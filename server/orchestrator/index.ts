@@ -1,0 +1,118 @@
+import type { LLMProvider, ChatMessage } from "../llm/types.js";
+import type { createChatService } from "../services/chat.js";
+import type { createSummaryService } from "../services/summary.js";
+import type { createFoodLoggingService } from "../services/food-logging.js";
+import type { createDeviceService } from "../services/device.js";
+import type { RealtimePublisher } from "../realtime/publisher.js";
+import { loadHistory } from "./history.js";
+import { buildSystemPrompt } from "./system-prompt.js";
+import { toolDefinitions, executeTool } from "./tools.js";
+
+export interface Logger {
+  error: (msg: string, ...args: unknown[]) => void;
+}
+
+interface OrchestratorDeps {
+  llmProvider: LLMProvider;
+  chatService: ReturnType<typeof createChatService>;
+  summaryService: ReturnType<typeof createSummaryService>;
+  foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  deviceService: ReturnType<typeof createDeviceService>;
+  publisher: RealtimePublisher;
+  logger?: Logger;
+}
+
+const FALLBACK = "抱歉，我現在無法完成這個請求，請稍後再試。";
+const MAX_ROUNDS = 3;
+
+export function createOrchestrator(deps: OrchestratorDeps) {
+  return {
+    async handleMessage(
+      deviceId: string,
+      userMessage: string,
+      imageBase64?: string,
+      imagePath?: string
+    ): Promise<string> {
+      const { llmProvider, chatService, deviceService } = deps;
+
+      // Load device info
+      const device = await deviceService.getDevice(deviceId);
+      if (!device) throw new Error("Device not found");
+
+      // Load history BEFORE saving current user message to avoid duplication
+      const history = await loadHistory(chatService, deviceId, 10);
+
+      // Save user message after loading history
+      await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
+      const systemMsg: ChatMessage = {
+        role: "system",
+        content: buildSystemPrompt(device.goal, {
+          calories: device.dailyCalories,
+          protein: device.dailyProtein,
+          carbs: device.dailyCarbs,
+          fat: device.dailyFat,
+        }),
+      };
+
+      const userContent: ChatMessage = imageBase64
+        ? {
+            role: "user",
+            content: [
+              { type: "text", text: userMessage },
+              { type: "image_url", image_url: { url: imageBase64 } },
+            ],
+          }
+        : { role: "user", content: userMessage };
+
+      const messages: ChatMessage[] = [systemMsg, ...history, userContent];
+
+      // Orchestration loop
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        let response;
+        try {
+          response = await llmProvider.chat(messages, toolDefinitions);
+        } catch (err) {
+          deps.logger?.error(`LLM chat failed for device ${deviceId}:`, err);
+          const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
+          await chatService.saveMessage(deviceId, "assistant", errorMsg);
+          return errorMsg;
+        }
+
+        if (response.content) {
+          await chatService.saveMessage(deviceId, "assistant", response.content);
+          return response.content;
+        }
+
+        if (response.toolCalls) {
+          const toolResults: Array<{ toolCall: typeof response.toolCalls[number]; result: string }> = [];
+          for (const toolCall of response.toolCalls) {
+            try {
+              const { result, summary } = await executeTool(toolCall, deviceId, {
+                llmProvider: deps.llmProvider,
+                foodLoggingService: deps.foodLoggingService,
+                summaryService: deps.summaryService,
+                publisher: deps.publisher,
+                currentImageDataUri: imageBase64,
+                imagePath,
+              });
+              await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
+              toolResults.push({ toolCall, result });
+            } catch (err) {
+              const errorStr = err instanceof Error ? err.message : "Tool execution failed";
+              deps.logger?.error(`Tool ${toolCall.function.name} failed for device ${deviceId}: ${errorStr}`, err);
+              toolResults.push({ toolCall, result: `Error: ${errorStr}` });
+            }
+          }
+          messages.push({ role: "assistant", content: null, tool_calls: response.toolCalls });
+          for (const { toolCall, result } of toolResults) {
+            messages.push({ role: "tool", content: result, tool_call_id: toolCall.id });
+          }
+        }
+      }
+
+      // Fallback after MAX_ROUNDS
+      await chatService.saveMessage(deviceId, "assistant", FALLBACK);
+      return FALLBACK;
+    },
+  };
+}
