@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --import tsx --test 'tests/**/*.test.ts'"
+    "dev:server": "tsx watch server/index.ts",
+    "dev:client": "vite dev --config client/vite.config.ts",
+    "build": "vite build --config client/vite.config.ts",
+    "test": "node --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --import tsx --test tests/unit/*.test.ts",
+    "test:integration": "node --import tsx --test tests/integration/*.test.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",
