@@ -56,6 +56,7 @@ export class OpenAIProvider implements LLMProvider {
       messages: messages as OpenAI.ChatCompletionMessageParam[],
       ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
     });
+    if (!response.choices.length) throw new Error("OpenAI returned no choices");
     const choice = response.choices[0];
     return {
       content: choice.message.content ?? undefined,
@@ -85,7 +86,9 @@ export class OpenAIProvider implements LLMProvider {
       ],
       response_format: { type: "json_object" },
     });
-    const text = response.choices[0].message.content ?? "{}";
+    if (!response.choices.length) throw new Error("Food analysis model returned no choices");
+    const text = response.choices[0].message.content;
+    if (!text) throw new Error("Food analysis model returned no content");
     return parseAnalysis(text);
   }
 }
