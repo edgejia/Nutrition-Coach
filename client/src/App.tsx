@@ -1,10 +1,8 @@
 import { useStore } from "./store.js";
+import { Onboarding } from "./components/Onboarding.js";
+import { MainLayout } from "./components/MainLayout.js";
 
 export function App() {
   const deviceId = useStore((s) => s.deviceId);
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {deviceId ? <p>Main (TODO)</p> : <p>Onboarding (TODO)</p>}
-    </div>
-  );
+  return deviceId ? <MainLayout /> : <Onboarding />;
 }
