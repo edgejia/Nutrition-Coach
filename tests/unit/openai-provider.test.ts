@@ -97,4 +97,55 @@ describe("OpenAI Provider", () => {
     assert.equal(capturedRequest.messages[1].content[1].image_url.url, "data:image/png;base64,abc");
     assert.equal(result.foodName, "蘋果");
   });
+
+  it("throws when chat receives empty choices", async () => {
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async () => ({ choices: [] }),
+        },
+      },
+    } as unknown as OpenAI;
+    const provider = new OpenAIProvider(fakeClient);
+    await assert.rejects(
+      () => provider.chat([{ role: "user", content: "test" }], []),
+      { message: "OpenAI returned no choices" }
+    );
+  });
+
+  it("throws when analyzeFood receives empty choices", async () => {
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async () => ({ choices: [] }),
+        },
+      },
+    } as unknown as OpenAI;
+    const provider = new OpenAIProvider(fakeClient);
+    await assert.rejects(
+      () => provider.analyzeFood("蘋果", "data:image/png;base64,abc"),
+      { message: "Food analysis model returned no choices" }
+    );
+  });
+
+  it("throws when analyzeFood receives null content", async () => {
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async () => ({
+            choices: [{
+              message: {
+                content: null,
+              },
+            }],
+          }),
+        },
+      },
+    } as unknown as OpenAI;
+    const provider = new OpenAIProvider(fakeClient);
+    await assert.rejects(
+      () => provider.analyzeFood("蘋果", "data:image/png;base64,abc"),
+      { message: "Food analysis model returned no content" }
+    );
+  });
 });
