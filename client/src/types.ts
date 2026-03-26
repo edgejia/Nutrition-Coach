@@ -17,5 +17,6 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   imagePath?: string | null;
+  imagePreviewUrl?: string;
   createdAt: string;
 }

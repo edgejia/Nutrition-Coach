@@ -46,8 +46,8 @@ export class OpenAIProvider implements LLMProvider {
 
   constructor(client?: OpenAI) {
     this.client = client ?? new OpenAI();
-    this.orchestratorModel = process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-4o";
-    this.analyzerModel = process.env.OPENAI_ANALYZER_MODEL ?? "gpt-4o";
+    this.orchestratorModel = process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5-nano";
+    this.analyzerModel = process.env.OPENAI_ANALYZER_MODEL ?? "gpt-4o-mini";
   }
 
   async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {

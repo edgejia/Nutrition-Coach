@@ -9,6 +9,7 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { toolDefinitions, executeTool } from "./tools.js";
 
 export interface Logger {
+  info: (msg: string, ...args: unknown[]) => void;
   error: (msg: string, ...args: unknown[]) => void;
 }
 
@@ -44,6 +45,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Save user message after loading history
       await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
+      deps.logger?.info(`[user] ${userMessage}${imageBase64 ? " [+image]" : ""}`);
       const systemMsg: ChatMessage = {
         role: "system",
         content: buildSystemPrompt(device.goal, {
@@ -79,11 +81,15 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         }
 
         if (response.content) {
+          deps.logger?.info(`[assistant] ${response.content}`);
           await chatService.saveMessage(deviceId, "assistant", response.content);
           return response.content;
         }
 
         if (response.toolCalls) {
+          for (const tc of response.toolCalls) {
+            deps.logger?.info(`[tool_call] ${tc.function.name} ${tc.function.arguments}`);
+          }
           const toolResults: Array<{ toolCall: typeof response.toolCalls[number]; result: string }> = [];
           for (const toolCall of response.toolCalls) {
             try {
@@ -95,6 +101,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 currentImageDataUri: imageBase64,
                 imagePath,
               });
+              deps.logger?.info(`[tool_result] ${toolCall.function.name} → ${summary}`);
               await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
               toolResults.push({ toolCall, result });
             } catch (err) {

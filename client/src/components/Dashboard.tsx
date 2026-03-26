@@ -35,8 +35,8 @@ export function Dashboard() {
   const s = summary ?? { totalCalories: 0, totalProtein: 0, totalCarbs: 0, totalFat: 0 };
 
   return (
-    <div className="space-y-3 rounded-xl bg-white p-4 shadow-sm">
-      <h2 className="font-bold text-gray-900">今日攝取</h2>
+    <div className="space-y-3">
+
       <ProgressBar label="熱量" current={s.totalCalories} target={targets.calories} unit="kcal" color="bg-orange-500" />
       <ProgressBar label="蛋白質" current={s.totalProtein} target={targets.protein} unit="g" color="bg-red-500" />
       <ProgressBar label="碳水" current={s.totalCarbs} target={targets.carbs} unit="g" color="bg-blue-500" />

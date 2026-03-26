@@ -40,7 +40,8 @@ export function ChatPanel() {
   async function handleSend(text: string, image?: File) {
     const activeDeviceId = useStore.getState().deviceId;
     if (!activeDeviceId) return;
-    const userMsg = { id: crypto.randomUUID(), role: "user" as const, content: text || "(圖片)", createdAt: new Date().toISOString() };
+    const imagePreviewUrl = image ? URL.createObjectURL(image) : undefined;
+    const userMsg = { id: crypto.randomUUID(), role: "user" as const, content: text || "", imagePreviewUrl, createdAt: new Date().toISOString() };
     addMessage(userMsg);
     setSending(true);
     try {
@@ -59,11 +60,20 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((m) => (
           <MessageBubble key={m.id} message={m} />
         ))}
+        {sending && (
+          <div className="flex justify-start">
+            <div className="flex items-center gap-1 rounded-2xl bg-gray-100 px-4 py-3">
+              <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
+            </div>
+          </div>
+        )}
         <div ref={endRef} />
       </div>
       <ChatInput onSend={handleSend} disabled={sending} />
