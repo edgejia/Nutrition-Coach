@@ -1,4 +1,6 @@
 .worktrees/
+.claude/
+.superpowers/
 node_modules/
 dist/
 data/*
