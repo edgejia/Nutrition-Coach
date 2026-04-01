@@ -33,7 +33,7 @@ export function HomeScreen() {
       <main className="flex-1 space-y-4 overflow-y-auto p-4 pb-28">
         <button type="button" onClick={() => setActiveScreen("summary")} className="block w-full text-left">
           <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-200">
-            <div className="mb-3 text-sm font-semibold text-gray-900">Today's Summary</div>
+            <div className="mb-3 text-sm font-semibold text-gray-900">今日攝取</div>
             <Dashboard />
           </section>
         </button>

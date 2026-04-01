@@ -19,7 +19,7 @@ export function ChatEntryBar(props: {
 
   return (
     <form onSubmit={handleSubmit} className="flex items-end gap-2 rounded-2xl border bg-white p-3 shadow-sm">
-      <button type="button" onClick={() => fileRef.current?.click()} className="rounded-lg bg-gray-100 p-2 text-gray-600 hover:bg-gray-200">
+      <button type="button" onClick={() => fileRef.current?.click()} disabled={props.disabled} className="rounded-lg bg-gray-100 p-2 text-gray-600 hover:bg-gray-200">
         +
       </button>
       <input
@@ -35,7 +35,7 @@ export function ChatEntryBar(props: {
           type="text"
           value={text}
           onChange={(event) => setText(event.target.value)}
-          placeholder="Ask the coach or log a meal with text / photo"
+          placeholder="輸入訊息，或拍照記錄餐點"
           disabled={props.disabled}
           className="w-full border-0 px-0 py-2 text-sm focus:outline-none disabled:opacity-50"
         />
