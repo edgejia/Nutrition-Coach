@@ -1,4 +1,4 @@
-import type { DailyTargets, Message } from "./types.js";
+import type { ChatReply, DailyTargets, MealEntry, Message } from "./types.js";
 
 function getHeaders(): Record<string, string> {
   const deviceId = localStorage.getItem("deviceId");
@@ -26,7 +26,7 @@ export async function updateGoals(goals: Partial<DailyTargets>): Promise<{ daily
   return res.json();
 }
 
-export async function sendMessage(message: string, image?: File): Promise<{ reply: string }> {
+export async function sendMessage(message: string, image?: File): Promise<ChatReply> {
   const form = new FormData();
   form.append("message", message);
   if (image) {
@@ -47,4 +47,20 @@ export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> 
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history");
   return res.json();
+}
+
+export async function getMeals(): Promise<{ meals: MealEntry[] }> {
+  const res = await fetch("/api/meals", { headers: getHeaders() });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error("Failed to load meals");
+  return res.json();
+}
+
+export async function deleteMeal(mealId: string): Promise<void> {
+  const res = await fetch(`/api/meals/${mealId}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error("Failed to delete meal");
 }

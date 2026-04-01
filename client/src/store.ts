@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { DailyTargets, DailySummary, Message } from "./types.js";
+import type {
+  ActiveScreen,
+  DailyTargets,
+  DailySummary,
+  MealEntry,
+  Message,
+  PendingHomeChatDraft,
+} from "./types.js";
 
 function readStoredJson<T>(key: string): T | null {
   try {
@@ -12,10 +19,20 @@ function readStoredJson<T>(key: string): T | null {
 interface AppState {
   deviceId: string | null;
   goal: string | null;
+  activeScreen: ActiveScreen;
   dailyTargets: DailyTargets | null;
   messages: Message[];
   dailySummary: DailySummary | null;
+  coachAdvice: string | null;
+  meals: MealEntry[];
+  pendingHomeChatDraft: PendingHomeChatDraft | null;
   sending: boolean;
+  setActiveScreen: (screen: ActiveScreen) => void;
+  setCoachAdvice: (advice: string | null) => void;
+  setMeals: (meals: MealEntry[]) => void;
+  removeMeal: (mealId: string) => void;
+  setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void;
+  clearPendingHomeChatDraft: () => void;
   setDevice: (deviceId: string, goal: string, dailyTargets: DailyTargets) => void;
   addMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
@@ -28,16 +45,27 @@ interface AppState {
 export const useStore = create<AppState>((set) => ({
   deviceId: localStorage.getItem("deviceId"),
   goal: localStorage.getItem("goal"),
+  activeScreen: localStorage.getItem("deviceId") ? "home" : "onboarding",
   dailyTargets: readStoredJson<DailyTargets>("dailyTargets"),
   messages: [],
   dailySummary: null,
+  coachAdvice: null,
+  meals: [],
+  pendingHomeChatDraft: null,
   sending: false,
+
+  setActiveScreen: (activeScreen) => set({ activeScreen }),
+  setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
+  setMeals: (meals) => set({ meals }),
+  removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
+  setPendingHomeChatDraft: (pendingHomeChatDraft) => set({ pendingHomeChatDraft }),
+  clearPendingHomeChatDraft: () => set({ pendingHomeChatDraft: null }),
 
   setDevice: (deviceId, goal, dailyTargets) => {
     localStorage.setItem("deviceId", deviceId);
     localStorage.setItem("goal", goal);
     localStorage.setItem("dailyTargets", JSON.stringify(dailyTargets));
-    set({ deviceId, goal, dailyTargets });
+    set({ deviceId, goal, dailyTargets, activeScreen: "home" });
   },
 
   addMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
@@ -52,6 +80,17 @@ export const useStore = create<AppState>((set) => ({
     localStorage.removeItem("deviceId");
     localStorage.removeItem("goal");
     localStorage.removeItem("dailyTargets");
-    set({ deviceId: null, goal: null, dailyTargets: null, messages: [], dailySummary: null, sending: false });
+    set({
+      deviceId: null,
+      goal: null,
+      activeScreen: "onboarding",
+      dailyTargets: null,
+      messages: [],
+      dailySummary: null,
+      coachAdvice: null,
+      meals: [],
+      pendingHomeChatDraft: null,
+      sending: false,
+    });
   },
 }));
