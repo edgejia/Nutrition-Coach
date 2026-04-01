@@ -1,5 +1,5 @@
 // server/services/chat.ts
-import { eq, and, asc, desc, sql } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { chatMessages } from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
 
@@ -23,15 +23,66 @@ export function createChatService(db: AppDatabase) {
     },
 
     async getHistory(deviceId: string, limit: number) {
-      const rows = await db
-        .select()
+      const visibleRows = await db
+        .select({
+          rowId: sql<number>`rowid`,
+          id: chatMessages.id,
+          deviceId: chatMessages.deviceId,
+          role: chatMessages.role,
+          content: chatMessages.content,
+          toolName: chatMessages.toolName,
+          imagePath: chatMessages.imagePath,
+          createdAt: chatMessages.createdAt,
+        })
         .from(chatMessages)
-        .where(eq(chatMessages.deviceId, deviceId))
+        .where(
+          and(
+            eq(chatMessages.deviceId, deviceId),
+            inArray(chatMessages.role, ["user", "assistant"])
+          )
+        )
         .orderBy(desc(sql`rowid`))
-        .limit(limit * 4);
+        .limit(limit);
 
-      const chronological = rows.reverse();
+      if (visibleRows.length === 0) {
+        return [];
+      }
+
+      const selectedVisibleRowIds = new Set(visibleRows.map((row) => row.rowId));
+      const earliestVisibleRowId = visibleRows[visibleRows.length - 1].rowId;
+
+      const previousVisibleRow = await db
+        .select({ rowId: sql<number>`rowid` })
+        .from(chatMessages)
+        .where(
+          sql`${chatMessages.deviceId} = ${deviceId}
+              and ${chatMessages.role} in ('user', 'assistant')
+              and rowid < ${earliestVisibleRowId}`
+        )
+        .orderBy(desc(sql`rowid`))
+        .limit(1);
+
+      const startAfterRowId = previousVisibleRow[0]?.rowId ?? 0;
+      const rows = await db
+        .select({
+          rowId: sql<number>`rowid`,
+          id: chatMessages.id,
+          deviceId: chatMessages.deviceId,
+          role: chatMessages.role,
+          content: chatMessages.content,
+          toolName: chatMessages.toolName,
+          imagePath: chatMessages.imagePath,
+          createdAt: chatMessages.createdAt,
+        })
+        .from(chatMessages)
+        .where(
+          sql`${chatMessages.deviceId} = ${deviceId}
+              and rowid > ${startAfterRowId}`
+        )
+        .orderBy(asc(sql`rowid`));
+
       const projected: Array<{
+        rowId: number;
         id: string;
         deviceId: string;
         role: string;
@@ -44,7 +95,7 @@ export function createChatService(db: AppDatabase) {
 
       let pendingDidLogMeal = false;
 
-      for (const row of chronological) {
+      for (const row of rows) {
         if (row.role === "tool") {
           if (row.toolName === "log_food") {
             pendingDidLogMeal = true;
@@ -57,19 +108,23 @@ export function createChatService(db: AppDatabase) {
         }
 
         if (row.role === "assistant") {
-          projected.push({
-            ...row,
-            didLogMeal: pendingDidLogMeal || undefined,
-          });
+          if (selectedVisibleRowIds.has(row.rowId)) {
+            projected.push({
+              ...row,
+              didLogMeal: pendingDidLogMeal || undefined,
+            });
+          }
           pendingDidLogMeal = false;
           continue;
         }
 
-        projected.push(row);
         pendingDidLogMeal = false;
+        if (selectedVisibleRowIds.has(row.rowId)) {
+          projected.push(row);
+        }
       }
 
-      return projected.slice(-limit);
+      return projected;
     },
 
     async getCompressedHistory(deviceId: string, turns: number) {

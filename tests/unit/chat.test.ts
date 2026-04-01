@@ -50,6 +50,32 @@ describe("ChatService", () => {
     assert.equal(history[1].didLogMeal, true);
   });
 
+  it("preserves the requested visible-message limit even when a turn has many tool rows", async () => {
+    await chatService.saveMessage(deviceId, "user", "幫我記錄晚餐");
+    for (let i = 1; i <= 10; i++) {
+      await chatService.saveMessage(deviceId, "tool", `工具結果${i}`, { toolName: `tool_${i}` });
+    }
+    await chatService.saveMessage(deviceId, "assistant", "已記錄晚餐！");
+
+    const history = await chatService.getHistory(deviceId, 2);
+    assert.equal(history.length, 2);
+    assert.deepEqual(history.map((message) => message.role), ["user", "assistant"]);
+  });
+
+  it("keeps didLogMeal=true for the returned assistant even when log_food is outside a naive raw-row window", async () => {
+    await chatService.saveMessage(deviceId, "user", "幫我記錄午餐");
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    for (let i = 1; i <= 5; i++) {
+      await chatService.saveMessage(deviceId, "tool", `後續工具${i}`, { toolName: `tool_${i}` });
+    }
+    await chatService.saveMessage(deviceId, "assistant", "已記錄午餐！");
+
+    const history = await chatService.getHistory(deviceId, 1);
+    assert.equal(history.length, 1);
+    assert.equal(history[0].role, "assistant");
+    assert.equal(history[0].didLogMeal, true);
+  });
+
   it("loads compressed history for LLM context", async () => {
     await chatService.saveMessage(deviceId, "user", "我吃了蘋果", { imagePath: "server/uploads/apple.png" });
     await chatService.saveMessage(deviceId, "tool", "蘋果, 95kcal", { toolName: "analyze_food" });
