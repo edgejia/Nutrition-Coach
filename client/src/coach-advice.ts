@@ -9,7 +9,7 @@ export function getCoachAdvice(summary: DailySummary | null, targets: DailyTarge
     return "還沒記錄任何餐點，開始記錄你的第一餐吧";
   }
 
-  const proteinRemaining = targets.protein - summary.totalProtein;
+  const proteinRemaining = Math.max(targets.protein - summary.totalProtein, 0);
   if (proteinRemaining > 30) {
     return `蛋白質還差 ${Math.round(proteinRemaining)}g，晚餐建議高蛋白食物`;
   }

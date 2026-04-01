@@ -21,4 +21,13 @@ describe("getCoachAdvice", () => {
 
     assert.equal(advice, "蛋白質還差 40g，晚餐建議高蛋白食物");
   });
+
+  it("does not recommend extra protein when protein is already above target", () => {
+    const advice = getCoachAdvice(
+      { totalCalories: 1400, totalProtein: 140, totalCarbs: 150, totalFat: 40, mealCount: 3 },
+      { calories: 1800, protein: 120, carbs: 200, fat: 60 }
+    );
+
+    assert.equal(advice, "今天攝取均衡，繼續保持！");
+  });
 });

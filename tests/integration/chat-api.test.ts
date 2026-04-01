@@ -9,6 +9,7 @@ import type { FastifyInstance } from "fastify";
 describe("Chat API", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
+  let address: string;
   let deviceId: string;
 
   beforeEach(async () => {
@@ -16,6 +17,7 @@ describe("Chat API", () => {
     app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
     deviceId = res.json().deviceId;
+    address = await app.listen({ port: 0 });
   });
 
   afterEach(async () => {
@@ -25,111 +27,75 @@ describe("Chat API", () => {
   });
 
   it("POST /api/chat accepts multipart text-only requests", async () => {
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      form.append("message", "我吃了蘋果");
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
 
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { "x-device-id": deviceId },
-        body: form,
-      });
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
 
-      assert.equal(res.status, 200);
-      const body = await res.json();
-      assert.ok(body.reply);
-    } finally {
-      if (app.server.listening) {
-        await app.close();
-      }
-    }
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.reply);
   });
 
   it("POST /api/chat accepts multipart image upload", async () => {
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      form.append("message", "");
-      form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
+    const form = new FormData();
+    form.append("message", "");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
 
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { "x-device-id": deviceId },
-        body: form,
-      });
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
 
-      assert.equal(res.status, 200);
-      const body = await res.json();
-      assert.ok(body.reply);
-    } finally {
-      if (app.server.listening) {
-        await app.close();
-      }
-    }
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.reply);
   });
 
   it("POST /api/chat rejects invalid image types", async () => {
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      form.append("message", "");
-      form.append("image", new Blob(["not an image"], { type: "text/plain" }), "meal.txt");
+    const form = new FormData();
+    form.append("message", "");
+    form.append("image", new Blob(["not an image"], { type: "text/plain" }), "meal.txt");
 
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { "x-device-id": deviceId },
-        body: form,
-      });
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
 
-      assert.equal(res.status, 400);
-    } finally {
-      if (app.server.listening) {
-        await app.close();
-      }
-    }
+    assert.equal(res.status, 400);
   });
 
   it("POST /api/chat rejects images larger than 5MB", async () => {
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      form.append("message", "");
-      form.append("image", new Blob([new Uint8Array(5 * 1024 * 1024 + 1)], { type: "image/png" }), "too-big.png");
+    const form = new FormData();
+    form.append("message", "");
+    form.append("image", new Blob([new Uint8Array(5 * 1024 * 1024 + 1)], { type: "image/png" }), "too-big.png");
 
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { "x-device-id": deviceId },
-        body: form,
-      });
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
 
-      assert.equal(res.status, 400);
-    } finally {
-      if (app.server.listening) {
-        await app.close();
-      }
-    }
+    assert.equal(res.status, 400);
   });
 
   it("POST /api/chat returns 401 without device id", async () => {
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      form.append("message", "hello");
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        body: form,
-      });
-      assert.equal(res.status, 401);
-    } finally {
-      if (app.server.listening) {
-        await app.close();
-      }
-    }
+    const form = new FormData();
+    form.append("message", "hello");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      body: form,
+    });
+    assert.equal(res.status, 401);
   });
 
   it("GET /api/chat/history returns messages", async () => {
-    const address = await app.listen({ port: 0 });
     const form = new FormData();
     form.append("message", "你好");
     await fetch(`${address}/api/chat`, {
@@ -162,24 +128,17 @@ describe("Chat API", () => {
     });
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      form.append("message", "我吃了蘋果");
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { "x-device-id": deviceId },
-        body: form,
-      });
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
 
-      assert.equal(res.status, 200);
-      const body = await res.json();
-      assert.equal(body.didLogMeal, true);
-    } finally {
-      if (app.server.listening) {
-        await app.close();
-      }
-    }
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.didLogMeal, true);
   });
 
   it("GET /api/chat/history keeps didLogMeal=true for persisted meal-logging replies", async () => {
@@ -195,31 +154,24 @@ describe("Chat API", () => {
     });
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      form.append("message", "我吃了蘋果");
-      await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { "x-device-id": deviceId },
-        body: form,
-      });
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+    await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
 
-      const historyRes = await app.inject({
-        method: "GET",
-        url: "/api/chat/history?limit=50",
-        headers: { "x-device-id": deviceId },
-      });
+    const historyRes = await app.inject({
+      method: "GET",
+      url: "/api/chat/history?limit=50",
+      headers: { "x-device-id": deviceId },
+    });
 
-      assert.equal(historyRes.statusCode, 200);
-      const historyBody = historyRes.json();
-      const assistantMessage = historyBody.messages.find((message: { role: string }) => message.role === "assistant");
-      assert.equal(assistantMessage.didLogMeal, true);
-    } finally {
-      if (app.server.listening) {
-        await app.close();
-      }
-    }
+    assert.equal(historyRes.statusCode, 200);
+    const historyBody = historyRes.json();
+    const assistantMessage = historyBody.messages.find((message: { role: string }) => message.role === "assistant");
+    assert.equal(assistantMessage.didLogMeal, true);
   });
 
   it("GET /api/chat/history rejects invalid limit", async () => {
