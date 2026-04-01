@@ -27,11 +27,11 @@ describe("ChatService", () => {
 
   it("saves tool messages with tool name", async () => {
     await chatService.saveMessage(deviceId, "user", "我吃了蘋果");
-    await chatService.saveMessage(deviceId, "tool", "分析完成", { toolName: "analyze_food" });
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     const history = await chatService.getHistory(deviceId, 50);
     assert.equal(history.length, 1); // getHistory only returns user + assistant
     const compressed = await chatService.getCompressedHistory(deviceId, 10);
-    assert.match(compressed[1].content, /\[使用 analyze_food → 分析完成\]/);
+    assert.match(compressed[1].content, /\[使用 log_food → 成功\]/);
   });
 
   it("persists user image metadata", async () => {
@@ -80,12 +80,14 @@ describe("ChatService", () => {
 
   it("loads compressed history for LLM context", async () => {
     await chatService.saveMessage(deviceId, "user", "我吃了蘋果", { imagePath: "server/uploads/apple.png" });
-    await chatService.saveMessage(deviceId, "tool", "蘋果, 95kcal", { toolName: "analyze_food" });
     await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     await chatService.saveMessage(deviceId, "assistant", "已記錄蘋果！");
     const compressed = await chatService.getCompressedHistory(deviceId, 10);
     assert.ok(compressed.length > 0);
-    assert.match(compressed[0].content, /\[附帶圖片\]/);
+    const text = compressed.map((message) => message.content).join("\n");
+    assert.match(text, /\[附帶圖片\]/);
+    assert.match(text, /\[使用 log_food → 成功\]/);
+    assert.doesNotMatch(text, /analyze_food/);
   });
 
   it("loads the most recent turns instead of stale oldest history", async () => {

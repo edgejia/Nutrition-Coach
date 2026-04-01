@@ -1,29 +1,10 @@
-import type { ToolDefinition, ToolCall, LLMProvider } from "../llm/types.js";
+import type { ToolDefinition, ToolCall } from "../llm/types.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService } from "../services/summary.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate } from "../lib/time.js";
 
 export const toolDefinitions: ToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "analyze_food",
-      description: "分析食物的營養成分。傳入食物描述文字或圖片，回傳食物名稱、熱量、蛋白質、碳水、脂肪和信心度。",
-      parameters: {
-        type: "object",
-        properties: {
-          description: { type: "string", description: "食物描述" },
-          image_base64: {
-            type: "string",
-            description: "可選。使用者上傳圖片的 base64 data URI（例如 data:image/png;base64,...）。",
-          },
-        },
-        required: ["description"],
-        additionalProperties: false,
-      },
-    },
-  },
   {
     type: "function",
     function: {
@@ -53,11 +34,9 @@ export const toolDefinitions: ToolDefinition[] = [
 ];
 
 export interface ToolDeps {
-  llmProvider: LLMProvider;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
   publisher: RealtimePublisher;
-  currentImageDataUri?: string;
   imagePath?: string;
 }
 
@@ -68,19 +47,6 @@ export async function executeTool(
 ): Promise<{ result: string; summary: string }> {
   const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
   const name = toolCall.function.name;
-
-  if (name === "analyze_food") {
-    if (typeof args.description !== "string" || args.description.trim() === "") {
-      throw new Error("analyze_food requires a description string");
-    }
-    const description = args.description;
-    const imageBase64 =
-      typeof args.image_base64 === "string" ? args.image_base64 : deps.currentImageDataUri;
-    const analysis = await deps.llmProvider.analyzeFood(description, imageBase64);
-    const result = JSON.stringify(analysis);
-    const summary = `${analysis.foodName}, ${analysis.calories}kcal, P${analysis.protein}g, C${analysis.carbs}g, F${analysis.fat}g (${analysis.confidence})`;
-    return { result, summary };
-  }
 
   if (name === "log_food") {
     const foodName = String(args.food_name ?? "");

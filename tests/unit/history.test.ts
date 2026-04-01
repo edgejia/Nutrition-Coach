@@ -26,13 +26,13 @@ describe("loadHistory", () => {
       async getCompressedHistory() {
         return [
           { role: "user", content: "我吃了蘋果\n[附帶圖片]" },
-          { role: "assistant", content: "[使用 analyze_food → 蘋果, 95kcal]" },
+          { role: "assistant", content: "[使用 log_food → 成功]" },
         ];
       },
     };
     const history = await loadHistory(compressedHistorySource, deviceId, 10);
     assert.equal(history.length, 2);
     assert.equal(history[0].role, "user");
-    assert.match(String(history[1].content), /\[使用 analyze_food/);
+    assert.match(String(history[1].content), /\[使用 log_food/);
   });
 });

@@ -68,7 +68,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       const messages: ChatMessage[] = [systemMsg, ...history, userContent];
 
-      // Orchestration loop
+      // The orchestrator may use tools in the first completion, then produce the
+      // final assistant reply in a follow-up completion on the same model.
       for (let round = 0; round < MAX_ROUNDS; round++) {
         let response;
         try {
@@ -94,11 +95,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           for (const toolCall of response.toolCalls) {
             try {
               const { result, summary } = await executeTool(toolCall, deviceId, {
-                llmProvider: deps.llmProvider,
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
                 publisher: deps.publisher,
-                currentImageDataUri: imageBase64,
                 imagePath,
               });
               deps.logger?.info(`[tool_result] ${toolCall.function.name} → ${summary}`);

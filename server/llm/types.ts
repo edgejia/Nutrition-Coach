@@ -34,18 +34,6 @@ export interface LLMResponse {
   toolCalls?: ToolCall[];
 }
 
-export interface FoodAnalysis {
-  foodName: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  confidence: "high" | "medium" | "low";
-  uncertainties: string[];
-}
-
 export interface LLMProvider {
   chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse>;
-  // imageBase64 carries the full base64 data URI string for the uploaded image.
-  analyzeFood(description: string, imageBase64?: string): Promise<FoodAnalysis>;
 }

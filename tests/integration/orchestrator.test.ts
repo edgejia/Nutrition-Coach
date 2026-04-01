@@ -44,18 +44,10 @@ describe("Orchestrator", () => {
   });
 
   it("executes tool calls and returns final reply", async () => {
-    // Round 1: LLM calls analyze_food
+    // Round 1: orchestrator model calls log_food directly
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
-        type: "function",
-        function: { name: "analyze_food", arguments: JSON.stringify({ description: "蘋果" }) },
-      }],
-    });
-    // Round 2: LLM calls log_food
-    mockLLM.queueChatResponse({
-      toolCalls: [{
-        id: "call_2",
         type: "function",
         function: {
           name: "log_food",
@@ -63,44 +55,25 @@ describe("Orchestrator", () => {
         },
       }],
     });
-    // Round 3: LLM responds with text
+    // Round 2: same model responds with final text
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
     const reply = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assert.equal(reply, "已幫你記錄蘋果！");
-    assert.equal(mockLLM.chatCalls.length, 3);
+    assert.equal(mockLLM.chatCalls.length, 2);
+    assert.deepEqual(
+      mockLLM.chatCalls[0].tools.map((tool) => tool.function.name),
+      ["log_food", "get_daily_summary"]
+    );
     const secondRound = mockLLM.chatCalls[1].messages;
     assert.equal(secondRound[secondRound.length - 2].role, "assistant");
     assert.equal(secondRound[secondRound.length - 1].role, "tool");
   });
 
-  it("persists uploaded image metadata while sending the data URI to the analyzer", async () => {
-    let capturedImageDataUri: string | undefined;
-    mockLLM.analyzeFood = async (_description: string, imageBase64?: string) => {
-      capturedImageDataUri = imageBase64;
-      return {
-        foodName: "沙拉",
-        calories: 180,
-        protein: 8,
-        carbs: 12,
-        fat: 10,
-        confidence: "high",
-        uncertainties: [],
-      };
-    };
+  it("persists uploaded image metadata while only sending the data URI in the user content parts", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
-        type: "function",
-        function: {
-          name: "analyze_food",
-          arguments: JSON.stringify({ description: "(圖片)", image_base64: "data:image/png;base64,abc123" }),
-        },
-      }],
-    });
-    mockLLM.queueChatResponse({
-      toolCalls: [{
-        id: "call_2",
         type: "function",
         function: {
           name: "log_food",
@@ -117,7 +90,18 @@ describe("Orchestrator", () => {
       "server/uploads/meal.png"
     );
     assert.equal(reply, "已幫你記錄這份餐點！");
-    assert.equal(capturedImageDataUri, "data:image/png;base64,abc123");
+
+    assert.deepEqual(
+      mockLLM.chatCalls[0].tools.map((tool) => tool.function.name),
+      ["log_food", "get_daily_summary"]
+    );
+
+    const firstRoundMessages = mockLLM.chatCalls[0].messages;
+    const lastUserMessage = [...firstRoundMessages].reverse().find((message) => message.role === "user");
+    assert.deepEqual(lastUserMessage?.content, [
+      { type: "text", text: "(圖片)" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,abc123" } },
+    ]);
 
     const history = await chatService.getHistory(deviceId, 10);
     assert.equal(history[0].imagePath, "server/uploads/meal.png");
