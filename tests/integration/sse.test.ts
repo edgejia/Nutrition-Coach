@@ -1,3 +1,5 @@
+process.env.TZ = "Asia/Taipei";
+
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../../server/app.js";
@@ -94,6 +96,65 @@ describe("SSE API", () => {
       const secondChunk = await reader.read();
       const text = new TextDecoder().decode(secondChunk.value);
       assert.match(text, /event: daily_summary/);
+      controller.abort();
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      if (app.server.listening) {
+        await app.close();
+      }
+    }
+  });
+
+  it('after deleting a meal over HTTP, SSE emits a daily_summary payload containing "mealCount":0', async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "沙拉", calories: 180, protein: 8, carbs: 12, fat: 10 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已記錄！" });
+
+    const address = await app.listen({ port: 0 });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const form = new FormData();
+      form.append("message", "這是我的午餐");
+      await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId },
+        body: form,
+      });
+
+      const mealsRes = await app.inject({
+        method: "GET",
+        url: "/api/meals",
+        headers: { "x-device-id": deviceId },
+      });
+      const mealId = mealsRes.json().meals[0].id as string;
+
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), 2000);
+      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+        signal: controller.signal,
+      });
+      const reader = sseRes.body?.getReader();
+      assert.ok(reader);
+
+      await reader.read(); // initial daily_summary
+
+      await fetch(`${address}/api/meals/${mealId}`, {
+        method: "DELETE",
+        headers: { "x-device-id": deviceId },
+      });
+
+      const secondChunk = await reader.read();
+      const text = new TextDecoder().decode(secondChunk.value);
+      assert.match(text, /event: daily_summary/);
+      assert.match(text, /"mealCount":0/);
       controller.abort();
     } finally {
       if (timeout) clearTimeout(timeout);

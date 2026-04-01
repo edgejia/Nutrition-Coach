@@ -1,5 +1,5 @@
 // server/services/chat.ts
-import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
+import { eq, and, asc, desc, sql } from "drizzle-orm";
 import { chatMessages } from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
 
@@ -23,19 +23,53 @@ export function createChatService(db: AppDatabase) {
     },
 
     async getHistory(deviceId: string, limit: number) {
-      // Fetch most recent N messages in insertion order, then reverse to chronological order.
       const rows = await db
         .select()
         .from(chatMessages)
-        .where(
-          and(
-            eq(chatMessages.deviceId, deviceId),
-            inArray(chatMessages.role, ["user", "assistant"])
-          )
-        )
+        .where(eq(chatMessages.deviceId, deviceId))
         .orderBy(desc(sql`rowid`))
-        .limit(limit);
-      return rows.reverse();
+        .limit(limit * 4);
+
+      const chronological = rows.reverse();
+      const projected: Array<{
+        id: string;
+        deviceId: string;
+        role: string;
+        content: string;
+        toolName: string | null;
+        imagePath: string | null;
+        createdAt: string;
+        didLogMeal?: boolean;
+      }> = [];
+
+      let pendingDidLogMeal = false;
+
+      for (const row of chronological) {
+        if (row.role === "tool") {
+          if (row.toolName === "log_food") {
+            pendingDidLogMeal = true;
+          }
+          continue;
+        }
+
+        if (row.role !== "user" && row.role !== "assistant") {
+          continue;
+        }
+
+        if (row.role === "assistant") {
+          projected.push({
+            ...row,
+            didLogMeal: pendingDidLogMeal || undefined,
+          });
+          pendingDidLogMeal = false;
+          continue;
+        }
+
+        projected.push(row);
+        pendingDidLogMeal = false;
+      }
+
+      return projected.slice(-limit);
     },
 
     async getCompressedHistory(deviceId: string, turns: number) {

@@ -10,6 +10,7 @@ import { createOrchestrator } from "./orchestrator/index.js";
 import { RealtimePublisher } from "./realtime/publisher.js";
 import { registerDeviceRoutes } from "./routes/device.js";
 import { registerChatRoutes } from "./routes/chat.js";
+import { registerMealRoutes } from "./routes/meals.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import type { LLMProvider } from "./llm/types.js";
 
@@ -48,7 +49,8 @@ export async function buildApp(opts: AppOptions) {
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
   registerDeviceRoutes(app, { deviceService });
-  registerChatRoutes(app, { orchestrator, chatService, deviceService });
+  registerChatRoutes(app, { orchestrator, chatService, deviceService, summaryService });
+  registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, publisher });
   registerSSERoutes(app, { publisher, summaryService, deviceService });
 
   return app;

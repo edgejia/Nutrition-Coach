@@ -41,6 +41,15 @@ describe("ChatService", () => {
     assert.equal(history[0].imagePath, "server/uploads/lunch.png");
   });
 
+  it("marks assistant history items with didLogMeal when preceded by log_food", async () => {
+    await chatService.saveMessage(deviceId, "user", "我吃了蘋果");
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    await chatService.saveMessage(deviceId, "assistant", "已記錄蘋果！");
+
+    const history = await chatService.getHistory(deviceId, 50);
+    assert.equal(history[1].didLogMeal, true);
+  });
+
   it("loads compressed history for LLM context", async () => {
     await chatService.saveMessage(deviceId, "user", "我吃了蘋果", { imagePath: "server/uploads/apple.png" });
     await chatService.saveMessage(deviceId, "tool", "蘋果, 95kcal", { toolName: "analyze_food" });
