@@ -9,6 +9,7 @@ export interface DailySummary {
   totalProtein: number;
   totalCarbs: number;
   totalFat: number;
+  mealCount: number;
 }
 
 export function createSummaryService(db: AppDatabase) {
@@ -21,6 +22,7 @@ export function createSummaryService(db: AppDatabase) {
           totalProtein: sql<number>`coalesce(sum(${meals.protein}), 0)`,
           totalCarbs: sql<number>`coalesce(sum(${meals.carbs}), 0)`,
           totalFat: sql<number>`coalesce(sum(${meals.fat}), 0)`,
+          mealCount: sql<number>`count(*)`,
         })
         .from(meals)
         .where(

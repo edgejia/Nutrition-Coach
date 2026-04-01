@@ -1,5 +1,5 @@
 // server/services/food-logging.ts
-import { eq, and, gte, lt } from "drizzle-orm";
+import { eq, and, gte, lt, asc } from "drizzle-orm";
 import { meals } from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
 import { getLocalDayBounds } from "../lib/time.js";
@@ -45,7 +45,21 @@ export function createFoodLoggingService(db: AppDatabase) {
             gte(meals.loggedAt, startIso),
             lt(meals.loggedAt, endIso)
           )
-        );
+        )
+        .orderBy(asc(meals.loggedAt));
+    },
+
+    async deleteMeal(deviceId: string, mealId: string) {
+      const rows = await db
+        .select({ id: meals.id })
+        .from(meals)
+        .where(and(eq(meals.id, mealId), eq(meals.deviceId, deviceId)));
+
+      if (!rows[0]) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      await db.delete(meals).where(and(eq(meals.id, mealId), eq(meals.deviceId, deviceId)));
     },
   };
 }

@@ -10,13 +10,16 @@ import { createFoodLoggingService } from "../../server/services/food-logging.js"
 describe("FoodLoggingService", () => {
   let foodService: ReturnType<typeof createFoodLoggingService>;
   let deviceId: string;
+  let foreignDeviceId: string;
 
   beforeEach(async () => {
     const db = createDb(":memory:");
     const deviceService = createDeviceService(db);
     foodService = createFoodLoggingService(db);
     const result = await deviceService.createDevice("fat_loss");
+    const foreignResult = await deviceService.createDevice("muscle_gain");
     deviceId = result.deviceId;
+    foreignDeviceId = foreignResult.deviceId;
   });
 
   it("logs a food entry and returns it", async () => {
@@ -39,30 +42,48 @@ describe("FoodLoggingService", () => {
 
   it("retrieves meals by date", async () => {
     await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
-      loggedAt: "2026-03-24T16:30:00.000Z",
-    });
-    await foodService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 165,
-      protein: 31,
-      carbs: 0,
-      fat: 3.6,
-      loggedAt: "2026-03-25T15:00:00.000Z",
-    });
-    await foodService.logFood(deviceId, {
       foodName: "隔天早餐",
       calories: 400,
       protein: 20,
       carbs: 30,
       fat: 15,
-      loggedAt: "2026-03-25T16:30:00.000Z",
+      loggedAt: "2026-03-25T07:30:00.000Z",
+    });
+    await foodService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-24T23:30:00.000Z",
     });
     const meals = await foodService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
     assert.equal(meals.length, 2);
+    assert.equal(meals[0].foodName, "蘋果");
+    assert.equal(meals[1].foodName, "隔天早餐");
+  });
+
+  it("rejects foreign ownership before deleting the owner's meal", async () => {
+    const meal = await foodService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+
+    await assert.rejects(
+      () => foodService.deleteMeal(foreignDeviceId, meal.id),
+      (error: unknown) => {
+        assert.equal((error as Error).message, "MEAL_NOT_FOUND");
+        return true;
+      }
+    );
+
+    await foodService.deleteMeal(deviceId, meal.id);
+
+    const meals = await foodService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    assert.equal(meals.length, 0);
   });
 });

@@ -40,4 +40,19 @@ describe("SummaryService", () => {
     assert.ok(Math.abs(summary.totalCarbs - 25) < 0.01);
     assert.ok(Math.abs(summary.totalFat - 3.9) < 0.01);
   });
+
+  it("counts meals in the daily summary", async () => {
+    await foodService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+
+    const summary = await summaryService.getDailySummary(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+
+    assert.equal(summary.mealCount, 1);
+  });
 });
