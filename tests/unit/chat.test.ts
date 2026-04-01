@@ -48,6 +48,8 @@ describe("ChatService", () => {
 
     const history = await chatService.getHistory(deviceId, 50);
     assert.equal(history[1].didLogMeal, true);
+    assert.equal("rowId" in history[0], false);
+    assert.equal("rowId" in history[1], false);
   });
 
   it("preserves the requested visible-message limit even when a turn has many tool rows", async () => {

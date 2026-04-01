@@ -82,7 +82,6 @@ export function createChatService(db: AppDatabase) {
         .orderBy(asc(sql`rowid`));
 
       const projected: Array<{
-        rowId: number;
         id: string;
         deviceId: string;
         role: string;
@@ -109,8 +108,9 @@ export function createChatService(db: AppDatabase) {
 
         if (row.role === "assistant") {
           if (selectedVisibleRowIds.has(row.rowId)) {
+            const { rowId: _rowId, ...visibleRow } = row;
             projected.push({
-              ...row,
+              ...visibleRow,
               didLogMeal: pendingDidLogMeal || undefined,
             });
           }
@@ -120,7 +120,8 @@ export function createChatService(db: AppDatabase) {
 
         pendingDidLogMeal = false;
         if (selectedVisibleRowIds.has(row.rowId)) {
-          projected.push(row);
+          const { rowId: _rowId, ...visibleRow } = row;
+          projected.push(visibleRow);
         }
       }
 
