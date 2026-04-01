@@ -28,6 +28,7 @@ describe("SummaryService", () => {
     assert.equal(summary.totalProtein, 0);
     assert.equal(summary.totalCarbs, 0);
     assert.equal(summary.totalFat, 0);
+    assert.equal(summary.mealCount, 0);
   });
 
   it("sums nutrients from multiple meals", async () => {

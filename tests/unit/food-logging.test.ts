@@ -86,4 +86,37 @@ describe("FoodLoggingService", () => {
     const meals = await foodService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
     assert.equal(meals.length, 0);
   });
+
+  it("rejects deleting the same meal concurrently", async () => {
+    const meal = await foodService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+
+    const results = await Promise.allSettled([
+      foodService.deleteMeal(deviceId, meal.id),
+      foodService.deleteMeal(deviceId, meal.id),
+    ]);
+
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+    const rejection = results.find((result) => result.status === "rejected");
+    assert.ok(rejection);
+    if (rejection.status === "rejected") {
+      assert.equal((rejection.reason as Error).message, "MEAL_NOT_FOUND");
+    }
+  });
+
+  it("rejects deleting a nonexistent meal", async () => {
+    await assert.rejects(
+      () => foodService.deleteMeal(deviceId, "missing-meal-id"),
+      (error: unknown) => {
+        assert.equal((error as Error).message, "MEAL_NOT_FOUND");
+        return true;
+      }
+    );
+  });
 });

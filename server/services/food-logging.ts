@@ -50,16 +50,14 @@ export function createFoodLoggingService(db: AppDatabase) {
     },
 
     async deleteMeal(deviceId: string, mealId: string) {
-      const rows = await db
-        .select({ id: meals.id })
-        .from(meals)
-        .where(and(eq(meals.id, mealId), eq(meals.deviceId, deviceId)));
+      const deleted = await db
+        .delete(meals)
+        .where(and(eq(meals.id, mealId), eq(meals.deviceId, deviceId)))
+        .returning({ id: meals.id });
 
-      if (!rows[0]) {
+      if (!deleted[0]) {
         throw new Error("MEAL_NOT_FOUND");
       }
-
-      await db.delete(meals).where(and(eq(meals.id, mealId), eq(meals.deviceId, deviceId)));
     },
   };
 }
