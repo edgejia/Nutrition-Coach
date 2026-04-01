@@ -4,6 +4,58 @@ import OpenAI from "openai";
 import { OpenAIProvider } from "../../server/llm/openai.js";
 
 describe("OpenAI Provider", () => {
+  it("forwards multimodal user content and tool definitions to OpenAI chat completions", async () => {
+    let capturedRequest: unknown;
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async (request: unknown) => {
+            capturedRequest = request;
+            return {
+              choices: [{
+                message: {
+                  content: "已收到",
+                },
+              }],
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI;
+
+    const provider = new OpenAIProvider(fakeClient);
+    const tools = [{
+      type: "function" as const,
+      function: {
+        name: "log_food",
+        description: "記錄食物",
+        parameters: { type: "object", properties: {} },
+      },
+    }];
+
+    await provider.chat([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "(圖片)" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,abc123" } },
+        ],
+      },
+    ], tools);
+
+    assert.deepEqual(capturedRequest, {
+      model: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5-nano",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "(圖片)" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,abc123" } },
+        ],
+      }],
+      tools,
+    });
+  });
+
   it("maps chat completion responses into LLMResponse", async () => {
     const fakeClient = {
       chat: {
