@@ -4,6 +4,7 @@ import { connectSSE, disconnectSSE } from "../sse.js";
 import { HomeScreen } from "./HomeScreen.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { GoalSettings } from "./GoalSettings.js";
+import { SummaryDetailScreen } from "./SummaryDetailScreen.js";
 
 export function MainLayout() {
   const deviceId = useStore((s) => s.deviceId);
@@ -40,7 +41,7 @@ export function MainLayout() {
       </header>
 
       {activeScreen === "home" && <HomeScreen />}
-      {activeScreen === "summary" && null /* SummaryDetailScreen — Task 6 */}
+      {activeScreen === "summary" && <SummaryDetailScreen />}
       {activeScreen === "chat" && <ChatPanel />}
       {activeScreen === "settings" && <GoalSettings onClose={() => setActiveScreen("home")} />}
     </div>
