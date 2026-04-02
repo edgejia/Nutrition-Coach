@@ -201,33 +201,23 @@ describe("Chat API", () => {
   });
 
   it("POST /api/chat returns 401 with invalid device id", async () => {
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      form.append("message", "hello");
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { "x-device-id": "non-existent-id" },
-        body: form,
-      });
-      assert.equal(res.status, 401);
-    } finally {
-      if (app.server.listening) await app.close();
-    }
+    const form = new FormData();
+    form.append("message", "hello");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": "non-existent-id" },
+      body: form,
+    });
+    assert.equal(res.status, 401);
   });
 
   it("POST /api/chat returns 400 when message and image are both missing", async () => {
-    const address = await app.listen({ port: 0 });
-    try {
-      const form = new FormData();
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { "x-device-id": deviceId },
-        body: form,
-      });
-      assert.equal(res.status, 400);
-    } finally {
-      if (app.server.listening) await app.close();
-    }
+    const form = new FormData();
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+    assert.equal(res.status, 400);
   });
 });
