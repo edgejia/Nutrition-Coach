@@ -1,6 +1,6 @@
 import type { LLMProvider, ChatMessage } from "../llm/types.js";
 import type { createChatService } from "../services/chat.js";
-import type { createSummaryService } from "../services/summary.js";
+import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService } from "../services/device.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
@@ -10,6 +10,7 @@ import { toolDefinitions, executeTool } from "./tools.js";
 
 export interface Logger {
   info: (msg: string, ...args: unknown[]) => void;
+  warn: (msg: string, ...args: unknown[]) => void;
   error: (msg: string, ...args: unknown[]) => void;
 }
 
@@ -33,7 +34,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       userMessage: string,
       imageBase64?: string,
       imagePath?: string
-    ): Promise<string> {
+    ): Promise<{ reply: string; didLogMeal: boolean; dailySummary?: DailySummary }> {
       const { llmProvider, chatService, deviceService } = deps;
 
       // Load device info
@@ -68,6 +69,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       const messages: ChatMessage[] = [systemMsg, ...history, userContent];
 
+      let didLogMeal = false;
+      let logMealSummary: DailySummary | undefined;
+
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
       for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -78,13 +82,13 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           deps.logger?.error(`LLM chat failed for device ${deviceId}:`, err);
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
           await chatService.saveMessage(deviceId, "assistant", errorMsg);
-          return errorMsg;
+          return { reply: errorMsg, didLogMeal, dailySummary: logMealSummary };
         }
 
         if (response.content) {
           deps.logger?.info(`[assistant] ${response.content}`);
           await chatService.saveMessage(deviceId, "assistant", response.content);
-          return response.content;
+          return { reply: response.content, didLogMeal, dailySummary: logMealSummary };
         }
 
         if (response.toolCalls) {
@@ -94,12 +98,17 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           const toolResults: Array<{ toolCall: typeof response.toolCalls[number]; result: string }> = [];
           for (const toolCall of response.toolCalls) {
             try {
-              const { result, summary } = await executeTool(toolCall, deviceId, {
+              const { result, summary, dailySummary } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
                 publisher: deps.publisher,
                 imagePath,
+                logger: deps.logger,
               });
+              if (toolCall.function.name === "log_food") {
+                didLogMeal = true;
+                logMealSummary = dailySummary;
+              }
               deps.logger?.info(`[tool_result] ${toolCall.function.name} → ${summary}`);
               await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
               toolResults.push({ toolCall, result });
@@ -118,7 +127,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Fallback after MAX_ROUNDS
       await chatService.saveMessage(deviceId, "assistant", FALLBACK);
-      return FALLBACK;
+      return { reply: FALLBACK, didLogMeal, dailySummary: logMealSummary };
     },
   };
 }

@@ -2,23 +2,19 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
-import { currentAppDate } from "../lib/time.js";
 import type { createOrchestrator } from "../orchestrator/index.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
-import type { createSummaryService } from "../services/summary.js";
-
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
   chatService: ReturnType<typeof createChatService>;
   deviceService: ReturnType<typeof createDeviceService>;
-  summaryService: ReturnType<typeof createSummaryService>;
 }
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
-  const { orchestrator, chatService, deviceService, summaryService } = deps;
+  const { orchestrator, chatService, deviceService } = deps;
 
   app.post("/api/chat", async (request, reply) => {
     const deviceId = request.headers["x-device-id"] as string;
@@ -68,14 +64,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       return reply.code(400).send({ error: "Message or image required" });
     }
 
-    const beforeSummary = await summaryService.getDailySummary(deviceId, currentAppDate());
-    const replyText = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
-    const afterSummary = await summaryService.getDailySummary(deviceId, currentAppDate());
+    const { reply: replyText, didLogMeal, dailySummary } = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
 
-    return {
-      reply: replyText,
-      didLogMeal: afterSummary.mealCount > beforeSummary.mealCount,
-    };
+    return didLogMeal
+      ? { reply: replyText, didLogMeal, dailySummary }
+      : { reply: replyText, didLogMeal };
   });
 
   app.get("/api/chat/history", async (request, reply) => {

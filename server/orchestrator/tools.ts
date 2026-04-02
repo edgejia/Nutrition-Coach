@@ -1,7 +1,8 @@
 import type { ToolDefinition, ToolCall } from "../llm/types.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
-import type { createSummaryService } from "../services/summary.js";
+import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
+import type { Logger } from "./index.js";
 import { currentAppDate } from "../lib/time.js";
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -38,13 +39,20 @@ export interface ToolDeps {
   summaryService: ReturnType<typeof createSummaryService>;
   publisher: RealtimePublisher;
   imagePath?: string;
+  logger?: Logger;
+}
+
+export interface ToolExecutionResult {
+  result: string;
+  summary: string;
+  dailySummary?: DailySummary;
 }
 
 export async function executeTool(
   toolCall: ToolCall,
   deviceId: string,
   deps: ToolDeps
-): Promise<{ result: string; summary: string }> {
+): Promise<ToolExecutionResult> {
   const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
   const name = toolCall.function.name;
 
@@ -58,6 +66,7 @@ export async function executeTool(
       throw new Error("Invalid log_food arguments");
     }
 
+    // Core: durable DB write — this IS the success boundary for didLogMeal
     await deps.foodLoggingService.logFood(deviceId, {
       foodName,
       calories,
@@ -66,10 +75,16 @@ export async function executeTool(
       fat,
       imagePath: deps.imagePath,
     });
-    // Trigger SSE update
+
     const dailySummary = await deps.summaryService.getDailySummary(deviceId, currentAppDate());
-    deps.publisher.publishDailySummary(deviceId, dailySummary);
-    return { result: "食物已成功記錄", summary: "成功" };
+
+    try {
+      deps.publisher.publishDailySummary(deviceId, dailySummary);
+    } catch (err) {
+      deps.logger?.warn("log_food dailySummary publish failed (meal already persisted):", err);
+    }
+
+    return { result: "食物已成功記錄", summary: "成功", dailySummary };
   }
 
   if (name === "get_daily_summary") {
