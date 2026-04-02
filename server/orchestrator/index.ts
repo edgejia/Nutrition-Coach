@@ -6,7 +6,7 @@ import type { createDeviceService } from "../services/device.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { toolDefinitions, executeTool } from "./tools.js";
+import { toolDefinitions, executeTool, isFatalToolError } from "./tools.js";
 
 export interface Logger {
   info: (msg: string, ...args: unknown[]) => void;
@@ -121,6 +121,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
               toolResults.push({ toolCall, result });
             } catch (err) {
+              if (isFatalToolError(err)) {
+                throw err;
+              }
+
               const errorStr = err instanceof Error ? err.message : "Tool execution failed";
               deps.logger?.error(`Tool ${toolCall.function.name} failed for device ${deviceId}: ${errorStr}`, err);
               toolResults.push({ toolCall, result: `Error: ${errorStr}` });

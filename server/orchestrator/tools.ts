@@ -48,6 +48,18 @@ export interface ToolExecutionResult {
   dailySummary?: DailySummary;
 }
 
+export class FatalToolError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "FatalToolError";
+    this.cause = options?.cause;
+  }
+}
+
+export function isFatalToolError(error: unknown): error is FatalToolError {
+  return error instanceof FatalToolError;
+}
+
 export async function executeTool(
   toolCall: ToolCall,
   deviceId: string,
@@ -77,7 +89,13 @@ export async function executeTool(
       imagePath: deps.imagePath,
     });
 
-    const dailySummary = await deps.summaryService.getDailySummary(deviceId, currentAppDate());
+    let dailySummary: DailySummary;
+    try {
+      dailySummary = await deps.summaryService.getDailySummary(deviceId, currentAppDate());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "log_food dailySummary recomputation failed";
+      throw new FatalToolError(message, { cause: err });
+    }
 
     try {
       deps.publisher.publishDailySummary(deviceId, dailySummary);
