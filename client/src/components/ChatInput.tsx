@@ -36,6 +36,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
       <button
         type="button"
         onClick={() => fileRef.current?.click()}
+        disabled={disabled}
         className="rounded-lg bg-gray-100 p-2 text-gray-600 hover:bg-gray-200"
         title="上傳圖片"
       >
@@ -52,7 +53,14 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         {image && (
           <span className="mb-1 text-xs text-gray-500">
             {image.name}
-            <button type="button" onClick={() => { setImage(null); if (fileRef.current) fileRef.current.value = ""; }} className="ml-1 text-red-500">x</button>
+            <button
+              type="button"
+              onClick={() => { setImage(null); if (fileRef.current) fileRef.current.value = ""; }}
+              disabled={disabled}
+              className="ml-1 text-red-500 disabled:opacity-50"
+            >
+              x
+            </button>
           </span>
         )}
         <textarea
