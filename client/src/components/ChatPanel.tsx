@@ -11,6 +11,7 @@ export function ChatPanel() {
   const messages = useStore((s) => s.messages);
   const setMessages = useStore((s) => s.setMessages);
   const addMessage = useStore((s) => s.addMessage);
+  const setDailySummary = useStore((s) => s.setDailySummary);
   const sending = useStore((s) => s.sending);
   const setSending = useStore((s) => s.setSending);
   const clearDevice = useStore((s) => s.clearDevice);
@@ -33,10 +34,13 @@ export function ChatPanel() {
     }
     setSending(true);
     try {
-      const { reply, didLogMeal } = await sendMessage(text, image);
+      const { reply, didLogMeal, dailySummary } = await sendMessage(text, image);
       if (useStore.getState().deviceId !== activeDeviceId) return;
       if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
         clearPendingHomeChatDraft();
+      }
+      if (didLogMeal && dailySummary) {
+        setDailySummary(dailySummary);
       }
       addMessage({ id: crypto.randomUUID(), role: "assistant", content: reply, createdAt: new Date().toISOString(), didLogMeal });
     } catch (err) {
