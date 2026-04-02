@@ -89,9 +89,16 @@ export function ChatPanel() {
           await sendPendingDraft(draft);
         }
       })
-      .catch((err) => {
+      .catch(async (err) => {
         if (cancelled) return;
-        if (err instanceof Error && err.message === "UNAUTHORIZED") clearDevice();
+        if (err instanceof Error && err.message === "UNAUTHORIZED") {
+          clearDevice();
+          return;
+        }
+        const draft = useStore.getState().pendingHomeChatDraft;
+        if (draft && draft.status === "staged" && !attemptedDraftIdsRef.current.has(draft.id)) {
+          await sendPendingDraft(draft);
+        }
       });
     return () => {
       cancelled = true;
