@@ -39,7 +39,7 @@ describe("Orchestrator", () => {
 
   it("returns text reply when LLM responds with content", async () => {
     mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
-    const reply = await orchestrator.handleMessage(deviceId, "你好");
+    const { reply } = await orchestrator.handleMessage(deviceId, "你好");
     assert.equal(reply, "你好！我是你的營養教練。");
   });
 
@@ -58,7 +58,7 @@ describe("Orchestrator", () => {
     // Round 2: same model responds with final text
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
-    const reply = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    const { reply } = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assert.equal(reply, "已幫你記錄蘋果！");
     assert.equal(mockLLM.chatCalls.length, 2);
     assert.deepEqual(
@@ -83,7 +83,7 @@ describe("Orchestrator", () => {
     });
     mockLLM.queueChatResponse({ content: "已幫你記錄這份餐點！" });
 
-    const reply = await orchestrator.handleMessage(
+    const { reply } = await orchestrator.handleMessage(
       deviceId,
       "(圖片)",
       "data:image/png;base64,abc123",
@@ -120,7 +120,7 @@ describe("Orchestrator", () => {
         }],
       });
     }
-    const reply = await orchestrator.handleMessage(deviceId, "test");
+    const { reply } = await orchestrator.handleMessage(deviceId, "test");
     assert.equal(reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
   });
 });

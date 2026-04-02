@@ -49,7 +49,7 @@ export async function buildApp(opts: AppOptions) {
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
   registerDeviceRoutes(app, { deviceService });
-  registerChatRoutes(app, { orchestrator, chatService, deviceService, summaryService });
+  registerChatRoutes(app, { orchestrator, chatService, deviceService });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, publisher });
   registerSSERoutes(app, { publisher, summaryService, deviceService });
 
