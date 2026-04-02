@@ -27,6 +27,14 @@ interface OrchestratorDeps {
 const FALLBACK = "抱歉，我現在無法完成這個請求，請稍後再試。";
 const MAX_ROUNDS = 3;
 
+function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined): DailySummary {
+  if (!dailySummary) {
+    throw new Error("log_food succeeded without dailySummary");
+  }
+
+  return dailySummary;
+}
+
 export function createOrchestrator(deps: OrchestratorDeps) {
   return {
     async handleMessage(
@@ -107,7 +115,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               });
               if (toolCall.function.name === "log_food") {
                 didLogMeal = true;
-                logMealSummary = dailySummary;
+                logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
               }
               deps.logger?.info(`[tool_result] ${toolCall.function.name} → ${summary}`);
               await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });

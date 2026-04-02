@@ -66,6 +66,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
     const { reply: replyText, didLogMeal, dailySummary } = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
 
+    if (didLogMeal && !dailySummary) {
+      throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
+    }
+
     return didLogMeal
       ? { reply: replyText, didLogMeal, dailySummary }
       : { reply: replyText, didLogMeal };

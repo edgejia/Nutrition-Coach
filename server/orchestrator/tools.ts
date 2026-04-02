@@ -66,7 +66,8 @@ export async function executeTool(
       throw new Error("Invalid log_food arguments");
     }
 
-    // Core: durable DB write — this IS the success boundary for didLogMeal
+    // Main-path contract: the meal must be persisted AND the fresh daily summary
+    // must be computed before log_food is treated as a successful logged meal.
     await deps.foodLoggingService.logFood(deviceId, {
       foodName,
       calories,
@@ -81,7 +82,7 @@ export async function executeTool(
     try {
       deps.publisher.publishDailySummary(deviceId, dailySummary);
     } catch (err) {
-      deps.logger?.warn("log_food dailySummary publish failed (meal already persisted):", err);
+      deps.logger?.warn("log_food dailySummary publish failed after contract success:", err);
     }
 
     return { result: "食物已成功記錄", summary: "成功", dailySummary };

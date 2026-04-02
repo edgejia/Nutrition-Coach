@@ -8,7 +8,7 @@ import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import { executeTool } from "../../server/orchestrator/tools.js";
 import type { ToolCall } from "../../server/llm/types.js";
 
-describe("executeTool - log_food success boundary", () => {
+describe("executeTool - log_food dailySummary contract", () => {
   let deviceId: string;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let summaryService: ReturnType<typeof createSummaryService>;
@@ -36,7 +36,7 @@ describe("executeTool - log_food success boundary", () => {
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
   });
 
-  it("fails when summaryService.getDailySummary throws after DB write", async () => {
+  it("fails when required dailySummary computation throws after DB write", async () => {
     const throwingSummary = {
       getDailySummary: async () => {
         throw new Error("summary computation failed");
@@ -58,7 +58,7 @@ describe("executeTool - log_food success boundary", () => {
     assert.equal(meals[0].foodName, "蘋果");
   });
 
-  it("succeeds when publisher.publishDailySummary throws after DB write", async () => {
+  it("returns the required dailySummary even when publisher.publishDailySummary throws", async () => {
     const throwingPublisher = {
       publishDailySummary: () => {
         throw new Error("SSE publish failed");
@@ -73,6 +73,7 @@ describe("executeTool - log_food success boundary", () => {
 
     assert.equal(result.result, "食物已成功記錄");
     assert.ok(result.dailySummary);
+    assert.equal(result.dailySummary.mealCount, 1);
 
     // Verify meal was actually persisted to DB
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
