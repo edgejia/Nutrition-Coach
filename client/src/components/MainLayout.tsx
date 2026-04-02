@@ -30,14 +30,24 @@ export function MainLayout() {
         >
           AI 營養教練
         </button>
-        <button
-          type="button"
-          onClick={() => setActiveScreen("settings")}
-          disabled={sending}
-          className="text-sm text-blue-600 hover:underline disabled:no-underline disabled:opacity-50"
-        >
-          設定目標
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setActiveScreen("chat")}
+            disabled={sending}
+            className="text-sm text-blue-600 hover:underline disabled:no-underline disabled:opacity-50"
+          >
+            聊天
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveScreen("settings")}
+            disabled={sending}
+            className="text-sm text-blue-600 hover:underline disabled:no-underline disabled:opacity-50"
+          >
+            設定目標
+          </button>
+        </div>
       </header>
 
       {activeScreen === "home" && <HomeScreen />}
