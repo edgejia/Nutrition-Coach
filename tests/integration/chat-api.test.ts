@@ -165,7 +165,13 @@ describe("Chat API", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.didLogMeal, true);
-    assert.ok(body.dailySummary);
+    assert.deepEqual(body.dailySummary, {
+      totalCalories: 95,
+      totalProtein: 0.5,
+      totalCarbs: 25,
+      totalFat: 0.3,
+      mealCount: 1,
+    });
   });
 
   it("POST /api/chat does not include dailySummary when no food is logged", async () => {
@@ -182,7 +188,7 @@ describe("Chat API", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.didLogMeal, false);
-    assert.equal(body.dailySummary, undefined);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
   });
 
   it("POST /api/chat returns didLogMeal: true even when final LLM round fails after log_food succeeded", async () => {
@@ -211,7 +217,14 @@ describe("Chat API", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.didLogMeal, true, "meal was persisted; didLogMeal must survive LLM failure");
-    assert.ok(body.dailySummary);
+    assert.equal(body.reply, "抱歉，目前無法處理您的請求，請稍後再試。");
+    assert.deepEqual(body.dailySummary, {
+      totalCalories: 90,
+      totalProtein: 1,
+      totalCarbs: 23,
+      totalFat: 0.3,
+      mealCount: 1,
+    });
   });
 
   it("GET /api/chat/history keeps didLogMeal=true for persisted meal-logging replies", async () => {
