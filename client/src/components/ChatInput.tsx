@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
@@ -9,14 +9,26 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const canSend = Boolean(text.trim() || image);
 
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!text.trim() && !image) return;
+  function submitMessage() {
+    if (disabled || !canSend) return;
     onSend(text.trim(), image ?? undefined);
     setText("");
     setImage(null);
     if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    submitMessage();
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      submitMessage();
+    }
   }
 
   return (
@@ -43,18 +55,19 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             <button type="button" onClick={() => { setImage(null); if (fileRef.current) fileRef.current.value = ""; }} className="ml-1 text-red-500">x</button>
           </span>
         )}
-        <input
-          type="text"
+        <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="輸入食物或問問題..."
           disabled={disabled}
-          className="w-full rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          rows={1}
+          className="w-full resize-none rounded-lg border px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:opacity-50"
         />
       </div>
       <button
         type="submit"
-        disabled={disabled || (!text.trim() && !image)}
+        disabled={disabled || !canSend}
         className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
       >
         送出
