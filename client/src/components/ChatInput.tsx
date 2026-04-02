@@ -20,7 +20,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-end gap-2 border-t bg-white p-3">
+    <form onSubmit={handleSubmit} className="flex items-end gap-2 rounded-2xl border bg-white p-3 shadow-sm">
       <button
         type="button"
         onClick={() => fileRef.current?.click()}

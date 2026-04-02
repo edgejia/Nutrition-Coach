@@ -1,19 +1,23 @@
 import type { Message } from "../types.js";
 
-export function MessageBubble({ message }: { message: Message }) {
+export function MessageBubble(props: {
+  message: Message;
+  onOpenSummary?: () => void;
+}) {
+  const { message, onOpenSummary } = props;
   const isUser = message.role === "user";
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-4 py-2 ${
-          isUser ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"
-        }`}
-      >
+      <div className={`max-w-[80%] rounded-2xl px-4 py-2 ${isUser ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"}`}>
         {message.imagePreviewUrl && (
           <img src={message.imagePreviewUrl} alt="附圖" className="mb-2 max-h-48 rounded-lg object-cover" />
         )}
-        {message.content && (
-          <p className="whitespace-pre-wrap text-sm">{message.content}</p>
+        {message.content && <p className="whitespace-pre-wrap text-sm">{message.content}</p>}
+        {!isUser && message.didLogMeal && onOpenSummary && (
+          <button type="button" onClick={onOpenSummary} className="mt-3 text-sm font-medium text-green-700 hover:underline">
+            查看今日餐點
+          </button>
         )}
       </div>
     </div>
