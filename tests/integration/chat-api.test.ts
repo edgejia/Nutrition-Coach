@@ -141,6 +141,79 @@ describe("Chat API", () => {
     assert.equal(body.didLogMeal, true);
   });
 
+  it("POST /api/chat returns dailySummary when didLogMeal is true", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.didLogMeal, true);
+    assert.ok(body.dailySummary);
+  });
+
+  it("POST /api/chat does not include dailySummary when no food is logged", async () => {
+    mockLLM.queueChatResponse({ content: "今天狀態不錯，記得多喝水。" });
+
+    const form = new FormData();
+    form.append("message", "今天天氣真好");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.dailySummary, undefined);
+  });
+
+  it("POST /api/chat returns didLogMeal: true even when final LLM round fails after log_food succeeded", async () => {
+    // log_food persists to DB, then the model's reply generation throws.
+    // The meal is in the DB; the API must reflect that even though it returns an error message.
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "香蕉", calories: 90, protein: 1, carbs: 23, fat: 0.3 }),
+        },
+      }],
+    });
+    mockLLM.queueChatError(new Error("API timeout"));
+
+    const form = new FormData();
+    form.append("message", "我吃了香蕉");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.didLogMeal, true, "meal was persisted; didLogMeal must survive LLM failure");
+    assert.ok(body.dailySummary);
+  });
+
   it("GET /api/chat/history keeps didLogMeal=true for persisted meal-logging replies", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
