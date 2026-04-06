@@ -109,7 +109,7 @@ describe("Editorial UI", () => {
     });
   });
 
-  it("returns split advice text and dynamic nutrition tags", () => {
+  it("returns split advice text and dynamic nutrition tags in Chinese", () => {
     const presentation = getAdvicePresentation(
       {
         totalCalories: 1200,
@@ -126,7 +126,7 @@ describe("Editorial UI", () => {
       state: "ready",
       headline: "先補蛋白質。",
       body: "晚餐選高蛋白、低油脂的食物。",
-      tags: ["Need +80g protein", "Fat near limit", "Dinner still fits"],
+      tags: ["蛋白質差 80g", "脂肪接近上限", "晚餐還有空間"],
     });
   });
 

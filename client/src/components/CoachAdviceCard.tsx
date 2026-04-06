@@ -1,5 +1,5 @@
 import { useStore } from "../store.js";
-import type { DailySummary, DailyTargets } from "../types.js";
+import type { DailySummary, DailyTargets, CoachCTA } from "../types.js";
 
 export function splitAdvice(advice: string): { headline: string; body: string } {
   const dotIdx = advice.indexOf("。");
@@ -24,9 +24,9 @@ export function getAdviceTags(summary: DailySummary, targets: DailyTargets | nul
   const fatPct = targets.fat > 0 ? (summary.totalFat / targets.fat) * 100 : 0;
   const calRemaining = Math.max(0, Math.round(targets.calories - summary.totalCalories));
 
-  if (proteinRemaining > 5) tags.push(`Need +${proteinRemaining}g protein`);
-  if (fatPct >= 85) tags.push("Fat near limit");
-  if (calRemaining > 0) tags.push("Dinner still fits");
+  if (proteinRemaining > 5) tags.push(`蛋白質差 ${proteinRemaining}g`);
+  if (fatPct >= 85) tags.push("脂肪接近上限");
+  if (calRemaining > 0) tags.push("晚餐還有空間");
 
   return tags;
 }
@@ -56,98 +56,122 @@ export function getAdvicePresentation(
   };
 }
 
-export function CoachAdviceCard({ advice }: { advice: string | null }) {
+export function CoachAdviceCard({
+  advice,
+  cta,
+  onCtaClick,
+}: {
+  advice: string | null;
+  cta: CoachCTA | null;
+  onCtaClick?: (text: string) => void;
+}) {
   const summary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
   const presentation = getAdvicePresentation(summary, targets, advice);
 
+  const ctaBlock = cta && (
+    <div className="mt-3 flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={() => onCtaClick?.(cta.primary)}
+        className="w-full rounded-xl px-4 py-2.5 text-sm font-bold"
+        style={{
+          background: "var(--orange)",
+          color: "white",
+          boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
+        }}
+      >
+        {cta.primary}
+      </button>
+      <button
+        type="button"
+        onClick={() => onCtaClick?.(cta.secondary)}
+        className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold"
+        style={{
+          background: "var(--bg-raised)",
+          border: "1px solid var(--border-med)",
+          color: "var(--text-2)",
+        }}
+      >
+        {cta.secondary}
+      </button>
+    </div>
+  );
+
   if (presentation.state === "loading") {
     return (
-      <section>
-        <div className="mb-2 text-sm font-semibold" style={{ color: "var(--text-2)" }}>
-          Coach advice
-        </div>
-        <div
-          className="animate-pulse rounded-2xl p-4"
-          style={{ background: "var(--bg-teal)", border: "1px solid var(--teal-border)" }}
-        >
-          <div className="mb-2 h-5 w-3/4 rounded" style={{ background: "rgba(109,191,163,0.15)" }} />
-          <div className="h-4 w-full rounded" style={{ background: "rgba(109,191,163,0.1)" }} />
-          <div className="mt-1 h-4 w-2/3 rounded" style={{ background: "rgba(109,191,163,0.1)" }} />
-        </div>
-      </section>
+      <div
+        className="animate-pulse rounded-2xl p-4"
+        style={{ background: "var(--bg-teal)", border: "1px solid var(--teal-border)" }}
+      >
+        <div className="mb-2 h-5 w-3/4 rounded" style={{ background: "rgba(109,191,163,0.15)" }} />
+        <div className="h-4 w-full rounded" style={{ background: "rgba(109,191,163,0.1)" }} />
+        <div className="mt-1 h-4 w-2/3 rounded" style={{ background: "rgba(109,191,163,0.1)" }} />
+      </div>
     );
   }
 
   if (presentation.state === "empty") {
     return (
-      <section>
-        <div className="mb-2 text-sm font-semibold" style={{ color: "var(--text-2)" }}>
-          Coach advice
-        </div>
-        <div
-          className="rounded-2xl p-4"
-          style={{ background: "var(--bg-teal)", border: "1px solid var(--teal-border)" }}
-        >
-          <p className="text-sm leading-relaxed" style={{ color: "var(--teal-text)" }}>
-            {presentation.message}
-          </p>
-        </div>
-      </section>
+      <div
+        className="rounded-2xl p-4"
+        style={{ background: "var(--bg-teal)", border: "1px solid var(--teal-border)" }}
+      >
+        <p className="text-sm leading-relaxed" style={{ color: "var(--teal-text)" }}>
+          {presentation.message}
+        </p>
+        {ctaBlock}
+      </div>
     );
   }
 
   return (
-    <section>
-      <div className="mb-2 text-sm font-semibold" style={{ color: "var(--text-2)" }}>
-        Coach advice
-      </div>
-      <div
-        className="rounded-2xl p-4"
-        style={{
-          background: "var(--bg-teal)",
-          border: "1px solid var(--teal-border)",
-        }}
-      >
-        {advice && (
-          <>
-            <p
-              className="mb-2 leading-snug"
+    <div
+      className="rounded-2xl p-4"
+      style={{
+        background: "var(--bg-teal)",
+        border: "1px solid var(--teal-border)",
+      }}
+    >
+      {advice && (
+        <>
+          <p
+            className="mb-2 leading-snug"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 20,
+              fontWeight: 800,
+              color: "var(--text)",
+              letterSpacing: "-0.015em",
+            }}
+          >
+            {presentation.headline}
+          </p>
+          {presentation.body && (
+            <p className="mb-3 text-sm leading-relaxed" style={{ color: "var(--teal-text)" }}>
+              {presentation.body}
+            </p>
+          )}
+        </>
+      )}
+      {presentation.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {presentation.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full px-2.5 py-1 text-xs font-semibold"
               style={{
-                fontFamily: "var(--font-display)",
-                fontSize: 20,
-                fontWeight: 800,
-                color: "var(--text)",
-                letterSpacing: "-0.015em",
+                background: "rgba(109,191,163,0.08)",
+                border: "1px solid rgba(109,191,163,0.2)",
+                color: "var(--teal-text)",
               }}
             >
-              {presentation.headline}
-            </p>
-            {presentation.body && (
-              <p className="mb-3 text-sm leading-relaxed" style={{ color: "var(--teal-text)" }}>
-                {presentation.body}
-              </p>
-            )}
-          </>
-        )}
-        {presentation.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {presentation.tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full px-2.5 py-1 text-xs font-semibold"
-                style={{
-                  background: "rgba(109,191,163,0.08)",
-                  border: "1px solid rgba(109,191,163,0.2)",
-                  color: "var(--teal-text)",
-                }}
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+      {ctaBlock}
+    </div>
   );
 }
