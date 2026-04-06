@@ -145,4 +145,22 @@ describe("Editorial UI", () => {
 
     assert.equal(advice, "蛋白質還差 100g，晚餐建議高蛋白食物");
   });
+
+  it("simulates CTA click by setting pending draft and switching to chat", () => {
+    useStore.getState().setActiveScreen("home");
+
+    // Simulate what handleCtaClick does
+    const ctaText = "問我怎麼補蛋白質";
+    useStore.getState().setPendingHomeChatDraft({
+      id: "test-cta",
+      text: ctaText,
+      status: "staged",
+    });
+    useStore.getState().setActiveScreen("chat");
+
+    const state = useStore.getState();
+    assert.equal(state.activeScreen, "chat");
+    assert.equal(state.pendingHomeChatDraft?.text, ctaText);
+    assert.equal(state.pendingHomeChatDraft?.status, "staged");
+  });
 });
