@@ -26,6 +26,7 @@ interface AppState {
   coachAdvice: string | null;
   meals: MealEntry[];
   pendingHomeChatDraft: PendingHomeChatDraft | null;
+  showSettings: boolean;
   sending: boolean;
   setActiveScreen: (screen: ActiveScreen) => void;
   setCoachAdvice: (advice: string | null) => void;
@@ -33,6 +34,7 @@ interface AppState {
   removeMeal: (mealId: string) => void;
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void;
   clearPendingHomeChatDraft: () => void;
+  setShowSettings: (showSettings: boolean) => void;
   setDevice: (deviceId: string, goal: string, dailyTargets: DailyTargets) => void;
   addMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
@@ -52,6 +54,7 @@ export const useStore = create<AppState>((set) => ({
   coachAdvice: null,
   meals: [],
   pendingHomeChatDraft: null,
+  showSettings: false,
   sending: false,
 
   setActiveScreen: (activeScreen) => set({ activeScreen }),
@@ -60,12 +63,13 @@ export const useStore = create<AppState>((set) => ({
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
   setPendingHomeChatDraft: (pendingHomeChatDraft) => set({ pendingHomeChatDraft }),
   clearPendingHomeChatDraft: () => set({ pendingHomeChatDraft: null }),
+  setShowSettings: (showSettings) => set({ showSettings }),
 
   setDevice: (deviceId, goal, dailyTargets) => {
     localStorage.setItem("deviceId", deviceId);
     localStorage.setItem("goal", goal);
     localStorage.setItem("dailyTargets", JSON.stringify(dailyTargets));
-    set({ deviceId, goal, dailyTargets, activeScreen: "home" });
+    set({ deviceId, goal, dailyTargets, activeScreen: "home", showSettings: false });
   },
 
   addMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
@@ -90,6 +94,7 @@ export const useStore = create<AppState>((set) => ({
       coachAdvice: null,
       meals: [],
       pendingHomeChatDraft: null,
+      showSettings: false,
       sending: false,
     });
   },

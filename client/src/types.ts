@@ -1,4 +1,4 @@
-export type ActiveScreen = "home" | "summary" | "chat" | "onboarding" | "settings";
+export type ActiveScreen = "home" | "summary" | "chat" | "onboarding";
 
 export interface DailyTargets {
   calories: number;

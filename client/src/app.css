@@ -1,1 +1,51 @@
 @import "tailwindcss";
+
+:root {
+  --bg: #111210;
+  --bg-card: #1c1b19;
+  --bg-raised: #242320;
+  --bg-teal: #182820;
+
+  --border: rgba(255, 255, 255, 0.07);
+  --border-med: rgba(255, 255, 255, 0.11);
+
+  --text: #f0ede8;
+  --text-2: #968f87;
+  --text-3: #4a4540;
+
+  --orange: #e8682a;
+  --orange-dim: rgba(232, 104, 42, 0.15);
+
+  --teal-text: #6dbfa3;
+  --teal-border: rgba(109, 191, 163, 0.2);
+  --red: #e55555;
+  --blue: #5b96e8;
+  --amber: #e8a020;
+  --green: #4cb87a;
+
+  --font-display: "Bricolage Grotesque", sans-serif;
+  --font-body: "Manrope", sans-serif;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}

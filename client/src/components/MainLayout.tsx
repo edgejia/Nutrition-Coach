@@ -10,8 +10,8 @@ export function MainLayout() {
   const deviceId = useStore((s) => s.deviceId);
   const setDailySummary = useStore((s) => s.setDailySummary);
   const activeScreen = useStore((s) => s.activeScreen);
-  const setActiveScreen = useStore((s) => s.setActiveScreen);
-  const sending = useStore((s) => s.sending);
+  const showSettings = useStore((s) => s.showSettings);
+  const setShowSettings = useStore((s) => s.setShowSettings);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -20,40 +20,11 @@ export function MainLayout() {
   }, [deviceId, setDailySummary]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-gray-50">
-      <header className="flex shrink-0 items-center justify-between border-b bg-white px-4 py-3">
-        <button
-          type="button"
-          onClick={() => setActiveScreen("home")}
-          disabled={sending}
-          className="text-lg font-bold text-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          AI 營養教練
-        </button>
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setActiveScreen("chat")}
-            disabled={sending}
-            className="text-sm text-blue-600 hover:underline disabled:no-underline disabled:opacity-50"
-          >
-            聊天
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveScreen("settings")}
-            disabled={sending}
-            className="text-sm text-blue-600 hover:underline disabled:no-underline disabled:opacity-50"
-          >
-            設定目標
-          </button>
-        </div>
-      </header>
-
+    <div className="flex h-screen flex-col overflow-hidden" style={{ background: "var(--bg)" }}>
       {activeScreen === "home" && <HomeScreen />}
       {activeScreen === "summary" && <SummaryDetailScreen />}
       {activeScreen === "chat" && <ChatPanel />}
-      {activeScreen === "settings" && <GoalSettings onClose={() => setActiveScreen("home")} />}
+      {showSettings && <GoalSettings onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

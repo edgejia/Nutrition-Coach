@@ -1,0 +1,131 @@
+import { beforeEach, describe, it } from "node:test";
+import assert from "node:assert/strict";
+const storage = new Map<string, string>();
+globalThis.localStorage = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    storage.set(key, value);
+  },
+  removeItem: (key: string) => {
+    storage.delete(key);
+  },
+  clear: () => {
+    storage.clear();
+  },
+  get length() {
+    return storage.size;
+  },
+  key: (index: number) => [...storage.keys()][index] ?? null,
+} as Storage;
+
+const { useStore } = await import("../../client/src/store.js");
+const { getDashboardCells } = await import("../../client/src/components/Dashboard.js");
+const { splitAdvice, getAdvicePresentation } = await import("../../client/src/components/CoachAdviceCard.js");
+const { getDisplayedCoachAdvice } = await import("../../client/src/components/HomeScreen.js");
+
+describe("Editorial UI", () => {
+  beforeEach(() => {
+    storage.clear();
+    useStore.setState({
+      deviceId: "device-1",
+      goal: "fat_loss",
+      activeScreen: "home",
+      dailyTargets: { calories: 1800, protein: 140, carbs: 180, fat: 60 },
+      messages: [],
+      dailySummary: {
+        totalCalories: 920,
+        totalProtein: 54,
+        totalCarbs: 88,
+        totalFat: 34,
+        mealCount: 2,
+      },
+      coachAdvice: null,
+      meals: [],
+      pendingHomeChatDraft: null,
+      showSettings: false,
+      sending: false,
+    });
+  });
+
+  it("tracks settings as an overlay flag instead of an active screen", () => {
+    assert.equal(useStore.getState().showSettings, false);
+
+    useStore.getState().setShowSettings(true);
+    assert.equal(useStore.getState().showSettings, true);
+    assert.equal(useStore.getState().activeScreen, "home");
+
+    useStore.getState().clearDevice();
+    assert.equal(useStore.getState().showSettings, false);
+    assert.equal(useStore.getState().activeScreen, "onboarding");
+  });
+
+  it("derives four skeleton dashboard cells before the first summary arrives", () => {
+    const cells = getDashboardCells(null, useStore.getState().dailyTargets);
+
+    assert.equal(cells?.length, 4);
+    assert.ok(cells?.every((cell) => cell.label.startsWith("skeleton-")));
+  });
+
+  it("splits coach advice into headline and body at the first sentence break", () => {
+    assert.deepEqual(splitAdvice("先補蛋白質。晚餐吃雞胸肉與優格。"), {
+      headline: "先補蛋白質。",
+      body: "晚餐吃雞胸肉與優格。",
+    });
+  });
+
+  it("returns guided empty-state copy instead of an em dash when no meals exist", () => {
+    const presentation = getAdvicePresentation(
+      {
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        mealCount: 0,
+      },
+      useStore.getState().dailyTargets,
+      null,
+    );
+
+    assert.deepEqual(presentation, {
+      state: "empty",
+      message: "還沒有今天的紀錄，拍張照或打字告訴我你吃了什麼吧！",
+    });
+  });
+
+  it("returns split advice text and dynamic nutrition tags", () => {
+    const presentation = getAdvicePresentation(
+      {
+        totalCalories: 1200,
+        totalProtein: 60,
+        totalCarbs: 110,
+        totalFat: 55,
+        mealCount: 3,
+      },
+      useStore.getState().dailyTargets,
+      "先補蛋白質。晚餐選高蛋白、低油脂的食物。",
+    );
+
+    assert.deepEqual(presentation, {
+      state: "ready",
+      headline: "先補蛋白質。",
+      body: "晚餐選高蛋白、低油脂的食物。",
+      tags: ["Need +80g protein", "Fat near limit", "Dinner still fits"],
+    });
+  });
+
+  it("prefers freshly derived coach advice over stale stored advice", () => {
+    const advice = getDisplayedCoachAdvice(
+      "昨天的舊建議",
+      {
+        totalCalories: 900,
+        totalProtein: 40,
+        totalCarbs: 80,
+        totalFat: 20,
+        mealCount: 2,
+      },
+      useStore.getState().dailyTargets,
+    );
+
+    assert.equal(advice, "蛋白質還差 100g，晚餐建議高蛋白食物");
+  });
+});

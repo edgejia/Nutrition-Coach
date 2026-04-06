@@ -1,46 +1,164 @@
 import { useStore } from "../store.js";
+import type { DailySummary, DailyTargets } from "../types.js";
 
-function ProgressBar({ label, current, target, unit, color }: {
+export type DashboardCellData = {
   label: string;
   current: number;
   target: number;
   unit: string;
-  color: string;
+  barColor: string;
+  valueColor: string;
+  nearLimit?: boolean;
+};
+
+function MacroCell({
+  label,
+  current,
+  target,
+  unit,
+  barColor,
+  valueColor,
+  nearLimit = false,
+}: {
+  label: string;
+  current: number;
+  target: number;
+  unit: string;
+  barColor: string;
+  valueColor: string;
+  nearLimit?: boolean;
 }) {
   const pct = target > 0 ? Math.min((current / target) * 100, 100) : 0;
-  const remaining = Math.max(target - current, 0);
 
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-sm">
-        <span className="font-medium text-gray-700">{label}</span>
-        <span className="text-gray-500">
-          {Math.round(current)} / {target} {unit}
-        </span>
+    <div
+      className="relative rounded-2xl p-4"
+      style={{
+        background: "var(--bg-card)",
+        border: nearLimit ? "1px solid rgba(232,160,32,0.25)" : "1px solid var(--border)",
+      }}
+    >
+      {nearLimit && <div className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full" style={{ background: "var(--amber)" }} />}
+      <div className="mb-1.5 text-xs font-bold uppercase tracking-widest" style={{ color: "var(--text-3)" }}>
+        {label}
       </div>
-      <div className="h-3 overflow-hidden rounded-full bg-gray-200">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      <div
+        className="mb-0.5 leading-none"
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 26,
+          fontWeight: 800,
+          color: valueColor,
+          letterSpacing: "-0.02em",
+        }}
+      >
+        {Math.round(current)} / {target}
+        {unit}
       </div>
-      <p className="text-xs text-gray-400">剩餘 {Math.round(remaining)} {unit}</p>
+      <div className="mb-2.5 text-xs" style={{ color: "var(--text-3)" }}>
+        — {Math.max(0, Math.round(target - current))}
+        {unit} remaining
+      </div>
+      <div className="h-px overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.08)", height: 3 }}>
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: barColor,
+            borderRadius: 2,
+            transition: "width 0.6s cubic-bezier(0.16,1,0.3,1)",
+          }}
+        />
+      </div>
     </div>
   );
+}
+
+export function getDashboardCells(
+  summary: DailySummary | null,
+  targets: DailyTargets | null,
+): DashboardCellData[] | null {
+  if (!targets) return null;
+  if (!summary) {
+    return Array.from({ length: 4 }, (_, index) => ({
+      label: `skeleton-${index}`,
+      current: 0,
+      target: 0,
+      unit: "",
+      barColor: "",
+      valueColor: "",
+    }));
+  }
+
+  const fatPct = targets.fat > 0 ? (summary.totalFat / targets.fat) * 100 : 0;
+
+  return [
+    {
+      label: "Protein",
+      current: summary.totalProtein,
+      target: targets.protein,
+      unit: "g",
+      barColor: "var(--red)",
+      valueColor: "var(--red)",
+    },
+    {
+      label: "Carbs",
+      current: summary.totalCarbs,
+      target: targets.carbs,
+      unit: "g",
+      barColor: "var(--blue)",
+      valueColor: "var(--blue)",
+    },
+    {
+      label: "Fat",
+      current: summary.totalFat,
+      target: targets.fat,
+      unit: "g",
+      barColor: "var(--amber)",
+      valueColor: "var(--amber)",
+      nearLimit: fatPct >= 85,
+    },
+    {
+      label: "Meals",
+      current: summary.mealCount,
+      target: 4,
+      unit: "",
+      barColor: "var(--green)",
+      valueColor: "var(--green)",
+    },
+  ];
 }
 
 export function Dashboard() {
   const summary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
+  const cells = getDashboardCells(summary, targets);
 
-  if (!targets) return null;
+  if (!cells) return null;
 
-  const s = summary ?? { totalCalories: 0, totalProtein: 0, totalCarbs: 0, totalFat: 0 };
+  if (!summary) {
+    return (
+      <div className="grid grid-cols-2 gap-2.5">
+        {cells.map((cell) => (
+          <div
+            key={cell.label}
+            className="animate-pulse rounded-2xl p-4"
+            style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
+          >
+            <div className="mb-2 h-3 w-16 rounded" style={{ background: "var(--bg-raised)" }} />
+            <div className="mb-1 h-7 w-24 rounded" style={{ background: "var(--bg-raised)" }} />
+            <div className="mt-3 h-px w-full" style={{ background: "var(--bg-raised)" }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-3">
-
-      <ProgressBar label="熱量" current={s.totalCalories} target={targets.calories} unit="kcal" color="bg-orange-500" />
-      <ProgressBar label="蛋白質" current={s.totalProtein} target={targets.protein} unit="g" color="bg-red-500" />
-      <ProgressBar label="碳水" current={s.totalCarbs} target={targets.carbs} unit="g" color="bg-blue-500" />
-      <ProgressBar label="脂肪" current={s.totalFat} target={targets.fat} unit="g" color="bg-yellow-500" />
+    <div className="grid grid-cols-2 gap-2.5">
+      {cells.map((cell) => (
+        <MacroCell key={cell.label} {...cell} />
+      ))}
     </div>
   );
 }

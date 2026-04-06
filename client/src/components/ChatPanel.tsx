@@ -29,7 +29,13 @@ export function ChatPanel() {
     if (!activeDeviceId) return;
     if (opts?.appendUserBubble !== false) {
       const imagePreviewUrl = image ? URL.createObjectURL(image) : undefined;
-      const userMsg = { id: crypto.randomUUID(), role: "user" as const, content: text || "", imagePreviewUrl, createdAt: new Date().toISOString() };
+      const userMsg = {
+        id: crypto.randomUUID(),
+        role: "user" as const,
+        content: text || "",
+        imagePreviewUrl,
+        createdAt: new Date().toISOString(),
+      };
       addMessage(userMsg);
     }
     setSending(true);
@@ -42,7 +48,13 @@ export function ChatPanel() {
       if (didLogMeal && dailySummary) {
         setDailySummary(dailySummary);
       }
-      addMessage({ id: crypto.randomUUID(), role: "assistant", content: reply, createdAt: new Date().toISOString(), didLogMeal });
+      addMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: reply,
+        createdAt: new Date().toISOString(),
+        didLogMeal,
+      });
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
@@ -52,7 +64,12 @@ export function ChatPanel() {
         return;
       }
       if (useStore.getState().deviceId !== activeDeviceId) return;
-      addMessage({ id: crypto.randomUUID(), role: "assistant", content: "抱歉，發生錯誤，請再試一次。", createdAt: new Date().toISOString() });
+      addMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "抱歉，發生錯誤，請再試一次。",
+        createdAt: new Date().toISOString(),
+      });
       if (opts?.draftId) {
         const currentDraft = useStore.getState().pendingHomeChatDraft;
         if (currentDraft && currentDraft.id === opts.draftId) {
@@ -116,43 +133,75 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-gray-50">
-      <DashboardMiniBar />
-      <div className="flex items-center justify-between border-b bg-white px-4 py-3">
-        <span className="text-sm font-semibold text-gray-900">Expanded Chat</span>
+    <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--bg)" }}>
+      <div className="shrink-0 px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
         <button
           type="button"
           onClick={handleBackToHome}
           disabled={isChatLocked}
-          className="text-sm text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+          className="mb-3 flex items-center gap-2 text-xs font-semibold disabled:opacity-40"
+          style={{ color: "var(--text-2)" }}
         >
-          返回 Dashboard
+          <span
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-xs"
+            style={{
+              background: "var(--bg-raised)",
+              border: "1px solid var(--border-med)",
+            }}
+          >
+            ‹
+          </span>
+          Back to dashboard
         </button>
+        <h2
+          className="mb-1 leading-none"
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 28,
+            fontWeight: 800,
+            color: "var(--text)",
+            letterSpacing: "-0.025em",
+          }}
+        >
+          Coach chat
+        </h2>
+        <p className="mb-2.5 text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
+          同一個輸入框同時處理提問與記錄。AI 回覆會直接連回今日攝取狀態。
+        </p>
+        <DashboardMiniBar />
       </div>
+
       {isChatLocked && (
-        <div className="border-b bg-gray-50 px-4 py-3 text-sm text-gray-600">
+        <div
+          className="shrink-0 px-4 py-2.5 text-sm font-medium"
+          style={{
+            borderBottom: "1px solid var(--border)",
+            background: "var(--bg-card)",
+            color: "var(--text-2)",
+          }}
+        >
           訊息送出中，請稍候。
         </div>
       )}
       {pendingHomeChatDraft?.status === "failed" && (
-        <div className="border-b bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div
+          className="shrink-0 px-4 py-3 text-sm"
+          style={{
+            borderBottom: "1px solid var(--border)",
+            background: "rgba(232,160,32,0.06)",
+            color: "var(--amber)",
+          }}
+        >
           上一筆草稿送出失敗。
-          <button
-            type="button"
-            onClick={() => sendPendingDraft(pendingHomeChatDraft)}
-            className="ml-3 font-medium underline"
-          >
+          <button type="button" onClick={() => sendPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
             重試送出
           </button>
-          <button
-            type="button"
-            onClick={clearPendingHomeChatDraft}
-            className="ml-3 font-medium underline"
-          >
+          <button type="button" onClick={clearPendingHomeChatDraft} className="ml-3 font-semibold underline">
             取消草稿
           </button>
         </div>
       )}
+
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((m) => (
           <MessageBubble
@@ -163,16 +212,22 @@ export function ChatPanel() {
         ))}
         {sending && (
           <div className="flex justify-start">
-            <div className="flex items-center gap-1 rounded-2xl bg-gray-100 px-4 py-3">
-              <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
+            <div
+              className="flex items-center gap-1 rounded-2xl px-4 py-3"
+              style={{ background: "var(--bg-card)", border: "1px solid var(--border-med)" }}
+            >
+              <span className="h-2 w-2 animate-bounce rounded-full [animation-delay:-0.3s]" style={{ background: "var(--text-3)" }} />
+              <span className="h-2 w-2 animate-bounce rounded-full [animation-delay:-0.15s]" style={{ background: "var(--text-3)" }} />
+              <span className="h-2 w-2 animate-bounce rounded-full" style={{ background: "var(--text-3)" }} />
             </div>
           </div>
         )}
         <div ref={endRef} />
       </div>
-      <ChatInput onSend={handleSend} disabled={sending} />
+
+      <div className="shrink-0 px-3 pb-safe" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
+        <ChatInput onSend={handleSend} disabled={sending} />
+      </div>
     </div>
   );
 }

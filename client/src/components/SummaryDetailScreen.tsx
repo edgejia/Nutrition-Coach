@@ -10,6 +10,9 @@ export function SummaryDetailScreen() {
   const removeMeal = useStore((s) => s.removeMeal);
   const clearDevice = useStore((s) => s.clearDevice);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
+  const summary = useStore((s) => s.dailySummary);
+  const targets = useStore((s) => s.dailyTargets);
+  const sending = useStore((s) => s.sending);
   const [loading, setLoading] = useState(true);
   const [deletingMealId, setDeletingMealId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,30 +59,120 @@ export function SummaryDetailScreen() {
     }
   }
 
+  const calRemaining =
+    targets && summary ? Math.max(0, Math.round(targets.calories - summary.totalCalories)) : null;
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-gray-50">
-      <main className="flex-1 space-y-4 overflow-y-auto p-4">
-        <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-200">
-          <div className="mb-3 text-sm font-semibold text-gray-900">今日營養狀態</div>
-          <Dashboard />
-        </section>
-        {loading ? (
-          <p className="text-sm text-gray-500">載入餐點中...</p>
-        ) : error ? (
-          <p className="rounded-2xl bg-white p-4 text-sm text-red-600 ring-1 ring-gray-200">{error}</p>
-        ) : (
-          <MealTimeline meals={meals} deletingMealId={deletingMealId} onDelete={handleDelete} />
-        )}
-      </main>
-      <div className="border-t bg-white p-3">
+    <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--bg)" }}>
+      <div className="shrink-0 px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
         <button
           type="button"
           onClick={() => setActiveScreen("home")}
-          className="w-full rounded-xl bg-gray-900 px-4 py-3 text-sm font-medium text-white"
+          disabled={sending}
+          className="mb-3 flex items-center gap-2 text-xs font-semibold disabled:opacity-40"
+          style={{ color: "var(--text-2)" }}
         >
-          返回 Dashboard
+          <span
+            className="flex h-6 w-6 items-center justify-center rounded-lg text-xs"
+            style={{
+              background: "var(--bg-raised)",
+              border: "1px solid var(--border-med)",
+            }}
+          >
+            ‹
+          </span>
+          Back to dashboard
         </button>
+        <h2
+          className="mb-1"
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 28,
+            fontWeight: 800,
+            color: "var(--text)",
+            letterSpacing: "-0.025em",
+          }}
+        >
+          Summary detail
+        </h2>
+        <p className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
+          這裡才展開今日餐點、來源與更正操作，讓首頁保持乾淨。
+        </p>
       </div>
+
+      <main className="flex-1 space-y-3 overflow-y-auto p-4">
+        <div className="grid grid-cols-2 gap-2.5">
+          <div
+            className="rounded-2xl p-3.5"
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-med)",
+            }}
+          >
+            <div className="mb-1.5 text-xs font-bold" style={{ color: "var(--text)" }}>
+              Daily status
+            </div>
+            <div className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
+              {calRemaining !== null ? `${calRemaining} kcal remaining.` : "Calculating..."}
+              <br />
+              {targets && summary && summary.totalProtein < targets.protein * 0.8
+                ? "Protein still needs work."
+                : "Protein on track."}
+            </div>
+          </div>
+          <div
+            className="rounded-2xl p-3.5"
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-med)",
+            }}
+          >
+            <div className="mb-1.5 text-xs font-bold" style={{ color: "var(--text)" }}>
+              Coach note
+            </div>
+            <div className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
+              {calRemaining !== null && calRemaining > 200
+                ? "Dinner can stay normal-sized, but keep fat lower."
+                : "Dinner should be light today."}
+            </div>
+          </div>
+        </div>
+
+        <Dashboard />
+
+        <div>
+          <div
+            className="mb-2 px-1 text-base font-bold"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 18,
+              fontWeight: 800,
+              color: "var(--text)",
+              letterSpacing: "-0.015em",
+            }}
+          >
+            Meals today
+          </div>
+          {loading ? (
+            <p className="text-sm" style={{ color: "var(--text-2)" }}>
+              載入餐點中...
+            </p>
+          ) : error ? (
+            <p
+              className="rounded-2xl p-4 text-sm"
+              style={{
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-med)",
+                color: "var(--red)",
+              }}
+            >
+              {error}
+            </p>
+          ) : (
+            <MealTimeline meals={meals} deletingMealId={deletingMealId} onDelete={handleDelete} />
+          )}
+        </div>
+      </main>
     </div>
   );
 }
