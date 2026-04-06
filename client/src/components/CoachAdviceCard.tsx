@@ -58,11 +58,11 @@ export function getAdvicePresentation(
 
 export function CoachAdviceCard({
   advice,
-  cta,
+  cta = null,
   onCtaClick,
 }: {
   advice: string | null;
-  cta: CoachCTA | null;
+  cta?: CoachCTA | null;
   onCtaClick?: (text: string) => void;
 }) {
   const summary = useStore((s) => s.dailySummary);
