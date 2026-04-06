@@ -66,6 +66,23 @@ describe("Editorial UI", () => {
     assert.ok(cells?.every((cell) => cell.label.startsWith("skeleton-")));
   });
 
+  it("renders Calories cell instead of Meals with Chinese labels", () => {
+    const cells = getDashboardCells(
+      { totalCalories: 920, totalProtein: 54, totalCarbs: 88, totalFat: 34, mealCount: 2 },
+      { calories: 1800, protein: 140, carbs: 180, fat: 60 },
+    );
+
+    assert.equal(cells?.length, 4);
+    const labels = cells!.map((c) => c.label);
+    assert.deepEqual(labels, ["熱量", "蛋白質", "碳水", "脂肪"]);
+
+    const calorieCell = cells![0];
+    assert.equal(calorieCell.current, 920);
+    assert.equal(calorieCell.target, 1800);
+    assert.equal(calorieCell.unit, "kcal");
+    assert.equal(calorieCell.barColor, "var(--orange)");
+  });
+
   it("splits coach advice into headline and body at the first sentence break", () => {
     assert.deepEqual(splitAdvice("先補蛋白質。晚餐吃雞胸肉與優格。"), {
       headline: "先補蛋白質。",
@@ -92,7 +109,7 @@ describe("Editorial UI", () => {
     });
   });
 
-  it("returns split advice text and dynamic nutrition tags", () => {
+  it("returns split advice text and dynamic nutrition tags in Chinese", () => {
     const presentation = getAdvicePresentation(
       {
         totalCalories: 1200,
@@ -109,7 +126,7 @@ describe("Editorial UI", () => {
       state: "ready",
       headline: "先補蛋白質。",
       body: "晚餐選高蛋白、低油脂的食物。",
-      tags: ["Need +80g protein", "Fat near limit", "Dinner still fits"],
+      tags: ["蛋白質差 80g", "脂肪接近上限", "晚餐還有空間"],
     });
   });
 
@@ -127,5 +144,23 @@ describe("Editorial UI", () => {
     );
 
     assert.equal(advice, "蛋白質還差 100g，晚餐建議高蛋白食物");
+  });
+
+  it("simulates CTA click by setting pending draft and switching to chat", () => {
+    useStore.getState().setActiveScreen("home");
+
+    // Simulate what handleCtaClick does
+    const ctaText = "問我怎麼補蛋白質";
+    useStore.getState().setPendingHomeChatDraft({
+      id: "test-cta",
+      text: ctaText,
+      status: "staged",
+    });
+    useStore.getState().setActiveScreen("chat");
+
+    const state = useStore.getState();
+    assert.equal(state.activeScreen, "chat");
+    assert.equal(state.pendingHomeChatDraft?.text, ctaText);
+    assert.equal(state.pendingHomeChatDraft?.status, "staged");
   });
 });

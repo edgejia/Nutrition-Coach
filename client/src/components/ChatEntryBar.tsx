@@ -73,7 +73,7 @@ export function ChatEntryBar(props: {
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask the coach or log a meal with text / photo..."
+          placeholder="輸入文字或拍照記錄飲食..."
           disabled={props.disabled}
           rows={1}
           className="w-full resize-none rounded-xl px-3 py-2.5 text-sm focus:outline-none disabled:opacity-50"

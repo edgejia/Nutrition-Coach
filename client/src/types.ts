@@ -47,3 +47,8 @@ export interface ChatReply {
   didLogMeal?: boolean;
   dailySummary?: DailySummary;
 }
+
+export interface CoachCTA {
+  primary: string;
+  secondary: string;
+}

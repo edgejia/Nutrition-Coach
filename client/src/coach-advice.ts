@@ -1,4 +1,4 @@
-import type { DailyTargets, DailySummary } from "./types.js";
+import type { DailyTargets, DailySummary, CoachCTA } from "./types.js";
 
 export function getCoachAdvice(summary: DailySummary | null, targets: DailyTargets | null): string | null {
   if (!summary || !targets) {
@@ -24,4 +24,41 @@ export function getCoachAdvice(summary: DailySummary | null, targets: DailyTarge
   }
 
   return "今天攝取均衡，繼續保持！";
+}
+
+function getMealPeriod(hour: number): string {
+  if (hour < 11) return "早餐";
+  if (hour < 15) return "午餐";
+  if (hour < 21) return "晚餐";
+  return "宵夜";
+}
+
+export function getCoachCTA(
+  summary: DailySummary | null,
+  targets: DailyTargets | null,
+  hour: number = new Date().getHours(),
+): CoachCTA {
+  const secondary = "記錄飲食";
+
+  if (!summary || !targets || summary.mealCount === 0) {
+    return { primary: "開始記錄今天第一餐", secondary };
+  }
+
+  const proteinRemaining = targets.protein - summary.totalProtein;
+  const calRemaining = targets.calories - summary.totalCalories;
+
+  if (proteinRemaining > 30) {
+    return { primary: "問我怎麼補蛋白質", secondary };
+  }
+
+  if (calRemaining <= 0) {
+    return { primary: "問我現在還能不能吃", secondary };
+  }
+
+  if (calRemaining < 200) {
+    return { primary: "問我怎麼收今天這餐", secondary };
+  }
+
+  const meal = getMealPeriod(hour);
+  return { primary: `問我${meal}怎麼吃`, secondary };
 }
