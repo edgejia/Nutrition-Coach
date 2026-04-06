@@ -56,8 +56,8 @@ function MacroCell({
         {unit}
       </div>
       <div className="mb-2.5 text-xs" style={{ color: "var(--text-3)" }}>
-        — {Math.max(0, Math.round(target - current))}
-        {unit} remaining
+        還差 {Math.max(0, Math.round(target - current))}
+        {unit}
       </div>
       <div className="h-px overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.08)", height: 3 }}>
         <div
@@ -94,7 +94,15 @@ export function getDashboardCells(
 
   return [
     {
-      label: "Protein",
+      label: "熱量",
+      current: summary.totalCalories,
+      target: targets.calories,
+      unit: "kcal",
+      barColor: "var(--orange)",
+      valueColor: "var(--orange)",
+    },
+    {
+      label: "蛋白質",
       current: summary.totalProtein,
       target: targets.protein,
       unit: "g",
@@ -102,7 +110,7 @@ export function getDashboardCells(
       valueColor: "var(--red)",
     },
     {
-      label: "Carbs",
+      label: "碳水",
       current: summary.totalCarbs,
       target: targets.carbs,
       unit: "g",
@@ -110,7 +118,7 @@ export function getDashboardCells(
       valueColor: "var(--blue)",
     },
     {
-      label: "Fat",
+      label: "脂肪",
       current: summary.totalFat,
       target: targets.fat,
       unit: "g",
@@ -118,18 +126,10 @@ export function getDashboardCells(
       valueColor: "var(--amber)",
       nearLimit: fatPct >= 85,
     },
-    {
-      label: "Meals",
-      current: summary.mealCount,
-      target: 4,
-      unit: "",
-      barColor: "var(--green)",
-      valueColor: "var(--green)",
-    },
   ];
 }
 
-export function Dashboard() {
+export function Dashboard({ onTap }: { onTap?: () => void } = {}) {
   const summary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
   const cells = getDashboardCells(summary, targets);
@@ -154,11 +154,24 @@ export function Dashboard() {
     );
   }
 
-  return (
+  const grid = (
     <div className="grid grid-cols-2 gap-2.5">
       {cells.map((cell) => (
         <MacroCell key={cell.label} {...cell} />
       ))}
     </div>
+  );
+
+  if (!onTap) return grid;
+
+  return (
+    <button
+      type="button"
+      onClick={onTap}
+      aria-label="查看今日營養詳情"
+      className="w-full cursor-pointer text-left"
+    >
+      {grid}
+    </button>
   );
 }

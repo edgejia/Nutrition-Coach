@@ -66,6 +66,23 @@ describe("Editorial UI", () => {
     assert.ok(cells?.every((cell) => cell.label.startsWith("skeleton-")));
   });
 
+  it("renders Calories cell instead of Meals with Chinese labels", () => {
+    const cells = getDashboardCells(
+      { totalCalories: 920, totalProtein: 54, totalCarbs: 88, totalFat: 34, mealCount: 2 },
+      { calories: 1800, protein: 140, carbs: 180, fat: 60 },
+    );
+
+    assert.equal(cells?.length, 4);
+    const labels = cells!.map((c) => c.label);
+    assert.deepEqual(labels, ["熱量", "蛋白質", "碳水", "脂肪"]);
+
+    const calorieCell = cells![0];
+    assert.equal(calorieCell.current, 920);
+    assert.equal(calorieCell.target, 1800);
+    assert.equal(calorieCell.unit, "kcal");
+    assert.equal(calorieCell.barColor, "var(--orange)");
+  });
+
   it("splits coach advice into headline and body at the first sentence break", () => {
     assert.deepEqual(splitAdvice("先補蛋白質。晚餐吃雞胸肉與優格。"), {
       headline: "先補蛋白質。",
