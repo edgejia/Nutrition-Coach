@@ -1,11 +1,15 @@
 import { useState } from "react";
+import type { IntakeData } from "../../types.js";
+
+type ActivityLevel = IntakeData["activityLevel"];
+type TrainingFreq = IntakeData["trainingFrequency"];
 
 interface Props {
-  onNext: (data: { activityLevel: string; trainingFrequency: string; allergies?: string }) => void;
+  onNext: (data: { activityLevel: ActivityLevel; trainingFrequency: TrainingFreq; allergies?: string }) => void;
   onBack: () => void;
 }
 
-const ACTIVITY_OPTIONS = [
+const ACTIVITY_OPTIONS: readonly { value: ActivityLevel; label: string }[] = [
   { value: "sedentary", label: "久坐" },
   { value: "light", label: "輕度活動" },
   { value: "moderate", label: "中度活動" },
@@ -13,7 +17,7 @@ const ACTIVITY_OPTIONS = [
   { value: "very_active", label: "高度活動" },
 ];
 
-const TRAINING_OPTIONS = [
+const TRAINING_OPTIONS: readonly { value: TrainingFreq; label: string }[] = [
   { value: "none", label: "不訓練" },
   { value: "1_2", label: "1-2 次/週" },
   { value: "3_4", label: "3-4 次/週" },
@@ -21,11 +25,16 @@ const TRAINING_OPTIONS = [
 ];
 
 export function StepLifestyle({ onNext, onBack }: Props) {
-  const [activity, setActivity] = useState("");
-  const [training, setTraining] = useState("");
+  const [activity, setActivity] = useState<ActivityLevel | "">("");
+  const [training, setTraining] = useState<TrainingFreq | "">("");
   const [allergies, setAllergies] = useState("");
 
   const canProceed = activity && training;
+
+  function handleNext() {
+    if (!activity || !training) return;
+    onNext({ activityLevel: activity, trainingFrequency: training, allergies: allergies.trim() || undefined });
+  }
 
   return (
     <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
@@ -99,7 +108,7 @@ export function StepLifestyle({ onNext, onBack }: Props) {
           上一步
         </button>
         <button
-          onClick={() => onNext({ activityLevel: activity, trainingFrequency: training, allergies: allergies.trim() || undefined })}
+          onClick={handleNext}
           disabled={!canProceed}
           className="flex-1 rounded-xl py-3 text-sm font-bold disabled:opacity-40"
           style={{ background: "var(--orange)", color: "#000" }}
