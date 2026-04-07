@@ -44,14 +44,18 @@ function buildIntakePayload(intake: IntakeFields): Record<string, unknown> {
   };
 }
 
+const RESPONSE_SCHEMA_EXAMPLE = '{"calories":1800,"protein":140,"carbs":180,"fat":60,"coachExplanation":"一句繁體中文說明"}';
+
 function buildMessages(goal: Goal, intake: IntakeFields): ChatMessage[] {
   const payload = buildIntakePayload(intake);
   return [
     {
       role: "system",
       content:
-        "你是一位嚴謹的營養教練。請只輸出 JSON，不要加說明文字、Markdown 或工具呼叫。" +
-        "請根據目標與體態資料生成每日熱量與三大營養素目標，並附上一句簡短的繁體中文教練說明。",
+        "你是一位嚴謹的營養教練。請只輸出 JSON，不要加說明文字、Markdown 或工具呼叫。\n" +
+        "根據目標與體態資料生成每日熱量與三大營養素目標，並附上一句簡短的繁體中文教練說明。\n" +
+        "必須嚴格使用以下欄位名稱（不可加 _g、_kcal 後綴，不可使用巢狀結構）：\n" +
+        RESPONSE_SCHEMA_EXAMPLE,
     },
     {
       role: "user",
@@ -70,36 +74,46 @@ function readFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function readExplanation(parsed: LLMTargetResponse): string | null {
-  const explanation = parsed.explanation ?? parsed.coachExplanation;
-  if (typeof explanation !== "string") {
-    return null;
-  }
+const EXPLANATION_KEYS = ["coachExplanation", "explanation", "note", "coachNote", "message", "coach_explanation"];
 
-  const trimmed = explanation.trim();
-  return trimmed.length > 0 ? trimmed : null;
+function readExplanation(obj: Record<string, unknown>): string | null {
+  // Check known keys first
+  for (const key of EXPLANATION_KEYS) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  // Fallback: any key containing "note", "explanation", or "coach"
+  for (const key of Object.keys(obj)) {
+    const lower = key.toLowerCase();
+    if (lower.includes("note") || lower.includes("explanation") || lower.includes("coach")) {
+      const value = obj[key];
+      if (typeof value === "string" && value.trim().length > 0) return value.trim();
+    }
+  }
+  return null;
+}
+
+function readMacroNumber(obj: Record<string, unknown>, key: string): number | null {
+  return readFiniteNumber(obj[key] ?? obj[`${key}_g`] ?? obj[`${key}_kcal`]);
 }
 
 function parseTargetResponse(content: string): { dailyTargets: DailyTargets; coachExplanation: string } {
   const cleaned = cleanJsonContent(content);
-  const parsed = JSON.parse(cleaned) as LLMTargetResponse;
-  const rawTargets = parsed.dailyTargets ?? parsed;
-  const calories = readFiniteNumber(rawTargets.calories);
-  const protein = readFiniteNumber(rawTargets.protein);
-  const carbs = readFiniteNumber(rawTargets.carbs);
-  const fat = readFiniteNumber(rawTargets.fat);
+  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  // Support nested "macros" or "dailyTargets" sub-objects
+  const macros = (parsed.macros ?? parsed.dailyTargets ?? parsed) as Record<string, unknown>;
+
+  const calories = readMacroNumber(parsed, "calories") ?? readMacroNumber(macros, "calories");
+  const protein = readMacroNumber(macros, "protein") ?? readMacroNumber(parsed, "protein");
+  const carbs = readMacroNumber(macros, "carbs") ?? readMacroNumber(parsed, "carbs");
+  const fat = readMacroNumber(macros, "fat") ?? readMacroNumber(parsed, "fat");
   const coachExplanation = readExplanation(parsed);
 
   if (calories === null || protein === null || carbs === null || fat === null || coachExplanation === null) {
     throw new Error("Invalid target response");
   }
 
-  const dailyTargets: DailyTargets = {
-    calories,
-    protein,
-    carbs,
-    fat,
-  };
+  const dailyTargets: DailyTargets = { calories, protein, carbs, fat };
   return { dailyTargets, coachExplanation };
 }
 
