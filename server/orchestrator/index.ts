@@ -57,12 +57,28 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       deps.logger?.info(`[user] ${userMessage}${imageBase64 ? " [+image]" : ""}`);
       const systemMsg: ChatMessage = {
         role: "system",
-        content: buildSystemPrompt(device.goal, {
-          calories: device.dailyCalories,
-          protein: device.dailyProtein,
-          carbs: device.dailyCarbs,
-          fat: device.dailyFat,
-        }),
+        content: buildSystemPrompt(
+          device.goal,
+          {
+            calories: device.dailyCalories,
+            protein: device.dailyProtein,
+            carbs: device.dailyCarbs,
+            fat: device.dailyFat,
+          },
+          {
+            sex: device.sex,
+            age: device.age,
+            heightCm: device.heightCm,
+            weightKg: device.weightKg,
+            activityLevel: device.activityLevel,
+            trainingFrequency: device.trainingFrequency,
+            allergies: device.allergies,
+            goalClarification: device.goalClarification,
+            bodyFatPercent: device.bodyFatPercent,
+            tdee: device.tdee,
+            advancedNotes: device.advancedNotes,
+          },
+        ),
       };
 
       const userContent: ChatMessage = imageBase64

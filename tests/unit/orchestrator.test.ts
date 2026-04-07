@@ -9,16 +9,21 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import { createOrchestrator } from "../../server/orchestrator/index.js";
 
+function assertString(value: unknown): asserts value is string {
+  assert.equal(typeof value, "string");
+}
+
 describe("Orchestrator - didLogMeal", () => {
   let orchestrator: ReturnType<typeof createOrchestrator>;
   let mockLLM: MockLLMProvider;
   let deviceId: string;
+  let deviceService: ReturnType<typeof createDeviceService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let shouldFailSummary = false;
 
   beforeEach(async () => {
     const db = createDb(":memory:");
-    const deviceService = createDeviceService(db);
+    deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     const summaryService = createSummaryService(db);
     const chatService = createChatService(db);
@@ -44,6 +49,41 @@ describe("Orchestrator - didLogMeal", () => {
     });
 
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+  });
+
+  it("forwards device intake data into the system prompt", async () => {
+    const { deviceId: intakeDeviceId } = await deviceService.createDevice("fat_loss", {
+      sex: "male",
+      age: 30,
+      heightCm: 175,
+      weightKg: 80,
+      activityLevel: "moderate",
+      trainingFrequency: "3_4",
+      allergies: "花生",
+      goalClarification: "不想影響重訓表現",
+      bodyFatPercent: 18,
+      tdee: 1800,
+      advancedNotes: "晚餐常外食",
+    });
+
+    mockLLM.queueChatResponse({ content: "已收到" });
+
+    await orchestrator.handleMessage(intakeDeviceId, "我想先看一下建議");
+
+    const systemPrompt = mockLLM.chatCalls[0]?.messages[0]?.content;
+    assertString(systemPrompt);
+    assert.match(systemPrompt, /使用者背景資料/);
+    assert.match(systemPrompt, /性別：男/);
+    assert.match(systemPrompt, /年齡：30/);
+    assert.match(systemPrompt, /身高：175 cm/);
+    assert.match(systemPrompt, /體重：80 kg/);
+    assert.match(systemPrompt, /活動量：moderate/);
+    assert.match(systemPrompt, /訓練頻率：3_4/);
+    assert.match(systemPrompt, /過敏\/飲食限制：花生/);
+    assert.match(systemPrompt, /目標補充：不想影響重訓表現/);
+    assert.match(systemPrompt, /體脂率：18%/);
+    assert.match(systemPrompt, /TDEE：1800 kcal/);
+    assert.match(systemPrompt, /備註：晚餐常外食/);
   });
 
   it("handleMessage returns { reply, didLogMeal: true } when log_food is executed", async () => {
