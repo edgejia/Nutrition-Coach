@@ -52,3 +52,24 @@ export interface CoachCTA {
   primary: string;
   secondary: string;
 }
+
+export interface IntakeData {
+  goal: "fat_loss" | "muscle_gain";
+  sex: "male" | "female";
+  age: number;
+  heightCm: number;
+  weightKg: number;
+  activityLevel: "sedentary" | "light" | "moderate" | "active" | "very_active";
+  trainingFrequency: "none" | "1_2" | "3_4" | "5_plus";
+  allergies?: string;
+  goalClarification?: string;
+  bodyFatPercent?: number;
+  tdee?: number;
+  advancedNotes?: string;
+}
+
+export interface IntakeResult {
+  deviceId: string;
+  dailyTargets: DailyTargets;
+  coachExplanation: string | null;
+}

@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import type { IntakeData } from "../../client/src/types.js";
 
 // Minimal localStorage shim
 const storage = new Map<string, string>();
@@ -41,6 +42,35 @@ describe("API Client", () => {
     assert.equal(result.deviceId, "d-1");
     assert.equal(fetchCalls[0].url, "/api/device");
     assert.equal(fetchCalls[0].init.method, "POST");
+  });
+
+  it("submitIntake sends POST to /api/device with intake payload and returns coachExplanation", async () => {
+    const intake: IntakeData = {
+      goal: "fat_loss",
+      sex: "female",
+      age: 31,
+      heightCm: 165,
+      weightKg: 58,
+      activityLevel: "moderate",
+      trainingFrequency: "3_4",
+      allergies: "peanuts",
+      goalClarification: "tone up",
+      bodyFatPercent: 24,
+      tdee: 1900,
+      advancedNotes: "prefers simple meals",
+    };
+    mockFetch(200, {
+      deviceId: "d-2",
+      dailyTargets: { calories: 1600, protein: 110, carbs: 140, fat: 55 },
+      coachExplanation: "Use a modest deficit.",
+    });
+
+    const result = await api.submitIntake(intake);
+
+    assert.equal(fetchCalls[0].url, "/api/device");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), intake);
+    assert.equal(result.coachExplanation, "Use a modest deficit.");
   });
 
   it("sendMessage includes X-Device-Id header from localStorage", async () => {

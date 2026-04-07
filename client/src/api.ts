@@ -1,4 +1,4 @@
-import type { ChatReply, DailyTargets, MealEntry, Message } from "./types.js";
+import type { ChatReply, DailyTargets, IntakeData, IntakeResult, MealEntry, Message } from "./types.js";
 
 function getHeaders(): Record<string, string> {
   const deviceId = localStorage.getItem("deviceId");
@@ -12,6 +12,16 @@ export async function registerDevice(goal: string): Promise<{ deviceId: string; 
     body: JSON.stringify({ goal }),
   });
   if (!res.ok) throw new Error("Failed to register device");
+  return res.json();
+}
+
+export async function submitIntake(data: IntakeData): Promise<IntakeResult> {
+  const res = await fetch("/api/device", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to submit intake");
   return res.json();
 }
 
