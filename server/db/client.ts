@@ -13,6 +13,18 @@ export function createDb(dbPath: string) {
     CREATE TABLE IF NOT EXISTS devices (
       id TEXT PRIMARY KEY,
       goal TEXT NOT NULL,
+      sex TEXT,
+      age INTEGER,
+      height_cm REAL,
+      weight_kg REAL,
+      activity_level TEXT,
+      training_frequency TEXT,
+      allergies TEXT,
+      goal_clarification TEXT,
+      body_fat_percent REAL,
+      tdee REAL,
+      advanced_notes TEXT,
+      coach_explanation TEXT,
       daily_calories INTEGER NOT NULL,
       daily_protein INTEGER NOT NULL,
       daily_carbs INTEGER NOT NULL,
@@ -40,6 +52,33 @@ export function createDb(dbPath: string) {
       created_at TEXT NOT NULL
     );
   `);
+
+  const deviceColumns = [
+    'ALTER TABLE devices ADD COLUMN sex TEXT',
+    'ALTER TABLE devices ADD COLUMN age INTEGER',
+    'ALTER TABLE devices ADD COLUMN height_cm REAL',
+    'ALTER TABLE devices ADD COLUMN weight_kg REAL',
+    'ALTER TABLE devices ADD COLUMN activity_level TEXT',
+    'ALTER TABLE devices ADD COLUMN training_frequency TEXT',
+    'ALTER TABLE devices ADD COLUMN allergies TEXT',
+    'ALTER TABLE devices ADD COLUMN goal_clarification TEXT',
+    'ALTER TABLE devices ADD COLUMN body_fat_percent REAL',
+    'ALTER TABLE devices ADD COLUMN tdee REAL',
+    'ALTER TABLE devices ADD COLUMN advanced_notes TEXT',
+    'ALTER TABLE devices ADD COLUMN coach_explanation TEXT',
+  ];
+
+  for (const statement of deviceColumns) {
+    try {
+      sqlite.exec(statement);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/duplicate column|already exists/i.test(message)) {
+        continue;
+      }
+      throw error;
+    }
+  }
 
   return drizzle(sqlite, { schema });
 }

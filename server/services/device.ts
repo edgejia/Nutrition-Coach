@@ -17,16 +17,53 @@ export interface DailyTargets {
 
 export type Goal = keyof typeof GOAL_DEFAULTS;
 
+export interface IntakeFields {
+  sex: string;
+  age: number;
+  heightCm: number;
+  weightKg: number;
+  activityLevel: string;
+  trainingFrequency: string;
+  allergies?: string;
+  goalClarification?: string;
+  bodyFatPercent?: number;
+  tdee?: number;
+  advancedNotes?: string;
+}
+
+export function getGoalDefaults(goal: Goal): DailyTargets {
+  const defaults = GOAL_DEFAULTS[goal];
+  if (!defaults) throw new Error(`Invalid goal: ${goal}`);
+  return { ...defaults };
+}
+
 export function createDeviceService(db: AppDatabase) {
   return {
-    async createDevice(goal: Goal) {
-      const defaults = GOAL_DEFAULTS[goal];
-      if (!defaults) throw new Error(`Invalid goal: ${goal}`);
+    async createDevice(
+      goal: Goal,
+      intake?: IntakeFields,
+      targets?: DailyTargets,
+      coachExplanation?: string,
+    ) {
+      const goalDefaults = getGoalDefaults(goal);
+      const defaults = targets ?? goalDefaults;
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
       await db.insert(devices).values({
         id,
         goal,
+        sex: intake?.sex ?? null,
+        age: intake?.age ?? null,
+        heightCm: intake?.heightCm ?? null,
+        weightKg: intake?.weightKg ?? null,
+        activityLevel: intake?.activityLevel ?? null,
+        trainingFrequency: intake?.trainingFrequency ?? null,
+        allergies: intake?.allergies ?? null,
+        goalClarification: intake?.goalClarification ?? null,
+        bodyFatPercent: intake?.bodyFatPercent ?? null,
+        tdee: intake?.tdee ?? null,
+        advancedNotes: intake?.advancedNotes ?? null,
+        coachExplanation: coachExplanation ?? null,
         dailyCalories: defaults.calories,
         dailyProtein: defaults.protein,
         dailyCarbs: defaults.carbs,

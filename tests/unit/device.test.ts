@@ -27,8 +27,91 @@ describe("DeviceService", () => {
     assert.equal(result.dailyTargets.protein, 180);
   });
 
+  it("creates a device with full intake data", async () => {
+    const result = await service.createDevice("fat_loss", {
+      sex: "male",
+      age: 30,
+      heightCm: 175,
+      weightKg: 80,
+      activityLevel: "moderate",
+      trainingFrequency: "3_4",
+      allergies: "花生",
+      goalClarification: "不想影響重訓表現",
+      bodyFatPercent: 20,
+      tdee: 2200,
+      advancedNotes: "",
+    });
+
+    assert.equal(result.dailyTargets.calories, 1500);
+
+    const device = await service.getDevice(result.deviceId);
+    assert.ok(device);
+    assert.equal(device.sex, "male");
+    assert.equal(device.age, 30);
+    assert.equal(device.heightCm, 175);
+    assert.equal(device.weightKg, 80);
+    assert.equal(device.activityLevel, "moderate");
+    assert.equal(device.trainingFrequency, "3_4");
+    assert.equal(device.allergies, "花生");
+    assert.equal(device.goalClarification, "不想影響重訓表現");
+    assert.equal(device.bodyFatPercent, 20);
+    assert.equal(device.tdee, 2200);
+    assert.equal(device.advancedNotes, "");
+    assert.equal(device.coachExplanation, null);
+  });
+
+  it("creates a device with only required intake fields", async () => {
+    const result = await service.createDevice("muscle_gain", {
+      sex: "female",
+      age: 25,
+      heightCm: 165,
+      weightKg: 58,
+      activityLevel: "active",
+      trainingFrequency: "5_plus",
+    });
+
+    assert.equal(result.dailyTargets.calories, 2500);
+
+    const device = await service.getDevice(result.deviceId);
+    assert.ok(device);
+    assert.equal(device.sex, "female");
+    assert.equal(device.age, 25);
+    assert.equal(device.heightCm, 165);
+    assert.equal(device.weightKg, 58);
+    assert.equal(device.activityLevel, "active");
+    assert.equal(device.trainingFrequency, "5_plus");
+    assert.equal(device.allergies, null);
+    assert.equal(device.goalClarification, null);
+    assert.equal(device.bodyFatPercent, null);
+    assert.equal(device.tdee, null);
+    assert.equal(device.advancedNotes, null);
+    assert.equal(device.coachExplanation, null);
+  });
+
   it("rejects an invalid goal", async () => {
     await assert.rejects(() => service.createDevice("invalid_goal" as any), { message: /Invalid goal/ });
+  });
+
+  it("rejects an invalid goal even when custom targets are provided", async () => {
+    const validIntake = {
+      sex: "male",
+      age: 30,
+      heightCm: 175,
+      weightKg: 80,
+      activityLevel: "moderate",
+      trainingFrequency: "3_4",
+    };
+    const customTargets = {
+      calories: 1900,
+      protein: 140,
+      carbs: 180,
+      fat: 60,
+    };
+
+    await assert.rejects(
+      () => service.createDevice("invalid_goal" as any, validIntake, customTargets),
+      { message: /Invalid goal/ },
+    );
   });
 
   it("gets a device by id", async () => {
