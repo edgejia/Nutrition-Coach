@@ -7,6 +7,7 @@ import { createFoodLoggingService } from "./services/food-logging.js";
 import { createSummaryService } from "./services/summary.js";
 import { createChatService } from "./services/chat.js";
 import { createOrchestrator } from "./orchestrator/index.js";
+import { createTargetGenerationService } from "./services/target-generation.js";
 import { RealtimePublisher } from "./realtime/publisher.js";
 import { registerDeviceRoutes } from "./routes/device.js";
 import { registerChatRoutes } from "./routes/chat.js";
@@ -28,6 +29,7 @@ export async function buildApp(opts: AppOptions) {
   const llmProvider = opts.llmProvider;
 
   const deviceService = createDeviceService(db);
+  const targetGenerationService = createTargetGenerationService(llmProvider);
   const foodLoggingService = createFoodLoggingService(db);
   const summaryService = createSummaryService(db);
   const chatService = createChatService(db);
@@ -48,7 +50,7 @@ export async function buildApp(opts: AppOptions) {
   // Keep the parser limit above the product limit so the chat route can return a controlled 400 at 5MB.
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
-  registerDeviceRoutes(app, { deviceService });
+  registerDeviceRoutes(app, { deviceService, targetGenerationService });
   registerChatRoutes(app, { orchestrator, chatService, deviceService });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, publisher });
   registerSSERoutes(app, { publisher, summaryService, deviceService });
