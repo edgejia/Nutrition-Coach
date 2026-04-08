@@ -6,11 +6,29 @@ import { createFoodLoggingService } from "../../server/services/food-logging.js"
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import type { ChatMessage, ToolDefinition } from "../../server/llm/types.js";
 import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import { createOrchestrator } from "../../server/orchestrator/index.js";
 
 function assertString(value: unknown): asserts value is string {
   assert.equal(typeof value, "string");
+}
+
+class StreamingLLMProvider extends MockLLMProvider {
+  public streamCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
+  private streamQueue: string[][] = [];
+
+  queueChatStream(tokens: string[]) {
+    this.streamQueue.push(tokens);
+  }
+
+  async *chatStream(messages: ChatMessage[], tools: ToolDefinition[]): AsyncGenerator<string> {
+    this.streamCalls.push({ messages, tools });
+    const tokens = this.streamQueue.shift() ?? [];
+    for (const token of tokens) {
+      yield token;
+    }
+  }
 }
 
 describe("Orchestrator - didLogMeal", () => {
@@ -19,6 +37,7 @@ describe("Orchestrator - didLogMeal", () => {
   let deviceId: string;
   let deviceService: ReturnType<typeof createDeviceService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  let chatService: ReturnType<typeof createChatService>;
   let shouldFailSummary = false;
 
   beforeEach(async () => {
@@ -26,7 +45,7 @@ describe("Orchestrator - didLogMeal", () => {
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     const summaryService = createSummaryService(db);
-    const chatService = createChatService(db);
+    chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
     const publisher = new RealtimePublisher();
     shouldFailSummary = false;
@@ -166,5 +185,55 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(deviceId, "test");
     assert.equal(result.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
     assert.equal(result.didLogMeal, false);
+  });
+
+  it("handleMessage returns streamGenerator and defers assistant persistence when chatStream is available", async () => {
+    const streamingLLM = new StreamingLLMProvider();
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const publisher = new RealtimePublisher();
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    orchestrator = createOrchestrator({
+      llmProvider: streamingLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      deviceService: localDeviceService,
+      publisher,
+    });
+
+    streamingLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+        },
+      }],
+    });
+    streamingLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
+    streamingLLM.queueChatStream(["已幫", "你記錄", "蘋果！"]);
+
+    const result = await orchestrator.handleMessage(localDeviceId, "我吃了蘋果");
+
+    assert.ok("streamGenerator" in result);
+    assert.equal(result.didLogMeal, true);
+    assert.ok(result.dailySummary);
+    assert.equal(streamingLLM.streamCalls.length, 1);
+    assert.deepEqual(streamingLLM.streamCalls[0]?.tools, []);
+
+    const streamedTokens: string[] = [];
+    for await (const token of result.streamGenerator) {
+      streamedTokens.push(token);
+    }
+    assert.deepEqual(streamedTokens, ["已幫", "你記錄", "蘋果！"]);
+
+    const history = await localChatService.getHistory(localDeviceId, 10);
+    assert.equal(history.filter((message) => message.role === "assistant").length, 0);
   });
 });
