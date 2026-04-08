@@ -73,7 +73,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Describe meal, ask a question, or upload a photo..."
+          placeholder="描述餐點、提問，或上傳照片..."
           disabled={disabled}
           rows={1}
           className="w-full resize-none rounded-xl px-3 py-2.5 text-sm focus:outline-none disabled:opacity-50"

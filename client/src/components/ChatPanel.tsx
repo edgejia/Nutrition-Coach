@@ -151,7 +151,7 @@ export function ChatPanel() {
           >
             ‹
           </span>
-          Back to dashboard
+          返回主頁
         </button>
         <h2
           className="mb-1 leading-none"
@@ -163,7 +163,7 @@ export function ChatPanel() {
             letterSpacing: "-0.025em",
           }}
         >
-          Coach chat
+          教練對話
         </h2>
         <p className="mb-2.5 text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
           同一個輸入框同時處理提問與記錄。AI 回覆會直接連回今日攝取狀態。
