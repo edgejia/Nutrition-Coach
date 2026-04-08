@@ -34,7 +34,12 @@ export interface LLMResponse {
   toolCalls?: ToolCall[];
 }
 
+export type LLMRoundResult =
+  | { kind: "response"; response: LLMResponse }
+  | { kind: "stream"; streamGenerator: AsyncGenerator<string> };
+
 export interface LLMProvider {
   chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse>;
   chatStream?(messages: ChatMessage[], tools: ToolDefinition[]): AsyncGenerator<string>;
+  chatRound?(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMRoundResult>;
 }

@@ -99,13 +99,36 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       let didLogMeal = false;
       let logMealSummary: DailySummary | undefined;
+      let shouldStreamFinalReply = false;
 
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
       for (let round = 0; round < MAX_ROUNDS; round++) {
         let response;
         try {
-          response = await llmProvider.chat(messages, toolDefinitions);
+          if (typeof llmProvider.chatRound === "function") {
+            const roundResult = await llmProvider.chatRound(messages, toolDefinitions);
+            if (roundResult.kind === "stream") {
+              deps.logger?.info("[assistant] streaming final reply");
+              return {
+                streamGenerator: roundResult.streamGenerator,
+                didLogMeal,
+                dailySummary: logMealSummary,
+              };
+            }
+            response = roundResult.response;
+          } else {
+            if (shouldStreamFinalReply && typeof llmProvider.chatStream === "function") {
+              deps.logger?.info("[assistant] streaming final reply");
+              return {
+                streamGenerator: llmProvider.chatStream(messages, []),
+                didLogMeal,
+                dailySummary: logMealSummary,
+              };
+            }
+
+            response = await llmProvider.chat(messages, toolDefinitions);
+          }
         } catch (err) {
           deps.logger?.error(`LLM chat failed for device ${deviceId}:`, err);
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
@@ -114,21 +137,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         }
 
         if (response.content !== undefined) {
-          if (typeof llmProvider.chatStream === "function") {
-            deps.logger?.info("[assistant] streaming final reply");
-            return {
-              streamGenerator: llmProvider.chatStream(messages, []),
-              didLogMeal,
-              dailySummary: logMealSummary,
-            };
-          }
-
           deps.logger?.info(`[assistant] ${response.content}`);
           await chatService.saveMessage(deviceId, "assistant", response.content);
           return { reply: response.content, didLogMeal, dailySummary: logMealSummary };
         }
 
-        if (response.toolCalls) {
+        if (response.toolCalls?.length) {
           for (const tc of response.toolCalls) {
             deps.logger?.info(`[tool_call] ${tc.function.name} ${tc.function.arguments}`);
           }
@@ -163,6 +177,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           for (const { toolCall, result } of toolResults) {
             messages.push({ role: "tool", content: result, tool_call_id: toolCall.id });
           }
+          shouldStreamFinalReply = true;
         }
       }
 

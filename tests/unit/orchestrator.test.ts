@@ -6,7 +6,7 @@ import { createFoodLoggingService } from "../../server/services/food-logging.js"
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
-import type { ChatMessage, ToolDefinition } from "../../server/llm/types.js";
+import type { ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, LLMProvider } from "../../server/llm/types.js";
 import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import { createOrchestrator } from "../../server/orchestrator/index.js";
 
@@ -14,18 +14,64 @@ function assertString(value: unknown): asserts value is string {
   assert.equal(typeof value, "string");
 }
 
-class StreamingLLMProvider extends MockLLMProvider {
-  private streamQueue: string[][] = [];
+class StreamingLLMProvider implements LLMProvider {
+  private chatQueue: Array<LLMResponse | Error> = [];
+  private roundQueue: Array<LLMRoundResult | Error> = [];
+  private callIndex = 0;
+  public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
 
-  queueChatStream(tokens: string[]) {
-    this.streamQueue.push(tokens);
+  queueChatResponse(response: LLMResponse) {
+    this.chatQueue.push(response);
   }
 
-  async *chatStream(_messages: ChatMessage[], _tools: ToolDefinition[]): AsyncGenerator<string> {
-    const tokens = this.streamQueue.shift() ?? [];
-    for (const token of tokens) {
-      yield token;
+  queueChatError(error: Error) {
+    this.chatQueue.push(error);
+  }
+
+  queueChatStream(tokens: string[]) {
+    this.roundQueue.push({ kind: "stream", streamGenerator: streamTokens(tokens) });
+  }
+
+  queueRoundResponse(response: LLMResponse) {
+    this.roundQueue.push({ kind: "response", response });
+  }
+
+  async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {
+    this.chatCalls.push({ messages, tools });
+    if (this.callIndex < this.chatQueue.length) {
+      const item = this.chatQueue[this.callIndex++];
+      if (item instanceof Error) {
+        throw item;
+      }
+      return item;
     }
+
+    return { content: "Mock: 已記錄您的飲食！" };
+  }
+
+  async chatRound(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMRoundResult> {
+    this.chatCalls.push({ messages, tools });
+    const item = this.roundQueue.shift();
+    if (item instanceof Error) {
+      throw item;
+    }
+    if (item) {
+      return item;
+    }
+    return { kind: "response", response: { content: "Mock: 已記錄您的飲食！" } };
+  }
+
+  reset() {
+    this.chatQueue = [];
+    this.roundQueue = [];
+    this.callIndex = 0;
+    this.chatCalls = [];
+  }
+}
+
+async function* streamTokens(tokens: string[]): AsyncGenerator<string> {
+  for (const token of tokens) {
+    yield token;
   }
 }
 
@@ -214,7 +260,16 @@ describe("Orchestrator - didLogMeal", () => {
         },
       }],
     });
-    streamingLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
+    streamingLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+        },
+      }],
+    });
     streamingLLM.queueChatStream(["已幫", "你記錄", "蘋果！"]);
 
     const result = await orchestrator.handleMessage(localDeviceId, "我吃了蘋果");
@@ -222,6 +277,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.ok("streamGenerator" in result);
     assert.equal(result.didLogMeal, true);
     assert.ok(result.dailySummary);
+    assert.equal(streamingLLM.chatCalls.length, 2);
 
     const historyBeforeStream = await localChatService.getHistory(localDeviceId, 10);
     assert.equal(historyBeforeStream.filter((message) => message.role === "assistant").length, 0);
@@ -234,5 +290,38 @@ describe("Orchestrator - didLogMeal", () => {
 
     const historyAfterStream = await localChatService.getHistory(localDeviceId, 10);
     assert.equal(historyAfterStream.filter((message) => message.role === "assistant").length, 0);
+  });
+
+  it("handleMessage streams direct text replies when the provider exposes a round-level stream", async () => {
+    const streamingLLM = new StreamingLLMProvider();
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const publisher = new RealtimePublisher();
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    orchestrator = createOrchestrator({
+      llmProvider: streamingLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      deviceService: localDeviceService,
+      publisher,
+    });
+
+    streamingLLM.queueChatStream(["直接", "回覆"]);
+
+    const result = await orchestrator.handleMessage(localDeviceId, "你好");
+
+    assert.ok("streamGenerator" in result);
+    const streamedTokens: string[] = [];
+    for await (const token of result.streamGenerator) {
+      streamedTokens.push(token);
+    }
+    assert.deepEqual(streamedTokens, ["直接", "回覆"]);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(streamingLLM.chatCalls.length, 1);
   });
 });

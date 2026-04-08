@@ -3,22 +3,78 @@ process.env.TZ = "Asia/Taipei";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../../server/app.js";
-import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
+import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ToolCall, ToolDefinition } from "../../server/llm/types.js";
 
-class StreamingLLMProvider extends MockLLMProvider {
-  private streamQueue: string[][] = [];
+class StreamingLLMProvider implements LLMProvider {
+  private chatQueue: Array<LLMResponse | Error> = [];
+  private roundQueue: Array<LLMRoundResult | Error> = [];
+  private callIndex = 0;
+  public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
+
+  queueChatResponse(response: LLMResponse) {
+    this.chatQueue.push(response);
+  }
+
+  queueChatError(error: Error) {
+    this.chatQueue.push(error);
+  }
 
   queueChatStream(tokens: string[]) {
-    this.streamQueue.push(tokens);
+    this.roundQueue.push({ kind: "stream", streamGenerator: streamTokens(tokens) });
   }
 
-  async *chatStream(): AsyncGenerator<string> {
-    const tokens = this.streamQueue.shift() ?? [];
-    for (const token of tokens) {
-      yield token;
-    }
+  queueRoundResponse(response: LLMResponse) {
+    this.roundQueue.push({ kind: "response", response });
   }
+
+  async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {
+    this.chatCalls.push({ messages, tools });
+    if (this.callIndex < this.chatQueue.length) {
+      const item = this.chatQueue[this.callIndex++];
+      if (item instanceof Error) {
+        throw item;
+      }
+      return item;
+    }
+
+    return { content: "Mock: 已記錄您的飲食！" };
+  }
+
+  async chatRound(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMRoundResult> {
+    this.chatCalls.push({ messages, tools });
+    const item = this.roundQueue.shift();
+    if (item instanceof Error) {
+      throw item;
+    }
+    if (item) {
+      return item;
+    }
+    return { kind: "response", response: { content: "Mock: 已記錄您的飲食！" } };
+  }
+}
+
+async function* streamTokens(tokens: string[]): AsyncGenerator<string> {
+  for (const token of tokens) {
+    yield token;
+  }
+}
+
+function createLogFoodToolCall(): ToolCall {
+  return {
+    id: "call_1",
+    type: "function",
+    function: {
+      name: "log_food",
+      arguments: JSON.stringify({
+        food_name: "蘋果",
+        calories: 95,
+        protein: 0.5,
+        carbs: 25,
+        fat: 0.3,
+      }),
+    },
+  };
 }
 
 async function readStreamUntil(
@@ -71,8 +127,7 @@ describe("chat-streaming", () => {
   });
 
   it("POST /api/chat returns content-type: text/event-stream", async () => {
-    mockLLM.queueChatResponse({ content: "測試回覆" });
-    mockLLM.queueChatStream(["測試", "回覆"]);
+    mockLLM.queueChatStream(["直接", "回覆"]);
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
@@ -99,8 +154,7 @@ describe("chat-streaming", () => {
   });
 
   it("POST /api/chat stream includes event: chunk", async () => {
-    mockLLM.queueChatResponse({ content: "測試回覆" });
-    mockLLM.queueChatStream(["測試", "回覆"]);
+    mockLLM.queueChatStream(["直接", "回覆"]);
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
@@ -131,7 +185,7 @@ describe("chat-streaming", () => {
   });
 
   it("POST /api/chat stream ends with event: done", async () => {
-    mockLLM.queueChatResponse({ content: "測試回覆" });
+    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
     mockLLM.queueChatStream(["測試", "回覆"]);
 
     const form = new FormData();
@@ -158,6 +212,14 @@ describe("chat-streaming", () => {
       const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
       assert.ok(doneDataMatch);
       assert.doesNotThrow(() => JSON.parse(doneDataMatch[1]));
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=5`, {
+        headers: { "x-device-id": deviceId },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json();
+      assert.equal(historyJson.messages.at(-1)?.role, "assistant");
+      assert.equal(historyJson.messages.at(-1)?.content, "測試回覆");
     } finally {
       if (timeout) clearTimeout(timeout);
       if (app.server.listening) {
@@ -167,8 +229,7 @@ describe("chat-streaming", () => {
   });
 
   it("POST /api/chat stream response includes CORS header", async () => {
-    mockLLM.queueChatResponse({ content: "測試回覆" });
-    mockLLM.queueChatStream(["測試", "回覆"]);
+    mockLLM.queueChatStream(["直接", "回覆"]);
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
