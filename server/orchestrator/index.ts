@@ -27,6 +27,10 @@ interface OrchestratorDeps {
 const FALLBACK = "抱歉，我現在無法完成這個請求，請稍後再試。";
 const MAX_ROUNDS = 3;
 
+export type OrchestratorResult =
+  | { reply: string; didLogMeal: boolean; dailySummary?: DailySummary }
+  | { streamGenerator: AsyncGenerator<string>; didLogMeal: boolean; dailySummary?: DailySummary };
+
 function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined): DailySummary {
   if (!dailySummary) {
     throw new Error("log_food succeeded without dailySummary");
@@ -42,7 +46,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       userMessage: string,
       imageBase64?: string,
       imagePath?: string
-    ): Promise<{ reply: string; didLogMeal: boolean; dailySummary?: DailySummary }> {
+    ): Promise<OrchestratorResult> {
       const { llmProvider, chatService, deviceService } = deps;
 
       // Load device info
@@ -109,7 +113,16 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           return { reply: errorMsg, didLogMeal, dailySummary: logMealSummary };
         }
 
-        if (response.content) {
+        if (response.content !== undefined) {
+          if (typeof llmProvider.chatStream === "function") {
+            deps.logger?.info("[assistant] streaming final reply");
+            return {
+              streamGenerator: llmProvider.chatStream(messages, []),
+              didLogMeal,
+              dailySummary: logMealSummary,
+            };
+          }
+
           deps.logger?.info(`[assistant] ${response.content}`);
           await chatService.saveMessage(deviceId, "assistant", response.content);
           return { reply: response.content, didLogMeal, dailySummary: logMealSummary };

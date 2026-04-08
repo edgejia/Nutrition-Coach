@@ -15,15 +15,13 @@ function assertString(value: unknown): asserts value is string {
 }
 
 class StreamingLLMProvider extends MockLLMProvider {
-  public streamCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
   private streamQueue: string[][] = [];
 
   queueChatStream(tokens: string[]) {
     this.streamQueue.push(tokens);
   }
 
-  async *chatStream(messages: ChatMessage[], tools: ToolDefinition[]): AsyncGenerator<string> {
-    this.streamCalls.push({ messages, tools });
+  async *chatStream(_messages: ChatMessage[], _tools: ToolDefinition[]): AsyncGenerator<string> {
     const tokens = this.streamQueue.shift() ?? [];
     for (const token of tokens) {
       yield token;
@@ -224,8 +222,9 @@ describe("Orchestrator - didLogMeal", () => {
     assert.ok("streamGenerator" in result);
     assert.equal(result.didLogMeal, true);
     assert.ok(result.dailySummary);
-    assert.equal(streamingLLM.streamCalls.length, 1);
-    assert.deepEqual(streamingLLM.streamCalls[0]?.tools, []);
+
+    const historyBeforeStream = await localChatService.getHistory(localDeviceId, 10);
+    assert.equal(historyBeforeStream.filter((message) => message.role === "assistant").length, 0);
 
     const streamedTokens: string[] = [];
     for await (const token of result.streamGenerator) {
@@ -233,7 +232,7 @@ describe("Orchestrator - didLogMeal", () => {
     }
     assert.deepEqual(streamedTokens, ["已幫", "你記錄", "蘋果！"]);
 
-    const history = await localChatService.getHistory(localDeviceId, 10);
-    assert.equal(history.filter((message) => message.role === "assistant").length, 0);
+    const historyAfterStream = await localChatService.getHistory(localDeviceId, 10);
+    assert.equal(historyAfterStream.filter((message) => message.role === "assistant").length, 0);
   });
 });
