@@ -36,4 +36,5 @@ export interface LLMResponse {
 
 export interface LLMProvider {
   chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse>;
+  chatStream?(messages: ChatMessage[], tools: ToolDefinition[]): AsyncGenerator<string>;
 }

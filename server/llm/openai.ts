@@ -34,4 +34,19 @@ export class OpenAIProvider implements LLMProvider {
       })),
     };
   }
+
+  async *chatStream(messages: ChatMessage[], _tools: ToolDefinition[]): AsyncGenerator<string> {
+    const stream = await this.client.chat.completions.create({
+      model: this.model,
+      messages: messages as OpenAI.ChatCompletionMessageParam[],
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      const token = chunk.choices[0]?.delta?.content;
+      if (token) {
+        yield token;
+      }
+    }
+  }
 }

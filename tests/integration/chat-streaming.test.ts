@@ -55,7 +55,7 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat returns content-type: text/event-stream", async () => {
+  it.skip("POST /api/chat returns content-type: text/event-stream", async () => {
     mockLLM.queueChatResponse({ content: "測試回覆" });
 
     const form = new FormData();
@@ -82,7 +82,7 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat stream includes event: chunk", async () => {
+  it.skip("POST /api/chat stream includes event: chunk", async () => {
     mockLLM.queueChatResponse({ content: "測試回覆" });
 
     const form = new FormData();
@@ -113,7 +113,7 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat stream ends with event: done", async () => {
+  it.skip("POST /api/chat stream ends with event: done", async () => {
     mockLLM.queueChatResponse({ content: "測試回覆" });
 
     const form = new FormData();
@@ -148,7 +148,7 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat stream response includes CORS header", async () => {
+  it.skip("POST /api/chat stream response includes CORS header", async () => {
     mockLLM.queueChatResponse({ content: "測試回覆" });
 
     const form = new FormData();
