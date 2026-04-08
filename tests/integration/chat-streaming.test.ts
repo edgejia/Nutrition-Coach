@@ -6,6 +6,21 @@ import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
 
+class StreamingLLMProvider extends MockLLMProvider {
+  private streamQueue: string[][] = [];
+
+  queueChatStream(tokens: string[]) {
+    this.streamQueue.push(tokens);
+  }
+
+  async *chatStream(): AsyncGenerator<string> {
+    const tokens = this.streamQueue.shift() ?? [];
+    for (const token of tokens) {
+      yield token;
+    }
+  }
+}
+
 async function readStreamUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   expectedText: string,
@@ -32,12 +47,12 @@ async function readStreamUntil(
 
 describe("chat-streaming", () => {
   let app: FastifyInstance;
-  let mockLLM: MockLLMProvider;
+  let mockLLM: StreamingLLMProvider;
   let deviceId: string;
   let address: string;
 
   beforeEach(async () => {
-    mockLLM = new MockLLMProvider();
+    mockLLM = new StreamingLLMProvider();
     app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
 
     const res = await app.inject({
@@ -55,8 +70,9 @@ describe("chat-streaming", () => {
     }
   });
 
-  it.skip("POST /api/chat returns content-type: text/event-stream", async () => {
+  it("POST /api/chat returns content-type: text/event-stream", async () => {
     mockLLM.queueChatResponse({ content: "測試回覆" });
+    mockLLM.queueChatStream(["測試", "回覆"]);
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
@@ -82,8 +98,9 @@ describe("chat-streaming", () => {
     }
   });
 
-  it.skip("POST /api/chat stream includes event: chunk", async () => {
+  it("POST /api/chat stream includes event: chunk", async () => {
     mockLLM.queueChatResponse({ content: "測試回覆" });
+    mockLLM.queueChatStream(["測試", "回覆"]);
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
@@ -113,8 +130,9 @@ describe("chat-streaming", () => {
     }
   });
 
-  it.skip("POST /api/chat stream ends with event: done", async () => {
+  it("POST /api/chat stream ends with event: done", async () => {
     mockLLM.queueChatResponse({ content: "測試回覆" });
+    mockLLM.queueChatStream(["測試", "回覆"]);
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
@@ -148,8 +166,9 @@ describe("chat-streaming", () => {
     }
   });
 
-  it.skip("POST /api/chat stream response includes CORS header", async () => {
+  it("POST /api/chat stream response includes CORS header", async () => {
     mockLLM.queueChatResponse({ content: "測試回覆" });
+    mockLLM.queueChatStream(["測試", "回覆"]);
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
