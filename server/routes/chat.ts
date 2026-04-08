@@ -1,8 +1,9 @@
+import { PassThrough } from "node:stream";
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
-import type { createOrchestrator } from "../orchestrator/index.js";
+import type { createOrchestrator, OrchestratorResult } from "../orchestrator/index.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
 interface Deps {
@@ -64,11 +65,47 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       return reply.code(400).send({ error: "Message or image required" });
     }
 
-    const { reply: replyText, didLogMeal, dailySummary } = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
+    const result: OrchestratorResult = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
 
-    if (didLogMeal && !dailySummary) {
+    if (result.didLogMeal && !result.dailySummary) {
       throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
     }
+
+    if ("streamGenerator" in result) {
+      const { streamGenerator, didLogMeal, dailySummary } = result;
+      const stream = new PassThrough();
+
+      reply
+        .code(200)
+        .type("text/event-stream")
+        .header("cache-control", "no-cache")
+        .send(stream);
+
+      setImmediate(() => {
+        void (async () => {
+          let fullReply = "";
+
+          try {
+            for await (const token of streamGenerator) {
+              fullReply += token;
+              stream.write(`event: chunk\ndata: ${JSON.stringify({ token })}\n\n`);
+            }
+
+            await chatService.saveMessage(deviceId, "assistant", fullReply);
+            const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
+            stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+          } catch {
+            stream.write(`event: error\ndata: ${JSON.stringify({ message: "Stream interrupted" })}\n\n`);
+          } finally {
+            stream.end();
+          }
+        })();
+      });
+
+      return reply;
+    }
+
+    const { reply: replyText, didLogMeal, dailySummary } = result;
 
     return didLogMeal
       ? { reply: replyText, didLogMeal, dailySummary }
