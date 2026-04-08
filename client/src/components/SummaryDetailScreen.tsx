@@ -81,7 +81,7 @@ export function SummaryDetailScreen() {
           >
             ‹
           </span>
-          Back to dashboard
+          返回主頁
         </button>
         <h2
           className="mb-1"
@@ -93,7 +93,7 @@ export function SummaryDetailScreen() {
             letterSpacing: "-0.025em",
           }}
         >
-          Summary detail
+          今日摘要
         </h2>
         <p className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
           這裡才展開今日餐點、來源與更正操作，讓首頁保持乾淨。
@@ -110,14 +110,14 @@ export function SummaryDetailScreen() {
             }}
           >
             <div className="mb-1.5 text-xs font-bold" style={{ color: "var(--text)" }}>
-              Daily status
+              今日狀態
             </div>
             <div className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
-              {calRemaining !== null ? `${calRemaining} kcal remaining.` : "Calculating..."}
+              {calRemaining !== null ? `剩餘 ${calRemaining} kcal` : "計算中..."}
               <br />
               {targets && summary && summary.totalProtein < targets.protein * 0.8
-                ? "Protein still needs work."
-                : "Protein on track."}
+                ? "蛋白質攝取仍需加強。"
+                : "蛋白質攝取達標。"}
             </div>
           </div>
           <div
@@ -128,12 +128,12 @@ export function SummaryDetailScreen() {
             }}
           >
             <div className="mb-1.5 text-xs font-bold" style={{ color: "var(--text)" }}>
-              Coach note
+              教練備注
             </div>
             <div className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
               {calRemaining !== null && calRemaining > 200
-                ? "Dinner can stay normal-sized, but keep fat lower."
-                : "Dinner should be light today."}
+                ? "晚餐可正常份量，但留意脂肪攝取。"
+                : "今日晚餐建議清淡。"}
             </div>
           </div>
         </div>
@@ -151,7 +151,7 @@ export function SummaryDetailScreen() {
               letterSpacing: "-0.015em",
             }}
           >
-            Meals today
+            今日餐點
           </div>
           {loading ? (
             <p className="text-sm" style={{ color: "var(--text-2)" }}>
