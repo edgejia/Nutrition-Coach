@@ -39,13 +39,18 @@ function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined
   return dailySummary;
 }
 
+export interface HandleMessageOpts {
+  onStatus?: (label: string) => void;
+}
+
 export function createOrchestrator(deps: OrchestratorDeps) {
   return {
     async handleMessage(
       deviceId: string,
       userMessage: string,
       imageBase64?: string,
-      imagePath?: string
+      imagePath?: string,
+      opts?: HandleMessageOpts
     ): Promise<OrchestratorResult> {
       const { llmProvider, chatService, deviceService } = deps;
 
@@ -149,6 +154,11 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           const toolResults: Array<{ toolCall: typeof response.toolCalls[number]; result: string }> = [];
           for (const toolCall of response.toolCalls) {
             try {
+              // D-03: emit progress label before executing log_food so the route
+              // can surface it during the real waiting period, before tokens arrive.
+              if (toolCall.function.name === "log_food") {
+                opts?.onStatus?.("記錄餐點中...");
+              }
               const { result, summary, dailySummary } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,

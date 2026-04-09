@@ -79,7 +79,7 @@ export async function sendMessageStream(
 
   const res = await fetch("/api/chat", {
     method: "POST",
-    headers: getHeaders(),
+    headers: { ...getHeaders(), "Accept": "text/event-stream" },
     body: form,
   });
 

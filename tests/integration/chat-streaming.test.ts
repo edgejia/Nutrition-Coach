@@ -139,7 +139,7 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -166,7 +166,7 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -198,7 +198,7 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -241,7 +241,7 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -273,7 +273,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -303,7 +303,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -316,6 +316,85 @@ describe("chat-streaming", () => {
       assert.match(text, /event: status/);
       assert.match(text, /記錄餐點中/);
       assert.match(text, /event: done/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat with SSE accept header shows 分析圖片中 before first chunk", async () => {
+    // D-03: 分析圖片中 must appear before the first chunk token
+    mockLLM.queueChatStream(["回覆文字"]);
+
+    const form = new FormData();
+    form.append("message", "這是什麼食物");
+    const jpegBytes = new Uint8Array([
+      0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+      ...new Array(50).fill(0x00),
+    ]);
+    form.append("image", new Blob([jpegBytes], { type: "image/jpeg" }), "food.jpg");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      // status event must appear before the first chunk
+      const statusPos = text.indexOf("分析圖片中");
+      const chunkPos = text.indexOf("event: chunk");
+      assert.ok(statusPos !== -1, "expected 分析圖片中 in stream");
+      assert.ok(chunkPos !== -1, "expected event: chunk in stream");
+      assert.ok(statusPos < chunkPos, "分析圖片中 must appear before first event: chunk");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat with SSE accept header bridges non-stream reply into chunk and done events", async () => {
+    // When the provider returns a plain { reply } instead of a streamGenerator,
+    // the route must still emit event: chunk + event: done so sendMessageStream() works.
+    // Use queueRoundResponse so chatRound() returns a non-stream response (chatQueue
+    // is only consumed by chat(); chatRound() uses its own roundQueue).
+    mockLLM.queueRoundResponse({ content: "純文字回覆" });
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+      assert.ok(res.body);
+
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /event: chunk/, "expected event: chunk for bridged non-stream reply");
+      assert.match(text, /event: done/, "expected event: done");
+
+      // The chunk must contain the full reply text
+      const chunkMatch = text.match(/event: chunk\s+data: (.+)/);
+      assert.ok(chunkMatch, "expected chunk data line");
+      const chunkData = JSON.parse(chunkMatch[1]) as { token: string };
+      assert.equal(chunkData.token, "純文字回覆");
     } finally {
       clearTimeout(timeout);
     }

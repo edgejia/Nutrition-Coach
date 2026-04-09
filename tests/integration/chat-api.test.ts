@@ -260,6 +260,24 @@ describe("Chat API", () => {
     assert.equal(assistantMessage.didLogMeal, true);
   });
 
+  it("POST /api/chat without SSE accept header still returns JSON", async () => {
+    mockLLM.queueChatResponse({ content: "純文字回覆" });
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+    const body = await res.json();
+    assert.ok(body.reply, "expected a reply field in JSON response");
+  });
+
   it("GET /api/chat/history rejects invalid limit", async () => {
     const res = await app.inject({
       method: "GET",
