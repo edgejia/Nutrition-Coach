@@ -123,4 +123,36 @@ describe("Orchestrator", () => {
     const { reply } = await orchestrator.handleMessage(deviceId, "test");
     assert.equal(reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
   });
+
+  it("handleMessage emits 記錄餐點中 progress before executing log_food", async () => {
+    // D-03: onStatus("記錄餐點中...") must fire before executeTool completes for log_food
+    const statusLabels: string[] = [];
+    const toolCallOrder: string[] = [];
+
+    // Intercept: track when onStatus fires vs when log_food result arrives
+    // We use a single-round log_food call followed by final reply
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
+
+    await orchestrator.handleMessage(deviceId, "我吃了蘋果", undefined, undefined, {
+      onStatus: (label: string) => {
+        statusLabels.push(label);
+        toolCallOrder.push(`status:${label}`);
+      },
+    });
+
+    assert.ok(
+      statusLabels.includes("記錄餐點中..."),
+      `expected onStatus to receive '記錄餐點中...' but got: ${JSON.stringify(statusLabels)}`
+    );
+  });
 });

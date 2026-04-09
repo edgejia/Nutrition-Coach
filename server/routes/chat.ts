@@ -3,9 +3,10 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
-import type { createOrchestrator, OrchestratorResult } from "../orchestrator/index.js";
+import type { createOrchestrator } from "../orchestrator/index.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
+
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
   chatService: ReturnType<typeof createChatService>;
@@ -65,33 +66,74 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       return reply.code(400).send({ error: "Message or image required" });
     }
 
-    const result: OrchestratorResult = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
+    // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
+    const acceptHeader = request.headers["accept"] ?? "";
+    const wantsSSE = acceptHeader.includes("text/event-stream");
 
-    if (result.didLogMeal && !result.dailySummary) {
-      throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
+    if (!wantsSSE) {
+      // JSON path: existing non-SSE callers remain intact
+      const result = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
+
+      if (result.didLogMeal && !result.dailySummary) {
+        throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
+      }
+
+      if ("streamGenerator" in result) {
+        // Non-SSE caller received a stream result — drain and return as JSON
+        const { streamGenerator, didLogMeal, dailySummary } = result;
+        let fullReply = "";
+        for await (const token of streamGenerator) {
+          fullReply += token;
+        }
+        await chatService.saveMessage(deviceId, "assistant", fullReply);
+        return didLogMeal
+          ? { reply: fullReply, didLogMeal, dailySummary }
+          : { reply: fullReply, didLogMeal };
+      }
+
+      const { reply: replyText, didLogMeal, dailySummary } = result;
+      return didLogMeal
+        ? { reply: replyText, didLogMeal, dailySummary }
+        : { reply: replyText, didLogMeal };
     }
 
-    if ("streamGenerator" in result) {
-      const { streamGenerator, didLogMeal, dailySummary } = result;
-      const stream = new PassThrough();
+    // SSE path: open stream BEFORE awaiting orchestrator so status labels are
+    // visible during the real waiting period (D-03, D-04, D-05).
+    const stream = new PassThrough();
 
-      reply
-        .code(200)
-        .type("text/event-stream")
-        .header("cache-control", "no-cache")
-        .send(stream);
+    reply
+      .code(200)
+      .type("text/event-stream")
+      .header("cache-control", "no-cache")
+      .send(stream);
 
-      setImmediate(() => {
-        void (async () => {
-          let fullReply = "";
+    setImmediate(() => {
+      void (async () => {
+        try {
+          // D-03: emit 分析圖片中 immediately if an image is present — this fires
+          // before orchestrator.handleMessage is awaited, covering the real wait.
+          if (image) {
+            stream.write(`event: status\ndata: ${JSON.stringify({ label: "分析圖片中..." })}\n\n`);
+          }
 
-          try {
-            if (image) {
-              stream.write(`event: status\ndata: ${JSON.stringify({ label: "分析圖片中..." })}\n\n`);
+          // Pass onStatus so the orchestrator can surface 記錄餐點中 from inside
+          // the tool-call loop, before executeTool(log_food) completes (D-03).
+          const result = await orchestrator.handleMessage(
+            deviceId,
+            message,
+            image?.dataUri,
+            image?.path,
+            {
+              onStatus: (label: string) => {
+                stream.write(`event: status\ndata: ${JSON.stringify({ label })}\n\n`);
+              },
             }
-            if (didLogMeal) {
-              stream.write(`event: status\ndata: ${JSON.stringify({ label: "記錄餐點中..." })}\n\n`);
-            }
+          );
+
+          if ("streamGenerator" in result) {
+            // Native streaming path: forward tokens as event: chunk events
+            const { streamGenerator, didLogMeal, dailySummary } = result;
+            let fullReply = "";
 
             for await (const token of streamGenerator) {
               fullReply += token;
@@ -101,22 +143,24 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             await chatService.saveMessage(deviceId, "assistant", fullReply);
             const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
             stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-          } catch {
-            stream.write(`event: error\ndata: ${JSON.stringify({ message: "Stream interrupted" })}\n\n`);
-          } finally {
-            stream.end();
+          } else {
+            // Non-stream fallback: bridge plain reply into SSE so sendMessageStream()
+            // always receives event: chunk + event: done regardless of provider capability.
+            const { reply: replyText, didLogMeal, dailySummary } = result;
+            await chatService.saveMessage(deviceId, "assistant", replyText);
+            stream.write(`event: chunk\ndata: ${JSON.stringify({ token: replyText })}\n\n`);
+            const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
+            stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
           }
-        })();
-      });
+        } catch {
+          stream.write(`event: error\ndata: ${JSON.stringify({ message: "Stream interrupted" })}\n\n`);
+        } finally {
+          stream.end();
+        }
+      })();
+    });
 
-      return reply;
-    }
-
-    const { reply: replyText, didLogMeal, dailySummary } = result;
-
-    return didLogMeal
-      ? { reply: replyText, didLogMeal, dailySummary }
-      : { reply: replyText, didLogMeal };
+    return reply;
   });
 
   app.get("/api/chat/history", async (request, reply) => {
