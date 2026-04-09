@@ -73,3 +73,10 @@ export interface IntakeResult {
   dailyTargets: DailyTargets;
   coachExplanation: string | null;
 }
+
+export interface ProvisionalBubble {
+  id: string;
+  statusLabel: string;
+  content: string;
+  isStreaming: boolean;
+}

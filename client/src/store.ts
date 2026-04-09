@@ -6,6 +6,7 @@ import type {
   MealEntry,
   Message,
   PendingHomeChatDraft,
+  ProvisionalBubble,
 } from "./types.js";
 
 function readStoredJson<T>(key: string): T | null {
@@ -41,6 +42,11 @@ interface AppState {
   setDailySummary: (summary: DailySummary) => void;
   setDailyTargets: (targets: DailyTargets) => void;
   setSending: (sending: boolean) => void;
+  provisionalBubble: ProvisionalBubble | null;
+  setProvisionalBubble: (bubble: ProvisionalBubble | null) => void;
+  appendProvisionalToken: (token: string) => void;
+  setProvisionalStatus: (label: string) => void;
+  commitProvisionalBubble: (extra: { didLogMeal?: boolean; dailySummary?: DailySummary }) => void;
   clearDevice: () => void;
 }
 
@@ -56,6 +62,7 @@ export const useStore = create<AppState>((set) => ({
   pendingHomeChatDraft: null,
   showSettings: false,
   sending: false,
+  provisionalBubble: null,
 
   setActiveScreen: (activeScreen) => set({ activeScreen }),
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
@@ -80,6 +87,50 @@ export const useStore = create<AppState>((set) => ({
     set({ dailyTargets });
   },
   setSending: (sending) => set({ sending }),
+  setProvisionalBubble: (provisionalBubble) => set({ provisionalBubble }),
+  appendProvisionalToken: (token) =>
+    set((state) => {
+      if (!state.provisionalBubble) {
+        return {};
+      }
+
+      return {
+        provisionalBubble: {
+          ...state.provisionalBubble,
+          statusLabel: "",
+          content: state.provisionalBubble.content + token,
+        },
+      };
+    }),
+  setProvisionalStatus: (label) =>
+    set((state) => {
+      if (!state.provisionalBubble) {
+        return {};
+      }
+
+      return {
+        provisionalBubble: {
+          ...state.provisionalBubble,
+          statusLabel: label,
+        },
+      };
+    }),
+  commitProvisionalBubble: (extra) =>
+    set((state) => {
+      if (!state.provisionalBubble) {
+        return {};
+      }
+
+      const finalMessage: Message = {
+        id: state.provisionalBubble.id,
+        role: "assistant",
+        content: state.provisionalBubble.content,
+        createdAt: new Date().toISOString(),
+        didLogMeal: extra.didLogMeal,
+      };
+
+      return { messages: [...state.messages, finalMessage], provisionalBubble: null };
+    }),
   clearDevice: () => {
     localStorage.removeItem("deviceId");
     localStorage.removeItem("goal");
@@ -96,6 +147,7 @@ export const useStore = create<AppState>((set) => ({
       pendingHomeChatDraft: null,
       showSettings: false,
       sending: false,
+      provisionalBubble: null,
     });
   },
 }));
