@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "../store.js";
-import { sendMessage, loadHistory } from "../api.js";
+import { sendMessageStream, loadHistory } from "../api.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
 import { DashboardMiniBar } from "./DashboardMiniBar.js";
@@ -14,6 +14,9 @@ export function ChatPanel() {
   const setDailySummary = useStore((s) => s.setDailySummary);
   const sending = useStore((s) => s.sending);
   const setSending = useStore((s) => s.setSending);
+  const provisionalBubble = useStore((s) => s.provisionalBubble);
+  const setProvisionalBubble = useStore((s) => s.setProvisionalBubble);
+  const commitProvisionalBubble = useStore((s) => s.commitProvisionalBubble);
   const clearDevice = useStore((s) => s.clearDevice);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
@@ -27,35 +30,65 @@ export function ChatPanel() {
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
     const activeDeviceId = useStore.getState().deviceId;
     if (!activeDeviceId) return;
+
     if (opts?.appendUserBubble !== false) {
       const imagePreviewUrl = image ? URL.createObjectURL(image) : undefined;
-      const userMsg = {
+      addMessage({
         id: crypto.randomUUID(),
         role: "user" as const,
         content: text || "",
         imagePreviewUrl,
         createdAt: new Date().toISOString(),
-      };
-      addMessage(userMsg);
-    }
-    setSending(true);
-    try {
-      const { reply, didLogMeal, dailySummary } = await sendMessage(text, image);
-      if (useStore.getState().deviceId !== activeDeviceId) return;
-      if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
-        clearPendingHomeChatDraft();
-      }
-      if (didLogMeal && dailySummary) {
-        setDailySummary(dailySummary);
-      }
-      addMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: reply,
-        createdAt: new Date().toISOString(),
-        didLogMeal,
       });
+    }
+
+    const bubbleId = crypto.randomUUID();
+    setProvisionalBubble({ id: bubbleId, statusLabel: "思考中...", content: "", isStreaming: true });
+    setSending(true);
+
+    try {
+      await sendMessageStream(
+        text,
+        {
+          onStatus: (label) => {
+            useStore.getState().setProvisionalStatus(label);
+          },
+          onToken: (token) => {
+            useStore.getState().appendProvisionalToken(token);
+          },
+          onDone: ({ didLogMeal, dailySummary }) => {
+            if (useStore.getState().deviceId !== activeDeviceId) return;
+            if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
+              clearPendingHomeChatDraft();
+            }
+            if (didLogMeal && dailySummary) {
+              setDailySummary(dailySummary);
+            }
+            commitProvisionalBubble({ didLogMeal, dailySummary });
+            setSending(false);
+          },
+          onError: (errorMessage) => {
+            if (useStore.getState().deviceId !== activeDeviceId) return;
+            useStore.getState().setProvisionalBubble({
+              id: bubbleId,
+              statusLabel: "",
+              content: errorMessage || "抱歉，發生錯誤，請再試一次。",
+              isStreaming: false,
+            });
+            commitProvisionalBubble({ didLogMeal: false });
+            if (opts?.draftId) {
+              const currentDraft = useStore.getState().pendingHomeChatDraft;
+              if (currentDraft && currentDraft.id === opts.draftId) {
+                setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+              }
+            }
+            setSending(false);
+          },
+        },
+        image,
+      );
     } catch (err) {
+      if (useStore.getState().deviceId !== activeDeviceId) return;
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
           clearPendingHomeChatDraft();
@@ -63,23 +96,20 @@ export function ChatPanel() {
         clearDevice();
         return;
       }
-      if (useStore.getState().deviceId !== activeDeviceId) return;
-      addMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
+      useStore.getState().setProvisionalBubble({
+        id: bubbleId,
+        statusLabel: "",
         content: "抱歉，發生錯誤，請再試一次。",
-        createdAt: new Date().toISOString(),
+        isStreaming: false,
       });
+      commitProvisionalBubble({ didLogMeal: false });
       if (opts?.draftId) {
         const currentDraft = useStore.getState().pendingHomeChatDraft;
         if (currentDraft && currentDraft.id === opts.draftId) {
           setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
         }
       }
-    } finally {
-      if (useStore.getState().deviceId === activeDeviceId) {
-        setSending(false);
-      }
+      setSending(false);
     }
   }
 
@@ -124,7 +154,7 @@ export function ChatPanel() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, provisionalBubble?.content]);
 
   function handleBackToHome() {
     if (sending) return;
@@ -170,19 +200,6 @@ export function ChatPanel() {
         </p>
         <DashboardMiniBar />
       </div>
-
-      {isChatLocked && (
-        <div
-          className="shrink-0 px-4 py-2.5 text-sm font-medium"
-          style={{
-            borderBottom: "1px solid var(--border)",
-            background: "var(--bg-card)",
-            color: "var(--text-2)",
-          }}
-        >
-          訊息送出中，請稍候。
-        </div>
-      )}
       {pendingHomeChatDraft?.status === "failed" && (
         <div
           className="shrink-0 px-4 py-3 text-sm"
@@ -210,17 +227,18 @@ export function ChatPanel() {
             onOpenSummary={m.didLogMeal ? () => setActiveScreen("summary") : undefined}
           />
         ))}
-        {sending && (
-          <div className="flex justify-start">
-            <div
-              className="flex items-center gap-1 rounded-2xl px-4 py-3"
-              style={{ background: "var(--bg-card)", border: "1px solid var(--border-med)" }}
-            >
-              <span className="h-2 w-2 animate-bounce rounded-full [animation-delay:-0.3s]" style={{ background: "var(--text-3)" }} />
-              <span className="h-2 w-2 animate-bounce rounded-full [animation-delay:-0.15s]" style={{ background: "var(--text-3)" }} />
-              <span className="h-2 w-2 animate-bounce rounded-full" style={{ background: "var(--text-3)" }} />
-            </div>
-          </div>
+        {provisionalBubble && (
+          <MessageBubble
+            key={provisionalBubble.id}
+            message={{
+              id: provisionalBubble.id,
+              role: "assistant",
+              content: provisionalBubble.statusLabel || provisionalBubble.content,
+              createdAt: new Date().toISOString(),
+            }}
+            isProvisional={true}
+            isStatusLabel={provisionalBubble.statusLabel.length > 0}
+          />
         )}
         <div ref={endRef} />
       </div>
