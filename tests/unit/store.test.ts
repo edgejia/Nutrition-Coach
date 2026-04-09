@@ -54,6 +54,7 @@ describe("AppStore", () => {
       meals: [],
       pendingHomeChatDraft: null,
       sending: false,
+      provisionalBubble: null,
     });
   });
 
@@ -141,5 +142,119 @@ describe("AppStore", () => {
 
     useStore.getState().clearPendingHomeChatDraft();
     assert.equal(useStore.getState().pendingHomeChatDraft, null);
+  });
+});
+
+describe("ProvisionalBubble actions", () => {
+  beforeEach(() => {
+    storage.clear();
+    useStore.setState({
+      messages: [],
+      sending: false,
+      provisionalBubble: null,
+    });
+  });
+
+  it("setProvisionalBubble sets the bubble state", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "b-1",
+      statusLabel: "思考中...",
+      content: "",
+      isStreaming: true,
+    });
+
+    assert.equal(useStore.getState().provisionalBubble?.id, "b-1");
+    assert.equal(useStore.getState().provisionalBubble?.statusLabel, "思考中...");
+  });
+
+  it("setProvisionalBubble(null) clears the bubble", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "b-1",
+      statusLabel: "",
+      content: "",
+      isStreaming: true,
+    });
+
+    useStore.getState().setProvisionalBubble(null);
+
+    assert.equal(useStore.getState().provisionalBubble, null);
+  });
+
+  it("setProvisionalStatus updates statusLabel without touching content", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "b-1",
+      statusLabel: "思考中...",
+      content: "",
+      isStreaming: true,
+    });
+
+    useStore.getState().setProvisionalStatus("分析圖片中...");
+
+    assert.equal(useStore.getState().provisionalBubble?.statusLabel, "分析圖片中...");
+    assert.equal(useStore.getState().provisionalBubble?.content, "");
+  });
+
+  it("setProvisionalStatus is no-op when provisionalBubble is null", () => {
+    useStore.getState().setProvisionalStatus("分析圖片中...");
+
+    assert.equal(useStore.getState().provisionalBubble, null);
+  });
+
+  it("appendProvisionalToken clears statusLabel and appends content (D-04)", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "b-1",
+      statusLabel: "思考中...",
+      content: "",
+      isStreaming: true,
+    });
+
+    useStore.getState().appendProvisionalToken("你好");
+
+    assert.equal(useStore.getState().provisionalBubble?.statusLabel, "");
+    assert.equal(useStore.getState().provisionalBubble?.content, "你好");
+  });
+
+  it("appendProvisionalToken accumulates across multiple calls", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "b-1",
+      statusLabel: "",
+      content: "",
+      isStreaming: true,
+    });
+
+    useStore.getState().appendProvisionalToken("Hello");
+    useStore.getState().appendProvisionalToken(" World");
+
+    assert.equal(useStore.getState().provisionalBubble?.content, "Hello World");
+  });
+
+  it("appendProvisionalToken is no-op when provisionalBubble is null", () => {
+    useStore.getState().appendProvisionalToken("token");
+
+    assert.equal(useStore.getState().provisionalBubble, null);
+  });
+
+  it("commitProvisionalBubble atomically adds message and clears bubble (D-06, D-07)", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "msg-1",
+      statusLabel: "",
+      content: "完整回覆",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({ didLogMeal: true });
+
+    assert.equal(useStore.getState().provisionalBubble, null);
+    assert.equal(useStore.getState().messages.length, 1);
+    assert.equal(useStore.getState().messages[0].id, "msg-1");
+    assert.equal(useStore.getState().messages[0].role, "assistant");
+    assert.equal(useStore.getState().messages[0].content, "完整回覆");
+    assert.equal(useStore.getState().messages[0].didLogMeal, true);
+  });
+
+  it("commitProvisionalBubble is no-op when provisionalBubble is null", () => {
+    useStore.getState().commitProvisionalBubble({ didLogMeal: false });
+
+    assert.equal(useStore.getState().messages.length, 0);
   });
 });
