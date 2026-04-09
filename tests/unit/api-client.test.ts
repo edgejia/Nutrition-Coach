@@ -24,6 +24,31 @@ function mockFetch(status: number, body: unknown) {
   }) as typeof fetch;
 }
 
+function makeSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+}
+
+function mockStreamFetch(status: number, chunks: string[]) {
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    fetchCalls.push({ url, init: init ?? {} });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      body: makeSSEStream(chunks),
+      headers: new Headers({ "content-type": "text/event-stream" }),
+    } as Response;
+  }) as typeof fetch;
+}
+
 const api = await import("../../client/src/api.js");
 
 describe("API Client", () => {
@@ -143,5 +168,123 @@ describe("API Client", () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
     await assert.rejects(() => api.updateGoals({ calories: 2000 }), { message: "UNAUTHORIZED" });
+  });
+});
+
+describe("sendMessageStream", () => {
+  beforeEach(() => {
+    storage.clear();
+    fetchCalls = [];
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("dispatches onStatus for event: status", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, ['event: status\ndata: {"label":"分析圖片中..."}\n\n']);
+    const labels: string[] = [];
+
+    await api.sendMessageStream("hello", {
+      onStatus: (label) => labels.push(label),
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {},
+    });
+
+    assert.deepEqual(labels, ["分析圖片中..."]);
+  });
+
+  it("dispatches onToken for each event: chunk", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: chunk\ndata: {"token":"你好"}\n\n',
+      'event: chunk\ndata: {"token":"！"}\n\n',
+      'event: done\ndata: {"didLogMeal":false}\n\n',
+    ]);
+    const tokens: string[] = [];
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: (token) => tokens.push(token),
+      onDone: () => {},
+      onError: () => {},
+    });
+
+    assert.deepEqual(tokens, ["你好", "！"]);
+  });
+
+  it("handles two SSE events in a single chunk (TCP buffering)", async () => {
+    storage.set("deviceId", "d-1");
+    const combined = 'event: chunk\ndata: {"token":"A"}\n\nevent: done\ndata: {"didLogMeal":false}\n\n';
+    mockStreamFetch(200, [combined]);
+    const tokens: string[] = [];
+    let done = false;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: (token) => tokens.push(token),
+      onDone: () => {
+        done = true;
+      },
+      onError: () => {},
+    });
+
+    assert.deepEqual(tokens, ["A"]);
+    assert.equal(done, true);
+  });
+
+  it("handles SSE event split across two chunks", async () => {
+    storage.set("deviceId", "d-1");
+    const part1 = 'event: chunk\ndata: {"to';
+    const part2 = 'ken":"B"}\n\nevent: done\ndata: {"didLogMeal":false}\n\n';
+    mockStreamFetch(200, [part1, part2]);
+    const tokens: string[] = [];
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: (token) => tokens.push(token),
+      onDone: () => {},
+      onError: () => {},
+    });
+
+    assert.deepEqual(tokens, ["B"]);
+  });
+
+  it("silently skips malformed JSON and continues processing", async () => {
+    storage.set("deviceId", "d-1");
+    const bad = 'event: chunk\ndata: NOT_JSON\n\nevent: done\ndata: {"didLogMeal":false}\n\n';
+    mockStreamFetch(200, [bad]);
+    let done = false;
+
+    await assert.doesNotReject(() =>
+      api.sendMessageStream("hello", {
+        onStatus: () => {},
+        onToken: () => {},
+        onDone: () => {
+          done = true;
+        },
+        onError: () => {},
+      }),
+    );
+
+    assert.equal(done, true);
+  });
+
+  it("throws UNAUTHORIZED on 401 response", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(401, []);
+
+    await assert.rejects(
+      () =>
+        api.sendMessageStream("hello", {
+          onStatus: () => {},
+          onToken: () => {},
+          onDone: () => {},
+          onError: () => {},
+        }),
+      { message: "UNAUTHORIZED" },
+    );
   });
 });
