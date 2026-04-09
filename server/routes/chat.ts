@@ -86,6 +86,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           let fullReply = "";
 
           try {
+            if (image) {
+              stream.write(`event: status\ndata: ${JSON.stringify({ label: "分析圖片中..." })}\n\n`);
+            }
+            if (didLogMeal) {
+              stream.write(`event: status\ndata: ${JSON.stringify({ label: "記錄餐點中..." })}\n\n`);
+            }
+
             for await (const token of streamGenerator) {
               fullReply += token;
               stream.write(`event: chunk\ndata: ${JSON.stringify({ token })}\n\n`);
