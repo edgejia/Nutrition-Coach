@@ -360,6 +360,37 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat with SSE accept header sanitizes raw tool names in streamed reply", async () => {
+    // Even if the model streams tokens containing log_food or get_daily_summary,
+    // the route must strip them before emitting event: chunk to the client.
+    mockLLM.queueChatStream(["我可以幫你", "計算並log_food", "這道菜，也會get_daily_summary。"]);
+
+    const form = new FormData();
+    form.append("message", "記錄午餐");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.doesNotMatch(text, /log_food/, "log_food must not appear in SSE stream");
+      assert.doesNotMatch(text, /get_daily_summary/, "get_daily_summary must not appear in SSE stream");
+      assert.match(text, /event: chunk/, "expected event: chunk");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat with SSE accept header bridges non-stream reply into chunk and done events", async () => {
     // When the provider returns a plain { reply } instead of a streamGenerator,
     // the route must still emit event: chunk + event: done so sendMessageStream() works.

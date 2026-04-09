@@ -33,19 +33,53 @@ export function createChatService(db: AppDatabase) {
     },
 
     async getHistory(deviceId: string, limit: number) {
-      // Fetch most recent N messages in insertion order, then reverse to chronological order.
+      // Fetch all roles (including tool) to compute the didLogMeal projection,
+      // then filter to user+assistant before returning. Fetch limit*4 to ensure
+      // we have enough rows after tool messages are dropped.
       const rows = await db
         .select()
         .from(chatMessages)
-        .where(
-          and(
-            eq(chatMessages.deviceId, deviceId),
-            inArray(chatMessages.role, ["user", "assistant"])
-          )
-        )
+        .where(eq(chatMessages.deviceId, deviceId))
         .orderBy(desc(sql`rowid`))
-        .limit(limit);
-      return rows.reverse();
+        .limit(limit * 4);
+
+      const chronological = rows.reverse();
+      const projected: Array<{
+        id: string;
+        deviceId: string;
+        role: string;
+        content: string;
+        toolName: string | null;
+        imagePath: string | null;
+        createdAt: string;
+        didLogMeal?: boolean;
+      }> = [];
+
+      let pendingDidLogMeal = false;
+
+      for (const row of chronological) {
+        if (row.role === "tool") {
+          if (row.toolName === "log_food") {
+            pendingDidLogMeal = true;
+          }
+          continue;
+        }
+
+        if (row.role !== "user" && row.role !== "assistant") {
+          continue;
+        }
+
+        if (row.role === "assistant") {
+          projected.push({ ...row, didLogMeal: pendingDidLogMeal || undefined });
+          pendingDidLogMeal = false;
+          continue;
+        }
+
+        projected.push(row);
+        pendingDidLogMeal = false;
+      }
+
+      return projected.slice(-limit);
     },
 
     async getCompressedHistory(deviceId: string, turns: number) {

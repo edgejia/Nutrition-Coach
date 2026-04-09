@@ -15,6 +15,14 @@ interface Deps {
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
+// Last-gate filter: strip internal tool identifiers even when the model ignores
+// the system prompt rule. Applied to every reply before DB write and client emit.
+function sanitizeReply(text: string): string {
+  return text
+    .replace(/log_food/g, "完成記錄")
+    .replace(/get_daily_summary/g, "查詢今日攝取");
+}
+
 export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
   const { orchestrator, chatService, deviceService } = deps;
 
@@ -85,16 +93,18 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         for await (const token of streamGenerator) {
           fullReply += token;
         }
-        await chatService.saveMessage(deviceId, "assistant", fullReply);
+        const sanitized = sanitizeReply(fullReply);
+        await chatService.saveMessage(deviceId, "assistant", sanitized);
         return didLogMeal
-          ? { reply: fullReply, didLogMeal, dailySummary }
-          : { reply: fullReply, didLogMeal };
+          ? { reply: sanitized, didLogMeal, dailySummary }
+          : { reply: sanitized, didLogMeal };
       }
 
       const { reply: replyText, didLogMeal, dailySummary } = result;
+      const sanitizedJson = sanitizeReply(replyText);
       return didLogMeal
-        ? { reply: replyText, didLogMeal, dailySummary }
-        : { reply: replyText, didLogMeal };
+        ? { reply: sanitizedJson, didLogMeal, dailySummary }
+        : { reply: sanitizedJson, didLogMeal };
     }
 
     // SSE path: open stream BEFORE awaiting orchestrator so status labels are
@@ -131,24 +141,28 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           );
 
           if ("streamGenerator" in result) {
-            // Native streaming path: forward tokens as event: chunk events
+            // Native streaming path: accumulate all tokens first, then sanitize
+            // before emitting — ensures tool identifiers can't slip through even
+            // when they span multiple tokens (e.g. "log" + "_food").
             const { streamGenerator, didLogMeal, dailySummary } = result;
             let fullReply = "";
 
             for await (const token of streamGenerator) {
               fullReply += token;
-              stream.write(`event: chunk\ndata: ${JSON.stringify({ token })}\n\n`);
             }
 
-            await chatService.saveMessage(deviceId, "assistant", fullReply);
+            const sanitizedStream = sanitizeReply(fullReply);
+            await chatService.saveMessage(deviceId, "assistant", sanitizedStream);
+            stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedStream })}\n\n`);
             const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
             stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
           } else {
             // Non-stream fallback: bridge plain reply into SSE so sendMessageStream()
             // always receives event: chunk + event: done regardless of provider capability.
             const { reply: replyText, didLogMeal, dailySummary } = result;
-            await chatService.saveMessage(deviceId, "assistant", replyText);
-            stream.write(`event: chunk\ndata: ${JSON.stringify({ token: replyText })}\n\n`);
+            const sanitizedFallback = sanitizeReply(replyText);
+            await chatService.saveMessage(deviceId, "assistant", sanitizedFallback);
+            stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
             const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
             stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
           }

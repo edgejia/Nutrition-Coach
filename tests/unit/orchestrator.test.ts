@@ -163,6 +163,7 @@ describe("Orchestrator - didLogMeal", () => {
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
     const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.reply, "已幫你記錄蘋果！");
     assert.equal(result.didLogMeal, true);
   });
@@ -171,6 +172,7 @@ describe("Orchestrator - didLogMeal", () => {
     mockLLM.queueChatResponse({ content: "今天天氣真好！" });
 
     const result = await orchestrator.handleMessage(deviceId, "今天天氣怎麼樣？");
+    if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.reply, "今天天氣真好！");
     assert.equal(result.didLogMeal, false);
   });
@@ -227,6 +229,7 @@ describe("Orchestrator - didLogMeal", () => {
     }
 
     const result = await orchestrator.handleMessage(deviceId, "test");
+    if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
     assert.equal(result.didLogMeal, false);
   });

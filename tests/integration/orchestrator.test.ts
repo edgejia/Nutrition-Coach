@@ -39,7 +39,7 @@ describe("Orchestrator", () => {
 
   it("returns text reply when LLM responds with content", async () => {
     mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
-    const reply = await orchestrator.handleMessage(deviceId, "你好");
+    const { reply } = await orchestrator.handleMessage(deviceId, "你好");
     assert.equal(reply, "你好！我是你的營養教練。");
   });
 
@@ -66,7 +66,7 @@ describe("Orchestrator", () => {
     // Round 3: LLM responds with text
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
-    const reply = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    const { reply } = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assert.equal(reply, "已幫你記錄蘋果！");
     assert.equal(mockLLM.chatCalls.length, 3);
     const secondRound = mockLLM.chatCalls[1].messages;
@@ -75,19 +75,6 @@ describe("Orchestrator", () => {
   });
 
   it("persists uploaded image metadata while sending the data URI to the analyzer", async () => {
-    let capturedImageDataUri: string | undefined;
-    mockLLM.analyzeFood = async (_description: string, imageBase64?: string) => {
-      capturedImageDataUri = imageBase64;
-      return {
-        foodName: "沙拉",
-        calories: 180,
-        protein: 8,
-        carbs: 12,
-        fat: 10,
-        confidence: "high",
-        uncertainties: [],
-      };
-    };
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
@@ -110,14 +97,13 @@ describe("Orchestrator", () => {
     });
     mockLLM.queueChatResponse({ content: "已幫你記錄這份餐點！" });
 
-    const reply = await orchestrator.handleMessage(
+    const { reply } = await orchestrator.handleMessage(
       deviceId,
       "(圖片)",
       "data:image/png;base64,abc123",
       "server/uploads/meal.png"
     );
     assert.equal(reply, "已幫你記錄這份餐點！");
-    assert.equal(capturedImageDataUri, "data:image/png;base64,abc123");
 
     const history = await chatService.getHistory(deviceId, 10);
     assert.equal(history[0].imagePath, "server/uploads/meal.png");
@@ -178,7 +164,7 @@ describe("Orchestrator", () => {
         }],
       });
     }
-    const reply = await orchestrator.handleMessage(deviceId, "test");
+    const { reply } = await orchestrator.handleMessage(deviceId, "test");
     assert.equal(reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
   });
 });

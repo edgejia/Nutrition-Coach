@@ -324,4 +324,24 @@ describe("Chat API", () => {
     });
     assert.equal(res.status, 400);
   });
+
+  it("POST /api/chat sanitizes raw tool names in JSON reply", async () => {
+    // Even if the model outputs log_food or get_daily_summary in its reply text,
+    // the route must strip them before they reach the client.
+    mockLLM.queueChatResponse({ content: "我可以幫你計算並log_food這道菜，稍後也會get_daily_summary給你。" });
+
+    const form = new FormData();
+    form.append("message", "記錄午餐");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { reply: string };
+    assert.doesNotMatch(body.reply, /log_food/, "log_food must not appear in JSON reply");
+    assert.doesNotMatch(body.reply, /get_daily_summary/, "get_daily_summary must not appear in JSON reply");
+  });
 });
