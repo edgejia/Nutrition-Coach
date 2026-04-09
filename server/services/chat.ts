@@ -3,6 +3,16 @@ import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { chatMessages } from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
 
+function formatToolSummary(toolName: string, content: string): string {
+  if (toolName === "log_food") {
+    return "[系統已完成餐點記錄]";
+  }
+  if (toolName === "get_daily_summary") {
+    return `[系統已更新今日攝取摘要：${content}]`;
+  }
+  return `[系統工具已完成：${content}]`;
+}
+
 export function createChatService(db: AppDatabase) {
   return {
     async saveMessage(
@@ -23,17 +33,9 @@ export function createChatService(db: AppDatabase) {
     },
 
     async getHistory(deviceId: string, limit: number) {
-      const visibleRows = await db
-        .select({
-          rowId: sql<number>`rowid`,
-          id: chatMessages.id,
-          deviceId: chatMessages.deviceId,
-          role: chatMessages.role,
-          content: chatMessages.content,
-          toolName: chatMessages.toolName,
-          imagePath: chatMessages.imagePath,
-          createdAt: chatMessages.createdAt,
-        })
+      // Fetch most recent N messages in insertion order, then reverse to chronological order.
+      const rows = await db
+        .select()
         .from(chatMessages)
         .where(
           and(
@@ -43,89 +45,7 @@ export function createChatService(db: AppDatabase) {
         )
         .orderBy(desc(sql`rowid`))
         .limit(limit);
-
-      if (visibleRows.length === 0) {
-        return [];
-      }
-
-      const selectedVisibleRowIds = new Set(visibleRows.map((row) => row.rowId));
-      const earliestVisibleRowId = visibleRows[visibleRows.length - 1].rowId;
-
-      const previousVisibleRow = await db
-        .select({ rowId: sql<number>`rowid` })
-        .from(chatMessages)
-        .where(
-          sql`${chatMessages.deviceId} = ${deviceId}
-              and ${chatMessages.role} in ('user', 'assistant')
-              and rowid < ${earliestVisibleRowId}`
-        )
-        .orderBy(desc(sql`rowid`))
-        .limit(1);
-
-      const startAfterRowId = previousVisibleRow[0]?.rowId ?? 0;
-      const rows = await db
-        .select({
-          rowId: sql<number>`rowid`,
-          id: chatMessages.id,
-          deviceId: chatMessages.deviceId,
-          role: chatMessages.role,
-          content: chatMessages.content,
-          toolName: chatMessages.toolName,
-          imagePath: chatMessages.imagePath,
-          createdAt: chatMessages.createdAt,
-        })
-        .from(chatMessages)
-        .where(
-          sql`${chatMessages.deviceId} = ${deviceId}
-              and rowid > ${startAfterRowId}`
-        )
-        .orderBy(asc(sql`rowid`));
-
-      const projected: Array<{
-        id: string;
-        deviceId: string;
-        role: string;
-        content: string;
-        toolName: string | null;
-        imagePath: string | null;
-        createdAt: string;
-        didLogMeal?: boolean;
-      }> = [];
-
-      let pendingDidLogMeal = false;
-
-      for (const row of rows) {
-        if (row.role === "tool") {
-          if (row.toolName === "log_food") {
-            pendingDidLogMeal = true;
-          }
-          continue;
-        }
-
-        if (row.role !== "user" && row.role !== "assistant") {
-          continue;
-        }
-
-        if (row.role === "assistant") {
-          if (selectedVisibleRowIds.has(row.rowId)) {
-            const { rowId: _rowId, ...visibleRow } = row;
-            projected.push({
-              ...visibleRow,
-              didLogMeal: pendingDidLogMeal || undefined,
-            });
-          }
-          pendingDidLogMeal = false;
-          continue;
-        }
-
-        pendingDidLogMeal = false;
-        if (selectedVisibleRowIds.has(row.rowId)) {
-          const { rowId: _rowId, ...visibleRow } = row;
-          projected.push(visibleRow);
-        }
-      }
-
-      return projected;
+      return rows.reverse();
     },
 
     async getCompressedHistory(deviceId: string, turns: number) {
@@ -173,7 +93,7 @@ export function createChatService(db: AppDatabase) {
           current = [];
         }
         if (msg.role === "tool") {
-          pendingToolSummaries.push(`[使用 ${msg.toolName} → ${msg.content}]`);
+          pendingToolSummaries.push(formatToolSummary(msg.toolName ?? "", msg.content));
         } else if (msg.role === "user" && msg.imagePath) {
           current.push({ role: "user", content: `${msg.content}\n[附帶圖片]` });
         } else if (msg.role === "assistant") {

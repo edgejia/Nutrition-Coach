@@ -39,15 +39,23 @@ describe("Orchestrator", () => {
 
   it("returns text reply when LLM responds with content", async () => {
     mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
-    const { reply } = await orchestrator.handleMessage(deviceId, "你好");
+    const reply = await orchestrator.handleMessage(deviceId, "你好");
     assert.equal(reply, "你好！我是你的營養教練。");
   });
 
   it("executes tool calls and returns final reply", async () => {
-    // Round 1: orchestrator model calls log_food directly
+    // Round 1: LLM calls analyze_food
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
+        type: "function",
+        function: { name: "analyze_food", arguments: JSON.stringify({ description: "蘋果" }) },
+      }],
+    });
+    // Round 2: LLM calls log_food
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_2",
         type: "function",
         function: {
           name: "log_food",
@@ -55,25 +63,44 @@ describe("Orchestrator", () => {
         },
       }],
     });
-    // Round 2: same model responds with final text
+    // Round 3: LLM responds with text
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
-    const { reply } = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    const reply = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assert.equal(reply, "已幫你記錄蘋果！");
-    assert.equal(mockLLM.chatCalls.length, 2);
-    assert.deepEqual(
-      mockLLM.chatCalls[0].tools.map((tool) => tool.function.name),
-      ["log_food", "get_daily_summary"]
-    );
+    assert.equal(mockLLM.chatCalls.length, 3);
     const secondRound = mockLLM.chatCalls[1].messages;
     assert.equal(secondRound[secondRound.length - 2].role, "assistant");
     assert.equal(secondRound[secondRound.length - 1].role, "tool");
   });
 
-  it("persists uploaded image metadata while only sending the data URI in the user content parts", async () => {
+  it("persists uploaded image metadata while sending the data URI to the analyzer", async () => {
+    let capturedImageDataUri: string | undefined;
+    mockLLM.analyzeFood = async (_description: string, imageBase64?: string) => {
+      capturedImageDataUri = imageBase64;
+      return {
+        foodName: "沙拉",
+        calories: 180,
+        protein: 8,
+        carbs: 12,
+        fat: 10,
+        confidence: "high",
+        uncertainties: [],
+      };
+    };
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
+        type: "function",
+        function: {
+          name: "analyze_food",
+          arguments: JSON.stringify({ description: "(圖片)", image_base64: "data:image/png;base64,abc123" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_2",
         type: "function",
         function: {
           name: "log_food",
@@ -83,31 +110,62 @@ describe("Orchestrator", () => {
     });
     mockLLM.queueChatResponse({ content: "已幫你記錄這份餐點！" });
 
-    const { reply } = await orchestrator.handleMessage(
+    const reply = await orchestrator.handleMessage(
       deviceId,
       "(圖片)",
       "data:image/png;base64,abc123",
       "server/uploads/meal.png"
     );
     assert.equal(reply, "已幫你記錄這份餐點！");
-
-    assert.deepEqual(
-      mockLLM.chatCalls[0].tools.map((tool) => tool.function.name),
-      ["log_food", "get_daily_summary"]
-    );
-
-    const firstRoundMessages = mockLLM.chatCalls[0].messages;
-    const lastUserMessage = [...firstRoundMessages].reverse().find((message) => message.role === "user");
-    assert.deepEqual(lastUserMessage?.content, [
-      { type: "text", text: "(圖片)" },
-      { type: "image_url", image_url: { url: "data:image/png;base64,abc123" } },
-    ]);
+    assert.equal(capturedImageDataUri, "data:image/png;base64,abc123");
 
     const history = await chatService.getHistory(deviceId, 10);
     assert.equal(history[0].imagePath, "server/uploads/meal.png");
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals[0].imagePath, "server/uploads/meal.png");
+  });
+
+  it("first LLM round receives sanitized system prompt without raw tool names", async () => {
+    mockLLM.queueChatResponse({ content: "你好！" });
+    await orchestrator.handleMessage(deviceId, "你好");
+    assert.ok(mockLLM.chatCalls.length >= 1);
+    const firstRound = mockLLM.chatCalls[0].messages;
+    const systemMsg = firstRound.find((m) => m.role === "system");
+    assert.ok(systemMsg, "first round must have a system message");
+    const systemContent = String(systemMsg!.content);
+    assert.doesNotMatch(systemContent, /log_food|get_daily_summary/,
+      "system prompt must not contain raw tool identifiers");
+    assert.match(systemContent, /不要向使用者提及任何內部工具名稱/,
+      "system prompt must contain the sanitization instruction");
+  });
+
+  it("second LLM round receives sanitized tool context instead of raw tool names", async () => {
+    // Round 1: LLM calls log_food
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 0.5, carbs: 25, fat: 0.3 }),
+        },
+      }],
+    });
+    // Round 2: LLM responds with text
+    mockLLM.queueChatResponse({ content: "已記錄蘋果！" });
+
+    await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    assert.ok(mockLLM.chatCalls.length >= 2);
+
+    // Check the second round's messages for tool context
+    const secondRound = mockLLM.chatCalls[1].messages;
+    const toolMessages = secondRound.filter((m) => m.role === "tool");
+    assert.ok(toolMessages.length >= 1, "second round must have at least one tool result");
+    for (const tm of toolMessages) {
+      assert.doesNotMatch(String(tm.content), /log_food|get_daily_summary/,
+        "tool result content must not contain raw tool identifiers");
+    }
   });
 
   it("returns fallback after 3 rounds of only tool calls", async () => {
@@ -120,39 +178,7 @@ describe("Orchestrator", () => {
         }],
       });
     }
-    const { reply } = await orchestrator.handleMessage(deviceId, "test");
+    const reply = await orchestrator.handleMessage(deviceId, "test");
     assert.equal(reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
-  });
-
-  it("handleMessage emits 記錄餐點中 progress before executing log_food", async () => {
-    // D-03: onStatus("記錄餐點中...") must fire before executeTool completes for log_food
-    const statusLabels: string[] = [];
-    const toolCallOrder: string[] = [];
-
-    // Intercept: track when onStatus fires vs when log_food result arrives
-    // We use a single-round log_food call followed by final reply
-    mockLLM.queueChatResponse({
-      toolCalls: [{
-        id: "call_1",
-        type: "function",
-        function: {
-          name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 }),
-        },
-      }],
-    });
-    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
-
-    await orchestrator.handleMessage(deviceId, "我吃了蘋果", undefined, undefined, {
-      onStatus: (label: string) => {
-        statusLabels.push(label);
-        toolCallOrder.push(`status:${label}`);
-      },
-    });
-
-    assert.ok(
-      statusLabels.includes("記錄餐點中..."),
-      `expected onStatus to receive '記錄餐點中...' but got: ${JSON.stringify(statusLabels)}`
-    );
   });
 });
