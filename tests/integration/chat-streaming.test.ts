@@ -254,4 +254,70 @@ describe("chat-streaming", () => {
       }
     }
   });
+
+  it("POST /api/chat stream includes event: status with 分析圖片中 when image is present", async () => {
+    mockLLM.queueChatStream(["回覆"]);
+
+    const form = new FormData();
+    form.append("message", "這是什麼食物");
+    const jpegBytes = new Uint8Array([
+      0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+      ...new Array(50).fill(0x00),
+    ]);
+    form.append("image", new Blob([jpegBytes], { type: "image/jpeg" }), "food.jpg");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /event: status/);
+      assert.match(text, /分析圖片中/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat stream includes event: status with 記錄餐點中 when didLogMeal is true", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+    mockLLM.queueChatStream(["餐點已記錄，繼續保持！"]);
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /event: status/);
+      assert.match(text, /記錄餐點中/);
+      assert.match(text, /event: done/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
 });
