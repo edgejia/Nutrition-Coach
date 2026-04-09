@@ -1,10 +1,15 @@
 import type { Message } from "../types.js";
 
+type ProvisionalBubbleProps = {
+  isProvisional: boolean;
+  isStatusLabel: boolean;
+};
+
 export function MessageBubble(props: {
   message: Message;
   onOpenSummary?: () => void;
-}) {
-  const { message, onOpenSummary } = props;
+} & Partial<ProvisionalBubbleProps>) {
+  const { message, onOpenSummary, isProvisional, isStatusLabel } = props;
   const isUser = message.role === "user";
 
   if (isUser) {
@@ -42,7 +47,26 @@ export function MessageBubble(props: {
           color: "var(--text)",
         }}
       >
-        {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
+        {message.content &&
+          (isStatusLabel ? (
+            <p className="text-sm leading-relaxed" style={{ color: "var(--text-2)", fontStyle: "italic" }}>
+              {message.content}
+              {isProvisional && (
+                <span className="animate-pulse" style={{ color: "var(--text-3)" }}>
+                  ...
+                </span>
+              )}
+            </p>
+          ) : (
+            <p className="whitespace-pre-wrap">
+              {message.content}
+              {isProvisional && (
+                <span className="animate-pulse" style={{ color: "var(--orange)" }}>
+                  |
+                </span>
+              )}
+            </p>
+          ))}
         {message.didLogMeal && onOpenSummary && (
           <button
             type="button"
