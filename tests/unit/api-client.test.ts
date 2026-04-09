@@ -272,6 +272,27 @@ describe("sendMessageStream", () => {
     assert.equal(done, true);
   });
 
+  it("reports an interrupted stream when EOF arrives before done or error", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, ['event: chunk\ndata: {"token":"半途"}\n\n']);
+    const errors: string[] = [];
+    const tokens: string[] = [];
+    let done = false;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: (token) => tokens.push(token),
+      onDone: () => {
+        done = true;
+      },
+      onError: (message) => errors.push(message),
+    });
+
+    assert.deepEqual(tokens, ["半途"]);
+    assert.equal(done, false);
+    assert.deepEqual(errors, ["Stream interrupted"]);
+  });
+
   it("throws UNAUTHORIZED on 401 response", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(401, []);

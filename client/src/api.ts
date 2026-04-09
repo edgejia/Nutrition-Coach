@@ -93,6 +93,7 @@ export async function sendMessageStream(
 
   const decoder = new TextDecoder();
   let buffer = "";
+  let sawTerminalEvent = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -134,17 +135,23 @@ export async function sendMessageStream(
         } else if (eventType === "chunk") {
           callbacks.onToken((parsed.token as string) ?? "");
         } else if (eventType === "done") {
+          sawTerminalEvent = true;
           callbacks.onDone({
             didLogMeal: Boolean(parsed.didLogMeal),
             ...(parsed.dailySummary ? { dailySummary: parsed.dailySummary as DailySummary } : {}),
           });
         } else if (eventType === "error") {
+          sawTerminalEvent = true;
           callbacks.onError((parsed.message as string) ?? "Stream error");
         }
       } catch {
         // Ignore malformed SSE payloads and continue parsing subsequent events.
       }
     }
+  }
+
+  if (!sawTerminalEvent) {
+    callbacks.onError("Stream interrupted");
   }
 }
 
