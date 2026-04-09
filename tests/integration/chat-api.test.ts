@@ -326,8 +326,6 @@ describe("Chat API", () => {
   });
 
   it("POST /api/chat sanitizes raw tool names in JSON reply", async () => {
-    // Even if the model outputs log_food or get_daily_summary in its reply text,
-    // the route must strip them before they reach the client.
     mockLLM.queueChatResponse({ content: "我可以幫你計算並log_food這道菜，稍後也會get_daily_summary給你。" });
 
     const form = new FormData();
@@ -343,5 +341,20 @@ describe("Chat API", () => {
     const body = await res.json() as { reply: string };
     assert.doesNotMatch(body.reply, /log_food/, "log_food must not appear in JSON reply");
     assert.doesNotMatch(body.reply, /get_daily_summary/, "get_daily_summary must not appear in JSON reply");
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { "x-device-id": deviceId },
+    });
+    assert.equal(historyRes.status, 200);
+
+    const historyBody = await historyRes.json() as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const assistantMessages = historyBody.messages.filter((message) => message.role === "assistant");
+
+    assert.equal(assistantMessages.length, 1, "JSON chat should persist a single assistant message");
+    assert.equal(assistantMessages[0]?.content, body.reply);
+    assert.doesNotMatch(assistantMessages[0]?.content ?? "", /log_food/);
+    assert.doesNotMatch(assistantMessages[0]?.content ?? "", /get_daily_summary/);
   });
 });

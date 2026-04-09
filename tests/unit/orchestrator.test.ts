@@ -166,6 +166,9 @@ describe("Orchestrator - didLogMeal", () => {
     if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.reply, "已幫你記錄蘋果！");
     assert.equal(result.didLogMeal, true);
+
+    const history = await chatService.getHistory(deviceId, 10);
+    assert.equal(history.filter((message) => message.role === "assistant").length, 0);
   });
 
   it("handleMessage returns { reply, didLogMeal: false } when log_food is not called", async () => {
@@ -232,6 +235,9 @@ describe("Orchestrator - didLogMeal", () => {
     if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
     assert.equal(result.didLogMeal, false);
+
+    const history = await chatService.getHistory(deviceId, 10);
+    assert.equal(history.filter((message) => message.role === "assistant").length, 0);
   });
 
   it("handleMessage returns streamGenerator and defers assistant persistence when chatStream is available", async () => {

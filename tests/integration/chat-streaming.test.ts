@@ -101,6 +101,19 @@ async function readStreamUntil(
   return combined;
 }
 
+function parseSSEEvents(body: string): Array<{ event: string; data: string }> {
+  return body
+    .split("\n\n")
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const lines = block.split("\n");
+      const event = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) ?? "";
+      const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length) ?? "";
+      return { event, data };
+    });
+}
+
 describe("chat-streaming", () => {
   let app: FastifyInstance;
   let mockLLM: StreamingLLMProvider;
@@ -361,9 +374,13 @@ describe("chat-streaming", () => {
   });
 
   it("POST /api/chat with SSE accept header sanitizes raw tool names in streamed reply", async () => {
-    // Even if the model streams tokens containing log_food or get_daily_summary,
-    // the route must strip them before emitting event: chunk to the client.
-    mockLLM.queueChatStream(["我可以幫你", "計算並log_food", "這道菜，也會get_daily_summary。"]);
+    mockLLM.queueChatStream([
+      "我可以幫你",
+      "計算並log",
+      "_food，接著",
+      "再get_daily_",
+      "summary後回答",
+    ]);
 
     const form = new FormData();
     form.append("message", "記錄午餐");
@@ -382,10 +399,20 @@ describe("chat-streaming", () => {
       assert.ok(res.body);
       const reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkEvents = events.filter((event) => event.event === "chunk");
+      const doneEvents = events.filter((event) => event.event === "done");
+      const combinedChunkText = chunkEvents
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
 
       assert.doesNotMatch(text, /log_food/, "log_food must not appear in SSE stream");
       assert.doesNotMatch(text, /get_daily_summary/, "get_daily_summary must not appear in SSE stream");
-      assert.match(text, /event: chunk/, "expected event: chunk");
+      assert.ok(chunkEvents.length >= 2, "expected multiple progressive chunk events before done");
+      assert.equal(doneEvents.length, 1, "expected a single done event");
+      assert.match(combinedChunkText, /完成記錄/);
+      assert.match(combinedChunkText, /查詢今日攝取/);
     } finally {
       clearTimeout(timeout);
     }
@@ -421,11 +448,21 @@ describe("chat-streaming", () => {
       assert.match(text, /event: chunk/, "expected event: chunk for bridged non-stream reply");
       assert.match(text, /event: done/, "expected event: done");
 
-      // The chunk must contain the full reply text
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { "x-device-id": deviceId },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+
       const chunkMatch = text.match(/event: chunk\s+data: (.+)/);
       assert.ok(chunkMatch, "expected chunk data line");
       const chunkData = JSON.parse(chunkMatch[1]) as { token: string };
       assert.equal(chunkData.token, "純文字回覆");
+      assert.equal(assistantMessages.length, 1, "fallback SSE must persist the assistant reply exactly once");
+      assert.equal(assistantMessages[0]?.content, "純文字回覆");
     } finally {
       clearTimeout(timeout);
     }
