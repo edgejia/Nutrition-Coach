@@ -14,6 +14,7 @@ interface Deps {
 }
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const SENSITIVE_IDENTIFIERS = ["log_food", "get_daily_summary"];
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
@@ -21,6 +22,48 @@ function sanitizeReply(text: string): string {
   return text
     .replace(/log_food/g, "完成記錄")
     .replace(/get_daily_summary/g, "查詢今日攝取");
+}
+
+async function finalizeAssistantReply(
+  chatService: ReturnType<typeof createChatService>,
+  deviceId: string,
+  rawReply: string,
+): Promise<string> {
+  const sanitized = sanitizeReply(rawReply);
+  await chatService.saveMessage(deviceId, "assistant", sanitized);
+  return sanitized;
+}
+
+function createStreamingSanitizer() {
+  let tail = "";
+
+  return {
+    push(token: string): string {
+      tail += token;
+      const overlapLength = SENSITIVE_IDENTIFIERS.reduce((maxOverlap, identifier) => {
+        for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
+          if (tail.endsWith(identifier.slice(0, prefixLength))) {
+            return Math.max(maxOverlap, prefixLength);
+          }
+        }
+
+        return maxOverlap;
+      }, 0);
+
+      if (tail.length <= overlapLength) {
+        return "";
+      }
+
+      const safePrefix = tail.slice(0, tail.length - overlapLength);
+      tail = tail.slice(tail.length - overlapLength);
+      return sanitizeReply(safePrefix);
+    },
+    flush(): string {
+      const finalChunk = sanitizeReply(tail);
+      tail = "";
+      return finalChunk;
+    },
+  };
 }
 
 export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
@@ -93,15 +136,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         for await (const token of streamGenerator) {
           fullReply += token;
         }
-        const sanitized = sanitizeReply(fullReply);
-        await chatService.saveMessage(deviceId, "assistant", sanitized);
+        const sanitized = await finalizeAssistantReply(chatService, deviceId, fullReply);
         return didLogMeal
           ? { reply: sanitized, didLogMeal, dailySummary }
           : { reply: sanitized, didLogMeal };
       }
 
       const { reply: replyText, didLogMeal, dailySummary } = result;
-      const sanitizedJson = sanitizeReply(replyText);
+      const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
       return didLogMeal
         ? { reply: sanitizedJson, didLogMeal, dailySummary }
         : { reply: sanitizedJson, didLogMeal };
@@ -141,27 +183,30 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           );
 
           if ("streamGenerator" in result) {
-            // Native streaming path: accumulate all tokens first, then sanitize
-            // before emitting — ensures tool identifiers can't slip through even
-            // when they span multiple tokens (e.g. "log" + "_food").
             const { streamGenerator, didLogMeal, dailySummary } = result;
+            const sanitizer = createStreamingSanitizer();
             let fullReply = "";
 
             for await (const token of streamGenerator) {
               fullReply += token;
+              const sanitizedChunk = sanitizer.push(token);
+              if (sanitizedChunk) {
+                stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+              }
             }
 
-            const sanitizedStream = sanitizeReply(fullReply);
-            await chatService.saveMessage(deviceId, "assistant", sanitizedStream);
-            stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedStream })}\n\n`);
+            const finalChunk = sanitizer.flush();
+            if (finalChunk) {
+              stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
+            }
+            await finalizeAssistantReply(chatService, deviceId, fullReply);
             const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
             stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
           } else {
             // Non-stream fallback: bridge plain reply into SSE so sendMessageStream()
             // always receives event: chunk + event: done regardless of provider capability.
             const { reply: replyText, didLogMeal, dailySummary } = result;
-            const sanitizedFallback = sanitizeReply(replyText);
-            await chatService.saveMessage(deviceId, "assistant", sanitizedFallback);
+            const sanitizedFallback = await finalizeAssistantReply(chatService, deviceId, replyText);
             stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
             const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
             stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);

@@ -137,13 +137,11 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         } catch (err) {
           deps.logger?.error(`LLM chat failed for device ${deviceId}:`, err);
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
-          await chatService.saveMessage(deviceId, "assistant", errorMsg);
           return { reply: errorMsg, didLogMeal, dailySummary: logMealSummary };
         }
 
         if (response.content !== undefined) {
           deps.logger?.info(`[assistant] ${response.content}`);
-          await chatService.saveMessage(deviceId, "assistant", response.content);
           return { reply: response.content, didLogMeal, dailySummary: logMealSummary };
         }
 
@@ -192,7 +190,6 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       }
 
       // Fallback after MAX_ROUNDS
-      await chatService.saveMessage(deviceId, "assistant", FALLBACK);
       return { reply: FALLBACK, didLogMeal, dailySummary: logMealSummary };
     },
   };
