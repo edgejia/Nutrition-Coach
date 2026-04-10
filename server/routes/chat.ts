@@ -11,6 +11,12 @@ interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
   chatService: ReturnType<typeof createChatService>;
   deviceService: ReturnType<typeof createDeviceService>;
+  /**
+   * Override the upload storage directory. When undefined the route falls back
+   * to the default `server/uploads/` path (production behaviour unchanged).
+   * Pass a scenario-local temp directory in harness runs to prevent residue.
+   */
+  uploadsDir?: string;
 }
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -67,7 +73,7 @@ function createStreamingSanitizer() {
 }
 
 export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
-  const { orchestrator, chatService, deviceService } = deps;
+  const { orchestrator, chatService, deviceService, uploadsDir: injectedUploadsDir } = deps;
 
   app.post("/api/chat", async (request, reply) => {
     const deviceId = request.headers["x-device-id"] as string;
@@ -97,10 +103,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           return reply.code(400).send({ error: "Image too large. Max 5MB." });
         }
         const filename = `${crypto.randomUUID()}.${part.mimetype.split("/")[1]}`;
-        const __dirname = dirname(fileURLToPath(import.meta.url));
-        const uploadsDir = join(__dirname, "..", "uploads");
-        await mkdir(uploadsDir, { recursive: true });
-        const storedPath = join(uploadsDir, filename);
+        const resolvedUploadsDir = injectedUploadsDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "uploads");
+        await mkdir(resolvedUploadsDir, { recursive: true });
+        const storedPath = join(resolvedUploadsDir, filename);
         await writeFile(storedPath, buffer);
         image = {
           dataUri: `data:${part.mimetype};base64,${buffer.toString("base64")}`,
