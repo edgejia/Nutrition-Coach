@@ -103,7 +103,7 @@ describe("Orchestrator", () => {
       "data:image/png;base64,abc123",
       "server/uploads/meal.png"
     );
-    assert.equal(reply, "已幫你記錄這份餐點！");
+    assert.equal(reply, "已先依照片做保守估算並完成記錄：沙拉，約 180 kcal。若你想更精準，我可以再依份量幫你調整。");
 
     const history = await chatService.getHistory(deviceId, 10);
     assert.equal(history[0].imagePath, "server/uploads/meal.png");
@@ -124,6 +124,8 @@ describe("Orchestrator", () => {
       "system prompt must not contain raw tool identifiers");
     assert.match(systemContent, /不要向使用者提及任何內部工具名稱/,
       "system prompt must contain the sanitization instruction");
+    assert.match(systemContent, /本產品沒有「方式1 \/ 方式2」或額外確認流程/,
+      "system prompt must forbid hallucinated image-choice branches");
   });
 
   it("second LLM round receives sanitized tool context instead of raw tool names", async () => {

@@ -240,6 +240,51 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(history.filter((message) => message.role === "assistant").length, 0);
   });
 
+  it("returns a deterministic logged reply for image-only uploads after log_food succeeds", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "豬肉燒烤飯盒", calories: 680, protein: 35, carbs: 86, fat: 22 }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "(圖片)",
+      "data:image/png;base64,abc123",
+      "server/uploads/meal.png",
+    );
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(result.didLogMeal, true);
+    assert.match(result.reply, /已先依照片做保守估算並完成記錄：豬肉燒烤飯盒，約 680 kcal。若你想更精準，我可以再依份量幫你調整。/);
+    assert.equal(mockLLM.chatCalls.length, 1, "image-only logging should not require a second LLM round");
+  });
+
+  it("recovers locally when the user replies 2 to a previously hallucinated choice prompt", async () => {
+    await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "server/uploads/meal.png" });
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    await chatService.saveMessage(
+      deviceId,
+      "assistant",
+      "已收到圖片。若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算並記錄。",
+    );
+
+    const result = await orchestrator.handleMessage(deviceId, "2");
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(
+      result.reply,
+      "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。"
+    );
+    assert.equal(mockLLM.chatCalls.length, 0, "recovery path should not call the model again");
+  });
+
   it("handleMessage returns streamGenerator and defers assistant persistence when chatStream is available", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");

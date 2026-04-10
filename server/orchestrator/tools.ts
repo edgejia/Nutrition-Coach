@@ -46,6 +46,13 @@ export interface ToolExecutionResult {
   result: string;
   summary: string;
   dailySummary?: DailySummary;
+  loggedMeal?: {
+    foodName: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  };
 }
 
 export class FatalToolError extends Error {
@@ -103,7 +110,18 @@ export async function executeTool(
       deps.logger?.warn("log_food dailySummary publish failed after contract success:", err);
     }
 
-    return { result: "食物已成功記錄", summary: "成功", dailySummary };
+    return {
+      result: "食物已成功記錄",
+      summary: "成功",
+      dailySummary,
+      loggedMeal: {
+        foodName,
+        calories,
+        protein,
+        carbs,
+        fat,
+      },
+    };
   }
 
   if (name === "get_daily_summary") {
