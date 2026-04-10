@@ -2,7 +2,6 @@
   "name": "nutrition-coach",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "yarn@1.22.22",
   "type": "module",
   "scripts": {
     "dev:server": "node --env-file=.env --import tsx --watch server/index.ts",
@@ -10,7 +9,8 @@
     "build": "vite build --config client/vite.config.ts",
     "test": "node --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node --import tsx --test tests/unit/*.test.ts",
-    "test:integration": "node --import tsx --test tests/integration/*.test.ts"
+    "test:integration": "node --import tsx --test tests/integration/*.test.ts",
+    "verify:harness": "node --import tsx tests/harness/run.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",
