@@ -50,6 +50,7 @@ export async function createScenarioApp(
   const buildOpts: Parameters<typeof buildApp>[0] = {
     dbPath: ":memory:",
     llmProvider,
+    ...(opts.uploadsDir !== undefined ? { uploadsDir: opts.uploadsDir } : {}),
   };
 
   const app = await buildApp(buildOpts);

@@ -18,6 +18,13 @@ import type { LLMProvider } from "./llm/types.js";
 export interface AppOptions {
   dbPath?: string;
   llmProvider: LLMProvider;
+  /**
+   * Override the directory where uploaded files are stored.
+   * When omitted the route uses its default (`server/uploads/` relative to the
+   * compiled route file). Pass a temp directory in test scenarios to prevent
+   * upload residue from accumulating inside the repo.
+   */
+  uploadsDir?: string;
 }
 
 export async function buildApp(opts: AppOptions) {
@@ -51,7 +58,7 @@ export async function buildApp(opts: AppOptions) {
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
   registerDeviceRoutes(app, { deviceService, targetGenerationService });
-  registerChatRoutes(app, { orchestrator, chatService, deviceService });
+  registerChatRoutes(app, { orchestrator, chatService, deviceService, uploadsDir: opts.uploadsDir });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, publisher });
   registerSSERoutes(app, { publisher, summaryService, deviceService });
 
