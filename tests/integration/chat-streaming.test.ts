@@ -81,6 +81,17 @@ function createLogFoodToolCall(): ToolCall {
   };
 }
 
+function createLogFoodToolCallWithArguments(argumentsText: string): ToolCall {
+  return {
+    id: "call_invalid",
+    type: "function",
+    function: {
+      name: "log_food",
+      arguments: argumentsText,
+    },
+  };
+}
+
 async function readStreamUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   expectedText: string,
@@ -583,6 +594,82 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "catch block must write exactly one assistant fallback");
       assert.match(assistantMsgs[0]!.content, /抱歉|無法/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat treats invalid log_food JSON as fatal and writes unified route fallback", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [createLogFoodToolCallWithArguments("{bad json")],
+    });
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /event: done/);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+      assert.equal(assistantMsgs.length, 1, "invalid log_food JSON must write exactly one route fallback");
+      assert.match(assistantMsgs[0]!.content, /這次無法完成請求/);
+      assert.doesNotMatch(assistantMsgs[0]!.content, /log_food|FatalToolError|bad json/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat treats invalid log_food required fields as fatal and writes unified route fallback", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [createLogFoodToolCallWithArguments(JSON.stringify({ food_name: "", calories: "nope" }))],
+    });
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /event: done/);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+      assert.equal(assistantMsgs.length, 1, "invalid log_food fields must write exactly one route fallback");
+      assert.match(assistantMsgs[0]!.content, /這次無法完成請求/);
+      assert.doesNotMatch(assistantMsgs[0]!.content, /log_food|FatalToolError|nope/);
     } finally {
       clearTimeout(timeout);
     }
