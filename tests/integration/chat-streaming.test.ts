@@ -674,4 +674,55 @@ describe("chat-streaming", () => {
       clearTimeout(timeout);
     }
   });
+
+  it("POST /api/chat D-09: when log_food succeeds but chatRound final-reply throws, meal is kept and partial-success fallback written to history", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+    mockLLM.queueRoundError(new Error("LLM reply generation failed"));
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /event: done/);
+      const doneMatch = text.match(/event: done\s+data: (.+)/);
+      assert.ok(doneMatch);
+      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal?: boolean; dailySummary?: unknown };
+      assert.equal(donePayload.didLogMeal, true, "D-09: didLogMeal must remain true after log_food succeeded");
+      assert.ok(donePayload.dailySummary, "D-09: dailySummary must be preserved after log_food succeeded");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+      assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
+      assert.match(
+        assistantMsgs[0]!.content,
+        /已完成記錄，但回覆生成失敗/,
+        "D-09 must use the partial-success fallback, not the generic route catch fallback",
+      );
+
+      const mealsRes = await fetch(`${address}/api/meals`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
+      assert.ok(mealsJson.meals.some((m) => m.foodName === "蘋果"), "meal must be kept even when final reply fails");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
 });
