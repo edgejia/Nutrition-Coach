@@ -28,6 +28,10 @@ class StreamingLLMProvider implements LLMProvider {
     this.roundQueue.push({ kind: "response", response });
   }
 
+  queueRoundError(error: Error) {
+    this.roundQueue.push(error);
+  }
+
   async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {
     this.chatCalls.push({ messages, tools });
     if (this.callIndex < this.chatQueue.length) {
@@ -463,6 +467,122 @@ describe("chat-streaming", () => {
       assert.equal(chunkData.token, "純文字回覆");
       assert.equal(assistantMessages.length, 1, "fallback SSE must persist the assistant reply exactly once");
       assert.equal(assistantMessages[0]?.content, "純文字回覆");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat hallucinationGuard truncates stream on 方式1/方式2 pattern and writes retry-prompt to history", async () => {
+    mockLLM.queueChatStream([
+      "我提供",
+      "方式1 直接依照片估算記錄\n",
+      "方式2 請補充份量後再記錄",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.doesNotMatch(text, /方式2 請補充份量後再記錄/);
+      assert.match(text, /無法辨識這次的請求/);
+
+      const doneMatch = text.match(/event: done\s+data: (.+)/);
+      assert.ok(doneMatch, "expected done event");
+      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal: boolean };
+      assert.equal(donePayload.didLogMeal, false);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+      assert.equal(assistantMsgs.length, 1, "exactly one assistant reply expected");
+      assert.match(assistantMsgs[0]!.content, /無法辨識這次的請求/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat hallucinationGuard does not trigger on normal stream", async () => {
+    mockLLM.queueChatStream(["豬肉飯", " 680 kcal", "，已記錄"]);
+
+    const form = new FormData();
+    form.append("message", "記錄午餐");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const combinedChunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+
+      assert.match(combinedChunkText, /豬肉飯/);
+      assert.match(combinedChunkText, /680 kcal/);
+      assert.match(text, /event: done/);
+      assert.doesNotMatch(text, /無法辨識這次的請求/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat catch block writes unified fallback to history when orchestrator throws", async () => {
+    mockLLM.queueRoundError(new Error("Vision API timeout"));
+
+    const form = new FormData();
+    form.append("message", "記錄午餐");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /event: done/);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+      assert.equal(assistantMsgs.length, 1, "catch block must write exactly one assistant fallback");
+      assert.match(assistantMsgs[0]!.content, /抱歉|無法/);
     } finally {
       clearTimeout(timeout);
     }
