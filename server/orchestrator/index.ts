@@ -7,6 +7,7 @@ import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { toolDefinitions, executeTool, isFatalToolError } from "./tools.js";
+import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
 
 export interface Logger {
   info: (msg: string, ...args: unknown[]) => void;
@@ -27,7 +28,6 @@ interface OrchestratorDeps {
 const FALLBACK = "抱歉，我現在無法完成這個請求，請稍後再試。";
 const MAX_ROUNDS = 3;
 const IMAGE_PLACEHOLDER = "(圖片)";
-const CHOICE_PROMPT_PATTERN = /方式\s*1[\s\S]*方式\s*2|方式\s*2[\s\S]*方式\s*1/;
 const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 
