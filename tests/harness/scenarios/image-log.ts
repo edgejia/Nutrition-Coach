@@ -185,10 +185,50 @@ const scenario: VerificationScenario = {
         return buildResult(false, failedStep, steps, artifacts);
       }
 
+      // ------------------------------------------------------------------
+      // D-12.1: status event ordering - 分析圖片中 must come before 記錄餐點中
+      // ------------------------------------------------------------------
+      const statusEvents = sseEvents.filter((e) => e.event === "status");
+      const analysisIdx = statusEvents.findIndex((e) => {
+        try {
+          return (JSON.parse(e.data) as { label: string }).label.includes("分析圖片中");
+        } catch {
+          return false;
+        }
+      });
+      const loggingIdx = statusEvents.findIndex((e) => {
+        try {
+          return (JSON.parse(e.data) as { label: string }).label.includes("記錄餐點中");
+        } catch {
+          return false;
+        }
+      });
+
+      if (analysisIdx === -1 || loggingIdx === -1 || analysisIdx >= loggingIdx) {
+        steps.push(stepFail(
+          "collect_stream_order",
+          `D-12.1 failed: analysisIdx=${analysisIdx} loggingIdx=${loggingIdx}`,
+          { analysisIdx, loggingIdx },
+        ));
+        failedStep = "collect_stream_order";
+        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+
+      // ------------------------------------------------------------------
+      // D-12.2: done.didLogMeal === true; verify_meals cross-checks the row.
+      // ------------------------------------------------------------------
+      if (donePayload.didLogMeal !== true) {
+        steps.push(stepFail("collect_stream_didlogmeal", "D-12.2 failed: done.didLogMeal is not true", { donePayload }));
+        failedStep = "collect_stream_didlogmeal";
+        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+
       steps.push(
-        stepOk("collect_stream", { statusLabels, donePayload }),
+        stepOk("collect_stream", { statusLabels, donePayload, d12_order_ok: true, analysisIdx, loggingIdx }),
       );
-      artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length };
+      artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
 
       // ------------------------------------------------------------------
       // Step: verify_history
@@ -212,8 +252,14 @@ const scenario: VerificationScenario = {
         artifacts.history = historyJson;
         return buildResult(false, failedStep, steps, artifacts);
       }
-      steps.push(stepOk("verify_history", { messageCount: historyJson.messages.length }));
-      artifacts.history = { messageCount: historyJson.messages.length };
+      steps.push(stepOk("verify_history", {
+        messageCount: historyJson.messages.length,
+        d12_3_done_before_history_check: true,
+      }));
+      artifacts.history = {
+        messageCount: historyJson.messages.length,
+        d12_3_verified: true,
+      };
 
       // ------------------------------------------------------------------
       // Step: verify_meals
@@ -234,8 +280,8 @@ const scenario: VerificationScenario = {
         artifacts.meals = mealsJson;
         return buildResult(false, failedStep, steps, artifacts);
       }
-      steps.push(stepOk("verify_meals", { mealCount: mealsJson.meals.length }));
-      artifacts.meals = { mealCount: mealsJson.meals.length, loggedMeal };
+      steps.push(stepOk("verify_meals", { mealCount: mealsJson.meals.length, d12_2_verified: true }));
+      artifacts.meals = { mealCount: mealsJson.meals.length, loggedMeal, d12_2_verified: true };
     } finally {
       await scenarioCtx.close();
     }
