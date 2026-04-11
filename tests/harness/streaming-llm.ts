@@ -30,6 +30,7 @@ async function* streamTokens(tokens: string[]): AsyncGenerator<string> {
  *   provider.queueChatStream(["token1", " token2"]);     // second chatRound() call (stream)
  *   provider.queueChatResponse({ content: "reply" });    // chat() call
  *   provider.queueChatError(new Error("timeout"));       // chat() call that throws
+ *   provider.queueRoundError(new Error("timeout"));      // chatRound() call that throws
  */
 export class StreamingLLMProvider implements LLMProvider {
   private chatQueue: Array<LLMResponse | Error> = [];
@@ -62,6 +63,14 @@ export class StreamingLLMProvider implements LLMProvider {
    */
   queueChatStream(tokens: string[]): void {
     this.roundQueue.push({ kind: "stream", streamGenerator: streamTokens(tokens) });
+  }
+
+  /**
+   * Queue an error to be thrown by the next `chatRound()` call.
+   * Used to simulate image analysis / LLM failures in failure scenarios.
+   */
+  queueRoundError(error: Error): void {
+    this.roundQueue.push(error);
   }
 
   /**
