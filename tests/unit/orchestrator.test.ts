@@ -9,6 +9,7 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, LLMProvider } from "../../server/llm/types.js";
 import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import { createOrchestrator } from "../../server/orchestrator/index.js";
+import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
 
 function assertString(value: unknown): asserts value is string {
   assert.equal(typeof value, "string");
@@ -74,6 +75,16 @@ async function* streamTokens(tokens: string[]): AsyncGenerator<string> {
     yield token;
   }
 }
+
+describe("orchestrator shared patterns", () => {
+  it("matches the known 方式1/方式2 hallucinated choice prompt shape", () => {
+    assert.equal(
+      CHOICE_PROMPT_PATTERN.test("若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算。"),
+      true,
+    );
+    assert.equal(CHOICE_PROMPT_PATTERN.test("我會直接依照片估算並完成記錄。"), false);
+  });
+});
 
 describe("Orchestrator - didLogMeal", () => {
   let orchestrator: ReturnType<typeof createOrchestrator>;
