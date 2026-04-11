@@ -44,6 +44,38 @@ test("image-log artifacts show both 分析圖片中 and 記錄餐點中 status l
   );
 });
 
+test("image-log artifacts prove D-12 status and persistence invariants", async () => {
+  const result: ScenarioResult = await runScenarioByName("image-log");
+  const streamArtifact = result.artifacts.stream as {
+    analysisIdx?: number;
+    loggingIdx?: number;
+    donePayload?: { didLogMeal?: boolean };
+  } | undefined;
+  const historyArtifact = result.artifacts.history as {
+    d12_3_verified?: boolean;
+  } | undefined;
+  const mealsArtifact = result.artifacts.meals as {
+    d12_2_verified?: boolean;
+  } | undefined;
+
+  assert.ok(streamArtifact, "expected stream artifact");
+  assert.equal(streamArtifact.donePayload?.didLogMeal, true, "D-12.2: done.didLogMeal must be true");
+  assert.ok(
+    typeof streamArtifact.analysisIdx === "number" && streamArtifact.analysisIdx >= 0,
+    `D-12.1: expected analysisIdx >= 0, got ${streamArtifact.analysisIdx}`,
+  );
+  assert.ok(
+    typeof streamArtifact.loggingIdx === "number" && streamArtifact.loggingIdx >= 0,
+    `D-12.1: expected loggingIdx >= 0, got ${streamArtifact.loggingIdx}`,
+  );
+  assert.ok(
+    streamArtifact.analysisIdx < streamArtifact.loggingIdx,
+    `D-12.1: expected analysisIdx < loggingIdx, got ${streamArtifact.analysisIdx} >= ${streamArtifact.loggingIdx}`,
+  );
+  assert.equal(mealsArtifact?.d12_2_verified, true, "D-12.2: matching meal must be present");
+  assert.equal(historyArtifact?.d12_3_verified, true, "D-12.3: assistant history must exist after done");
+});
+
 test("image-log cleanup snapshot reports zero residual files", async () => {
   const result: ScenarioResult = await runScenarioByName("image-log");
   const cleanup = result.artifacts.cleanup_uploads as {
