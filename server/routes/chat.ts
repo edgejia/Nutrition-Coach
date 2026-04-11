@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 import type { createOrchestrator } from "../orchestrator/index.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
+import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -21,6 +22,7 @@ interface Deps {
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const SENSITIVE_IDENTIFIERS = ["log_food", "get_daily_summary"];
+const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
@@ -191,8 +193,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             const { streamGenerator, didLogMeal, dailySummary } = result;
             const sanitizer = createStreamingSanitizer();
             let fullReply = "";
+            let hallucAccum = "";
+            let hallucinationDetected = false;
 
             for await (const token of streamGenerator) {
+              hallucAccum += token;
+              if (CHOICE_PROMPT_PATTERN.test(hallucAccum)) {
+                hallucinationDetected = true;
+                break;
+              }
               fullReply += token;
               const sanitizedChunk = sanitizer.push(token);
               if (sanitizedChunk) {
@@ -200,13 +209,21 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
               }
             }
 
-            const finalChunk = sanitizer.flush();
-            if (finalChunk) {
-              stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
+            if (hallucinationDetected) {
+              const retryMsg = "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
+              await finalizeAssistantReply(chatService, deviceId, retryMsg);
+              stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
+              const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
+              stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+            } else {
+              const finalChunk = sanitizer.flush();
+              if (finalChunk) {
+                stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
+              }
+              await finalizeAssistantReply(chatService, deviceId, fullReply);
+              const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
+              stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
             }
-            await finalizeAssistantReply(chatService, deviceId, fullReply);
-            const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
-            stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
           } else {
             // Non-stream fallback: bridge plain reply into SSE so sendMessageStream()
             // always receives event: chunk + event: done regardless of provider capability.
@@ -217,7 +234,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
           }
         } catch {
-          stream.write(`event: error\ndata: ${JSON.stringify({ message: "Stream interrupted" })}\n\n`);
+          try {
+            await finalizeAssistantReply(chatService, deviceId, UNIFIED_FALLBACK);
+          } catch {
+            // If history persistence also fails, still close the stream with done.
+          }
+          stream.write(`event: done\ndata: ${JSON.stringify({ didLogMeal: false })}\n\n`);
         } finally {
           stream.end();
         }
