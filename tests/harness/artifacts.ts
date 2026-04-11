@@ -8,7 +8,7 @@
  * Redaction rules (applied recursively to the full artifact graph):
  *   - `x-device-id` header values  → "[REDACTED]"
  *   - `deviceId=<value>` URL query params  → "deviceId=[REDACTED]"
- *   - Absolute paths containing `/uploads/`  → "[REDACTED_PATH]"
+ *   - Paths containing `/uploads/`  → "[REDACTED_PATH]"
  *   - Object keys named `deviceId` or `x-device-id`  → "[REDACTED]"
  */
 
@@ -59,8 +59,8 @@ export function redact(value: unknown): unknown {
 }
 
 function redactString(s: string): string {
-  // Redact absolute upload paths like /abs/path/server/uploads/filename.jpg
-  if (/\/uploads\//.test(s) && path.isAbsolute(s)) {
+  // Redact any path referencing the uploads directory (absolute or relative)
+  if (/\/uploads\//.test(s)) {
     return REDACTED_PATH;
   }
   // Redact deviceId= query parameter values in URLs

@@ -109,7 +109,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         await writeFile(storedPath, buffer);
         image = {
           dataUri: `data:${part.mimetype};base64,${buffer.toString("base64")}`,
-          path: `server/uploads/${filename}`,
+          path: storedPath,
         };
       }
     }
