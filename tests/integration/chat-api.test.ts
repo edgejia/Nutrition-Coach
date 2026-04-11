@@ -217,7 +217,7 @@ describe("Chat API", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.didLogMeal, true, "meal was persisted; didLogMeal must survive LLM failure");
-    assert.equal(body.reply, "抱歉，目前無法處理您的請求，請稍後再試。");
+    assert.equal(body.reply, "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。");
     assert.deepEqual(body.dailySummary, {
       totalCalories: 90,
       totalProtein: 1,

@@ -188,6 +188,14 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           }
         } catch (err) {
           deps.logger?.error(`LLM chat failed for device ${deviceId}:`, err);
+          if (didLogMeal) {
+            const partialFallback = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
+            return {
+              reply: partialFallback,
+              didLogMeal: true,
+              dailySummary: requireDailySummaryForLoggedMeal(logMealSummary),
+            };
+          }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
           return { reply: errorMsg, didLogMeal, dailySummary: logMealSummary };
         }
