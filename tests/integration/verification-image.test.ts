@@ -95,3 +95,27 @@ test("image-log cleanup snapshot reports zero residual files", async () => {
     "expected directoryRemoved: true in cleanup evidence",
   );
 });
+
+test("runScenarioByName(\"image-log-failure\") succeeds with all three sub-scenarios", async () => {
+  const result: ScenarioResult = await runScenarioByName("image-log-failure");
+  assert.equal(result.ok, true, result.consoleSummary);
+});
+
+test("image-log-failure artifacts show sub_a_analysis_fail evidence", async () => {
+  const result: ScenarioResult = await runScenarioByName("image-log-failure");
+  assert.ok(result.artifacts.sub_a_analysis_fail, "expected sub_a_analysis_fail artifact");
+});
+
+test("image-log-failure artifacts show sub_c_reply_fail with mealKept true", async () => {
+  const result: ScenarioResult = await runScenarioByName("image-log-failure");
+  const subC = result.artifacts.sub_c_reply_fail as {
+    donePayload?: { didLogMeal?: boolean; dailySummary?: unknown };
+    fallbackContent?: string;
+    mealKept?: boolean;
+  } | undefined;
+  assert.ok(subC, "expected sub_c_reply_fail artifact");
+  assert.equal(subC.donePayload?.didLogMeal, true, "D-09: done.didLogMeal must remain true");
+  assert.ok(subC.donePayload?.dailySummary, "D-09: dailySummary must be preserved");
+  assert.match(subC.fallbackContent ?? "", /已完成記錄，但回覆生成失敗/);
+  assert.equal(subC.mealKept, true, "D-09: meal must be kept when log_food succeeded before reply failed");
+});
