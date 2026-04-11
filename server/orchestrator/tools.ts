@@ -72,8 +72,17 @@ export async function executeTool(
   deviceId: string,
   deps: ToolDeps
 ): Promise<ToolExecutionResult> {
-  const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
   const name = toolCall.function.name;
+  let args: Record<string, unknown>;
+
+  try {
+    args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+  } catch (err) {
+    if (name === "log_food") {
+      throw new FatalToolError("Invalid log_food arguments", { cause: err });
+    }
+    throw err;
+  }
 
   if (name === "log_food") {
     const foodName = String(args.food_name ?? "");
@@ -82,7 +91,7 @@ export async function executeTool(
     const carbs = Number(args.carbs);
     const fat = Number(args.fat);
     if (!foodName || ![calories, protein, carbs, fat].every(Number.isFinite)) {
-      throw new Error("Invalid log_food arguments");
+      throw new FatalToolError("Invalid log_food arguments");
     }
 
     // Main-path contract: the meal must be persisted AND the fresh daily summary
