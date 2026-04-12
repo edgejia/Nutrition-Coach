@@ -67,6 +67,10 @@ export function isFatalToolError(error: unknown): error is FatalToolError {
   return error instanceof FatalToolError;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export async function executeTool(
   toolCall: ToolCall,
   deviceId: string,
@@ -85,19 +89,27 @@ export async function executeTool(
   }
 
   if (name === "log_food") {
-    const foodName = String(args.food_name ?? "");
-    const calories = Number(args.calories);
-    const protein = Number(args.protein);
-    const carbs = Number(args.carbs);
-    const fat = Number(args.fat);
-    if (!foodName || ![calories, protein, carbs, fat].every(Number.isFinite)) {
+    const foodName = args.food_name;
+    const calories = args.calories;
+    const protein = args.protein;
+    const carbs = args.carbs;
+    const fat = args.fat;
+    if (
+      typeof foodName !== "string" ||
+      foodName.trim() === "" ||
+      !isFiniteNumber(calories) ||
+      !isFiniteNumber(protein) ||
+      !isFiniteNumber(carbs) ||
+      !isFiniteNumber(fat)
+    ) {
       throw new FatalToolError("Invalid log_food arguments");
     }
+    const normalizedFoodName = foodName.trim();
 
     // Main-path contract: the meal must be persisted AND the fresh daily summary
     // must be computed before log_food is treated as a successful logged meal.
     await deps.foodLoggingService.logFood(deviceId, {
-      foodName,
+      foodName: normalizedFoodName,
       calories,
       protein,
       carbs,
@@ -124,7 +136,7 @@ export async function executeTool(
       summary: "成功",
       dailySummary,
       loggedMeal: {
-        foodName,
+        foodName: normalizedFoodName,
         calories,
         protein,
         carbs,

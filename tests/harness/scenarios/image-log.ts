@@ -37,13 +37,14 @@ const SCENARIO_UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log", "
 // ---------------------------------------------------------------------------
 
 /** Minimal valid JPEG bytes (JFIF header + EOI marker). */
-function makeJpegBytes(): Uint8Array {
-  return new Uint8Array([
+function makeJpegBytes(): ArrayBuffer {
+  const bytes = new Uint8Array([
     0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
     0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
     ...new Array(50).fill(0x00),
     0xFF, 0xD9,
   ]);
+  return bytes.buffer as ArrayBuffer;
 }
 
 function stepOk(name: string, actual?: unknown): ScenarioStepResult {

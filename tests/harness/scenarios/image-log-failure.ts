@@ -20,13 +20,14 @@ const UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log-failure", "u
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 
-function makeJpegBytes(): Uint8Array {
-  return new Uint8Array([
+function makeJpegBytes(): ArrayBuffer {
+  const bytes = new Uint8Array([
     0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
     0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
     ...new Array(50).fill(0x00),
     0xFF, 0xD9,
   ]);
+  return bytes.buffer as ArrayBuffer;
 }
 
 function stepOk(name: string, actual?: unknown): ScenarioStepResult {

@@ -651,7 +651,13 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat treats invalid log_food required fields as fatal and writes unified route fallback", async () => {
     mockLLM.queueRoundResponse({
-      toolCalls: [createLogFoodToolCallWithArguments(JSON.stringify({ food_name: "", calories: "nope" }))],
+      toolCalls: [createLogFoodToolCallWithArguments(JSON.stringify({
+        food_name: {},
+        calories: null,
+        protein: "",
+        carbs: null,
+        fat: null,
+      }))],
     });
 
     const form = new FormData();
@@ -681,7 +687,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "invalid log_food fields must write exactly one route fallback");
       assert.match(assistantMsgs[0]!.content, /這次無法完成請求/);
-      assert.doesNotMatch(assistantMsgs[0]!.content, /log_food|FatalToolError|nope/);
+      assert.doesNotMatch(assistantMsgs[0]!.content, /log_food|FatalToolError|object|null/);
     } finally {
       clearTimeout(timeout);
     }
