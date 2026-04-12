@@ -1,17 +1,20 @@
 import { PassThrough } from "node:stream";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import type { createOrchestrator } from "../orchestrator/index.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
+import type { RealtimePublisher } from "../realtime/publisher.js";
+import type { DailySummary } from "../services/summary.js";
 import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
   chatService: ReturnType<typeof createChatService>;
   deviceService: ReturnType<typeof createDeviceService>;
+  publisher: RealtimePublisher;
   /**
    * Override the upload storage directory. When undefined the route falls back
    * to the default `server/uploads/` path (production behaviour unchanged).
@@ -76,7 +79,7 @@ function createStreamingSanitizer() {
 }
 
 export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
-  const { orchestrator, chatService, deviceService, uploadsDir: injectedUploadsDir } = deps;
+  const { orchestrator, chatService, deviceService, publisher, uploadsDir: injectedUploadsDir } = deps;
 
   app.post("/api/chat", async (request, reply) => {
     const deviceId = request.headers["x-device-id"] as string;
@@ -151,6 +154,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             fullReply += token;
           }
           const sanitized = await finalizeAssistantReply(chatService, deviceId, fullReply);
+          // D-03/C6: JSON path publish boundary — immediately before reply.send().
+          // C1: try/catch ensures publish failure never changes the HTTP response or status code.
+          if (didLogMeal && dailySummary) {
+            try {
+              publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
+            } catch (publishErr) {
+              console.warn("[chat JSON] publishDailySummary failed (non-fatal):", publishErr);
+            }
+          }
           return didLogMeal
             ? { reply: sanitized, didLogMeal, dailySummary }
             : { reply: sanitized, didLogMeal };
@@ -158,12 +170,30 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
         const { reply: replyText, didLogMeal, dailySummary } = result;
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
+        // D-03/C6: JSON path publish boundary — immediately before reply.send().
+        // C1: try/catch ensures publish failure never changes the HTTP response or status code.
+        if (didLogMeal && dailySummary) {
+          try {
+            publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
+          } catch (publishErr) {
+            console.warn("[chat JSON] publishDailySummary failed (non-fatal):", publishErr);
+          }
+        }
         return didLogMeal
           ? { reply: sanitizedJson, didLogMeal, dailySummary }
           : { reply: sanitizedJson, didLogMeal };
       } catch {
         const fallback = jsonDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);
+        // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
+        // C1: try/catch ensures publish failure never changes the HTTP response or status code.
+        if (jsonDidLogMeal && jsonDailySummary) {
+          try {
+            publisher.publishDailySummary(deviceId, jsonDailySummary as DailySummary);
+          } catch (publishErr) {
+            console.warn("[chat JSON] publishDailySummary failed (non-fatal):", publishErr);
+          }
+        }
         return jsonDidLogMeal
           ? { reply: sanitizedJson, didLogMeal: true, ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}) }
           : { reply: sanitizedJson, didLogMeal: false };
@@ -241,6 +271,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
               stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
               const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
               stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+              // D-03: publishDailySummary fires AFTER done is written to the client stream.
+              // C1: try/catch ensures publish failure never alters SSE outcome or stream state.
+              if (streamDidLogMeal && streamDailySummary) {
+                try {
+                  publisher.publishDailySummary(deviceId, streamDailySummary as DailySummary);
+                } catch (publishErr) {
+                  console.warn("[chat SSE] publishDailySummary failed (non-fatal):", publishErr);
+                }
+              }
             } else {
               for (const heldToken of heldTokens) {
                 fullReply += heldToken;
@@ -256,15 +295,35 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
               await finalizeAssistantReply(chatService, deviceId, fullReply);
               const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
               stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+              // D-03: publishDailySummary fires AFTER done is written to the client stream.
+              // C1: try/catch ensures publish failure never alters SSE outcome or stream state.
+              if (streamDidLogMeal && streamDailySummary) {
+                try {
+                  publisher.publishDailySummary(deviceId, streamDailySummary as DailySummary);
+                } catch (publishErr) {
+                  console.warn("[chat SSE] publishDailySummary failed (non-fatal):", publishErr);
+                }
+              }
             }
           } else {
             // Non-stream fallback: bridge plain reply into SSE so sendMessageStream()
             // always receives event: chunk + event: done regardless of provider capability.
             const { reply: replyText, didLogMeal, dailySummary } = result;
+            streamDidLogMeal = didLogMeal;
+            streamDailySummary = dailySummary;
             const sanitizedFallback = await finalizeAssistantReply(chatService, deviceId, replyText);
             stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
             const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
             stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+            // D-03: publishDailySummary fires AFTER done is written to the client stream.
+            // C1: try/catch ensures publish failure never alters SSE outcome or stream state.
+            if (didLogMeal && dailySummary) {
+              try {
+                publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
+              } catch (publishErr) {
+                console.warn("[chat SSE] publishDailySummary failed (non-fatal):", publishErr);
+              }
+            }
           }
         } catch {
           const fallback = streamDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
@@ -277,6 +336,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ? { didLogMeal: true, ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}) }
             : { didLogMeal: false };
           stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+          // D-03: publishDailySummary fires AFTER done is written to the client stream.
+          // C1: try/catch ensures publish failure never alters SSE outcome or stream state.
+          if (streamDidLogMeal && streamDailySummary) {
+            try {
+              publisher.publishDailySummary(deviceId, streamDailySummary as DailySummary);
+            } catch (publishErr) {
+              console.warn("[chat SSE] publishDailySummary failed (non-fatal):", publishErr);
+            }
+          }
         } finally {
           stream.end();
         }

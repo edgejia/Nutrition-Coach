@@ -1,7 +1,6 @@
 import type { ToolDefinition, ToolCall } from "../llm/types.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
-import type { RealtimePublisher } from "../realtime/publisher.js";
 import type { Logger } from "./index.js";
 import { currentAppDate } from "../lib/time.js";
 
@@ -37,7 +36,6 @@ export const toolDefinitions: ToolDefinition[] = [
 export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
-  publisher: RealtimePublisher;
   imagePath?: string;
   logger?: Logger;
 }
@@ -123,12 +121,6 @@ export async function executeTool(
     } catch (err) {
       const message = err instanceof Error ? err.message : "log_food dailySummary recomputation failed";
       throw new FatalToolError(message, { cause: err });
-    }
-
-    try {
-      deps.publisher.publishDailySummary(deviceId, dailySummary);
-    } catch (err) {
-      deps.logger?.warn("log_food dailySummary publish failed after contract success:", err);
     }
 
     return {

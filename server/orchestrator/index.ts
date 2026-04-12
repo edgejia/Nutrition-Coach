@@ -3,7 +3,6 @@ import type { createChatService } from "../services/chat.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService } from "../services/device.js";
-import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { toolDefinitions, executeTool, isFatalToolError } from "./tools.js";
@@ -21,7 +20,6 @@ interface OrchestratorDeps {
   summaryService: ReturnType<typeof createSummaryService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   deviceService: ReturnType<typeof createDeviceService>;
-  publisher: RealtimePublisher;
   logger?: Logger;
 }
 
@@ -220,7 +218,6 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               const { result, summary, dailySummary, loggedMeal: toolLoggedMeal } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
-                publisher: deps.publisher,
                 imagePath,
                 logger: deps.logger,
               });
