@@ -308,6 +308,7 @@ describe("chat-streaming", () => {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
       const res = await fetch(`${address}/api/chat`, {
@@ -319,13 +320,15 @@ describe("chat-streaming", () => {
 
       assert.ok(res.body);
 
-      const reader = res.body.getReader();
+      reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
 
       assert.match(text, /event: status/);
       assert.match(text, /分析圖片中/);
     } finally {
       clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
     }
   });
 
@@ -338,6 +341,7 @@ describe("chat-streaming", () => {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
       const res = await fetch(`${address}/api/chat`, {
@@ -375,6 +379,7 @@ describe("chat-streaming", () => {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
       const res = await fetch(`${address}/api/chat`, {
@@ -385,7 +390,7 @@ describe("chat-streaming", () => {
       });
 
       assert.ok(res.body);
-      const reader = res.body.getReader();
+      reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
 
       // status event must appear before the first chunk
@@ -396,6 +401,8 @@ describe("chat-streaming", () => {
       assert.ok(statusPos < chunkPos, "分析圖片中 must appear before first event: chunk");
     } finally {
       clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
     }
   });
 

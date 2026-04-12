@@ -6,6 +6,50 @@ import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
 
+interface SSEEvent {
+  event: string;
+  data: string;
+}
+
+function parseSSEEvents(raw: string): SSEEvent[] {
+  return raw
+    .split("\n\n")
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const lines = block.split("\n");
+      return {
+        event: lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) ?? "",
+        data: lines.find((line) => line.startsWith("data: "))?.slice("data: ".length) ?? "",
+      };
+    });
+}
+
+async function readUntilEventCount(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  targetEvent: string,
+  targetCount: number,
+  maxReads = 80,
+): Promise<{ raw: string; observedAt: number }> {
+  const decoder = new TextDecoder();
+  let raw = "";
+
+  for (let i = 0; i < maxReads; i += 1) {
+    const chunk = await reader.read();
+    if (chunk.value) {
+      raw += decoder.decode(chunk.value, { stream: !chunk.done });
+    }
+    if (parseSSEEvents(raw).filter((frame) => frame.event === targetEvent).length >= targetCount) {
+      return { raw, observedAt: Date.now() };
+    }
+    if (chunk.done) {
+      break;
+    }
+  }
+
+  throw new Error(`Expected ${targetCount} ${targetEvent} event(s), got ${parseSSEEvents(raw).filter((frame) => frame.event === targetEvent).length}`);
+}
+
 describe("Chat API", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
@@ -393,5 +437,207 @@ describe("Chat API", () => {
     const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
     assert.equal(assistantMsgs.length, 1, "JSON fallback must persist exactly one assistant reply");
     assert.match(assistantMsgs[0]!.content, /這次無法完成請求/);
+  });
+
+  it("SSE path: done payload has didLogMeal:true and exactly one assistant message when LLM fails after log_food", async () => {
+    // D-04 SSE branch: log_food persists meal, then final reply generation throws.
+    // Invariant: done has didLogMeal:true and history has exactly one assistant message.
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_sse_fail",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "燕麥粥", calories: 150, protein: 5, carbs: 27, fat: 2.5 }),
+        },
+      }],
+    });
+    mockLLM.queueChatError(new Error("stream generation failed"));
+
+    const form = new FormData();
+    form.append("message", "我吃了燕麥粥");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, Accept: "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      assert.ok(res.body);
+
+      reader = res.body.getReader();
+      const { raw } = await readUntilEventCount(reader, "done", 1);
+      const doneEvent = parseSSEEvents(raw).find((frame) => frame.event === "done");
+      assert.ok(doneEvent, "SSE stream must emit event: done");
+
+      const donePayload = JSON.parse(doneEvent.data) as {
+        didLogMeal: boolean;
+        dailySummary?: { mealCount: number; totalCalories: number };
+      };
+      assert.equal(donePayload.didLogMeal, true, "meal was persisted before LLM failure");
+      assert.equal(donePayload.dailySummary?.mealCount, 1);
+      assert.equal(donePayload.dailySummary?.totalCalories, 150);
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+    }
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { "x-device-id": deviceId },
+    });
+    assert.equal(historyRes.status, 200);
+
+    const historyBody = await historyRes.json() as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const assistantMsgs = historyBody.messages.filter((message) => message.role === "assistant");
+    assert.equal(assistantMsgs.length, 1);
+    assert.match(assistantMsgs[0]?.content ?? "", /已完成記錄，但回覆生成失敗/);
+  });
+
+  it("JSON path: exactly one assistant message in history when orchestrator throws after log_food (D-04 JSON branch)", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_json_fail",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "地瓜", calories: 180, protein: 2, carbs: 41, fat: 0.2 }),
+        },
+      }],
+    });
+    mockLLM.queueChatError(new Error("json generation failed"));
+
+    const form = new FormData();
+    form.append("message", "我吃了地瓜");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { didLogMeal: boolean; dailySummary?: { mealCount: number } };
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.dailySummary?.mealCount, 1);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { "x-device-id": deviceId },
+    });
+    assert.equal(historyRes.status, 200);
+
+    const historyBody = await historyRes.json() as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const assistantMsgs = historyBody.messages.filter((message) => message.role === "assistant");
+    assert.equal(assistantMsgs.length, 1);
+    assert.match(assistantMsgs[0]?.content ?? "", /已完成記錄，但回覆生成失敗/);
+  });
+
+  it("D-03: daily_summary SSE push arrives on /api/sse AFTER done event is emitted on chat stream", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_order",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "優格", calories: 120, protein: 8, carbs: 15, fat: 3 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已記錄優格！" });
+
+    const sseController = new AbortController();
+    const timeout = setTimeout(() => sseController.abort(), 5000);
+    let sseReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let chatReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+        signal: sseController.signal,
+      });
+      assert.equal(sseRes.status, 200);
+      assert.ok(sseRes.body);
+      sseReader = sseRes.body.getReader();
+
+      await readUntilEventCount(sseReader, "daily_summary", 1);
+      const dailySummaryPromise = readUntilEventCount(sseReader, "daily_summary", 1);
+
+      const form = new FormData();
+      form.append("message", "我吃了優格");
+
+      const chatRes = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, Accept: "text/event-stream" },
+        body: form,
+      });
+      assert.equal(chatRes.status, 200);
+      assert.ok(chatRes.body);
+
+      chatReader = chatRes.body.getReader();
+      const chatDoneEvent = await readUntilEventCount(chatReader, "done", 1);
+      const dailySummaryEvent = await dailySummaryPromise;
+
+      assert.ok(
+        dailySummaryEvent.observedAt >= chatDoneEvent.observedAt,
+        `daily_summary observed at ${dailySummaryEvent.observedAt}, before chat done at ${chatDoneEvent.observedAt}`,
+      );
+
+      const doneFrame = parseSSEEvents(chatDoneEvent.raw).find((frame) => frame.event === "done");
+      assert.ok(doneFrame);
+      const donePayload = JSON.parse(doneFrame.data) as { didLogMeal: boolean; dailySummary?: { mealCount: number } };
+      assert.equal(donePayload.didLogMeal, true);
+      assert.equal(donePayload.dailySummary?.mealCount, 1);
+    } finally {
+      clearTimeout(timeout);
+      await chatReader?.cancel().catch(() => {});
+      await sseReader?.cancel().catch(() => {});
+      sseController.abort();
+    }
+  });
+
+  it("POST /api/chat JSON body returns 401 when x-device-id header is missing", async () => {
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "test" }),
+    });
+
+    assert.equal(res.status, 401);
+  });
+
+  it("POST /api/chat multipart returns 401 when x-device-id header is missing", async () => {
+    const form = new FormData();
+    form.append("message", "test");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      body: form,
+    });
+
+    assert.equal(res.status, 401);
+  });
+
+  it("GET /api/chat/history returns 401 with invalid (non-existent) device id", async () => {
+    const res = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { "x-device-id": "non-existent-id" },
+    });
+
+    assert.equal(res.status, 401);
+  });
+
+  it("GET /api/sse returns 401 with invalid device id via query param", async () => {
+    const res = await fetch(`${address}/api/sse?deviceId=non-existent-id`);
+
+    assert.equal(res.status, 401);
   });
 });
