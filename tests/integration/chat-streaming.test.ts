@@ -508,6 +508,7 @@ describe("chat-streaming", () => {
       const reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
 
+      assert.doesNotMatch(text, /方式1 直接依照片估算記錄/);
       assert.doesNotMatch(text, /方式2 請補充份量後再記錄/);
       assert.match(text, /無法辨識這次的請求/);
 

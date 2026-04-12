@@ -194,6 +194,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             const sanitizer = createStreamingSanitizer();
             let fullReply = "";
             let hallucAccum = "";
+            const heldTokens: string[] = [];
+            let holdingChoicePrompt = false;
             let hallucinationDetected = false;
 
             for await (const token of streamGenerator) {
@@ -201,6 +203,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
               if (CHOICE_PROMPT_PATTERN.test(hallucAccum)) {
                 hallucinationDetected = true;
                 break;
+              }
+              if (holdingChoicePrompt || /方式\s*[12]/.test(hallucAccum)) {
+                holdingChoicePrompt = true;
+                heldTokens.push(token);
+                continue;
               }
               fullReply += token;
               const sanitizedChunk = sanitizer.push(token);
@@ -216,6 +223,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
               const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
               stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
             } else {
+              for (const heldToken of heldTokens) {
+                fullReply += heldToken;
+                const sanitizedChunk = sanitizer.push(heldToken);
+                if (sanitizedChunk) {
+                  stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+                }
+              }
               const finalChunk = sanitizer.flush();
               if (finalChunk) {
                 stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
