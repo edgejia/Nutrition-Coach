@@ -23,6 +23,7 @@ interface Deps {
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const SENSITIVE_IDENTIFIERS = ["log_food", "get_daily_summary"];
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
+const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
@@ -129,31 +130,44 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const wantsSSE = acceptHeader.includes("text/event-stream");
 
     if (!wantsSSE) {
-      // JSON path: existing non-SSE callers remain intact
-      const result = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
+      let jsonDidLogMeal = false;
+      let jsonDailySummary: unknown;
 
-      if (result.didLogMeal && !result.dailySummary) {
-        throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
-      }
+      try {
+        // JSON path: existing non-SSE callers remain intact
+        const result = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
+        jsonDidLogMeal = result.didLogMeal;
+        jsonDailySummary = result.dailySummary;
 
-      if ("streamGenerator" in result) {
-        // Non-SSE caller received a stream result — drain and return as JSON
-        const { streamGenerator, didLogMeal, dailySummary } = result;
-        let fullReply = "";
-        for await (const token of streamGenerator) {
-          fullReply += token;
+        if (result.didLogMeal && !result.dailySummary) {
+          throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
         }
-        const sanitized = await finalizeAssistantReply(chatService, deviceId, fullReply);
-        return didLogMeal
-          ? { reply: sanitized, didLogMeal, dailySummary }
-          : { reply: sanitized, didLogMeal };
-      }
 
-      const { reply: replyText, didLogMeal, dailySummary } = result;
-      const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
-      return didLogMeal
-        ? { reply: sanitizedJson, didLogMeal, dailySummary }
-        : { reply: sanitizedJson, didLogMeal };
+        if ("streamGenerator" in result) {
+          // Non-SSE caller received a stream result — drain and return as JSON
+          const { streamGenerator, didLogMeal, dailySummary } = result;
+          let fullReply = "";
+          for await (const token of streamGenerator) {
+            fullReply += token;
+          }
+          const sanitized = await finalizeAssistantReply(chatService, deviceId, fullReply);
+          return didLogMeal
+            ? { reply: sanitized, didLogMeal, dailySummary }
+            : { reply: sanitized, didLogMeal };
+        }
+
+        const { reply: replyText, didLogMeal, dailySummary } = result;
+        const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
+        return didLogMeal
+          ? { reply: sanitizedJson, didLogMeal, dailySummary }
+          : { reply: sanitizedJson, didLogMeal };
+      } catch {
+        const fallback = jsonDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
+        const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);
+        return jsonDidLogMeal
+          ? { reply: sanitizedJson, didLogMeal: true, ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}) }
+          : { reply: sanitizedJson, didLogMeal: false };
+      }
     }
 
     // SSE path: open stream BEFORE awaiting orchestrator so status labels are
@@ -168,6 +182,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
     setImmediate(() => {
       void (async () => {
+        let streamDidLogMeal = false;
+        let streamDailySummary: unknown;
+
         try {
           // D-03: emit 分析圖片中 immediately if an image is present — this fires
           // before orchestrator.handleMessage is awaited, covering the real wait.
@@ -191,6 +208,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
           if ("streamGenerator" in result) {
             const { streamGenerator, didLogMeal, dailySummary } = result;
+            streamDidLogMeal = didLogMeal;
+            streamDailySummary = dailySummary;
             const sanitizer = createStreamingSanitizer();
             let fullReply = "";
             let hallucAccum = "";
@@ -248,12 +267,16 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
           }
         } catch {
+          const fallback = streamDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
           try {
-            await finalizeAssistantReply(chatService, deviceId, UNIFIED_FALLBACK);
+            await finalizeAssistantReply(chatService, deviceId, fallback);
           } catch {
             // If history persistence also fails, still close the stream with done.
           }
-          stream.write(`event: done\ndata: ${JSON.stringify({ didLogMeal: false })}\n\n`);
+          const doneData = streamDidLogMeal
+            ? { didLogMeal: true, ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}) }
+            : { didLogMeal: false };
+          stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
         } finally {
           stream.end();
         }

@@ -65,6 +65,7 @@ const scenario: VerificationScenario = {
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
     let failedStep: string | undefined;
+    let uploadFilesBeforeCleanup: string[] = [];
 
     // Boot our own app instance with the scenario-local uploads directory so
     // uploads never land in `server/uploads/`.
@@ -284,21 +285,18 @@ const scenario: VerificationScenario = {
       artifacts.meals = { mealCount: mealsJson.meals.length, loggedMeal, d12_2_verified: true };
     } finally {
       await scenarioCtx.close();
+      try {
+        uploadFilesBeforeCleanup = await readdir(SCENARIO_UPLOADS_DIR);
+      } catch {
+        uploadFilesBeforeCleanup = [];
+      }
+      await rm(SCENARIO_UPLOADS_DIR, { recursive: true, force: true });
     }
 
     // ------------------------------------------------------------------
     // Step: cleanup_uploads
     // ------------------------------------------------------------------
-    let uploadFiles: string[] = [];
-    try {
-      uploadFiles = await readdir(SCENARIO_UPLOADS_DIR);
-    } catch {
-      uploadFiles = [];
-    }
-    artifacts.uploads_before_cleanup = { files: uploadFiles };
-
-    // Remove the temp directory entirely.
-    await rm(SCENARIO_UPLOADS_DIR, { recursive: true, force: true });
+    artifacts.uploads_before_cleanup = { files: uploadFilesBeforeCleanup };
 
     // Verify the directory is gone (no residual files).
     let residualFiles: string[] = [];
@@ -312,7 +310,7 @@ const scenario: VerificationScenario = {
     const cleanupOk = residualFiles.length === 0;
     const cleanupEvidence = {
       removedDir: SCENARIO_UPLOADS_DIR,
-      filesBeforeCleanup: uploadFiles.length,
+      filesBeforeCleanup: uploadFilesBeforeCleanup.length,
       residualFiles: residualFiles.length,
       directoryRemoved: cleanupOk,
     };

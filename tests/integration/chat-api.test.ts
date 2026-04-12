@@ -357,4 +357,41 @@ describe("Chat API", () => {
     assert.doesNotMatch(assistantMessages[0]?.content ?? "", /log_food/);
     assert.doesNotMatch(assistantMessages[0]?.content ?? "", /get_daily_summary/);
   });
+
+  it("POST /api/chat JSON path treats invalid log_food JSON as friendly fallback", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_bad_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: "{bad json",
+        },
+      }],
+    });
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { reply: string; didLogMeal: boolean; dailySummary?: unknown };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.match(body.reply, /這次無法完成請求/);
+    assert.doesNotMatch(body.reply, /log_food|FatalToolError|bad json/);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { "x-device-id": deviceId },
+    });
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+    assert.equal(assistantMsgs.length, 1, "JSON fallback must persist exactly one assistant reply");
+    assert.match(assistantMsgs[0]!.content, /這次無法完成請求/);
+  });
 });

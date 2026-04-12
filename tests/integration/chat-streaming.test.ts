@@ -24,6 +24,10 @@ class StreamingLLMProvider implements LLMProvider {
     this.roundQueue.push({ kind: "stream", streamGenerator: streamTokens(tokens) });
   }
 
+  queueChatStreamError(tokens: string[], error: Error) {
+    this.roundQueue.push({ kind: "stream", streamGenerator: streamTokensThenThrow(tokens, error) });
+  }
+
   queueRoundResponse(response: LLMResponse) {
     this.roundQueue.push({ kind: "response", response });
   }
@@ -62,6 +66,13 @@ async function* streamTokens(tokens: string[]): AsyncGenerator<string> {
   for (const token of tokens) {
     yield token;
   }
+}
+
+async function* streamTokensThenThrow(tokens: string[], error: Error): AsyncGenerator<string> {
+  for (const token of tokens) {
+    yield token;
+  }
+  throw error;
 }
 
 function createLogFoodToolCall(): ToolCall {
@@ -722,6 +733,46 @@ describe("chat-streaming", () => {
       });
       const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
       assert.ok(mealsJson.meals.some((m) => m.foodName === "蘋果"), "meal must be kept even when final reply fails");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat D-09: when streamed final reply throws after log_food, meal state is preserved", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+    mockLLM.queueChatStreamError(["已"], new Error("stream interrupted after log_food"));
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      const doneMatch = text.match(/event: done\s+data: (.+)/);
+      assert.ok(doneMatch);
+      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal?: boolean; dailySummary?: unknown };
+      assert.equal(donePayload.didLogMeal, true, "stream failure after log_food must preserve didLogMeal");
+      assert.ok(donePayload.dailySummary, "stream failure after log_food must preserve dailySummary");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+      assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
+      assert.match(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗/);
     } finally {
       clearTimeout(timeout);
     }
