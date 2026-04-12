@@ -4,7 +4,6 @@ import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createSummaryService } from "../../server/services/summary.js";
-import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import { executeTool } from "../../server/orchestrator/tools.js";
 import type { ToolCall } from "../../server/llm/types.js";
 
@@ -47,7 +46,6 @@ describe("executeTool - log_food dailySummary contract", () => {
       executeTool(logFoodCall, deviceId, {
         foodLoggingService,
         summaryService: throwingSummary,
-        publisher: new RealtimePublisher(),
       }),
       /summary computation failed/
     );
@@ -58,17 +56,10 @@ describe("executeTool - log_food dailySummary contract", () => {
     assert.equal(meals[0].foodName, "蘋果");
   });
 
-  it("returns the required dailySummary even when publisher.publishDailySummary throws", async () => {
-    const throwingPublisher = {
-      publishDailySummary: () => {
-        throw new Error("SSE publish failed");
-      },
-    } as unknown as RealtimePublisher;
-
+  it("returns the required dailySummary without publishing from the tool layer", async () => {
     const result = await executeTool(logFoodCall, deviceId, {
       foodLoggingService,
       summaryService,
-      publisher: throwingPublisher,
     });
 
     assert.equal(result.result, "食物已成功記錄");

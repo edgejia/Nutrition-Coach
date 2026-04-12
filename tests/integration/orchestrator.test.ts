@@ -6,7 +6,11 @@ import { createFoodLoggingService } from "../../server/services/food-logging.js"
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
-import { createOrchestrator } from "../../server/orchestrator/index.js";
+import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
+
+function assertReplyResult(result: OrchestratorResult): asserts result is Extract<OrchestratorResult, { reply: string }> {
+  assert.ok("reply" in result);
+}
 
 describe("Orchestrator", () => {
   let orchestrator: ReturnType<typeof createOrchestrator>;
@@ -37,6 +41,7 @@ describe("Orchestrator", () => {
   it("returns text reply when LLM responds with content", async () => {
     mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
     const result = await orchestrator.handleMessage(deviceId, "你好");
+    assertReplyResult(result);
     assert.equal(result.reply, "你好！我是你的營養教練。");
     assert.equal(result.didLogMeal, false);
   });
@@ -65,6 +70,7 @@ describe("Orchestrator", () => {
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
     const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    assertReplyResult(result);
     assert.equal(result.reply, "已幫你記錄蘋果！");
     assert.equal(result.didLogMeal, true);
     assert.deepEqual(result.dailySummary, {
@@ -109,6 +115,7 @@ describe("Orchestrator", () => {
       "data:image/png;base64,abc123",
       "server/uploads/meal.png"
     );
+    assertReplyResult(result);
     assert.equal(result.reply, "已先依照片做保守估算並完成記錄：沙拉，約 180 kcal。若你想更精準，我可以再依份量幫你調整。");
     assert.equal(result.didLogMeal, true);
 
@@ -137,6 +144,7 @@ describe("Orchestrator", () => {
       });
     }
     const result = await orchestrator.handleMessage(deviceId, "test");
+    assertReplyResult(result);
     assert.equal(result.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
     assert.equal(result.didLogMeal, false);
   });

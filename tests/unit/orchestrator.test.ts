@@ -7,7 +7,6 @@ import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, LLMProvider } from "../../server/llm/types.js";
-import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import { createOrchestrator } from "../../server/orchestrator/index.js";
 import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
 
@@ -102,7 +101,6 @@ describe("Orchestrator - didLogMeal", () => {
     const summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
-    const publisher = new RealtimePublisher();
     shouldFailSummary = false;
 
     orchestrator = createOrchestrator({
@@ -119,7 +117,6 @@ describe("Orchestrator - didLogMeal", () => {
       },
       foodLoggingService,
       deviceService,
-      publisher,
     });
 
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
@@ -303,7 +300,6 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
-    const publisher = new RealtimePublisher();
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
 
     orchestrator = createOrchestrator({
@@ -312,7 +308,6 @@ describe("Orchestrator - didLogMeal", () => {
       summaryService: localSummaryService,
       foodLoggingService: localFoodLoggingService,
       deviceService: localDeviceService,
-      publisher,
     });
 
     streamingLLM.queueChatResponse({
@@ -364,7 +359,6 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
-    const publisher = new RealtimePublisher();
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
 
     orchestrator = createOrchestrator({
@@ -373,7 +367,6 @@ describe("Orchestrator - didLogMeal", () => {
       summaryService: localSummaryService,
       foodLoggingService: localFoodLoggingService,
       deviceService: localDeviceService,
-      publisher,
     });
 
     streamingLLM.queueChatStream(["直接", "回覆"]);
