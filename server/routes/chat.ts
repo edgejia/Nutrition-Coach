@@ -197,6 +197,16 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         return jsonDidLogMeal
           ? { reply: sanitizedJson, didLogMeal: true, ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}) }
           : { reply: sanitizedJson, didLogMeal: false };
+      } finally {
+        // D-08: Delete upload file after processing completes (success or failure).
+        // try/catch so cleanup failure never propagates to the client response.
+        if (image?.path) {
+          try {
+            await unlink(image.path);
+          } catch (cleanupErr) {
+            console.warn("[chat JSON] Upload cleanup failed (non-fatal):", cleanupErr);
+          }
+        }
       }
     }
 
@@ -346,6 +356,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             }
           }
         } finally {
+          // D-08: Delete upload file after processing completes (success or failure).
+          // try/catch so cleanup failure never crashes the stream or changes its outcome.
+          if (image?.path) {
+            try {
+              await unlink(image.path);
+            } catch (cleanupErr) {
+              console.warn("[chat SSE] Upload cleanup failed (non-fatal):", cleanupErr);
+            }
+          }
           stream.end();
         }
       })();

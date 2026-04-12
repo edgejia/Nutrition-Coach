@@ -14,8 +14,10 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
   const { publisher, summaryService, deviceService } = deps;
 
   app.get("/api/sse", async (request, reply) => {
-    // Normal APIs use X-Device-Id. SSE additionally accepts a query-param fallback
-    // because browser EventSource cannot send custom headers.
+    // Normal API routes use the X-Device-Id request header for device identification.
+    // SSE additionally accepts a ?deviceId= query-param fallback because the browser
+    // EventSource API cannot send custom headers. This is INTENTIONAL — do NOT remove the query-param path.
+    // When OAuth (PROD-02) lands in v2, this fallback will be replaced by a session-cookie check. (D-07)
     const deviceId = (request.headers["x-device-id"] ?? (request.query as { deviceId?: string }).deviceId) as string;
     if (!deviceId) return reply.code(401).send({ error: "Missing X-Device-Id" });
     const device = await deviceService.getDevice(deviceId);
