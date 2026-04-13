@@ -12,3 +12,5 @@ server/uploads/*
 *.db-shm
 *.db-wal
 .DS_Store
+.playwright-cli/
+.claude/worktrees/
