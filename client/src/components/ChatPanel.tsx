@@ -275,7 +275,7 @@ export function ChatPanel() {
             onClick={() => {
               endRef.current?.scrollIntoView({ behavior: "smooth" });
             }}
-            className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full text-lg text-white transition-opacity duration-150"
+            className="absolute bottom-4 left-1/2 z-10 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full text-lg text-white transition-opacity duration-150"
             style={{
               background: "var(--orange)",
               boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
