@@ -245,27 +245,30 @@ export function ChatPanel() {
         </div>
       )}
 
-      <div ref={scrollContainerRef} className="relative flex-1 space-y-3 overflow-y-auto p-4">
-        {messages.map((m) => (
-          <MessageBubble
-            key={m.id}
-            message={m}
-            onOpenSummary={m.didLogMeal ? () => setActiveScreen("summary") : undefined}
-          />
-        ))}
-        {provisionalBubble && (
-          <MessageBubble
-            key={provisionalBubble.id}
-            message={{
-              id: provisionalBubble.id,
-              role: "assistant",
-              content: provisionalBubble.statusLabel || provisionalBubble.content,
-              createdAt: new Date().toISOString(),
-            }}
-            isProvisional={true}
-            isStatusLabel={provisionalBubble.statusLabel.length > 0}
-          />
-        )}
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollContainerRef} className="h-full space-y-3 overflow-y-auto p-4">
+          {messages.map((m) => (
+            <MessageBubble
+              key={m.id}
+              message={m}
+              onOpenSummary={m.didLogMeal ? () => setActiveScreen("summary") : undefined}
+            />
+          ))}
+          {provisionalBubble && (
+            <MessageBubble
+              key={provisionalBubble.id}
+              message={{
+                id: provisionalBubble.id,
+                role: "assistant",
+                content: provisionalBubble.statusLabel || provisionalBubble.content,
+                createdAt: new Date().toISOString(),
+              }}
+              isProvisional={true}
+              isStatusLabel={provisionalBubble.statusLabel.length > 0}
+            />
+          )}
+          <div ref={endRef} />
+        </div>
         {isScrolledUp && (messages.length > 0 || provisionalBubble !== null) && (
           <button
             type="button"
@@ -282,7 +285,6 @@ export function ChatPanel() {
             ↓
           </button>
         )}
-        <div ref={endRef} />
       </div>
 
       <div className="shrink-0 px-3 pb-safe" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
