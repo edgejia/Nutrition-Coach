@@ -13,24 +13,41 @@ export function MessageBubble(props: {
   const isUser = message.role === "user";
 
   if (isUser) {
+    const hasImage = Boolean(message.imagePreviewUrl);
+    const hasText = Boolean(message.content);
+    const isImageOnly = hasImage && !hasText;
+
+    if (isImageOnly) {
+      return (
+        <div className="flex justify-end">
+          <img
+            src={message.imagePreviewUrl}
+            alt="附圖"
+            className="max-w-[80%] rounded-2xl object-contain max-h-64"
+          />
+        </div>
+      );
+    }
+
+    // image+text OR text-only — both use orange gradient bubble
     return (
       <div className="flex justify-end">
         <div
-          className="max-w-[80%] rounded-3xl px-4 py-3 text-sm font-medium leading-relaxed text-white"
+          className="max-w-[80%] rounded-3xl px-4 py-3 text-sm font-normal leading-relaxed text-white"
           style={{
             background: "linear-gradient(135deg, #D45E22, #E8682A, #F07832)",
             borderBottomRightRadius: 6,
             boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
           }}
         >
-          {message.imagePreviewUrl && (
+          {hasImage && (
             <img
               src={message.imagePreviewUrl}
               alt="附圖"
-              className="mb-2 max-h-48 w-full rounded-xl object-cover"
+              className="mb-2 max-h-48 w-full rounded-xl object-contain"
             />
           )}
-          {message.content && <p className="whitespace-pre-wrap">{message.content}</p>}
+          {hasText && <p className="whitespace-pre-wrap">{message.content}</p>}
         </div>
       </div>
     );
