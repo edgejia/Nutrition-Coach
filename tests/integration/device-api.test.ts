@@ -103,4 +103,67 @@ describe("Device API", () => {
     });
     assert.equal(res.statusCode, 401);
   });
+
+  it("PUT /api/device/goals returns 400 for null body", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const { deviceId } = create.json();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: {
+        "x-device-id": deviceId,
+        "content-type": "application/json",
+      },
+      body: "null",
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.json().error);
+  });
+
+  it("PUT /api/device/goals returns 400 for array body", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const { deviceId } = create.json();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: {
+        "x-device-id": deviceId,
+        "content-type": "application/json",
+      },
+      body: "[1,2,3]",
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.json().error);
+  });
+
+  it("PUT /api/device/goals returns 400 for string body", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const { deviceId } = create.json();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: {
+        "x-device-id": deviceId,
+        "content-type": "application/json",
+      },
+      body: '"hello"',
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.json().error);
+  });
 });
