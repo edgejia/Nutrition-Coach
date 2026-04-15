@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { sendMessageStream, loadHistory } from "../api.js";
 import { MessageBubble } from "./MessageBubble.js";
@@ -24,6 +24,10 @@ export function ChatPanel() {
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
   const endRef = useRef<HTMLDivElement>(null);
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
+  const isFirstMount = useRef(true);
+  const isAtBottom = useRef(true);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
 
   const isChatLocked = sending;
 
@@ -152,9 +156,31 @@ export function ChatPanel() {
     };
   }, [deviceId, setMessages, clearDevice, setPendingHomeChatDraft]);
 
+  // Effect 1: scroll-on-message-update
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isFirstMount.current) {
+      endRef.current?.scrollIntoView({ behavior: "instant" });
+      isFirstMount.current = false;
+      return;
+    }
+    if (isAtBottom.current) {
+      endRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, provisionalBubble?.content]);
+
+  // Effect 2: scroll position tracker (runs once on mount)
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      isAtBottom.current = distanceFromBottom < 100;
+      setIsScrolledUp(distanceFromBottom >= 100);
+    };
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, []);
 
   function handleBackToHome() {
     if (sending) return;
@@ -219,7 +245,7 @@ export function ChatPanel() {
         </div>
       )}
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+      <div ref={scrollContainerRef} className="relative flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((m) => (
           <MessageBubble
             key={m.id}
@@ -239,6 +265,22 @@ export function ChatPanel() {
             isProvisional={true}
             isStatusLabel={provisionalBubble.statusLabel.length > 0}
           />
+        )}
+        {isScrolledUp && (messages.length > 0 || provisionalBubble !== null) && (
+          <button
+            type="button"
+            onClick={() => {
+              endRef.current?.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full text-lg text-white transition-opacity duration-150"
+            style={{
+              background: "var(--orange)",
+              boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
+            }}
+            aria-label="捲動到最新訊息"
+          >
+            ↓
+          </button>
         )}
         <div ref={endRef} />
       </div>
