@@ -1,4 +1,6 @@
 // server/lib/time.ts
+import { config } from "../config.js";
+
 export function formatLocalDate(date: Date): string {
   return [
     date.getFullYear(),
@@ -28,7 +30,7 @@ export function getLocalDayBounds(date: Date) {
  * Logs a warning if TZ is unset so operators notice misconfiguration early.
  */
 export function validateTimezone() {
-  if (!process.env.TZ) {
+  if (!config.tzWasProvided) {
     console.warn(
       "[nutrition-coach] WARNING: TZ env var is not set. " +
       "Day-boundary calculations default to the system timezone. " +

@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { LLMProvider, ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, ToolCall } from "./types.js";
+import { config } from "../config.js";
 
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
@@ -7,7 +8,7 @@ export class OpenAIProvider implements LLMProvider {
 
   constructor(client?: OpenAI) {
     this.client = client ?? new OpenAI();
-    this.model = process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5-nano";
+    this.model = config.orchestratorModel;
   }
 
   async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {

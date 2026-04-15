@@ -14,6 +14,7 @@ import { registerChatRoutes } from "./routes/chat.js";
 import { registerMealRoutes } from "./routes/meals.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import type { LLMProvider } from "./llm/types.js";
+import { config } from "./config.js";
 
 export interface AppOptions {
   dbPath?: string;
@@ -32,7 +33,7 @@ export async function buildApp(opts: AppOptions) {
   const { validateTimezone } = await import("./lib/time.js");
   validateTimezone();
 
-  const db = createDb(opts.dbPath ?? process.env.DB_PATH ?? "./data/nutrition.db");
+  const db = createDb(opts.dbPath ?? config.dbPath);
   const llmProvider = opts.llmProvider;
 
   const deviceService = createDeviceService(db);
