@@ -164,12 +164,15 @@ export function registerDeviceRoutes(app: FastifyInstance, { deviceService, targ
     const goals: Record<string, number> = {};
     for (const key of validKeys) {
       if (key in body) {
-        const val = Number(body[key]);
-        if (!Number.isFinite(val) || val < 0) {
-          return reply.code(400).send({ error: `Invalid value for ${key}` });
+        const raw = body[key];
+        if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
+          return reply.code(400).send({ error: `Invalid value for ${key}: must be a non-negative number` });
         }
-        goals[key] = val;
+        goals[key] = raw;
       }
+    }
+    if (Object.keys(goals).length === 0) {
+      return reply.code(400).send({ error: "Request must include at least one valid goal field (calories, protein, carbs, fat)" });
     }
     const dailyTargets = await deviceService.updateGoals(deviceId, goals);
     return { dailyTargets };

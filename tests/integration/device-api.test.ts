@@ -166,4 +166,76 @@ describe("Device API", () => {
     assert.equal(res.statusCode, 400);
     assert.ok(res.json().error);
   });
+
+  it("PUT /api/device/goals returns 400 for empty object body", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const { deviceId } = create.json();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { "x-device-id": deviceId },
+      payload: {},
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.json().error);
+  });
+
+  it("PUT /api/device/goals returns 400 for unknown-only keys", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const { deviceId } = create.json();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { "x-device-id": deviceId },
+      payload: { sodium: 1 },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.json().error);
+  });
+
+  it("PUT /api/device/goals returns 400 for string field value", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const { deviceId } = create.json();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { "x-device-id": deviceId },
+      payload: { protein: "150" },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.json().error);
+  });
+
+  it("PUT /api/device/goals returns 400 for null field value", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const { deviceId } = create.json();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { "x-device-id": deviceId },
+      payload: { protein: null },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.json().error);
+  });
 });
