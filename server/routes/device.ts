@@ -156,7 +156,10 @@ export function registerDeviceRoutes(app: FastifyInstance, { deviceService, targ
     const device = await deviceService.getDevice(deviceId);
     if (!device) return reply.code(401).send({ error: "Invalid device ID" });
 
-    const body = request.body as Record<string, unknown>;
+    const body = request.body;
+    if (!isRecord(body)) {
+      return reply.code(400).send({ error: "Invalid request body" });
+    }
     const validKeys = ["calories", "protein", "carbs", "fat"];
     const goals: Record<string, number> = {};
     for (const key of validKeys) {
