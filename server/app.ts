@@ -43,8 +43,10 @@ export async function buildApp(opts: AppOptions) {
   const db = createDb(opts.dbPath ?? config.dbPath);
   const llmProvider = opts.llmProvider;
 
+  const app = Fastify({ logger: opts.logger ?? false });
+
   const deviceService = createDeviceService(db);
-  const targetGenerationService = createTargetGenerationService(llmProvider);
+  const targetGenerationService = createTargetGenerationService(llmProvider, app.log);
   const foodLoggingService = createFoodLoggingService(db);
   const summaryService = createSummaryService(db);
   const chatService = createChatService(db);
@@ -57,8 +59,6 @@ export async function buildApp(opts: AppOptions) {
     foodLoggingService,
     deviceService,
   });
-
-  const app = Fastify({ logger: opts.logger ?? false });
   await app.register(cors);
   // Keep the parser limit above the product limit so the chat route can return a controlled 400 at 5MB.
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });

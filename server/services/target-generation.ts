@@ -1,5 +1,6 @@
 import type { LLMProvider, ChatMessage } from "../llm/types.js";
 import type { Goal, IntakeFields, DailyTargets } from "./device.js";
+import type { FastifyBaseLogger } from "fastify";
 import { getGoalDefaults } from "./device.js";
 
 interface TargetGenerationResult {
@@ -149,7 +150,7 @@ function getFallbackResult(goal: Goal): TargetGenerationResult {
   };
 }
 
-export function createTargetGenerationService(llmProvider: LLMProvider) {
+export function createTargetGenerationService(llmProvider: LLMProvider, log?: FastifyBaseLogger) {
   return {
     async generateTargets(goal: Goal, intake: IntakeFields): Promise<TargetGenerationResult> {
       const messages = buildMessages(goal, intake);
@@ -178,6 +179,7 @@ export function createTargetGenerationService(llmProvider: LLMProvider) {
         }
       }
 
+      log?.warn({ event: "target_gen_fallback", reason: "llm_attempts_exhausted" }, "Target generation fallback");
       return getFallbackResult(goal);
     },
   };
