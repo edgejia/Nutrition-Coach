@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
@@ -639,5 +640,135 @@ describe("Chat API", () => {
     const res = await fetch(`${address}/api/sse?deviceId=non-existent-id`);
 
     assert.equal(res.status, 401);
+  });
+
+  it("OBS-04: production logs contain no raw deviceId or meal text (text path)", async () => {
+    const logLines: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _, cb) {
+        // Split because pino may batch multiple newline-delimited records per write() call (Gap 2)
+        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+        cb();
+      },
+    });
+
+    const obs04LLM = new MockLLMProvider();
+    obs04LLM.queueChatResponse({ content: "測試回覆" });
+
+    const obs04App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: obs04LLM,
+      logger: { level: "info", stream: logStream },
+    });
+
+    const deviceRes = await obs04App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const obs04DeviceId = deviceRes.json().deviceId as string;
+    const obs04Address = await obs04App.listen({ port: 0 });
+
+    const form = new FormData();
+    form.append("message", "我吃了機密測試食物");
+    await fetch(`${obs04Address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": obs04DeviceId },
+      body: form,
+    });
+
+    await obs04App.close();
+
+    // Assert: no log line (after JSON.parse) contains raw deviceId or meal text
+    let parsedCount = 0;
+    for (const line of logLines) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue; // skip non-JSON lines (pino startup banners, etc.)
+      }
+      parsedCount++;
+      const serialized = JSON.stringify(parsed);
+      assert.ok(
+        !serialized.includes(obs04DeviceId),
+        `deviceId leaked in log line: ${line.slice(0, 300)}`,
+      );
+      assert.ok(
+        !serialized.includes("機密測試食物"),
+        `meal text leaked in log line: ${line.slice(0, 300)}`,
+      );
+    }
+    // Sanity: ensure we actually captured log lines (not zero — would mean stream wiring failed)
+    assert.ok(parsedCount > 0, `Expected at least 1 parsed log line, got ${parsedCount}. Total lines: ${logLines.length}`);
+  });
+
+  it("OBS-04: production logs contain no absolute upload path (image path)", async () => {
+    const logLines: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _, cb) {
+        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+        cb();
+      },
+    });
+
+    const obs04ImageLLM = new MockLLMProvider();
+    obs04ImageLLM.queueChatResponse({ content: "圖片已記錄" });
+
+    const obs04ImageApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: obs04ImageLLM,
+      logger: { level: "info", stream: logStream },
+    });
+
+    const deviceRes = await obs04ImageApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const obs04ImageDeviceId = deviceRes.json().deviceId as string;
+    const obs04ImageAddress = await obs04ImageApp.listen({ port: 0 });
+
+    // Create a minimal 1x1 JPEG in memory (smallest valid JPEG bytes)
+    const minimalJpeg = Buffer.from(
+      "ffd8ffe000104a46494600010100000100010000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b08000100010801ffC40014000100000000000000000000000000000007ffC40014100100000000000000000000000000000000ffda00080101000000013fcfffd9",
+      "hex"
+    );
+
+    const form = new FormData();
+    form.append("message", "這是測試圖片");
+    form.append("image", new Blob([minimalJpeg], { type: "image/jpeg" }), "test.jpg");
+
+    await fetch(`${obs04ImageAddress}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": obs04ImageDeviceId },
+      body: form,
+    });
+
+    await obs04ImageApp.close();
+
+    // Assert: no log line contains an absolute path to the upload directory
+    // Absolute upload paths look like /tmp/... or /var/folders/... or the OS temp dir
+    let parsedCount = 0;
+    for (const line of logLines) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      parsedCount++;
+      const serialized = JSON.stringify(parsed);
+      assert.ok(
+        !serialized.includes(obs04ImageDeviceId),
+        `deviceId leaked in image log line: ${line.slice(0, 300)}`,
+      );
+      // Check for common absolute path patterns that indicate upload path leakage
+      assert.ok(
+        !/\/tmp\/|\/var\/folders\/|\/private\/tmp\//.test(serialized),
+        `absolute upload path leaked in image log line: ${line.slice(0, 300)}`,
+      );
+    }
+    assert.ok(parsedCount > 0, `Expected at least 1 parsed log line for image path, got ${parsedCount}. Total lines: ${logLines.length}`);
   });
 });
