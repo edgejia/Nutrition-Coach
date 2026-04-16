@@ -26,6 +26,13 @@ export interface AppOptions {
    * upload residue from accumulating inside the repo.
    */
   uploadsDir?: string;
+  /**
+   * Optional Fastify logger configuration.
+   * When omitted: Fastify initializes with `logger: false` (silent — backward compatible with all existing tests).
+   * In production (server/index.ts): pass `{ level: 'info', redact: { paths: ['req.headers.authorization'], remove: true } }`.
+   * In OBS-04 tests: pass `{ level: 'info', stream: captureStream }` to capture log lines.
+   */
+  logger?: import("fastify").FastifyServerOptions["logger"];
 }
 
 export async function buildApp(opts: AppOptions) {
@@ -49,10 +56,9 @@ export async function buildApp(opts: AppOptions) {
     summaryService,
     foodLoggingService,
     deviceService,
-    logger: console,
   });
 
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: opts.logger ?? false });
   await app.register(cors);
   // Keep the parser limit above the product limit so the chat route can return a controlled 400 at 5MB.
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });

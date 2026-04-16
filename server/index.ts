@@ -6,6 +6,10 @@ const port = config.port;
 
 const app = await buildApp({
   llmProvider: new OpenAIProvider(),
+  logger: {
+    level: process.env.LOG_LEVEL ?? "info",
+    redact: { paths: ["req.headers.authorization"], remove: true },
+  },
 });
 
 await app.listen({ port, host: "0.0.0.0" });
