@@ -36,14 +36,14 @@ export interface AppOptions {
 }
 
 export async function buildApp(opts: AppOptions) {
-  // Warn early if TZ is misconfigured (day-boundary logic depends on it).
-  const { validateTimezone } = await import("./lib/time.js");
-  validateTimezone();
-
   const db = createDb(opts.dbPath ?? config.dbPath);
   const llmProvider = opts.llmProvider;
 
   const app = Fastify({ logger: opts.logger ?? false });
+
+  // Warn early if TZ is misconfigured (day-boundary logic depends on it).
+  const { validateTimezone } = await import("./lib/time.js");
+  validateTimezone(app.log);
 
   const deviceService = createDeviceService(db);
   const targetGenerationService = createTargetGenerationService(llmProvider, app.log);

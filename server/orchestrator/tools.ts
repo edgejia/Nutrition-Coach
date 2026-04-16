@@ -1,7 +1,6 @@
 import type { ToolDefinition, ToolCall } from "../llm/types.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
-import type { Logger } from "./index.js";
 import { currentAppDate } from "../lib/time.js";
 
 export const toolDefinitions: ToolDefinition[] = [
@@ -37,7 +36,6 @@ export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
   imagePath?: string;
-  logger?: Logger;
 }
 
 export interface ToolExecutionResult {

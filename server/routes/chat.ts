@@ -151,8 +151,9 @@ async function cleanupUploadSafe(imagePath: string | undefined, log: FastifyBase
     await unlink(imagePath);
     log.info({ event: "upload_cleanup_success" }, "Upload cleanup success");
   } catch (cleanupErr) {
+    const code = cleanupErr instanceof Error && "code" in cleanupErr ? (cleanupErr as NodeJS.ErrnoException).code : "UNKNOWN";
     log.warn(
-      { event: "upload_cleanup_failed", err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr) },
+      { event: "upload_cleanup_failed", code },
       "Upload cleanup failed (non-fatal)",
     );
   }

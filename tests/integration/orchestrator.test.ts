@@ -179,7 +179,9 @@ describe("Orchestrator", () => {
     assert.equal(spyHooks.onToolResult.mock.callCount(), 1, "onToolResult should fire once");
     assert.equal(spyHooks.onToolResult.mock.calls[0].arguments[0].success, true);
     assert.equal(spyHooks.onToolResult.mock.calls[0].arguments[0].executed, true);
-    assert.equal(spyHooks.onLLMEnd.mock.callCount(), 1, "onLLMEnd fires on final reply round only");
+    assert.equal(spyHooks.onLLMEnd.mock.callCount(), 2, "onLLMEnd should fire twice: tool-round (hadToolCalls=true) and content-round (hadToolCalls=false)");
+    assert.equal(spyHooks.onLLMEnd.mock.calls[0].arguments[1], true, "First onLLMEnd should have hadToolCalls=true");
+    assert.equal(spyHooks.onLLMEnd.mock.calls[1].arguments[1], false, "Second onLLMEnd should have hadToolCalls=false");
   });
 
   it("OBS-02: fires onFallback('max_rounds') after 3 rounds of only tool calls", async () => {

@@ -13,4 +13,4 @@ const app = await buildApp({
 });
 
 await app.listen({ port, host: "0.0.0.0" });
-console.log(`Server listening on http://localhost:${port}`);
+app.log.info({ port }, "Server listening");

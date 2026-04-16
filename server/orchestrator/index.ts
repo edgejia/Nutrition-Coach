@@ -266,6 +266,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             return { reply, didLogMeal, dailySummary: logMealSummary };
           }
           shouldStreamFinalReply = true;
+          // Complete the tool-round LLM lifecycle event
+          opts?.hooks?.onLLMEnd?.(round + 1, true);
         }
       }
 

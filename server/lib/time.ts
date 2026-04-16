@@ -29,12 +29,16 @@ export function getLocalDayBounds(date: Date) {
  * the process timezone matching the configured TZ env var (default: Asia/Taipei).
  * Logs a warning if TZ is unset so operators notice misconfiguration early.
  */
-export function validateTimezone() {
+export function validateTimezone(log?: any) {
   if (!config.tzWasProvided) {
-    console.warn(
+    const message =
       "[nutrition-coach] WARNING: TZ env var is not set. " +
       "Day-boundary calculations default to the system timezone. " +
-      "Set TZ=Asia/Taipei in .env for correct behaviour."
-    );
+      "Set TZ=Asia/Taipei in .env for correct behaviour.";
+    if (log?.warn) {
+      log.warn(message);
+    } else {
+      console.warn(message);
+    }
   }
 }
