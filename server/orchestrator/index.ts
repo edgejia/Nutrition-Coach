@@ -7,12 +7,9 @@ import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { toolDefinitions, executeTool, isFatalToolError } from "./tools.js";
 import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
-
-export interface Logger {
-  info: (msg: string, ...args: unknown[]) => void;
-  warn: (msg: string, ...args: unknown[]) => void;
-  error: (msg: string, ...args: unknown[]) => void;
-}
+import type { OrchestratorHooks } from "./hooks.js";
+import { config } from "../config.js";
+import { basename } from "node:path";
 
 interface OrchestratorDeps {
   llmProvider: LLMProvider;
@@ -20,7 +17,6 @@ interface OrchestratorDeps {
   summaryService: ReturnType<typeof createSummaryService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   deviceService: ReturnType<typeof createDeviceService>;
-  logger?: Logger;
 }
 
 const FALLBACK = "抱歉，我現在無法完成這個請求，請稍後再試。";
@@ -74,8 +70,28 @@ function detectHallucinatedChoiceFollowUp(
   return HALLUCINATED_CHOICE_RECOVERY_REPLY;
 }
 
+function redactToolArgs(toolName: string, rawArgs: string): string {
+  if (toolName === "log_food") {
+    try {
+      const args = JSON.parse(rawArgs) as Record<string, unknown>;
+      const cal = args.calories ?? "?";
+      const p = args.protein ?? "?";
+      const c = args.carbs ?? "?";
+      const f = args.fat ?? "?";
+      return `熱量 ${cal}kcal, P${p}g, C${c}g, F${f}g`;
+    } catch {
+      return "<log_food args>";
+    }
+  }
+  if (toolName === "get_daily_summary") {
+    return "<get_daily_summary args>";
+  }
+  return `<${toolName} args>`;
+}
+
 export interface HandleMessageOpts {
   onStatus?: (label: string) => void;
+  hooks?: OrchestratorHooks;  // injected per-call; per-request reqId binding via createStructuredHooks
 }
 
 export function createOrchestrator(deps: OrchestratorDeps) {
@@ -100,9 +116,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Save user message after loading history
       await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
-      deps.logger?.info(`[user] ${userMessage}${imageBase64 ? " [+image]" : ""}`);
       if (hallucinatedChoiceRecovery) {
-        deps.logger?.info(`[assistant] ${hallucinatedChoiceRecovery}`);
+        opts?.hooks?.onFallback?.("hallucination_detected");
         return { reply: hallucinatedChoiceRecovery, didLogMeal: false };
       }
       const systemMsg: ChatMessage = {
@@ -159,12 +174,13 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
       for (let round = 0; round < MAX_ROUNDS; round++) {
+        opts?.hooks?.onLLMStart?.(round + 1);
         let response;
         try {
           if (typeof llmProvider.chatRound === "function") {
             const roundResult = await llmProvider.chatRound(messages, toolDefinitions);
             if (roundResult.kind === "stream") {
-              deps.logger?.info("[assistant] streaming final reply");
+              opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
                 streamGenerator: roundResult.streamGenerator,
                 didLogMeal,
@@ -174,7 +190,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = roundResult.response;
           } else {
             if (shouldStreamFinalReply && typeof llmProvider.chatStream === "function") {
-              deps.logger?.info("[assistant] streaming final reply");
+              opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
                 streamGenerator: llmProvider.chatStream(messages, []),
                 didLogMeal,
@@ -185,7 +201,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = await llmProvider.chat(messages, toolDefinitions);
           }
         } catch (err) {
-          deps.logger?.error(`LLM chat failed for device ${deviceId}:`, err);
+          opts?.hooks?.onFallback?.(didLogMeal ? "partial_success" : "llm_error");
           if (didLogMeal) {
             const partialFallback = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
             return {
@@ -199,14 +215,11 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         }
 
         if (response.content !== undefined) {
-          deps.logger?.info(`[assistant] ${response.content}`);
+          opts?.hooks?.onLLMEnd?.(round + 1, false);
           return { reply: response.content, didLogMeal, dailySummary: logMealSummary };
         }
 
         if (response.toolCalls?.length) {
-          for (const tc of response.toolCalls) {
-            deps.logger?.info(`[tool_call] ${tc.function.name} ${tc.function.arguments}`);
-          }
           const toolResults: Array<{ toolCall: typeof response.toolCalls[number]; result: string }> = [];
           for (const toolCall of response.toolCalls) {
             try {
@@ -215,27 +228,31 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (toolCall.function.name === "log_food") {
                 opts?.onStatus?.("記錄餐點中...");
               }
+              const argsRedacted = config.debug
+                ? toolCall.function.arguments
+                : redactToolArgs(toolCall.function.name, toolCall.function.arguments);
+              opts?.hooks?.onToolReceived?.(toolCall.function.name, argsRedacted);
               const { result, summary, dailySummary, loggedMeal: toolLoggedMeal } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
                 imagePath,
-                logger: deps.logger,
               });
               if (toolCall.function.name === "log_food") {
                 didLogMeal = true;
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
                 loggedMeal = toolLoggedMeal;
               }
-              deps.logger?.info(`[tool_result] ${toolCall.function.name} → ${summary}`);
+              opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: true, executed: true, summary });
               await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
               toolResults.push({ toolCall, result });
             } catch (err) {
+              const errorStr = err instanceof Error ? err.message : "Tool execution failed";
               if (isFatalToolError(err)) {
+                // Validation failed before execution — emit executed:false BEFORE propagating
+                opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: false, executed: false, failureReason: errorStr });
                 throw err;
               }
-
-              const errorStr = err instanceof Error ? err.message : "Tool execution failed";
-              deps.logger?.error(`Tool ${toolCall.function.name} failed for device ${deviceId}: ${errorStr}`, err);
+              opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: false, executed: true, failureReason: errorStr });
               toolResults.push({ toolCall, result: `Error: ${errorStr}` });
             }
           }
@@ -245,7 +262,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           }
           if (didLogMeal && loggedMeal && isImageOnlyMessage(userMessage, imageBase64)) {
             const reply = buildImageLoggedReply(loggedMeal);
-            deps.logger?.info(`[assistant] ${reply}`);
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
             return { reply, didLogMeal, dailySummary: logMealSummary };
           }
           shouldStreamFinalReply = true;
@@ -253,6 +270,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       }
 
       // Fallback after MAX_ROUNDS
+      opts?.hooks?.onFallback?.("max_rounds");
       return { reply: FALLBACK, didLogMeal, dailySummary: logMealSummary };
     },
   };

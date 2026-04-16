@@ -7,6 +7,7 @@ import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
+import { createSpyHooks } from "../helpers/spy-hooks.js";
 
 function assertReplyResult(result: OrchestratorResult): asserts result is Extract<OrchestratorResult, { reply: string }> {
   assert.ok("reply" in result);
@@ -18,6 +19,7 @@ describe("Orchestrator", () => {
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let chatService: ReturnType<typeof createChatService>;
   let deviceId: string;
+  let spyHooks: ReturnType<typeof createSpyHooks>;
 
   beforeEach(async () => {
     const db = createDb(":memory:");
@@ -36,6 +38,7 @@ describe("Orchestrator", () => {
     });
 
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+    spyHooks = createSpyHooks(); // fresh mocks each test — never at module scope (Pitfall 6)
   });
 
   it("returns text reply when LLM responds with content", async () => {
@@ -147,5 +150,111 @@ describe("Orchestrator", () => {
     assertReplyResult(result);
     assert.equal(result.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
     assert.equal(result.didLogMeal, false);
+  });
+
+  it("OBS-01: fires onLLMStart and onLLMEnd for a single-round reply", async () => {
+    mockLLM.queueChatResponse({ content: "你好！" });
+    await orchestrator.handleMessage(deviceId, "你好", undefined, undefined, { hooks: spyHooks });
+    assert.equal(spyHooks.onLLMStart.mock.callCount(), 1, "onLLMStart should fire once");
+    assert.equal(spyHooks.onLLMStart.mock.calls[0].arguments[0], 1, "round should be 1 (1-indexed)");
+    assert.equal(spyHooks.onLLMEnd.mock.callCount(), 1, "onLLMEnd should fire once");
+    assert.equal(spyHooks.onLLMEnd.mock.calls[0].arguments[0], 1, "round should be 1");
+    assert.equal(spyHooks.onLLMEnd.mock.calls[0].arguments[1], false, "hadToolCalls should be false");
+    assert.equal(spyHooks.onFallback.mock.callCount(), 0, "onFallback should not fire");
+  });
+
+  it("OBS-01: fires onToolReceived and onToolResult during tool call round", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "c1",
+        type: "function",
+        function: { name: "get_daily_summary", arguments: "{}" },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今日攝取：熱量 500kcal" });
+    await orchestrator.handleMessage(deviceId, "查看今日攝取", undefined, undefined, { hooks: spyHooks });
+    assert.equal(spyHooks.onLLMStart.mock.callCount(), 2, "onLLMStart should fire for each round");
+    assert.equal(spyHooks.onToolReceived.mock.callCount(), 1, "onToolReceived should fire once");
+    assert.equal(spyHooks.onToolReceived.mock.calls[0].arguments[0], "get_daily_summary");
+    assert.equal(spyHooks.onToolResult.mock.callCount(), 1, "onToolResult should fire once");
+    assert.equal(spyHooks.onToolResult.mock.calls[0].arguments[0].success, true);
+    assert.equal(spyHooks.onToolResult.mock.calls[0].arguments[0].executed, true);
+    assert.equal(spyHooks.onLLMEnd.mock.callCount(), 1, "onLLMEnd fires on final reply round only");
+  });
+
+  it("OBS-02: fires onFallback('max_rounds') after 3 rounds of only tool calls", async () => {
+    for (let i = 0; i < 3; i++) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `c${i}`,
+          type: "function",
+          function: { name: "get_daily_summary", arguments: "{}" },
+        }],
+      });
+    }
+    await orchestrator.handleMessage(deviceId, "test", undefined, undefined, { hooks: spyHooks });
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1, "onFallback should fire exactly once");
+    assert.equal(spyHooks.onFallback.mock.calls[0].arguments[0], "max_rounds");
+  });
+
+  it("OBS-03: hook payloads contain no raw deviceId and no raw meal text", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "c1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 25, fat: 0.5 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已記錄" });
+    const mealText = "我吃了蘋果測試PII";
+    await orchestrator.handleMessage(deviceId, mealText, undefined, undefined, { hooks: spyHooks });
+
+    const allPayloads = JSON.stringify([
+      ...spyHooks.onLLMStart.mock.calls.map((c) => c.arguments),
+      ...spyHooks.onLLMEnd.mock.calls.map((c) => c.arguments),
+      ...spyHooks.onToolReceived.mock.calls.map((c) => c.arguments),
+      ...spyHooks.onToolResult.mock.calls.map((c) => c.arguments),
+      ...spyHooks.onFallback.mock.calls.map((c) => c.arguments),
+    ]);
+    assert.ok(!allPayloads.includes(deviceId), `deviceId must not appear in any hook payload. Got: ${allPayloads.slice(0, 200)}`);
+    assert.ok(!allPayloads.includes(mealText), `meal text must not appear in any hook payload. Got: ${allPayloads.slice(0, 200)}`);
+    // Verify redacted summary IS present (not absent — that would mean hooks didn't fire)
+    assert.equal(spyHooks.onToolReceived.mock.callCount(), 1, "onToolReceived should fire");
+    const argsRedacted = spyHooks.onToolReceived.mock.calls[0].arguments[1] as string;
+    assert.ok(argsRedacted.includes("kcal"), `argsRedacted should contain 'kcal' from redactToolArgs: ${argsRedacted}`);
+  });
+
+  it("HOOK-01: fires onToolResult with executed:false when validation fails (FatalToolError)", async () => {
+    // Queue a tool call with invalid log_food arguments (missing required numeric fields)
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "c1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "bad food" }), // missing calories, protein, carbs, fat
+        },
+      }],
+    });
+    // FatalToolError propagates — do NOT queue a second reply
+
+    // Assert that handleMessage REJECTS (error propagates)
+    await assert.rejects(
+      () => orchestrator.handleMessage(deviceId, "記錄一個壞食物", undefined, undefined, { hooks: spyHooks }),
+      (err: unknown) => err instanceof Error,
+      "handleMessage should reject when FatalToolError is not caught"
+    );
+
+    // Despite the rejection, onToolResult must have fired BEFORE the error propagated
+    assert.equal(spyHooks.onToolResult.mock.callCount(), 1, "onToolResult should fire once for the validation failure");
+    const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
+    assert.equal(payload.tool, "log_food");
+    assert.equal(payload.success, false);
+    assert.equal(payload.executed, false, "executed:false — tool validation failed before execution");
+    assert.ok(typeof payload.failureReason === "string" && payload.failureReason.length > 0);
+    assert.ok(!payload.failureReason?.includes(deviceId), "failureReason must not contain deviceId");
   });
 });
