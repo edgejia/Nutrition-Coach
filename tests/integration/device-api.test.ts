@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
@@ -237,5 +238,69 @@ describe("Device API", () => {
     });
     assert.equal(res.statusCode, 400);
     assert.ok(res.json().error);
+  });
+
+  it("OBS-02: emits target_gen_fallback event when LLM returns invalid targets", async () => {
+    const logLines: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _, cb) {
+        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+        cb();
+      },
+    });
+
+    const obs02LLM = new MockLLMProvider();
+    // Queue 2 invalid responses — target-generation makes 2 attempts before fallback
+    obs02LLM.queueChatResponse({ content: "not valid json at all" });
+    obs02LLM.queueChatResponse({ content: "also not valid json" });
+
+    const obs02App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: obs02LLM,
+      logger: { level: "info", stream: logStream },
+    });
+
+    // POST /api/device with full intake fields to trigger generateTargets
+    const res = await obs02App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: {
+        goal: "fat_loss",
+        sex: "female",
+        age: 30,
+        heightCm: 165,
+        weightKg: 60,
+        activityLevel: "moderate",
+        trainingFrequency: "3_4",
+      },
+    });
+
+    await obs02App.close();
+
+    // Response should still succeed (fallback targets used)
+    assert.equal(res.statusCode, 200, `Expected 200 but got ${res.statusCode}: ${res.body}`);
+
+    // Find target_gen_fallback event in captured log lines
+    let fallbackEventFound = false;
+    for (const line of logLines) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (parsed.event === "target_gen_fallback") {
+        fallbackEventFound = true;
+        assert.ok(
+          typeof parsed.reason === "string" && parsed.reason.length > 0,
+          `target_gen_fallback must have a non-empty reason field. Got: ${JSON.stringify(parsed)}`,
+        );
+        break;
+      }
+    }
+    assert.ok(
+      fallbackEventFound,
+      `Expected a log line with event="target_gen_fallback" but none found. Lines captured: ${logLines.length}`,
+    );
   });
 });
