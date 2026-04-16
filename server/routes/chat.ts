@@ -2,13 +2,15 @@ import { PassThrough } from "node:stream";
 import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
 import type { createOrchestrator } from "../orchestrator/index.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import type { DailySummary } from "../services/summary.js";
 import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
+import { createStructuredHooks } from "../orchestrator/hooks.js";
+import type { OrchestratorHooks } from "../orchestrator/hooks.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -78,6 +80,223 @@ function createStreamingSanitizer() {
   };
 }
 
+async function parseMultipartRequest(
+  request: FastifyRequest,
+  uploadsDir: string,
+): Promise<{ message: string; image?: { dataUri: string; path: string } } | { error: string; code: number }> {
+  let message = "";
+  let image: { dataUri: string; path: string } | undefined;
+
+  const contentType = request.headers["content-type"] ?? "";
+  if (!contentType.includes("multipart/form-data")) {
+    return { error: "Content-Type must be multipart/form-data", code: 400 };
+  }
+
+  const parts = request.parts();
+  for await (const part of parts) {
+    if (part.type === "field" && part.fieldname === "message") {
+      message = part.value as string;
+    } else if (part.type === "file" && part.fieldname === "image") {
+      if (!ALLOWED_TYPES.includes(part.mimetype)) {
+        return { error: "Invalid image type. Allowed: jpeg, png, webp", code: 400 };
+      }
+      const buffer = await part.toBuffer();
+      if (buffer.length > 5 * 1024 * 1024) {
+        return { error: "Image too large. Max 5MB.", code: 400 };
+      }
+      const filename = `${crypto.randomUUID()}.${part.mimetype.split("/")[1]}`;
+      await mkdir(uploadsDir, { recursive: true });
+      const storedPath = join(uploadsDir, filename);
+      await writeFile(storedPath, buffer);
+      image = {
+        dataUri: `data:${part.mimetype};base64,${buffer.toString("base64")}`,
+        path: storedPath,
+      };
+    }
+  }
+
+  if (!message && image) {
+    message = "(圖片)";
+  }
+
+  if (!message && !image) {
+    return { error: "Message or image required", code: 400 };
+  }
+
+  return { message, image };
+}
+
+function publishSummarySafe(
+  publisher: RealtimePublisher,
+  deviceId: string,
+  didLogMeal: boolean,
+  dailySummary: unknown,
+  log: FastifyBaseLogger,
+): void {
+  if (!didLogMeal || !dailySummary) return;
+  try {
+    publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
+    log.info({ event: "summary_publish_success" }, "Summary publish success");
+  } catch (publishErr) {
+    log.warn(
+      { event: "summary_publish_failed", err: publishErr instanceof Error ? publishErr.message : String(publishErr) },
+      "Summary publish failed (non-fatal)",
+    );
+  }
+}
+
+async function cleanupUploadSafe(imagePath: string | undefined, log: FastifyBaseLogger): Promise<void> {
+  if (!imagePath) return;
+  try {
+    await unlink(imagePath);
+    log.info({ event: "upload_cleanup_success" }, "Upload cleanup success");
+  } catch (cleanupErr) {
+    log.warn(
+      { event: "upload_cleanup_failed", err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr) },
+      "Upload cleanup failed (non-fatal)",
+    );
+  }
+}
+
+async function handleStreamingReply(
+  stream: PassThrough,
+  streamGenerator: AsyncGenerator<string>,
+  chatService: ReturnType<typeof createChatService>,
+  deviceId: string,
+  didLogMeal: boolean,
+  dailySummary: unknown,
+  hooks?: OrchestratorHooks,
+): Promise<{ fullReply: string; didLogMeal: boolean; dailySummary?: unknown }> {
+  const sanitizer = createStreamingSanitizer();
+  let fullReply = "";
+  let hallucAccum = "";
+  const heldTokens: string[] = [];
+  let holdingChoicePrompt = false;
+  let hallucinationDetected = false;
+
+  for await (const token of streamGenerator) {
+    hallucAccum += token;
+    if (CHOICE_PROMPT_PATTERN.test(hallucAccum)) {
+      hallucinationDetected = true;
+      break;
+    }
+    if (holdingChoicePrompt || /方式\s*[12]/.test(hallucAccum)) {
+      holdingChoicePrompt = true;
+      heldTokens.push(token);
+      continue;
+    }
+    fullReply += token;
+    const sanitizedChunk = sanitizer.push(token);
+    if (sanitizedChunk) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+    }
+  }
+
+  if (hallucinationDetected) {
+    hooks?.onFallback?.("hallucination_detected");
+    const retryMsg = "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
+    await finalizeAssistantReply(chatService, deviceId, retryMsg);
+    stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
+    return { fullReply: retryMsg, didLogMeal, dailySummary };
+  }
+
+  for (const heldToken of heldTokens) {
+    fullReply += heldToken;
+    const sanitizedChunk = sanitizer.push(heldToken);
+    if (sanitizedChunk) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+    }
+  }
+  const finalChunk = sanitizer.flush();
+  if (finalChunk) {
+    stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
+  }
+  await finalizeAssistantReply(chatService, deviceId, fullReply);
+  return { fullReply, didLogMeal, dailySummary };
+}
+
+async function handleOrchestratorSSE(
+  stream: PassThrough,
+  deps: {
+    orchestrator: ReturnType<typeof createOrchestrator>;
+    chatService: ReturnType<typeof createChatService>;
+    publisher: RealtimePublisher;
+    log: FastifyBaseLogger;
+  },
+  deviceId: string,
+  message: string,
+  image: { dataUri: string; path: string } | undefined,
+  hooks?: OrchestratorHooks,
+): Promise<void> {
+  let streamDidLogMeal = false;
+  let streamDailySummary: unknown;
+
+  try {
+    if (image) {
+      stream.write(`event: status\ndata: ${JSON.stringify({ label: "分析圖片中..." })}\n\n`);
+    }
+
+    const result = await deps.orchestrator.handleMessage(
+      deviceId,
+      message,
+      image?.dataUri,
+      image?.path,
+      {
+        onStatus: (label: string) => {
+          stream.write(`event: status\ndata: ${JSON.stringify({ label })}\n\n`);
+        },
+        hooks,
+      }
+    );
+
+    if ("streamGenerator" in result) {
+      const { streamGenerator, didLogMeal, dailySummary } = result;
+      streamDidLogMeal = didLogMeal;
+      streamDailySummary = dailySummary;
+
+      const streamResult = await handleStreamingReply(
+        stream,
+        streamGenerator,
+        deps.chatService,
+        deviceId,
+        didLogMeal,
+        dailySummary,
+        hooks,
+      );
+      streamDidLogMeal = streamResult.didLogMeal;
+      streamDailySummary = streamResult.dailySummary;
+
+      const doneData = { didLogMeal: streamDidLogMeal, ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}) };
+      stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+      publishSummarySafe(deps.publisher, deviceId, streamDidLogMeal, streamDailySummary, deps.log);
+    } else {
+      const { reply: replyText, didLogMeal, dailySummary } = result;
+      streamDidLogMeal = didLogMeal;
+      streamDailySummary = dailySummary;
+      const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, replyText);
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
+      const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
+      stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+      publishSummarySafe(deps.publisher, deviceId, didLogMeal, dailySummary, deps.log);
+    }
+  } catch {
+    const fallback = streamDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
+    try {
+      await finalizeAssistantReply(deps.chatService, deviceId, fallback);
+    } catch {
+      // If history persistence also fails, still close the stream with done.
+    }
+    const doneData = streamDidLogMeal
+      ? { didLogMeal: true, ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}) }
+      : { didLogMeal: false };
+    stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+    publishSummarySafe(deps.publisher, deviceId, streamDidLogMeal, streamDailySummary, deps.log);
+  } finally {
+    await cleanupUploadSafe(image?.path, deps.log);
+    stream.end();
+  }
+}
+
 export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
   const { orchestrator, chatService, deviceService, publisher, uploadsDir: injectedUploadsDir } = deps;
 
@@ -87,46 +306,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const device = await deviceService.getDevice(deviceId);
     if (!device) return reply.code(401).send({ error: "Invalid device ID" });
 
-    let message = "";
-    let image:
-      | { dataUri: string; path: string }
-      | undefined;
+    const resolvedUploadsDir = injectedUploadsDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "uploads");
+    const parseResult = await parseMultipartRequest(request, resolvedUploadsDir);
 
-    const contentType = request.headers["content-type"] ?? "";
-    if (!contentType.includes("multipart/form-data")) {
-      return reply.code(400).send({ error: "Content-Type must be multipart/form-data" });
-    }
-    const parts = request.parts();
-    for await (const part of parts) {
-      if (part.type === "field" && part.fieldname === "message") {
-        message = part.value as string;
-      } else if (part.type === "file" && part.fieldname === "image") {
-        if (!ALLOWED_TYPES.includes(part.mimetype)) {
-          return reply.code(400).send({ error: "Invalid image type. Allowed: jpeg, png, webp" });
-        }
-        const buffer = await part.toBuffer();
-        if (buffer.length > 5 * 1024 * 1024) {
-          return reply.code(400).send({ error: "Image too large. Max 5MB." });
-        }
-        const filename = `${crypto.randomUUID()}.${part.mimetype.split("/")[1]}`;
-        const resolvedUploadsDir = injectedUploadsDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "uploads");
-        await mkdir(resolvedUploadsDir, { recursive: true });
-        const storedPath = join(resolvedUploadsDir, filename);
-        await writeFile(storedPath, buffer);
-        image = {
-          dataUri: `data:${part.mimetype};base64,${buffer.toString("base64")}`,
-          path: storedPath,
-        };
-      }
+    if ("error" in parseResult) {
+      return reply.code(parseResult.code).send({ error: parseResult.error });
     }
 
-    if (!message && image) {
-      message = "(圖片)";
-    }
-
-    if (!message && !image) {
-      return reply.code(400).send({ error: "Message or image required" });
-    }
+    const { message, image } = parseResult;
 
     // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
     const acceptHeader = request.headers["accept"] ?? "";
@@ -156,13 +343,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const sanitized = await finalizeAssistantReply(chatService, deviceId, fullReply);
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
           // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-          if (didLogMeal && dailySummary) {
-            try {
-              publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
-            } catch (publishErr) {
-              console.warn("[chat JSON] publishDailySummary failed (non-fatal):", publishErr);
-            }
-          }
+          publishSummarySafe(publisher, deviceId, didLogMeal, dailySummary, request.log);
           return didLogMeal
             ? { reply: sanitized, didLogMeal, dailySummary }
             : { reply: sanitized, didLogMeal };
@@ -172,13 +353,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        if (didLogMeal && dailySummary) {
-          try {
-            publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
-          } catch (publishErr) {
-            console.warn("[chat JSON] publishDailySummary failed (non-fatal):", publishErr);
-          }
-        }
+        publishSummarySafe(publisher, deviceId, didLogMeal, dailySummary, request.log);
         return didLogMeal
           ? { reply: sanitizedJson, didLogMeal, dailySummary }
           : { reply: sanitizedJson, didLogMeal };
@@ -187,26 +362,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        if (jsonDidLogMeal && jsonDailySummary) {
-          try {
-            publisher.publishDailySummary(deviceId, jsonDailySummary as DailySummary);
-          } catch (publishErr) {
-            console.warn("[chat JSON] publishDailySummary failed (non-fatal):", publishErr);
-          }
-        }
+        publishSummarySafe(publisher, deviceId, jsonDidLogMeal, jsonDailySummary, request.log);
         return jsonDidLogMeal
           ? { reply: sanitizedJson, didLogMeal: true, ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}) }
           : { reply: sanitizedJson, didLogMeal: false };
       } finally {
         // D-08: Delete upload file after processing completes (success or failure).
-        // try/catch so cleanup failure never propagates to the client response.
-        if (image?.path) {
-          try {
-            await unlink(image.path);
-          } catch (cleanupErr) {
-            console.warn("[chat JSON] Upload cleanup failed (non-fatal):", cleanupErr);
-          }
-        }
+        await cleanupUploadSafe(image?.path, request.log);
       }
     }
 
@@ -220,154 +382,18 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       .header("cache-control", "no-cache")
       .send(stream);
 
+    const orchLog = request.log.child({ component: "orchestrator" });
+    const hooks = createStructuredHooks(orchLog);
+
     setImmediate(() => {
-      void (async () => {
-        let streamDidLogMeal = false;
-        let streamDailySummary: unknown;
-
-        try {
-          // D-03: emit 分析圖片中 immediately if an image is present — this fires
-          // before orchestrator.handleMessage is awaited, covering the real wait.
-          if (image) {
-            stream.write(`event: status\ndata: ${JSON.stringify({ label: "分析圖片中..." })}\n\n`);
-          }
-
-          // Pass onStatus so the orchestrator can surface 記錄餐點中 from inside
-          // the tool-call loop, before executeTool(log_food) completes (D-03).
-          const result = await orchestrator.handleMessage(
-            deviceId,
-            message,
-            image?.dataUri,
-            image?.path,
-            {
-              onStatus: (label: string) => {
-                stream.write(`event: status\ndata: ${JSON.stringify({ label })}\n\n`);
-              },
-            }
-          );
-
-          if ("streamGenerator" in result) {
-            const { streamGenerator, didLogMeal, dailySummary } = result;
-            streamDidLogMeal = didLogMeal;
-            streamDailySummary = dailySummary;
-            const sanitizer = createStreamingSanitizer();
-            let fullReply = "";
-            let hallucAccum = "";
-            const heldTokens: string[] = [];
-            let holdingChoicePrompt = false;
-            let hallucinationDetected = false;
-
-            for await (const token of streamGenerator) {
-              hallucAccum += token;
-              if (CHOICE_PROMPT_PATTERN.test(hallucAccum)) {
-                hallucinationDetected = true;
-                break;
-              }
-              if (holdingChoicePrompt || /方式\s*[12]/.test(hallucAccum)) {
-                holdingChoicePrompt = true;
-                heldTokens.push(token);
-                continue;
-              }
-              fullReply += token;
-              const sanitizedChunk = sanitizer.push(token);
-              if (sanitizedChunk) {
-                stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
-              }
-            }
-
-            if (hallucinationDetected) {
-              const retryMsg = "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
-              await finalizeAssistantReply(chatService, deviceId, retryMsg);
-              stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
-              const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
-              stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-              // D-03: publishDailySummary fires AFTER done is written to the client stream.
-              // C1: try/catch ensures publish failure never alters SSE outcome or stream state.
-              if (streamDidLogMeal && streamDailySummary) {
-                try {
-                  publisher.publishDailySummary(deviceId, streamDailySummary as DailySummary);
-                } catch (publishErr) {
-                  console.warn("[chat SSE] publishDailySummary failed (non-fatal):", publishErr);
-                }
-              }
-            } else {
-              for (const heldToken of heldTokens) {
-                fullReply += heldToken;
-                const sanitizedChunk = sanitizer.push(heldToken);
-                if (sanitizedChunk) {
-                  stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
-                }
-              }
-              const finalChunk = sanitizer.flush();
-              if (finalChunk) {
-                stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
-              }
-              await finalizeAssistantReply(chatService, deviceId, fullReply);
-              const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
-              stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-              // D-03: publishDailySummary fires AFTER done is written to the client stream.
-              // C1: try/catch ensures publish failure never alters SSE outcome or stream state.
-              if (streamDidLogMeal && streamDailySummary) {
-                try {
-                  publisher.publishDailySummary(deviceId, streamDailySummary as DailySummary);
-                } catch (publishErr) {
-                  console.warn("[chat SSE] publishDailySummary failed (non-fatal):", publishErr);
-                }
-              }
-            }
-          } else {
-            // Non-stream fallback: bridge plain reply into SSE so sendMessageStream()
-            // always receives event: chunk + event: done regardless of provider capability.
-            const { reply: replyText, didLogMeal, dailySummary } = result;
-            streamDidLogMeal = didLogMeal;
-            streamDailySummary = dailySummary;
-            const sanitizedFallback = await finalizeAssistantReply(chatService, deviceId, replyText);
-            stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
-            const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
-            stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-            // D-03: publishDailySummary fires AFTER done is written to the client stream.
-            // C1: try/catch ensures publish failure never alters SSE outcome or stream state.
-            if (didLogMeal && dailySummary) {
-              try {
-                publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
-              } catch (publishErr) {
-                console.warn("[chat SSE] publishDailySummary failed (non-fatal):", publishErr);
-              }
-            }
-          }
-        } catch {
-          const fallback = streamDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
-          try {
-            await finalizeAssistantReply(chatService, deviceId, fallback);
-          } catch {
-            // If history persistence also fails, still close the stream with done.
-          }
-          const doneData = streamDidLogMeal
-            ? { didLogMeal: true, ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}) }
-            : { didLogMeal: false };
-          stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-          // D-03: publishDailySummary fires AFTER done is written to the client stream.
-          // C1: try/catch ensures publish failure never alters SSE outcome or stream state.
-          if (streamDidLogMeal && streamDailySummary) {
-            try {
-              publisher.publishDailySummary(deviceId, streamDailySummary as DailySummary);
-            } catch (publishErr) {
-              console.warn("[chat SSE] publishDailySummary failed (non-fatal):", publishErr);
-            }
-          }
-        } finally {
-          // D-08: Delete upload file after processing completes (success or failure).
-          // try/catch so cleanup failure never crashes the stream or changes its outcome.
-          if (image?.path) {
-            try {
-              await unlink(image.path);
-            } catch (cleanupErr) {
-              console.warn("[chat SSE] Upload cleanup failed (non-fatal):", cleanupErr);
-            }
-          }
-          stream.end();
-        }
-      })();
+      void handleOrchestratorSSE(
+        stream,
+        { orchestrator, chatService, publisher, log: request.log },
+        deviceId,
+        message,
+        image,
+        hooks,
+      );
     });
 
     return reply;
