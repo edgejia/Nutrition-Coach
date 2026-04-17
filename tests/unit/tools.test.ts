@@ -5,6 +5,7 @@ import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { executeTool } from "../../server/orchestrator/tools.js";
+import { formatLocalDate } from "../../server/lib/time.js";
 import type { ToolCall } from "../../server/llm/types.js";
 
 describe("executeTool - log_food dailySummary contract", () => {
@@ -65,6 +66,7 @@ describe("executeTool - log_food dailySummary contract", () => {
     assert.equal(result.result, "食物已成功記錄");
     assert.ok(result.dailySummary);
     assert.equal(result.dailySummary.mealCount, 1);
+    assert.equal(result.dailySummary.date, formatLocalDate(new Date()));
 
     // Verify meal was actually persisted to DB
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());

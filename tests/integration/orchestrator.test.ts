@@ -7,6 +7,7 @@ import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
+import { formatLocalDate } from "../../server/lib/time.js";
 import { createSpyHooks } from "../helpers/spy-hooks.js";
 
 function assertReplyResult(result: OrchestratorResult): asserts result is Extract<OrchestratorResult, { reply: string }> {
@@ -82,6 +83,7 @@ describe("Orchestrator", () => {
       totalCarbs: 20,
       totalFat: 2,
       mealCount: 1,
+      date: formatLocalDate(new Date()),
     });
     assert.equal(mockLLM.chatCalls.length, 3);
     const secondRound = mockLLM.chatCalls[1].messages;

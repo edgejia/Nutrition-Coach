@@ -29,6 +29,7 @@ describe("SummaryService", () => {
     assert.equal(summary.totalCarbs, 0);
     assert.equal(summary.totalFat, 0);
     assert.equal(summary.mealCount, 0);
+    assert.equal(summary.date, "2026-03-25");
   });
 
   it("sums nutrients from multiple meals", async () => {
@@ -40,6 +41,7 @@ describe("SummaryService", () => {
     assert.ok(Math.abs(summary.totalProtein - 31.5) < 0.01);
     assert.ok(Math.abs(summary.totalCarbs - 25) < 0.01);
     assert.ok(Math.abs(summary.totalFat - 3.9) < 0.01);
+    assert.equal(summary.date, "2026-03-25");
   });
 
   it("counts meals in the daily summary", async () => {
@@ -55,5 +57,40 @@ describe("SummaryService", () => {
     const summary = await summaryService.getDailySummary(deviceId, new Date("2026-03-25T12:00:00+08:00"));
 
     assert.equal(summary.mealCount, 1);
+    assert.equal(summary.date, "2026-03-25");
+  });
+
+  it("isolates meals logged across the Asia/Taipei midnight boundary (D-17)", async () => {
+    // TPE 23:59 on 2026-03-25 (pre-midnight, belongs to 2026-03-25 local day)
+    await foodService.logFood(deviceId, {
+      foodName: "宵夜",
+      calories: 200,
+      protein: 10,
+      carbs: 20,
+      fat: 8,
+      loggedAt: "2026-03-25T15:59:00.000Z",
+    });
+    // TPE 00:01 on 2026-03-26 (post-midnight, belongs to 2026-03-26 local day)
+    await foodService.logFood(deviceId, {
+      foodName: "早餐",
+      calories: 350,
+      protein: 15,
+      carbs: 45,
+      fat: 10,
+      loggedAt: "2026-03-25T16:01:00.000Z",
+    });
+
+    const march25 = await summaryService.getDailySummary(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    const march26 = await summaryService.getDailySummary(deviceId, new Date("2026-03-26T12:00:00+08:00"));
+
+    // March 25 summary should only contain the pre-midnight meal
+    assert.equal(march25.mealCount, 1);
+    assert.equal(march25.date, "2026-03-25");
+    assert.ok(Math.abs(march25.totalCalories - 200) < 0.01);
+
+    // March 26 summary should only contain the post-midnight meal
+    assert.equal(march26.mealCount, 1);
+    assert.equal(march26.date, "2026-03-26");
+    assert.ok(Math.abs(march26.totalCalories - 350) < 0.01);
   });
 });
