@@ -725,9 +725,14 @@ describe("chat-streaming", () => {
       assert.match(text, /event: done/);
       const doneMatch = text.match(/event: done\s+data: (.+)/);
       assert.ok(doneMatch);
-      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal?: boolean; dailySummary?: unknown };
+      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal?: boolean; dailySummary?: { date?: string } };
       assert.equal(donePayload.didLogMeal, true, "D-09: didLogMeal must remain true after log_food succeeded");
       assert.ok(donePayload.dailySummary, "D-09: dailySummary must be preserved after log_food succeeded");
+      assert.match(
+        donePayload.dailySummary?.date ?? "",
+        /^\d{4}-\d{2}-\d{2}$/,
+        "D-09 partial-success: dailySummary.date must survive final-reply failure",
+      );
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { "x-device-id": deviceId },
@@ -775,9 +780,14 @@ describe("chat-streaming", () => {
 
       const doneMatch = text.match(/event: done\s+data: (.+)/);
       assert.ok(doneMatch);
-      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal?: boolean; dailySummary?: unknown };
+      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal?: boolean; dailySummary?: { date?: string } };
       assert.equal(donePayload.didLogMeal, true, "stream failure after log_food must preserve didLogMeal");
       assert.ok(donePayload.dailySummary, "stream failure after log_food must preserve dailySummary");
+      assert.match(
+        donePayload.dailySummary?.date ?? "",
+        /^\d{4}-\d{2}-\d{2}$/,
+        "stream failure after log_food must preserve dailySummary.date",
+      );
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { "x-device-id": deviceId },

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { formatLocalDate } from "../../server/lib/time.js";
 import type { FastifyInstance } from "fastify";
 
 interface SSEEvent {
@@ -216,6 +217,7 @@ describe("Chat API", () => {
       totalCarbs: 25,
       totalFat: 0.3,
       mealCount: 1,
+      date: formatLocalDate(new Date()),
     });
   });
 
@@ -269,6 +271,7 @@ describe("Chat API", () => {
       totalCarbs: 23,
       totalFat: 0.3,
       mealCount: 1,
+      date: formatLocalDate(new Date()),
     });
   });
 
@@ -480,11 +483,12 @@ describe("Chat API", () => {
 
       const donePayload = JSON.parse(doneEvent.data) as {
         didLogMeal: boolean;
-        dailySummary?: { mealCount: number; totalCalories: number };
+        dailySummary?: { mealCount: number; totalCalories: number; date?: string };
       };
       assert.equal(donePayload.didLogMeal, true, "meal was persisted before LLM failure");
       assert.equal(donePayload.dailySummary?.mealCount, 1);
       assert.equal(donePayload.dailySummary?.totalCalories, 150);
+      assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
     } finally {
       clearTimeout(timeout);
       await reader?.cancel().catch(() => {});
@@ -527,9 +531,10 @@ describe("Chat API", () => {
     });
 
     assert.equal(res.status, 200);
-    const body = await res.json() as { didLogMeal: boolean; dailySummary?: { mealCount: number } };
+    const body = await res.json() as { didLogMeal: boolean; dailySummary?: { mealCount: number; date?: string } };
     assert.equal(body.didLogMeal, true);
     assert.equal(body.dailySummary?.mealCount, 1);
+    assert.match(body.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
       headers: { "x-device-id": deviceId },
@@ -595,9 +600,10 @@ describe("Chat API", () => {
 
       const doneFrame = parseSSEEvents(chatDoneEvent.raw).find((frame) => frame.event === "done");
       assert.ok(doneFrame);
-      const donePayload = JSON.parse(doneFrame.data) as { didLogMeal: boolean; dailySummary?: { mealCount: number } };
+      const donePayload = JSON.parse(doneFrame.data) as { didLogMeal: boolean; dailySummary?: { mealCount: number; date?: string } };
       assert.equal(donePayload.didLogMeal, true);
       assert.equal(donePayload.dailySummary?.mealCount, 1);
+      assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
     } finally {
       clearTimeout(timeout);
       await chatReader?.cancel().catch(() => {});

@@ -50,6 +50,8 @@ describe("SSE API", () => {
       const text = new TextDecoder().decode(firstChunk.value);
       assert.match(text, /event: daily_summary/);
       assert.match(text, /data: /);
+      // SUM-01: initial daily_summary payload carries date YYYY-MM-DD
+      assert.match(text, /"date":"\d{4}-\d{2}-\d{2}"/);
       controller.abort();
     } finally {
       if (timeout) clearTimeout(timeout);
@@ -96,6 +98,8 @@ describe("SSE API", () => {
       const secondChunk = await reader.read();
       const text = new TextDecoder().decode(secondChunk.value);
       assert.match(text, /event: daily_summary/);
+      // SUM-01: post-log daily_summary payload carries date YYYY-MM-DD
+      assert.match(text, /"date":"\d{4}-\d{2}-\d{2}"/);
       controller.abort();
     } finally {
       if (timeout) clearTimeout(timeout);
@@ -155,6 +159,8 @@ describe("SSE API", () => {
       const text = new TextDecoder().decode(secondChunk.value);
       assert.match(text, /event: daily_summary/);
       assert.match(text, /"mealCount":0/);
+      // SUM-01: post-delete daily_summary payload carries date YYYY-MM-DD
+      assert.match(text, /"date":"\d{4}-\d{2}-\d{2}"/);
       controller.abort();
     } finally {
       if (timeout) clearTimeout(timeout);
