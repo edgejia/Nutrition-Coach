@@ -241,6 +241,7 @@ async function runStalePublisher(): Promise<ScenarioResult> {
     totalCarbs: 0,
     totalFat: 0,
     mealCount: 0,
+    date: "2026-03-25",
   };
 
   const publisher = new RealtimePublisher();
