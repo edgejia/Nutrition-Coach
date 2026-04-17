@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
@@ -121,5 +122,53 @@ describe("Meals API", () => {
       headers: { "x-device-id": deviceId },
     });
     assert.deepEqual(remainingMeals.json().meals, []);
+  });
+
+  it("GET /api/meals logs redacted day_rollover event when requested", async () => {
+    const rolloverLogLines: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _, cb) {
+        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => rolloverLogLines.push(line));
+        cb();
+      },
+    });
+
+    const rolloverApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    const rolloverDeviceId = (
+      await rolloverApp.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } })
+    ).json().deviceId as string;
+
+    const res = await rolloverApp.inject({
+      method: "GET",
+      url: "/api/meals",
+      headers: {
+        "x-device-id": rolloverDeviceId,
+        "x-refresh-reason": "day_rollover",
+      },
+    });
+
+    await rolloverApp.close();
+
+    assert.equal(res.statusCode, 200);
+    const parsedLines = rolloverLogLines.flatMap((line) => {
+      try {
+        return [JSON.parse(line) as Record<string, unknown>];
+      } catch {
+        return [];
+      }
+    });
+    assert.ok(
+      parsedLines.some((line) => line.event === "day_rollover"),
+      `Expected day_rollover log event. Captured lines: ${rolloverLogLines.length}`,
+    );
+    assert.ok(
+      !rolloverLogLines.join("\n").includes(rolloverDeviceId),
+      "day_rollover logs must not include raw deviceId",
+    );
   });
 });
