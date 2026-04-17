@@ -8,6 +8,7 @@ export interface DailyTargets {
 }
 
 export interface DailySummary {
+  date: string;
   totalCalories: number;
   totalProtein: number;
   totalCarbs: number;

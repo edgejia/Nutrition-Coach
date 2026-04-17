@@ -13,6 +13,7 @@ globalThis.localStorage = {
 } as Storage;
 
 const { useStore } = await import("../../client/src/store.js");
+const { formatLocalDate } = await import("../../client/src/lib/time.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
 
 async function loadFreshStore(suffix: string) {
@@ -112,7 +113,8 @@ describe("AppStore", () => {
   });
 
   it("setDailySummary updates summary state", () => {
-    useStore.getState().setDailySummary({ totalCalories: 500, totalProtein: 30, totalCarbs: 60, totalFat: 15, mealCount: 1 });
+    const today = formatLocalDate(new Date());
+    useStore.getState().setDailySummary({ date: today, totalCalories: 500, totalProtein: 30, totalCarbs: 60, totalFat: 15, mealCount: 1 });
     assert.equal(useStore.getState().dailySummary?.totalCalories, 500);
   });
 
