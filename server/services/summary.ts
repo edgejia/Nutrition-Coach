@@ -10,12 +10,13 @@ export interface DailySummary {
   totalCarbs: number;
   totalFat: number;
   mealCount: number;
+  date: string;
 }
 
 export function createSummaryService(db: AppDatabase) {
   return {
     async getDailySummary(deviceId: string, date: Date): Promise<DailySummary> {
-      const { startIso, endIso } = getLocalDayBounds(date);
+      const { dateKey, startIso, endIso } = getLocalDayBounds(date);
       const result = await db
         .select({
           totalCalories: sql<number>`coalesce(sum(${meals.calories}), 0)`,
@@ -32,7 +33,7 @@ export function createSummaryService(db: AppDatabase) {
             lt(meals.loggedAt, endIso)
           )
         );
-      return result[0];
+      return { ...result[0], date: dateKey };
     },
   };
 }
