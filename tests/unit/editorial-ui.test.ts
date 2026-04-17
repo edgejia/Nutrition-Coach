@@ -21,7 +21,7 @@ globalThis.localStorage = {
 const { useStore } = await import("../../client/src/store.js");
 const { getDashboardCells } = await import("../../client/src/components/Dashboard.js");
 const { splitAdvice, getAdvicePresentation } = await import("../../client/src/components/CoachAdviceCard.js");
-const { getDisplayedCoachAdvice } = await import("../../client/src/components/HomeScreen.js");
+const { getDisplayedCoachAdvice, formatHomeHeaderDate } = await import("../../client/src/components/HomeScreen.js");
 
 describe("Editorial UI", () => {
   beforeEach(() => {
@@ -148,6 +148,21 @@ describe("Editorial UI", () => {
     );
 
     assert.equal(advice, "蛋白質還差 100g，晚餐建議高蛋白食物");
+  });
+
+  it("formats HomeHeader date keys with the existing zh-TW month/day/weekday style", () => {
+    assert.equal(formatHomeHeaderDate("2026-03-25"), "3月25日 週三");
+  });
+
+  it("falls back to today's local date when HomeHeader date key is malformed", () => {
+    const today = new Date();
+    const expected = today.toLocaleDateString("zh-TW", {
+      month: "long",
+      day: "numeric",
+      weekday: "short",
+    });
+
+    assert.equal(formatHomeHeaderDate("not-a-date"), expected);
   });
 
   it("simulates CTA click by setting pending draft and switching to chat", () => {
