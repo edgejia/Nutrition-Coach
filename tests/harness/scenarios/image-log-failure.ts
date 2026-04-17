@@ -19,6 +19,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log-failure", "uploads");
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+interface DailySummaryPayload {
+  date: string;
+}
 
 function makeJpegBytes(): ArrayBuffer {
   const bytes = new Uint8Array([
@@ -68,16 +73,20 @@ async function fetchMeals(address: string, deviceId: string): Promise<Array<{ fo
   return mealsJson.meals;
 }
 
-function parseDonePayload(rawSSE: string): { didLogMeal?: boolean; dailySummary?: unknown } | undefined {
+function parseDonePayload(rawSSE: string): { didLogMeal?: boolean; dailySummary?: DailySummaryPayload } | undefined {
   const doneEvent = parseSSEEvents(rawSSE).find((e) => e.event === "done");
   if (!doneEvent) {
     return undefined;
   }
   try {
-    return JSON.parse(doneEvent.data) as { didLogMeal?: boolean; dailySummary?: unknown };
+    return JSON.parse(doneEvent.data) as { didLogMeal?: boolean; dailySummary?: DailySummaryPayload };
   } catch {
     return {};
   }
+}
+
+function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boolean {
+  return typeof summary?.date === "string" && DATE_KEY_PATTERN.test(summary.date);
 }
 
 async function runSubScenario(
@@ -276,6 +285,13 @@ const scenario: VerificationScenario = {
         if (!donePayload) return { ok: false, error: "missing done event", evidence };
         if (donePayload.didLogMeal !== true) return { ok: false, error: "D-09: expected done.didLogMeal true after log_food succeeded", evidence };
         if (!donePayload.dailySummary) return { ok: false, error: "D-09: expected dailySummary after log_food succeeded", evidence };
+        if (!hasValidDailySummaryDate(donePayload.dailySummary)) {
+          return {
+            ok: false,
+            error: `D-09: expected dailySummary.date to match YYYY-MM-DD, got ${String(donePayload.dailySummary.date)}`,
+            evidence,
+          };
+        }
         if (assistantMsgs.length !== 1) return { ok: false, error: `D-10: expected 1 assistant msg, got ${assistantMsgs.length}`, evidence };
         if (fallbackContent !== PARTIAL_SUCCESS_FALLBACK) return { ok: false, error: "D-09: expected partial-success fallback wording", evidence };
         if (!mealKept) return { ok: false, error: "D-09: meal must be kept when log_food succeeded before reply failed", evidence };

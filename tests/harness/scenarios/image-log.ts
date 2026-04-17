@@ -55,6 +55,16 @@ function stepFail(name: string, error: string, actual?: unknown): ScenarioStepRe
   return { name, ok: false, error, actual };
 }
 
+interface DailySummaryPayload {
+  date: string;
+}
+
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boolean {
+  return typeof summary?.date === "string" && DATE_KEY_PATTERN.test(summary.date);
+}
+
 // ---------------------------------------------------------------------------
 // Scenario definition
 // ---------------------------------------------------------------------------
@@ -160,7 +170,7 @@ const scenario: VerificationScenario = {
           }
         });
       const doneEvent = sseEvents.find((e) => e.event === "done");
-      let donePayload: { didLogMeal?: boolean; dailySummary?: unknown } = {};
+      let donePayload: { didLogMeal?: boolean; dailySummary?: DailySummaryPayload } = {};
       if (doneEvent) {
         try {
           donePayload = JSON.parse(doneEvent.data) as typeof donePayload;
@@ -223,6 +233,17 @@ const scenario: VerificationScenario = {
       if (donePayload.didLogMeal !== true) {
         steps.push(stepFail("collect_stream_didlogmeal", "D-12.2 failed: done.didLogMeal is not true", { donePayload }));
         failedStep = "collect_stream_didlogmeal";
+        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+
+      if (!hasValidDailySummaryDate(donePayload.dailySummary)) {
+        steps.push(stepFail(
+          "collect_stream_summary_date",
+          `Expected done.dailySummary.date to match YYYY-MM-DD, got ${String(donePayload.dailySummary?.date)}`,
+          { donePayload },
+        ));
+        failedStep = "collect_stream_summary_date";
         artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
         return buildResult(false, failedStep, steps, artifacts);
       }
