@@ -23,6 +23,7 @@ import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioSte
 // ---------------------------------------------------------------------------
 
 interface DailySummary {
+  date: string;
   totalCalories: number;
   totalProtein: number;
   totalCarbs: number;
@@ -87,6 +88,8 @@ const STEP_NAMES = [
   "verify_meals",
   "verify_summary",
 ] as const;
+
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 // ---------------------------------------------------------------------------
 // Scenario implementation
@@ -535,6 +538,16 @@ const textLogScenario: VerificationScenario = {
           const stepResult = fail(
             "verify_summary",
             `Expected dailySummary.mealCount === 1, got ${summaryToVerify.mealCount}`,
+            { dailySummary: summaryToVerify },
+          );
+          steps.push(stepResult);
+          return failResult(scenarioName, steps, "verify_summary", artifacts);
+        }
+
+        if (typeof summaryToVerify.date !== "string" || !DATE_KEY_PATTERN.test(summaryToVerify.date)) {
+          const stepResult = fail(
+            "verify_summary",
+            `Expected dailySummary.date to match YYYY-MM-DD, got ${String(summaryToVerify.date)}`,
             { dailySummary: summaryToVerify },
           );
           steps.push(stepResult);
