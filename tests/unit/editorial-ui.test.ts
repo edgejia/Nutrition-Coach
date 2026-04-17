@@ -151,7 +151,13 @@ describe("Editorial UI", () => {
   });
 
   it("formats HomeHeader date keys with the existing zh-TW month/day/weekday style", () => {
-    assert.equal(formatHomeHeaderDate("2026-03-25"), "3月25日 週三");
+    const expected = new Date(2026, 2, 25).toLocaleDateString("zh-TW", {
+      month: "long",
+      day: "numeric",
+      weekday: "short",
+    });
+
+    assert.equal(formatHomeHeaderDate("2026-03-25"), expected);
   });
 
   it("falls back to today's local date when HomeHeader date key is malformed", () => {

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useStore } from "../store.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
+import { formatLocalDate } from "../lib/time.js";
 import { Dashboard } from "./Dashboard.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { ChatEntryBar } from "./ChatEntryBar.js";
@@ -13,17 +14,27 @@ export function getDisplayedCoachAdvice(
   return getCoachAdvice(dailySummary, dailyTargets) ?? storedAdvice;
 }
 
-function HomeHeader() {
-  const setActiveScreen = useStore((s) => s.setActiveScreen);
-  const setShowSettings = useStore((s) => s.setShowSettings);
-  const sending = useStore((s) => s.sending);
-
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("zh-TW", {
+export function formatHomeHeaderDate(dateKey: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  const fallbackDateKey = formatLocalDate(new Date());
+  const [, yearText, monthText, dayText] = match ?? /^(\d{4})-(\d{2})-(\d{2})$/.exec(fallbackDateKey)!;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  return new Date(year, month - 1, day).toLocaleDateString("zh-TW", {
     month: "long",
     day: "numeric",
     weekday: "short",
   });
+}
+
+function HomeHeader() {
+  const setActiveScreen = useStore((s) => s.setActiveScreen);
+  const setShowSettings = useStore((s) => s.setShowSettings);
+  const sending = useStore((s) => s.sending);
+  const dailySummary = useStore((s) => s.dailySummary);
+  const dateKey = dailySummary?.date ?? formatLocalDate(new Date());
+  const dateStr = formatHomeHeaderDate(dateKey);
 
   return (
     <div className="flex items-center justify-between px-5 pb-2 pt-4">
