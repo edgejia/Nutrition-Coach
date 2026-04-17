@@ -75,6 +75,7 @@ async function main(): Promise<void> {
     console.log("");
     console.log("Example:");
     console.log("  yarn verify:harness -- text-log");
+    console.log("  yarn verify:harness -- daily-rollover");
     console.log("  yarn verify:harness -- boundary-contracts");
     process.exitCode = args.length === 0 ? 1 : 0;
     return;
