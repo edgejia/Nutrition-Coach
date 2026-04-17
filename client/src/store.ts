@@ -8,6 +8,7 @@ import type {
   PendingHomeChatDraft,
   ProvisionalBubble,
 } from "./types.js";
+import { formatLocalDate } from "./lib/time.js";
 
 function readStoredJson<T>(key: string): T | null {
   try {
@@ -16,6 +17,12 @@ function readStoredJson<T>(key: string): T | null {
     return null;
   }
 }
+
+// Rollover refresh handler: fire-and-forget callback invoked when a stale/future-dated
+// summary is rejected by the store's date guard. Stored at module scope (not in state)
+// so SSE/chat callers never see it as a reactive field and tests can reset per case (D-13, D-19).
+type RolloverRefreshHandler = () => void | Promise<void>;
+let rolloverRefreshHandler: RolloverRefreshHandler | null = null;
 
 interface AppState {
   deviceId: string | null;
@@ -40,6 +47,7 @@ interface AppState {
   addMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
   setDailySummary: (summary: DailySummary) => void;
+  setRolloverRefreshHandler: (handler: RolloverRefreshHandler | null) => void;
   setDailyTargets: (targets: DailyTargets) => void;
   setSending: (sending: boolean) => void;
   provisionalBubble: ProvisionalBubble | null;
@@ -50,7 +58,7 @@ interface AppState {
   clearDevice: () => void;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   deviceId: localStorage.getItem("deviceId"),
   goal: localStorage.getItem("goal"),
   activeScreen: localStorage.getItem("deviceId") ? "home" : "onboarding",
@@ -81,7 +89,30 @@ export const useStore = create<AppState>((set) => ({
 
   addMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
   setMessages: (messages) => set({ messages }),
-  setDailySummary: (dailySummary) => set({ dailySummary }),
+  // Guarded summary write boundary (D-10, D-11, D-13, T-09-05, T-09-06).
+  // Writes only when `summary.date` equals local today. Mismatches fire the
+  // registered rollover refresh handler without propagating errors to callers.
+  setDailySummary: (summary) => {
+    const activeDate = formatLocalDate(new Date());
+    if (summary.date === activeDate) {
+      set({ dailySummary: summary });
+      return;
+    }
+    // Fire-and-forget: never throw into SSE/chat event handlers (T-09-06).
+    try {
+      const result = rolloverRefreshHandler?.();
+      // If handler returned a promise, swallow rejections so async failures
+      // cannot break chat/SSE event handling.
+      if (result && typeof (result as Promise<void>).catch === "function") {
+        (result as Promise<void>).catch(() => undefined);
+      }
+    } catch {
+      // Intentionally suppressed — handler errors must not reach the caller.
+    }
+  },
+  setRolloverRefreshHandler: (handler) => {
+    rolloverRefreshHandler = handler;
+  },
   setDailyTargets: (dailyTargets) => {
     localStorage.setItem("dailyTargets", JSON.stringify(dailyTargets));
     set({ dailyTargets });
@@ -115,7 +146,9 @@ export const useStore = create<AppState>((set) => ({
         },
       };
     }),
-  commitProvisionalBubble: (extra) =>
+  // Atomically finalize assistant message and clear provisional bubble, then
+  // route any provided dailySummary through the guarded setDailySummary (D-12).
+  commitProvisionalBubble: (extra) => {
     set((state) => {
       if (!state.provisionalBubble) {
         return {};
@@ -130,7 +163,11 @@ export const useStore = create<AppState>((set) => ({
       };
 
       return { messages: [...state.messages, finalMessage], provisionalBubble: null };
-    }),
+    });
+    if (extra.dailySummary) {
+      get().setDailySummary(extra.dailySummary);
+    }
+  },
   clearDevice: () => {
     localStorage.removeItem("deviceId");
     localStorage.removeItem("goal");

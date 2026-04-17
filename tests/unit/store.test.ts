@@ -13,6 +13,7 @@ globalThis.localStorage = {
 } as Storage;
 
 const { useStore } = await import("../../client/src/store.js");
+const { formatLocalDate } = await import("../../client/src/lib/time.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
 
 async function loadFreshStore(suffix: string) {
@@ -56,6 +57,8 @@ describe("AppStore", () => {
       sending: false,
       provisionalBubble: null,
     });
+    // Reset rollover refresh handler to avoid cross-test leakage (D-19)
+    useStore.getState().setRolloverRefreshHandler(null);
   });
 
   it("defaults activeScreen to onboarding without a stored device", async () => {
@@ -111,9 +114,74 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().messages[0].content, "new");
   });
 
-  it("setDailySummary updates summary state", () => {
-    useStore.getState().setDailySummary({ totalCalories: 500, totalProtein: 30, totalCarbs: 60, totalFat: 15, mealCount: 1 });
+  it("setDailySummary updates summary state when date matches today", () => {
+    const today = formatLocalDate(new Date());
+    useStore.getState().setDailySummary({ date: today, totalCalories: 500, totalProtein: 30, totalCarbs: 60, totalFat: 15, mealCount: 1 });
     assert.equal(useStore.getState().dailySummary?.totalCalories, 500);
+    assert.equal(useStore.getState().dailySummary?.date, today);
+  });
+
+  it("setDailySummary drops summary when date mismatch vs local today (D-10)", () => {
+    // Seed a trusted summary for today.
+    const today = formatLocalDate(new Date());
+    useStore.getState().setDailySummary({ date: today, totalCalories: 400, totalProtein: 25, totalCarbs: 50, totalFat: 12, mealCount: 1 });
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 400);
+
+    // Attempt to overwrite with a stale yesterday-dated summary.
+    useStore.getState().setDailySummary({ date: "1999-01-01", totalCalories: 99999, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealCount: 99 });
+
+    // Previous trusted summary is preserved; mismatched summary did not mutate state.
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 400);
+    assert.equal(useStore.getState().dailySummary?.date, today);
+  });
+
+  it("setDailySummary invokes registered rollover handler on date mismatch without throwing (D-13)", () => {
+    let handlerCallCount = 0;
+    useStore.getState().setRolloverRefreshHandler(() => {
+      handlerCallCount++;
+    });
+
+    // Stale date triggers handler exactly once.
+    useStore.getState().setDailySummary({ date: "1999-01-01", totalCalories: 1, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealCount: 0 });
+
+    assert.equal(handlerCallCount, 1);
+    assert.equal(useStore.getState().dailySummary, null);
+  });
+
+  it("setDailySummary does not throw when rollover handler throws synchronously (T-09-06)", () => {
+    useStore.getState().setRolloverRefreshHandler(() => {
+      throw new Error("boom");
+    });
+
+    // Must not propagate to caller (SSE/chat path protection).
+    assert.doesNotThrow(() => {
+      useStore.getState().setDailySummary({ date: "1999-01-01", totalCalories: 1, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealCount: 0 });
+    });
+    assert.equal(useStore.getState().dailySummary, null);
+  });
+
+  it("setDailySummary does not throw when rollover handler returns a rejected promise (T-09-06)", async () => {
+    useStore.getState().setRolloverRefreshHandler(() => Promise.reject(new Error("async boom")));
+
+    assert.doesNotThrow(() => {
+      useStore.getState().setDailySummary({ date: "1999-01-01", totalCalories: 1, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealCount: 0 });
+    });
+    assert.equal(useStore.getState().dailySummary, null);
+    // Let the microtask rejection settle to prove we caught it.
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it("setDailySummary does not invoke rollover handler when date matches today", () => {
+    let handlerCallCount = 0;
+    useStore.getState().setRolloverRefreshHandler(() => {
+      handlerCallCount++;
+    });
+
+    const today = formatLocalDate(new Date());
+    useStore.getState().setDailySummary({ date: today, totalCalories: 100, totalProtein: 5, totalCarbs: 10, totalFat: 2, mealCount: 1 });
+
+    assert.equal(handlerCallCount, 0);
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 100);
   });
 
   it("setDailyTargets persists to localStorage", () => {
@@ -150,9 +218,12 @@ describe("ProvisionalBubble actions", () => {
     storage.clear();
     useStore.setState({
       messages: [],
+      dailySummary: null,
       sending: false,
       provisionalBubble: null,
     });
+    // Reset rollover refresh handler to avoid cross-test leakage (D-19)
+    useStore.getState().setRolloverRefreshHandler(null);
   });
 
   it("setProvisionalBubble sets the bubble state", () => {
@@ -256,5 +327,85 @@ describe("ProvisionalBubble actions", () => {
     useStore.getState().commitProvisionalBubble({ didLogMeal: false });
 
     assert.equal(useStore.getState().messages.length, 0);
+  });
+
+  it("commitProvisionalBubble routes dailySummary through guarded setDailySummary when date matches (D-12)", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "msg-1",
+      statusLabel: "",
+      content: "已記錄",
+      isStreaming: true,
+    });
+
+    const today = formatLocalDate(new Date());
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: true,
+      dailySummary: {
+        date: today,
+        totalCalories: 620,
+        totalProtein: 35,
+        totalCarbs: 70,
+        totalFat: 22,
+        mealCount: 2,
+      },
+    });
+
+    assert.equal(useStore.getState().provisionalBubble, null);
+    assert.equal(useStore.getState().messages.length, 1);
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 620);
+    assert.equal(useStore.getState().dailySummary?.date, today);
+  });
+
+  it("commitProvisionalBubble dailySummary with date mismatch is dropped by guard but message still commits (D-12)", () => {
+    let handlerCallCount = 0;
+    useStore.getState().setRolloverRefreshHandler(() => {
+      handlerCallCount++;
+    });
+
+    useStore.getState().setProvisionalBubble({
+      id: "msg-stale",
+      statusLabel: "",
+      content: "已記錄",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: true,
+      dailySummary: {
+        date: "1999-01-01",
+        totalCalories: 99999,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        mealCount: 1,
+      },
+    });
+
+    // Message commits; provisional cleared; summary dropped; handler fired.
+    assert.equal(useStore.getState().provisionalBubble, null);
+    assert.equal(useStore.getState().messages.length, 1);
+    assert.equal(useStore.getState().dailySummary, null);
+    assert.equal(handlerCallCount, 1);
+  });
+
+  it("commitProvisionalBubble without dailySummary leaves dailySummary untouched and handler unfired", () => {
+    let handlerCallCount = 0;
+    useStore.getState().setRolloverRefreshHandler(() => {
+      handlerCallCount++;
+    });
+
+    useStore.getState().setProvisionalBubble({
+      id: "msg-no-summary",
+      statusLabel: "",
+      content: "好的",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({ didLogMeal: false });
+
+    assert.equal(useStore.getState().provisionalBubble, null);
+    assert.equal(useStore.getState().messages.length, 1);
+    assert.equal(useStore.getState().dailySummary, null);
+    assert.equal(handlerCallCount, 0);
   });
 });

@@ -33,6 +33,7 @@ describe("Editorial UI", () => {
       dailyTargets: { calories: 1800, protein: 140, carbs: 180, fat: 60 },
       messages: [],
       dailySummary: {
+        date: "2026-04-01",
         totalCalories: 920,
         totalProtein: 54,
         totalCarbs: 88,
@@ -68,7 +69,7 @@ describe("Editorial UI", () => {
 
   it("renders Calories cell instead of Meals with Chinese labels", () => {
     const cells = getDashboardCells(
-      { totalCalories: 920, totalProtein: 54, totalCarbs: 88, totalFat: 34, mealCount: 2 },
+      { date: "2026-04-01", totalCalories: 920, totalProtein: 54, totalCarbs: 88, totalFat: 34, mealCount: 2 },
       { calories: 1800, protein: 140, carbs: 180, fat: 60 },
     );
 
@@ -93,6 +94,7 @@ describe("Editorial UI", () => {
   it("returns guided empty-state copy instead of an em dash when no meals exist", () => {
     const presentation = getAdvicePresentation(
       {
+        date: "2026-04-01",
         totalCalories: 0,
         totalProtein: 0,
         totalCarbs: 0,
@@ -112,6 +114,7 @@ describe("Editorial UI", () => {
   it("returns split advice text and dynamic nutrition tags in Chinese", () => {
     const presentation = getAdvicePresentation(
       {
+        date: "2026-04-01",
         totalCalories: 1200,
         totalProtein: 60,
         totalCarbs: 110,
@@ -134,6 +137,7 @@ describe("Editorial UI", () => {
     const advice = getDisplayedCoachAdvice(
       "昨天的舊建議",
       {
+        date: "2026-04-01",
         totalCalories: 900,
         totalProtein: 40,
         totalCarbs: 80,
