@@ -9,6 +9,7 @@
 
 import { buildApp } from "../../server/app.js";
 import { StreamingLLMProvider } from "./streaming-llm.js";
+import type { AppServices } from "../../server/app.js";
 import type { LLMProvider } from "../../server/llm/types.js";
 import type { FastifyInstance } from "fastify";
 
@@ -28,8 +29,15 @@ export interface ScenarioAppContext {
   address: string;
   /** The device ID seeded during boot — use in every scenario request. */
   deviceId: string;
+  /** In-process service handles for deterministic harness setup. */
+  services: ScenarioAppServices;
   /** Shut down the app and release the port. */
   close(): Promise<void>;
+}
+
+export interface ScenarioAppServices {
+  foodLoggingService: AppServices["foodLoggingService"];
+  summaryService: AppServices["summaryService"];
 }
 
 /**
@@ -46,14 +54,24 @@ export async function createScenarioApp(
   process.env.TZ = "Asia/Taipei";
 
   const llmProvider = opts.llmProvider ?? new StreamingLLMProvider();
+  let services: ScenarioAppServices | undefined;
 
   const buildOpts: Parameters<typeof buildApp>[0] = {
     dbPath: ":memory:",
     llmProvider,
     ...(opts.uploadsDir !== undefined ? { uploadsDir: opts.uploadsDir } : {}),
+    onServicesReady: (readyServices) => {
+      services = {
+        foodLoggingService: readyServices.foodLoggingService,
+        summaryService: readyServices.summaryService,
+      };
+    },
   };
 
   const app = await buildApp(buildOpts);
+  if (!services) {
+    throw new Error("createScenarioApp: services were not captured during app boot");
+  }
 
   // Seed one device so scenarios can make authenticated requests immediately.
   const deviceRes = await app.inject({
@@ -76,6 +94,7 @@ export async function createScenarioApp(
     app,
     address,
     deviceId,
+    services,
     close: async () => {
       if (app.server.listening) {
         await app.close();

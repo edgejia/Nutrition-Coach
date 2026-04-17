@@ -16,6 +16,11 @@ import { registerSSERoutes } from "./routes/sse.js";
 import type { LLMProvider } from "./llm/types.js";
 import { config } from "./config.js";
 
+export interface AppServices {
+  foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  summaryService: ReturnType<typeof createSummaryService>;
+}
+
 export interface AppOptions {
   dbPath?: string;
   llmProvider: LLMProvider;
@@ -33,6 +38,8 @@ export interface AppOptions {
    * In OBS-04 tests: pass `{ level: 'info', stream: captureStream }` to capture log lines.
    */
   logger?: import("fastify").FastifyServerOptions["logger"];
+  /** Test harness observer for in-process service access. Does not expose an HTTP surface. */
+  onServicesReady?: (services: AppServices) => void;
 }
 
 export async function buildApp(opts: AppOptions) {
@@ -51,6 +58,8 @@ export async function buildApp(opts: AppOptions) {
   const summaryService = createSummaryService(db);
   const chatService = createChatService(db);
   const publisher = new RealtimePublisher();
+
+  opts.onServicesReady?.({ foodLoggingService, summaryService });
 
   const orchestrator = createOrchestrator({
     llmProvider,
