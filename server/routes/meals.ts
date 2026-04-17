@@ -22,6 +22,10 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     const device = await deviceService.getDevice(deviceId);
     if (!device) return reply.code(401).send({ error: "Invalid device ID" });
 
+    if (request.headers["x-refresh-reason"] === "day_rollover") {
+      request.log.info({ event: "day_rollover" }, "Day rollover meals refresh");
+    }
+
     const meals = await foodLoggingService.getMealsByDate(deviceId, currentAppDate());
     return {
       meals: meals.map((meal) => ({

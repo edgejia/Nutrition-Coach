@@ -155,8 +155,13 @@ export async function sendMessageStream(
   }
 }
 
-export async function getMeals(): Promise<{ meals: MealEntry[] }> {
-  const res = await fetch("/api/meals", { headers: getHeaders() });
+export async function getMeals(options?: { refreshReason?: "day_rollover" }): Promise<{ meals: MealEntry[] }> {
+  const headers = getHeaders();
+  if (options?.refreshReason === "day_rollover") {
+    headers["X-Refresh-Reason"] = "day_rollover";
+  }
+
+  const res = await fetch("/api/meals", { headers });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load meals");
   return res.json();
