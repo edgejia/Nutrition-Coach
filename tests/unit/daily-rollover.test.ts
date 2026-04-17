@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createDailyRolloverController } from "../../client/src/useDailyRollover.js";
+import {
+  createDailyRolloverController,
+  type ClearRolloverTimer,
+  type RolloverTimer,
+  type SetRolloverTimer,
+} from "../../client/src/useDailyRollover.js";
 
 type Listener = () => void;
 
@@ -32,26 +37,27 @@ class FakeEventTarget {
 describe("createDailyRolloverController", () => {
   it("refreshes once when the midnight timer fires", () => {
     let current = new Date("2026-03-25T23:59:59+08:00");
-    let timer: (() => void) | null = null;
+    const timers: Array<() => void> = [];
     let delayMs: number | undefined;
     let refreshCount = 0;
+    const setTimer: SetRolloverTimer = (callback, delay) => {
+      timers.push(callback);
+      delayMs = delay;
+      return timers.length as unknown as RolloverTimer;
+    };
 
     createDailyRolloverController({
       refresh: () => {
         refreshCount++;
       },
       now: () => current,
-      setTimer: (callback, delay) => {
-        timer = callback;
-        delayMs = delay;
-        return 1 as unknown as ReturnType<typeof setTimeout>;
-      },
+      setTimer,
       clearTimer: () => undefined,
     });
 
     assert.equal(delayMs, 1000);
     current = new Date("2026-03-26T00:00:00+08:00");
-    timer?.();
+    timers[0]?.();
 
     assert.equal(refreshCount, 1);
   });
@@ -67,8 +73,8 @@ describe("createDailyRolloverController", () => {
       },
       now: () => current,
       documentTarget: documentTarget as unknown as DailyRolloverDocumentTarget,
-      setTimer: (() => 1) as typeof setTimeout,
-      clearTimer: (() => undefined) as typeof clearTimeout,
+      setTimer: (() => 1 as unknown as RolloverTimer),
+      clearTimer: (() => undefined),
     });
 
     current = new Date("2026-03-26T08:00:00+08:00");
@@ -88,8 +94,8 @@ describe("createDailyRolloverController", () => {
       },
       now: () => current,
       windowTarget: windowTarget as unknown as DailyRolloverWindowTarget,
-      setTimer: (() => 1) as typeof setTimeout,
-      clearTimer: (() => undefined) as typeof clearTimeout,
+      setTimer: (() => 1 as unknown as RolloverTimer),
+      clearTimer: (() => undefined),
     });
 
     current = new Date("2026-03-26T08:00:00+08:00");
@@ -102,16 +108,17 @@ describe("createDailyRolloverController", () => {
     const documentTarget = new FakeEventTarget();
     const windowTarget = new FakeEventTarget();
     let cleared = false;
+    const clearTimer: ClearRolloverTimer = () => {
+      cleared = true;
+    };
 
     const cleanup = createDailyRolloverController({
       refresh: () => undefined,
       now: () => new Date("2026-03-25T23:59:59+08:00"),
       documentTarget: documentTarget as unknown as DailyRolloverDocumentTarget,
       windowTarget: windowTarget as unknown as DailyRolloverWindowTarget,
-      setTimer: (() => 123) as typeof setTimeout,
-      clearTimer: (() => {
-        cleared = true;
-      }) as typeof clearTimeout,
+      setTimer: (() => 123 as unknown as RolloverTimer),
+      clearTimer,
     });
 
     assert.equal(documentTarget.listenerCount("visibilitychange"), 1);
@@ -122,6 +129,42 @@ describe("createDailyRolloverController", () => {
     assert.equal(documentTarget.listenerCount("visibilitychange"), 0);
     assert.equal(windowTarget.listenerCount("focus"), 0);
     assert.equal(cleared, true);
+  });
+
+  it("does not throw or stop rescheduling when refresh fails", async () => {
+    let current = new Date("2026-03-25T23:59:59+08:00");
+    const timers: Array<() => void> = [];
+    const setTimer: SetRolloverTimer = (callback) => {
+      timers.push(callback);
+      return timers.length as unknown as RolloverTimer;
+    };
+
+    createDailyRolloverController({
+      refresh: () => {
+        throw new Error("refresh failed");
+      },
+      now: () => current,
+      setTimer,
+      clearTimer: () => undefined,
+    });
+
+    current = new Date("2026-03-26T00:00:00+08:00");
+    assert.doesNotThrow(() => timers[0]?.());
+    assert.equal(timers.length, 2);
+
+    const documentTarget = new FakeEventTarget();
+    const cleanup = createDailyRolloverController({
+      refresh: () => Promise.reject(new Error("refresh rejected")),
+      now: () => current,
+      documentTarget: documentTarget as unknown as DailyRolloverDocumentTarget,
+      setTimer,
+      clearTimer: () => undefined,
+    });
+
+    current = new Date("2026-03-27T00:00:00+08:00");
+    assert.doesNotThrow(() => documentTarget.dispatch("visibilitychange"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    cleanup();
   });
 });
 

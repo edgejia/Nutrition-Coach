@@ -1,11 +1,15 @@
 import { useEffect } from "react";
 import { formatLocalDate } from "./lib/time.js";
 
+export type RolloverTimer = ReturnType<typeof setTimeout>;
+export type SetRolloverTimer = (callback: () => void, delayMs: number) => RolloverTimer;
+export type ClearRolloverTimer = (timer: RolloverTimer) => void;
+
 export interface DailyRolloverControllerOptions {
   refresh: () => void | Promise<void>;
   now?: () => Date;
-  setTimer?: typeof setTimeout;
-  clearTimer?: typeof clearTimeout;
+  setTimer?: SetRolloverTimer;
+  clearTimer?: ClearRolloverTimer;
   documentTarget?: Pick<Document, "addEventListener" | "removeEventListener" | "visibilityState">;
   windowTarget?: Pick<Window, "addEventListener" | "removeEventListener">;
 }
@@ -20,6 +24,17 @@ export function createDailyRolloverController(options: DailyRolloverControllerOp
   let activeDate = formatLocalDate(now());
   let activeTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+
+  function runRefresh() {
+    try {
+      const result = options.refresh();
+      if (result && typeof result === "object" && "catch" in result) {
+        void result.catch(() => undefined);
+      }
+    } catch {
+      // Rollover refresh should not throw into timer, focus, or visibility callbacks.
+    }
+  }
 
   function clearActiveTimer() {
     if (activeTimer !== undefined) {
@@ -44,7 +59,7 @@ export function createDailyRolloverController(options: DailyRolloverControllerOp
       const nextDate = formatLocalDate(now());
       if (nextDate !== activeDate) {
         activeDate = nextDate;
-        void options.refresh();
+        runRefresh();
       }
       scheduleNextMidnight();
     }, delayMs);
@@ -55,7 +70,7 @@ export function createDailyRolloverController(options: DailyRolloverControllerOp
     if (nextDate === activeDate) return;
 
     activeDate = nextDate;
-    void options.refresh();
+    runRefresh();
     scheduleNextMidnight();
   }
 
