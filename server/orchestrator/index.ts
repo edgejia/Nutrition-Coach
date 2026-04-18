@@ -55,6 +55,33 @@ function ensureGoalReceipt(reply: string, receipt: string | undefined): string {
   return `${reply}\n\n${receipt}`;
 }
 
+async function* ensureGoalReceiptStream(
+  stream: AsyncGenerator<string>,
+  receipt: string | undefined,
+): AsyncGenerator<string> {
+  if (!receipt) {
+    yield* stream;
+    return;
+  }
+
+  let fullReply = "";
+  try {
+    for await (const token of stream) {
+      fullReply += token;
+      yield token;
+    }
+  } catch {
+    if (!fullReply.includes(receipt)) {
+      yield `${fullReply ? "\n\n" : ""}${receipt}`;
+    }
+    return;
+  }
+
+  if (!fullReply.includes(receipt)) {
+    yield `${fullReply ? "\n\n" : ""}${receipt}`;
+  }
+}
+
 function detectHallucinatedChoiceFollowUp(
   userMessage: string,
   recentMessages: Array<{ role: string; content: string; didLogMeal?: boolean }>
@@ -174,7 +201,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             if (roundResult.kind === "stream") {
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
-                streamGenerator: roundResult.streamGenerator,
+                streamGenerator: ensureGoalReceiptStream(
+                  roundResult.streamGenerator,
+                  successfulGoalReceipt,
+                ),
                 didLogMeal,
                 dailySummary: logMealSummary,
               };

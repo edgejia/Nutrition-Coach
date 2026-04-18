@@ -32,6 +32,10 @@ class StreamingLLMProvider implements LLMProvider {
     this.roundQueue.push({ kind: "stream", streamGenerator: streamTokens(tokens) });
   }
 
+  queueChatStreamError(tokens: string[], error: Error) {
+    this.roundQueue.push({ kind: "stream", streamGenerator: streamTokensThenThrow(tokens, error) });
+  }
+
   queueRoundResponse(response: LLMResponse) {
     this.roundQueue.push({ kind: "response", response });
   }
@@ -73,6 +77,13 @@ async function* streamTokens(tokens: string[]): AsyncGenerator<string> {
   for (const token of tokens) {
     yield token;
   }
+}
+
+async function* streamTokensThenThrow(tokens: string[], error: Error): AsyncGenerator<string> {
+  for (const token of tokens) {
+    yield token;
+  }
+  throw error;
 }
 
 describe("orchestrator shared patterns", () => {
@@ -381,5 +392,98 @@ describe("Orchestrator - didLogMeal", () => {
     assert.deepEqual(streamedTokens, ["直接", "回覆"]);
     assert.equal(result.didLogMeal, false);
     assert.equal(streamingLLM.chatCalls.length, 1);
+  });
+
+  it("appends a successful goal update receipt to streamed final replies", async () => {
+    const streamingLLM = new StreamingLLMProvider();
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    orchestrator = createOrchestrator({
+      llmProvider: streamingLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      deviceService: localDeviceService,
+      publisher: {
+        publishGoalsUpdate() {
+          return { sent: 1 };
+        },
+      },
+    });
+
+    streamingLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "goal_stream",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    streamingLLM.queueChatStream(["已經", "更新好了"]);
+
+    const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
+    assert.ok("streamGenerator" in result);
+
+    const streamedTokens: string[] = [];
+    for await (const token of result.streamGenerator) {
+      streamedTokens.push(token);
+    }
+
+    assert.equal(streamedTokens.join(""), "已經更新好了\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    const device = await localDeviceService.getDevice(localDeviceId);
+    assert.equal(device?.dailyCalories, 1800);
+    assert.equal(device?.dailyProtein, 130);
+  });
+
+  it("yields the goal update receipt when streamed final reply generation fails", async () => {
+    const streamingLLM = new StreamingLLMProvider();
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    orchestrator = createOrchestrator({
+      llmProvider: streamingLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      deviceService: localDeviceService,
+      publisher: {
+        publishGoalsUpdate() {
+          return { sent: 1 };
+        },
+      },
+    });
+
+    streamingLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "goal_stream_error",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    streamingLLM.queueChatStreamError(["處理中"], new Error("stream broke"));
+
+    const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
+    assert.ok("streamGenerator" in result);
+
+    const streamedTokens: string[] = [];
+    for await (const token of result.streamGenerator) {
+      streamedTokens.push(token);
+    }
+
+    assert.equal(streamedTokens.join(""), "處理中\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
   });
 });
