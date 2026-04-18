@@ -341,6 +341,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Fallback after MAX_ROUNDS
       opts?.hooks?.onFallback?.("max_rounds");
+      if (successfulGoalReceipt) {
+        return { reply: successfulGoalReceipt, didLogMeal, dailySummary: logMealSummary };
+      }
       return { reply: FALLBACK, didLogMeal, dailySummary: logMealSummary };
     },
   };

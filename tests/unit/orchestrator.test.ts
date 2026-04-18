@@ -259,6 +259,60 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(history.filter((message) => message.role === "assistant").length, 0);
   });
 
+  it("returns the goal update receipt after MAX_ROUNDS when the mutation already succeeded", async () => {
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+    const localLLM = new MockLLMProvider();
+
+    orchestrator = createOrchestrator({
+      llmProvider: localLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      deviceService: localDeviceService,
+      publisher: {
+        publishGoalsUpdate() {
+          return { sent: 1 };
+        },
+      },
+    });
+
+    localLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_max_rounds",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    localLLM.queueChatResponse({
+      toolCalls: [{
+        id: "summary_1",
+        type: "function",
+        function: { name: "get_daily_summary", arguments: "{}" },
+      }],
+    });
+    localLLM.queueChatResponse({
+      toolCalls: [{
+        id: "summary_2",
+        type: "function",
+        function: { name: "get_daily_summary", arguments: "{}" },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.didLogMeal, false);
+  });
+
   it("returns a deterministic logged reply for image-only uploads after log_food succeeds", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
