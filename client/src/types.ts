@@ -7,6 +7,14 @@ export interface DailyTargets {
   fat: number;
 }
 
+// SSE `goals_update` event payload. Server publishes only `{ targets }` so that
+// the client re-renders every existing goal-driven surface (Dashboard,
+// GoalSettings, HomeHeader) through the existing `setDailyTargets` store
+// action — no goal-update-specific UI affordance is introduced (D-23..D-26).
+export interface GoalsUpdatePayload {
+  targets: DailyTargets;
+}
+
 export interface DailySummary {
   date: string;
   totalCalories: number;
