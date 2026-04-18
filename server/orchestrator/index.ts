@@ -16,7 +16,7 @@ interface OrchestratorDeps {
   summaryService: ReturnType<typeof createSummaryService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   deviceService: ReturnType<typeof createDeviceService>;
-  publisher: RealtimePublisher;
+  publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
 
 const FALLBACK = "抱歉，我現在無法完成這個請求，請稍後再試。";

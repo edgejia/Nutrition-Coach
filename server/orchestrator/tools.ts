@@ -20,7 +20,7 @@ export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
   deviceService?: ReturnType<typeof createDeviceService>;
-  publisher?: RealtimePublisher;
+  publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
   imagePath?: string;
 }
 
