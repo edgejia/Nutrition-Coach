@@ -248,12 +248,6 @@ const updateGoalsContract: ToolContract<Partial<DailyTargets>, UpdateGoalsResult
       carbs: { type: "number", minimum: 0, maximum: 1000 },
       fat: { type: "number", minimum: 0, maximum: 300 },
     },
-    anyOf: [
-      { required: ["calories"] },
-      { required: ["protein"] },
-      { required: ["carbs"] },
-      { required: ["fat"] },
-    ],
   },
   zodSchema: updateGoalsSchema,
   sourceFields: ["calories", "protein", "carbs", "fat"] as const,

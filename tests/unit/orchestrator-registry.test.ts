@@ -30,6 +30,19 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         assert.deepEqual(def.function.parameters, contract!.parameters);
       }
     });
+
+    it("Test 2b: tool schemas avoid OpenAI-rejected top-level composition keywords", () => {
+      const forbiddenTopLevelKeywords = ["anyOf", "oneOf", "allOf", "enum", "not"];
+      for (const def of getToolDefinitions()) {
+        for (const keyword of forbiddenTopLevelKeywords) {
+          assert.equal(
+            Object.hasOwn(def.function.parameters, keyword),
+            false,
+            `${def.function.name} parameters must not contain top-level ${keyword}`,
+          );
+        }
+      }
+    });
   });
 
   describe("executeTool dispatches via toolRegistry", () => {
