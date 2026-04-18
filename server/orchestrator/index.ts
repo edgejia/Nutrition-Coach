@@ -321,6 +321,13 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (isFatalToolError(err)) {
                 // Validation failed before execution — emit executed:false BEFORE propagating
                 opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: false, executed: false, failureReason: errorStr });
+                if (successfulGoalReceipt) {
+                  return {
+                    reply: successfulGoalReceipt,
+                    didLogMeal,
+                    dailySummary: logMealSummary,
+                  };
+                }
                 throw err;
               }
               opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: false, executed: true, failureReason: errorStr });
