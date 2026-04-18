@@ -7,8 +7,10 @@ import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
+import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createSpyHooks } from "../helpers/spy-hooks.js";
+import type { DailyTargets } from "../../server/services/device.js";
 
 function assertReplyResult(result: OrchestratorResult): asserts result is Extract<OrchestratorResult, { reply: string }> {
   assert.ok("reply" in result);
@@ -19,16 +21,19 @@ describe("Orchestrator", () => {
   let mockLLM: MockLLMProvider;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let chatService: ReturnType<typeof createChatService>;
+  let deviceService: ReturnType<typeof createDeviceService>;
   let deviceId: string;
   let spyHooks: ReturnType<typeof createSpyHooks>;
+  let publishedGoals: Array<{ deviceId: string; targets: DailyTargets }>;
 
   beforeEach(async () => {
     const db = createDb(":memory:");
-    const deviceService = createDeviceService(db);
+    deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     const summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
+    publishedGoals = [];
 
     orchestrator = createOrchestrator({
       llmProvider: mockLLM,
@@ -36,7 +41,13 @@ describe("Orchestrator", () => {
       summaryService,
       foodLoggingService,
       deviceService,
-    });
+      publisher: {
+        publishGoalsUpdate(id: string, targets: DailyTargets) {
+          publishedGoals.push({ deviceId: id, targets });
+          return { sent: 1 };
+        },
+      },
+    } as Parameters<typeof createOrchestrator>[0]);
 
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
     spyHooks = createSpyHooks(); // fresh mocks each test — never at module scope (Pitfall 6)
@@ -266,5 +277,176 @@ describe("Orchestrator", () => {
     assert.equal(payload.executed, false, "executed:false — tool validation failed before execution");
     assert.ok(typeof payload.failureReason === "string" && payload.failureReason.length > 0);
     assert.ok(!payload.failureReason?.includes(deviceId), "failureReason must not contain deviceId");
+  });
+
+  it("GOAL-06: passes current user text and immediately previous assistant message to update_goals", async () => {
+    await chatService.saveMessage(deviceId, "assistant", "確認要把蛋白質改成 130 g 嗎?");
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_call",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g" });
+
+    const result = await orchestrator.handleMessage(deviceId, "卡路里改 1800，是", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.match(result.reply, /已更新每日目標/);
+
+    const device = await deviceService.getDevice(deviceId);
+    assert.equal(device?.dailyCalories, 1800);
+    assert.equal(device?.dailyProtein, 130);
+    assert.equal(publishedGoals.length, 1);
+  });
+
+  it("GOAL-05: controlled validation failure saves a tool message, returns to the LLM, and does not throw", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_validation",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 99999 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "請提供 500 到 8000 之間的卡路里目標。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "卡路里改 99999", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.reply, "請提供 500 到 8000 之間的卡路里目標。");
+
+    const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
+    assert.equal(payload.tool, "update_goals");
+    assert.equal(payload.success, false);
+    assert.equal(payload.executed, false);
+    assert.match(payload.failureReason ?? "", /validation/);
+
+    const secondRoundMessages = mockLLM.chatCalls[1].messages;
+    const toolMessage = secondRoundMessages.find((message) => message.role === "tool");
+    assert.ok(toolMessage, "validation failure should be pushed into the next LLM round");
+    assert.match(String(toolMessage.content), /validation/);
+
+    const history = await chatService.getHistory(deviceId, 10);
+    assert.equal(history.some((message) => message.role === "tool" && message.toolName === "update_goals"), true);
+  });
+
+  it("GOAL-06: controlled guard failure records failureReason:\"guard\" and keeps the fatal unknown-tool path unchanged", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_guard",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "你想把卡路里調整成多少？" });
+
+    const result = await orchestrator.handleMessage(deviceId, "少吃一點", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.equal(result.didLogMeal, false);
+    const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
+    assert.equal(payload.tool, "update_goals");
+    assert.equal(payload.success, false);
+    assert.equal(payload.executed, false);
+    assert.match(payload.failureReason ?? "", /guard/);
+
+    mockLLM.reset();
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unknown_tool",
+        type: "function",
+        function: { name: "unknown_goal_tool", arguments: "{}" },
+      }],
+    });
+    await assert.rejects(
+      orchestrator.handleMessage(deviceId, "測試未知工具", undefined, undefined, { hooks: spyHooks }),
+      /unknown tool/,
+    );
+  });
+
+  it("OBS-03: onToolReceived for update_goals exposes field names only, not target numbers, raw user text, or deviceId", async () => {
+    const rawUserText = `raw user text ${deviceId} 卡路里 1800 蛋白質 130`;
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_redaction",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g" });
+
+    await orchestrator.handleMessage(deviceId, rawUserText, undefined, undefined, { hooks: spyHooks });
+
+    assert.equal(spyHooks.onToolReceived.mock.callCount(), 1);
+    const argsRedacted = spyHooks.onToolReceived.mock.calls[0].arguments[1];
+    assert.match(argsRedacted, /updatedFields: calories,protein/);
+    assert.doesNotMatch(argsRedacted, /1800/);
+    assert.doesNotMatch(argsRedacted, /130/);
+    assert.doesNotMatch(argsRedacted, /raw user text/);
+    assert.doesNotMatch(argsRedacted, new RegExp(deviceId));
+  });
+
+  it("OBS-02: structured goal hook events carry only field names, failureReason, and event names", () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const log = {
+      info(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+      warn(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+    };
+    const hooks = createStructuredHooks(log as never);
+
+    hooks.onToolResult?.({
+      tool: "update_goals",
+      success: true,
+      executed: true,
+      summary: "updatedFields: calories,protein",
+      updatedFields: ["calories", "protein"],
+      publishedEvents: ["goals_update"],
+    });
+    hooks.onToolResult?.({
+      tool: "update_goals",
+      success: false,
+      executed: false,
+      failureReason: "guard",
+      summary: "failureReason: guard",
+    });
+
+    const goalEvents = captured.filter((payload) =>
+      ["goal_update_success", "goal_update_rejected", "goals_update_published"].includes(String(payload.event)),
+    );
+    assert.deepEqual(goalEvents.map((payload) => payload.event), [
+      "goal_update_success",
+      "goals_update_published",
+      "goal_update_rejected",
+    ]);
+
+    const rawUserText = "raw user text 卡路里 1800 蛋白質 130";
+    for (const payload of goalEvents) {
+      const keys = Object.keys(payload).sort();
+      if (payload.event === "goal_update_rejected") {
+        assert.deepEqual(keys, ["event", "failureReason"]);
+      } else {
+        assert.deepEqual(keys, ["event", "updatedFields"]);
+      }
+      const serialized = JSON.stringify(payload);
+      assert.doesNotMatch(serialized, /1800/);
+      assert.doesNotMatch(serialized, /130/);
+      assert.doesNotMatch(serialized, new RegExp(deviceId));
+      assert.doesNotMatch(serialized, new RegExp(rawUserText));
+    }
   });
 });
