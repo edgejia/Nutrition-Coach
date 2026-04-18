@@ -166,20 +166,62 @@ describe("chat goal update integration", () => {
     });
   });
 
-  it("keeps targets unchanged when vague intent is clarified without a tool call", async () => {
-    mockLLM.queueChatResponse({ content: "你想把每日熱量或三大營養素調整成多少？" });
+  it("keeps targets unchanged when vague intent gets a recommendation without a tool call", async () => {
+    mockLLM.queueChatResponse({
+      content:
+        "如果你想少吃一點，我建議先調成：\n- 熱量：1400 kcal\n- 蛋白質：120 g\n- 碳水化合物：130 g\n- 脂肪：45 g\n\n要幫你套用這組目標嗎？",
+    });
 
     const { status, body } = await postChat("我想少吃一點");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
-    assert.match(body.reply, /調整成多少/);
+    assert.match(body.reply, /建議/);
+    assert.match(body.reply, /1400 kcal/);
+    assert.match(body.reply, /要幫你套用/);
     assert.doesNotMatch(body.reply, /已更新每日目標：/);
     assert.deepEqual(await readTargets(), {
       calories: 1500,
       protein: 120,
       carbs: 150,
       fat: 50,
+    });
+  });
+
+  it("updates targets when the user confirms the previous assistant recommendation", async () => {
+    mockLLM.queueChatResponse({
+      content:
+        "如果你想少吃一點，我建議先調成：\n- 熱量：1400 kcal\n- 蛋白質：120 g\n- 碳水化合物：130 g\n- 脂肪：45 g\n\n要幫你套用這組目標嗎？",
+    });
+
+    const first = await postChat("我想少吃一點");
+    assert.equal(first.status, 200);
+    assert.doesNotMatch(first.body.reply, /已更新每日目標：/);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_confirm_recommendation",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1400, protein: 120, carbs: 130, fat: 45 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 120 g\n• 碳水 130 g\n• 脂肪 45 g",
+    });
+
+    const { status, body } = await postChat("好");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.match(body.reply, /已更新每日目標：/);
+    assert.deepEqual(body.dailyTargets, {
+      calories: 1400,
+      protein: 120,
+      carbs: 130,
+      fat: 45,
     });
   });
 

@@ -138,7 +138,7 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /脂肪/);
   });
 
-  it("says vague phrases like 少吃一點 and 提高蛋白質 must ask for concrete values before mutation", () => {
+  it("says vague phrases like 少吃一點 and 提高蛋白質 must get a recommendation confirmation before mutation", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1500,
       protein: 120,
@@ -149,8 +149,9 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /少吃一點/);
     assert.match(prompt, /提高蛋白質/);
     assert.match(prompt, /血糖控制/);
-    assert.match(prompt, /先詢問/);
-    assert.match(prompt, /具體目標值/);
+    assert.match(prompt, /推薦一組具體數值/);
+    assert.match(prompt, /詢問使用者是否要套用/);
+    assert.match(prompt, /明確同意/);
   });
 
   it("says successful update receipts beginning 已更新每日目標： must be shown verbatim", () => {

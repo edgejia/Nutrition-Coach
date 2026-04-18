@@ -239,7 +239,7 @@ const getDailySummaryContract: ToolContract<
 const updateGoalsContract: ToolContract<Partial<DailyTargets>, UpdateGoalsResult> = {
   name: "update_goals",
   description:
-    "更新使用者每日營養目標。只有當使用者在目前訊息或上一輪確認中提供 calories/protein/carbs/fat 的具體數字時才可呼叫；模糊意圖必須先追問具體目標值。",
+    "更新使用者每日營養目標。只有當使用者在目前訊息提供 calories/protein/carbs/fat 的具體數字，或明確同意上一輪助理推薦的具體數字時才可呼叫；模糊意圖必須先推薦具體目標值並請使用者確認。",
   parameters: {
     type: "object",
     additionalProperties: false,

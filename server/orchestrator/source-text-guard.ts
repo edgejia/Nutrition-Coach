@@ -43,6 +43,24 @@ const CHINESE_DIGIT: Record<string, number> = {
 
 const APPROX_SUFFIX = "多";
 
+function hasExplicitConfirmation(text: string): boolean {
+  const normalized = text.trim().toLowerCase().replace(/\s+/g, "");
+  if (!normalized) return false;
+
+  if (/(不要|不用|不行|不好|不是|不對|取消|先不要|先不用|no|not)/i.test(normalized)) {
+    return false;
+  }
+
+  if (/^(好|可以|可|是|對|嗯|恩|ok|okay|yes|y|sure)$/.test(normalized)) {
+    return true;
+  }
+  if (/(^|[，,。!！、])(好|可以|可|是|對|ok|okay|yes|y|sure)($|[，,。!！、])/.test(normalized)) {
+    return true;
+  }
+
+  return /(幫我|直接)?(更新|套用|改成|照這樣|就這樣|用這組|照這組)/.test(normalized);
+}
+
 function stripFormatting(text: string): string {
   // Remove ASCII commas, Chinese commas, and all whitespace; keep the
   // `多` marker so we can still reject approximate runs after stripping.
@@ -257,7 +275,11 @@ export function checkSourceFields(
   const assistantCandidates = context.previousAssistantMessage
     ? normalizeNumericSourceText(context.previousAssistantMessage)
     : [];
-  const allowed = new Set<string>([...userCandidates, ...assistantCandidates]);
+  const userAllowed = new Set<string>(userCandidates);
+  const assistantAllowed = new Set<string>(assistantCandidates);
+  const confirmedAssistantRecommendation = hasExplicitConfirmation(
+    context.currentUserMessage ?? "",
+  );
 
   const guardedFields: string[] = [];
   for (const field of sourceFields) {
@@ -269,9 +291,13 @@ export function checkSourceFields(
       continue;
     }
     const key = String(value);
-    if (!allowed.has(key)) {
-      guardedFields.push(field);
+    if (userAllowed.has(key)) {
+      continue;
     }
+    if (assistantAllowed.has(key) && confirmedAssistantRecommendation) {
+      continue;
+    }
+    guardedFields.push(field);
   }
 
   return { ok: guardedFields.length === 0, guardedFields };

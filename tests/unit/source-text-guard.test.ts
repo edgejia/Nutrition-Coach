@@ -84,6 +84,19 @@ describe("checkSourceFields scope rule (current user + previous assistant only)"
     assert.equal(result.ok, true);
   });
 
+  it("Test 4b-2: number in previous assistant is rejected without explicit confirmation", () => {
+    const result = checkSourceFields(
+      { calories: 1800 },
+      ["calories"],
+      {
+        currentUserMessage: "再想一下",
+        previousAssistantMessage: "我建議熱量 1800 kcal，要套用嗎?",
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.guardedFields, ["calories"]);
+  });
+
   it("Test 4c: number NOT in current user or immediately previous assistant text is rejected", () => {
     const result = checkSourceFields(
       { calories: 1800 },
