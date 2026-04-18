@@ -11,6 +11,7 @@ import { SummaryDetailScreen } from "./SummaryDetailScreen.js";
 export function MainLayout() {
   const deviceId = useStore((s) => s.deviceId);
   const setDailySummary = useStore((s) => s.setDailySummary);
+  const setDailyTargets = useStore((s) => s.setDailyTargets);
   const setMeals = useStore((s) => s.setMeals);
   const clearDevice = useStore((s) => s.clearDevice);
   const setRolloverRefreshHandler = useStore((s) => s.setRolloverRefreshHandler);
@@ -21,7 +22,9 @@ export function MainLayout() {
   const refreshForRollover = useCallback(async () => {
     if (!deviceId) return;
     disconnectSSE();
-    connectSSE(deviceId, setDailySummary);
+    // After rollover we re-subscribe with both handlers so a goals_update
+    // that lands immediately after midnight still reaches setDailyTargets.
+    connectSSE(deviceId, { onSummary: setDailySummary, onGoalsUpdate: setDailyTargets });
     try {
       const { meals } = await getMeals({ refreshReason: "day_rollover" });
       setMeals(meals);
@@ -30,13 +33,16 @@ export function MainLayout() {
         clearDevice();
       }
     }
-  }, [deviceId, setDailySummary, setMeals, clearDevice]);
+  }, [deviceId, setDailySummary, setDailyTargets, setMeals, clearDevice]);
 
   useEffect(() => {
     if (!deviceId) return;
-    connectSSE(deviceId, setDailySummary);
+    // Goal updates flow through the existing `setDailyTargets` store action so
+    // Dashboard / Settings / HomeHeader re-render via existing selectors —
+    // no new UI affordance (D-25, D-26).
+    connectSSE(deviceId, { onSummary: setDailySummary, onGoalsUpdate: setDailyTargets });
     return () => disconnectSSE();
-  }, [deviceId, setDailySummary]);
+  }, [deviceId, setDailySummary, setDailyTargets]);
 
   useEffect(() => {
     setRolloverRefreshHandler(deviceId ? refreshForRollover : null);
