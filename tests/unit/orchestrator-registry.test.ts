@@ -14,10 +14,10 @@ import type { ToolCall } from "../../server/llm/types.js";
 
 describe("Phase 10-02: orchestrator tool registry", () => {
   describe("getToolDefinitions() derives definitions from toolRegistry", () => {
-    it("Test 1: returns exactly log_food and get_daily_summary (no update_goals yet)", () => {
+    it("Test 1: returns exactly log_food, get_daily_summary, and update_goals", () => {
       const defs = getToolDefinitions();
       const names = defs.map((d) => d.function.name).sort();
-      assert.deepEqual(names, ["get_daily_summary", "log_food"]);
+      assert.deepEqual(names, ["get_daily_summary", "log_food", "update_goals"]);
     });
 
     it("Test 2: definitions reuse each contract's description and parameters", () => {

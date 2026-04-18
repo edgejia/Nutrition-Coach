@@ -2,9 +2,12 @@ import { z } from "zod";
 import type { ToolDefinition, ToolCall } from "../llm/types.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
+import type { createDeviceService, DailyTargets } from "../services/device.js";
+import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate } from "../lib/time.js";
 import {
   runContract,
+  summarizeContractArgsForLog,
   type ToolContract,
   type RunContractContext,
 } from "./tool-contract.js";
@@ -16,12 +19,19 @@ import {
 export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
+  deviceService?: ReturnType<typeof createDeviceService>;
+  publisher?: RealtimePublisher;
   imagePath?: string;
 }
 
 export interface ToolExecutionResult {
   result: string;
   summary: string;
+  success?: boolean;
+  executed?: boolean;
+  failureReason?: "validation" | "guard" | "execute";
+  updatedFields?: string[];
+  publishedEvents?: string[];
   dailySummary?: DailySummary;
   loggedMeal?: {
     foodName: string;
@@ -69,6 +79,13 @@ interface LogFoodResult {
 
 type GetDailySummaryArgs = Record<string, never>;
 type GetDailySummaryResult = DailySummary;
+type UpdateGoalField = keyof DailyTargets;
+
+interface UpdateGoalsResult {
+  targets: DailyTargets;
+  updatedFields: UpdateGoalField[];
+  publishedEvents: ["goals_update"];
+}
 
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
 
@@ -83,6 +100,28 @@ const logFoodSchema = z
   .strict();
 
 const getDailySummarySchema = z.object({}).strict();
+
+const updateGoalsSchema = z
+  .object({
+    calories: z.number().min(500).max(8000).optional(),
+    protein: z.number().min(0).max(400).optional(),
+    carbs: z.number().min(0).max(1000).optional(),
+    fat: z.number().min(0).max(300).optional(),
+  })
+  .strict()
+  .refine((args) => Object.keys(args).length > 0, {
+    message: "at least one goal field is required",
+  });
+
+function updatedGoalFields(args: Partial<DailyTargets>): UpdateGoalField[] {
+  return (["calories", "protein", "carbs", "fat"] as const).filter(
+    (field) => args[field] !== undefined,
+  );
+}
+
+function formatGoalsReceipt(targets: DailyTargets): string {
+  return `已更新每日目標：\n• 卡路里 ${targets.calories} kcal\n• 蛋白質 ${targets.protein} g\n• 碳水 ${targets.carbs} g\n• 脂肪 ${targets.fat} g`;
+}
 
 // ---------------------------------------------------------------------------
 // Contracts. logSummary returns redacted shape (D-30); macros are part of
@@ -196,6 +235,55 @@ const getDailySummaryContract: ToolContract<
   },
 };
 
+const updateGoalsContract: ToolContract<Partial<DailyTargets>, UpdateGoalsResult> = {
+  name: "update_goals",
+  description:
+    "更新使用者每日營養目標。只有當使用者在目前訊息或上一輪確認中提供 calories/protein/carbs/fat 的具體數字時才可呼叫；模糊意圖必須先追問具體目標值。",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      calories: { type: "number", minimum: 500, maximum: 8000 },
+      protein: { type: "number", minimum: 0, maximum: 400 },
+      carbs: { type: "number", minimum: 0, maximum: 1000 },
+      fat: { type: "number", minimum: 0, maximum: 300 },
+    },
+    anyOf: [
+      { required: ["calories"] },
+      { required: ["protein"] },
+      { required: ["carbs"] },
+      { required: ["fat"] },
+    ],
+  },
+  zodSchema: updateGoalsSchema,
+  sourceFields: ["calories", "protein", "carbs", "fat"] as const,
+  logSummary: (args) => ({
+    tool: "update_goals",
+    updatedFields: updatedGoalFields(args),
+  }),
+  execute: async (args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.deviceService || !deps.publisher || !deviceId) {
+      throw new Error("update_goals contract missing deviceService/publisher/deviceId in context");
+    }
+
+    const updatedFields = updatedGoalFields(args);
+    const targets = await deps.deviceService.updateGoals(deviceId, args);
+    deps.publisher.publishGoalsUpdate(deviceId, targets);
+
+    return {
+      ok: true,
+      result: {
+        targets,
+        updatedFields,
+        publishedEvents: ["goals_update"],
+      },
+      toolMessage: formatGoalsReceipt(targets),
+    };
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Registry (D-02). Single source of truth.
 // ---------------------------------------------------------------------------
@@ -203,6 +291,7 @@ const getDailySummaryContract: ToolContract<
 export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [logFoodContract.name, logFoodContract as ToolContract<any, any>],
   [getDailySummaryContract.name, getDailySummaryContract as ToolContract<any, any>],
+  [updateGoalsContract.name, updateGoalsContract as ToolContract<any, any>],
 ]);
 
 export function getToolDefinitions(): ToolDefinition[] {
@@ -223,6 +312,34 @@ export function getToolDefinitions(): ToolDefinition[] {
 // Compatibility export (Phase 10-02): server/orchestrator/index.ts still imports
 // `toolDefinitions` until 10-03; computed once at module load from registry.
 export const toolDefinitions: ToolDefinition[] = getToolDefinitions();
+
+export function redactToolArgsForHook(toolName: string, rawArgs: string): string {
+  const contract = toolRegistry.get(toolName);
+  if (contract) {
+    const summary = summarizeContractArgsForLog(contract, rawArgs);
+    if (typeof summary === "string") {
+      return summary;
+    }
+    if (toolName === "log_food") {
+      const calories = summary.calories ?? "?";
+      const protein = summary.protein ?? "?";
+      const carbs = summary.carbs ?? "?";
+      const fat = summary.fat ?? "?";
+      return `熱量 ${calories}kcal, P${protein}g, C${carbs}g, F${fat}g`;
+    }
+    if (toolName === "get_daily_summary") {
+      return "<get_daily_summary args>";
+    }
+    if (toolName === "update_goals") {
+      const fields = Array.isArray(summary.updatedFields)
+        ? summary.updatedFields.join(",")
+        : "";
+      return `updatedFields: ${fields}`;
+    }
+    return `<${toolName} args>`;
+  }
+  return `<${toolName} args>`;
+}
 
 // ---------------------------------------------------------------------------
 // Orchestrator-facing dispatch (registry-first per D-03). Adapts the
@@ -255,6 +372,16 @@ export async function executeTool(
   const outcome = await runContract(contract, toolCall, ctx);
 
   if (!outcome.success) {
+    if (toolCall.function.name === "update_goals") {
+      return {
+        result: outcome.result,
+        summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
+        success: false,
+        executed: false,
+        failureReason: outcome.failureReason,
+      };
+    }
+
     // Convert controlled failures into FatalToolError so the existing
     // orchestrator catch-block emits `executed:false` exactly as Phase 8 did
     // for log_food / get_daily_summary. Carry the underlying message so test
@@ -289,6 +416,18 @@ export async function executeTool(
     return {
       result: outcome.result,
       summary: `熱量 ${summary.totalCalories}kcal, P${summary.totalProtein}g, C${summary.totalCarbs}g, F${summary.totalFat}g`,
+    };
+  }
+
+  if (toolCall.function.name === "update_goals") {
+    const contractResult = outcome.contractResult as UpdateGoalsResult;
+    return {
+      result: outcome.result,
+      summary: `updatedFields: ${contractResult.updatedFields.join(",")}`,
+      success: true,
+      executed: true,
+      updatedFields: [...contractResult.updatedFields],
+      publishedEvents: [...contractResult.publishedEvents],
     };
   }
 
