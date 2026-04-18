@@ -231,6 +231,7 @@ async function handleOrchestratorSSE(
 ): Promise<void> {
   let streamDidLogMeal = false;
   let streamDailySummary: unknown;
+  let streamDailyTargets: unknown;
 
   try {
     if (image) {
@@ -254,6 +255,7 @@ async function handleOrchestratorSSE(
       const { streamGenerator, didLogMeal, dailySummary } = result;
       streamDidLogMeal = didLogMeal;
       streamDailySummary = dailySummary;
+      streamDailyTargets = result.dailyTargets;
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -267,16 +269,25 @@ async function handleOrchestratorSSE(
       streamDidLogMeal = streamResult.didLogMeal;
       streamDailySummary = streamResult.dailySummary;
 
-      const doneData = { didLogMeal: streamDidLogMeal, ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}) };
+      const doneData = {
+        didLogMeal: streamDidLogMeal,
+        ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
+        ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
+      };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       publishSummarySafe(deps.publisher, deviceId, streamDidLogMeal, streamDailySummary, deps.log);
     } else {
-      const { reply: replyText, didLogMeal, dailySummary } = result;
+      const { reply: replyText, didLogMeal, dailySummary, dailyTargets } = result;
       streamDidLogMeal = didLogMeal;
       streamDailySummary = dailySummary;
+      streamDailyTargets = dailyTargets;
       const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, replyText);
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
-      const doneData = { didLogMeal, ...(dailySummary ? { dailySummary } : {}) };
+      const doneData = {
+        didLogMeal,
+        ...(dailySummary ? { dailySummary } : {}),
+        ...(dailyTargets ? { dailyTargets } : {}),
+      };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       publishSummarySafe(deps.publisher, deviceId, didLogMeal, dailySummary, deps.log);
     }
@@ -287,9 +298,11 @@ async function handleOrchestratorSSE(
     } catch {
       // If history persistence also fails, still close the stream with done.
     }
-    const doneData = streamDidLogMeal
-      ? { didLogMeal: true, ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}) }
-      : { didLogMeal: false };
+    const doneData = {
+      didLogMeal: streamDidLogMeal,
+      ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
+      ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
+    };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
     publishSummarySafe(deps.publisher, deviceId, streamDidLogMeal, streamDailySummary, deps.log);
   } finally {
@@ -323,12 +336,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     if (!wantsSSE) {
       let jsonDidLogMeal = false;
       let jsonDailySummary: unknown;
+      let jsonDailyTargets: unknown;
 
       try {
         // JSON path: existing non-SSE callers remain intact
         const result = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
         jsonDidLogMeal = result.didLogMeal;
         jsonDailySummary = result.dailySummary;
+        jsonDailyTargets = result.dailyTargets;
 
         if (result.didLogMeal && !result.dailySummary) {
           throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
@@ -345,28 +360,37 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
           // C1: try/catch ensures publish failure never changes the HTTP response or status code.
           publishSummarySafe(publisher, deviceId, didLogMeal, dailySummary, request.log);
-          return didLogMeal
-            ? { reply: sanitized, didLogMeal, dailySummary }
-            : { reply: sanitized, didLogMeal };
+          return {
+            reply: sanitized,
+            didLogMeal,
+            ...(dailySummary ? { dailySummary } : {}),
+            ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
+          };
         }
 
-        const { reply: replyText, didLogMeal, dailySummary } = result;
+        const { reply: replyText, didLogMeal, dailySummary, dailyTargets } = result;
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, didLogMeal, dailySummary, request.log);
-        return didLogMeal
-          ? { reply: sanitizedJson, didLogMeal, dailySummary }
-          : { reply: sanitizedJson, didLogMeal };
+        return {
+          reply: sanitizedJson,
+          didLogMeal,
+          ...(dailySummary ? { dailySummary } : {}),
+          ...(dailyTargets ? { dailyTargets } : {}),
+        };
       } catch {
         const fallback = jsonDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidLogMeal, jsonDailySummary, request.log);
-        return jsonDidLogMeal
-          ? { reply: sanitizedJson, didLogMeal: true, ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}) }
-          : { reply: sanitizedJson, didLogMeal: false };
+        return {
+          reply: sanitizedJson,
+          didLogMeal: jsonDidLogMeal,
+          ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}),
+          ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
+        };
       } finally {
         // D-08: Delete upload file after processing completes (success or failure).
         await cleanupUploadSafe(image?.path, request.log);

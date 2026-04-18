@@ -55,6 +55,7 @@ export interface ChatReply {
   reply: string;
   didLogMeal?: boolean;
   dailySummary?: DailySummary;
+  dailyTargets?: DailyTargets;
 }
 
 export interface CoachCTA {

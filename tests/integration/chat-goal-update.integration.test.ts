@@ -33,7 +33,10 @@ describe("chat goal update integration", () => {
     }
   });
 
-  async function postChat(message: string): Promise<{ status: number; body: { reply: string; didLogMeal: boolean } }> {
+  async function postChat(message: string): Promise<{
+    status: number;
+    body: { reply: string; didLogMeal: boolean; dailyTargets?: DailyTargets };
+  }> {
     const form = new FormData();
     form.append("message", message);
 
@@ -83,6 +86,12 @@ describe("chat goal update integration", () => {
     assert.match(body.reply, /已更新每日目標：/);
     assert.match(body.reply, /卡路里 1800 kcal/);
     assert.match(body.reply, /蛋白質 130 g/);
+    assert.deepEqual(body.dailyTargets, {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
 
     assert.deepEqual(await readTargets(), {
       calories: 1800,
@@ -112,6 +121,12 @@ describe("chat goal update integration", () => {
     assert.match(body.reply, /已更新每日目標：/);
     assert.match(body.reply, /卡路里 1800 kcal/);
     assert.match(body.reply, /蛋白質 130 g/);
+    assert.deepEqual(body.dailyTargets, {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
     assert.deepEqual(await readTargets(), {
       calories: 1800,
       protein: 130,
@@ -137,6 +152,12 @@ describe("chat goal update integration", () => {
 
     assert.equal(status, 200);
     assert.equal(body.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.deepEqual(body.dailyTargets, {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
     assert.deepEqual(await readTargets(), {
       calories: 1800,
       protein: 130,

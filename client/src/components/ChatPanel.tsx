@@ -12,6 +12,7 @@ export function ChatPanel() {
   const setMessages = useStore((s) => s.setMessages);
   const addMessage = useStore((s) => s.addMessage);
   const setDailySummary = useStore((s) => s.setDailySummary);
+  const setDailyTargets = useStore((s) => s.setDailyTargets);
   const sending = useStore((s) => s.sending);
   const setSending = useStore((s) => s.setSending);
   const provisionalBubble = useStore((s) => s.provisionalBubble);
@@ -60,10 +61,13 @@ export function ChatPanel() {
           onToken: (token) => {
             useStore.getState().appendProvisionalToken(token);
           },
-          onDone: ({ didLogMeal, dailySummary }) => {
+          onDone: ({ didLogMeal, dailySummary, dailyTargets }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
+            }
+            if (dailyTargets) {
+              setDailyTargets(dailyTargets);
             }
             if (didLogMeal && dailySummary) {
               setDailySummary(dailySummary);

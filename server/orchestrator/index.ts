@@ -2,7 +2,7 @@ import type { LLMProvider, ChatMessage } from "../llm/types.js";
 import type { createChatService } from "../services/chat.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
-import type { createDeviceService } from "../services/device.js";
+import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -26,8 +26,8 @@ const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 
 export type OrchestratorResult =
-  | { reply: string; didLogMeal: boolean; dailySummary?: DailySummary }
-  | { streamGenerator: AsyncGenerator<string>; didLogMeal: boolean; dailySummary?: DailySummary };
+  | { reply: string; didLogMeal: boolean; dailySummary?: DailySummary; dailyTargets?: DailyTargets }
+  | { streamGenerator: AsyncGenerator<string>; didLogMeal: boolean; dailySummary?: DailySummary; dailyTargets?: DailyTargets };
 
 function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined): DailySummary {
   if (!dailySummary) {
@@ -180,6 +180,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let logMealSummary: DailySummary | undefined;
       let shouldStreamFinalReply = false;
       let successfulGoalReceipt: string | undefined;
+      let successfulGoalTargets: DailyTargets | undefined;
       let loggedMeal:
         | {
             foodName: string;
@@ -207,6 +208,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 ),
                 didLogMeal,
                 dailySummary: logMealSummary,
+                dailyTargets: successfulGoalTargets,
               };
             }
             response = roundResult.response;
@@ -220,6 +222,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 ),
                 didLogMeal,
                 dailySummary: logMealSummary,
+                dailyTargets: successfulGoalTargets,
               };
             }
 
@@ -232,6 +235,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               reply: successfulGoalReceipt,
               didLogMeal,
               dailySummary: logMealSummary,
+              dailyTargets: successfulGoalTargets,
             };
           }
           if (didLogMeal) {
@@ -252,6 +256,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             reply: ensureGoalReceipt(response.content, successfulGoalReceipt),
             didLogMeal,
             dailySummary: logMealSummary,
+            dailyTargets: successfulGoalTargets,
           };
         }
 
@@ -275,6 +280,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 failureReason,
                 updatedFields,
                 publishedEvents,
+                dailyTargets,
               } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
@@ -305,6 +311,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               }
               if (toolCall.function.name === "update_goals") {
                 successfulGoalReceipt = result;
+                successfulGoalTargets = dailyTargets;
               }
               opts?.hooks?.onToolResult?.({
                 tool: toolCall.function.name,
@@ -326,6 +333,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     reply: successfulGoalReceipt,
                     didLogMeal,
                     dailySummary: logMealSummary,
+                    dailyTargets: successfulGoalTargets,
                   };
                 }
                 throw err;
@@ -352,7 +360,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       // Fallback after MAX_ROUNDS
       opts?.hooks?.onFallback?.("max_rounds");
       if (successfulGoalReceipt) {
-        return { reply: successfulGoalReceipt, didLogMeal, dailySummary: logMealSummary };
+        return {
+          reply: successfulGoalReceipt,
+          didLogMeal,
+          dailySummary: logMealSummary,
+          dailyTargets: successfulGoalTargets,
+        };
       }
       return { reply: FALLBACK, didLogMeal, dailySummary: logMealSummary };
     },

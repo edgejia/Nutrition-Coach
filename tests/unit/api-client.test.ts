@@ -235,6 +235,26 @@ describe("sendMessageStream", () => {
     assert.equal(done, true);
   });
 
+  it("dispatches dailyTargets from done events", async () => {
+    storage.set("deviceId", "d-1");
+    const targets = { calories: 1800, protein: 130, carbs: 150, fat: 50 };
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({ didLogMeal: false, dailyTargets: targets })}\n\n`,
+    ]);
+    let receivedTargets: typeof targets | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        receivedTargets = payload.dailyTargets;
+      },
+      onError: () => {},
+    });
+
+    assert.deepEqual(receivedTargets, targets);
+  });
+
   it("handles SSE event split across two chunks", async () => {
     storage.set("deviceId", "d-1");
     const part1 = 'event: chunk\ndata: {"to';

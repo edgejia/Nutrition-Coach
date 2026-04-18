@@ -32,6 +32,7 @@ export interface ToolExecutionResult {
   failureReason?: "validation" | "guard" | "execute";
   updatedFields?: string[];
   publishedEvents?: string[];
+  dailyTargets?: DailyTargets;
   dailySummary?: DailySummary;
   loggedMeal?: {
     foodName: string;
@@ -429,6 +430,7 @@ export async function executeTool(
       executed: true,
       updatedFields: [...contractResult.updatedFields],
       publishedEvents: [...contractResult.publishedEvents],
+      dailyTargets: contractResult.targets,
     };
   }
 

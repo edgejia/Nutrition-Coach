@@ -103,6 +103,17 @@ function createLogFoodToolCallWithArguments(argumentsText: string): ToolCall {
   };
 }
 
+function createUpdateGoalsToolCall(): ToolCall {
+  return {
+    id: "goal_stream",
+    type: "function",
+    function: {
+      name: "update_goals",
+      arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+    },
+  };
+}
+
 async function readStreamUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   expectedText: string,
@@ -264,6 +275,46 @@ describe("chat-streaming", () => {
       if (app.server.listening) {
         await app.close();
       }
+    }
+  });
+
+  it("POST /api/chat stream done includes dailyTargets after update_goals succeeds", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createUpdateGoalsToolCall()] });
+    mockLLM.queueChatStream(["已經", "更新好了"]);
+
+    const form = new FormData();
+    form.append("message", "卡路里改成 1800，蛋白質 130 克");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
+      assert.ok(doneDataMatch);
+      const donePayload = JSON.parse(doneDataMatch[1]) as {
+        didLogMeal: boolean;
+        dailyTargets?: { calories: number; protein: number; carbs: number; fat: number };
+      };
+      assert.equal(donePayload.didLogMeal, false);
+      assert.deepEqual(donePayload.dailyTargets, {
+        calories: 1800,
+        protein: 130,
+        carbs: 150,
+        fat: 50,
+      });
+      assert.match(text, /已更新每日目標/);
+    } finally {
+      clearTimeout(timeout);
     }
   });
 

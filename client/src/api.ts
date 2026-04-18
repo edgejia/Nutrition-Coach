@@ -62,7 +62,7 @@ export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> 
 export interface StreamCallbacks {
   onStatus: (label: string) => void;
   onToken: (token: string) => void;
-  onDone: (data: { didLogMeal: boolean; dailySummary?: DailySummary }) => void;
+  onDone: (data: { didLogMeal: boolean; dailySummary?: DailySummary; dailyTargets?: DailyTargets }) => void;
   onError: (message: string) => void;
 }
 
@@ -139,6 +139,7 @@ export async function sendMessageStream(
           callbacks.onDone({
             didLogMeal: Boolean(parsed.didLogMeal),
             ...(parsed.dailySummary ? { dailySummary: parsed.dailySummary as DailySummary } : {}),
+            ...(parsed.dailyTargets ? { dailyTargets: parsed.dailyTargets as DailyTargets } : {}),
           });
         } else if (eventType === "error") {
           sawTerminalEvent = true;
