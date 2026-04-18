@@ -51,12 +51,15 @@ describe("Orchestrator", () => {
   });
 
   it("executes tool calls and returns final reply", async () => {
-    // Round 1: LLM calls analyze_food
+    // Round 1: LLM calls get_daily_summary (registry-known tool; pre-Phase-10
+    // this round used the legacy lenient `analyze_food` unknown-tool path, but
+    // unknown tools now throw `FatalToolError("unknown tool")` per Phase 10 D-03,
+    // so the test now uses an existing tool to model a multi-round flow).
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
         type: "function",
-        function: { name: "analyze_food", arguments: JSON.stringify({ description: "蘋果" }) },
+        function: { name: "get_daily_summary", arguments: JSON.stringify({}) },
       }],
     });
     // Round 2: LLM calls log_food
@@ -92,13 +95,16 @@ describe("Orchestrator", () => {
   });
 
   it("persists uploaded image metadata while sending the data URI to the LLM", async () => {
+    // Round 1: previously simulated `analyze_food` (legacy lenient unknown-tool
+    // path); Phase 10-02 D-03 makes unknown tools fatal, so we now model the
+    // multi-round flow with the registry-known `get_daily_summary` tool.
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
         type: "function",
         function: {
-          name: "analyze_food",
-          arguments: JSON.stringify({ description: "(圖片)", image_base64: "data:image/png;base64,abc123" }),
+          name: "get_daily_summary",
+          arguments: JSON.stringify({}),
         },
       }],
     });
