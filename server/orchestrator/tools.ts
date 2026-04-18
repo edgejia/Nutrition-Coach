@@ -373,12 +373,19 @@ export async function executeTool(
 
   if (!outcome.success) {
     if (toolCall.function.name === "update_goals") {
+      const updatedFields =
+        typeof outcome.logSummary === "object" &&
+        outcome.logSummary !== null &&
+        Array.isArray(outcome.logSummary.updatedFields)
+          ? (outcome.logSummary.updatedFields as string[])
+          : undefined;
       return {
         result: outcome.result,
         summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
         success: false,
         executed: false,
         failureReason: outcome.failureReason,
+        updatedFields,
       };
     }
 

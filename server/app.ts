@@ -67,6 +67,7 @@ export async function buildApp(opts: AppOptions) {
     summaryService,
     foodLoggingService,
     deviceService,
+    publisher,
   });
   await app.register(cors);
   // Keep the parser limit above the product limit so the chat route can return a controlled 400 at 5MB.

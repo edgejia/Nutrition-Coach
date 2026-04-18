@@ -14,6 +14,8 @@ export interface ToolResultPayload {
   executed: boolean;      // false = validation failed before execution
   failureReason?: string; // redacted error summary; must NOT contain deviceId
   summary?: string;       // e.g. "成功" or "熱量 450kcal"
+  updatedFields?: string[];
+  publishedEvents?: string[];
 }
 
 export type FallbackReason =
@@ -38,6 +40,24 @@ export function createStructuredHooks(log: FastifyBaseLogger): OrchestratorHooks
         log.info({ event: "tool_result", ...payload }, "Tool result");
       } else {
         log.warn({ event: "tool_result", ...payload }, "Tool result (failed)");
+      }
+      if (payload.tool === "update_goals" && payload.success === true) {
+        log.info(
+          { event: "goal_update_success", updatedFields: payload.updatedFields ?? [] },
+          "Goal update success",
+        );
+        if (payload.publishedEvents?.includes("goals_update")) {
+          log.info(
+            { event: "goals_update_published", updatedFields: payload.updatedFields ?? [] },
+            "Goals update published",
+          );
+        }
+      }
+      if (payload.tool === "update_goals" && payload.success === false) {
+        log.warn(
+          { event: "goal_update_rejected", failureReason: payload.failureReason },
+          "Goal update rejected",
+        );
       }
     },
     onFallback(reason) {

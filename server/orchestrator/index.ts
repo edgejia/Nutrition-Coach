@@ -3,13 +3,12 @@ import type { createChatService } from "../services/chat.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService } from "../services/device.js";
+import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { toolDefinitions, executeTool, isFatalToolError } from "./tools.js";
+import { getToolDefinitions, executeTool, isFatalToolError, redactToolArgsForHook } from "./tools.js";
 import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
 import type { OrchestratorHooks } from "./hooks.js";
-import { config } from "../config.js";
-import { basename } from "node:path";
 
 interface OrchestratorDeps {
   llmProvider: LLMProvider;
@@ -17,6 +16,7 @@ interface OrchestratorDeps {
   summaryService: ReturnType<typeof createSummaryService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   deviceService: ReturnType<typeof createDeviceService>;
+  publisher: RealtimePublisher;
 }
 
 const FALLBACK = "抱歉，我現在無法完成這個請求，請稍後再試。";
@@ -70,25 +70,6 @@ function detectHallucinatedChoiceFollowUp(
   return HALLUCINATED_CHOICE_RECOVERY_REPLY;
 }
 
-function redactToolArgs(toolName: string, rawArgs: string): string {
-  if (toolName === "log_food") {
-    try {
-      const args = JSON.parse(rawArgs) as Record<string, unknown>;
-      const cal = args.calories ?? "?";
-      const p = args.protein ?? "?";
-      const c = args.carbs ?? "?";
-      const f = args.fat ?? "?";
-      return `熱量 ${cal}kcal, P${p}g, C${c}g, F${f}g`;
-    } catch {
-      return "<log_food args>";
-    }
-  }
-  if (toolName === "get_daily_summary") {
-    return "<get_daily_summary args>";
-  }
-  return `<${toolName} args>`;
-}
-
 export interface HandleMessageOpts {
   onStatus?: (label: string) => void;
   hooks?: OrchestratorHooks;  // injected per-call; per-request reqId binding via createStructuredHooks
@@ -113,6 +94,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       const history = await loadHistory(chatService, deviceId, 10);
       const recentMessages = await chatService.getHistory(deviceId, 3);
       const hallucinatedChoiceRecovery = detectHallucinatedChoiceFollowUp(userMessage, recentMessages);
+      const previousAssistantMessage = [...recentMessages]
+        .reverse()
+        .find((message) => message.role === "assistant")?.content;
 
       // Save user message after loading history
       await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
@@ -157,6 +141,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         : { role: "user", content: userMessage };
 
       const messages: ChatMessage[] = [systemMsg, ...history, userContent];
+      const toolDefinitions = getToolDefinitions();
 
       let didLogMeal = false;
       let logMealSummary: DailySummary | undefined;
@@ -228,21 +213,53 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (toolCall.function.name === "log_food") {
                 opts?.onStatus?.("記錄餐點中...");
               }
-              const argsRedacted = config.debug
-                ? toolCall.function.arguments
-                : redactToolArgs(toolCall.function.name, toolCall.function.arguments);
+              const argsRedacted = redactToolArgsForHook(toolCall.function.name, toolCall.function.arguments);
               opts?.hooks?.onToolReceived?.(toolCall.function.name, argsRedacted);
-              const { result, summary, dailySummary, loggedMeal: toolLoggedMeal } = await executeTool(toolCall, deviceId, {
+              const {
+                result,
+                summary,
+                dailySummary,
+                loggedMeal: toolLoggedMeal,
+                success,
+                failureReason,
+                updatedFields,
+                publishedEvents,
+              } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
+                deviceService: deps.deviceService,
+                publisher: deps.publisher,
                 imagePath,
+              }, {
+                currentUserMessage: userMessage,
+                previousAssistantMessage,
               });
+              if (success === false) {
+                opts?.hooks?.onToolResult?.({
+                  tool: toolCall.function.name,
+                  success: false,
+                  executed: false,
+                  failureReason,
+                  summary,
+                  updatedFields,
+                });
+                await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
+                toolResults.push({ toolCall, result });
+                continue;
+              }
               if (toolCall.function.name === "log_food") {
                 didLogMeal = true;
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
                 loggedMeal = toolLoggedMeal;
               }
-              opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: true, executed: true, summary });
+              opts?.hooks?.onToolResult?.({
+                tool: toolCall.function.name,
+                success: true,
+                executed: true,
+                summary,
+                updatedFields,
+                publishedEvents,
+              });
               await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
               toolResults.push({ toolCall, result });
             } catch (err) {

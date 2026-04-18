@@ -1,6 +1,8 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
+import { chatMessages } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createSummaryService } from "../../server/services/summary.js";
@@ -22,12 +24,13 @@ describe("Orchestrator", () => {
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let chatService: ReturnType<typeof createChatService>;
   let deviceService: ReturnType<typeof createDeviceService>;
+  let db: ReturnType<typeof createDb>;
   let deviceId: string;
   let spyHooks: ReturnType<typeof createSpyHooks>;
   let publishedGoals: Array<{ deviceId: string; targets: DailyTargets }>;
 
   beforeEach(async () => {
-    const db = createDb(":memory:");
+    db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     const summaryService = createSummaryService(db);
@@ -332,8 +335,8 @@ describe("Orchestrator", () => {
     assert.ok(toolMessage, "validation failure should be pushed into the next LLM round");
     assert.match(String(toolMessage.content), /validation/);
 
-    const history = await chatService.getHistory(deviceId, 10);
-    assert.equal(history.some((message) => message.role === "tool" && message.toolName === "update_goals"), true);
+    const storedMessages = await db.select().from(chatMessages).where(eq(chatMessages.deviceId, deviceId));
+    assert.equal(storedMessages.some((message) => message.role === "tool" && message.toolName === "update_goals"), true);
   });
 
   it("GOAL-06: controlled guard failure records failureReason:\"guard\" and keeps the fatal unknown-tool path unchanged", async () => {
