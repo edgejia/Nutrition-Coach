@@ -214,7 +214,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             if (shouldStreamFinalReply && typeof llmProvider.chatStream === "function") {
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
-                streamGenerator: llmProvider.chatStream(messages, []),
+                streamGenerator: ensureGoalReceiptStream(
+                  llmProvider.chatStream(messages, []),
+                  successfulGoalReceipt,
+                ),
                 didLogMeal,
                 dailySummary: logMealSummary,
               };

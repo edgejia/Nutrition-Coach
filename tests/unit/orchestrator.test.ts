@@ -73,6 +73,34 @@ class StreamingLLMProvider implements LLMProvider {
   }
 }
 
+class ChatStreamOnlyProvider implements LLMProvider {
+  private chatQueue: Array<LLMResponse | Error> = [];
+  private streamTokens: string[] = [];
+  public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
+
+  queueChatResponse(response: LLMResponse) {
+    this.chatQueue.push(response);
+  }
+
+  queueChatStream(tokens: string[]) {
+    this.streamTokens = tokens;
+  }
+
+  async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {
+    this.chatCalls.push({ messages, tools });
+    const item = this.chatQueue.shift();
+    if (item instanceof Error) {
+      throw item;
+    }
+    return item ?? { content: "Mock: 已記錄您的飲食！" };
+  }
+
+  async *chatStream(messages: ChatMessage[], tools: ToolDefinition[]): AsyncGenerator<string> {
+    this.chatCalls.push({ messages, tools });
+    yield* streamTokens(this.streamTokens);
+  }
+}
+
 async function* streamTokens(tokens: string[]): AsyncGenerator<string> {
   for (const token of tokens) {
     yield token;
@@ -539,5 +567,50 @@ describe("Orchestrator - didLogMeal", () => {
     }
 
     assert.equal(streamedTokens.join(""), "處理中\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+  });
+
+  it("appends a successful goal update receipt to legacy chatStream final replies", async () => {
+    const streamingLLM = new ChatStreamOnlyProvider();
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    orchestrator = createOrchestrator({
+      llmProvider: streamingLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      deviceService: localDeviceService,
+      publisher: {
+        publishGoalsUpdate() {
+          return { sent: 1 };
+        },
+      },
+    });
+
+    streamingLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_legacy_stream",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    streamingLLM.queueChatStream(["已經", "更新好了"]);
+
+    const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
+    assert.ok("streamGenerator" in result);
+
+    const streamedTokens: string[] = [];
+    for await (const token of result.streamGenerator) {
+      streamedTokens.push(token);
+    }
+
+    assert.equal(streamedTokens.join(""), "已經更新好了\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
   });
 });
