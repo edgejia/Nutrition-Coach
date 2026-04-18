@@ -121,4 +121,64 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /目標補充：想先增肌/);
     assert.doesNotMatch(prompt, /未提供/);
   });
+
+  it("says concrete daily goal numbers may update goals", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+
+    assert.match(prompt, /每日目標/);
+    assert.match(prompt, /具體數字/);
+    assert.match(prompt, /卡路里/);
+    assert.match(prompt, /蛋白質/);
+    assert.match(prompt, /碳水/);
+    assert.match(prompt, /脂肪/);
+  });
+
+  it("says vague phrases like 少吃一點 and 提高蛋白質 must ask for concrete values before mutation", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+
+    assert.match(prompt, /少吃一點/);
+    assert.match(prompt, /提高蛋白質/);
+    assert.match(prompt, /血糖控制/);
+    assert.match(prompt, /先詢問/);
+    assert.match(prompt, /具體目標值/);
+  });
+
+  it("says successful update receipts beginning 已更新每日目標： must be shown verbatim", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+
+    assert.match(prompt, /已更新每日目標：/);
+    assert.match(prompt, /原文呈現/);
+    assert.match(prompt, /四行/);
+  });
+
+  it("continues to include current daily targets and does not introduce get_current_goals", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+
+    assert.match(prompt, /每日營養目標/);
+    assert.match(prompt, /熱量：1800 kcal/);
+    assert.match(prompt, /蛋白質：130 g/);
+    assert.match(prompt, /碳水化合物：200 g/);
+    assert.match(prompt, /脂肪：60 g/);
+    assert.doesNotMatch(prompt, /get_current_goals/);
+  });
 });
