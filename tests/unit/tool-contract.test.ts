@@ -166,4 +166,28 @@ describe("runContract wrapper", () => {
     assert.equal(typeof fallback, "string");
     assert.equal(fallback, "<fake_goal args>");
   });
+
+  it("Test 7: source-field guard failure returns executed:false with failureReason: \"guard\" and guardedFields", async () => {
+    let executed = false;
+    const contract = makeFakeGoalContract({
+      sourceFields: ["calories"],
+      execute: async () => {
+        executed = true;
+        return { ok: true, result: { ok: true }, toolMessage: "done" };
+      },
+    });
+    const call = makeCall({ calories: 1800 });
+    const res = await runContract(contract, call, {
+      currentUserMessage: "幫我提高一點",
+      previousAssistantMessage: "要調整嗎?",
+    });
+    assert.equal(res.success, false);
+    assert.equal(res.executed, false);
+    assert.equal(res.failureReason, "guard");
+    assert.equal(executed, false);
+    const parsed = JSON.parse(res.result);
+    assert.equal(parsed.reason, "source_text_guard");
+    assert.equal(parsed.failureReason, "guard");
+    assert.deepEqual(parsed.guardedFields, ["calories"]);
+  });
 });
