@@ -92,6 +92,59 @@ describe("chat goal update integration", () => {
     });
   });
 
+  it("appends the deterministic receipt when the final model reply omits it", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_success_omitted_receipt",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已經幫你更新好了。" });
+
+    const { status, body } = await postChat("卡路里改成 1800，蛋白質 130 克");
+
+    assert.equal(status, 200);
+    assert.match(body.reply, /已經幫你更新好了/);
+    assert.match(body.reply, /已更新每日目標：/);
+    assert.match(body.reply, /卡路里 1800 kcal/);
+    assert.match(body.reply, /蛋白質 130 g/);
+    assert.deepEqual(await readTargets(), {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
+  });
+
+  it("returns the deterministic receipt when final reply generation fails after mutation", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_success_reply_error",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    mockLLM.queueChatError(new Error("reply generation failed"));
+
+    const { status, body } = await postChat("卡路里改成 1800，蛋白質 130 克");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.deepEqual(await readTargets(), {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
+  });
+
   it("keeps targets unchanged when vague intent is clarified without a tool call", async () => {
     mockLLM.queueChatResponse({ content: "你想把每日熱量或三大營養素調整成多少？" });
 

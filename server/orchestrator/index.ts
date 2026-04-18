@@ -49,6 +49,12 @@ function buildImageLoggedReply(loggedMeal: { foodName: string; calories: number 
   return `已先依照片做保守估算並完成記錄：${loggedMeal.foodName}，約 ${formatCalories(loggedMeal.calories)} kcal。若你想更精準，我可以再依份量幫你調整。`;
 }
 
+function ensureGoalReceipt(reply: string, receipt: string | undefined): string {
+  if (!receipt) return reply;
+  if (reply.includes(receipt)) return reply;
+  return `${reply}\n\n${receipt}`;
+}
+
 function detectHallucinatedChoiceFollowUp(
   userMessage: string,
   recentMessages: Array<{ role: string; content: string; didLogMeal?: boolean }>
@@ -146,6 +152,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let didLogMeal = false;
       let logMealSummary: DailySummary | undefined;
       let shouldStreamFinalReply = false;
+      let successfulGoalReceipt: string | undefined;
       let loggedMeal:
         | {
             foodName: string;
@@ -187,6 +194,13 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           }
         } catch (err) {
           opts?.hooks?.onFallback?.(didLogMeal ? "partial_success" : "llm_error");
+          if (successfulGoalReceipt) {
+            return {
+              reply: successfulGoalReceipt,
+              didLogMeal,
+              dailySummary: logMealSummary,
+            };
+          }
           if (didLogMeal) {
             const partialFallback = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
             return {
@@ -201,7 +215,11 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
-          return { reply: response.content, didLogMeal, dailySummary: logMealSummary };
+          return {
+            reply: ensureGoalReceipt(response.content, successfulGoalReceipt),
+            didLogMeal,
+            dailySummary: logMealSummary,
+          };
         }
 
         if (response.toolCalls?.length) {
@@ -251,6 +269,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 didLogMeal = true;
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
                 loggedMeal = toolLoggedMeal;
+              }
+              if (toolCall.function.name === "update_goals") {
+                successfulGoalReceipt = result;
               }
               opts?.hooks?.onToolResult?.({
                 tool: toolCall.function.name,
