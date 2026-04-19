@@ -106,6 +106,7 @@ function detectHallucinatedChoiceFollowUp(
 export interface HandleMessageOpts {
   onStatus?: (label: string) => void;
   hooks?: OrchestratorHooks;  // injected per-call; per-request reqId binding via createStructuredHooks
+  onUserMessageSaved?: () => void;
 }
 
 export function createOrchestrator(deps: OrchestratorDeps) {
@@ -133,6 +134,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Save user message after loading history
       await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
+      opts?.onUserMessageSaved?.();
       if (hallucinatedChoiceRecovery) {
         opts?.hooks?.onFallback?.("hallucination_detected");
         return { reply: hallucinatedChoiceRecovery, didLogMeal: false };

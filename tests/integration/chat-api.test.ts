@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
+import type { AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import type { FastifyInstance } from "fastify";
@@ -63,6 +64,7 @@ describe("Chat API", () => {
   let tempRoot: string;
   let uploadsDir: string;
   let assetsDir: string;
+  let services: AppServices | undefined;
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
@@ -74,6 +76,9 @@ describe("Chat API", () => {
       llmProvider: mockLLM,
       uploadsDir,
       assetsDir,
+      onServicesReady: (readyServices) => {
+        services = readyServices;
+      },
     });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
     deviceId = res.json().deviceId;
@@ -136,6 +141,65 @@ describe("Chat API", () => {
     assert.doesNotMatch(userMessage.imagePath ?? "", /\/uploads\//);
     assert.ok(userMessage.imageAssetId);
     assert.equal(userMessage.imageUrl, `/api/assets/${userMessage.imageAssetId}`);
+  });
+
+  it("POST /api/chat SSE backfills the user image message when failure happens before orchestrator persistence", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+    const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);
+    services.chatService.getCompressedHistory = async () => {
+      throw new Error("pre-save history failure");
+    };
+
+    const form = new FormData();
+    form.append("message", "");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const reader = res.body?.getReader();
+      assert.ok(reader);
+
+      const { raw } = await readUntilEventCount(reader, "done", 1);
+      const chunkText = parseSSEEvents(raw)
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      assert.match(chunkText, /抱歉|無法/);
+
+      const historyRes = await app.inject({
+        method: "GET",
+        url: "/api/chat/history?limit=10",
+        headers: { "x-device-id": deviceId },
+      });
+      const history = historyRes.json() as {
+        messages: Array<{
+          role: string;
+          content: string;
+          imagePath?: string | null;
+          imageAssetId?: string | null;
+          imageUrl?: string | null;
+        }>;
+      };
+
+      const userMessages = history.messages.filter((message) => message.role === "user");
+      const assistantMessages = history.messages.filter((message) => message.role === "assistant");
+
+      assert.equal(userMessages.length, 1, "route catch should backfill exactly one failed user image message");
+      assert.match(userMessages[0]!.imagePath ?? "", /^asset:/);
+      assert.ok(userMessages[0]!.imageAssetId);
+      assert.equal(userMessages[0]!.imageUrl, `/api/assets/${userMessages[0]!.imageAssetId}`);
+      assert.equal(assistantMessages.length, 1);
+      assert.match(assistantMessages[0]!.content, /抱歉|無法/);
+    } finally {
+      services.chatService.getCompressedHistory = originalGetCompressedHistory;
+    }
   });
 
   it("POST /api/chat rejects invalid image types", async () => {

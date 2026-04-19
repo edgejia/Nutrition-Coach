@@ -299,6 +299,7 @@ async function handleOrchestratorSSE(
 ): Promise<void> {
   let durableAssetId: string | undefined;
   let durableAssetRef: string | undefined;
+  let userMessagePersisted = false;
   let streamDidLogMeal = false;
   let streamDailySummary: unknown;
   let streamDailyTargets: unknown;
@@ -324,6 +325,9 @@ async function handleOrchestratorSSE(
       {
         onStatus: (label: string) => {
           stream.write(`event: status\ndata: ${JSON.stringify({ label })}\n\n`);
+        },
+        onUserMessageSaved: () => {
+          userMessagePersisted = true;
         },
         hooks,
       }
@@ -372,6 +376,10 @@ async function handleOrchestratorSSE(
   } catch {
     const fallback = streamDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
     try {
+      if (!userMessagePersisted && durableAssetRef) {
+        await deps.chatService.saveMessage(deviceId, "user", message, { imagePath: durableAssetRef });
+        userMessagePersisted = true;
+      }
       const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, fallback);
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
     } catch {
@@ -430,6 +438,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     if (!wantsSSE) {
       let durableAssetId: string | undefined;
       let durableAssetRef: string | undefined;
+      let userMessagePersisted = false;
       let jsonDidLogMeal = false;
       let jsonDailySummary: unknown;
       let jsonDailyTargets: unknown;
@@ -445,6 +454,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           message,
           image?.dataUri,
           durableAssetRef,
+          {
+            onUserMessageSaved: () => {
+              userMessagePersisted = true;
+            },
+          },
         );
         jsonDidLogMeal = result.didLogMeal;
         jsonDailySummary = result.dailySummary;
@@ -486,6 +500,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         };
       } catch {
         const fallback = jsonDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
+        if (!userMessagePersisted && durableAssetRef) {
+          await chatService.saveMessage(deviceId, "user", message, { imagePath: durableAssetRef });
+          userMessagePersisted = true;
+        }
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
