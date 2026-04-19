@@ -6,8 +6,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
+import Database from "better-sqlite3";
 import { buildApp } from "../../server/app.js";
 import type { AppServices } from "../../server/app.js";
+import { applyMigrations } from "../../server/db/migrate.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import type { FastifyInstance } from "fastify";
@@ -64,6 +66,7 @@ describe("Chat API", () => {
   let tempRoot: string;
   let uploadsDir: string;
   let assetsDir: string;
+  let dbPath: string;
   let services: AppServices | undefined;
 
   beforeEach(async () => {
@@ -71,8 +74,12 @@ describe("Chat API", () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-chat-api-"));
     uploadsDir = path.join(tempRoot, "uploads");
     assetsDir = path.join(tempRoot, "assets");
+    dbPath = path.join(tempRoot, "nutrition.db");
+    const sqlite = new Database(dbPath);
+    applyMigrations(sqlite);
+    sqlite.close();
     app = await buildApp({
-      dbPath: ":memory:",
+      dbPath,
       llmProvider: mockLLM,
       uploadsDir,
       assetsDir,
@@ -141,6 +148,34 @@ describe("Chat API", () => {
     assert.doesNotMatch(userMessage.imagePath ?? "", /\/uploads\//);
     assert.ok(userMessage.imageAssetId);
     assert.equal(userMessage.imageUrl, `/api/assets/${userMessage.imageAssetId}`);
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const references = sqlite
+        .prepare(
+          `SELECT ar.owner_type AS ownerType, ar.owner_id AS ownerId, ar.asset_id AS assetId
+             FROM asset_references ar
+            WHERE ar.owner_type = 'chat_message'`,
+        )
+        .all() as Array<{ ownerType: string; ownerId: string; assetId: string }>;
+      const chatMessage = sqlite
+        .prepare(
+          `SELECT id
+             FROM chat_messages
+            WHERE device_id = ?
+              AND role = 'user'
+              AND image_path = ?
+            LIMIT 1`,
+        )
+        .get(deviceId, userMessage.imagePath) as { id: string } | undefined;
+
+      assert.equal(references.length, 1, "expected one normalized asset_references row for the user image");
+      assert.equal(references[0]!.ownerType, "chat_message");
+      assert.equal(references[0]!.assetId, userMessage.imageAssetId);
+      assert.equal(references[0]!.ownerId, chatMessage?.id);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it("POST /api/chat SSE backfills the user image message when failure happens before orchestrator persistence", async () => {

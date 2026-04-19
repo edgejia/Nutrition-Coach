@@ -92,6 +92,34 @@ function createLogFoodToolCall(): ToolCall {
   };
 }
 
+function createGroupedLogFoodToolCall(): ToolCall {
+  return {
+    id: "call_grouped",
+    type: "function",
+    function: {
+      name: "log_food",
+      arguments: JSON.stringify({
+        items: [
+          {
+            food_name: "蘋果",
+            calories: 95,
+            protein: 0.5,
+            carbs: 25,
+            fat: 0.3,
+          },
+          {
+            food_name: "優格",
+            calories: 120,
+            protein: 8,
+            carbs: 12,
+            fat: 4,
+          },
+        ],
+      }),
+    },
+  };
+}
+
 function createLogFoodToolCallWithArguments(argumentsText: string): ToolCall {
   return {
     id: "call_invalid",
@@ -854,6 +882,53 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
       assert.match(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat grouped log_food keeps didLogMeal and dailySummary when the final reply fails", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createGroupedLogFoodToolCall()] });
+    mockLLM.queueRoundError(new Error("LLM grouped reply generation failed"));
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果和優格");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      const doneMatch = text.match(/event: done\s+data: (.+)/);
+      assert.ok(doneMatch);
+      const donePayload = JSON.parse(doneMatch[1]) as {
+        didLogMeal?: boolean;
+        dailySummary?: { mealCount?: number; totalCalories?: number; date?: string };
+      };
+      assert.equal(donePayload.didLogMeal, true, "grouped log_food must still mark didLogMeal after partial success");
+      assert.equal(donePayload.dailySummary?.mealCount, 1);
+      assert.equal(donePayload.dailySummary?.totalCalories, 215);
+      assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
+
+      const mealsRes = await fetch(`${address}/api/meals`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
+      assert.deepEqual(
+        mealsJson.meals.map((meal) => meal.foodName),
+        ["蘋果、優格"],
+        "grouped log_food should persist one transaction row for the turn",
+      );
     } finally {
       clearTimeout(timeout);
     }

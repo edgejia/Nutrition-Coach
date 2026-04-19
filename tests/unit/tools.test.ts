@@ -1,6 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
+import { mealRevisionItems, mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createSummaryService } from "../../server/services/summary.js";
@@ -20,6 +21,7 @@ import type { ToolCall } from "../../server/llm/types.js";
 // orchestrator hook behavior, which Tests 1 and 4 also pin.
 
 describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
+  let db: ReturnType<typeof createDb>;
   let deviceId: string;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let summaryService: ReturnType<typeof createSummaryService>;
@@ -40,7 +42,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   };
 
   beforeEach(async () => {
-    const db = createDb(":memory:");
+    db = createDb(":memory:");
     const deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     summaryService = createSummaryService(db);
@@ -69,6 +71,66 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 1);
     assert.equal(meals[0].foodName, "蘋果");
+  });
+
+  it("Test 1b: log_food items[] writes one transaction with multiple revision items and returns dailySummary/loggedMeal", async () => {
+    const groupedCall: ToolCall = {
+      id: "call_grouped",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "蘋果",
+              calories: 95,
+              protein: 0.5,
+              carbs: 25,
+              fat: 0.3,
+            },
+            {
+              food_name: "優格",
+              calories: 120,
+              protein: 8,
+              carbs: 12,
+              fat: 4,
+            },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(groupedCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.ok(result.dailySummary, "dailySummary must be returned for grouped writes");
+    assert.equal(result.dailySummary.mealCount, 1);
+    assert.deepEqual(result.loggedMeal, {
+      foodName: "蘋果、優格",
+      calories: 215,
+      protein: 8.5,
+      carbs: 37,
+      fat: 4.3,
+    });
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisions = await db.select().from(mealRevisions);
+    const revisionItems = await db.select().from(mealRevisionItems);
+
+    assert.equal(transactions.length, 1, "one transaction should be created for one grouped turn");
+    assert.equal(revisions.length, 1, "the grouped turn should create one current revision");
+    assert.equal(
+      revisionItems.length,
+      2,
+      "the grouped turn should persist one transaction with two revision items",
+    );
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0].id, transactions[0]!.id);
+    assert.equal(meals[0].foodName, "蘋果、優格");
   });
 
   it("Test 2: log_food summary recomputation failure persists meal and returns controlled failureReason:execute", async () => {
