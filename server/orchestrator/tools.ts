@@ -174,10 +174,6 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       },
     },
     additionalProperties: false,
-    anyOf: [
-      { required: ["food_name", "calories", "protein", "carbs", "fat"] },
-      { required: ["items"] },
-    ],
   },
   zodSchema: logFoodSchema,
   // No sourceFields per D-11: log_food calorie estimates need not appear in
