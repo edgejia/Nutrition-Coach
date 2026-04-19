@@ -8,6 +8,8 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../server/app.js";
+import type { AppServices } from "../../server/app.js";
+import { formatLocalDate } from "../../server/lib/time.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 
 describe("Meals API", () => {
@@ -19,6 +21,7 @@ describe("Meals API", () => {
   let tempRoot: string;
   let uploadsDir: string;
   let assetsDir: string;
+  let services: AppServices | undefined;
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
@@ -30,6 +33,9 @@ describe("Meals API", () => {
       llmProvider: mockLLM,
       uploadsDir,
       assetsDir,
+      onServicesReady: (readyServices) => {
+        services = readyServices;
+      },
     });
     deviceId = (
       await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } })
@@ -148,6 +154,44 @@ describe("Meals API", () => {
       headers: { "x-device-id": deviceId },
     });
     assert.deepEqual(remainingMeals.json().meals, []);
+  });
+
+  it("DELETE /api/meals/:id recomputes the deleted transaction's affected local day", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const loggedAt = "2026-03-25T04:00:00.000Z";
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "回補早餐",
+      calories: 420,
+      protein: 20,
+      carbs: 50,
+      fat: 14,
+      loggedAt,
+    });
+
+    const requestedDates: string[] = [];
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    services.summaryService.getDailySummary = async (summaryDeviceId, date) => {
+      requestedDates.push(formatLocalDate(date));
+      return originalGetDailySummary(summaryDeviceId, date);
+    };
+
+    try {
+      const deleteRes = await app.inject({
+        method: "DELETE",
+        url: `/api/meals/${meal.id}`,
+        headers: { "x-device-id": deviceId },
+      });
+
+      assert.equal(deleteRes.statusCode, 204);
+      assert.deepEqual(
+        requestedDates,
+        [formatLocalDate(new Date(loggedAt))],
+        "delete should recompute the affected local day, not today",
+      );
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+    }
   });
 
   it("GET /api/meals projects asset-backed image metadata without leaking staging paths", async () => {
