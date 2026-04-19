@@ -41,7 +41,6 @@ OPENAI_API_KEY=your-api-key-here
 OPENAI_ORCHESTRATOR_MODEL=gpt-5-nano
 PORT=3000
 DB_PATH=./data/nutrition.db
-VITE_FEEDBACK_FORM_URL=https://example.com/forms/nutrition-coach-beta
 TZ=Asia/Taipei
 ```
 
@@ -69,7 +68,7 @@ yarn start
 ```
 
 beta / production 會由同一個 Fastify 進程同時提供 API 與 `dist/client`。
-部署時請使用持久化主機與掛載磁碟，並維持 `TZ=Asia/Taipei`、`DB_PATH`、`ASSETS_DIR`、`UPLOADS_STAGING_DIR`、`CLIENT_DIST_DIR` 的一致設定。詳細的 Railway baseline 請見 [`docs/deploy/railway-beta.md`](docs/deploy/railway-beta.md)。
+部署時請使用持久化主機與掛載磁碟，並維持 `TZ=Asia/Taipei`、`DB_PATH`、`ASSETS_DIR`、`UPLOADS_STAGING_DIR`、`CLIENT_DIST_DIR` 的一致設定。public beta smoke 應在 real deployed domain 上執行，不以 localhost build smoke 取代。詳細的 Railway baseline 請見 [`docs/deploy/railway-beta.md`](docs/deploy/railway-beta.md)。
 
 ## 測試
 
@@ -115,5 +114,4 @@ yarn test:integration
 | `ASSETS_DIR` | 持久化圖片資產目錄 | `./data/assets` |
 | `UPLOADS_STAGING_DIR` | 上傳暫存目錄 | `./data/uploads-staging` |
 | `CLIENT_DIST_DIR` | 前端建置輸出目錄 | `./dist/client` |
-| `VITE_FEEDBACK_FORM_URL` | Beta 回饋表單 URL（建置時注入前端） | 未設定 |
 | `TZ` | 時區（影響每日統計邊界） | `Asia/Taipei` |

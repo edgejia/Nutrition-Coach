@@ -18,7 +18,6 @@ DB_PATH=/app/data/nutrition.db
 ASSETS_DIR=/app/data/assets
 UPLOADS_STAGING_DIR=/tmp/nutrition-uploads
 CLIENT_DIST_DIR=/app/dist/client
-VITE_FEEDBACK_FORM_URL=https://example.com/forms/nutrition-coach-beta
 TZ=Asia/Taipei
 ```
 
@@ -60,17 +59,17 @@ If either count is non-zero, stop the rollout and record the cleanup or backfill
 
 ## Manual Smoke Checklist
 
-Run this checklist from the public domain before marking the beta ready:
+Run this checklist from the public domain before marking the beta ready. Public beta smoke stays deployment-gated, so do not treat localhost-only build smoke as equivalent to a real deployed domain.
 
 1. Open the public domain and send a same-origin text chat request. Confirm the page, SSE stream, and API calls all stay on the same domain.
 2. Send one image-backed request. Confirm the image is accepted and the response/history references the stored asset.
 3. Refresh the page. Confirm the conversation and meal state persist after reload.
 4. Call `GET /api/assets/:id` for the uploaded image using the same `X-Device-Id`. Confirm the request succeeds with the expected image response.
-5. Click `回報 Beta 問題`. Confirm the external structured form opens in a new tab and points at the canonical beta intake destination.
+5. Re-open chat and the summary surface on a phone-sized viewport. Confirm the same-origin shell still works and the persisted image remains visible in both chat history and the meal list on the real deployed domain.
 
 ## Deployment Notes
 
 - Keep the SQLite file, durable assets, and any future uploads on the mounted volume.
 - Do not rely on the build step to see volume contents.
 - Keep the frontend build output in `dist/client` so Fastify can serve the same-origin app shell in beta.
-- Set `VITE_FEEDBACK_FORM_URL` during build so the shared beta always ships with one live tester feedback path.
+- Treat public beta smoke as deployment-gated rollout evidence on the real deployed domain, not as a localhost-only checklist item.
