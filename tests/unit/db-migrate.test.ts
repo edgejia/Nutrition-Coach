@@ -3,6 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { createDb } from "../../server/db/client.js";
 import { runMigrations } from "../../server/db/migrate.js";
 import { createDeviceService } from "../../server/services/device.js";
@@ -58,6 +59,24 @@ describe("database migration contract", () => {
     const result = await deviceService.createDevice("fat_loss");
 
     assert.ok(result.deviceId);
+  });
+
+  it("fails fast for partially migrated file-backed databases missing the assets table", async () => {
+    const dbPath = await makeTempDbPath();
+
+    await runMigrations(dbPath);
+
+    const sqlite = new Database(dbPath);
+    try {
+      sqlite.exec("DROP TABLE assets;");
+    } finally {
+      sqlite.close();
+    }
+
+    assert.throws(
+      () => createDb(dbPath),
+      /Database schema missing\. Run `yarn db:migrate` before starting the app\./,
+    );
   });
 
   it("bootstraps :memory: databases by default for tests", async () => {
