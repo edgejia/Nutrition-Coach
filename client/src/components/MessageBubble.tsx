@@ -1,4 +1,5 @@
 import type { Message } from "../types.js";
+import { AssistantMarkdown } from "./AssistantMarkdown.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 
 type ProvisionalBubbleProps = {
@@ -107,14 +108,18 @@ export function MessageBubble(props: {
               )}
             </p>
           ) : (
-            <p className="whitespace-pre-wrap">
-              {message.content}
-              {isProvisional && (
-                <span className="animate-pulse" style={{ color: "var(--orange)" }}>
-                  |
-                </span>
+            <>
+              {isProvisional ? (
+                <p className="whitespace-pre-wrap">
+                  {message.content}
+                  <span className="animate-pulse" style={{ color: "var(--orange)" }}>
+                    |
+                  </span>
+                </p>
+              ) : (
+                <AssistantMarkdown content={message.content} />
               )}
-            </p>
+            </>
           ))}
         {message.didLogMeal && onOpenSummary && (
           <button

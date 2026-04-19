@@ -46,6 +46,41 @@ textarea {
   font: inherit;
 }
 
+.assistant-markdown {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.assistant-markdown p,
+.assistant-markdown ol,
+.assistant-markdown ul,
+.assistant-markdown li {
+  margin: 0;
+}
+
+.assistant-markdown p + p,
+.assistant-markdown p + ol,
+.assistant-markdown p + ul,
+.assistant-markdown ol + p,
+.assistant-markdown ul + p,
+.assistant-markdown ol + ul,
+.assistant-markdown ul + ol {
+  margin-top: 8px;
+}
+
+.assistant-markdown ol,
+.assistant-markdown ul {
+  padding-left: 20px;
+}
+
+.assistant-markdown li + li {
+  margin-top: 4px;
+}
+
+.assistant-markdown strong {
+  font-weight: 800;
+}
+
 .pb-safe {
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
