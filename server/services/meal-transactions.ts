@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   assetReferences,
@@ -38,6 +38,16 @@ export interface MealTransactionDeleteResult {
   affectedDateKey: string;
 }
 
+interface MealTransactionRow {
+  id: string;
+  deviceId: string;
+  loggedAt: string;
+  currentRevisionId: string;
+  currentRevisionNumber: number;
+  deletedAt: string | null;
+  createdAt: string;
+}
+
 type AssetReferenceWriter = Pick<AppDatabase, "insert">;
 
 export function createMealTransactionsService(db: AppDatabase) {
@@ -73,6 +83,31 @@ export function createMealTransactionsService(db: AppDatabase) {
         createdAt,
       })
       .run();
+  }
+
+  function getActiveTransactionByDeviceAndId(
+    deviceId: string,
+    transactionId: string,
+  ): MealTransactionRow | undefined {
+    // Keep the shared delete/correction lookup pinned to the composite
+    // device_id + id index so the hot path remains regression-testable.
+    return db.$client
+      .prepare(
+        `
+          SELECT
+            id,
+            device_id AS deviceId,
+            logged_at AS loggedAt,
+            current_revision_id AS currentRevisionId,
+            current_revision_number AS currentRevisionNumber,
+            deleted_at AS deletedAt,
+            created_at AS createdAt
+          FROM meal_transactions INDEXED BY meal_tx_device_id_id_idx
+          WHERE device_id = ? AND id = ? AND deleted_at IS NULL
+          LIMIT 1
+        `,
+      )
+      .get(deviceId, transactionId) as MealTransactionRow | undefined;
   }
 
   return {
@@ -172,19 +207,7 @@ export function createMealTransactionsService(db: AppDatabase) {
       deviceId: string,
       transactionId: string,
     ): Promise<MealTransactionDeleteResult> {
-      const existing = (
-        await db
-          .select()
-          .from(mealTransactions)
-          .where(
-            and(
-              eq(mealTransactions.id, transactionId),
-              eq(mealTransactions.deviceId, deviceId),
-              isNull(mealTransactions.deletedAt),
-            ),
-          )
-          .limit(1)
-      )[0];
+      const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
 
       if (!existing) {
         throw new Error("MEAL_NOT_FOUND");

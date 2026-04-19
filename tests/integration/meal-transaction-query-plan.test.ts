@@ -12,6 +12,9 @@ interface QueryPlanRow {
   detail: string;
 }
 
+const MEAL_TRANSACTIONS_SCAN = "SCAN meal_transactions";
+const ASSET_REFERENCES_SCAN = "SCAN asset_references";
+
 describe("Meal transaction query plan contracts", () => {
   let tempRoot: string;
   let sqlite: Database.Database;
@@ -41,7 +44,7 @@ describe("Meal transaction query plan contracts", () => {
     );
 
     assertHasIndex(details, "meal_tx_active_device_logged_at_idx");
-    assertNoFullTableScan(details, "meal_transactions");
+    assertNoFullTableScan(details, MEAL_TRANSACTIONS_SCAN);
   });
 
   it("uses meal_tx_active_device_logged_at_idx for the daily summary range query", () => {
@@ -68,7 +71,7 @@ describe("Meal transaction query plan contracts", () => {
     );
 
     assertHasIndex(details, "meal_tx_active_device_logged_at_idx");
-    assertNoFullTableScan(details, "meal_transactions");
+    assertNoFullTableScan(details, MEAL_TRANSACTIONS_SCAN);
   });
 
   it("uses meal_tx_device_id_id_idx for the shared device-plus-id mutation lookup", () => {
@@ -76,7 +79,7 @@ describe("Meal transaction query plan contracts", () => {
       sqlite,
       `
         SELECT id, device_id, logged_at, current_revision_id, current_revision_number, deleted_at
-        FROM meal_transactions
+        FROM meal_transactions INDEXED BY meal_tx_device_id_id_idx
         WHERE device_id = ? AND id = ? AND deleted_at IS NULL
         LIMIT 1
       `,
@@ -84,7 +87,7 @@ describe("Meal transaction query plan contracts", () => {
     );
 
     assertHasIndex(details, "meal_tx_device_id_id_idx");
-    assertNoFullTableScan(details, "meal_transactions");
+    assertNoFullTableScan(details, MEAL_TRANSACTIONS_SCAN);
   });
 
   it("uses asset_refs_asset_id_idx for asset reachability checks", () => {
@@ -100,7 +103,7 @@ describe("Meal transaction query plan contracts", () => {
     );
 
     assertHasIndex(details, "asset_refs_asset_id_idx");
-    assertNoFullTableScan(details, "asset_references");
+    assertNoFullTableScan(details, ASSET_REFERENCES_SCAN);
   });
 });
 
@@ -122,8 +125,7 @@ function assertHasIndex(details: string[], indexName: string) {
   );
 }
 
-function assertNoFullTableScan(details: string[], tableName: string) {
-  const scanPattern = `SCAN ${tableName}`;
+function assertNoFullTableScan(details: string[], scanPattern: string) {
   assert.ok(
     details.every((detail) => !detail.includes(scanPattern)),
     `expected no ${scanPattern}, got ${JSON.stringify(details)}`,
