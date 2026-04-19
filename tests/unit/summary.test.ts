@@ -60,6 +60,46 @@ describe("SummaryService", () => {
     assert.equal(summary.date, "2026-03-25");
   });
 
+  it("excludes deleted transactions from the daily summary", async () => {
+    const deletedMeal = await foodService.logFood(deviceId, {
+      foodName: "早餐",
+      calories: 420,
+      protein: 18,
+      carbs: 44,
+      fat: 16,
+      loggedAt: "2026-03-25T02:30:00.000Z",
+    });
+    await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T06:00:00.000Z",
+      items: [
+        {
+          foodName: "雞腿便當",
+          calories: 720,
+          protein: 32,
+          carbs: 68,
+          fat: 28,
+        },
+        {
+          foodName: "無糖茶",
+          calories: 0,
+          protein: 0,
+          carbs: 0,
+          fat: 0,
+        },
+      ],
+    });
+
+    await foodService.deleteMeal(deviceId, deletedMeal.id);
+
+    const summary = await summaryService.getDailySummary(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+
+    assert.equal(summary.mealCount, 1);
+    assert.ok(Math.abs(summary.totalCalories - 720) < 0.01);
+    assert.ok(Math.abs(summary.totalProtein - 32) < 0.01);
+    assert.ok(Math.abs(summary.totalCarbs - 68) < 0.01);
+    assert.ok(Math.abs(summary.totalFat - 28) < 0.01);
+  });
+
   it("isolates meals logged across the Asia/Taipei midnight boundary (D-17)", async () => {
     // TPE 23:59 on 2026-03-25 (pre-midnight, belongs to 2026-03-25 local day)
     await foodService.logFood(deviceId, {

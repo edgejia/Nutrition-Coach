@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { access, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
+import { assetReferences, chatMessages } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import {
   buildAssetUrl,
@@ -73,5 +75,42 @@ describe("AssetService", () => {
     assert.equal(deleted, true);
     assert.equal(await assetService.getOwnedAsset(deviceId, asset.id), null);
     await assert.rejects(() => access(asset.filePath));
+  });
+
+  it("resolves normalized asset references without trusting chat-message string scans", async () => {
+    const stagedPath = path.join(stagingDir, "meal.webp");
+    await writeFile(stagedPath, Buffer.from("webp-image"));
+
+    const asset = await assetService.createAsset(deviceId, {
+      stagedPath,
+      mimeType: "image/webp",
+      originalFilename: "meal.webp",
+    });
+    const assetRef = makeAssetRef(asset.id);
+
+    await db.insert(chatMessages).values({
+      id: "chat-1",
+      deviceId,
+      role: "user",
+      content: "this row should not count as a meal-side reference",
+      imagePath: assetRef,
+      createdAt: "2026-03-25T04:30:00.000Z",
+    });
+
+    assert.equal(
+      await assetService.isAssetRefReferenced(assetRef),
+      false,
+      "raw chat_messages.image_path should no longer decide reachability",
+    );
+
+    await assetService.createAssetReference(deviceId, asset.id, "meal_revision", "meal-1:r1");
+
+    const refs = await db
+      .select()
+      .from(assetReferences)
+      .where(eq(assetReferences.assetId, asset.id));
+
+    assert.equal(refs.length, 1);
+    assert.equal(await assetService.isAssetRefReferenced(assetRef), true);
   });
 });
