@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { currentAppDate } from "../lib/time.js";
 import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService } from "../services/summary.js";
@@ -27,7 +26,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       request.log.info({ event: "day_rollover" }, "Day rollover meals refresh");
     }
 
-    const meals = await foodLoggingService.getMealsByDate(deviceId, currentAppDate());
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     return {
       meals: meals.map((meal) => {
         const imageAssetId = parseAssetRef(meal.imagePath);
@@ -54,8 +53,9 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     if (!device) return reply.code(401).send({ error: "Invalid device ID" });
 
     const { id } = request.params as { id: string };
+    let affectedDateKey: string;
     try {
-      await foodLoggingService.deleteMeal(deviceId, id);
+      ({ affectedDateKey } = await foodLoggingService.deleteMeal(deviceId, id));
     } catch (error) {
       if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
         return reply.code(404).send({ error: "Meal not found" });
@@ -63,7 +63,10 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       throw error;
     }
 
-    const dailySummary = await summaryService.getDailySummary(deviceId, currentAppDate());
+    const dailySummary = await summaryService.getDailySummary(
+      deviceId,
+      new Date(`${affectedDateKey}T12:00:00`),
+    );
     publisher.publishDailySummary(deviceId, dailySummary);
     return reply.code(204).send();
   });
