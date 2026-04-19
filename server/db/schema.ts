@@ -47,3 +47,14 @@ export const chatMessages = sqliteTable("chat_messages", {
   imagePath: text("image_path"),
   createdAt: text("created_at").notNull(),
 });
+
+export const assets = sqliteTable("assets", {
+  id: text("id").primaryKey(),
+  deviceId: text("device_id")
+    .notNull()
+    .references(() => devices.id),
+  storageKey: text("storage_key").notNull().unique(),
+  mimeType: text("mime_type").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  createdAt: text("created_at").notNull(),
+});

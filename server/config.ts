@@ -13,6 +13,12 @@ export const config = {
   /** SQLite database file path. Used as fallback when buildApp opts.dbPath is not provided. */
   dbPath: process.env.DB_PATH ?? "./data/nutrition.db",
 
+  /** Durable asset root for product-owned image files. */
+  assetsDir: process.env.ASSETS_DIR ?? "./data/assets",
+
+  /** Staging directory for request-local uploads before they are persisted as assets. */
+  uploadsStagingDir: process.env.UPLOADS_STAGING_DIR ?? "./data/uploads-staging",
+
   /** HTTP server port. */
   port: Number(process.env.PORT ?? 3000),
 
