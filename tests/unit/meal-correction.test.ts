@@ -81,6 +81,53 @@ describe("meal correction service", () => {
     assert.equal(result.candidate.foodName, "雞腿");
   });
 
+  it("keeps a uniquely resolved target available for the next vague follow-up turn", async () => {
+    const target = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-04-19T12:00:00.000Z",
+    });
+
+    const firstPass = await mealCorrectionService.findMeals(
+      deviceId,
+      "update",
+      "幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高",
+    );
+
+    assert.equal(firstPass.status, "resolved");
+    assert.equal(firstPass.resolvedMealId, target.id);
+
+    const secondPass = await mealCorrectionService.findMeals(deviceId, "update", "正常平均幾g就幾g");
+
+    assert.equal(secondPass.status, "resolved");
+    assert.equal(secondPass.resolvedMealId, target.id);
+    assert.equal(secondPass.fromPending, true);
+  });
+
+  it("supports partial single-item updates by preserving unspecified fields", async () => {
+    const original = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-04-19T12:00:00.000Z",
+    });
+
+    const result = await mealCorrectionService.updateMeal(deviceId, original.id, {
+      patch: { protein: 22 },
+    });
+
+    assert.equal(result.updatedMeal.foodName, "雞腿");
+    assert.equal(result.updatedMeal.calories, 220);
+    assert.equal(result.updatedMeal.protein, 22);
+    assert.equal(result.updatedMeal.carbs, 0);
+    assert.equal(result.updatedMeal.fat, 9);
+  });
+
   it("creates a pending clarification state when multiple meals match and resolves the next numbered reply", async () => {
     const first = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

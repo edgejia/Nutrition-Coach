@@ -32,6 +32,12 @@ export interface PendingMealSelectionState {
   candidates: MealCorrectionCandidate[];
 }
 
+type MealCorrectionUpdateInput =
+  | { items: MealTransactionItemInput[] }
+  | {
+      patch: Partial<MealTransactionItemInput>;
+    };
+
 export interface FindMealsResolvedResult {
   status: "resolved";
   action: "update" | "delete";
@@ -240,11 +246,61 @@ export function createMealCorrectionService(db: AppDatabase) {
         mealPeriod: inferMealPeriod(header.loggedAt),
       };
     });
-  }
+    }
 
-  async function tryResolvePendingSelection(
-    deviceId: string,
-    query: string,
+    async function rememberResolvedCandidate(
+      deviceId: string,
+      action: "update" | "delete",
+      candidate: MealCorrectionCandidate,
+    ): Promise<void> {
+      await turnStateService.putState(
+        deviceId,
+        PENDING_SELECTION_KIND,
+        { action, candidates: [candidate] },
+        PENDING_SELECTION_TTL_MS,
+      );
+    }
+
+    async function loadCurrentItems(deviceId: string, mealId: string): Promise<MealTransactionItemInput[]> {
+      const transaction = await db
+        .select({
+          currentRevisionId: mealTransactions.currentRevisionId,
+        })
+        .from(mealTransactions)
+        .where(and(
+          eq(mealTransactions.deviceId, deviceId),
+          eq(mealTransactions.id, mealId),
+          isNull(mealTransactions.deletedAt),
+        ))
+        .limit(1);
+
+      const currentRevisionId = transaction[0]?.currentRevisionId;
+      if (!currentRevisionId) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      const items = await db
+        .select({
+          foodName: mealRevisionItems.foodName,
+          calories: mealRevisionItems.calories,
+          protein: mealRevisionItems.protein,
+          carbs: mealRevisionItems.carbs,
+          fat: mealRevisionItems.fat,
+        })
+        .from(mealRevisionItems)
+        .where(eq(mealRevisionItems.revisionId, currentRevisionId))
+        .orderBy(asc(mealRevisionItems.position));
+
+      if (items.length === 0) {
+        throw new Error("MEAL_ITEMS_REQUIRED");
+      }
+
+      return items;
+    }
+
+    async function tryResolvePendingSelection(
+      deviceId: string,
+      query: string,
   ): Promise<FindMealsResolvedResult | FindMealsClarificationResult | undefined> {
     const pending = await turnStateService.getState<PendingMealSelectionState>(deviceId, PENDING_SELECTION_KIND);
     if (!pending) {
@@ -277,19 +333,29 @@ export function createMealCorrectionService(db: AppDatabase) {
       return labels.some((label) => label.length > 0 && normalized.includes(label));
     });
 
-    if (matchingCandidates.length === 1) {
-      return {
-        status: "resolved",
+      if (matchingCandidates.length === 1) {
+        return {
+          status: "resolved",
         action: pending.action,
         resolvedMealId: matchingCandidates[0]!.mealId,
         candidate: matchingCandidates[0]!,
         fromPending: true,
-      };
-    }
+        };
+      }
 
-    await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
-    return undefined;
-  }
+      if (pending.candidates.length === 1) {
+        return {
+          status: "resolved",
+          action: pending.action,
+          resolvedMealId: pending.candidates[0]!.mealId,
+          candidate: pending.candidates[0]!,
+          fromPending: true,
+        };
+      }
+
+      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+      return undefined;
+    }
 
   return {
     async findMeals(
@@ -335,6 +401,7 @@ export function createMealCorrectionService(db: AppDatabase) {
       if (hasRecentReference(query)) {
         const positiveMatches = scored.filter((entry) => entry.score > 0);
         if (positiveMatches.length > 0) {
+          await rememberResolvedCandidate(deviceId, action, positiveMatches[0]!.candidate);
           return {
             status: "resolved",
             action,
@@ -347,6 +414,7 @@ export function createMealCorrectionService(db: AppDatabase) {
         const hasStructuredHint = targetDateKey !== undefined || targetMealPeriod !== undefined;
         const hasLabelHint = scored.some((entry) => entry.labelMatched);
         if (!hasStructuredHint && !hasLabelHint) {
+          await rememberResolvedCandidate(deviceId, action, candidates[0]!);
           return {
             status: "resolved",
             action,
@@ -377,6 +445,7 @@ export function createMealCorrectionService(db: AppDatabase) {
       }
 
       if (top.length === 1) {
+        await rememberResolvedCandidate(deviceId, action, top[0]!);
         return {
           status: "resolved",
           action,
@@ -409,7 +478,7 @@ export function createMealCorrectionService(db: AppDatabase) {
     async updateMeal(
       deviceId: string,
       mealId: string,
-      items: MealTransactionItemInput[],
+      input: MealCorrectionUpdateInput,
     ): Promise<{
       updatedMeal: {
         id: string;
@@ -423,7 +492,33 @@ export function createMealCorrectionService(db: AppDatabase) {
       };
       dailySummary: DailySummary;
     }> {
-      const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, { items });
+      const items = "items" in input
+        ? input.items
+        : (() => {
+            const patch = input.patch;
+            return patch;
+          })();
+      let nextItems: MealTransactionItemInput[];
+
+      if (Array.isArray(items)) {
+        nextItems = items;
+      } else {
+        const currentItems = await loadCurrentItems(deviceId, mealId);
+        if (currentItems.length !== 1) {
+          throw new Error("MEAL_PATCH_REQUIRES_SINGLE_ITEM");
+        }
+
+        const currentItem = currentItems[0]!;
+        nextItems = [{
+          foodName: items.foodName ?? currentItem.foodName,
+          calories: items.calories ?? currentItem.calories,
+          protein: items.protein ?? currentItem.protein,
+          carbs: items.carbs ?? currentItem.carbs,
+          fat: items.fat ?? currentItem.fat,
+        }];
+      }
+
+      const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, { items: nextItems });
       const dailySummary = await summaryService.getDailySummary(
         deviceId,
         new Date(`${updated.affectedDateKey}T12:00:00`),

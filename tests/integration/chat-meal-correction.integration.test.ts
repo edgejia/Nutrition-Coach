@@ -262,6 +262,99 @@ describe("chat meal correction integration", () => {
     assert.equal(untouchedBreastTwo?.protein, 31);
   });
 
+  it("carries a uniquely resolved target across turns and applies a partial nutrient patch", async () => {
+    const target = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 30,
+      carbs: 0,
+      fat: 5,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 31,
+      carbs: 0,
+      fat: 5,
+      loggedAt: "2026-04-19T05:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_unique_target_for_followup",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "我已找到你要修改的那筆雞腿紀錄。如果要降低蛋白質，請直接告訴我要改成幾克。",
+    });
+
+    const firstTurn = await postChat("幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高");
+    assert.equal(firstTurn.status, 200);
+    assert.equal(firstTurn.body.didMutateMeal, false);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "reuse_pending_unique_target",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "正常平均幾g就幾g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "partial_patch_update",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: target.id,
+            protein: 22,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "已幫你把那筆雞腿的蛋白質調整成約22g。",
+    });
+
+    const { status, body } = await postChat("正常平均幾g就幾g");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.reply, /22g/);
+
+    const meals = await getMeals();
+    const updated = meals.find((meal) => meal.id === target.id);
+    assert.equal(updated?.foodName, "雞腿");
+    assert.equal(updated?.calories, 220);
+    assert.equal(updated?.protein, 22);
+    assert.equal(updated?.carbs, 0);
+    assert.equal(updated?.fat, 9);
+  });
+
   it("consumes the pending selection on the next chat turn and deletes the chosen meal", async () => {
     const first = await services.foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

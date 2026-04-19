@@ -86,7 +86,16 @@ interface FindMealsArgs {
   query: string;
 }
 
-type UpdateMealArgs = ({ meal_id: string } & LogFoodLegacyArgs) | ({ meal_id: string } & LogFoodGroupedArgs);
+interface UpdateMealPatchArgs {
+  meal_id: string;
+  food_name?: string;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+}
+
+type UpdateMealArgs = UpdateMealPatchArgs | ({ meal_id: string } & LogFoodGroupedArgs);
 
 interface DeleteMealArgs {
   meal_id: string;
@@ -175,9 +184,20 @@ const updateGoalsSchema = z
   });
 
 const updateMealSchema = z.union([
-  logFoodItemSchema.extend({
-    meal_id: z.string().uuid("meal_id must be a uuid"),
-  }).strict(),
+  z
+    .object({
+      meal_id: z.string().uuid("meal_id must be a uuid"),
+      food_name: z.string().min(1, "food_name must be non-empty").optional(),
+      calories: finiteNumber.optional(),
+      protein: finiteNumber.optional(),
+      carbs: finiteNumber.optional(),
+      fat: finiteNumber.optional(),
+    })
+    .strict()
+    .refine(
+      (args) => Object.keys(args).some((key) => key !== "meal_id"),
+      { message: "at least one meal field is required" },
+    ),
   z
     .object({
       meal_id: z.string().uuid("meal_id must be a uuid"),
@@ -381,7 +401,7 @@ const getDailySummaryContract: ToolContract<
 
 const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
   name: "update_meal",
-  description: "更新已解析出的歷史餐點內容。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
+  description: "更新已解析出的歷史餐點內容。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。若只調整單一欄位，可只提供該欄位，其餘沿用原紀錄；items 只用於整筆多項餐點 replacement。",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -431,20 +451,24 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
       deviceId,
       args.meal_id,
       "items" in args
-        ? args.items.map((item) => ({
-          foodName: item.food_name.trim(),
-          calories: item.calories,
-          protein: item.protein,
-          carbs: item.carbs,
-          fat: item.fat,
-        }))
-        : [{
-          foodName: args.food_name.trim(),
-          calories: args.calories,
-          protein: args.protein,
-          carbs: args.carbs,
-          fat: args.fat,
-        }],
+        ? {
+            items: args.items.map((item) => ({
+              foodName: item.food_name.trim(),
+              calories: item.calories,
+              protein: item.protein,
+              carbs: item.carbs,
+              fat: item.fat,
+            })),
+          }
+        : {
+            patch: {
+              ...(args.food_name !== undefined ? { foodName: args.food_name.trim() } : {}),
+              ...(args.calories !== undefined ? { calories: args.calories } : {}),
+              ...(args.protein !== undefined ? { protein: args.protein } : {}),
+              ...(args.carbs !== undefined ? { carbs: args.carbs } : {}),
+              ...(args.fat !== undefined ? { fat: args.fat } : {}),
+            },
+          },
     );
 
     await deps.mealCorrectionService.clearPendingSelection(deviceId);
