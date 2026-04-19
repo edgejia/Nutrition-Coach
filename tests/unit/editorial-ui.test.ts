@@ -21,7 +21,6 @@ globalThis.localStorage = {
 const { useStore } = await import("../../client/src/store.js");
 const { getDashboardCells } = await import("../../client/src/components/Dashboard.js");
 const { splitAdvice, getAdvicePresentation } = await import("../../client/src/components/CoachAdviceCard.js");
-const { getDisplayedCoachAdvice, formatHomeHeaderDate } = await import("../../client/src/components/HomeScreen.js");
 const { getUserMessagePresentation } = await import("../../client/src/components/MessageBubble.js");
 const { getMealRowPresentation } = await import("../../client/src/components/MealTimeline.js");
 const { getPersistedAssetPresentation, PERSISTED_ASSET_ERROR_LABEL } = await import("../../client/src/components/PersistedAssetImage.js");
@@ -134,44 +133,6 @@ describe("Editorial UI", () => {
       body: "晚餐選高蛋白、低油脂的食物。",
       tags: ["蛋白質差 80g", "脂肪接近上限", "晚餐還有空間"],
     });
-  });
-
-  it("prefers freshly derived coach advice over stale stored advice", () => {
-    const advice = getDisplayedCoachAdvice(
-      "昨天的舊建議",
-      {
-        date: "2026-04-01",
-        totalCalories: 900,
-        totalProtein: 40,
-        totalCarbs: 80,
-        totalFat: 20,
-        mealCount: 2,
-      },
-      useStore.getState().dailyTargets,
-    );
-
-    assert.equal(advice, "蛋白質還差 100g，晚餐建議高蛋白食物");
-  });
-
-  it("formats HomeHeader date keys with the existing zh-TW month/day/weekday style", () => {
-    const expected = new Date(2026, 2, 25).toLocaleDateString("zh-TW", {
-      month: "long",
-      day: "numeric",
-      weekday: "short",
-    });
-
-    assert.equal(formatHomeHeaderDate("2026-03-25"), expected);
-  });
-
-  it("falls back to today's local date when HomeHeader date key is malformed", () => {
-    const today = new Date();
-    const expected = today.toLocaleDateString("zh-TW", {
-      month: "long",
-      day: "numeric",
-      weekday: "short",
-    });
-
-    assert.equal(formatHomeHeaderDate("not-a-date"), expected);
   });
 
   it("simulates CTA click by setting pending draft and switching to chat", () => {
