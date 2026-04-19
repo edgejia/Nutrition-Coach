@@ -18,6 +18,7 @@ DB_PATH=/app/data/nutrition.db
 ASSETS_DIR=/app/data/assets
 UPLOADS_STAGING_DIR=/tmp/nutrition-uploads
 CLIENT_DIST_DIR=/app/dist/client
+VITE_FEEDBACK_FORM_URL=https://example.com/forms/nutrition-coach-beta
 TZ=Asia/Taipei
 ```
 
@@ -65,9 +66,11 @@ Run this checklist from the public domain before marking the beta ready:
 2. Send one image-backed request. Confirm the image is accepted and the response/history references the stored asset.
 3. Refresh the page. Confirm the conversation and meal state persist after reload.
 4. Call `GET /api/assets/:id` for the uploaded image using the same `X-Device-Id`. Confirm the request succeeds with the expected image response.
+5. Click `回報 Beta 問題`. Confirm the external structured form opens in a new tab and points at the canonical beta intake destination.
 
 ## Deployment Notes
 
 - Keep the SQLite file, durable assets, and any future uploads on the mounted volume.
 - Do not rely on the build step to see volume contents.
 - Keep the frontend build output in `dist/client` so Fastify can serve the same-origin app shell in beta.
+- Set `VITE_FEEDBACK_FORM_URL` during build so the shared beta always ships with one live tester feedback path.
