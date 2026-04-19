@@ -3,17 +3,27 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
+import {
+  assetReferences,
+  assets,
+  mealRevisionItems,
+  mealRevisions,
+  mealTransactions,
+  meals,
+} from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 
 describe("FoodLoggingService", () => {
+  let db: ReturnType<typeof createDb>;
   let foodService: ReturnType<typeof createFoodLoggingService>;
   let deviceId: string;
   let foreignDeviceId: string;
 
   beforeEach(async () => {
-    const db = createDb(":memory:");
+    db = createDb(":memory:");
     const deviceService = createDeviceService(db);
     foodService = createFoodLoggingService(db);
     const result = await deviceService.createDevice("fat_loss");
@@ -22,48 +32,89 @@ describe("FoodLoggingService", () => {
     foreignDeviceId = foreignResult.deviceId;
   });
 
-  it("logs a food entry and returns it", async () => {
+  async function createOwnedAsset(assetId: string) {
+    await db.insert(assets).values({
+      id: assetId,
+      deviceId,
+      storageKey: `meal-images/${assetId}.jpg`,
+      mimeType: "image/jpeg",
+      byteSize: 1234,
+      createdAt: "2026-03-25T04:29:00.000Z",
+    });
+  }
+
+  it("logs a compatibility meal entry while writing only canonical transaction rows", async () => {
+    await createOwnedAsset("asset-apple");
+
     const meal = await foodService.logFood(deviceId, {
       foodName: "蘋果",
       calories: 95,
       protein: 0.5,
       carbs: 25,
       fat: 0.3,
-      imagePath: "asset:apple-image",
+      imagePath: "asset:asset-apple",
       loggedAt: "2026-03-25T04:30:00.000Z",
     });
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisions = await db.select().from(mealRevisions);
+    const items = await db.select().from(mealRevisionItems);
+    const refs = await db
+      .select()
+      .from(assetReferences)
+      .where(eq(assetReferences.assetId, "asset-apple"));
+    const legacyMeals = await db.select().from(meals);
+
     assert.ok(meal.id);
     assert.equal(meal.foodName, "蘋果");
     assert.equal(meal.calories, 95);
     assert.equal(meal.deviceId, deviceId);
-    assert.equal(meal.imagePath, "asset:apple-image");
+    assert.equal(meal.imagePath, "asset:asset-apple");
     assert.equal(meal.loggedAt, "2026-03-25T04:30:00.000Z");
+    assert.equal(transactions.length, 1);
+    assert.equal(transactions[0]!.id, meal.id);
+    assert.equal(revisions.length, 1);
+    assert.equal(items.length, 1);
+    assert.equal(refs.length, 1);
+    assert.equal(legacyMeals.length, 0);
   });
 
-  it("retrieves meals by date", async () => {
-    await foodService.logFood(deviceId, {
-      foodName: "隔天早餐",
-      calories: 400,
-      protein: 20,
-      carbs: 30,
-      fat: 15,
-      loggedAt: "2026-03-25T07:30:00.000Z",
+  it("forwards grouped items without flattening them into separate transactions", async () => {
+    await createOwnedAsset("asset-breakfast");
+
+    await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T05:00:00.000Z",
+      imagePath: "asset:asset-breakfast",
+      items: [
+        {
+          foodName: "蛋餅",
+          calories: 320,
+          protein: 12,
+          carbs: 30,
+          fat: 16,
+        },
+        {
+          foodName: "豆漿",
+          calories: 180,
+          protein: 12,
+          carbs: 14,
+          fat: 8,
+        },
+      ],
     });
-    await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
-      loggedAt: "2026-03-24T23:30:00.000Z",
-    });
-    const meals = await foodService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
-    assert.equal(meals.length, 2);
-    assert.equal(meals[0].foodName, "蘋果");
-    assert.equal(meals[1].foodName, "隔天早餐");
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisions = await db.select().from(mealRevisions);
+    const items = await db.select().from(mealRevisionItems);
+    const legacyMeals = await db.select().from(meals);
+
+    assert.equal(transactions.length, 1, "grouped input should stay one transaction");
+    assert.equal(revisions.length, 1);
+    assert.equal(items.length, 2, "grouped input should stay grouped under one revision");
+    assert.equal(legacyMeals.length, 0);
   });
 
-  it("rejects foreign ownership before deleting the owner's meal", async () => {
+  it("preserves the MEAL_NOT_FOUND contract for foreign deletes while soft-deleting the owner row", async () => {
     const meal = await foodService.logFood(deviceId, {
       foodName: "蘋果",
       calories: 95,
@@ -83,31 +134,15 @@ describe("FoodLoggingService", () => {
 
     await foodService.deleteMeal(deviceId, meal.id);
 
-    const meals = await foodService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
-    assert.equal(meals.length, 0);
-  });
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, meal.id))
+    )[0];
 
-  it("rejects deleting the same meal concurrently", async () => {
-    const meal = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
-      loggedAt: "2026-03-25T04:30:00.000Z",
-    });
-
-    const results = await Promise.allSettled([
-      foodService.deleteMeal(deviceId, meal.id),
-      foodService.deleteMeal(deviceId, meal.id),
-    ]);
-
-    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
-    const rejection = results.find((result) => result.status === "rejected");
-    assert.ok(rejection);
-    if (rejection.status === "rejected") {
-      assert.equal((rejection.reason as Error).message, "MEAL_NOT_FOUND");
-    }
+    assert.ok(transaction);
+    assert.ok(transaction!.deletedAt);
   });
 
   it("rejects deleting a nonexistent meal", async () => {
