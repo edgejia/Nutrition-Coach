@@ -355,6 +355,62 @@ describe("chat meal correction integration", () => {
     assert.equal(updated?.fat, 9);
   });
 
+  it("applies grouped meal whole-meal nutrient patches without requiring full items[] replacement", async () => {
+    const grouped = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 30, carbs: 0, fat: 5 },
+        { foodName: "白飯", calories: 180, protein: 4, carbs: 40, fat: 0.5 },
+        { foodName: "花椰菜", calories: 50, protein: 3, carbs: 8, fat: 0.5 },
+      ],
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_grouped_target",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把今天那餐雞胸肉白飯的蛋白質改成 22g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "patch_grouped_meal_total",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: grouped.id,
+            protein: 22,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "已幫你把那餐的蛋白質改成 22g。",
+    });
+
+    const { status, body } = await postChat("把今天那餐雞胸肉白飯的蛋白質改成 22g");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.reply, /22g/);
+
+    const meals = await getMeals();
+    const updated = meals.find((meal) => meal.id === grouped.id);
+    assert.equal(updated?.foodName, "雞胸肉、白飯 等3項");
+    assert.equal(updated?.calories, 450);
+    assert.equal(updated?.protein, 22);
+    assert.equal(updated?.carbs, 48);
+    assert.equal(updated?.fat, 6);
+  });
+
   it("consumes the pending selection on the next chat turn and deletes the chosen meal", async () => {
     const first = await services.foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

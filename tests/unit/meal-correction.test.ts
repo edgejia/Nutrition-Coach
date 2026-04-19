@@ -128,6 +128,27 @@ describe("meal correction service", () => {
     assert.equal(result.updatedMeal.fat, 9);
   });
 
+  it("supports whole-meal numeric patches for grouped meals by preserving names and distributing totals", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 30, carbs: 0, fat: 5 },
+        { foodName: "白飯", calories: 180, protein: 4, carbs: 40, fat: 0.5 },
+        { foodName: "花椰菜", calories: 50, protein: 3, carbs: 8, fat: 0.5 },
+      ],
+    });
+
+    const result = await mealCorrectionService.updateMeal(deviceId, grouped.id, {
+      patch: { protein: 22 },
+    });
+
+    assert.equal(result.updatedMeal.foodName, "雞胸肉、白飯 等3項");
+    assert.equal(result.updatedMeal.calories, 450);
+    assert.equal(result.updatedMeal.protein, 22);
+    assert.equal(result.updatedMeal.carbs, 48);
+    assert.equal(result.updatedMeal.fat, 6);
+  });
+
   it("creates a pending clarification state when multiple meals match and resolves the next numbered reply", async () => {
     const first = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

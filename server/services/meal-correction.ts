@@ -70,6 +70,9 @@ interface CandidateHeaderRow {
   currentRevisionId: string;
 }
 
+const NUMERIC_ITEM_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
+type NumericItemField = (typeof NUMERIC_ITEM_FIELDS)[number];
+
 function normalizeText(text: string): string {
   return text.toLowerCase().replace(/\s+/g, "");
 }
@@ -149,9 +152,75 @@ function buildNotFoundPrompt(action: "update" | "delete"): string {
   return `我還不能確定你要${verb}哪一筆餐點，請補充日期、餐別或食物名稱。`;
 }
 
+function roundPatchValue(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
 function matchesCandidateLabel(candidate: MealCorrectionCandidate, normalizedQuery: string): boolean {
   const labels = [candidate.foodName, ...candidate.itemNames].map(normalizeText);
   return labels.some((label) => label.length > 0 && normalizedQuery.includes(label));
+}
+
+function distributePatchedTotal(
+  items: MealTransactionItemInput[],
+  field: NumericItemField,
+  targetTotal: number,
+): MealTransactionItemInput[] {
+  if (items.length === 1) {
+    return [{ ...items[0]!, [field]: targetTotal }];
+  }
+
+  const currentTotal = items.reduce((sum, item) => sum + item[field], 0);
+  let remaining = targetTotal;
+
+  return items.map((item, index) => {
+    if (index === items.length - 1) {
+      return {
+        ...item,
+        [field]: roundPatchValue(remaining),
+      };
+    }
+
+    let nextValue: number;
+    if (currentTotal > 0) {
+      nextValue = roundPatchValue(targetTotal * (item[field] / currentTotal));
+    } else {
+      nextValue = roundPatchValue(targetTotal / items.length);
+    }
+
+    remaining -= nextValue;
+    return {
+      ...item,
+      [field]: nextValue,
+    };
+  });
+}
+
+function applyMealPatch(
+  currentItems: MealTransactionItemInput[],
+  patch: Partial<MealTransactionItemInput>,
+): MealTransactionItemInput[] {
+  let nextItems = currentItems.map((item) => ({ ...item }));
+
+  if (patch.foodName !== undefined) {
+    if (nextItems.length !== 1) {
+      throw new Error("MEAL_NAME_PATCH_REQUIRES_SINGLE_ITEM");
+    }
+    nextItems[0] = {
+      ...nextItems[0]!,
+      foodName: patch.foodName,
+    };
+  }
+
+  for (const field of NUMERIC_ITEM_FIELDS) {
+    const nextValue = patch[field];
+    if (nextValue === undefined) {
+      continue;
+    }
+    nextItems = distributePatchedTotal(nextItems, field, nextValue);
+  }
+
+  return nextItems;
 }
 
 function scoreCandidate(
@@ -504,18 +573,7 @@ export function createMealCorrectionService(db: AppDatabase) {
         nextItems = items;
       } else {
         const currentItems = await loadCurrentItems(deviceId, mealId);
-        if (currentItems.length !== 1) {
-          throw new Error("MEAL_PATCH_REQUIRES_SINGLE_ITEM");
-        }
-
-        const currentItem = currentItems[0]!;
-        nextItems = [{
-          foodName: items.foodName ?? currentItem.foodName,
-          calories: items.calories ?? currentItem.calories,
-          protein: items.protein ?? currentItem.protein,
-          carbs: items.carbs ?? currentItem.carbs,
-          fat: items.fat ?? currentItem.fat,
-        }];
+        nextItems = applyMealPatch(currentItems, items);
       }
 
       const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, { items: nextItems });

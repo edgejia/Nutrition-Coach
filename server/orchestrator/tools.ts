@@ -401,7 +401,7 @@ const getDailySummaryContract: ToolContract<
 
 const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
   name: "update_meal",
-  description: "更新已解析出的歷史餐點內容。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。若只調整單一欄位，可只提供該欄位，其餘沿用原紀錄；items 只用於整筆多項餐點 replacement。",
+  description: "更新已解析出的歷史餐點內容。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。若只調整單一欄位，可只提供該欄位，其餘沿用原紀錄；對多項餐點，數字欄位會視為整餐總量 patch 並由系統按原比例分配到 items。items 只用於整筆多項餐點 replacement。",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -447,29 +447,38 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
       throw new FatalToolError("meal target unresolved");
     }
 
-    const updated = await deps.mealCorrectionService.updateMeal(
-      deviceId,
-      args.meal_id,
-      "items" in args
-        ? {
-            items: args.items.map((item) => ({
-              foodName: item.food_name.trim(),
-              calories: item.calories,
-              protein: item.protein,
-              carbs: item.carbs,
-              fat: item.fat,
-            })),
-          }
-        : {
-            patch: {
-              ...(args.food_name !== undefined ? { foodName: args.food_name.trim() } : {}),
-              ...(args.calories !== undefined ? { calories: args.calories } : {}),
-              ...(args.protein !== undefined ? { protein: args.protein } : {}),
-              ...(args.carbs !== undefined ? { carbs: args.carbs } : {}),
-              ...(args.fat !== undefined ? { fat: args.fat } : {}),
+    let updated: UpdateMealResult;
+    try {
+      updated = await deps.mealCorrectionService.updateMeal(
+        deviceId,
+        args.meal_id,
+        "items" in args
+          ? {
+              items: args.items.map((item) => ({
+                foodName: item.food_name.trim(),
+                calories: item.calories,
+                protein: item.protein,
+                carbs: item.carbs,
+                fat: item.fat,
+              })),
+            }
+          : {
+              patch: {
+                ...(args.food_name !== undefined ? { foodName: args.food_name.trim() } : {}),
+                ...(args.calories !== undefined ? { calories: args.calories } : {}),
+                ...(args.protein !== undefined ? { protein: args.protein } : {}),
+                ...(args.carbs !== undefined ? { carbs: args.carbs } : {}),
+                ...(args.fat !== undefined ? { fat: args.fat } : {}),
+              },
             },
-          },
-    );
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "meal update failed";
+      if (message === "MEAL_NAME_PATCH_REQUIRES_SINGLE_ITEM") {
+        throw new FatalToolError("multi-item meal name changes require full items replacement");
+      }
+      throw error;
+    }
 
     await deps.mealCorrectionService.clearPendingSelection(deviceId);
     if (deps.toolSessionState) {
