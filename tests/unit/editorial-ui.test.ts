@@ -22,6 +22,7 @@ const { useStore } = await import("../../client/src/store.js");
 const { getDashboardCells } = await import("../../client/src/components/Dashboard.js");
 const { splitAdvice, getAdvicePresentation } = await import("../../client/src/components/CoachAdviceCard.js");
 const { getDisplayedCoachAdvice, formatHomeHeaderDate } = await import("../../client/src/components/HomeScreen.js");
+const { getUserMessagePresentation } = await import("../../client/src/components/MessageBubble.js");
 
 describe("Editorial UI", () => {
   beforeEach(() => {
@@ -187,5 +188,20 @@ describe("Editorial UI", () => {
     assert.equal(state.activeScreen, "chat");
     assert.equal(state.pendingHomeChatDraft?.text, ctaText);
     assert.equal(state.pendingHomeChatDraft?.status, "staged");
+  });
+
+  it("prefers persisted imageUrl when restoring image-only user chat messages", () => {
+    const presentation = getUserMessagePresentation({
+      id: "msg-image",
+      role: "user",
+      content: "(圖片)",
+      imageAssetId: "asset-1",
+      imageUrl: "/api/assets/asset-1",
+      createdAt: "2026-04-19T00:00:00.000Z",
+    });
+
+    assert.equal(presentation.imageSrc, "/api/assets/asset-1");
+    assert.equal(presentation.text, "");
+    assert.equal(presentation.isImageOnly, true);
   });
 });

@@ -372,9 +372,11 @@ async function handleOrchestratorSSE(
   } catch {
     const fallback = streamDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
     try {
-      await finalizeAssistantReply(deps.chatService, deviceId, fallback);
+      const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, fallback);
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
     } catch {
       // If history persistence also fails, still close the stream with done.
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: fallback })}\n\n`);
     }
     const doneData = {
       didLogMeal: streamDidLogMeal,

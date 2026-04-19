@@ -5,6 +5,25 @@ type ProvisionalBubbleProps = {
   isStatusLabel: boolean;
 };
 
+function isImagePlaceholderContent(content: string): boolean {
+  return content.trim() === "(圖片)";
+}
+
+export function getUserMessagePresentation(message: Message) {
+  const imageSrc = message.imagePreviewUrl ?? message.imageUrl ?? undefined;
+  const text = isImagePlaceholderContent(message.content) ? "" : message.content;
+  const hasImage = Boolean(imageSrc);
+  const hasText = Boolean(text);
+
+  return {
+    imageSrc,
+    text,
+    hasImage,
+    hasText,
+    isImageOnly: hasImage && !hasText,
+  };
+}
+
 export function MessageBubble(props: {
   message: Message;
   onOpenSummary?: () => void;
@@ -13,15 +32,13 @@ export function MessageBubble(props: {
   const isUser = message.role === "user";
 
   if (isUser) {
-    const hasImage = Boolean(message.imagePreviewUrl);
-    const hasText = Boolean(message.content);
-    const isImageOnly = hasImage && !hasText;
+    const { imageSrc, text, hasImage, hasText, isImageOnly } = getUserMessagePresentation(message);
 
     if (isImageOnly) {
       return (
         <div className="flex justify-end">
           <img
-            src={message.imagePreviewUrl}
+            src={imageSrc}
             alt="附圖"
             className="max-w-[80%] rounded-2xl object-contain max-h-64"
           />
@@ -42,12 +59,12 @@ export function MessageBubble(props: {
         >
           {hasImage && (
             <img
-              src={message.imagePreviewUrl}
+              src={imageSrc}
               alt="附圖"
               className="mb-2 max-h-48 w-full rounded-xl object-contain"
             />
           )}
-          {hasText && <p className="whitespace-pre-wrap">{message.content}</p>}
+          {hasText && <p className="whitespace-pre-wrap">{text}</p>}
         </div>
       </div>
     );

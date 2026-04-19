@@ -654,8 +654,15 @@ describe("chat-streaming", () => {
       assert.ok(res.body);
       const reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const combinedChunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
 
       assert.match(text, /event: done/);
+      assert.match(combinedChunkText, /抱歉|無法/, "live SSE path must surface the fallback reply before done");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { "x-device-id": deviceId },
