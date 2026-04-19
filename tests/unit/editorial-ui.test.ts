@@ -23,6 +23,8 @@ const { getDashboardCells } = await import("../../client/src/components/Dashboar
 const { splitAdvice, getAdvicePresentation } = await import("../../client/src/components/CoachAdviceCard.js");
 const { getDisplayedCoachAdvice, formatHomeHeaderDate } = await import("../../client/src/components/HomeScreen.js");
 const { getUserMessagePresentation } = await import("../../client/src/components/MessageBubble.js");
+const { getMealRowPresentation } = await import("../../client/src/components/MealTimeline.js");
+const { getPersistedAssetPresentation, PERSISTED_ASSET_ERROR_LABEL } = await import("../../client/src/components/PersistedAssetImage.js");
 
 describe("Editorial UI", () => {
   beforeEach(() => {
@@ -203,5 +205,33 @@ describe("Editorial UI", () => {
     assert.equal(presentation.imageSrc, "/api/assets/asset-1");
     assert.equal(presentation.text, "");
     assert.equal(presentation.isImageOnly, true);
+  });
+
+  it("derives meal-row thumbnail and macro presentation for persisted meal images", () => {
+    const presentation = getMealRowPresentation({
+      id: "meal-1",
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 34.4,
+      carbs: 55.2,
+      fat: 19.1,
+      imageAssetId: "asset-1",
+      imageUrl: "/api/assets/asset-1?deviceId=device-1",
+      loggedAt: "2026-04-19T12:30:00.000Z",
+    });
+
+    assert.equal(presentation.thumbnailSrc, "/api/assets/asset-1?deviceId=device-1");
+    assert.equal(presentation.macroSummary, "620 kcal · P34 · C55 · F19");
+  });
+
+  it("switches persisted assets to a stable fallback label after load failure", () => {
+    const initial = getPersistedAssetPresentation("/api/assets/asset-1");
+    const failed = getPersistedAssetPresentation("/api/assets/asset-1", true);
+
+    assert.equal(initial.shouldRenderImage, true);
+    assert.equal(initial.shouldRenderFallback, false);
+    assert.equal(failed.shouldRenderImage, false);
+    assert.equal(failed.shouldRenderFallback, true);
+    assert.equal(failed.fallbackLabel, PERSISTED_ASSET_ERROR_LABEL);
   });
 });

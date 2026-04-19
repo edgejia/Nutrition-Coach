@@ -24,12 +24,12 @@ export function SummaryDetailScreen() {
       .then(({ meals }) => {
         if (!cancelled) setMeals(meals);
       })
-      .catch((err) => {
+        .catch((err) => {
         if (!cancelled) {
           if (err instanceof Error && err.message === "UNAUTHORIZED") {
             clearDevice();
           } else {
-            setError("載入餐點失敗，請重試。");
+            setError("內容載入失敗，請重新整理；若仍發生，請用「回報 Beta 問題」告訴我們。");
           }
         }
       })

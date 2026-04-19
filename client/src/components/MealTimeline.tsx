@@ -1,4 +1,17 @@
 import type { MealEntry } from "../types.js";
+import { PersistedAssetImage } from "./PersistedAssetImage.js";
+
+export function getMealRowPresentation(meal: MealEntry) {
+  return {
+    timeLabel: new Date(meal.loggedAt).toLocaleTimeString("zh-TW", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }),
+    thumbnailSrc: meal.imageUrl ?? undefined,
+    macroSummary: `${Math.round(meal.calories)} kcal · P${Math.round(meal.protein)} · C${Math.round(meal.carbs)} · F${Math.round(meal.fat)}`,
+  };
+}
 
 export function MealTimeline(props: {
   meals: MealEntry[];
@@ -36,21 +49,38 @@ export function MealTimeline(props: {
             borderBottom: i < props.meals.length - 1 ? "1px solid var(--border)" : "none",
           }}
         >
-          <div className="w-10 shrink-0 text-xs font-semibold tabular-nums" style={{ color: "var(--text-3)" }}>
-            {new Date(meal.loggedAt).toLocaleTimeString("zh-TW", {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            })}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-bold" style={{ color: "var(--text)" }}>
-              {meal.foodName}
-            </div>
-            <div className="mt-0.5 text-xs" style={{ color: "var(--text-2)" }}>
-              {Math.round(meal.calories)} kcal · P{Math.round(meal.protein)} · C{Math.round(meal.carbs)} · F{Math.round(meal.fat)}
-            </div>
-          </div>
+          {(() => {
+            const presentation = getMealRowPresentation(meal);
+
+            return (
+              <>
+                <div className="w-10 shrink-0 text-xs font-semibold tabular-nums" style={{ color: "var(--text-3)" }}>
+                  {presentation.timeLabel}
+                </div>
+                {presentation.thumbnailSrc && (
+                  <PersistedAssetImage
+                    src={presentation.thumbnailSrc}
+                    alt={`${meal.foodName} 縮圖`}
+                    imgClassName="h-10 w-10 shrink-0 rounded-xl object-cover"
+                    fallbackClassName="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-[10px] font-semibold leading-tight"
+                    fallbackStyle={{
+                      background: "var(--bg-raised)",
+                      borderColor: "var(--border-med)",
+                      color: "var(--text-2)",
+                    }}
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold" style={{ color: "var(--text)" }}>
+                    {meal.foodName}
+                  </div>
+                  <div className="mt-0.5 text-xs" style={{ color: "var(--text-2)" }}>
+                    {presentation.macroSummary}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
           <button
             type="button"
             onClick={() => props.onDelete(meal.id)}

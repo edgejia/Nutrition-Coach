@@ -1,4 +1,5 @@
 import type { Message } from "../types.js";
+import { PersistedAssetImage } from "./PersistedAssetImage.js";
 
 type ProvisionalBubbleProps = {
   isProvisional: boolean;
@@ -37,11 +38,19 @@ export function MessageBubble(props: {
     if (isImageOnly) {
       return (
         <div className="flex justify-end">
-          <img
-            src={imageSrc}
-            alt="附圖"
-            className="max-w-[80%] rounded-2xl object-contain max-h-64"
-          />
+          <div className="max-w-[80%]">
+            <PersistedAssetImage
+              src={imageSrc}
+              alt="附圖"
+              imgClassName="max-h-64 max-w-full rounded-2xl object-contain"
+              fallbackClassName="flex min-h-40 min-w-48 items-center justify-center rounded-2xl border px-4 py-6 text-center text-xs font-semibold"
+              fallbackStyle={{
+                background: "var(--bg-card)",
+                borderColor: "var(--border-med)",
+                color: "var(--text-2)",
+              }}
+            />
+          </div>
         </div>
       );
     }
@@ -58,10 +67,16 @@ export function MessageBubble(props: {
           }}
         >
           {hasImage && (
-            <img
+            <PersistedAssetImage
               src={imageSrc}
               alt="附圖"
-              className="mb-2 max-h-48 w-full rounded-xl object-contain"
+              imgClassName="mb-2 max-h-48 w-full rounded-xl object-contain"
+              fallbackClassName="mb-2 flex min-h-32 w-full items-center justify-center rounded-xl border px-3 py-4 text-center text-xs font-semibold"
+              fallbackStyle={{
+                background: "rgba(28,27,25,0.32)",
+                borderColor: "rgba(255,255,255,0.12)",
+                color: "rgba(255,255,255,0.88)",
+              }}
             />
           )}
           {hasText && <p className="whitespace-pre-wrap">{text}</p>}
