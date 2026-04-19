@@ -77,6 +77,7 @@ async function main(): Promise<void> {
     console.log("  yarn verify:harness -- text-log");
     console.log("  yarn verify:harness -- daily-rollover");
     console.log("  yarn verify:harness -- boundary-contracts");
+    console.log("  yarn verify:harness -- meal-delete-consistency");
     process.exitCode = args.length === 0 ? 1 : 0;
     return;
   }
