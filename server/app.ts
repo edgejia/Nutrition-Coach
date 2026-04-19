@@ -6,17 +6,20 @@ import { createDeviceService } from "./services/device.js";
 import { createFoodLoggingService } from "./services/food-logging.js";
 import { createSummaryService } from "./services/summary.js";
 import { createChatService } from "./services/chat.js";
+import { createAssetService } from "./services/assets.js";
 import { createOrchestrator } from "./orchestrator/index.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
 import { RealtimePublisher } from "./realtime/publisher.js";
 import { registerDeviceRoutes } from "./routes/device.js";
 import { registerChatRoutes } from "./routes/chat.js";
 import { registerMealRoutes } from "./routes/meals.js";
+import { registerAssetRoutes } from "./routes/assets.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import type { LLMProvider } from "./llm/types.js";
 import { config } from "./config.js";
 
 export interface AppServices {
+  assetService: ReturnType<typeof createAssetService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
 }
@@ -31,6 +34,8 @@ export interface AppOptions {
    * upload residue from accumulating inside the repo.
    */
   uploadsDir?: string;
+  /** Override the durable assets directory used by the asset service. */
+  assetsDir?: string;
   /**
    * Optional Fastify logger configuration.
    * When omitted: Fastify initializes with `logger: false` (silent — backward compatible with all existing tests).
@@ -57,9 +62,10 @@ export async function buildApp(opts: AppOptions) {
   const foodLoggingService = createFoodLoggingService(db);
   const summaryService = createSummaryService(db);
   const chatService = createChatService(db);
+  const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
   const publisher = new RealtimePublisher();
 
-  opts.onServicesReady?.({ foodLoggingService, summaryService });
+  opts.onServicesReady?.({ assetService, foodLoggingService, summaryService });
 
   const orchestrator = createOrchestrator({
     llmProvider,
@@ -76,6 +82,7 @@ export async function buildApp(opts: AppOptions) {
   registerDeviceRoutes(app, { deviceService, targetGenerationService });
   registerChatRoutes(app, { orchestrator, chatService, deviceService, publisher, uploadsDir: opts.uploadsDir });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, publisher });
+  registerAssetRoutes(app, { assetService, deviceService });
   registerSSERoutes(app, { publisher, summaryService, deviceService });
 
   return app;
