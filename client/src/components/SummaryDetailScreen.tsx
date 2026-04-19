@@ -29,7 +29,7 @@ export function SummaryDetailScreen() {
           if (err instanceof Error && err.message === "UNAUTHORIZED") {
             clearDevice();
           } else {
-            setError("內容載入失敗，請重新整理；若仍發生，請用「回報 Beta 問題」告訴我們。");
+            setError("內容載入失敗，請重新整理後再試一次。");
           }
         }
       })

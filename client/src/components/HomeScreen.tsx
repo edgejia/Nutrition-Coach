@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useStore } from "../store.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { formatLocalDate } from "../lib/time.js";
-import { getFeedbackEntryState, readFeedbackFormUrl } from "../lib/feedback.js";
 import { Dashboard } from "./Dashboard.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { ChatEntryBar } from "./ChatEntryBar.js";
@@ -96,10 +95,6 @@ export function HomeScreen() {
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const coachAdvice = getDisplayedCoachAdvice(storedCoachAdvice, dailySummary, dailyTargets);
   const cta = getCoachCTA(dailySummary, dailyTargets);
-  const feedbackEntry = getFeedbackEntryState({
-    sending,
-    feedbackUrl: readFeedbackFormUrl(),
-  });
 
   useEffect(() => {
     setCoachAdvice(coachAdvice);
@@ -115,38 +110,10 @@ export function HomeScreen() {
     setActiveScreen("chat");
   }
 
-  function handleFeedbackClick() {
-    if (feedbackEntry.disabled || !feedbackEntry.feedbackUrl) {
-      return;
-    }
-    window.open(feedbackEntry.feedbackUrl, "_blank", "noopener,noreferrer");
-  }
-
   return (
     <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--bg)" }}>
       <main className="flex-1 space-y-3 overflow-y-auto px-4 pb-24 pt-2">
         <HomeHeader />
-        <button
-          type="button"
-          onClick={handleFeedbackClick}
-          disabled={feedbackEntry.disabled}
-          className="flex w-full items-start justify-between rounded-xl border px-4 py-3 text-left disabled:opacity-50"
-          style={{
-            background: "var(--bg-card)",
-            borderColor: "var(--border-med)",
-            color: "var(--text)",
-          }}
-        >
-          <div className="min-w-0">
-            <div className="text-sm font-bold">{feedbackEntry.label}</div>
-            <div className="mt-1 text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
-              有問題或卡住時，直接告訴我們。
-            </div>
-          </div>
-          <span className="ml-3 shrink-0 text-sm" style={{ color: "var(--text-2)" }}>
-            ↗
-          </span>
-        </button>
         <CoachAdviceCard advice={coachAdvice} cta={cta} onCtaClick={handleCtaClick} />
         <Dashboard onTap={() => { if (!sending) setActiveScreen("summary"); }} />
       </main>
