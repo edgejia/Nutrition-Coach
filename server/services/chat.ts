@@ -1,7 +1,8 @@
 // server/services/chat.ts
-import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
-import { chatMessages } from "../db/schema.js";
+import { eq, and, asc, desc, sql } from "drizzle-orm";
+import { assetReferences, assets, chatMessages } from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
+import { parseAssetRef } from "./assets.js";
 
 function formatToolSummary(toolName: string, content: string): string {
   if (toolName === "log_food") {
@@ -21,14 +22,58 @@ export function createChatService(db: AppDatabase) {
       content: string,
       opts?: { toolName?: string; imagePath?: string }
     ) {
-      await db.insert(chatMessages).values({
-        id: crypto.randomUUID(),
-        deviceId,
-        role,
-        content,
-        toolName: opts?.toolName ?? null,
-        imagePath: opts?.imagePath ?? null,
-        createdAt: new Date().toISOString(),
+      const id = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      const imageAssetId = parseAssetRef(opts?.imagePath);
+
+      return db.transaction((tx) => {
+        if (imageAssetId) {
+          const existingAsset = tx
+            .select({ id: assets.id })
+            .from(assets)
+            .where(eq(assets.id, imageAssetId))
+            .limit(1)
+            .get();
+
+          if (!existingAsset) {
+            tx.insert(assets)
+              .values({
+                id: imageAssetId,
+                deviceId,
+                storageKey: `unresolved/${imageAssetId}`,
+                mimeType: "application/octet-stream",
+                byteSize: 0,
+                createdAt,
+              })
+              .run();
+          }
+        }
+
+        tx.insert(chatMessages).values({
+          id,
+          deviceId,
+          role,
+          content,
+          toolName: opts?.toolName ?? null,
+          imagePath: opts?.imagePath ?? null,
+          createdAt,
+        }).run();
+
+        if (imageAssetId) {
+          // Normalize chat image evidence into asset_references.owner_type = "chat_message".
+          tx.insert(assetReferences)
+            .values({
+              id: `chat_message:${id}:${imageAssetId}`,
+              assetId: imageAssetId,
+              deviceId,
+              ownerType: "chat_message",
+              ownerId: id,
+              createdAt,
+            })
+            .run();
+        }
+
+        return { id, createdAt };
       });
     },
 

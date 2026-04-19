@@ -59,13 +59,21 @@ export function isFatalToolError(error: unknown): error is FatalToolError {
 // Contract-level types.
 // ---------------------------------------------------------------------------
 
-interface LogFoodArgs {
+interface LogFoodItemArgs {
   food_name: string;
   calories: number;
   protein: number;
   carbs: number;
   fat: number;
 }
+
+interface LogFoodLegacyArgs extends LogFoodItemArgs {}
+
+interface LogFoodGroupedArgs {
+  items: LogFoodItemArgs[];
+}
+
+type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
 
 interface LogFoodResult {
   dailySummary: DailySummary;
@@ -90,7 +98,7 @@ interface UpdateGoalsResult {
 
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
 
-const logFoodSchema = z
+const logFoodItemSchema = z
   .object({
     food_name: z.string().min(1, "food_name must be non-empty"),
     calories: finiteNumber,
@@ -99,6 +107,15 @@ const logFoodSchema = z
     fat: finiteNumber,
   })
   .strict();
+
+const logFoodSchema = z.union([
+  logFoodItemSchema,
+  z
+    .object({
+      items: z.array(logFoodItemSchema).min(1, "items must contain at least one entry"),
+    })
+    .strict(),
+]);
 
 const getDailySummarySchema = z.object({}).strict();
 
@@ -131,7 +148,7 @@ function formatGoalsReceipt(targets: DailyTargets): string {
 
 const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
   name: "log_food",
-  description: "將已分析的食物記錄到今日飲食中。",
+  description: "將已分析的一項或多項食物記錄到今日飲食中。",
   parameters: {
     type: "object",
     properties: {
@@ -140,18 +157,37 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       protein: { type: "number" },
       carbs: { type: "number" },
       fat: { type: "number" },
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            food_name: { type: "string" },
+            calories: { type: "number" },
+            protein: { type: "number" },
+            carbs: { type: "number" },
+            fat: { type: "number" },
+          },
+          required: ["food_name", "calories", "protein", "carbs", "fat"],
+        },
+      },
     },
-    required: ["food_name", "calories", "protein", "carbs", "fat"],
+    additionalProperties: false,
+    anyOf: [
+      { required: ["food_name", "calories", "protein", "carbs", "fat"] },
+      { required: ["items"] },
+    ],
   },
   zodSchema: logFoodSchema,
   // No sourceFields per D-11: log_food calorie estimates need not appear in
   // user text; the assistant computes them.
   logSummary: (args) => ({
     tool: "log_food",
-    calories: args.calories,
-    protein: args.protein,
-    carbs: args.carbs,
-    fat: args.fat,
+    calories: "items" in args ? args.items.reduce((sum, item) => sum + item.calories, 0) : args.calories,
+    protein: "items" in args ? args.items.reduce((sum, item) => sum + item.protein, 0) : args.protein,
+    carbs: "items" in args ? args.items.reduce((sum, item) => sum + item.carbs, 0) : args.carbs,
+    fat: "items" in args ? args.items.reduce((sum, item) => sum + item.fat, 0) : args.fat,
   }),
   execute: async (args, context) => {
     const deps = context.deps?.toolDeps as ToolDeps | undefined;
@@ -159,19 +195,28 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
     if (!deps || !deviceId) {
       throw new Error("log_food contract missing toolDeps/deviceId in context");
     }
-    const normalizedFoodName = args.food_name.trim();
+    const loggedMeal = "items" in args
+      ? await deps.foodLoggingService.logGroupedMeal(deviceId, {
+        imagePath: deps.imagePath,
+        items: args.items.map((item) => ({
+          foodName: item.food_name.trim(),
+          calories: item.calories,
+          protein: item.protein,
+          carbs: item.carbs,
+          fat: item.fat,
+        })),
+      })
+      : await deps.foodLoggingService.logFood(deviceId, {
+        foodName: args.food_name.trim(),
+        calories: args.calories,
+        protein: args.protein,
+        carbs: args.carbs,
+        fat: args.fat,
+        imagePath: deps.imagePath,
+      });
 
     // Phase 8/9 invariant: persist the meal BEFORE recomputing the daily
     // summary so partial-success fallback paths still see the row in the DB.
-    await deps.foodLoggingService.logFood(deviceId, {
-      foodName: normalizedFoodName,
-      calories: args.calories,
-      protein: args.protein,
-      carbs: args.carbs,
-      fat: args.fat,
-      imagePath: deps.imagePath,
-    });
-
     let dailySummary: DailySummary;
     try {
       dailySummary = await deps.summaryService.getDailySummary(
@@ -191,11 +236,11 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       result: {
         dailySummary,
         loggedMeal: {
-          foodName: normalizedFoodName,
-          calories: args.calories,
-          protein: args.protein,
-          carbs: args.carbs,
-          fat: args.fat,
+          foodName: loggedMeal.foodName,
+          calories: loggedMeal.calories,
+          protein: loggedMeal.protein,
+          carbs: loggedMeal.carbs,
+          fat: loggedMeal.fat,
         },
       },
       toolMessage: "食物已成功記錄",
