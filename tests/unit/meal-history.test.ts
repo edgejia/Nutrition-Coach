@@ -115,7 +115,6 @@ describe("MealHistoryService", () => {
     assert.equal(meals[0]!.foodName, "黑咖啡");
     assert.deepEqual(meals[1], {
       id: grouped.id,
-      deviceId,
       foodName: "蛋餅、豆漿 等3項",
       calories: 590,
       protein: 25,

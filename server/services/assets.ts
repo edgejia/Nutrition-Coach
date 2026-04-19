@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import { assets, chatMessages, meals } from "../db/schema.js";
+import { assetReferences, assets } from "../db/schema.js";
 
 function extensionFromMimeType(mimeType: string) {
   switch (mimeType) {
@@ -137,28 +137,48 @@ export function createAssetService(
       return true;
     },
 
-    async isAssetRefReferenced(assetRef: string) {
-      const messageRef = (
-        await db
-          .select({ id: chatMessages.id })
-          .from(chatMessages)
-          .where(eq(chatMessages.imagePath, assetRef))
-          .limit(1)
-      )[0];
+    async createAssetReference(
+      deviceId: string,
+      assetId: string,
+      ownerType: string,
+      ownerId: string,
+    ) {
+      const createdAt = new Date().toISOString();
 
-      if (messageRef) {
-        return true;
+      await db.insert(assetReferences).values({
+        id: `${ownerType}:${ownerId}:${assetId}`,
+        assetId,
+        deviceId,
+        ownerType,
+        ownerId,
+        createdAt,
+      });
+
+      return {
+        id: `${ownerType}:${ownerId}:${assetId}`,
+        assetId,
+        deviceId,
+        ownerType,
+        ownerId,
+        createdAt,
+      };
+    },
+
+    async isAssetRefReferenced(assetRef: string) {
+      const assetId = parseAssetRef(assetRef);
+      if (!assetId) {
+        return false;
       }
 
-      const mealRef = (
+      const reference = (
         await db
-          .select({ id: meals.id })
-          .from(meals)
-          .where(eq(meals.imagePath, assetRef))
+          .select({ id: assetReferences.id })
+          .from(assetReferences)
+          .where(eq(assetReferences.assetId, assetId))
           .limit(1)
       )[0];
 
-      return Boolean(mealRef);
+      return Boolean(reference);
     },
   };
 }

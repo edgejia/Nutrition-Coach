@@ -148,28 +148,43 @@ describe("MealTransactionsService", () => {
     assert.equal(successfulItems.length, 2);
     assert.ok(successfulItems.every((item) => item.revisionId === successfulRevision!.id));
 
-    await assert.rejects(() =>
-      mealTransactionsService.createTransaction(deviceId, {
-        loggedAt: "2026-03-25T06:00:00.000Z",
-        imagePath: "asset:missing-asset",
-        items: [
-          {
-            foodName: "午餐",
-            calories: 600,
-            protein: 32,
-            carbs: 55,
-            fat: 24,
-          },
-          {
-            foodName: "奶茶",
-            calories: 280,
-            protein: 4,
-            carbs: 42,
-            fat: 10,
-          },
-        ],
-      }),
-    );
+    await db.insert(assetReferences).values({
+      id: "meal_revision:tx-conflict:r1:asset-breakfast",
+      assetId: "asset-breakfast",
+      deviceId,
+      ownerType: "meal_revision",
+      ownerId: "tx-conflict:r1",
+      createdAt: "2026-03-25T05:30:00.000Z",
+    });
+
+    const originalRandomUUID = crypto.randomUUID;
+    (crypto as { randomUUID: () => string }).randomUUID = () => "tx-conflict";
+    try {
+      await assert.rejects(() =>
+        mealTransactionsService.createTransaction(deviceId, {
+          loggedAt: "2026-03-25T06:00:00.000Z",
+          imagePath: "asset:asset-breakfast",
+          items: [
+            {
+              foodName: "午餐",
+              calories: 600,
+              protein: 32,
+              carbs: 55,
+              fat: 24,
+            },
+            {
+              foodName: "奶茶",
+              calories: 280,
+              protein: 4,
+              carbs: 42,
+              fat: 10,
+            },
+          ],
+        }),
+      );
+    } finally {
+      (crypto as { randomUUID: () => string }).randomUUID = originalRandomUUID;
+    }
 
     const transactions = await db.select().from(mealTransactions);
     const revisions = await db.select().from(mealRevisions);
@@ -179,7 +194,7 @@ describe("MealTransactionsService", () => {
     assert.equal(transactions.length, 1);
     assert.equal(revisions.length, 1);
     assert.equal(items.length, 2);
-    assert.equal(refs.length, 1);
+    assert.equal(refs.length, 2);
   });
 
   it("creates a tombstone revision on soft delete and rejects foreign ownership", async () => {

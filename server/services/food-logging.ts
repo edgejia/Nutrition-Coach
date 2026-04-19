@@ -1,18 +1,11 @@
 // server/services/food-logging.ts
-import { and, asc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import {
-  mealRevisionItems,
-  mealRevisions,
-  mealTransactions,
-} from "../db/schema.js";
-import { getLocalDayBounds } from "../lib/time.js";
 import {
   createMealTransactionsService,
   type CreateMealTransactionInput,
   type MealTransactionItemInput,
 } from "./meal-transactions.js";
-import { makeAssetRef } from "./assets.js";
+import { createMealHistoryService } from "./meal-history.js";
 
 export interface FoodData {
   foodName: string;
@@ -40,6 +33,7 @@ export interface GroupedMealData extends CreateMealTransactionInput {}
 
 export function createFoodLoggingService(db: AppDatabase) {
   const mealTransactionsService = createMealTransactionsService(db);
+  const mealHistoryService = createMealHistoryService(db);
 
   function buildGroupedFoodName(items: MealTransactionItemInput[]) {
     if (items.length === 1) {
@@ -110,67 +104,11 @@ export function createFoodLoggingService(db: AppDatabase) {
     },
 
     async getMealsByDate(deviceId: string, date: Date) {
-      const { startIso, endIso } = getLocalDayBounds(date);
-      const headers = await db
-        .select({
-          id: mealTransactions.id,
-          loggedAt: mealTransactions.loggedAt,
-          currentRevisionId: mealTransactions.currentRevisionId,
-        })
-        .from(mealTransactions)
-        .where(
-          and(
-            eq(mealTransactions.deviceId, deviceId),
-            isNull(mealTransactions.deletedAt),
-            gte(mealTransactions.loggedAt, startIso),
-            lt(mealTransactions.loggedAt, endIso),
-          ),
-        )
-        .orderBy(asc(mealTransactions.loggedAt));
-
-      if (headers.length === 0) {
-        return [];
-      }
-
-      const revisionIds = headers.map((header) => header.currentRevisionId);
-      const revisions = await db
-        .select()
-        .from(mealRevisions)
-        .where(inArray(mealRevisions.id, revisionIds));
-      const items = await db
-        .select()
-        .from(mealRevisionItems)
-        .where(inArray(mealRevisionItems.revisionId, revisionIds))
-        .orderBy(asc(mealRevisionItems.position));
-
-      const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
-      const itemsByRevisionId = new Map<string, MealTransactionItemInput[]>();
-
-      for (const item of items) {
-        const revisionItems = itemsByRevisionId.get(item.revisionId) ?? [];
-        revisionItems.push({
-          foodName: item.foodName,
-          calories: item.calories,
-          protein: item.protein,
-          carbs: item.carbs,
-          fat: item.fat,
-        });
-        itemsByRevisionId.set(item.revisionId, revisionItems);
-      }
-
-      return headers.map((header) => {
-        const revision = revisionById.get(header.currentRevisionId);
-        const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
-        const imagePath = revision?.imageAssetId ? makeAssetRef(revision.imageAssetId) : null;
-
-        return projectCompatibilityEntry(
-          deviceId,
-          header.id,
-          header.loggedAt,
-          imagePath,
-          revisionItems,
-        );
-      });
+      const meals = await mealHistoryService.getMealsByDate(deviceId, date);
+      return meals.map((meal) => ({
+        ...meal,
+        deviceId,
+      }));
     },
 
     async deleteMeal(deviceId: string, mealId: string) {

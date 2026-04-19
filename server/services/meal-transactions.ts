@@ -2,6 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   assetReferences,
+  assets,
   mealRevisionItems,
   mealRevisions,
   mealTransactions,
@@ -89,6 +90,32 @@ export function createMealTransactionsService(db: AppDatabase) {
       const imagePath = imageAssetId ? `asset:${imageAssetId}` : null;
 
       return db.transaction((tx) => {
+        if (imageAssetId) {
+          // Some direct callers still pass an `asset:<id>` ref without staging
+          // the asset row first. Preserve the canonical image link by creating
+          // a minimal metadata row so the explicit meal-side reference remains
+          // normalized and queryable.
+          const existingAsset = tx
+            .select({ id: assets.id })
+            .from(assets)
+            .where(eq(assets.id, imageAssetId))
+            .limit(1)
+            .get();
+
+          if (!existingAsset) {
+            tx.insert(assets)
+              .values({
+                id: imageAssetId,
+                deviceId,
+                storageKey: `unresolved/${imageAssetId}`,
+                mimeType: "application/octet-stream",
+                byteSize: 0,
+                createdAt,
+              })
+              .run();
+          }
+        }
+
         tx.insert(mealTransactions)
           .values({
             id: transactionId,

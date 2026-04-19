@@ -1,6 +1,10 @@
 // server/services/summary.ts
-import { eq, and, gte, lt, sql } from "drizzle-orm";
-import { meals } from "../db/schema.js";
+import { and, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import {
+  mealRevisionItems,
+  mealRevisions,
+  mealTransactions,
+} from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
 import { getLocalDayBounds } from "../lib/time.js";
 
@@ -19,19 +23,28 @@ export function createSummaryService(db: AppDatabase) {
       const { dateKey, startIso, endIso } = getLocalDayBounds(date);
       const result = await db
         .select({
-          totalCalories: sql<number>`coalesce(sum(${meals.calories}), 0)`,
-          totalProtein: sql<number>`coalesce(sum(${meals.protein}), 0)`,
-          totalCarbs: sql<number>`coalesce(sum(${meals.carbs}), 0)`,
-          totalFat: sql<number>`coalesce(sum(${meals.fat}), 0)`,
-          mealCount: sql<number>`count(*)`,
+          totalCalories: sql<number>`coalesce(sum(${mealRevisionItems.calories}), 0)`,
+          totalProtein: sql<number>`coalesce(sum(${mealRevisionItems.protein}), 0)`,
+          totalCarbs: sql<number>`coalesce(sum(${mealRevisionItems.carbs}), 0)`,
+          totalFat: sql<number>`coalesce(sum(${mealRevisionItems.fat}), 0)`,
+          mealCount: sql<number>`count(distinct ${mealTransactions.id})`,
         })
-        .from(meals)
+        .from(mealTransactions)
+        .innerJoin(
+          mealRevisions,
+          eq(mealTransactions.currentRevisionId, mealRevisions.id),
+        )
+        .innerJoin(
+          mealRevisionItems,
+          eq(mealRevisionItems.revisionId, mealRevisions.id),
+        )
         .where(
           and(
-            eq(meals.deviceId, deviceId),
-            gte(meals.loggedAt, startIso),
-            lt(meals.loggedAt, endIso)
-          )
+            eq(mealTransactions.deviceId, deviceId),
+            isNull(mealTransactions.deletedAt),
+            gte(mealTransactions.loggedAt, startIso),
+            lt(mealTransactions.loggedAt, endIso),
+          ),
         );
       return { ...result[0], date: dateKey };
     },
