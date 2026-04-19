@@ -20,6 +20,7 @@ import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { RealtimePublisher } from "../../../server/realtime/publisher.js";
+import type { createScenarioApp as createScenarioAppFn } from "../app-fixture.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -27,8 +28,18 @@ import type {
   ScenarioStepResult,
 } from "../scenario-types.js";
 
+type ScenarioAppContext = Awaited<ReturnType<typeof createScenarioAppFn>>;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "boundary-contracts", "uploads");
+const ASSETS_DIR = path.resolve(__dirname, "..", "tmp", "boundary-contracts", "assets");
+const ASSET_REF_PATTERN = /^asset:/;
+
+interface ImageAssetDto {
+  imagePath?: string | null;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
+}
 
 function pass(name: string, actual?: unknown): ScenarioStepResult {
   return { name, ok: true, actual };
@@ -83,6 +94,88 @@ async function assertUploadsEmpty(
   return true;
 }
 
+async function collectAssetEvidence(params: {
+  address: string;
+  deviceId: string;
+  assetService: ScenarioAppContext["services"]["assetService"];
+  chatService: ScenarioAppContext["services"]["chatService"];
+  foodLoggingService: ScenarioAppContext["services"]["foodLoggingService"];
+  assetsDir: string;
+}): Promise<{
+  historyJson: { messages: Array<{ role: string; content: string } & ImageAssetDto> };
+  mealsJson: { meals: Array<{ foodName: string } & ImageAssetDto> };
+  persistedHistory: Array<{ role: string; content: string; imagePath?: string | null }>;
+  persistedMeals: Array<{ foodName: string; imagePath?: string | null }>;
+  assetRef: string | null;
+  assetUrl: string | null;
+  fetchStatus: number | null;
+  fetchContentType: string | null;
+  assetFilePath: string | null;
+  assetRefReferenced: boolean | null;
+  assetsDirEntries: string[];
+}> {
+  const historyRes = await fetch(`${params.address}/api/chat/history?limit=10`, {
+    headers: { "x-device-id": params.deviceId },
+  });
+  const historyJson = await historyRes.json() as {
+    messages: Array<{ role: string; content: string } & ImageAssetDto>;
+  };
+
+  const mealsRes = await fetch(`${params.address}/api/meals`, {
+    headers: { "x-device-id": params.deviceId },
+  });
+  const mealsJson = await mealsRes.json() as {
+    meals: Array<{ foodName: string } & ImageAssetDto>;
+  };
+
+  const persistedHistory = await params.chatService.getHistory(params.deviceId, 10);
+  const persistedMeals = await params.foodLoggingService.getMealsByDate(params.deviceId, new Date());
+
+  const userMessage = historyJson.messages.find((message) => message.role === "user" && message.imageAssetId);
+  const meal = mealsJson.meals.find((entry) => entry.imageAssetId);
+  const persistedUserMessage = persistedHistory.find((message) => message.role === "user" && ASSET_REF_PATTERN.test(message.imagePath ?? ""));
+  const persistedMeal = persistedMeals.find((entry) => ASSET_REF_PATTERN.test(entry.imagePath ?? ""));
+  const assetRow = persistedUserMessage ?? persistedMeal;
+
+  const assetRef = assetRow?.imagePath ?? null;
+  const assetUrl = userMessage?.imageUrl ?? meal?.imageUrl ?? null;
+  let fetchStatus: number | null = null;
+  let fetchContentType: string | null = null;
+  let assetFilePath: string | null = null;
+  let assetRefReferenced: boolean | null = null;
+
+  if (assetRef) {
+    const assetId = assetRef.slice("asset:".length);
+    assetRefReferenced = await params.assetService.isAssetRefReferenced(assetRef);
+    const ownedAsset = await params.assetService.getOwnedAsset(params.deviceId, assetId);
+    assetFilePath = ownedAsset?.filePath ?? null;
+  }
+
+  if (assetUrl) {
+    const assetRes = await fetch(`${params.address}${assetUrl}`, {
+      headers: { "x-device-id": params.deviceId },
+    });
+    fetchStatus = assetRes.status;
+    fetchContentType = assetRes.headers.get("content-type");
+  }
+
+  const assetsDirEntries = await readdir(params.assetsDir);
+
+  return {
+    historyJson,
+    mealsJson,
+    persistedHistory,
+    persistedMeals,
+    assetRef,
+    assetUrl,
+    fetchStatus,
+    fetchContentType,
+    assetFilePath,
+    assetRefReferenced,
+    assetsDirEntries,
+  };
+}
+
 async function runUploadCleanup(): Promise<ScenarioResult> {
   const scenarioName = "upload-cleanup";
   const steps: ScenarioStepResult[] = [];
@@ -90,6 +183,9 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
 
   await rm(UPLOADS_DIR, { recursive: true, force: true });
   await mkdir(UPLOADS_DIR, { recursive: true });
+  const assetsDir = `${ASSETS_DIR}-upload-cleanup`;
+  await rm(assetsDir, { recursive: true, force: true });
+  await mkdir(assetsDir, { recursive: true });
 
   const llm = new StreamingLLMProvider();
   llm.queueRoundResponse({
@@ -104,7 +200,7 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
   });
   llm.queueChatStream(["已記錄", "蛋炒飯！"]);
 
-  const fixture = await createScenarioApp({ llmProvider: llm, uploadsDir: UPLOADS_DIR });
+  const fixture = await createScenarioApp({ llmProvider: llm, uploadsDir: UPLOADS_DIR, assetsDir });
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
   try {
@@ -147,6 +243,43 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
     steps.push(pass("collect_stream", { donePayload }));
     artifacts.stream = { events: parseSSEEvents(rawSSE) };
 
+    const assetEvidence = await collectAssetEvidence({
+      address: fixture.address,
+      deviceId: fixture.deviceId,
+      assetService: fixture.services.assetService,
+      chatService: fixture.services.chatService,
+      foodLoggingService: fixture.services.foodLoggingService,
+      assetsDir,
+    });
+    if (!assetEvidence.assetRef || !ASSET_REF_PATTERN.test(assetEvidence.assetRef)) {
+      steps.push(fail("verify_durable_asset", "Expected durable asset ref in persisted rows", assetEvidence));
+      return failResult(scenarioName, steps, "verify_durable_asset", artifacts);
+    }
+    if (assetEvidence.fetchStatus !== 200) {
+      steps.push(fail("verify_durable_asset", `Expected asset fetch 200, got ${assetEvidence.fetchStatus}`, assetEvidence));
+      return failResult(scenarioName, steps, "verify_durable_asset", artifacts);
+    }
+    if (!assetEvidence.assetRefReferenced) {
+      steps.push(fail("verify_durable_asset", "Expected durable asset ref to remain referenced", assetEvidence));
+      return failResult(scenarioName, steps, "verify_durable_asset", artifacts);
+    }
+    const rawPaths = [
+      ...assetEvidence.persistedHistory,
+      ...assetEvidence.persistedMeals,
+    ]
+      .map((row) => row.imagePath ?? "")
+      .filter((imagePath) => /\/uploads\//.test(imagePath));
+    if (rawPaths.length > 0) {
+      steps.push(fail("verify_durable_asset", "Expected no persisted raw /uploads/ paths", { rawPaths, assetEvidence }));
+      return failResult(scenarioName, steps, "verify_durable_asset", artifacts);
+    }
+    if (assetEvidence.assetsDirEntries.length === 0) {
+      steps.push(fail("verify_durable_asset", "Expected durable asset files to exist", assetEvidence));
+      return failResult(scenarioName, steps, "verify_durable_asset", artifacts);
+    }
+    steps.push(pass("verify_durable_asset", assetEvidence));
+    artifacts.durable_asset = assetEvidence;
+
     if (!(await assertUploadsEmpty("verify_upload_cleanup", steps, artifacts))) {
       return failResult(scenarioName, steps, "verify_upload_cleanup", artifacts);
     }
@@ -161,6 +294,7 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
     await reader?.cancel().catch(() => {});
     await fixture.close();
     await rm(UPLOADS_DIR, { recursive: true, force: true });
+    await rm(assetsDir, { recursive: true, force: true });
   }
 }
 
@@ -171,11 +305,14 @@ async function runUploadCleanupFailure(): Promise<ScenarioResult> {
 
   await rm(UPLOADS_DIR, { recursive: true, force: true });
   await mkdir(UPLOADS_DIR, { recursive: true });
+  const assetsDir = `${ASSETS_DIR}-upload-cleanup-failure`;
+  await rm(assetsDir, { recursive: true, force: true });
+  await mkdir(assetsDir, { recursive: true });
 
   const llm = new StreamingLLMProvider();
   llm.queueRoundError(new Error("forced orchestrator failure for C4"));
 
-  const fixture = await createScenarioApp({ llmProvider: llm, uploadsDir: UPLOADS_DIR });
+  const fixture = await createScenarioApp({ llmProvider: llm, uploadsDir: UPLOADS_DIR, assetsDir });
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
   try {
@@ -213,6 +350,48 @@ async function runUploadCleanupFailure(): Promise<ScenarioResult> {
     steps.push(pass("collect_stream_or_error", { events: parseSSEEvents(rawSSE) }));
     artifacts.stream = { events: parseSSEEvents(rawSSE) };
 
+    const assetEvidence = await collectAssetEvidence({
+      address: fixture.address,
+      deviceId: fixture.deviceId,
+      assetService: fixture.services.assetService,
+      chatService: fixture.services.chatService,
+      foodLoggingService: fixture.services.foodLoggingService,
+      assetsDir,
+    });
+    if (assetEvidence.assetRef) {
+      if (!ASSET_REF_PATTERN.test(assetEvidence.assetRef)) {
+        steps.push(fail("verify_durable_asset_on_failure", "Expected durable asset ref on failure path", assetEvidence));
+        return failResult(scenarioName, steps, "verify_durable_asset_on_failure", artifacts);
+      }
+      if (!assetEvidence.assetRefReferenced) {
+        steps.push(fail("verify_durable_asset_on_failure", "Expected failure path asset ref to remain referenced", assetEvidence));
+        return failResult(scenarioName, steps, "verify_durable_asset_on_failure", artifacts);
+      }
+      const rawPaths = [
+        ...assetEvidence.persistedHistory,
+        ...assetEvidence.persistedMeals,
+      ]
+        .map((row) => row.imagePath ?? "")
+        .filter((imagePath) => /\/uploads\//.test(imagePath));
+      if (rawPaths.length > 0) {
+        steps.push(fail("verify_durable_asset_on_failure", "Expected no persisted raw /uploads/ paths", { rawPaths, assetEvidence }));
+        return failResult(scenarioName, steps, "verify_durable_asset_on_failure", artifacts);
+      }
+      if (assetEvidence.fetchStatus !== 200) {
+        steps.push(fail("verify_durable_asset_on_failure", `Expected asset fetch 200, got ${assetEvidence.fetchStatus}`, assetEvidence));
+        return failResult(scenarioName, steps, "verify_durable_asset_on_failure", artifacts);
+      }
+    } else if (assetEvidence.fetchStatus !== null) {
+      steps.push(fail("verify_durable_asset_on_failure", "Unexpected asset fetch without asset ref", assetEvidence));
+      return failResult(scenarioName, steps, "verify_durable_asset_on_failure", artifacts);
+    }
+    if (assetEvidence.assetRef && assetEvidence.assetsDirEntries.length === 0) {
+      steps.push(fail("verify_durable_asset_on_failure", "Expected durable asset files to remain for referenced asset", assetEvidence));
+      return failResult(scenarioName, steps, "verify_durable_asset_on_failure", artifacts);
+    }
+    steps.push(pass("verify_durable_asset_on_failure", assetEvidence));
+    artifacts.durable_asset = assetEvidence;
+
     if (!(await assertUploadsEmpty("verify_upload_cleanup_on_failure", steps, artifacts))) {
       return failResult(scenarioName, steps, "verify_upload_cleanup_on_failure", artifacts);
     }
@@ -227,6 +406,7 @@ async function runUploadCleanupFailure(): Promise<ScenarioResult> {
     await reader?.cancel().catch(() => {});
     await fixture.close();
     await rm(UPLOADS_DIR, { recursive: true, force: true });
+    await rm(assetsDir, { recursive: true, force: true });
   }
 }
 

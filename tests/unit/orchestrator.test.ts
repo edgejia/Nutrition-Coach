@@ -406,7 +406,7 @@ describe("Orchestrator - didLogMeal", () => {
       deviceId,
       "(圖片)",
       "data:image/png;base64,abc123",
-      "server/uploads/meal.png",
+      "asset:meal-image",
     );
 
     if (!("reply" in result)) throw new Error("expected reply result");
@@ -416,7 +416,7 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("recovers locally when the user replies 2 to a previously hallucinated choice prompt", async () => {
-    await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "server/uploads/meal.png" });
+    await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "asset:meal-image" });
     await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     await chatService.saveMessage(
       deviceId,

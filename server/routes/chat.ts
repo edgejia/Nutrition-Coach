@@ -1,9 +1,9 @@
 import { PassThrough } from "node:stream";
 import { writeFile, mkdir, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
 import type { createOrchestrator } from "../orchestrator/index.js";
+import { buildAssetUrl, makeAssetRef, parseAssetRef, type createAssetService } from "../services/assets.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
@@ -11,16 +11,18 @@ import type { DailySummary } from "../services/summary.js";
 import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
+import { config } from "../config.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
+  assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
   deviceService: ReturnType<typeof createDeviceService>;
   publisher: RealtimePublisher;
   /**
    * Override the upload storage directory. When undefined the route falls back
-   * to the default `server/uploads/` path (production behaviour unchanged).
-   * Pass a scenario-local temp directory in harness runs to prevent residue.
+   * to `config.uploadsStagingDir` (production behaviour unchanged). Pass a
+   * scenario-local temp directory in harness runs to prevent staged residue.
    */
   uploadsDir?: string;
 }
@@ -83,9 +85,17 @@ function createStreamingSanitizer() {
 async function parseMultipartRequest(
   request: FastifyRequest,
   uploadsDir: string,
-): Promise<{ message: string; image?: { dataUri: string; path: string } } | { error: string; code: number }> {
+): Promise<
+  | {
+      message: string;
+      image?: { dataUri: string; path: string; mimeType: string; originalFilename?: string };
+    }
+  | { error: string; code: number }
+> {
   let message = "";
-  let image: { dataUri: string; path: string } | undefined;
+  let image:
+    | { dataUri: string; path: string; mimeType: string; originalFilename?: string }
+    | undefined;
 
   const contentType = request.headers["content-type"] ?? "";
   if (!contentType.includes("multipart/form-data")) {
@@ -111,6 +121,8 @@ async function parseMultipartRequest(
       image = {
         dataUri: `data:${part.mimetype};base64,${buffer.toString("base64")}`,
         path: storedPath,
+        mimeType: part.mimetype,
+        originalFilename: part.filename,
       };
     }
   }
@@ -155,6 +167,61 @@ async function cleanupUploadSafe(imagePath: string | undefined, log: FastifyBase
     log.warn(
       { event: "upload_cleanup_failed", code },
       "Upload cleanup failed (non-fatal)",
+    );
+  }
+}
+
+function projectAssetFields(imagePath: string | null | undefined) {
+  const imageAssetId = parseAssetRef(imagePath);
+  return {
+    imageAssetId,
+    imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+  };
+}
+
+async function createDurableAssetIfNeeded(
+  assetService: ReturnType<typeof createAssetService>,
+  deviceId: string,
+  image: { path: string; mimeType: string; originalFilename?: string } | undefined,
+) {
+  if (!image) {
+    return undefined;
+  }
+
+  const asset = await assetService.createAsset(deviceId, {
+    stagedPath: image.path,
+    mimeType: image.mimeType,
+    originalFilename: image.originalFilename,
+  });
+
+  // The legacy imagePath column now stores an asset ref token for new uploads.
+  return { assetId: asset.id, assetRef: makeAssetRef(asset.id) };
+}
+
+async function cleanupDurableAssetSafe(
+  assetService: ReturnType<typeof createAssetService>,
+  deviceId: string,
+  assetId: string | undefined,
+  assetRef: string | undefined,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  if (!assetId || !assetRef) {
+    return;
+  }
+
+  try {
+    const isReferenced = await assetService.isAssetRefReferenced(assetRef);
+    if (!isReferenced) {
+      await assetService.deleteOwnedAsset(deviceId, assetId);
+      log.info({ event: "durable_asset_cleanup_success" }, "Durable asset cleanup success");
+    }
+  } catch (cleanupErr) {
+    log.warn(
+      {
+        event: "durable_asset_cleanup_failed",
+        err: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+      },
+      "Durable asset cleanup failed (non-fatal)",
     );
   }
 }
@@ -219,6 +286,7 @@ async function handleStreamingReply(
 async function handleOrchestratorSSE(
   stream: PassThrough,
   deps: {
+    assetService: ReturnType<typeof createAssetService>;
     orchestrator: ReturnType<typeof createOrchestrator>;
     chatService: ReturnType<typeof createChatService>;
     publisher: RealtimePublisher;
@@ -226,9 +294,11 @@ async function handleOrchestratorSSE(
   },
   deviceId: string,
   message: string,
-  image: { dataUri: string; path: string } | undefined,
+  image: { dataUri: string; path: string; mimeType: string; originalFilename?: string } | undefined,
   hooks?: OrchestratorHooks,
 ): Promise<void> {
+  let durableAssetId: string | undefined;
+  let durableAssetRef: string | undefined;
   let streamDidLogMeal = false;
   let streamDailySummary: unknown;
   let streamDailyTargets: unknown;
@@ -238,11 +308,19 @@ async function handleOrchestratorSSE(
       stream.write(`event: status\ndata: ${JSON.stringify({ label: "分析圖片中..." })}\n\n`);
     }
 
+    const durableAsset = await createDurableAssetIfNeeded(
+      deps.assetService,
+      deviceId,
+      image,
+    );
+    durableAssetId = durableAsset?.assetId;
+    durableAssetRef = durableAsset?.assetRef;
+
     const result = await deps.orchestrator.handleMessage(
       deviceId,
       message,
       image?.dataUri,
-      image?.path,
+      durableAssetRef,
       {
         onStatus: (label: string) => {
           stream.write(`event: status\ndata: ${JSON.stringify({ label })}\n\n`);
@@ -306,13 +384,27 @@ async function handleOrchestratorSSE(
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
     publishSummarySafe(deps.publisher, deviceId, streamDidLogMeal, streamDailySummary, deps.log);
   } finally {
+    await cleanupDurableAssetSafe(
+      deps.assetService,
+      deviceId,
+      durableAssetId,
+      durableAssetRef,
+      deps.log,
+    );
     await cleanupUploadSafe(image?.path, deps.log);
     stream.end();
   }
 }
 
 export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
-  const { orchestrator, chatService, deviceService, publisher, uploadsDir: injectedUploadsDir } = deps;
+  const {
+    orchestrator,
+    assetService,
+    chatService,
+    deviceService,
+    publisher,
+    uploadsDir: injectedUploadsDir,
+  } = deps;
 
   app.post("/api/chat", async (request, reply) => {
     const deviceId = request.headers["x-device-id"] as string;
@@ -320,7 +412,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const device = await deviceService.getDevice(deviceId);
     if (!device) return reply.code(401).send({ error: "Invalid device ID" });
 
-    const resolvedUploadsDir = injectedUploadsDir ?? join(dirname(fileURLToPath(import.meta.url)), "..", "uploads");
+    const resolvedUploadsDir = injectedUploadsDir ?? config.uploadsStagingDir;
     const parseResult = await parseMultipartRequest(request, resolvedUploadsDir);
 
     if ("error" in parseResult) {
@@ -334,13 +426,24 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const wantsSSE = acceptHeader.includes("text/event-stream");
 
     if (!wantsSSE) {
+      let durableAssetId: string | undefined;
+      let durableAssetRef: string | undefined;
       let jsonDidLogMeal = false;
       let jsonDailySummary: unknown;
       let jsonDailyTargets: unknown;
 
       try {
+        const durableAsset = await createDurableAssetIfNeeded(assetService, deviceId, image);
+        durableAssetId = durableAsset?.assetId;
+        durableAssetRef = durableAsset?.assetRef;
+
         // JSON path: existing non-SSE callers remain intact
-        const result = await orchestrator.handleMessage(deviceId, message, image?.dataUri, image?.path);
+        const result = await orchestrator.handleMessage(
+          deviceId,
+          message,
+          image?.dataUri,
+          durableAssetRef,
+        );
         jsonDidLogMeal = result.didLogMeal;
         jsonDailySummary = result.dailySummary;
         jsonDailyTargets = result.dailyTargets;
@@ -392,6 +495,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
         };
       } finally {
+        await cleanupDurableAssetSafe(
+          assetService,
+          deviceId,
+          durableAssetId,
+          durableAssetRef,
+          request.log,
+        );
         // D-08: Delete upload file after processing completes (success or failure).
         await cleanupUploadSafe(image?.path, request.log);
       }
@@ -413,7 +523,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     setImmediate(() => {
       void handleOrchestratorSSE(
         stream,
-        { orchestrator, chatService, publisher, log: request.log },
+        { assetService, orchestrator, chatService, publisher, log: request.log },
         deviceId,
         message,
         image,
@@ -436,6 +546,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       return reply.code(400).send({ error: "Invalid limit. Must be an integer between 1 and 200." });
     }
     const messages = await chatService.getHistory(deviceId, parsedLimit);
-    return { messages };
+    return {
+      messages: messages.map((message) => ({
+        ...message,
+        ...projectAssetFields(message.imagePath),
+      })),
+    };
   });
 }

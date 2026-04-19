@@ -1,6 +1,9 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { createDb } from "./db/client.js";
 import { createDeviceService } from "./services/device.js";
 import { createFoodLoggingService } from "./services/food-logging.js";
@@ -20,6 +23,7 @@ import { config } from "./config.js";
 
 export interface AppServices {
   assetService: ReturnType<typeof createAssetService>;
+  chatService: ReturnType<typeof createChatService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
 }
@@ -29,13 +33,15 @@ export interface AppOptions {
   llmProvider: LLMProvider;
   /**
    * Override the directory where uploaded files are stored.
-   * When omitted the route uses its default (`server/uploads/` relative to the
-   * compiled route file). Pass a temp directory in test scenarios to prevent
-   * upload residue from accumulating inside the repo.
+   * When omitted the route uses `config.uploadsStagingDir`. Pass a temp
+   * directory in test scenarios to prevent staged-upload residue from
+   * accumulating inside the repo.
    */
   uploadsDir?: string;
   /** Override the durable assets directory used by the asset service. */
   assetsDir?: string;
+  /** Override the built client directory used for same-origin beta serving. */
+  clientDistDir?: string;
   /**
    * Optional Fastify logger configuration.
    * When omitted: Fastify initializes with `logger: false` (silent — backward compatible with all existing tests).
@@ -50,6 +56,7 @@ export interface AppOptions {
 export async function buildApp(opts: AppOptions) {
   const db = createDb(opts.dbPath ?? config.dbPath);
   const llmProvider = opts.llmProvider;
+  const clientDistDir = path.resolve(opts.clientDistDir ?? config.clientDistDir);
 
   const app = Fastify({ logger: opts.logger ?? false });
 
@@ -65,7 +72,7 @@ export async function buildApp(opts: AppOptions) {
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
   const publisher = new RealtimePublisher();
 
-  opts.onServicesReady?.({ assetService, foodLoggingService, summaryService });
+  opts.onServicesReady?.({ assetService, chatService, foodLoggingService, summaryService });
 
   const orchestrator = createOrchestrator({
     llmProvider,
@@ -80,10 +87,42 @@ export async function buildApp(opts: AppOptions) {
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
   registerDeviceRoutes(app, { deviceService, targetGenerationService });
-  registerChatRoutes(app, { orchestrator, chatService, deviceService, publisher, uploadsDir: opts.uploadsDir });
+  registerChatRoutes(app, {
+    orchestrator,
+    chatService,
+    deviceService,
+    assetService,
+    publisher,
+    uploadsDir: opts.uploadsDir,
+  });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, publisher });
   registerAssetRoutes(app, { assetService, deviceService });
   registerSSERoutes(app, { publisher, summaryService, deviceService });
+
+  let hasClientDist = false;
+  try {
+    await access(path.join(clientDistDir, "index.html"));
+    hasClientDist = true;
+  } catch {
+    hasClientDist = false;
+  }
+
+  if (hasClientDist) {
+    await app.register(fastifyStatic, {
+      root: clientDistDir,
+      prefix: "/",
+      index: ["index.html"],
+    });
+
+    app.setNotFoundHandler((request, reply) => {
+      if (request.method === "GET" && !request.url.startsWith("/api/")) {
+        reply.type("text/html");
+        return reply.sendFile("index.html");
+      }
+
+      return reply.code(404).send({ error: "Not Found" });
+    });
+  }
 
   return app;
 }

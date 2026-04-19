@@ -18,9 +18,12 @@ export interface ScenarioAppOptions {
   llmProvider?: LLMProvider;
   /**
    * Directory to save uploaded files. When omitted the route uses its default
-   * (`server/uploads/`). Pass a tmp dir in scenarios that exercise image upload.
+   * (`config.uploadsStagingDir`). Pass a tmp dir in scenarios that exercise
+   * image upload.
    */
   uploadsDir?: string;
+  /** Override the durable asset root used by the app during a scenario. */
+  assetsDir?: string;
 }
 
 export interface ScenarioAppContext {
@@ -36,6 +39,8 @@ export interface ScenarioAppContext {
 }
 
 export interface ScenarioAppServices {
+  assetService: AppServices["assetService"];
+  chatService: AppServices["chatService"];
   foodLoggingService: AppServices["foodLoggingService"];
   summaryService: AppServices["summaryService"];
 }
@@ -60,8 +65,11 @@ export async function createScenarioApp(
     dbPath: ":memory:",
     llmProvider,
     ...(opts.uploadsDir !== undefined ? { uploadsDir: opts.uploadsDir } : {}),
+    ...(opts.assetsDir !== undefined ? { assetsDir: opts.assetsDir } : {}),
     onServicesReady: (readyServices) => {
       services = {
+        assetService: readyServices.assetService,
+        chatService: readyServices.chatService,
         foodLoggingService: readyServices.foodLoggingService,
         summaryService: readyServices.summaryService,
       };

@@ -29,14 +29,14 @@ describe("FoodLoggingService", () => {
       protein: 0.5,
       carbs: 25,
       fat: 0.3,
-      imagePath: "server/uploads/apple.png",
+      imagePath: "asset:apple-image",
       loggedAt: "2026-03-25T04:30:00.000Z",
     });
     assert.ok(meal.id);
     assert.equal(meal.foodName, "蘋果");
     assert.equal(meal.calories, 95);
     assert.equal(meal.deviceId, deviceId);
-    assert.equal(meal.imagePath, "server/uploads/apple.png");
+    assert.equal(meal.imagePath, "asset:apple-image");
     assert.equal(meal.loggedAt, "2026-03-25T04:30:00.000Z");
   });
 

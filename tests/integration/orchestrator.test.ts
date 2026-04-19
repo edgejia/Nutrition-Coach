@@ -138,7 +138,7 @@ describe("Orchestrator", () => {
       deviceId,
       "(圖片)",
       "data:image/png;base64,abc123",
-      "server/uploads/meal.png"
+      "asset:meal-image"
     );
     assertReplyResult(result);
     assert.equal(result.reply, "已先依照片做保守估算並完成記錄：沙拉，約 180 kcal。若你想更精準，我可以再依份量幫你調整。");
@@ -152,10 +152,10 @@ describe("Orchestrator", () => {
     });
 
     const history = await chatService.getHistory(deviceId, 10);
-    assert.equal(history[0].imagePath, "server/uploads/meal.png");
+    assert.equal(history[0].imagePath, "asset:meal-image");
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
-    assert.equal(meals[0].imagePath, "server/uploads/meal.png");
+    assert.equal(meals[0].imagePath, "asset:meal-image");
   });
 
   it("returns fallback after 3 rounds of only tool calls", async () => {

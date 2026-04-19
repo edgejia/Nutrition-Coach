@@ -13,6 +13,12 @@ import assert from "node:assert/strict";
 import { runScenarioByName } from "../harness/run.js";
 import type { ScenarioResult } from "../harness/scenario-types.js";
 
+interface ImageAssetDto {
+  imagePath?: string | null;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
+}
+
 test("runScenarioByName(\"image-log\") succeeds", async () => {
   const result: ScenarioResult = await runScenarioByName("image-log");
   assert.equal(result.ok, true, result.consoleSummary);
@@ -21,7 +27,7 @@ test("runScenarioByName(\"image-log\") succeeds", async () => {
 test("image-log steps include all required step names", async () => {
   const result: ScenarioResult = await runScenarioByName("image-log");
   const stepNames = result.steps.map((s) => s.name);
-  const required = ["post_chat", "collect_stream", "verify_history", "verify_meals", "cleanup_uploads"];
+  const required = ["post_chat", "collect_stream", "verify_history", "verify_meals", "verify_asset_fetch", "cleanup_uploads"];
   for (const name of required) {
     assert.ok(stepNames.includes(name), `expected step "${name}" in ${JSON.stringify(stepNames)}`);
   }
@@ -53,9 +59,11 @@ test("image-log artifacts prove D-12 status and persistence invariants", async (
   } | undefined;
   const historyArtifact = result.artifacts.history as {
     d12_3_verified?: boolean;
+    messages?: Array<{ role: string } & ImageAssetDto>;
   } | undefined;
   const mealsArtifact = result.artifacts.meals as {
     d12_2_verified?: boolean;
+    meals?: Array<{ foodName: string } & ImageAssetDto>;
   } | undefined;
 
   assert.ok(streamArtifact, "expected stream artifact");
@@ -74,6 +82,59 @@ test("image-log artifacts prove D-12 status and persistence invariants", async (
   );
   assert.equal(mealsArtifact?.d12_2_verified, true, "D-12.2: matching meal must be present");
   assert.equal(historyArtifact?.d12_3_verified, true, "D-12.3: assistant history must exist after done");
+});
+
+test("image-log artifacts expose durable asset refs and block legacy raw upload paths", async () => {
+  const result: ScenarioResult = await runScenarioByName("image-log");
+  const historyArtifact = result.artifacts.history as {
+    messages?: Array<{ role: string } & ImageAssetDto>;
+    persistedMessages?: Array<{ role: string; imagePath?: string | null }>;
+  } | undefined;
+  const mealsArtifact = result.artifacts.meals as {
+    meals?: Array<{ foodName: string } & ImageAssetDto>;
+    persistedMeals?: Array<{ foodName: string; imagePath?: string | null }>;
+  } | undefined;
+  const assetFetch = result.artifacts.asset_fetch as {
+    assetUrl?: string;
+    status?: number;
+    contentType?: string | null;
+  } | undefined;
+
+  const dtoRows = [
+    ...(historyArtifact?.messages ?? []),
+    ...(mealsArtifact?.meals ?? []),
+  ].filter((row) => typeof row.imagePath === "string");
+  const persistedRows = [
+    ...(historyArtifact?.persistedMessages ?? []),
+    ...(mealsArtifact?.persistedMeals ?? []),
+  ].filter((row) => typeof row.imagePath === "string");
+
+  const rawPaths = persistedRows
+    .map((row) => row.imagePath ?? "")
+    .filter((imagePath) => /\/uploads\//.test(imagePath));
+  assert.equal(
+    rawPaths.length,
+    0,
+    `Legacy raw upload paths remain; backfill or clear them before beta sign-off. Found: ${JSON.stringify(rawPaths)}`,
+  );
+
+  for (const row of dtoRows) {
+    assert.match(row.imagePath ?? "", /^asset:/, `expected durable asset ref for ${JSON.stringify(row)}`);
+    assert.ok(row.imageAssetId, `expected imageAssetId for ${JSON.stringify(row)}`);
+    assert.equal(
+      row.imageUrl,
+      `/api/assets/${row.imageAssetId}`,
+      `expected imageUrl to derive from asset id for ${JSON.stringify(row)}`,
+    );
+  }
+
+  for (const row of persistedRows) {
+    assert.match(row.imagePath ?? "", /^asset:/, `expected persisted durable asset ref for ${JSON.stringify(row)}`);
+  }
+
+  assert.ok(assetFetch, "expected asset_fetch artifact");
+  assert.equal(assetFetch.status, 200, "expected verify_asset_fetch to return 200");
+  assert.equal(assetFetch.contentType, "image/jpeg", "expected fetched asset to preserve its mime type");
 });
 
 test("image-log cleanup snapshot reports zero residual files", async () => {

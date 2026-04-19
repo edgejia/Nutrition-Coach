@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
-import { assets } from "../db/schema.js";
+import { assets, chatMessages, meals } from "../db/schema.js";
 
 function extensionFromMimeType(mimeType: string) {
   switch (mimeType) {
@@ -135,6 +135,30 @@ export function createAssetService(
         .where(and(eq(assets.id, assetId), eq(assets.deviceId, deviceId)));
       await rm(asset.filePath, { force: true });
       return true;
+    },
+
+    async isAssetRefReferenced(assetRef: string) {
+      const messageRef = (
+        await db
+          .select({ id: chatMessages.id })
+          .from(chatMessages)
+          .where(eq(chatMessages.imagePath, assetRef))
+          .limit(1)
+      )[0];
+
+      if (messageRef) {
+        return true;
+      }
+
+      const mealRef = (
+        await db
+          .select({ id: meals.id })
+          .from(meals)
+          .where(eq(meals.imagePath, assetRef))
+          .limit(1)
+      )[0];
+
+      return Boolean(mealRef);
     },
   };
 }

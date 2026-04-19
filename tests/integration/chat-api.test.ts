@@ -2,6 +2,9 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
@@ -57,10 +60,21 @@ describe("Chat API", () => {
   let mockLLM: MockLLMProvider;
   let address: string;
   let deviceId: string;
+  let tempRoot: string;
+  let uploadsDir: string;
+  let assetsDir: string;
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
-    app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
+    tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-chat-api-"));
+    uploadsDir = path.join(tempRoot, "uploads");
+    assetsDir = path.join(tempRoot, "assets");
+    app = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: mockLLM,
+      uploadsDir,
+      assetsDir,
+    });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
     deviceId = res.json().deviceId;
     address = await app.listen({ port: 0 });
@@ -70,6 +84,7 @@ describe("Chat API", () => {
     if (app.server.listening) {
       await app.close();
     }
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("POST /api/chat accepts multipart text-only requests", async () => {
@@ -101,6 +116,26 @@ describe("Chat API", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.ok(body.reply);
+
+    const historyRes = await app.inject({
+      method: "GET",
+      url: "/api/chat/history?limit=10",
+      headers: { "x-device-id": deviceId },
+    });
+    const history = historyRes.json() as {
+      messages: Array<{
+        role: string;
+        imagePath?: string | null;
+        imageAssetId?: string | null;
+        imageUrl?: string | null;
+      }>;
+    };
+    const userMessage = history.messages.find((message) => message.role === "user");
+    assert.ok(userMessage);
+    assert.match(userMessage.imagePath ?? "", /^asset:/);
+    assert.doesNotMatch(userMessage.imagePath ?? "", /\/uploads\//);
+    assert.ok(userMessage.imageAssetId);
+    assert.equal(userMessage.imageUrl, `/api/assets/${userMessage.imageAssetId}`);
   });
 
   it("POST /api/chat rejects invalid image types", async () => {

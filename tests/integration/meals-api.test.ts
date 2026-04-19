@@ -2,6 +2,9 @@ process.env.TZ = "Asia/Taipei";
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../server/app.js";
@@ -13,10 +16,21 @@ describe("Meals API", () => {
   let address: string;
   let deviceId: string;
   let otherDeviceId: string;
+  let tempRoot: string;
+  let uploadsDir: string;
+  let assetsDir: string;
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
-    app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
+    tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-meals-api-"));
+    uploadsDir = path.join(tempRoot, "uploads");
+    assetsDir = path.join(tempRoot, "assets");
+    app = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: mockLLM,
+      uploadsDir,
+      assetsDir,
+    });
     deviceId = (
       await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } })
     ).json().deviceId;
@@ -30,11 +44,23 @@ describe("Meals API", () => {
     if (app.server.listening) {
       await app.close();
     }
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   async function postChatMessage(message: string) {
     const form = new FormData();
     form.append("message", message);
+    return fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+  }
+
+  async function postImageChatMessage(fileName: string) {
+    const form = new FormData();
+    form.append("message", "");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), fileName);
     return fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { "x-device-id": deviceId },
@@ -122,6 +148,41 @@ describe("Meals API", () => {
       headers: { "x-device-id": deviceId },
     });
     assert.deepEqual(remainingMeals.json().meals, []);
+  });
+
+  it("GET /api/meals projects asset-backed image metadata without leaking staging paths", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_image_1",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "便當", calories: 640, protein: 32, carbs: 78, fat: 21 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已記錄便當！" });
+
+    const postRes = await postImageChatMessage("meal.png");
+    assert.equal(postRes.status, 200);
+
+    const mealsRes = await app.inject({
+      method: "GET",
+      url: "/api/meals",
+      headers: { "x-device-id": deviceId },
+    });
+
+    assert.equal(mealsRes.statusCode, 200);
+    const body = mealsRes.json() as {
+      meals: Array<{
+        imageAssetId?: string | null;
+        imageUrl?: string | null;
+      }>;
+    };
+    assert.equal(body.meals.length, 1);
+    assert.ok(body.meals[0].imageAssetId);
+    assert.equal(body.meals[0].imageUrl, `/api/assets/${body.meals[0].imageAssetId}`);
+    assert.doesNotMatch(body.meals[0].imageUrl ?? "", /\/uploads\//);
   });
 
   it("GET /api/meals logs redacted day_rollover event when requested", async () => {

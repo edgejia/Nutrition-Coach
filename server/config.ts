@@ -19,6 +19,9 @@ export const config = {
   /** Staging directory for request-local uploads before they are persisted as assets. */
   uploadsStagingDir: process.env.UPLOADS_STAGING_DIR ?? "./data/uploads-staging",
 
+  /** Built client directory served by Fastify in the beta runtime. */
+  clientDistDir: process.env.CLIENT_DIST_DIR ?? "./dist/client",
+
   /** HTTP server port. */
   port: Number(process.env.PORT ?? 3000),
 

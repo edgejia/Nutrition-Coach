@@ -31,6 +31,8 @@ export interface MealEntry {
   protein: number;
   carbs: number;
   fat: number;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
   loggedAt: string;
 }
 
@@ -39,6 +41,8 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   imagePath?: string | null;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
   imagePreviewUrl?: string;
   createdAt: string;
   didLogMeal?: boolean;

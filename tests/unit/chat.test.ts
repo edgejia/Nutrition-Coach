@@ -37,14 +37,14 @@ describe("ChatService", () => {
   });
 
   it("persists user image metadata", async () => {
-    await chatService.saveMessage(deviceId, "user", "這是我的午餐", { imagePath: "server/uploads/lunch.png" });
+    await chatService.saveMessage(deviceId, "user", "這是我的午餐", { imagePath: "asset:lunch-image" });
     const history = await chatService.getHistory(deviceId, 50);
     assert.equal(history.length, 1);
-    assert.equal(history[0].imagePath, "server/uploads/lunch.png");
+    assert.equal(history[0].imagePath, "asset:lunch-image");
   });
 
   it("loads compressed history for LLM context", async () => {
-    await chatService.saveMessage(deviceId, "user", "我吃了蘋果", { imagePath: "server/uploads/apple.png" });
+    await chatService.saveMessage(deviceId, "user", "我吃了蘋果", { imagePath: "asset:apple-image" });
     await chatService.saveMessage(deviceId, "tool", "蘋果, 95kcal", { toolName: "analyze_food" });
     await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     await chatService.saveMessage(deviceId, "assistant", "已記錄蘋果！");

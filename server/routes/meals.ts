@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { currentAppDate } from "../lib/time.js";
+import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService } from "../services/summary.js";
 import type { createDeviceService } from "../services/device.js";
@@ -28,15 +29,20 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, currentAppDate());
     return {
-      meals: meals.map((meal) => ({
-        id: meal.id,
-        foodName: meal.foodName,
-        calories: meal.calories,
-        protein: meal.protein,
-        carbs: meal.carbs,
-        fat: meal.fat,
-        loggedAt: meal.loggedAt,
-      })),
+      meals: meals.map((meal) => {
+        const imageAssetId = parseAssetRef(meal.imagePath);
+        return {
+          id: meal.id,
+          foodName: meal.foodName,
+          calories: meal.calories,
+          protein: meal.protein,
+          carbs: meal.carbs,
+          fat: meal.fat,
+          imageAssetId,
+          imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+          loggedAt: meal.loggedAt,
+        };
+      }),
     };
   });
 

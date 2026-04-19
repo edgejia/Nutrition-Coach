@@ -58,20 +58,17 @@ yarn dev:client
 
 前端預設跑在 `http://localhost:5173`，後端跑在 `http://localhost:3000`。
 
-## 建置生產版本
+## 生產 / beta 部署
 
 ```bash
+yarn install
 yarn build
+yarn db:migrate
+yarn start
 ```
 
-建置完成後，需要**兩個獨立的進程**來提供服務：
-
-- **後端**：執行 `yarn dev:server` 啟動 Fastify（API 路由與 SSE）
-- **前端靜態檔案**：Fastify 不 serve `dist/client`，需另外以靜態 host 提供，例如：
-  - 開發測試：`yarn preview`（Vite preview server）
-  - 生產環境：Caddy、nginx、或雲端靜態 hosting（Vercel、Netlify 等）
-
-確保前端與後端的 API base URL 設定正確（預設前端連 `http://localhost:3000`）。
+beta / production 會由同一個 Fastify 進程同時提供 API 與 `dist/client`。
+部署時請使用持久化主機與掛載磁碟，並維持 `TZ=Asia/Taipei`、`DB_PATH`、`ASSETS_DIR`、`UPLOADS_STAGING_DIR`、`CLIENT_DIST_DIR` 的一致設定。詳細的 Railway baseline 請見 [`docs/deploy/railway-beta.md`](docs/deploy/railway-beta.md)。
 
 ## 測試
 
@@ -114,4 +111,7 @@ yarn test:integration
 | `OPENAI_ORCHESTRATOR_MODEL` | 對話 LLM 模型 | `gpt-5-nano` |
 | `PORT` | 後端埠號 | `3000` |
 | `DB_PATH` | SQLite 資料庫路徑 | `./data/nutrition.db` |
+| `ASSETS_DIR` | 持久化圖片資產目錄 | `./data/assets` |
+| `UPLOADS_STAGING_DIR` | 上傳暫存目錄 | `./data/uploads-staging` |
+| `CLIENT_DIST_DIR` | 前端建置輸出目錄 | `./dist/client` |
 | `TZ` | 時區（影響每日統計邊界） | `Asia/Taipei` |

@@ -31,6 +31,7 @@ import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioSte
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCENARIO_UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log", "uploads");
+const SCENARIO_ASSETS_DIR = path.resolve(__dirname, "..", "tmp", "image-log", "assets");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,6 +60,12 @@ interface DailySummaryPayload {
   date: string;
 }
 
+interface ImageAssetDto {
+  imagePath?: string | null;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
+}
+
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boolean {
@@ -81,6 +88,7 @@ const scenario: VerificationScenario = {
     // Boot our own app instance with the scenario-local uploads directory so
     // uploads never land in `server/uploads/`.
     await mkdir(SCENARIO_UPLOADS_DIR, { recursive: true });
+    await mkdir(SCENARIO_ASSETS_DIR, { recursive: true });
 
     const llm = new StreamingLLMProvider();
     // Round 1: tool call — log_food for 豬肉燒烤飯盒
@@ -111,6 +119,7 @@ const scenario: VerificationScenario = {
     const scenarioCtx = await createScenarioApp({
       llmProvider: llm,
       uploadsDir: SCENARIO_UPLOADS_DIR,
+      assetsDir: SCENARIO_ASSETS_DIR,
     });
 
     try {
@@ -266,8 +275,12 @@ const scenario: VerificationScenario = {
         return buildResult(false, failedStep, steps, artifacts);
       }
       const historyJson = await historyRes.json() as {
-        messages: Array<{ role: string; content: string }>;
+        messages: Array<{ role: string; content: string } & ImageAssetDto>;
       };
+      const persistedHistory = await scenarioCtx.services.chatService.getHistory(
+        scenarioCtx.deviceId,
+        10,
+      );
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       if (assistantMsgs.length === 0) {
         steps.push(stepFail("verify_history", "no assistant message persisted", historyJson));
@@ -275,11 +288,37 @@ const scenario: VerificationScenario = {
         artifacts.history = historyJson;
         return buildResult(false, failedStep, steps, artifacts);
       }
+      const userMessage = historyJson.messages.find((m) => m.role === "user");
+      const persistedUserMessage = persistedHistory.find((m) => m.role === "user");
+      if (!userMessage) {
+        steps.push(stepFail("verify_history", "no user image message persisted", historyJson));
+        failedStep = "verify_history";
+        artifacts.history = historyJson;
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+      if (!/^asset:/.test(userMessage.imagePath ?? "")) {
+        steps.push(stepFail("verify_history", "expected user imagePath to use asset:<id>", userMessage));
+        failedStep = "verify_history";
+        artifacts.history = historyJson;
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+      if (!/^asset:/.test(persistedUserMessage?.imagePath ?? "")) {
+        steps.push(stepFail(
+          "verify_history",
+          "expected persisted user imagePath to use asset:<id>",
+          persistedUserMessage,
+        ));
+        failedStep = "verify_history";
+        artifacts.history = { ...historyJson, persistedMessages: persistedHistory };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
       steps.push(stepOk("verify_history", {
         messageCount: historyJson.messages.length,
         d12_3_done_before_history_check: true,
       }));
       artifacts.history = {
+        ...historyJson,
+        persistedMessages: persistedHistory,
         messageCount: historyJson.messages.length,
         d12_3_verified: true,
       };
@@ -295,16 +334,75 @@ const scenario: VerificationScenario = {
         failedStep = "verify_meals";
         return buildResult(false, failedStep, steps, artifacts);
       }
-      const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
+      const mealsJson = await mealsRes.json() as {
+        meals: Array<{ foodName: string } & ImageAssetDto>;
+      };
+      const persistedMeals = await scenarioCtx.services.foodLoggingService.getMealsByDate(
+        scenarioCtx.deviceId,
+        new Date(),
+      );
       const loggedMeal = mealsJson.meals.find((m) => m.foodName === "豬肉燒烤飯盒");
+      const persistedMeal = persistedMeals.find((m) => m.foodName === "豬肉燒烤飯盒");
       if (!loggedMeal) {
         steps.push(stepFail("verify_meals", "豬肉燒烤飯盒 not found in meals", mealsJson));
         failedStep = "verify_meals";
         artifacts.meals = mealsJson;
         return buildResult(false, failedStep, steps, artifacts);
       }
+      if (!/^asset:/.test(loggedMeal.imageAssetId ? `asset:${loggedMeal.imageAssetId}` : "")) {
+        steps.push(stepFail("verify_meals", "expected meal imageAssetId to be populated", loggedMeal));
+        failedStep = "verify_meals";
+        artifacts.meals = mealsJson;
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+      if (!/^asset:/.test(persistedMeal?.imagePath ?? "")) {
+        steps.push(stepFail(
+          "verify_meals",
+          "expected persisted meal imagePath to use asset:<id>",
+          persistedMeal,
+        ));
+        failedStep = "verify_meals";
+        artifacts.meals = { ...mealsJson, persistedMeals };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
       steps.push(stepOk("verify_meals", { mealCount: mealsJson.meals.length, d12_2_verified: true }));
-      artifacts.meals = { mealCount: mealsJson.meals.length, loggedMeal, d12_2_verified: true };
+      artifacts.meals = {
+        ...mealsJson,
+        persistedMeals,
+        mealCount: mealsJson.meals.length,
+        loggedMeal,
+        d12_2_verified: true,
+      };
+
+      // ------------------------------------------------------------------
+      // Step: verify_asset_fetch
+      // ------------------------------------------------------------------
+      const assetUrl = userMessage.imageUrl ?? loggedMeal.imageUrl;
+      if (!assetUrl) {
+        steps.push(stepFail("verify_asset_fetch", "missing imageUrl on asset-backed row", { userMessage, loggedMeal }));
+        failedStep = "verify_asset_fetch";
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+
+      const assetRes = await fetch(`${scenarioCtx.address}${assetUrl}`, {
+        headers: { "x-device-id": scenarioCtx.deviceId },
+      });
+      if (assetRes.status !== 200) {
+        steps.push(stepFail("verify_asset_fetch", `HTTP ${assetRes.status}`, { assetUrl }));
+        failedStep = "verify_asset_fetch";
+        artifacts.asset_fetch = { assetUrl, status: assetRes.status };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+      steps.push(stepOk("verify_asset_fetch", {
+        assetUrl,
+        status: assetRes.status,
+        contentType: assetRes.headers.get("content-type"),
+      }));
+      artifacts.asset_fetch = {
+        assetUrl,
+        status: assetRes.status,
+        contentType: assetRes.headers.get("content-type"),
+      };
     } finally {
       await scenarioCtx.close();
       try {
@@ -313,6 +411,7 @@ const scenario: VerificationScenario = {
         uploadFilesBeforeCleanup = [];
       }
       await rm(SCENARIO_UPLOADS_DIR, { recursive: true, force: true });
+      await rm(SCENARIO_ASSETS_DIR, { recursive: true, force: true });
     }
 
     // ------------------------------------------------------------------
