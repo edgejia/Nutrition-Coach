@@ -8,6 +8,15 @@ function formatToolSummary(toolName: string, content: string): string {
   if (toolName === "log_food") {
     return "[系統已完成餐點記錄]";
   }
+  if (toolName === "update_meal") {
+    return "[系統已完成餐點修改]";
+  }
+  if (toolName === "delete_meal") {
+    return "[系統已完成餐點刪除]";
+  }
+  if (toolName === "find_meals") {
+    return "[系統已完成餐點查找]";
+  }
   if (toolName === "get_daily_summary") {
     return `[系統已更新今日攝取摘要：${content}]`;
   }

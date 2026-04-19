@@ -38,6 +38,20 @@ export interface MealTransactionDeleteResult {
   affectedDateKey: string;
 }
 
+export interface MealTransactionUpdateInput {
+  imagePath?: string | null;
+  items: MealTransactionItemInput[];
+}
+
+export interface MealTransactionUpdateResult {
+  transactionId: string;
+  revisionId: string;
+  loggedAt: string;
+  affectedDateKey: string;
+  imageAssetId: string | null;
+  items: MealTransactionItemInput[];
+}
+
 interface MealTransactionRow {
   id: string;
   deviceId: string;
@@ -243,6 +257,104 @@ export function createMealTransactionsService(db: AppDatabase) {
           transactionId: existing.id,
           loggedAt: existing.loggedAt,
           affectedDateKey: formatLocalDate(new Date(existing.loggedAt)),
+        };
+      });
+    },
+
+    async updateTransaction(
+      deviceId: string,
+      transactionId: string,
+      input: MealTransactionUpdateInput,
+    ): Promise<MealTransactionUpdateResult> {
+      const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
+
+      if (!existing) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      const items = normalizeItems(input.items);
+      const createdAt = new Date().toISOString();
+      const revisionNumber = existing.currentRevisionNumber + 1;
+      const revisionId = `${existing.id}:r${revisionNumber}`;
+      const explicitImageAssetId = parseAssetRef(input.imagePath);
+      const currentRevision = db
+        .select({
+          imageAssetId: mealRevisions.imageAssetId,
+        })
+        .from(mealRevisions)
+        .where(eq(mealRevisions.id, existing.currentRevisionId))
+        .limit(1)
+        .get();
+      const imageAssetId = explicitImageAssetId ?? currentRevision?.imageAssetId ?? null;
+
+      return db.transaction((tx) => {
+        if (imageAssetId) {
+          const existingAsset = tx
+            .select({ id: assets.id })
+            .from(assets)
+            .where(eq(assets.id, imageAssetId))
+            .limit(1)
+            .get();
+
+          if (!existingAsset) {
+            tx.insert(assets)
+              .values({
+                id: imageAssetId,
+                deviceId,
+                storageKey: `unresolved/${imageAssetId}`,
+                mimeType: "application/octet-stream",
+                byteSize: 0,
+                createdAt,
+              })
+              .run();
+          }
+        }
+
+        tx.insert(mealRevisions)
+          .values({
+            id: revisionId,
+            transactionId: existing.id,
+            revisionNumber,
+            supersedesRevisionId: existing.currentRevisionId,
+            imageAssetId,
+            changeType: "update",
+            createdAt,
+          })
+          .run();
+
+        tx.insert(mealRevisionItems)
+          .values(
+            items.map((item, position) => ({
+              revisionId,
+              position,
+              foodName: item.foodName,
+              calories: item.calories,
+              protein: item.protein,
+              carbs: item.carbs,
+              fat: item.fat,
+            })),
+          )
+          .run();
+
+        tx.update(mealTransactions)
+          .set({
+            currentRevisionId: revisionId,
+            currentRevisionNumber: revisionNumber,
+          })
+          .where(eq(mealTransactions.id, existing.id))
+          .run();
+
+        if (imageAssetId) {
+          insertAssetReference(tx, deviceId, imageAssetId, "meal_revision", revisionId, createdAt);
+        }
+
+        return {
+          transactionId: existing.id,
+          revisionId,
+          loggedAt: existing.loggedAt,
+          affectedDateKey: formatLocalDate(new Date(existing.loggedAt)),
+          imageAssetId,
+          items,
         };
       });
     },

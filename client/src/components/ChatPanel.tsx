@@ -61,7 +61,7 @@ export function ChatPanel() {
           onToken: (token) => {
             useStore.getState().appendProvisionalToken(token);
           },
-          onDone: ({ didLogMeal, dailySummary, dailyTargets }) => {
+          onDone: ({ didLogMeal, didMutateMeal, dailySummary, dailyTargets }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -69,10 +69,10 @@ export function ChatPanel() {
             if (dailyTargets) {
               setDailyTargets(dailyTargets);
             }
-            if (didLogMeal && dailySummary) {
+            if ((didLogMeal || didMutateMeal) && dailySummary) {
               setDailySummary(dailySummary);
             }
-            commitProvisionalBubble({ didLogMeal, dailySummary });
+            commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary });
             setSending(false);
           },
           onError: (errorMessage) => {

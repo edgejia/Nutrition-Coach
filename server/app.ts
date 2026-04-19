@@ -10,6 +10,7 @@ import { createFoodLoggingService } from "./services/food-logging.js";
 import { createSummaryService } from "./services/summary.js";
 import { createChatService } from "./services/chat.js";
 import { createAssetService } from "./services/assets.js";
+import { createMealCorrectionService } from "./services/meal-correction.js";
 import { createOrchestrator } from "./orchestrator/index.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
 import { RealtimePublisher } from "./realtime/publisher.js";
@@ -25,6 +26,7 @@ export interface AppServices {
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   summaryService: ReturnType<typeof createSummaryService>;
 }
 
@@ -70,15 +72,17 @@ export async function buildApp(opts: AppOptions) {
   const summaryService = createSummaryService(db);
   const chatService = createChatService(db);
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
+  const mealCorrectionService = createMealCorrectionService(db);
   const publisher = new RealtimePublisher();
 
-  opts.onServicesReady?.({ assetService, chatService, foodLoggingService, summaryService });
+  opts.onServicesReady?.({ assetService, chatService, foodLoggingService, mealCorrectionService, summaryService });
 
   const orchestrator = createOrchestrator({
     llmProvider,
     chatService,
     summaryService,
     foodLoggingService,
+    mealCorrectionService,
     deviceService,
     publisher,
   });

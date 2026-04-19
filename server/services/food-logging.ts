@@ -114,5 +114,16 @@ export function createFoodLoggingService(db: AppDatabase) {
     async deleteMeal(deviceId: string, mealId: string) {
       return mealTransactionsService.softDeleteTransaction(deviceId, mealId);
     },
+
+    async updateMeal(deviceId: string, mealId: string, input: GroupedMealData) {
+      const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, input);
+      return projectCompatibilityEntry(
+        deviceId,
+        updated.transactionId,
+        updated.loggedAt,
+        updated.imageAssetId ? `asset:${updated.imageAssetId}` : null,
+        updated.items,
+      );
+    },
   };
 }

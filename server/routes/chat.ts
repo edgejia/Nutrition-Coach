@@ -31,6 +31,7 @@ const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const SENSITIVE_IDENTIFIERS = ["log_food", "get_daily_summary"];
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
+const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
@@ -141,11 +142,11 @@ async function parseMultipartRequest(
 function publishSummarySafe(
   publisher: RealtimePublisher,
   deviceId: string,
-  didLogMeal: boolean,
+  didMutateMeal: boolean,
   dailySummary: unknown,
   log: FastifyBaseLogger,
 ): void {
-  if (!didLogMeal || !dailySummary) return;
+  if (!didMutateMeal || !dailySummary) return;
   try {
     publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
     log.info({ event: "summary_publish_success" }, "Summary publish success");
@@ -301,6 +302,7 @@ async function handleOrchestratorSSE(
   let durableAssetRef: string | undefined;
   let userMessagePersisted = false;
   let streamDidLogMeal = false;
+  let streamDidMutateMeal = false;
   let streamDailySummary: unknown;
   let streamDailyTargets: unknown;
 
@@ -336,6 +338,7 @@ async function handleOrchestratorSSE(
     if ("streamGenerator" in result) {
       const { streamGenerator, didLogMeal, dailySummary } = result;
       streamDidLogMeal = didLogMeal;
+      streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
       streamDailyTargets = result.dailyTargets;
 
@@ -353,28 +356,35 @@ async function handleOrchestratorSSE(
 
       const doneData = {
         didLogMeal: streamDidLogMeal,
+        didMutateMeal: streamDidMutateMeal,
         ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-      publishSummarySafe(deps.publisher, deviceId, streamDidLogMeal, streamDailySummary, deps.log);
+      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
     } else {
       const { reply: replyText, didLogMeal, dailySummary, dailyTargets } = result;
       streamDidLogMeal = didLogMeal;
+      streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
       streamDailyTargets = dailyTargets;
       const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, replyText);
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
         didLogMeal,
+        didMutateMeal: streamDidMutateMeal,
         ...(dailySummary ? { dailySummary } : {}),
         ...(dailyTargets ? { dailyTargets } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-      publishSummarySafe(deps.publisher, deviceId, didLogMeal, dailySummary, deps.log);
+      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, deps.log);
     }
   } catch {
-    const fallback = streamDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
+    const fallback = streamDidLogMeal
+      ? PARTIAL_SUCCESS_FALLBACK
+      : streamDidMutateMeal
+        ? PARTIAL_MUTATION_FALLBACK
+        : UNIFIED_FALLBACK;
     try {
       if (!userMessagePersisted && durableAssetRef) {
         await deps.chatService.saveMessage(deviceId, "user", message, { imagePath: durableAssetRef });
@@ -388,11 +398,12 @@ async function handleOrchestratorSSE(
     }
     const doneData = {
       didLogMeal: streamDidLogMeal,
+      didMutateMeal: streamDidMutateMeal,
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-    publishSummarySafe(deps.publisher, deviceId, streamDidLogMeal, streamDailySummary, deps.log);
+    publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
   } finally {
     await cleanupDurableAssetSafe(
       deps.assetService,
@@ -440,6 +451,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let durableAssetRef: string | undefined;
       let userMessagePersisted = false;
       let jsonDidLogMeal = false;
+      let jsonDidMutateMeal = false;
       let jsonDailySummary: unknown;
       let jsonDailyTargets: unknown;
 
@@ -461,6 +473,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           },
         );
         jsonDidLogMeal = result.didLogMeal;
+        jsonDidMutateMeal = result.didMutateMeal ?? result.didLogMeal;
         jsonDailySummary = result.dailySummary;
         jsonDailyTargets = result.dailyTargets;
 
@@ -478,10 +491,17 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const sanitized = await finalizeAssistantReply(chatService, deviceId, fullReply);
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
           // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-          publishSummarySafe(publisher, deviceId, didLogMeal, dailySummary, request.log);
+          publishSummarySafe(
+            publisher,
+            deviceId,
+            result.didMutateMeal ?? didLogMeal,
+            dailySummary,
+            request.log,
+          );
           return {
             reply: sanitized,
             didLogMeal,
+            ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
             ...(dailySummary ? { dailySummary } : {}),
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
           };
@@ -491,15 +511,20 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, didLogMeal, dailySummary, request.log);
+        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, request.log);
         return {
           reply: sanitizedJson,
           didLogMeal,
+          ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
           ...(dailySummary ? { dailySummary } : {}),
           ...(dailyTargets ? { dailyTargets } : {}),
         };
       } catch {
-        const fallback = jsonDidLogMeal ? PARTIAL_SUCCESS_FALLBACK : UNIFIED_FALLBACK;
+        const fallback = jsonDidLogMeal
+          ? PARTIAL_SUCCESS_FALLBACK
+          : jsonDidMutateMeal
+            ? PARTIAL_MUTATION_FALLBACK
+            : UNIFIED_FALLBACK;
         if (!userMessagePersisted && durableAssetRef) {
           await chatService.saveMessage(deviceId, "user", message, { imagePath: durableAssetRef });
           userMessagePersisted = true;
@@ -507,10 +532,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidLogMeal, jsonDailySummary, request.log);
+        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, request.log);
         return {
           reply: sanitizedJson,
           didLogMeal: jsonDidLogMeal,
+          ...(jsonDidMutateMeal ? { didMutateMeal: true } : {}),
           ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}),
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
         };

@@ -58,6 +58,7 @@ export interface PendingHomeChatDraft {
 export interface ChatReply {
   reply: string;
   didLogMeal?: boolean;
+  didMutateMeal?: boolean;
   dailySummary?: DailySummary;
   dailyTargets?: DailyTargets;
 }

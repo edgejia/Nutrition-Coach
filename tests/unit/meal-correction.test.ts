@@ -1,0 +1,77 @@
+import { beforeEach, describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { createDb } from "../../server/db/client.js";
+import { createDeviceService } from "../../server/services/device.js";
+import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+
+describe("meal correction service", () => {
+  let db: ReturnType<typeof createDb>;
+  let deviceId: string;
+  let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  let mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
+
+  beforeEach(async () => {
+    db = createDb(":memory:");
+    const deviceService = createDeviceService(db);
+    foodLoggingService = createFoodLoggingService(db);
+    mealCorrectionService = createMealCorrectionService(db);
+    deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+  });
+
+  it("resolves recent-reference shorthand to the latest active meal", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "燕麥",
+      calories: 220,
+      protein: 10,
+      carbs: 35,
+      fat: 4,
+      loggedAt: "2026-04-19T08:00:00.000Z",
+    });
+    const latest = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 680,
+      protein: 32,
+      carbs: 84,
+      fat: 22,
+      loggedAt: "2026-04-19T12:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把剛剛那筆改成 500 卡");
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, latest.id);
+    assert.equal(result.candidate.foodName, "雞腿飯");
+  });
+
+  it("creates a pending clarification state when multiple meals match and resolves the next numbered reply", async () => {
+    const first = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const second = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 29,
+      carbs: 78,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
+    assert.equal(firstPass.status, "needs_clarification");
+    assert.equal(firstPass.candidates.length, 2);
+    assert.match(firstPass.prompt, /請直接回覆編號/);
+
+    const secondPass = await mealCorrectionService.findMeals(deviceId, "delete", "第二個");
+    assert.equal(secondPass.status, "resolved");
+    assert.equal(secondPass.action, "delete");
+    assert.equal(secondPass.resolvedMealId, first.id);
+    assert.notEqual(secondPass.resolvedMealId, second.id);
+    assert.equal(secondPass.fromPending, true);
+  });
+});

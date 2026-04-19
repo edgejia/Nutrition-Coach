@@ -3,6 +3,7 @@ import type { createChatService } from "../services/chat.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
+import type { createMealCorrectionService } from "../services/meal-correction.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -15,6 +16,7 @@ interface OrchestratorDeps {
   chatService: ReturnType<typeof createChatService>;
   summaryService: ReturnType<typeof createSummaryService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
   deviceService: ReturnType<typeof createDeviceService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
@@ -26,8 +28,20 @@ const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 
 export type OrchestratorResult =
-  | { reply: string; didLogMeal: boolean; dailySummary?: DailySummary; dailyTargets?: DailyTargets }
-  | { streamGenerator: AsyncGenerator<string>; didLogMeal: boolean; dailySummary?: DailySummary; dailyTargets?: DailyTargets };
+  | {
+      reply: string;
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: DailySummary;
+      dailyTargets?: DailyTargets;
+    }
+  | {
+      streamGenerator: AsyncGenerator<string>;
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: DailySummary;
+      dailyTargets?: DailyTargets;
+    };
 
 function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined): DailySummary {
   if (!dailySummary) {
@@ -177,8 +191,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       const messages: ChatMessage[] = [systemMsg, ...history, userContent];
       const toolDefinitions = getToolDefinitions();
+      const toolSessionState = { resolvedMealIds: [] as string[] };
 
       let didLogMeal = false;
+      let didMutateMeal = false;
       let logMealSummary: DailySummary | undefined;
       let shouldStreamFinalReply = false;
       let successfulGoalReceipt: string | undefined;
@@ -209,6 +225,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   successfulGoalReceipt,
                 ),
                 didLogMeal,
+                didMutateMeal,
                 dailySummary: logMealSummary,
                 dailyTargets: successfulGoalTargets,
               };
@@ -223,6 +240,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   successfulGoalReceipt,
                 ),
                 didLogMeal,
+                didMutateMeal,
                 dailySummary: logMealSummary,
                 dailyTargets: successfulGoalTargets,
               };
@@ -231,25 +249,29 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = await llmProvider.chat(messages, toolDefinitions);
           }
         } catch (err) {
-          opts?.hooks?.onFallback?.(didLogMeal ? "partial_success" : "llm_error");
+          opts?.hooks?.onFallback?.(didMutateMeal ? "partial_success" : "llm_error");
           if (successfulGoalReceipt) {
             return {
               reply: successfulGoalReceipt,
               didLogMeal,
+              didMutateMeal,
               dailySummary: logMealSummary,
               dailyTargets: successfulGoalTargets,
             };
           }
-          if (didLogMeal) {
-            const partialFallback = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
+          if (didMutateMeal) {
+            const partialFallback = didLogMeal
+              ? "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。"
+              : "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
             return {
               reply: partialFallback,
-              didLogMeal: true,
+              didLogMeal,
+              didMutateMeal: true,
               dailySummary: requireDailySummaryForLoggedMeal(logMealSummary),
             };
           }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
-          return { reply: errorMsg, didLogMeal, dailySummary: logMealSummary };
+          return { reply: errorMsg, didLogMeal, didMutateMeal, dailySummary: logMealSummary };
         }
 
         if (response.content !== undefined) {
@@ -257,6 +279,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           return {
             reply: ensureGoalReceipt(response.content, successfulGoalReceipt),
             didLogMeal,
+            didMutateMeal,
             dailySummary: logMealSummary,
             dailyTargets: successfulGoalTargets,
           };
@@ -270,6 +293,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               // can surface it during the real waiting period, before tokens arrive.
               if (toolCall.function.name === "log_food") {
                 opts?.onStatus?.("記錄餐點中...");
+              } else if (toolCall.function.name === "update_meal") {
+                opts?.onStatus?.("調整餐點中...");
+              } else if (toolCall.function.name === "delete_meal") {
+                opts?.onStatus?.("刪除餐點中...");
               }
               const argsRedacted = redactToolArgsForHook(toolCall.function.name, toolCall.function.arguments);
               opts?.hooks?.onToolReceived?.(toolCall.function.name, argsRedacted);
@@ -283,12 +310,15 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 updatedFields,
                 publishedEvents,
                 dailyTargets,
+                mealMutationKind,
               } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
+                mealCorrectionService: deps.mealCorrectionService,
                 deviceService: deps.deviceService,
                 publisher: deps.publisher,
                 imagePath,
+                toolSessionState,
               }, {
                 currentUserMessage: userMessage,
                 previousAssistantMessage,
@@ -308,8 +338,13 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               }
               if (toolCall.function.name === "log_food") {
                 didLogMeal = true;
+                didMutateMeal = true;
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
                 loggedMeal = toolLoggedMeal;
+              }
+              if (mealMutationKind === "update" || mealMutationKind === "delete") {
+                didMutateMeal = true;
+                logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
               }
               if (toolCall.function.name === "update_goals") {
                 successfulGoalReceipt = result;
@@ -334,6 +369,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   return {
                     reply: successfulGoalReceipt,
                     didLogMeal,
+                    didMutateMeal,
                     dailySummary: logMealSummary,
                     dailyTargets: successfulGoalTargets,
                   };
@@ -351,7 +387,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           if (didLogMeal && loggedMeal && isImageOnlyMessage(userMessage, imageBase64)) {
             const reply = buildImageLoggedReply(loggedMeal);
             opts?.hooks?.onLLMEnd?.(round + 1, true);
-            return { reply, didLogMeal, dailySummary: logMealSummary };
+            return { reply, didLogMeal, didMutateMeal, dailySummary: logMealSummary };
           }
           shouldStreamFinalReply = true;
           // Complete the tool-round LLM lifecycle event
@@ -365,11 +401,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         return {
           reply: successfulGoalReceipt,
           didLogMeal,
+          didMutateMeal,
           dailySummary: logMealSummary,
           dailyTargets: successfulGoalTargets,
         };
       }
-      return { reply: FALLBACK, didLogMeal, dailySummary: logMealSummary };
+      return { reply: FALLBACK, didLogMeal, didMutateMeal, dailySummary: logMealSummary };
     },
   };
 }

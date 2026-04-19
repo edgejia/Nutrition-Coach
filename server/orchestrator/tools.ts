@@ -3,6 +3,7 @@ import type { ToolDefinition, ToolCall } from "../llm/types.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
+import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate } from "../lib/time.js";
 import {
@@ -19,9 +20,13 @@ import {
 export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
+  mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
   deviceService?: ReturnType<typeof createDeviceService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
   imagePath?: string;
+  toolSessionState?: {
+    resolvedMealIds: string[];
+  };
 }
 
 export interface ToolExecutionResult {
@@ -34,6 +39,7 @@ export interface ToolExecutionResult {
   publishedEvents?: string[];
   dailyTargets?: DailyTargets;
   dailySummary?: DailySummary;
+  mealMutationKind?: "log" | "update" | "delete";
   loggedMeal?: {
     foodName: string;
     calories: number;
@@ -75,6 +81,17 @@ interface LogFoodGroupedArgs {
 
 type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
 
+interface FindMealsArgs {
+  action: "update" | "delete";
+  query: string;
+}
+
+type UpdateMealArgs = ({ meal_id: string } & LogFoodLegacyArgs) | ({ meal_id: string } & LogFoodGroupedArgs);
+
+interface DeleteMealArgs {
+  meal_id: string;
+}
+
 interface LogFoodResult {
   dailySummary: DailySummary;
   loggedMeal: {
@@ -84,6 +101,25 @@ interface LogFoodResult {
     carbs: number;
     fat: number;
   };
+}
+
+interface UpdateMealResult {
+  dailySummary: DailySummary;
+  updatedMeal: {
+    id: string;
+    foodName: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    imagePath: string | null;
+    loggedAt: string;
+  };
+}
+
+interface DeleteMealResult {
+  dailySummary: DailySummary;
+  deletedMealId: string;
 }
 
 type GetDailySummaryArgs = Record<string, never>;
@@ -117,6 +153,13 @@ const logFoodSchema = z.union([
     .strict(),
 ]);
 
+const findMealsSchema = z
+  .object({
+    action: z.enum(["update", "delete"]),
+    query: z.string().min(1, "query must be non-empty"),
+  })
+  .strict();
+
 const getDailySummarySchema = z.object({}).strict();
 
 const updateGoalsSchema = z
@@ -130,6 +173,24 @@ const updateGoalsSchema = z
   .refine((args) => Object.keys(args).length > 0, {
     message: "at least one goal field is required",
   });
+
+const updateMealSchema = z.union([
+  logFoodItemSchema.extend({
+    meal_id: z.string().uuid("meal_id must be a uuid"),
+  }).strict(),
+  z
+    .object({
+      meal_id: z.string().uuid("meal_id must be a uuid"),
+      items: z.array(logFoodItemSchema).min(1, "items must contain at least one entry"),
+    })
+    .strict(),
+]);
+
+const deleteMealSchema = z
+  .object({
+    meal_id: z.string().uuid("meal_id must be a uuid"),
+  })
+  .strict();
 
 function updatedGoalFields(args: Partial<DailyTargets>): UpdateGoalField[] {
   return (["calories", "protein", "carbs", "fat"] as const).filter(
@@ -244,6 +305,47 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
   },
 };
 
+const findMealsContract: ToolContract<FindMealsArgs, FindMealsResult> = {
+  name: "find_meals",
+  description: "解析要修改或刪除的歷史餐點目標，只能回傳資料庫候選或要求澄清。",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: "string",
+        enum: ["update", "delete"],
+      },
+      query: { type: "string" },
+    },
+    required: ["action", "query"],
+  },
+  zodSchema: findMealsSchema,
+  logSummary: (args) => ({
+    tool: "find_meals",
+    action: args.action,
+  }),
+  execute: async (args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.mealCorrectionService || !deviceId) {
+      throw new Error("find_meals contract missing mealCorrectionService/deviceId in context");
+    }
+
+    const result = await deps.mealCorrectionService.findMeals(deviceId, args.action, args.query.trim());
+    if (deps.toolSessionState) {
+      deps.toolSessionState.resolvedMealIds =
+        result.status === "resolved" ? [result.resolvedMealId] : [];
+    }
+
+    return {
+      ok: true,
+      result,
+      toolMessage: JSON.stringify(result),
+    };
+  },
+};
+
 const getDailySummaryContract: ToolContract<
   GetDailySummaryArgs,
   GetDailySummaryResult
@@ -273,6 +375,129 @@ const getDailySummaryContract: ToolContract<
       ok: true,
       result: summary,
       toolMessage: JSON.stringify(summary),
+    };
+  },
+};
+
+const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
+  name: "update_meal",
+  description: "更新已解析出的歷史餐點內容。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      meal_id: { type: "string" },
+      food_name: { type: "string" },
+      calories: { type: "number" },
+      protein: { type: "number" },
+      carbs: { type: "number" },
+      fat: { type: "number" },
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            food_name: { type: "string" },
+            calories: { type: "number" },
+            protein: { type: "number" },
+            carbs: { type: "number" },
+            fat: { type: "number" },
+          },
+          required: ["food_name", "calories", "protein", "carbs", "fat"],
+        },
+      },
+    },
+    required: ["meal_id"],
+  },
+  zodSchema: updateMealSchema,
+  logSummary: (args) => ({
+    tool: "update_meal",
+    itemCount: "items" in args ? args.items.length : 1,
+  }),
+  execute: async (args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.mealCorrectionService || !deviceId) {
+      throw new Error("update_meal contract missing mealCorrectionService/deviceId in context");
+    }
+
+    const resolvedMealIds = deps.toolSessionState?.resolvedMealIds ?? [];
+    if (!resolvedMealIds.includes(args.meal_id)) {
+      throw new FatalToolError("meal target unresolved");
+    }
+
+    const updated = await deps.mealCorrectionService.updateMeal(
+      deviceId,
+      args.meal_id,
+      "items" in args
+        ? args.items.map((item) => ({
+          foodName: item.food_name.trim(),
+          calories: item.calories,
+          protein: item.protein,
+          carbs: item.carbs,
+          fat: item.fat,
+        }))
+        : [{
+          foodName: args.food_name.trim(),
+          calories: args.calories,
+          protein: args.protein,
+          carbs: args.carbs,
+          fat: args.fat,
+        }],
+    );
+
+    await deps.mealCorrectionService.clearPendingSelection(deviceId);
+    if (deps.toolSessionState) {
+      deps.toolSessionState.resolvedMealIds = [];
+    }
+
+    return {
+      ok: true,
+      result: updated,
+      toolMessage: "已更新餐點",
+    };
+  },
+};
+
+const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealResult> = {
+  name: "delete_meal",
+  description: "刪除已解析出的歷史餐點。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      meal_id: { type: "string" },
+    },
+    required: ["meal_id"],
+  },
+  zodSchema: deleteMealSchema,
+  logSummary: () => ({
+    tool: "delete_meal",
+  }),
+  execute: async (args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.mealCorrectionService || !deviceId) {
+      throw new Error("delete_meal contract missing mealCorrectionService/deviceId in context");
+    }
+
+    const resolvedMealIds = deps.toolSessionState?.resolvedMealIds ?? [];
+    if (!resolvedMealIds.includes(args.meal_id)) {
+      throw new FatalToolError("meal target unresolved");
+    }
+
+    const deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id);
+
+    await deps.mealCorrectionService.clearPendingSelection(deviceId);
+    if (deps.toolSessionState) {
+      deps.toolSessionState.resolvedMealIds = [];
+    }
+
+    return {
+      ok: true,
+      result: deleted,
+      toolMessage: "已刪除餐點",
     };
   },
 };
@@ -326,6 +551,9 @@ const updateGoalsContract: ToolContract<Partial<DailyTargets>, UpdateGoalsResult
 
 export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [logFoodContract.name, logFoodContract as ToolContract<any, any>],
+  [findMealsContract.name, findMealsContract as ToolContract<any, any>],
+  [updateMealContract.name, updateMealContract as ToolContract<any, any>],
+  [deleteMealContract.name, deleteMealContract as ToolContract<any, any>],
   [getDailySummaryContract.name, getDailySummaryContract as ToolContract<any, any>],
   [updateGoalsContract.name, updateGoalsContract as ToolContract<any, any>],
 ]);
@@ -365,6 +593,15 @@ export function redactToolArgsForHook(toolName: string, rawArgs: string): string
     }
     if (toolName === "get_daily_summary") {
       return "<get_daily_summary args>";
+    }
+    if (toolName === "find_meals") {
+      return `action: ${summary.action ?? "unknown"}`;
+    }
+    if (toolName === "update_meal") {
+      return `itemCount: ${summary.itemCount ?? "?"}`;
+    }
+    if (toolName === "delete_meal") {
+      return "<delete_meal args>";
     }
     if (toolName === "update_goals") {
       const fields = Array.isArray(summary.updatedFields)
@@ -408,7 +645,12 @@ export async function executeTool(
   const outcome = await runContract(contract, toolCall, ctx);
 
   if (!outcome.success) {
-    if (toolCall.function.name === "update_goals") {
+    if (
+      toolCall.function.name === "find_meals"
+      || toolCall.function.name === "update_goals"
+      || toolCall.function.name === "update_meal"
+      || toolCall.function.name === "delete_meal"
+    ) {
       const updatedFields =
         typeof outcome.logSummary === "object" &&
         outcome.logSummary !== null &&
@@ -418,11 +660,11 @@ export async function executeTool(
       return {
         result: outcome.result,
         summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
-        success: false,
-        executed: false,
-        failureReason: outcome.failureReason,
-        updatedFields,
-      };
+      success: false,
+      executed: false,
+      failureReason: outcome.failureReason,
+      updatedFields,
+    };
     }
 
     // Convert controlled failures into FatalToolError so the existing
@@ -449,8 +691,37 @@ export async function executeTool(
     return {
       result: outcome.result,
       summary: "成功",
+      mealMutationKind: "log",
       dailySummary: contractResult.dailySummary,
       loggedMeal: contractResult.loggedMeal,
+    };
+  }
+
+  if (toolCall.function.name === "find_meals") {
+    const contractResult = outcome.contractResult as FindMealsResult;
+    return {
+      result: outcome.result,
+      summary: `status: ${contractResult.status}`,
+    };
+  }
+
+  if (toolCall.function.name === "update_meal") {
+    const contractResult = outcome.contractResult as UpdateMealResult;
+    return {
+      result: outcome.result,
+      summary: "成功",
+      mealMutationKind: "update",
+      dailySummary: contractResult.dailySummary,
+    };
+  }
+
+  if (toolCall.function.name === "delete_meal") {
+    const contractResult = outcome.contractResult as DeleteMealResult;
+    return {
+      result: outcome.result,
+      summary: "成功",
+      mealMutationKind: "delete",
+      dailySummary: contractResult.dailySummary,
     };
   }
 

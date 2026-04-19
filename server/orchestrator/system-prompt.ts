@@ -103,5 +103,12 @@ export function buildSystemPrompt(goal: string, targets: DailyTargets, intake?: 
 4. 成功更新後，最終回覆必須原文呈現工具回傳的收據文字，包含「已更新每日目標：」開頭與四行目標數值。
 5. 不要向使用者提及內部工具名稱或系統欄位。`);
 
+  sections.push(`歷史餐點修正規則：
+1. 當使用者要修改或刪除舊餐點時，先解析目標餐點，再決定是否執行 mutation；不要把修正需求當成新的 log_food。
+2. 修改或刪除歷史餐點前，必須先呼叫 find_meals。只有當 find_meals 已解析出唯一目標時，才可以呼叫 update_meal 或 delete_meal。
+3. 如果 find_meals 回傳多筆候選或找不到目標，就用簡短繁體中文向使用者追問澄清；這一輪不要更新或刪除任何餐點。
+4. 如果使用者是在回覆上一輪的候選編號問題，先用 find_meals 解析這個選擇，再視結果決定是否 update_meal 或 delete_meal。
+5. 成功修改歷史餐點時，要明確表示是更新原本那筆紀錄，不是新增一筆。成功刪除時，要明確表示已刪除原本那筆餐點。`);
+
   return sections.join("\n\n");
 }

@@ -13,6 +13,7 @@ const requiredTables = [
   "meal_revisions",
   "meal_revision_items",
   "asset_references",
+  "turn_states",
 ] as const;
 
 function hasTable(sqlite: Database.Database, name: string) {

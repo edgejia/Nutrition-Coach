@@ -136,3 +136,22 @@ export const assetReferences = sqliteTable(
     index("asset_refs_asset_id_idx").on(table.assetId),
   ],
 );
+
+export const turnStates = sqliteTable(
+  "turn_states",
+  {
+    id: text("id").primaryKey(),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    kind: text("kind").notNull(),
+    payload: text("payload").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("turn_states_device_kind_uq").on(table.deviceId, table.kind),
+    index("turn_states_device_expires_idx").on(table.deviceId, table.expiresAt),
+  ],
+);
