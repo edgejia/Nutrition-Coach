@@ -15,6 +15,13 @@
       "when": 1776563328911,
       "tag": "0001_sleepy_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776591621715,
+      "tag": "0002_meal_transaction_v2_foundation",
+      "breakpoints": true
     }
   ]
 }

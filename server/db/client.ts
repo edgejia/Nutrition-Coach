@@ -5,7 +5,15 @@ import { applyMigrations } from "./migrate.js";
 
 export type AppDatabase = ReturnType<typeof createDb>;
 
-const requiredTables = ["devices", "meals", "chat_messages", "assets"] as const;
+const requiredTables = [
+  "devices",
+  "chat_messages",
+  "assets",
+  "meal_transactions",
+  "meal_revisions",
+  "meal_revision_items",
+  "asset_references",
+] as const;
 
 function hasTable(sqlite: Database.Database, name: string) {
   return Boolean(
