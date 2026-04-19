@@ -11,7 +11,11 @@ export function registerAssetRoutes(app: FastifyInstance, deps: Deps) {
   const { assetService, deviceService } = deps;
 
   app.get("/api/assets/:id", async (request, reply) => {
-    const deviceId = request.headers["x-device-id"] as string;
+    const queryDeviceId =
+      typeof (request.query as { deviceId?: unknown } | undefined)?.deviceId === "string"
+        ? ((request.query as { deviceId?: string }).deviceId ?? "")
+        : "";
+    const deviceId = (request.headers["x-device-id"] as string | undefined) ?? queryDeviceId;
     if (!deviceId) {
       return reply.code(401).send({ error: "Missing X-Device-Id" });
     }

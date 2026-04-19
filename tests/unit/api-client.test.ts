@@ -121,6 +121,26 @@ describe("API Client", () => {
     await assert.rejects(() => api.sendMessage("hello"), { message: "UNAUTHORIZED" });
   });
 
+  it("loadHistory appends deviceId to asset urls for browser image fetches", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      messages: [
+        {
+          id: "msg-1",
+          role: "user",
+          content: "(圖片)",
+          imageAssetId: "asset-1",
+          imageUrl: "/api/assets/asset-1",
+          createdAt: "2026-04-19T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.loadHistory();
+
+    assert.equal(result.messages[0]?.imageUrl, "/api/assets/asset-1?deviceId=d-1");
+  });
+
   it("getMeals includes X-Device-Id", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
@@ -143,6 +163,29 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].url, "/api/meals");
     assert.equal(headers["X-Device-Id"], "d-1");
     assert.equal(result.meals.length, 1);
+  });
+
+  it("getMeals appends deviceId to meal image urls for browser image fetches", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      meals: [
+        {
+          id: "meal-1",
+          foodName: "雞胸肉便當",
+          calories: 520,
+          protein: 42,
+          carbs: 48,
+          fat: 18,
+          imageAssetId: "asset-1",
+          imageUrl: "/api/assets/asset-1",
+          loggedAt: "2026-04-01T04:30:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.getMeals();
+
+    assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1?deviceId=d-1");
   });
 
   it("deleteMeal sends DELETE and resolves without a body", async () => {
@@ -168,6 +211,24 @@ describe("API Client", () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
     await assert.rejects(() => api.updateGoals({ calories: 2000 }), { message: "UNAUTHORIZED" });
+  });
+
+  it("withAuthorizedAssetUrl preserves existing deviceId query params", () => {
+    storage.set("deviceId", "device-123");
+
+    assert.equal(
+      api.withAuthorizedAssetUrl("/api/assets/asset-1?deviceId=existing-device"),
+      "/api/assets/asset-1?deviceId=existing-device",
+    );
+  });
+
+  it("withAuthorizedAssetUrl leaves non-asset urls unchanged", () => {
+    storage.set("deviceId", "device-123");
+
+    assert.equal(
+      api.withAuthorizedAssetUrl("blob:http://localhost/preview-id"),
+      "blob:http://localhost/preview-id",
+    );
   });
 });
 

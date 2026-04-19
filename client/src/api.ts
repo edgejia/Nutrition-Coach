@@ -5,6 +5,24 @@ function getHeaders(): Record<string, string> {
   return deviceId ? { "X-Device-Id": deviceId } : {};
 }
 
+export function withAuthorizedAssetUrl(
+  assetUrl: string | null | undefined,
+  deviceId = localStorage.getItem("deviceId"),
+): string | null | undefined {
+  if (!assetUrl || !deviceId || !assetUrl.startsWith("/api/assets/")) {
+    return assetUrl;
+  }
+
+  const [pathname, queryString = ""] = assetUrl.split("?", 2);
+  const params = new URLSearchParams(queryString);
+  if (!params.has("deviceId")) {
+    params.set("deviceId", deviceId);
+  }
+
+  const nextQuery = params.toString();
+  return nextQuery ? `${pathname}?${nextQuery}` : pathname;
+}
+
 export async function registerDevice(goal: string): Promise<{ deviceId: string; dailyTargets: DailyTargets }> {
   const res = await fetch("/api/device", {
     method: "POST",
@@ -56,7 +74,13 @@ export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> 
   const res = await fetch(`/api/chat/history?limit=${limit}`, { headers: getHeaders() });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history");
-  return res.json();
+  const body = await res.json() as { messages: Message[] };
+  return {
+    messages: body.messages.map((message) => ({
+      ...message,
+      imageUrl: withAuthorizedAssetUrl(message.imageUrl),
+    })),
+  };
 }
 
 export interface StreamCallbacks {
@@ -165,7 +189,13 @@ export async function getMeals(options?: { refreshReason?: "day_rollover" }): Pr
   const res = await fetch("/api/meals", { headers });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load meals");
-  return res.json();
+  const body = await res.json() as { meals: MealEntry[] };
+  return {
+    meals: body.meals.map((meal) => ({
+      ...meal,
+      imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
+    })),
+  };
 }
 
 export async function deleteMeal(mealId: string): Promise<void> {

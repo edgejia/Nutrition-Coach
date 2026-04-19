@@ -96,4 +96,17 @@ describe("Assets API", () => {
     assert.equal(res.headers["content-type"], "image/png");
     assert.equal(res.body.length > 0, true);
   });
+
+  it("GET /api/assets/:id accepts deviceId in the query string for browser image requests", async () => {
+    const asset = await createOwnedAsset();
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/assets/${asset.id}?deviceId=${ownerDeviceId}`,
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers["content-type"], "image/png");
+    assert.equal(res.body.length > 0, true);
+  });
 });
