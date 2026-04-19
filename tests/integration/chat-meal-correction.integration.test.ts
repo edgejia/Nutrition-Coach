@@ -182,6 +182,86 @@ describe("chat meal correction integration", () => {
     assert.equal(meals.length, 2);
   });
 
+  it("respects the named food target even when the user also says recent-reference shorthand", async () => {
+    const target = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const breastOne = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 30,
+      carbs: 0,
+      fat: 5,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+    const breastTwo = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 31,
+      carbs: 0,
+      fat: 5,
+      loggedAt: "2026-04-19T05:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_recent_named_target",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "update_named_recent_target",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: target.id,
+            food_name: "雞腿",
+            calories: 220,
+            protein: 18,
+            carbs: 0,
+            fat: 9,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "已幫你更新剛剛那筆雞腿的蛋白質。",
+    });
+
+    const { status, body } = await postChat("幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.reply, /雞腿/);
+
+    const meals = await getMeals();
+    assert.equal(meals.length, 3);
+
+    const updated = meals.find((meal) => meal.id === target.id);
+    const untouchedBreastOne = meals.find((meal) => meal.id === breastOne.id);
+    const untouchedBreastTwo = meals.find((meal) => meal.id === breastTwo.id);
+
+    assert.equal(updated?.foodName, "雞腿");
+    assert.equal(updated?.protein, 18);
+    assert.equal(untouchedBreastOne?.protein, 30);
+    assert.equal(untouchedBreastTwo?.protein, 31);
+  });
+
   it("consumes the pending selection on the next chat turn and deletes the chosen meal", async () => {
     const first = await services.foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

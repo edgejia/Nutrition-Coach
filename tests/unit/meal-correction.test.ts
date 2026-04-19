@@ -44,6 +44,43 @@ describe("meal correction service", () => {
     assert.equal(result.candidate.foodName, "雞腿飯");
   });
 
+  it("uses recent-reference shorthand as a recency tie-breaker instead of overriding a named food target", async () => {
+    const target = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-04-19T12:00:00.000Z",
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 30,
+      carbs: 0,
+      fat: 5,
+      loggedAt: "2026-04-19T12:30:00.000Z",
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 31,
+      carbs: 0,
+      fat: 5,
+      loggedAt: "2026-04-19T13:00:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(
+      deviceId,
+      "update",
+      "幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高",
+    );
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, target.id);
+    assert.equal(result.candidate.foodName, "雞腿");
+  });
+
   it("creates a pending clarification state when multiple meals match and resolves the next numbered reply", async () => {
     const first = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

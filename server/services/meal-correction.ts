@@ -143,6 +143,11 @@ function buildNotFoundPrompt(action: "update" | "delete"): string {
   return `我還不能確定你要${verb}哪一筆餐點，請補充日期、餐別或食物名稱。`;
 }
 
+function matchesCandidateLabel(candidate: MealCorrectionCandidate, normalizedQuery: string): boolean {
+  const labels = [candidate.foodName, ...candidate.itemNames].map(normalizeText);
+  return labels.some((label) => label.length > 0 && normalizedQuery.includes(label));
+}
+
 function scoreCandidate(
   candidate: MealCorrectionCandidate,
   query: string,
@@ -166,8 +171,7 @@ function scoreCandidate(
     score += 2;
   }
 
-  const labels = [candidate.foodName, ...candidate.itemNames].map(normalizeText);
-  const matched = labels.some((label) => label.length > 0 && normalizedQuery.includes(label));
+  const matched = matchesCandidateLabel(candidate, normalizedQuery);
   if (matched) {
     score += 3;
   }
@@ -307,26 +311,18 @@ export function createMealCorrectionService(db: AppDatabase) {
         };
       }
 
-      if (hasRecentReference(query)) {
-        return {
-          status: "resolved",
-          action,
-          resolvedMealId: candidates[0]!.mealId,
-          candidate: candidates[0]!,
-          fromPending: false,
-        };
-      }
-
       const relativeOffset = extractRelativeDateOffset(query);
       const targetDateKey = relativeOffset === undefined
         ? undefined
         : formatLocalDate(new Date(Date.now() + relativeOffset * 24 * 60 * 60 * 1000));
       const targetMealPeriod = extractMealPeriod(query);
+      const normalizedQuery = normalizeText(query);
 
       const scored = candidates
         .map((candidate) => ({
           candidate,
           score: scoreCandidate(candidate, query, targetDateKey, targetMealPeriod),
+          labelMatched: matchesCandidateLabel(candidate, normalizedQuery),
         }))
         .filter((entry) => entry.score >= 0)
         .sort((left, right) => {
@@ -335,6 +331,31 @@ export function createMealCorrectionService(db: AppDatabase) {
           }
           return right.candidate.loggedAt.localeCompare(left.candidate.loggedAt);
         });
+
+      if (hasRecentReference(query)) {
+        const positiveMatches = scored.filter((entry) => entry.score > 0);
+        if (positiveMatches.length > 0) {
+          return {
+            status: "resolved",
+            action,
+            resolvedMealId: positiveMatches[0]!.candidate.mealId,
+            candidate: positiveMatches[0]!.candidate,
+            fromPending: false,
+          };
+        }
+
+        const hasStructuredHint = targetDateKey !== undefined || targetMealPeriod !== undefined;
+        const hasLabelHint = scored.some((entry) => entry.labelMatched);
+        if (!hasStructuredHint && !hasLabelHint) {
+          return {
+            status: "resolved",
+            action,
+            resolvedMealId: candidates[0]!.mealId,
+            candidate: candidates[0]!,
+            fromPending: false,
+          };
+        }
+      }
 
       if (scored.length === 0) {
         return {
