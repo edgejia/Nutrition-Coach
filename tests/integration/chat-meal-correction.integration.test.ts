@@ -6,6 +6,43 @@ import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 
+const REAL_DATE = Date;
+const FIXED_NOW = new REAL_DATE("2026-04-19T12:00:00+08:00");
+
+class FixedDate extends REAL_DATE {
+  constructor(...args: any[]) {
+    switch (args.length) {
+      case 0:
+        super(FIXED_NOW);
+        break;
+      case 1:
+        super(args[0]);
+        break;
+      case 2:
+        super(args[0], args[1]);
+        break;
+      case 3:
+        super(args[0], args[1], args[2]);
+        break;
+      case 4:
+        super(args[0], args[1], args[2], args[3]);
+        break;
+      case 5:
+        super(args[0], args[1], args[2], args[3], args[4]);
+        break;
+      case 6:
+        super(args[0], args[1], args[2], args[3], args[4], args[5]);
+        break;
+      default:
+        super(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+    }
+  }
+
+  static now(): number {
+    return FIXED_NOW.getTime();
+  }
+}
+
 describe("chat meal correction integration", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
@@ -14,6 +51,7 @@ describe("chat meal correction integration", () => {
   let services: AppServices;
 
   beforeEach(async () => {
+    globalThis.Date = FixedDate as DateConstructor;
     mockLLM = new MockLLMProvider();
     app = await buildApp({
       dbPath: ":memory:",
@@ -31,6 +69,7 @@ describe("chat meal correction integration", () => {
     if (app.server.listening) {
       await app.close();
     }
+    globalThis.Date = REAL_DATE;
   });
 
   async function postChat(message: string): Promise<{

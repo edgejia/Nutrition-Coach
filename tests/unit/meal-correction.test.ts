@@ -1,9 +1,48 @@
-import { beforeEach, describe, it } from "node:test";
+process.env.TZ = "Asia/Taipei";
+
+import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+
+const REAL_DATE = Date;
+const FIXED_NOW = new REAL_DATE("2026-04-19T12:00:00+08:00");
+
+class FixedDate extends REAL_DATE {
+  constructor(...args: any[]) {
+    switch (args.length) {
+      case 0:
+        super(FIXED_NOW);
+        break;
+      case 1:
+        super(args[0]);
+        break;
+      case 2:
+        super(args[0], args[1]);
+        break;
+      case 3:
+        super(args[0], args[1], args[2]);
+        break;
+      case 4:
+        super(args[0], args[1], args[2], args[3]);
+        break;
+      case 5:
+        super(args[0], args[1], args[2], args[3], args[4]);
+        break;
+      case 6:
+        super(args[0], args[1], args[2], args[3], args[4], args[5]);
+        break;
+      default:
+        super(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+    }
+  }
+
+  static now(): number {
+    return FIXED_NOW.getTime();
+  }
+}
 
 describe("meal correction service", () => {
   let db: ReturnType<typeof createDb>;
@@ -12,11 +51,16 @@ describe("meal correction service", () => {
   let mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
 
   beforeEach(async () => {
+    globalThis.Date = FixedDate as DateConstructor;
     db = createDb(":memory:");
     const deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+  });
+
+  afterEach(() => {
+    globalThis.Date = REAL_DATE;
   });
 
   it("resolves recent-reference shorthand to the latest active meal", async () => {
