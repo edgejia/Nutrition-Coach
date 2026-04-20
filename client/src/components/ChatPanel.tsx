@@ -7,6 +7,7 @@ import {
   deriveFollowModeOnScroll,
   getLiveUpdateSources,
   shouldFollowLatestOnLiveUpdate,
+  shouldFollowLatestOnScreenEntry,
   shouldShowJumpToLatest,
 } from "../lib/chat-scroll.js";
 import { MessageBubble } from "./MessageBubble.js";
@@ -37,7 +38,6 @@ export function ChatPanel() {
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
-  const latestAnchorRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
   const isFirstMount = useRef(true);
@@ -86,8 +86,16 @@ export function ChatPanel() {
     };
   }
 
-  function scrollLatestIntoView(behavior: ScrollBehavior) {
-    latestAnchorRef.current?.scrollIntoView({ behavior, block: "end", inline: "nearest" });
+  function alignContainerToLatest(container: HTMLDivElement, behavior: ScrollBehavior) {
+    const nextTop = container.scrollHeight;
+
+    if (behavior === "smooth") {
+      container.scrollTo({ top: nextTop, behavior });
+      return;
+    }
+
+    container.scrollTop = nextTop;
+    previousScrollTopRef.current = container.scrollTop;
   }
 
   function cancelScheduledScroll() {
@@ -97,8 +105,13 @@ export function ChatPanel() {
     }
   }
 
-  function scheduleLatestIntoView(options?: { behavior?: ScrollBehavior; force?: boolean }) {
+  function scheduleLatestAlignment(options?: { behavior?: ScrollBehavior; force?: boolean }) {
+    const container = scrollContainerRef.current;
     const behavior = options?.behavior ?? "instant";
+
+    if (!container) {
+      return;
+    }
 
     if (!options?.force && followModeRef.current !== "attached") {
       return;
@@ -106,7 +119,7 @@ export function ChatPanel() {
 
     if (behavior !== "instant") {
       cancelScheduledScroll();
-      scrollLatestIntoView(behavior);
+      alignContainerToLatest(container, behavior);
       return;
     }
 
@@ -116,7 +129,12 @@ export function ChatPanel() {
 
     scrollFrameRef.current = requestAnimationFrame(() => {
       scrollFrameRef.current = null;
-      scrollLatestIntoView("instant");
+      const activeContainer = scrollContainerRef.current;
+      if (!activeContainer) {
+        return;
+      }
+
+      alignContainerToLatest(activeContainer, "instant");
     });
   }
 
@@ -256,14 +274,25 @@ export function ChatPanel() {
     };
   }, [deviceId, setMessages, clearDevice, setPendingHomeChatDraft]);
 
-  // Keep the latest anchor visible for initial load and local chat updates while attached.
+  // Keep the latest edge visible for initial load and local chat updates while attached.
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
     const nextSnapshot = buildLiveUpdateSnapshot();
 
     if (isFirstMount.current) {
-      scrollLatestIntoView("instant");
+      if (
+        shouldFollowLatestOnScreenEntry({
+          mode: followModeRef.current,
+          snapshot: {
+            messageCount: nextSnapshot.messageCount,
+            provisionalId: nextSnapshot.provisionalId,
+          },
+        })
+      ) {
+        alignContainerToLatest(container, "instant");
+      }
+
       previousScrollTopRef.current = container.scrollTop;
       liveUpdateSnapshotRef.current = nextSnapshot;
       isFirstMount.current = false;
@@ -280,7 +309,7 @@ export function ChatPanel() {
     );
 
     if (shouldFollow) {
-      scheduleLatestIntoView();
+      scheduleLatestAlignment();
     }
 
     liveUpdateSnapshotRef.current = nextSnapshot;
@@ -327,7 +356,7 @@ export function ChatPanel() {
       );
 
       if (shouldFollow) {
-        scheduleLatestIntoView();
+        scheduleLatestAlignment();
       }
     });
 
@@ -450,7 +479,6 @@ export function ChatPanel() {
                 isStatusLabel={provisionalBubble.statusLabel.length > 0}
               />
             )}
-            <div ref={latestAnchorRef} />
           </div>
         </div>
         {showJumpToLatest && (
@@ -458,7 +486,7 @@ export function ChatPanel() {
             type="button"
             onClick={() => {
               setLocalFollowMode("attached");
-              scheduleLatestIntoView({
+              scheduleLatestAlignment({
                 behavior: getJumpToLatestBehavior(),
                 force: true,
               });
