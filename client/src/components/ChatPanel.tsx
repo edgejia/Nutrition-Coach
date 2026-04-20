@@ -204,6 +204,24 @@ export function ChatPanel() {
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
   }
 
+  function handleMessageImageSettle() {
+    if (
+      !shouldFollowLatestOnLiveUpdate({
+        mode: followModeRef.current,
+        source: "image-settle",
+      })
+    ) {
+      return;
+    }
+
+    if (isEntrySettleActive()) {
+      armEntrySettleWindow();
+      return;
+    }
+
+    scheduleLatestAlignment();
+  }
+
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
     const activeDeviceId = useStore.getState().deviceId;
     if (!activeDeviceId) return;
@@ -557,6 +575,7 @@ export function ChatPanel() {
                 key={m.id}
                 message={m}
                 onOpenSummary={m.didLogMeal ? () => setActiveScreen("summary") : undefined}
+                onImageSettle={handleMessageImageSettle}
               />
             ))}
             {provisionalBubble && (
