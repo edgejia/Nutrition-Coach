@@ -21,6 +21,26 @@ function buildSnapshot(overrides: Partial<LiveUpdateSnapshot> = {}): LiveUpdateS
 }
 
 describe("chat-scroll live update triggers", () => {
+  it("treats the first non-empty history hydrate as an attached follow source", () => {
+    const previous = buildSnapshot({
+      messageCount: 0,
+      lastMessageId: null,
+      lastMessageRole: null,
+      provisionalId: null,
+      provisionalStatusLabel: "",
+      provisionalContentLength: 0,
+    });
+    const next = buildSnapshot({
+      messageCount: 3,
+      lastMessageId: "assistant-3",
+      lastMessageRole: "assistant",
+      provisionalId: null,
+      provisionalStatusLabel: "",
+    });
+
+    assert.deepEqual(getLiveUpdateSources(previous, next), ["history-hydrate"]);
+  });
+
   it("detects statusLabel-only updates without requiring token growth", () => {
     const previous = buildSnapshot({ provisionalStatusLabel: "分析圖片中..." });
     const next = buildSnapshot({ provisionalStatusLabel: "記錄餐點中..." });
@@ -56,6 +76,14 @@ describe("chat-scroll live update triggers", () => {
   });
 
   it("follows statusLabel-only and resize-driven updates while attached", () => {
+    assert.equal(
+      shouldFollowLatestOnLiveUpdate({
+        mode: "attached",
+        source: "history-hydrate",
+      }),
+      true,
+    );
+
     assert.equal(
       shouldFollowLatestOnLiveUpdate({
         mode: "attached",

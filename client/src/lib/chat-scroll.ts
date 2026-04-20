@@ -2,6 +2,7 @@ const NEAR_LATEST_ANCHOR_THRESHOLD_PX = 96;
 
 export type FollowMode = "attached" | "detached";
 export type LiveUpdateSource =
+  | "history-hydrate"
   | "status-label"
   | "token-stream"
   | "provisional-commit"
@@ -21,6 +22,7 @@ export interface LiveUpdateSnapshot {
 }
 
 const ATTACHED_FOLLOW_SOURCES = new Set<LiveUpdateSource>([
+  "history-hydrate",
   "status-label",
   "token-stream",
   "provisional-commit",
@@ -41,15 +43,16 @@ export function deriveFollowModeOnScroll(args: {
   mode: FollowMode;
   distanceFromLatest: number;
   scrollDelta: number;
+  userInitiated?: boolean;
   threshold?: number;
 }): FollowMode {
-  const { mode, distanceFromLatest, scrollDelta, threshold } = args;
+  const { mode, distanceFromLatest, scrollDelta, userInitiated = false, threshold } = args;
 
   if (isNearLatestAnchor(distanceFromLatest, threshold)) {
     return "attached";
   }
 
-  if (scrollDelta < 0) {
+  if (scrollDelta < 0 && userInitiated) {
     return "detached";
   }
 
@@ -61,6 +64,18 @@ export function getLiveUpdateSources(
   next: LiveUpdateSnapshot,
 ): LiveUpdateSource[] {
   const sources: LiveUpdateSource[] = [];
+  const messageCountIncreased = next.messageCount > previous.messageCount;
+  const lastMessageChanged = next.lastMessageId !== previous.lastMessageId;
+
+  if (
+    previous.messageCount === 0 &&
+    previous.lastMessageId === null &&
+    previous.provisionalId === null &&
+    next.messageCount > 0 &&
+    next.provisionalId === null
+  ) {
+    sources.push("history-hydrate");
+  }
 
   if (next.provisionalStatusLabel !== previous.provisionalStatusLabel && next.provisionalStatusLabel.length > 0) {
     sources.push("status-label");
@@ -70,13 +85,10 @@ export function getLiveUpdateSources(
     sources.push("token-stream");
   }
 
-  const messageCountIncreased = next.messageCount > previous.messageCount;
-  const lastMessageChanged = next.lastMessageId !== previous.lastMessageId;
-
   if (messageCountIncreased && lastMessageChanged) {
     if (previous.provisionalId && !next.provisionalId && next.lastMessageRole === "assistant") {
       sources.push("provisional-commit");
-    } else if (next.lastMessageRole === "user") {
+    } else if (sources.length === 0 && next.lastMessageRole === "user") {
       sources.push("user-message-append");
       if (next.lastMessageHasImagePreview) {
         sources.push("local-preview");

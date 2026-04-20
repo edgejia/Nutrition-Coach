@@ -18,9 +18,21 @@ describe("chat-scroll contract", () => {
       mode: "attached",
       distanceFromLatest: 140,
       scrollDelta: -24,
+      userInitiated: true,
     });
 
     assert.equal(nextMode, "detached");
+  });
+
+  it("does not detach on a non-user upward delta", () => {
+    const nextMode = deriveFollowModeOnScroll({
+      mode: "attached",
+      distanceFromLatest: 140,
+      scrollDelta: -24,
+      userInitiated: false,
+    });
+
+    assert.equal(nextMode, "attached");
   });
 
   it("does not detach because content growth changed the distance", () => {
@@ -38,6 +50,7 @@ describe("chat-scroll contract", () => {
       mode: "detached",
       distanceFromLatest: 48,
       scrollDelta: 32,
+      userInitiated: true,
     });
 
     assert.equal(nextMode, "attached");
