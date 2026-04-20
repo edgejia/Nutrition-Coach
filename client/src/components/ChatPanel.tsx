@@ -7,6 +7,7 @@ import {
   deriveFollowModeOnScroll,
   getLiveUpdateSources,
   shouldFollowLatestOnLiveUpdate,
+  shouldFollowLatestOnPersistedHistoryRefresh,
   shouldFollowLatestOnScreenEntry,
   shouldShowJumpToLatest,
 } from "../lib/chat-scroll.js";
@@ -16,6 +17,7 @@ import { DashboardMiniBar } from "./DashboardMiniBar.js";
 import type { PendingHomeChatDraft } from "../types.js";
 
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
+const ENTRY_SETTLE_WINDOW_MS = 240;
 
 function getNowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -40,9 +42,13 @@ export function ChatPanel() {
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
   const contentRef = useRef<HTMLDivElement>(null);
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
+  const hadMessagesOnEntryRef = useRef(messages.length > 0);
   const isFirstMount = useRef(true);
+  const entrySettleActiveRef = useRef(false);
+  const entrySettleTimeoutRef = useRef<number | null>(null);
   const liveUpdateSnapshotRef = useRef<LiveUpdateSnapshot | null>(null);
   const lastUserScrollIntentAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const pendingPersistedHistoryRefreshRef = useRef(false);
   const previousScrollTopRef = useRef(0);
   const followModeRef = useRef<FollowMode>("attached");
   const scrollFrameRef = useRef<number | null>(null);
@@ -58,6 +64,9 @@ export function ChatPanel() {
 
   function setLocalFollowMode(nextMode: FollowMode) {
     followModeRef.current = nextMode;
+    if (nextMode === "detached") {
+      disarmEntrySettleWindow();
+    }
     setFollowMode((currentMode) => (currentMode === nextMode ? currentMode : nextMode));
   }
 
@@ -102,6 +111,55 @@ export function ChatPanel() {
     if (scrollFrameRef.current !== null) {
       cancelAnimationFrame(scrollFrameRef.current);
       scrollFrameRef.current = null;
+    }
+  }
+
+  function clearEntrySettleTimeout() {
+    if (entrySettleTimeoutRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(entrySettleTimeoutRef.current);
+      entrySettleTimeoutRef.current = null;
+    }
+  }
+
+  function disarmEntrySettleWindow() {
+    entrySettleActiveRef.current = false;
+    clearEntrySettleTimeout();
+  }
+
+  function isEntrySettleActive() {
+    return entrySettleActiveRef.current && followModeRef.current === "attached";
+  }
+
+  function armEntrySettleWindow() {
+    if (followModeRef.current !== "attached") {
+      return;
+    }
+
+    entrySettleActiveRef.current = true;
+    clearEntrySettleTimeout();
+    scheduleLatestAlignment({ force: true });
+
+    requestAnimationFrame(() => {
+      if (!isEntrySettleActive()) {
+        return;
+      }
+
+      scheduleLatestAlignment({ force: true });
+
+      requestAnimationFrame(() => {
+        if (!isEntrySettleActive()) {
+          return;
+        }
+
+        scheduleLatestAlignment({ force: true });
+      });
+    });
+
+    if (typeof window !== "undefined") {
+      entrySettleTimeoutRef.current = window.setTimeout(() => {
+        entrySettleActiveRef.current = false;
+        entrySettleTimeoutRef.current = null;
+      }, ENTRY_SETTLE_WINDOW_MS);
     }
   }
 
@@ -252,6 +310,14 @@ export function ChatPanel() {
       .then(async ({ messages }) => {
         if (cancelled) return;
         if (useStore.getState().deviceId !== activeDeviceId) return;
+        pendingPersistedHistoryRefreshRef.current = shouldFollowLatestOnPersistedHistoryRefresh({
+          mode: followModeRef.current,
+          snapshot: {
+            hadMessagesOnEntry: hadMessagesOnEntryRef.current,
+            messageCount: messages.length,
+            provisionalId: useStore.getState().provisionalBubble?.id ?? null,
+          },
+        });
         setMessages(messages);
         const draft = useStore.getState().pendingHomeChatDraft;
         if (draft && draft.status === "staged" && !attemptedDraftIdsRef.current.has(draft.id)) {
@@ -291,6 +357,7 @@ export function ChatPanel() {
         })
       ) {
         alignContainerToLatest(container, "instant");
+        armEntrySettleWindow();
       }
 
       previousScrollTopRef.current = container.scrollTop;
@@ -300,6 +367,16 @@ export function ChatPanel() {
     }
 
     const previousSnapshot = liveUpdateSnapshotRef.current;
+    const shouldFollowPersistedRefresh =
+      pendingPersistedHistoryRefreshRef.current &&
+      shouldFollowLatestOnPersistedHistoryRefresh({
+        mode: followModeRef.current,
+        snapshot: {
+          hadMessagesOnEntry: hadMessagesOnEntryRef.current,
+          messageCount: nextSnapshot.messageCount,
+          provisionalId: nextSnapshot.provisionalId,
+        },
+      });
     const nextSources = previousSnapshot ? getLiveUpdateSources(previousSnapshot, nextSnapshot) : [];
     const shouldFollow = nextSources.some((source) =>
       shouldFollowLatestOnLiveUpdate({
@@ -308,6 +385,12 @@ export function ChatPanel() {
       }),
     );
 
+    pendingPersistedHistoryRefreshRef.current = false;
+
+    if (shouldFollowPersistedRefresh) {
+      armEntrySettleWindow();
+    }
+
     if (shouldFollow) {
       scheduleLatestAlignment();
     }
@@ -315,7 +398,13 @@ export function ChatPanel() {
     liveUpdateSnapshotRef.current = nextSnapshot;
   }, [messages, provisionalBubble?.id, provisionalBubble?.statusLabel, provisionalBubble?.content]);
 
-  useEffect(() => () => cancelScheduledScroll(), []);
+  useEffect(
+    () => () => {
+      cancelScheduledScroll();
+      disarmEntrySettleWindow();
+    },
+    [],
+  );
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -362,6 +451,10 @@ export function ChatPanel() {
 
     observer.observe(content);
     observer.observe(container);
+
+    if (entrySettleActiveRef.current) {
+      scheduleLatestAlignment({ force: true });
+    }
 
     return () => {
       observer.disconnect();
