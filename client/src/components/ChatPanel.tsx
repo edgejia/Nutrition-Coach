@@ -25,6 +25,7 @@ export function ChatPanel() {
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
   const latestAnchorRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
   const isFirstMount = useRef(true);
   const previousScrollTopRef = useRef(0);
@@ -238,6 +239,30 @@ export function ChatPanel() {
 
   useEffect(() => () => cancelScheduledScroll(), []);
 
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const content = contentRef.current;
+    const container = scrollContainerRef.current;
+    if (!content || !container) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      scheduleLatestIntoView();
+    });
+
+    observer.observe(content);
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      cancelScheduledScroll();
+    };
+  }, []);
+
   // Track user-initiated upward scrolling and re-attach when they return near latest.
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -325,28 +350,30 @@ export function ChatPanel() {
       )}
 
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollContainerRef} className="h-full space-y-3 overflow-y-auto p-4">
-          {messages.map((m) => (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              onOpenSummary={m.didLogMeal ? () => setActiveScreen("summary") : undefined}
-            />
-          ))}
-          {provisionalBubble && (
-            <MessageBubble
-              key={provisionalBubble.id}
-              message={{
-                id: provisionalBubble.id,
-                role: "assistant",
-                content: provisionalBubble.statusLabel || provisionalBubble.content,
-                createdAt: new Date().toISOString(),
-              }}
-              isProvisional={true}
-              isStatusLabel={provisionalBubble.statusLabel.length > 0}
-            />
-          )}
-          <div ref={latestAnchorRef} />
+        <div ref={scrollContainerRef} className="h-full overflow-y-auto p-4">
+          <div ref={contentRef} className="space-y-3 pb-4">
+            {messages.map((m) => (
+              <MessageBubble
+                key={m.id}
+                message={m}
+                onOpenSummary={m.didLogMeal ? () => setActiveScreen("summary") : undefined}
+              />
+            ))}
+            {provisionalBubble && (
+              <MessageBubble
+                key={provisionalBubble.id}
+                message={{
+                  id: provisionalBubble.id,
+                  role: "assistant",
+                  content: provisionalBubble.statusLabel || provisionalBubble.content,
+                  createdAt: new Date().toISOString(),
+                }}
+                isProvisional={true}
+                isStatusLabel={provisionalBubble.statusLabel.length > 0}
+              />
+            )}
+            <div ref={latestAnchorRef} />
+          </div>
         </div>
         {showJumpToLatest && (
           <button
