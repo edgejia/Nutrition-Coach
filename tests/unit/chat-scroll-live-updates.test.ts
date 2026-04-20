@@ -151,6 +151,14 @@ describe("chat-scroll live update triggers", () => {
       }),
       true,
     );
+
+    assert.equal(
+      shouldFollowLatestOnLiveUpdate({
+        mode: "attached",
+        source: "image-settle",
+      }),
+      true,
+    );
   });
 
   it("does not follow observer-driven or status updates while detached", () => {
@@ -189,6 +197,14 @@ describe("chat-scroll live update triggers", () => {
       shouldFollowLatestOnLiveUpdate({
         mode: "detached",
         source: "status-label",
+      }),
+      false,
+    );
+
+    assert.equal(
+      shouldFollowLatestOnLiveUpdate({
+        mode: "detached",
+        source: "image-settle",
       }),
       false,
     );

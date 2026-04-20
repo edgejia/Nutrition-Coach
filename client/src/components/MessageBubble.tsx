@@ -29,8 +29,9 @@ export function getUserMessagePresentation(message: Message) {
 export function MessageBubble(props: {
   message: Message;
   onOpenSummary?: () => void;
+  onImageSettle?: () => void;
 } & Partial<ProvisionalBubbleProps>) {
-  const { message, onOpenSummary, isProvisional, isStatusLabel } = props;
+  const { message, onOpenSummary, onImageSettle, isProvisional, isStatusLabel } = props;
   const isUser = message.role === "user";
 
   if (isUser) {
@@ -50,6 +51,7 @@ export function MessageBubble(props: {
                 borderColor: "var(--border-med)",
                 color: "var(--text-2)",
               }}
+              onAssetSettle={onImageSettle}
             />
           </div>
         </div>
@@ -78,6 +80,7 @@ export function MessageBubble(props: {
                 borderColor: "rgba(255,255,255,0.12)",
                 color: "rgba(255,255,255,0.88)",
               }}
+              onAssetSettle={onImageSettle}
             />
           )}
           {hasText && <p className="whitespace-pre-wrap">{text}</p>}

@@ -8,6 +8,7 @@ export type LiveUpdateSource =
   | "provisional-commit"
   | "user-message-append"
   | "local-preview"
+  | "image-settle"
   | "content-resize"
   | "container-resize";
 
@@ -39,6 +40,7 @@ const ATTACHED_FOLLOW_SOURCES = new Set<LiveUpdateSource>([
   "provisional-commit",
   "user-message-append",
   "local-preview",
+  "image-settle",
   "content-resize",
   "container-resize",
 ]);
