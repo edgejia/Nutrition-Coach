@@ -13,10 +13,17 @@ export function getMealRowPresentation(meal: MealEntry) {
   };
 }
 
+export function getMealTimelineEmptyStateCopy(isReadOnly: boolean) {
+  return isReadOnly
+    ? "這一天還沒有餐點紀錄。可以切回今天查看即時紀錄，或改看其他日期。"
+    : "今天還沒有餐點紀錄。";
+}
+
 export function MealTimeline(props: {
   meals: MealEntry[];
   deletingMealId: string | null;
-  onDelete: (mealId: string) => void;
+  isReadOnly?: boolean;
+  onDelete?: (mealId: string) => void;
 }) {
   if (props.meals.length === 0) {
     return (
@@ -28,7 +35,7 @@ export function MealTimeline(props: {
           color: "var(--text-2)",
         }}
       >
-        今天還沒有餐點紀錄。
+        {getMealTimelineEmptyStateCopy(Boolean(props.isReadOnly))}
       </p>
     );
   }
@@ -81,19 +88,21 @@ export function MealTimeline(props: {
               </>
             );
           })()}
-          <button
-            type="button"
-            onClick={() => props.onDelete(meal.id)}
-            disabled={props.deletingMealId !== null}
-            className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold disabled:opacity-50"
-            style={{
-              background: "var(--bg-raised)",
-              border: "1px solid var(--border-med)",
-              color: "var(--text-2)",
-            }}
-          >
-            刪除
-          </button>
+          {!props.isReadOnly && props.onDelete && (
+            <button
+              type="button"
+              onClick={() => props.onDelete?.(meal.id)}
+              disabled={props.deletingMealId !== null}
+              className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold disabled:opacity-50"
+              style={{
+                background: "var(--bg-raised)",
+                border: "1px solid var(--border-med)",
+                color: "var(--text-2)",
+              }}
+            >
+              刪除
+            </button>
+          )}
         </article>
       ))}
     </div>

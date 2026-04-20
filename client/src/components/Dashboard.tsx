@@ -129,9 +129,21 @@ export function getDashboardCells(
   ];
 }
 
-export function Dashboard({ onTap }: { onTap?: () => void } = {}) {
-  const summary = useStore((s) => s.dailySummary);
-  const targets = useStore((s) => s.dailyTargets);
+export function Dashboard({
+  onTap,
+  summary: summaryOverride,
+  targets: targetsOverride,
+  ariaLabel = "查看今日營養詳情",
+}: {
+  onTap?: () => void;
+  summary?: DailySummary | null;
+  targets?: DailyTargets | null;
+  ariaLabel?: string;
+} = {}) {
+  const storeSummary = useStore((s) => s.dailySummary);
+  const storeTargets = useStore((s) => s.dailyTargets);
+  const summary = summaryOverride === undefined ? storeSummary : summaryOverride;
+  const targets = targetsOverride === undefined ? storeTargets : targetsOverride;
   const cells = getDashboardCells(summary, targets);
 
   if (!cells) return null;
@@ -168,7 +180,7 @@ export function Dashboard({ onTap }: { onTap?: () => void } = {}) {
     <button
       type="button"
       onClick={onTap}
-      aria-label="查看今日營養詳情"
+      aria-label={ariaLabel}
       className="w-full cursor-pointer text-left"
     >
       {grid}
