@@ -9,6 +9,7 @@ import {
   shouldFollowLatestOnLiveUpdate,
   shouldFollowLatestOnPersistedHistoryRefresh,
   shouldFollowLatestOnScreenEntry,
+  shouldFollowLatestOnUploadStart,
   shouldShowJumpToLatest,
 } from "../lib/chat-scroll.js";
 import { MessageBubble } from "./MessageBubble.js";
@@ -18,6 +19,7 @@ import type { PendingHomeChatDraft } from "../types.js";
 
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
 const ENTRY_SETTLE_WINDOW_MS = 240;
+const UPLOAD_SETTLE_WINDOW_MS = 320;
 
 function getNowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -46,6 +48,8 @@ export function ChatPanel() {
   const isFirstMount = useRef(true);
   const entrySettleActiveRef = useRef(false);
   const entrySettleTimeoutRef = useRef<number | null>(null);
+  const uploadSettleActiveRef = useRef(false);
+  const uploadSettleTimeoutRef = useRef<number | null>(null);
   const liveUpdateSnapshotRef = useRef<LiveUpdateSnapshot | null>(null);
   const lastUserScrollIntentAtRef = useRef(Number.NEGATIVE_INFINITY);
   const pendingPersistedHistoryRefreshRef = useRef(false);
@@ -66,6 +70,7 @@ export function ChatPanel() {
     followModeRef.current = nextMode;
     if (nextMode === "detached") {
       disarmEntrySettleWindow();
+      disarmUploadSettleWindow();
     }
     setFollowMode((currentMode) => (currentMode === nextMode ? currentMode : nextMode));
   }
@@ -121,13 +126,29 @@ export function ChatPanel() {
     }
   }
 
+  function clearUploadSettleTimeout() {
+    if (uploadSettleTimeoutRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(uploadSettleTimeoutRef.current);
+      uploadSettleTimeoutRef.current = null;
+    }
+  }
+
   function disarmEntrySettleWindow() {
     entrySettleActiveRef.current = false;
     clearEntrySettleTimeout();
   }
 
+  function disarmUploadSettleWindow() {
+    uploadSettleActiveRef.current = false;
+    clearUploadSettleTimeout();
+  }
+
   function isEntrySettleActive() {
     return entrySettleActiveRef.current && followModeRef.current === "attached";
+  }
+
+  function isUploadSettleActive() {
+    return uploadSettleActiveRef.current && followModeRef.current === "attached";
   }
 
   function armEntrySettleWindow() {
@@ -160,6 +181,52 @@ export function ChatPanel() {
         entrySettleActiveRef.current = false;
         entrySettleTimeoutRef.current = null;
       }, ENTRY_SETTLE_WINDOW_MS);
+    }
+  }
+
+  function armUploadSettleWindow() {
+    if (followModeRef.current !== "attached") {
+      return;
+    }
+
+    uploadSettleActiveRef.current = true;
+    clearUploadSettleTimeout();
+    scheduleLatestAlignment({ force: true });
+
+    requestAnimationFrame(() => {
+      if (!isUploadSettleActive()) {
+        return;
+      }
+
+      scheduleLatestAlignment({ force: true });
+
+      requestAnimationFrame(() => {
+        if (!isUploadSettleActive()) {
+          return;
+        }
+
+        scheduleLatestAlignment({ force: true });
+      });
+    });
+
+    if (typeof window !== "undefined") {
+      uploadSettleTimeoutRef.current = window.setTimeout(() => {
+        uploadSettleActiveRef.current = false;
+        uploadSettleTimeoutRef.current = null;
+      }, UPLOAD_SETTLE_WINDOW_MS);
+    }
+  }
+
+  function handleBeforeSend(payload: { hasImage: boolean; hasText: boolean }) {
+    if (
+      shouldFollowLatestOnUploadStart({
+        mode: followModeRef.current,
+        snapshot: {
+          hasImage: payload.hasImage,
+        },
+      })
+    ) {
+      armUploadSettleWindow();
     }
   }
 
@@ -219,12 +286,28 @@ export function ChatPanel() {
       return;
     }
 
+    if (isUploadSettleActive()) {
+      armUploadSettleWindow();
+      return;
+    }
+
     scheduleLatestAlignment();
   }
 
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
     const activeDeviceId = useStore.getState().deviceId;
     if (!activeDeviceId) return;
+
+    if (
+      shouldFollowLatestOnUploadStart({
+        mode: followModeRef.current,
+        snapshot: {
+          hasImage: image !== undefined,
+        },
+      })
+    ) {
+      armUploadSettleWindow();
+    }
 
     if (opts?.appendUserBubble !== false) {
       const imagePreviewUrl = image ? URL.createObjectURL(image) : undefined;
@@ -420,6 +503,7 @@ export function ChatPanel() {
     () => () => {
       cancelScheduledScroll();
       disarmEntrySettleWindow();
+      disarmUploadSettleWindow();
     },
     [],
   );
@@ -617,7 +701,7 @@ export function ChatPanel() {
       </div>
 
       <div className="shrink-0 px-3 pb-safe" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
-        <ChatInput onSend={handleSend} disabled={sending} />
+        <ChatInput onSend={handleSend} onBeforeSend={handleBeforeSend} disabled={sending} />
       </div>
     </div>
   );
