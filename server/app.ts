@@ -8,6 +8,7 @@ import { createDb } from "./db/client.js";
 import { createDeviceService } from "./services/device.js";
 import { createFoodLoggingService } from "./services/food-logging.js";
 import { createSummaryService } from "./services/summary.js";
+import { createDaySnapshotService } from "./services/day-snapshot.js";
 import { createChatService } from "./services/chat.js";
 import { createAssetService } from "./services/assets.js";
 import { createMealCorrectionService } from "./services/meal-correction.js";
@@ -17,6 +18,7 @@ import { RealtimePublisher } from "./realtime/publisher.js";
 import { registerDeviceRoutes } from "./routes/device.js";
 import { registerChatRoutes } from "./routes/chat.js";
 import { registerMealRoutes } from "./routes/meals.js";
+import { registerDaySnapshotRoutes } from "./routes/day-snapshot.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import type { LLMProvider } from "./llm/types.js";
@@ -70,6 +72,7 @@ export async function buildApp(opts: AppOptions) {
   const targetGenerationService = createTargetGenerationService(llmProvider, app.log);
   const foodLoggingService = createFoodLoggingService(db);
   const summaryService = createSummaryService(db);
+  const daySnapshotService = createDaySnapshotService({ summaryService, foodLoggingService });
   const chatService = createChatService(db);
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
   const mealCorrectionService = createMealCorrectionService(db);
@@ -100,6 +103,7 @@ export async function buildApp(opts: AppOptions) {
     uploadsDir: opts.uploadsDir,
   });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, publisher });
+  registerDaySnapshotRoutes(app, { daySnapshotService, deviceService });
   registerAssetRoutes(app, { assetService, deviceService });
   registerSSERoutes(app, { publisher, summaryService, deviceService });
 

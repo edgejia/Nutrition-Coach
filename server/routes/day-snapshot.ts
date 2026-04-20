@@ -1,0 +1,53 @@
+import type { FastifyInstance } from "fastify";
+import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
+import type { createDaySnapshotService } from "../services/day-snapshot.js";
+import type { createDeviceService } from "../services/device.js";
+
+interface Deps {
+  daySnapshotService: ReturnType<typeof createDaySnapshotService>;
+  deviceService: ReturnType<typeof createDeviceService>;
+}
+
+export function registerDaySnapshotRoutes(app: FastifyInstance, deps: Deps) {
+  const { daySnapshotService, deviceService } = deps;
+
+  app.get("/api/day-snapshot", async (request, reply) => {
+    const deviceId = request.headers["x-device-id"] as string;
+    if (!deviceId) return reply.code(401).send({ error: "Missing X-Device-Id" });
+
+    const device = await deviceService.getDevice(deviceId);
+    if (!device) return reply.code(401).send({ error: "Invalid device ID" });
+
+    const { date } = request.query as { date?: string };
+    if (!date) {
+      return reply.code(400).send({ error: "Missing date query" });
+    }
+
+    try {
+      const snapshot = await daySnapshotService.getDaySnapshot(deviceId, date);
+      return {
+        date: snapshot.date,
+        summary: snapshot.summary,
+        meals: snapshot.meals.map((meal) => {
+          const imageAssetId = parseAssetRef(meal.imagePath);
+          return {
+            id: meal.id,
+            foodName: meal.foodName,
+            calories: meal.calories,
+            protein: meal.protein,
+            carbs: meal.carbs,
+            fat: meal.fat,
+            imageAssetId,
+            imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+            loggedAt: meal.loggedAt,
+          };
+        }),
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message === "INVALID_DATE_KEY") {
+        return reply.code(400).send({ error: "Invalid date query" });
+      }
+      throw error;
+    }
+  });
+}
