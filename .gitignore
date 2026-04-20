@@ -7,6 +7,16 @@ data/*
 !data/.gitkeep
 server/uploads/*
 !server/uploads/.gitkeep
+tests/harness/artifacts/*/latest/
+.planning/phases/
+.planning/research/
+.planning/codebase/
+.planning/quick/
+.planning/threads/
+.planning/todos/
+.planning/debug/
+.planning/seeds/
+.planning/ui-reviews/
 .env
 *.db
 *.db-shm
