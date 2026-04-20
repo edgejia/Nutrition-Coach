@@ -21,6 +21,11 @@ export interface LiveUpdateSnapshot {
   provisionalContentLength: number;
 }
 
+export interface ScreenEntrySnapshot {
+  messageCount: number;
+  provisionalId: string | null;
+}
+
 const ATTACHED_FOLLOW_SOURCES = new Set<LiveUpdateSource>([
   "history-hydrate",
   "status-label",
@@ -97,6 +102,18 @@ export function getLiveUpdateSources(
   }
 
   return sources;
+}
+
+export function shouldFollowLatestOnScreenEntry(args: {
+  mode: FollowMode;
+  snapshot: ScreenEntrySnapshot;
+}): boolean {
+  const { mode, snapshot } = args;
+  if (mode !== "attached") {
+    return false;
+  }
+
+  return snapshot.messageCount > 0 || snapshot.provisionalId !== null;
 }
 
 export function shouldFollowLatestOnLiveUpdate(args: {

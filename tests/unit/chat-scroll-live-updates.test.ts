@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   getLiveUpdateSources,
   shouldFollowLatestOnLiveUpdate,
+  shouldFollowLatestOnScreenEntry,
   type LiveUpdateSnapshot,
 } from "../../client/src/lib/chat-scroll.js";
 
@@ -21,6 +22,30 @@ function buildSnapshot(overrides: Partial<LiveUpdateSnapshot> = {}): LiveUpdateS
 }
 
 describe("chat-scroll live update triggers", () => {
+  it("treats existing-history screen entry as an attached follow decision", () => {
+    assert.equal(
+      shouldFollowLatestOnScreenEntry({
+        mode: "attached",
+        snapshot: {
+          messageCount: 3,
+          provisionalId: null,
+        },
+      }),
+      true,
+    );
+
+    assert.equal(
+      shouldFollowLatestOnScreenEntry({
+        mode: "attached",
+        snapshot: {
+          messageCount: 0,
+          provisionalId: null,
+        },
+      }),
+      false,
+    );
+  });
+
   it("treats the first non-empty history hydrate as an attached follow source", () => {
     const previous = buildSnapshot({
       messageCount: 0,
@@ -102,6 +127,17 @@ describe("chat-scroll live update triggers", () => {
   });
 
   it("does not follow observer-driven or status updates while detached", () => {
+    assert.equal(
+      shouldFollowLatestOnScreenEntry({
+        mode: "detached",
+        snapshot: {
+          messageCount: 3,
+          provisionalId: null,
+        },
+      }),
+      false,
+    );
+
     assert.equal(
       shouldFollowLatestOnLiveUpdate({
         mode: "detached",
