@@ -203,11 +203,11 @@ export function SummaryDetailScreen() {
           </span>
           <span>{selectedDateLabel}</span>
         </div>
-        <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
-          {isReadOnly
-            ? `你正在查看 ${selectedDateLabel}，今天的即時更新不會覆蓋這個畫面。`
-            : "這裡查看當日摘要與餐點紀錄；切到其他日期時會改為只讀快照。"}
-        </p>
+        {isReadOnly && (
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
+            {`你正在查看 ${selectedDateLabel}，今天的即時更新不會覆蓋這個畫面。`}
+          </p>
+        )}
       </div>
 
       <main className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -218,6 +218,9 @@ export function SummaryDetailScreen() {
             border: "1px solid var(--border-med)",
           }}
         >
+          <div className="mb-3 text-xs font-bold" style={{ color: "var(--text-2)" }}>
+            選擇日期
+          </div>
           <div className="mb-3 flex items-center justify-between gap-3">
             <button
               type="button"
