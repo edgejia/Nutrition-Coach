@@ -6,6 +6,7 @@ import {
   shouldFollowLatestOnLiveUpdate,
   shouldFollowLatestOnPersistedHistoryRefresh,
   shouldFollowLatestOnScreenEntry,
+  shouldFollowLatestOnUploadStart,
   type LiveUpdateSnapshot,
 } from "../../client/src/lib/chat-scroll.js";
 
@@ -67,6 +68,38 @@ describe("chat-scroll live update triggers", () => {
           hadMessagesOnEntry: false,
           messageCount: 3,
           provisionalId: null,
+        },
+      }),
+      false,
+    );
+  });
+
+  it("treats a fresh image upload from the bottom as its own attached follow decision", () => {
+    assert.equal(
+      shouldFollowLatestOnUploadStart({
+        mode: "attached",
+        snapshot: {
+          hasImage: true,
+        },
+      }),
+      true,
+    );
+
+    assert.equal(
+      shouldFollowLatestOnUploadStart({
+        mode: "attached",
+        snapshot: {
+          hasImage: false,
+        },
+      }),
+      false,
+    );
+
+    assert.equal(
+      shouldFollowLatestOnUploadStart({
+        mode: "detached",
+        snapshot: {
+          hasImage: true,
         },
       }),
       false,

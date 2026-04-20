@@ -33,6 +33,10 @@ export interface PersistedHistoryRefreshSnapshot {
   provisionalId: string | null;
 }
 
+export interface UploadStartSnapshot {
+  hasImage: boolean;
+}
+
 const ATTACHED_FOLLOW_SOURCES = new Set<LiveUpdateSource>([
   "history-hydrate",
   "status-label",
@@ -138,6 +142,14 @@ export function shouldFollowLatestOnPersistedHistoryRefresh(args: {
   }
 
   return snapshot.messageCount > 0 || snapshot.provisionalId !== null;
+}
+
+export function shouldFollowLatestOnUploadStart(args: {
+  mode: FollowMode;
+  snapshot: UploadStartSnapshot;
+}): boolean {
+  const { mode, snapshot } = args;
+  return mode === "attached" && snapshot.hasImage;
 }
 
 export function shouldFollowLatestOnLiveUpdate(args: {

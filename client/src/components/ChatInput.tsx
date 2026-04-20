@@ -2,10 +2,11 @@ import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
+  onBeforeSend?: (payload: { hasImage: boolean; hasText: boolean }) => void;
   disabled: boolean;
 }
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -13,7 +14,12 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
 
   function submitMessage() {
     if (disabled || !canSend) return;
-    onSend(text.trim(), image ?? undefined);
+    const trimmedText = text.trim();
+    onBeforeSend?.({
+      hasImage: image !== null,
+      hasText: trimmedText.length > 0,
+    });
+    onSend(trimmedText, image ?? undefined);
     setText("");
     setImage(null);
     if (fileRef.current) fileRef.current.value = "";
