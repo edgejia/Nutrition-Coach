@@ -14,6 +14,12 @@ import { ChatInput } from "./ChatInput.js";
 import { DashboardMiniBar } from "./DashboardMiniBar.js";
 import type { PendingHomeChatDraft } from "../types.js";
 
+const USER_SCROLL_INTENT_WINDOW_MS = 400;
+
+function getNowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
 export function ChatPanel() {
   const deviceId = useStore((s) => s.deviceId);
   const messages = useStore((s) => s.messages);
@@ -36,6 +42,7 @@ export function ChatPanel() {
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
   const isFirstMount = useRef(true);
   const liveUpdateSnapshotRef = useRef<LiveUpdateSnapshot | null>(null);
+  const lastUserScrollIntentAtRef = useRef(Number.NEGATIVE_INFINITY);
   const previousScrollTopRef = useRef(0);
   const followModeRef = useRef<FollowMode>("attached");
   const scrollFrameRef = useRef<number | null>(null);
@@ -56,6 +63,14 @@ export function ChatPanel() {
 
   function getDistanceFromLatest(container: HTMLDivElement) {
     return container.scrollHeight - container.scrollTop - container.clientHeight;
+  }
+
+  function markUserScrollIntent() {
+    lastUserScrollIntentAtRef.current = getNowMs();
+  }
+
+  function hasRecentUserScrollIntent() {
+    return getNowMs() - lastUserScrollIntentAtRef.current <= USER_SCROLL_INTENT_WINDOW_MS;
   }
 
   function buildLiveUpdateSnapshot(): LiveUpdateSnapshot {
@@ -274,6 +289,25 @@ export function ChatPanel() {
   useEffect(() => () => cancelScheduledScroll(), []);
 
   useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleUserScrollIntent = () => {
+      markUserScrollIntent();
+    };
+
+    container.addEventListener("wheel", handleUserScrollIntent, { passive: true });
+    container.addEventListener("touchstart", handleUserScrollIntent, { passive: true });
+    container.addEventListener("touchmove", handleUserScrollIntent, { passive: true });
+
+    return () => {
+      container.removeEventListener("wheel", handleUserScrollIntent);
+      container.removeEventListener("touchstart", handleUserScrollIntent);
+      container.removeEventListener("touchmove", handleUserScrollIntent);
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof ResizeObserver === "undefined") {
       return;
     }
@@ -319,6 +353,7 @@ export function ChatPanel() {
         mode: followModeRef.current,
         distanceFromLatest: getDistanceFromLatest(container),
         scrollDelta: nextScrollTop - previousScrollTopRef.current,
+        userInitiated: hasRecentUserScrollIntent(),
       });
 
       previousScrollTopRef.current = nextScrollTop;
