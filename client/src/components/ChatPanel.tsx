@@ -29,6 +29,7 @@ export function ChatPanel() {
   const isFirstMount = useRef(true);
   const previousScrollTopRef = useRef(0);
   const followModeRef = useRef<FollowMode>("attached");
+  const scrollFrameRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [followMode, setFollowMode] = useState<FollowMode>("attached");
 
@@ -50,6 +51,44 @@ export function ChatPanel() {
 
   function scrollLatestIntoView(behavior: ScrollBehavior) {
     latestAnchorRef.current?.scrollIntoView({ behavior, block: "end", inline: "nearest" });
+  }
+
+  function cancelScheduledScroll() {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+  }
+
+  function scheduleLatestIntoView(options?: { behavior?: ScrollBehavior; force?: boolean }) {
+    const behavior = options?.behavior ?? "instant";
+
+    if (!options?.force && followModeRef.current !== "attached") {
+      return;
+    }
+
+    if (behavior !== "instant") {
+      cancelScheduledScroll();
+      scrollLatestIntoView(behavior);
+      return;
+    }
+
+    if (scrollFrameRef.current !== null) {
+      return;
+    }
+
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      scrollLatestIntoView("instant");
+    });
+  }
+
+  function getJumpToLatestBehavior(): ScrollBehavior {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return "smooth";
+    }
+
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
   }
 
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
@@ -193,10 +232,11 @@ export function ChatPanel() {
     }
 
     if (followModeRef.current === "attached") {
-      scrollLatestIntoView("instant");
-      previousScrollTopRef.current = container.scrollTop;
+      scheduleLatestIntoView();
     }
-  }, [messages, provisionalBubble?.content]);
+  }, [messages, provisionalBubble?.id, provisionalBubble?.statusLabel, provisionalBubble?.content]);
+
+  useEffect(() => () => cancelScheduledScroll(), []);
 
   // Track user-initiated upward scrolling and re-attach when they return near latest.
   useEffect(() => {
@@ -313,16 +353,20 @@ export function ChatPanel() {
             type="button"
             onClick={() => {
               setLocalFollowMode("attached");
-              scrollLatestIntoView("smooth");
+              scheduleLatestIntoView({
+                behavior: getJumpToLatestBehavior(),
+                force: true,
+              });
             }}
-            className="absolute bottom-4 left-1/2 z-10 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full text-lg text-white transition-opacity duration-150"
+            className="absolute bottom-3 left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center justify-center rounded-full px-4 text-[12px] font-extrabold text-white transition-all duration-150"
             style={{
               background: "var(--orange)",
               boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
+              lineHeight: 1.4,
             }}
-            aria-label="捲動到最新訊息"
+            aria-label="回到最新訊息"
           >
-            ↓
+            回到最新
           </button>
         )}
       </div>
