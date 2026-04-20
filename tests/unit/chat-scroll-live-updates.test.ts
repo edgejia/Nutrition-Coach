@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   getLiveUpdateSources,
   shouldFollowLatestOnLiveUpdate,
+  shouldFollowLatestOnPersistedHistoryRefresh,
   shouldFollowLatestOnScreenEntry,
   type LiveUpdateSnapshot,
 } from "../../client/src/lib/chat-scroll.js";
@@ -39,6 +40,32 @@ describe("chat-scroll live update triggers", () => {
         mode: "attached",
         snapshot: {
           messageCount: 0,
+          provisionalId: null,
+        },
+      }),
+      false,
+    );
+  });
+
+  it("treats persisted-session history refresh as a follow decision after re-entry", () => {
+    assert.equal(
+      shouldFollowLatestOnPersistedHistoryRefresh({
+        mode: "attached",
+        snapshot: {
+          hadMessagesOnEntry: true,
+          messageCount: 3,
+          provisionalId: null,
+        },
+      }),
+      true,
+    );
+
+    assert.equal(
+      shouldFollowLatestOnPersistedHistoryRefresh({
+        mode: "attached",
+        snapshot: {
+          hadMessagesOnEntry: false,
+          messageCount: 3,
           provisionalId: null,
         },
       }),
@@ -131,6 +158,18 @@ describe("chat-scroll live update triggers", () => {
       shouldFollowLatestOnScreenEntry({
         mode: "detached",
         snapshot: {
+          messageCount: 3,
+          provisionalId: null,
+        },
+      }),
+      false,
+    );
+
+    assert.equal(
+      shouldFollowLatestOnPersistedHistoryRefresh({
+        mode: "detached",
+        snapshot: {
+          hadMessagesOnEntry: true,
           messageCount: 3,
           provisionalId: null,
         },
