@@ -1,6 +1,34 @@
 const NEAR_LATEST_ANCHOR_THRESHOLD_PX = 96;
 
 export type FollowMode = "attached" | "detached";
+export type LiveUpdateSource =
+  | "status-label"
+  | "token-stream"
+  | "provisional-commit"
+  | "user-message-append"
+  | "local-preview"
+  | "content-resize"
+  | "container-resize";
+
+export interface LiveUpdateSnapshot {
+  messageCount: number;
+  lastMessageId: string | null;
+  lastMessageRole: "user" | "assistant" | null;
+  lastMessageHasImagePreview: boolean;
+  provisionalId: string | null;
+  provisionalStatusLabel: string;
+  provisionalContentLength: number;
+}
+
+const ATTACHED_FOLLOW_SOURCES = new Set<LiveUpdateSource>([
+  "status-label",
+  "token-stream",
+  "provisional-commit",
+  "user-message-append",
+  "local-preview",
+  "content-resize",
+  "container-resize",
+]);
 
 export function isNearLatestAnchor(
   distanceFromLatest: number,
@@ -26,6 +54,45 @@ export function deriveFollowModeOnScroll(args: {
   }
 
   return mode;
+}
+
+export function getLiveUpdateSources(
+  previous: LiveUpdateSnapshot,
+  next: LiveUpdateSnapshot,
+): LiveUpdateSource[] {
+  const sources: LiveUpdateSource[] = [];
+
+  if (next.provisionalStatusLabel !== previous.provisionalStatusLabel && next.provisionalStatusLabel.length > 0) {
+    sources.push("status-label");
+  }
+
+  if (next.provisionalContentLength > previous.provisionalContentLength) {
+    sources.push("token-stream");
+  }
+
+  const messageCountIncreased = next.messageCount > previous.messageCount;
+  const lastMessageChanged = next.lastMessageId !== previous.lastMessageId;
+
+  if (messageCountIncreased && lastMessageChanged) {
+    if (previous.provisionalId && !next.provisionalId && next.lastMessageRole === "assistant") {
+      sources.push("provisional-commit");
+    } else if (next.lastMessageRole === "user") {
+      sources.push("user-message-append");
+      if (next.lastMessageHasImagePreview) {
+        sources.push("local-preview");
+      }
+    }
+  }
+
+  return sources;
+}
+
+export function shouldFollowLatestOnLiveUpdate(args: {
+  mode: FollowMode;
+  source: LiveUpdateSource;
+}): boolean {
+  const { mode, source } = args;
+  return mode === "attached" && ATTACHED_FOLLOW_SOURCES.has(source);
 }
 
 export function shouldShowJumpToLatest(args: {
