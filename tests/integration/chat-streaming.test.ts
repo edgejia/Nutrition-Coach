@@ -306,6 +306,63 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat stream done can include affectedDate for historical logs", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_historical_stream",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["已", "幫你", "記到 3/25。"]);
+
+    const form = new FormData();
+    form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
+      assert.ok(doneDataMatch);
+      const donePayload = JSON.parse(doneDataMatch[1]) as {
+        didLogMeal: boolean;
+        affectedDate?: string;
+        dailySummary?: { date?: string };
+      };
+
+      assert.equal(donePayload.didLogMeal, true);
+      assert.equal(donePayload.affectedDate, "2026-03-25");
+      assert.equal(donePayload.dailySummary?.date, "2026-03-25");
+    } finally {
+      await reader?.cancel();
+      controller.abort();
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat stream done includes dailyTargets after update_goals succeeds", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createUpdateGoalsToolCall()] });
     mockLLM.queueChatStream(["已經", "更新好了"]);

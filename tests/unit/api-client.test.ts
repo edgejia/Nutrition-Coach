@@ -377,6 +377,25 @@ describe("sendMessageStream", () => {
     assert.deepEqual(receivedTargets, targets);
   });
 
+  it("dispatches affectedDate from done events", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":true,"affectedDate":"2026-03-25"}\n\n',
+    ]);
+    let affectedDate: string | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        affectedDate = payload.affectedDate;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(affectedDate, "2026-03-25");
+  });
+
   it("handles SSE event split across two chunks", async () => {
     storage.set("deviceId", "d-1");
     const part1 = 'event: chunk\ndata: {"to';

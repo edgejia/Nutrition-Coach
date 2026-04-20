@@ -246,4 +246,65 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       `熱量 ${summary.totalCalories}kcal, P${summary.totalProtein}g, C${summary.totalCarbs}g, F${summary.totalFat}g`,
     );
   });
+
+  it("returns affectedDate when log_food targets an explicit historical day", async () => {
+    const historicalCall: ToolCall = {
+      id: "call_historical",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "牛肉麵",
+          calories: 520,
+          protein: 24,
+          carbs: 68,
+          fat: 16,
+          date_text: "2026-03-25",
+          meal_period: "dinner",
+        }),
+      },
+    };
+
+    const result = await executeTool(
+      historicalCall,
+      deviceId,
+      { foodLoggingService, summaryService },
+      { currentUserMessage: "幫我補記 2026-03-25 晚餐吃牛肉麵" },
+    );
+
+    assert.equal(result.summary, "成功");
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.equal(result.dailySummary?.date, "2026-03-25");
+  });
+
+  it("returns a controlled multiple_targets outcome for multi-date summary requests", async () => {
+    const call: ToolCall = {
+      id: "call_multi_summary",
+      type: "function",
+      function: {
+        name: "get_daily_summary",
+        arguments: JSON.stringify({}),
+      },
+    };
+
+    const result = await executeTool(
+      call,
+      deviceId,
+      { foodLoggingService, summaryService },
+      { currentUserMessage: "昨天和前天各吃多少蛋白質？" },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "status: multiple_targets");
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dayBeforeYesterday = new Date();
+    dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
+    assert.deepEqual(JSON.parse(result.result), {
+      status: "multiple_targets",
+      dateKeys: [formatLocalDate(yesterday), formatLocalDate(dayBeforeYesterday)],
+    });
+  });
 });

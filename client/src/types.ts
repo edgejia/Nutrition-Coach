@@ -61,6 +61,7 @@ export interface ChatReply {
   didMutateMeal?: boolean;
   dailySummary?: DailySummary;
   dailyTargets?: DailyTargets;
+  affectedDate?: string;
 }
 
 export interface CoachCTA {

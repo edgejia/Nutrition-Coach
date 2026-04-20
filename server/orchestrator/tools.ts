@@ -7,6 +7,11 @@ import type { createMealCorrectionService, FindMealsResult } from "../services/m
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate } from "../lib/time.js";
 import {
+  buildHistoricalLoggedAt,
+  resolveHistoricalDateIntent,
+  type HistoricalMealPeriod,
+} from "../lib/historical-date.js";
+import {
   runContract,
   summarizeContractArgsForLog,
   type ToolContract,
@@ -39,6 +44,7 @@ export interface ToolExecutionResult {
   publishedEvents?: string[];
   dailyTargets?: DailyTargets;
   dailySummary?: DailySummary;
+  affectedDate?: string;
   mealMutationKind?: "log" | "update" | "delete";
   loggedMeal?: {
     foodName: string;
@@ -73,9 +79,14 @@ interface LogFoodItemArgs {
   fat: number;
 }
 
-interface LogFoodLegacyArgs extends LogFoodItemArgs {}
+interface HistoricalDateToolArgs {
+  date_text?: string;
+  meal_period?: HistoricalMealPeriod;
+}
 
-interface LogFoodGroupedArgs {
+interface LogFoodLegacyArgs extends LogFoodItemArgs, HistoricalDateToolArgs {}
+
+interface LogFoodGroupedArgs extends HistoricalDateToolArgs {
   items: LogFoodItemArgs[];
 }
 
@@ -95,14 +106,22 @@ interface UpdateMealPatchArgs {
   fat?: number;
 }
 
-type UpdateMealArgs = UpdateMealPatchArgs | ({ meal_id: string } & LogFoodGroupedArgs);
+type UpdateMealArgs = UpdateMealPatchArgs | { meal_id: string; items: LogFoodItemArgs[] };
 
 interface DeleteMealArgs {
   meal_id: string;
 }
 
-interface LogFoodResult {
+type HistoricalToolClarification = {
+  status: "needs_clarification";
+  prompt: string;
+  reason: "multiple_dates" | "unsupported" | "unparseable";
+};
+
+interface LogFoodSuccessResult {
+  status: "logged";
   dailySummary: DailySummary;
+  affectedDate?: string;
   loggedMeal: {
     foodName: string;
     calories: number;
@@ -111,6 +130,8 @@ interface LogFoodResult {
     fat: number;
   };
 }
+
+type LogFoodResult = LogFoodSuccessResult | HistoricalToolClarification;
 
 interface UpdateMealResult {
   dailySummary: DailySummary;
@@ -131,8 +152,21 @@ interface DeleteMealResult {
   deletedMealId: string;
 }
 
-type GetDailySummaryArgs = Record<string, never>;
-type GetDailySummaryResult = DailySummary;
+interface GetDailySummaryArgs {
+  date_text?: string;
+}
+
+type GetDailySummaryResult =
+  | {
+      status: "summary";
+      dailySummary: DailySummary;
+      affectedDate?: string;
+    }
+  | HistoricalToolClarification
+  | {
+      status: "multiple_targets";
+      dateKeys: string[];
+    };
 type UpdateGoalField = keyof DailyTargets;
 
 interface UpdateGoalsResult {
@@ -142,6 +176,8 @@ interface UpdateGoalsResult {
 }
 
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
+const historicalDateTextSchema = z.string().min(1, "date_text must be non-empty").optional();
+const historicalMealPeriodSchema = z.enum(["breakfast", "lunch", "dinner", "late_night"]).optional();
 
 const logFoodItemSchema = z
   .object({
@@ -154,10 +190,17 @@ const logFoodItemSchema = z
   .strict();
 
 const logFoodSchema = z.union([
-  logFoodItemSchema,
+  logFoodItemSchema
+    .extend({
+      date_text: historicalDateTextSchema,
+      meal_period: historicalMealPeriodSchema,
+    })
+    .strict(),
   z
     .object({
       items: z.array(logFoodItemSchema).min(1, "items must contain at least one entry"),
+      date_text: historicalDateTextSchema,
+      meal_period: historicalMealPeriodSchema,
     })
     .strict(),
 ]);
@@ -169,7 +212,11 @@ const findMealsSchema = z
   })
   .strict();
 
-const getDailySummarySchema = z.object({}).strict();
+const getDailySummarySchema = z
+  .object({
+    date_text: historicalDateTextSchema,
+  })
+  .strict();
 
 const updateGoalsSchema = z
   .object({
@@ -222,6 +269,44 @@ function formatGoalsReceipt(targets: DailyTargets): string {
   return `已更新每日目標：\n• 卡路里 ${targets.calories} kcal\n• 蛋白質 ${targets.protein} g\n• 碳水 ${targets.carbs} g\n• 脂肪 ${targets.fat} g`;
 }
 
+function buildHistoricalToolMessage(
+  result: HistoricalToolClarification | { status: "multiple_targets"; dateKeys: string[] },
+): string {
+  return JSON.stringify(result);
+}
+
+function extractHistoricalMealPeriod(input: string): HistoricalMealPeriod | undefined {
+  if (/(早餐|早上|早飯)/.test(input)) return "breakfast";
+  if (/(午餐|中午)/.test(input)) return "lunch";
+  if (/(晚餐|晚上)/.test(input)) return "dinner";
+  if (/(宵夜|點心|下午茶)/.test(input)) return "late_night";
+  return undefined;
+}
+
+function extractPreviousHistoricalDateKey(
+  previousAssistantMessage: string | undefined,
+  currentDate: Date,
+): string | undefined {
+  if (!previousAssistantMessage) {
+    return undefined;
+  }
+
+  const resolved = resolveHistoricalDateIntent({
+    input: previousAssistantMessage,
+    currentDate,
+    mode: "mutation",
+  });
+  if (resolved.status !== "resolved" || !resolved.isHistorical || resolved.source !== "explicit") {
+    return undefined;
+  }
+
+  return resolved.dateKey;
+}
+
+function buildLocalMidpointDate(dateKey: string): Date {
+  return new Date(`${dateKey}T12:00:00`);
+}
+
 // ---------------------------------------------------------------------------
 // Contracts. logSummary returns redacted shape (D-30); macros are part of
 // existing Phase 8 behavior for log_food (intentional, see plan).
@@ -229,7 +314,7 @@ function formatGoalsReceipt(targets: DailyTargets): string {
 
 const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
   name: "log_food",
-  description: "將已分析的一項或多項食物記錄到今日飲食中。",
+  description: "將已分析的一項或多項食物記錄到今日，或記錄到明確指定的一個過去日期。歷史記錄只能對單一日期執行。",
   parameters: {
     type: "object",
     properties: {
@@ -238,6 +323,11 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       protein: { type: "number" },
       carbs: { type: "number" },
       fat: { type: "number" },
+      date_text: { type: "string" },
+      meal_period: {
+        type: "string",
+        enum: ["breakfast", "lunch", "dinner", "late_night"],
+      },
       items: {
         type: "array",
         items: {
@@ -272,9 +362,51 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
     if (!deps || !deviceId) {
       throw new Error("log_food contract missing toolDeps/deviceId in context");
     }
+    const currentDate = currentAppDate();
+    const dateIntent = resolveHistoricalDateIntent({
+      input: args.date_text?.trim() || context.currentUserMessage,
+      currentDate,
+      mode: "mutation",
+      previousDateKey: extractPreviousHistoricalDateKey(
+        context.previousAssistantMessage,
+        currentDate,
+      ),
+    });
+    if (dateIntent.status === "needs_clarification") {
+      const clarification: HistoricalToolClarification = {
+        status: "needs_clarification",
+        prompt: dateIntent.prompt,
+        reason: dateIntent.reason,
+      };
+      return {
+        ok: true,
+        result: clarification,
+        toolMessage: buildHistoricalToolMessage(clarification),
+      };
+    }
+    if (dateIntent.status !== "resolved") {
+      const clarification: HistoricalToolClarification = {
+        status: "needs_clarification",
+        prompt: "我還不能確定你要記錄哪一天，請一次告訴我一個日期。",
+        reason: "multiple_dates",
+      };
+      return {
+        ok: true,
+        result: clarification,
+        toolMessage: buildHistoricalToolMessage(clarification),
+      };
+    }
+
+    const loggedAt = dateIntent.isHistorical
+      ? buildHistoricalLoggedAt({
+          dateKey: dateIntent.dateKey,
+          mealPeriod: args.meal_period ?? extractHistoricalMealPeriod(context.currentUserMessage),
+        })
+      : undefined;
     const loggedMeal = "items" in args
       ? await deps.foodLoggingService.logGroupedMeal(deviceId, {
         imagePath: deps.imagePath,
+        loggedAt,
         items: args.items.map((item) => ({
           foodName: item.food_name.trim(),
           calories: item.calories,
@@ -290,6 +422,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         carbs: args.carbs,
         fat: args.fat,
         imagePath: deps.imagePath,
+        loggedAt,
       });
 
     // Phase 8/9 invariant: persist the meal BEFORE recomputing the daily
@@ -298,7 +431,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
     try {
       dailySummary = await deps.summaryService.getDailySummary(
         deviceId,
-        currentAppDate(),
+        buildLocalMidpointDate(dateIntent.dateKey),
       );
     } catch (err) {
       const message =
@@ -311,7 +444,9 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
     return {
       ok: true,
       result: {
+        status: "logged",
         dailySummary,
+        affectedDate: dateIntent.isHistorical ? dateIntent.dateKey : undefined,
         loggedMeal: {
           foodName: loggedMeal.foodName,
           calories: loggedMeal.calories,
@@ -371,15 +506,17 @@ const getDailySummaryContract: ToolContract<
   GetDailySummaryResult
 > = {
   name: "get_daily_summary",
-  description: "查詢今日已攝取的營養素總量。",
+  description: "查詢今日或明確指定單一日期的營養素總量。多日期問題請分別呼叫多次，每次只帶一個日期片語。",
   parameters: {
     type: "object",
-    properties: {},
+    properties: {
+      date_text: { type: "string" },
+    },
     additionalProperties: false,
   },
   zodSchema: getDailySummarySchema,
   logSummary: () => ({ tool: "get_daily_summary" }),
-  execute: async (_args, context) => {
+  execute: async (args, context) => {
     const deps = context.deps?.toolDeps as ToolDeps | undefined;
     const deviceId = context.deps?.deviceId as string | undefined;
     if (!deps || !deviceId) {
@@ -387,13 +524,50 @@ const getDailySummaryContract: ToolContract<
         "get_daily_summary contract missing toolDeps/deviceId in context",
       );
     }
+    const currentDate = currentAppDate();
+    const dateIntent = resolveHistoricalDateIntent({
+      input: args.date_text?.trim() || context.currentUserMessage,
+      currentDate,
+      mode: "query",
+      previousDateKey: extractPreviousHistoricalDateKey(
+        context.previousAssistantMessage,
+        currentDate,
+      ),
+    });
+    if (dateIntent.status === "needs_clarification") {
+      const clarification: HistoricalToolClarification = {
+        status: "needs_clarification",
+        prompt: dateIntent.prompt,
+        reason: dateIntent.reason,
+      };
+      return {
+        ok: true,
+        result: clarification,
+        toolMessage: buildHistoricalToolMessage(clarification),
+      };
+    }
+    if (dateIntent.status === "resolved_many") {
+      const multipleTargets = {
+        status: "multiple_targets" as const,
+        dateKeys: dateIntent.dateKeys,
+      };
+      return {
+        ok: true,
+        result: multipleTargets,
+        toolMessage: buildHistoricalToolMessage(multipleTargets),
+      };
+    }
     const summary = await deps.summaryService.getDailySummary(
       deviceId,
-      currentAppDate(),
+      buildLocalMidpointDate(dateIntent.dateKey),
     );
     return {
       ok: true,
-      result: summary,
+      result: {
+        status: "summary",
+        dailySummary: summary,
+        affectedDate: dateIntent.isHistorical ? dateIntent.dateKey : undefined,
+      },
       toolMessage: JSON.stringify(summary),
     };
   },
@@ -693,11 +867,11 @@ export async function executeTool(
       return {
         result: outcome.result,
         summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
-      success: false,
-      executed: false,
-      failureReason: outcome.failureReason,
-      updatedFields,
-    };
+        success: false,
+        executed: false,
+        failureReason: outcome.failureReason,
+        updatedFields,
+      };
     }
 
     // Convert controlled failures into FatalToolError so the existing
@@ -721,11 +895,21 @@ export async function executeTool(
   // Map contract-level success result back to ToolExecutionResult.
   if (toolCall.function.name === "log_food") {
     const contractResult = outcome.contractResult as LogFoodResult;
+    if (contractResult.status === "needs_clarification") {
+      return {
+        result: outcome.result,
+        summary: "status: needs_clarification",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+      };
+    }
     return {
       result: outcome.result,
       summary: "成功",
       mealMutationKind: "log",
       dailySummary: contractResult.dailySummary,
+      affectedDate: contractResult.affectedDate,
       loggedMeal: contractResult.loggedMeal,
     };
   }
@@ -760,9 +944,29 @@ export async function executeTool(
 
   if (toolCall.function.name === "get_daily_summary") {
     const summary = outcome.contractResult as GetDailySummaryResult;
+    if (summary.status === "needs_clarification") {
+      return {
+        result: outcome.result,
+        summary: "status: needs_clarification",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+      };
+    }
+    if (summary.status === "multiple_targets") {
+      return {
+        result: outcome.result,
+        summary: "status: multiple_targets",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+      };
+    }
     return {
       result: outcome.result,
-      summary: `熱量 ${summary.totalCalories}kcal, P${summary.totalProtein}g, C${summary.totalCarbs}g, F${summary.totalFat}g`,
+      summary: `熱量 ${summary.dailySummary.totalCalories}kcal, P${summary.dailySummary.totalProtein}g, C${summary.dailySummary.totalCarbs}g, F${summary.dailySummary.totalFat}g`,
+      dailySummary: summary.dailySummary,
+      affectedDate: summary.affectedDate,
     };
   }
 

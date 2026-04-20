@@ -91,6 +91,7 @@ export interface StreamCallbacks {
     didMutateMeal?: boolean;
     dailySummary?: DailySummary;
     dailyTargets?: DailyTargets;
+    affectedDate?: string;
   }) => void;
   onError: (message: string) => void;
 }
@@ -170,6 +171,7 @@ export async function sendMessageStream(
             ...(parsed.didMutateMeal !== undefined ? { didMutateMeal: Boolean(parsed.didMutateMeal) } : {}),
             ...(parsed.dailySummary ? { dailySummary: parsed.dailySummary as DailySummary } : {}),
             ...(parsed.dailyTargets ? { dailyTargets: parsed.dailyTargets as DailyTargets } : {}),
+            ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
           });
         } else if (eventType === "error") {
           sawTerminalEvent = true;

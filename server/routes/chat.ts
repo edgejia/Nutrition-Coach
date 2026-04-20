@@ -305,6 +305,7 @@ async function handleOrchestratorSSE(
   let streamDidMutateMeal = false;
   let streamDailySummary: unknown;
   let streamDailyTargets: unknown;
+  let streamAffectedDate: string | undefined;
 
   try {
     if (image) {
@@ -336,11 +337,12 @@ async function handleOrchestratorSSE(
     );
 
     if ("streamGenerator" in result) {
-      const { streamGenerator, didLogMeal, dailySummary } = result;
+      const { streamGenerator, didLogMeal, dailySummary, affectedDate } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
       streamDailyTargets = result.dailyTargets;
+      streamAffectedDate = affectedDate;
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -359,15 +361,17 @@ async function handleOrchestratorSSE(
         didMutateMeal: streamDidMutateMeal,
         ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
+        ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
     } else {
-      const { reply: replyText, didLogMeal, dailySummary, dailyTargets } = result;
+      const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
       streamDailyTargets = dailyTargets;
+      streamAffectedDate = affectedDate;
       const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, replyText);
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
@@ -375,6 +379,7 @@ async function handleOrchestratorSSE(
         didMutateMeal: streamDidMutateMeal,
         ...(dailySummary ? { dailySummary } : {}),
         ...(dailyTargets ? { dailyTargets } : {}),
+        ...(affectedDate ? { affectedDate } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, deps.log);
@@ -401,6 +406,7 @@ async function handleOrchestratorSSE(
       didMutateMeal: streamDidMutateMeal,
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
+      ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
     publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
@@ -454,6 +460,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonDidMutateMeal = false;
       let jsonDailySummary: unknown;
       let jsonDailyTargets: unknown;
+      let jsonAffectedDate: string | undefined;
 
       try {
         const durableAsset = await createDurableAssetIfNeeded(assetService, deviceId, image);
@@ -476,6 +483,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonDidMutateMeal = result.didMutateMeal ?? result.didLogMeal;
         jsonDailySummary = result.dailySummary;
         jsonDailyTargets = result.dailyTargets;
+        jsonAffectedDate = result.affectedDate;
 
         if (result.didLogMeal && !result.dailySummary) {
           throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
@@ -483,7 +491,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
-          const { streamGenerator, didLogMeal, dailySummary } = result;
+          const { streamGenerator, didLogMeal, dailySummary, affectedDate } = result;
           let fullReply = "";
           for await (const token of streamGenerator) {
             fullReply += token;
@@ -504,10 +512,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
             ...(dailySummary ? { dailySummary } : {}),
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
+            ...(affectedDate ? { affectedDate } : {}),
           };
         }
 
-        const { reply: replyText, didLogMeal, dailySummary, dailyTargets } = result;
+        const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate } = result;
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
@@ -518,6 +527,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
           ...(dailySummary ? { dailySummary } : {}),
           ...(dailyTargets ? { dailyTargets } : {}),
+          ...(affectedDate ? { affectedDate } : {}),
         };
       } catch {
         const fallback = jsonDidLogMeal
@@ -539,6 +549,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonDidMutateMeal ? { didMutateMeal: true } : {}),
           ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}),
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
+          ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),
         };
       } finally {
         await cleanupDurableAssetSafe(

@@ -188,6 +188,7 @@ describe("Chat API", () => {
     const form = new FormData();
     form.append("message", "");
     form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
       const res = await fetch(`${address}/api/chat`, {
@@ -197,7 +198,7 @@ describe("Chat API", () => {
       });
 
       assert.equal(res.status, 200);
-      const reader = res.body?.getReader();
+      reader = res.body?.getReader();
       assert.ok(reader);
 
       const { raw } = await readUntilEventCount(reader, "done", 1);
@@ -233,6 +234,7 @@ describe("Chat API", () => {
       assert.equal(assistantMessages.length, 1);
       assert.match(assistantMessages[0]!.content, /抱歉|無法/);
     } finally {
+      await reader?.cancel();
       services.chatService.getCompressedHistory = originalGetCompressedHistory;
     }
   });
@@ -353,6 +355,81 @@ describe("Chat API", () => {
       mealCount: 1,
       date: formatLocalDate(new Date()),
     });
+  });
+
+  it("POST /api/chat returns affectedDate for historical logging without changing the summary payload shape", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_historical_log",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記到 3/25。" });
+
+    const form = new FormData();
+    form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.affectedDate, "2026-03-25");
+    assert.equal(body.dailySummary?.date, "2026-03-25");
+  });
+
+  it("POST /api/chat returns affectedDate for non-today summary queries", async () => {
+    assert.ok(services, "expected app services");
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 32,
+      carbs: 0,
+      fat: 5,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_historical_summary",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({ date_text: "2026-03-25" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "你在 3/25 共吃了 32g 蛋白質。" });
+
+    const form = new FormData();
+    form.append("message", "2026-03-25 吃了多少蛋白質？");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.affectedDate, "2026-03-25");
+    assert.equal(body.dailySummary?.date, "2026-03-25");
+    assert.equal(body.dailySummary?.totalProtein, 32);
   });
 
   it("POST /api/chat does not include dailySummary when no food is logged", async () => {

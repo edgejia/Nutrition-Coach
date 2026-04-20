@@ -34,6 +34,7 @@ export type OrchestratorResult =
       didMutateMeal?: boolean;
       dailySummary?: DailySummary;
       dailyTargets?: DailyTargets;
+      affectedDate?: string;
     }
   | {
       streamGenerator: AsyncGenerator<string>;
@@ -41,6 +42,7 @@ export type OrchestratorResult =
       didMutateMeal?: boolean;
       dailySummary?: DailySummary;
       dailyTargets?: DailyTargets;
+      affectedDate?: string;
     };
 
 function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined): DailySummary {
@@ -199,6 +201,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let shouldStreamFinalReply = false;
       let successfulGoalReceipt: string | undefined;
       let successfulGoalTargets: DailyTargets | undefined;
+      let resolvedAffectedDate: string | undefined;
       let loggedMeal:
         | {
             foodName: string;
@@ -228,6 +231,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 didMutateMeal,
                 dailySummary: logMealSummary,
                 dailyTargets: successfulGoalTargets,
+                affectedDate: resolvedAffectedDate,
               };
             }
             response = roundResult.response;
@@ -243,6 +247,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 didMutateMeal,
                 dailySummary: logMealSummary,
                 dailyTargets: successfulGoalTargets,
+                affectedDate: resolvedAffectedDate,
               };
             }
 
@@ -257,6 +262,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didMutateMeal,
               dailySummary: logMealSummary,
               dailyTargets: successfulGoalTargets,
+              affectedDate: resolvedAffectedDate,
             };
           }
           if (didMutateMeal) {
@@ -268,10 +274,17 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didLogMeal,
               didMutateMeal: true,
               dailySummary: requireDailySummaryForLoggedMeal(logMealSummary),
+              affectedDate: resolvedAffectedDate,
             };
           }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
-          return { reply: errorMsg, didLogMeal, didMutateMeal, dailySummary: logMealSummary };
+          return {
+            reply: errorMsg,
+            didLogMeal,
+            didMutateMeal,
+            dailySummary: logMealSummary,
+            affectedDate: resolvedAffectedDate,
+          };
         }
 
         if (response.content !== undefined) {
@@ -282,6 +295,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             didMutateMeal,
             dailySummary: logMealSummary,
             dailyTargets: successfulGoalTargets,
+            affectedDate: resolvedAffectedDate,
           };
         }
 
@@ -310,6 +324,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 updatedFields,
                 publishedEvents,
                 dailyTargets,
+                affectedDate,
                 mealMutationKind,
               } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
@@ -336,11 +351,17 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 toolResults.push({ toolCall, result });
                 continue;
               }
+              if (affectedDate) {
+                resolvedAffectedDate = affectedDate;
+              }
               if (toolCall.function.name === "log_food") {
                 didLogMeal = true;
                 didMutateMeal = true;
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
                 loggedMeal = toolLoggedMeal;
+              }
+              if (toolCall.function.name === "get_daily_summary" && dailySummary) {
+                logMealSummary = dailySummary;
               }
               if (mealMutationKind === "update" || mealMutationKind === "delete") {
                 didMutateMeal = true;
@@ -372,6 +393,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     didMutateMeal,
                     dailySummary: logMealSummary,
                     dailyTargets: successfulGoalTargets,
+                    affectedDate: resolvedAffectedDate,
                   };
                 }
                 throw err;
@@ -387,7 +409,13 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           if (didLogMeal && loggedMeal && isImageOnlyMessage(userMessage, imageBase64)) {
             const reply = buildImageLoggedReply(loggedMeal);
             opts?.hooks?.onLLMEnd?.(round + 1, true);
-            return { reply, didLogMeal, didMutateMeal, dailySummary: logMealSummary };
+            return {
+              reply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              affectedDate: resolvedAffectedDate,
+            };
           }
           shouldStreamFinalReply = true;
           // Complete the tool-round LLM lifecycle event
@@ -404,9 +432,16 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           didMutateMeal,
           dailySummary: logMealSummary,
           dailyTargets: successfulGoalTargets,
+          affectedDate: resolvedAffectedDate,
         };
       }
-      return { reply: FALLBACK, didLogMeal, didMutateMeal, dailySummary: logMealSummary };
+      return {
+        reply: FALLBACK,
+        didLogMeal,
+        didMutateMeal,
+        dailySummary: logMealSummary,
+        affectedDate: resolvedAffectedDate,
+      };
     },
   };
 }

@@ -227,6 +227,64 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.didLogMeal, false);
   });
 
+  it("returns affectedDate when a historical log succeeds", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_historical_log",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記到 3/25。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "幫我補記 2026-03-25 晚餐吃牛肉麵");
+    if (!("reply" in result)) throw new Error("expected reply result");
+
+    assert.equal(result.didLogMeal, true);
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.equal(result.dailySummary?.date, "2026-03-25");
+  });
+
+  it("returns affectedDate for non-today summary queries", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 32,
+      carbs: 0,
+      fat: 5,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_historical_summary",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({ date_text: "2026-03-25" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "你在 3/25 共吃了 32g 蛋白質。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "2026-03-25 吃了多少蛋白質？");
+    if (!("reply" in result)) throw new Error("expected reply result");
+
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.equal(result.dailySummary?.date, "2026-03-25");
+  });
+
   it("handleMessage returns didLogMeal: true when log_food succeeded but final LLM round fails", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
