@@ -317,12 +317,32 @@ const scenario: VerificationScenario = {
         method: "DELETE",
         headers: { "x-device-id": fixture.deviceId },
       });
-      artifacts.deleteResponse = { status: deleteRes.status, mealId: deletedMeal.id };
-      if (deleteRes.status !== 204) {
-        steps.push(fail("delete_meal", `Expected 204 from DELETE /api/meals/:id, got ${deleteRes.status}`));
+      const deleteBody = await deleteRes.json() as {
+        affectedDate?: string;
+        dailySummary?: { date?: string; mealCount?: number };
+      };
+      artifacts.deleteResponse = { status: deleteRes.status, mealId: deletedMeal.id, body: deleteBody };
+      if (deleteRes.status !== 200) {
+        steps.push(fail("delete_meal", `Expected 200 from DELETE /api/meals/:id, got ${deleteRes.status}`));
         return failResult(scenarioName, steps, "delete_meal", artifacts);
       }
-      steps.push(pass("delete_meal", { mealId: deletedMeal.id, status: deleteRes.status }));
+      if (deleteBody.affectedDate !== postLogSummaryState.summary.date) {
+        steps.push(fail(
+          "delete_meal",
+          `Expected delete affectedDate ${postLogSummaryState.summary.date}, got ${deleteBody.affectedDate ?? "<missing>"}`,
+          deleteBody,
+        ));
+        return failResult(scenarioName, steps, "delete_meal", artifacts);
+      }
+      if (deleteBody.dailySummary?.date !== deleteBody.affectedDate) {
+        steps.push(fail(
+          "delete_meal",
+          `Expected delete response dailySummary.date ${deleteBody.affectedDate}, got ${deleteBody.dailySummary?.date ?? "<missing>"}`,
+          deleteBody,
+        ));
+        return failResult(scenarioName, steps, "delete_meal", artifacts);
+      }
+      steps.push(pass("delete_meal", { mealId: deletedMeal.id, status: deleteRes.status, body: deleteBody }));
 
       const postDeleteSummaryState = await waitForDailySummaryCount(sseReader, sseCollectedText, 3);
       sseCollectedText = postDeleteSummaryState.collectedText;

@@ -12,6 +12,7 @@ import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
 import { config } from "../config.js";
+import { currentAppDate, formatLocalDate } from "../lib/time.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -32,6 +33,7 @@ const SENSITIVE_IDENTIFIERS = ["log_food", "get_daily_summary"];
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
+const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
@@ -39,6 +41,29 @@ function sanitizeReply(text: string): string {
   return text
     .replace(/log_food/g, "完成記錄")
     .replace(/get_daily_summary/g, "查詢今日攝取");
+}
+
+function formatHistoricalDateLabel(dateKey: string, currentDate = currentAppDate()): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) {
+    return dateKey;
+  }
+
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  return year === currentDate.getFullYear()
+    ? `${month}/${day}`
+    : `${year}/${month}/${day}`;
+}
+
+function appendHistoricalDateSuffixIfMissing(text: string, affectedDate?: string): string {
+  if (!affectedDate || affectedDate === formatLocalDate(currentAppDate()) || CONCRETE_DATE_PATTERN.test(text)) {
+    return text;
+  }
+
+  return `${text}（${formatHistoricalDateLabel(affectedDate)}）`;
 }
 
 async function finalizeAssistantReply(
@@ -146,7 +171,15 @@ function publishSummarySafe(
   dailySummary: unknown,
   log: FastifyBaseLogger,
 ): void {
-  if (!didMutateMeal || !dailySummary) return;
+  const summaryDate = (
+    dailySummary
+    && typeof dailySummary === "object"
+    && "date" in dailySummary
+    && typeof (dailySummary as { date?: unknown }).date === "string"
+  )
+    ? (dailySummary as DailySummary).date
+    : undefined;
+  if (!didMutateMeal || !summaryDate || summaryDate !== formatLocalDate(currentAppDate())) return;
   try {
     publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
     log.info({ event: "summary_publish_success" }, "Summary publish success");
@@ -234,6 +267,7 @@ async function handleStreamingReply(
   deviceId: string,
   didLogMeal: boolean,
   dailySummary: unknown,
+  affectedDate?: string,
   hooks?: OrchestratorHooks,
 ): Promise<{ fullReply: string; didLogMeal: boolean; dailySummary?: unknown }> {
   const sanitizer = createStreamingSanitizer();
@@ -272,6 +306,15 @@ async function handleStreamingReply(
   for (const heldToken of heldTokens) {
     fullReply += heldToken;
     const sanitizedChunk = sanitizer.push(heldToken);
+    if (sanitizedChunk) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+    }
+  }
+  const normalizedReply = appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
+  const appendedText = normalizedReply.slice(fullReply.length);
+  if (appendedText) {
+    fullReply = normalizedReply;
+    const sanitizedChunk = sanitizer.push(appendedText);
     if (sanitizedChunk) {
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
     }
@@ -351,6 +394,7 @@ async function handleOrchestratorSSE(
         deviceId,
         didLogMeal,
         dailySummary,
+        streamAffectedDate,
         hooks,
       );
       streamDidLogMeal = streamResult.didLogMeal;
@@ -372,7 +416,8 @@ async function handleOrchestratorSSE(
       streamDailySummary = dailySummary;
       streamDailyTargets = dailyTargets;
       streamAffectedDate = affectedDate;
-      const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, replyText);
+      const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
+      const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, normalizedReply);
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
         didLogMeal,
@@ -496,7 +541,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           for await (const token of streamGenerator) {
             fullReply += token;
           }
-          const sanitized = await finalizeAssistantReply(chatService, deviceId, fullReply);
+          const normalizedReply = appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
+          const sanitized = await finalizeAssistantReply(chatService, deviceId, normalizedReply);
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
           // C1: try/catch ensures publish failure never changes the HTTP response or status code.
           publishSummarySafe(
@@ -517,7 +563,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         }
 
         const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate } = result;
-        const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, replyText);
+        const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
+        const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, normalizedReply);
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, request.log);

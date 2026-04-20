@@ -78,6 +78,7 @@ describe("chat meal correction integration", () => {
       reply: string;
       didLogMeal: boolean;
       didMutateMeal?: boolean;
+      affectedDate?: string;
       dailySummary?: {
         totalCalories: number;
         totalProtein: number;
@@ -171,6 +172,66 @@ describe("chat meal correction integration", () => {
     const meals = await getMeals();
     assert.equal(meals.length, 1);
     assert.equal(meals[0]!.id, original.id, "historical correction must preserve the original transaction id");
+    assert.equal(meals[0]!.foodName, "雞胸飯");
+    assert.equal(meals[0]!.calories, 500);
+  });
+
+  it("returns affectedDate for historical updates resolved through shared date parsing", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_historical_update",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把 3/25 的雞腿飯改成雞胸飯 500 卡",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "apply_historical_update",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            food_name: "雞胸飯",
+            calories: 500,
+            protein: 42,
+            carbs: 48,
+            fat: 12,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "已幫你更新 3/25 的那筆紀錄。",
+    });
+
+    const { status, body } = await postChat("把 3/25 的雞腿飯改成雞胸飯 500 卡");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.affectedDate, "2026-03-25");
+    assert.equal(body.dailySummary?.date, "2026-03-25");
+    assert.match(body.reply, /3\/25/);
+
+    const meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0]!.id, original.id);
     assert.equal(meals[0]!.foodName, "雞胸飯");
     assert.equal(meals[0]!.calories, 500);
   });
@@ -530,5 +591,57 @@ describe("chat meal correction integration", () => {
     assert.equal(meals.length, 1);
     assert.equal(meals[0]!.id, second.id);
     assert.notEqual(meals[0]!.id, first.id);
+  });
+
+  it("returns affectedDate for historical deletes resolved through shared date parsing", async () => {
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-03-25T10:30:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_historical_delete",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "delete",
+            query: "把 3/25 的牛肉麵刪掉",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "apply_historical_delete",
+        type: "function",
+        function: {
+          name: "delete_meal",
+          arguments: JSON.stringify({
+            meal_id: meal.id,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "已幫你刪除 3/25 那筆牛肉麵。",
+    });
+
+    const { status, body } = await postChat("把 3/25 的牛肉麵刪掉");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.affectedDate, "2026-03-25");
+    assert.equal(body.dailySummary?.date, "2026-03-25");
+    assert.match(body.reply, /3\/25/);
+
+    const meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    assert.equal(meals.length, 0);
   });
 });

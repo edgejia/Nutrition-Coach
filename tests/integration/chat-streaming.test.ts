@@ -363,6 +363,59 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat stream appends a concrete date when the model only says yesterday", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_historical_stream_relative_copy",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["已幫你補記昨天晚餐：牛肉麵。"]);
+
+    const form = new FormData();
+    form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      assert.match(text, /3\/25/);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=5`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const historyJson = await historyRes.json();
+      assert.match(historyJson.messages.at(-1)?.content ?? "", /3\/25/);
+    } finally {
+      await reader?.cancel();
+      controller.abort();
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat stream done includes dailyTargets after update_goals succeeds", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createUpdateGoalsToolCall()] });
     mockLLM.queueChatStream(["已經", "更新好了"]);

@@ -135,6 +135,7 @@ type LogFoodResult = LogFoodSuccessResult | HistoricalToolClarification;
 
 interface UpdateMealResult {
   dailySummary: DailySummary;
+  affectedDate: string;
   updatedMeal: {
     id: string;
     foodName: string;
@@ -149,6 +150,7 @@ interface UpdateMealResult {
 
 interface DeleteMealResult {
   dailySummary: DailySummary;
+  affectedDate: string;
   deletedMealId: string;
 }
 
@@ -487,7 +489,19 @@ const findMealsContract: ToolContract<FindMealsArgs, FindMealsResult> = {
       throw new Error("find_meals contract missing mealCorrectionService/deviceId in context");
     }
 
-    const result = await deps.mealCorrectionService.findMeals(deviceId, args.action, args.query.trim());
+    const currentDate = currentAppDate();
+    const result = await deps.mealCorrectionService.findMeals(
+      deviceId,
+      args.action,
+      args.query.trim(),
+      {
+        currentDate,
+        previousDateKey: extractPreviousHistoricalDateKey(
+          context.previousAssistantMessage,
+          currentDate,
+        ),
+      },
+    );
     if (deps.toolSessionState) {
       deps.toolSessionState.resolvedMealIds =
         result.status === "resolved" ? [result.resolvedMealId] : [];
@@ -929,6 +943,7 @@ export async function executeTool(
       summary: "成功",
       mealMutationKind: "update",
       dailySummary: contractResult.dailySummary,
+      affectedDate: contractResult.affectedDate,
     };
   }
 
@@ -939,6 +954,7 @@ export async function executeTool(
       summary: "成功",
       mealMutationKind: "delete",
       dailySummary: contractResult.dailySummary,
+      affectedDate: contractResult.affectedDate,
     };
   }
 

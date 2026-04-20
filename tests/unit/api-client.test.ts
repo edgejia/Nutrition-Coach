@@ -249,13 +249,33 @@ describe("API Client", () => {
     await assert.rejects(() => api.getDaySnapshot("2026-03-25"), { message: "UNAUTHORIZED" });
   });
 
-  it("deleteMeal sends DELETE and resolves without a body", async () => {
+  it("deleteMeal sends DELETE and returns affectedDate metadata", async () => {
     storage.set("deviceId", "d-1");
-    mockFetch(204, null);
+    mockFetch(200, {
+      affectedDate: "2026-03-25",
+      dailySummary: {
+        date: "2026-03-25",
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        mealCount: 0,
+      },
+    });
 
     const result = await api.deleteMeal("meal-1");
 
-    assert.equal(result, undefined);
+    assert.deepEqual(result, {
+      affectedDate: "2026-03-25",
+      dailySummary: {
+        date: "2026-03-25",
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        mealCount: 0,
+      },
+    });
     assert.equal(fetchCalls[0].url, "/api/meals/meal-1");
     assert.equal(fetchCalls[0].init.method, "DELETE");
     const headers = fetchCalls[0].init.headers as Record<string, string>;

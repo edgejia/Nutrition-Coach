@@ -2,10 +2,10 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   mealRevisionItems,
-  mealRevisions,
   mealTransactions,
 } from "../db/schema.js";
-import { formatLocalDate } from "../lib/time.js";
+import { resolveHistoricalDateIntent } from "../lib/historical-date.js";
+import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { createMealTransactionsService, type MealTransactionItemInput } from "./meal-transactions.js";
 import { createTurnStateService } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
@@ -64,6 +64,11 @@ export type FindMealsResult =
   | FindMealsClarificationResult
   | FindMealsNotFoundResult;
 
+interface FindMealsOptions {
+  currentDate?: Date;
+  previousDateKey?: string;
+}
+
 interface CandidateHeaderRow {
   id: string;
   loggedAt: string;
@@ -87,13 +92,6 @@ function inferMealPeriod(loggedAt: string): "breakfast" | "lunch" | "dinner" | "
 
 function hasRecentReference(query: string): boolean {
   return /(剛剛|剛才|上一筆|那筆|那餐|剛剛那筆|剛才那筆|上一餐)/.test(query);
-}
-
-function extractRelativeDateOffset(query: string): number | undefined {
-  if (/今天/.test(query)) return 0;
-  if (/昨天/.test(query)) return -1;
-  if (/前天/.test(query)) return -2;
-  return undefined;
 }
 
 function extractMealPeriod(query: string): MealCorrectionCandidate["mealPeriod"] | undefined {
@@ -150,6 +148,18 @@ function buildClarificationPrompt(
 function buildNotFoundPrompt(action: "update" | "delete"): string {
   const verb = action === "update" ? "修改" : "刪除";
   return `我還不能確定你要${verb}哪一筆餐點，請補充日期、餐別或食物名稱。`;
+}
+
+function buildDateClarificationPrompt(
+  action: "update" | "delete",
+  reason: "multiple_dates" | "unsupported" | "unparseable",
+): string {
+  if (reason === "multiple_dates") {
+    const verb = action === "update" ? "修改" : "刪除";
+    return `我還不能確定你要${verb}哪一天的餐點，請一次告訴我一個日期。`;
+  }
+
+  return "我還不能確定是哪一天，請再說一次日期。";
 }
 
 function roundPatchValue(value: number): number {
@@ -254,6 +264,39 @@ function scoreCandidate(
   return score;
 }
 
+function resolveFindMealsTargetDateKey(
+  query: string,
+  action: "update" | "delete",
+  options?: FindMealsOptions,
+): { status: "resolved"; targetDateKey?: string } | { status: "needs_clarification"; prompt: string } {
+  const currentDate = options?.currentDate ?? currentAppDate();
+  const dateIntent = resolveHistoricalDateIntent({
+    input: query,
+    currentDate,
+    mode: "mutation",
+    previousDateKey: options?.previousDateKey,
+  });
+
+  if (dateIntent.status === "needs_clarification") {
+    return {
+      status: "needs_clarification",
+      prompt: buildDateClarificationPrompt(action, dateIntent.reason),
+    };
+  }
+
+  if (dateIntent.status === "resolved_many") {
+    return {
+      status: "needs_clarification",
+      prompt: buildDateClarificationPrompt(action, "multiple_dates"),
+    };
+  }
+
+  return {
+    status: "resolved",
+    targetDateKey: dateIntent.source === "default_today" ? undefined : dateIntent.dateKey,
+  };
+}
+
 export function createMealCorrectionService(db: AppDatabase) {
   const mealTransactionsService = createMealTransactionsService(db);
   const turnStateService = createTurnStateService(db);
@@ -276,17 +319,12 @@ export function createMealCorrectionService(db: AppDatabase) {
 
     const limitedHeaders = headers.slice(-limit).reverse();
     const revisionIds = limitedHeaders.map((header) => header.currentRevisionId);
-    const revisions = await db
-      .select()
-      .from(mealRevisions)
-      .where(inArray(mealRevisions.id, revisionIds));
     const items = await db
       .select()
       .from(mealRevisionItems)
       .where(inArray(mealRevisionItems.revisionId, revisionIds))
       .orderBy(asc(mealRevisionItems.position));
 
-    const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
     const itemsByRevisionId = new Map<string, typeof items>();
     for (const item of items) {
       const existing = itemsByRevisionId.get(item.revisionId) ?? [];
@@ -302,6 +340,7 @@ export function createMealCorrectionService(db: AppDatabase) {
           : revisionItems.length === 2
             ? `${revisionItems[0]!.foodName}、${revisionItems[1]!.foodName}`
             : `${revisionItems[0]!.foodName}、${revisionItems[1]!.foodName} 等${revisionItems.length}項`;
+
       return {
         mealId: header.id,
         foodName,
@@ -315,61 +354,61 @@ export function createMealCorrectionService(db: AppDatabase) {
         mealPeriod: inferMealPeriod(header.loggedAt),
       };
     });
+  }
+
+  async function rememberResolvedCandidate(
+    deviceId: string,
+    action: "update" | "delete",
+    candidate: MealCorrectionCandidate,
+  ): Promise<void> {
+    await turnStateService.putState(
+      deviceId,
+      PENDING_SELECTION_KIND,
+      { action, candidates: [candidate] },
+      PENDING_SELECTION_TTL_MS,
+    );
+  }
+
+  async function loadCurrentItems(deviceId: string, mealId: string): Promise<MealTransactionItemInput[]> {
+    const transaction = await db
+      .select({
+        currentRevisionId: mealTransactions.currentRevisionId,
+      })
+      .from(mealTransactions)
+      .where(and(
+        eq(mealTransactions.deviceId, deviceId),
+        eq(mealTransactions.id, mealId),
+        isNull(mealTransactions.deletedAt),
+      ))
+      .limit(1);
+
+    const currentRevisionId = transaction[0]?.currentRevisionId;
+    if (!currentRevisionId) {
+      throw new Error("MEAL_NOT_FOUND");
     }
 
-    async function rememberResolvedCandidate(
-      deviceId: string,
-      action: "update" | "delete",
-      candidate: MealCorrectionCandidate,
-    ): Promise<void> {
-      await turnStateService.putState(
-        deviceId,
-        PENDING_SELECTION_KIND,
-        { action, candidates: [candidate] },
-        PENDING_SELECTION_TTL_MS,
-      );
+    const items = await db
+      .select({
+        foodName: mealRevisionItems.foodName,
+        calories: mealRevisionItems.calories,
+        protein: mealRevisionItems.protein,
+        carbs: mealRevisionItems.carbs,
+        fat: mealRevisionItems.fat,
+      })
+      .from(mealRevisionItems)
+      .where(eq(mealRevisionItems.revisionId, currentRevisionId))
+      .orderBy(asc(mealRevisionItems.position));
+
+    if (items.length === 0) {
+      throw new Error("MEAL_ITEMS_REQUIRED");
     }
 
-    async function loadCurrentItems(deviceId: string, mealId: string): Promise<MealTransactionItemInput[]> {
-      const transaction = await db
-        .select({
-          currentRevisionId: mealTransactions.currentRevisionId,
-        })
-        .from(mealTransactions)
-        .where(and(
-          eq(mealTransactions.deviceId, deviceId),
-          eq(mealTransactions.id, mealId),
-          isNull(mealTransactions.deletedAt),
-        ))
-        .limit(1);
+    return items;
+  }
 
-      const currentRevisionId = transaction[0]?.currentRevisionId;
-      if (!currentRevisionId) {
-        throw new Error("MEAL_NOT_FOUND");
-      }
-
-      const items = await db
-        .select({
-          foodName: mealRevisionItems.foodName,
-          calories: mealRevisionItems.calories,
-          protein: mealRevisionItems.protein,
-          carbs: mealRevisionItems.carbs,
-          fat: mealRevisionItems.fat,
-        })
-        .from(mealRevisionItems)
-        .where(eq(mealRevisionItems.revisionId, currentRevisionId))
-        .orderBy(asc(mealRevisionItems.position));
-
-      if (items.length === 0) {
-        throw new Error("MEAL_ITEMS_REQUIRED");
-      }
-
-      return items;
-    }
-
-    async function tryResolvePendingSelection(
-      deviceId: string,
-      query: string,
+  async function tryResolvePendingSelection(
+    deviceId: string,
+    query: string,
   ): Promise<FindMealsResolvedResult | FindMealsClarificationResult | undefined> {
     const pending = await turnStateService.getState<PendingMealSelectionState>(deviceId, PENDING_SELECTION_KIND);
     if (!pending) {
@@ -387,6 +426,7 @@ export function createMealCorrectionService(db: AppDatabase) {
           candidates: pending.candidates,
         };
       }
+
       return {
         status: "resolved",
         action: pending.action,
@@ -402,35 +442,36 @@ export function createMealCorrectionService(db: AppDatabase) {
       return labels.some((label) => label.length > 0 && normalized.includes(label));
     });
 
-      if (matchingCandidates.length === 1) {
-        return {
-          status: "resolved",
+    if (matchingCandidates.length === 1) {
+      return {
+        status: "resolved",
         action: pending.action,
         resolvedMealId: matchingCandidates[0]!.mealId,
         candidate: matchingCandidates[0]!,
         fromPending: true,
-        };
-      }
-
-      if (pending.candidates.length === 1) {
-        return {
-          status: "resolved",
-          action: pending.action,
-          resolvedMealId: pending.candidates[0]!.mealId,
-          candidate: pending.candidates[0]!,
-          fromPending: true,
-        };
-      }
-
-      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
-      return undefined;
+      };
     }
+
+    if (pending.candidates.length === 1) {
+      return {
+        status: "resolved",
+        action: pending.action,
+        resolvedMealId: pending.candidates[0]!.mealId,
+        candidate: pending.candidates[0]!,
+        fromPending: true,
+      };
+    }
+
+    await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+    return undefined;
+  }
 
   return {
     async findMeals(
       deviceId: string,
       action: "update" | "delete",
       query: string,
+      options?: FindMealsOptions,
     ): Promise<FindMealsResult> {
       const pendingSelection = await tryResolvePendingSelection(deviceId, query);
       if (pendingSelection) {
@@ -446,10 +487,17 @@ export function createMealCorrectionService(db: AppDatabase) {
         };
       }
 
-      const relativeOffset = extractRelativeDateOffset(query);
-      const targetDateKey = relativeOffset === undefined
-        ? undefined
-        : formatLocalDate(new Date(Date.now() + relativeOffset * 24 * 60 * 60 * 1000));
+      const dateResolution = resolveFindMealsTargetDateKey(query, action, options);
+      if (dateResolution.status === "needs_clarification") {
+        return {
+          status: "needs_clarification",
+          action,
+          prompt: dateResolution.prompt,
+          candidates: [],
+        };
+      }
+
+      const targetDateKey = dateResolution.targetDateKey;
       const targetMealPeriod = extractMealPeriod(query);
       const normalizedQuery = normalizeText(query);
 
@@ -559,6 +607,7 @@ export function createMealCorrectionService(db: AppDatabase) {
         imagePath: string | null;
         loggedAt: string;
       };
+      affectedDate: string;
       dailySummary: DailySummary;
     }> {
       const items = "items" in input
@@ -600,6 +649,7 @@ export function createMealCorrectionService(db: AppDatabase) {
           imagePath: updated.imageAssetId ? makeAssetRef(updated.imageAssetId) : null,
           loggedAt: updated.loggedAt,
         },
+        affectedDate: updated.affectedDateKey,
         dailySummary,
       };
     },
@@ -607,7 +657,7 @@ export function createMealCorrectionService(db: AppDatabase) {
     async deleteMeal(
       deviceId: string,
       mealId: string,
-    ): Promise<{ deletedMealId: string; dailySummary: DailySummary }> {
+    ): Promise<{ deletedMealId: string; affectedDate: string; dailySummary: DailySummary }> {
       const deleted = await mealTransactionsService.softDeleteTransaction(deviceId, mealId);
       const dailySummary = await summaryService.getDailySummary(
         deviceId,
@@ -616,6 +666,7 @@ export function createMealCorrectionService(db: AppDatabase) {
 
       return {
         deletedMealId: deleted.transactionId,
+        affectedDate: deleted.affectedDateKey,
         dailySummary,
       };
     },

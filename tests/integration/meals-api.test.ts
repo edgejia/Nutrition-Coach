@@ -74,6 +74,18 @@ describe("Meals API", () => {
     });
   }
 
+  async function readOptionalSSEChunk(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    timeoutMs: number,
+  ): Promise<string | null> {
+    const decoder = new TextDecoder();
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+    const read = reader.read()
+      .then((chunk) => (chunk.value ? decoder.decode(chunk.value) : ""))
+      .catch(() => "");
+    return Promise.race([read, timeout]);
+  }
+
   it("GET /api/meals returns today's meals in ascending timeline order after two meal logs", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -146,7 +158,18 @@ describe("Meals API", () => {
       url: `/api/meals/${mealId}`,
       headers: { "x-device-id": deviceId },
     });
-    assert.equal(ownDelete.statusCode, 204);
+    assert.equal(ownDelete.statusCode, 200);
+    assert.deepEqual(ownDelete.json(), {
+      affectedDate: formatLocalDate(new Date()),
+      dailySummary: {
+        date: formatLocalDate(new Date()),
+        totalCalories: 0,
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        mealCount: 0,
+      },
+    });
 
     const remainingMeals = await app.inject({
       method: "GET",
@@ -183,7 +206,8 @@ describe("Meals API", () => {
         headers: { "x-device-id": deviceId },
       });
 
-      assert.equal(deleteRes.statusCode, 204);
+      assert.equal(deleteRes.statusCode, 200);
+      assert.equal(deleteRes.json().affectedDate, formatLocalDate(new Date(loggedAt)));
       assert.deepEqual(
         requestedDates,
         [formatLocalDate(new Date(loggedAt))],
@@ -191,6 +215,61 @@ describe("Meals API", () => {
       );
     } finally {
       services.summaryService.getDailySummary = originalGetDailySummary;
+    }
+  });
+
+  it("DELETE /api/meals/:id does not publish historical recomputes into the today SSE loop", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "回補早餐",
+      calories: 420,
+      protein: 20,
+      carbs: 50,
+      fat: 14,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+        signal: controller.signal,
+      });
+      assert.equal(sseRes.status, 200);
+      assert.ok(sseRes.body);
+      reader = sseRes.body.getReader();
+
+      await reader.read();
+
+      const deleteRes = await fetch(`${address}/api/meals/${meal.id}`, {
+        method: "DELETE",
+        headers: { "x-device-id": deviceId },
+      });
+      assert.equal(deleteRes.status, 200);
+      assert.deepEqual(await deleteRes.json(), {
+        affectedDate: "2026-03-25",
+        dailySummary: {
+          date: "2026-03-25",
+          totalCalories: 0,
+          totalProtein: 0,
+          totalCarbs: 0,
+          totalFat: 0,
+          mealCount: 0,
+        },
+      });
+
+      const extraChunk = await readOptionalSSEChunk(reader, 250);
+      assert.ok(
+        extraChunk === null || !extraChunk.includes("event: daily_summary"),
+        `historical delete must not emit a today SSE summary, got ${extraChunk ?? "<none>"}`,
+      );
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
     }
   });
 

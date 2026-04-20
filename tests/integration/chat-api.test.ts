@@ -58,6 +58,18 @@ async function readUntilEventCount(
   throw new Error(`Expected ${targetCount} ${targetEvent} event(s), got ${parseSSEEvents(raw).filter((frame) => frame.event === targetEvent).length}`);
 }
 
+async function readOptionalSSEChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+): Promise<string | null> {
+  const decoder = new TextDecoder();
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+  const read = reader.read()
+    .then((chunk) => (chunk.value ? decoder.decode(chunk.value, { stream: !chunk.done }) : ""))
+    .catch(() => "");
+  return Promise.race([read, timeout]);
+}
+
 describe("Chat API", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
@@ -391,6 +403,101 @@ describe("Chat API", () => {
     assert.equal(body.didLogMeal, true);
     assert.equal(body.affectedDate, "2026-03-25");
     assert.equal(body.dailySummary?.date, "2026-03-25");
+  });
+
+  it("POST /api/chat appends a concrete date when a historical mutation reply only says relative time", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_historical_log_relative_copy",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你補記昨天晚餐：牛肉麵。" });
+
+    const form = new FormData();
+    form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.affectedDate, "2026-03-25");
+    assert.match(body.reply, /3\/25/);
+  });
+
+  it("historical chat mutations do not publish a non-today summary into the SSE live loop", async () => {
+    const sseController = new AbortController();
+    const timeout = setTimeout(() => sseController.abort(), 3000);
+    let sseReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+        signal: sseController.signal,
+      });
+      assert.equal(sseRes.status, 200);
+      assert.ok(sseRes.body);
+      sseReader = sseRes.body.getReader();
+      await sseReader.read();
+
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: "call_historical_log_no_publish",
+          type: "function",
+          function: {
+            name: "log_food",
+            arguments: JSON.stringify({
+              food_name: "牛肉麵",
+              calories: 520,
+              protein: 24,
+              carbs: 68,
+              fat: 16,
+              date_text: "2026-03-25",
+              meal_period: "dinner",
+            }),
+          },
+        }],
+      });
+      mockLLM.queueChatResponse({ content: "已幫你記到 3/25。" });
+
+      const form = new FormData();
+      form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { "x-device-id": deviceId },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.didLogMeal, true);
+      assert.equal(body.affectedDate, "2026-03-25");
+      assert.equal(body.dailySummary?.date, "2026-03-25");
+
+      const extraChunk = await readOptionalSSEChunk(sseReader, 250);
+      assert.ok(
+        extraChunk === null || !extraChunk.includes("event: daily_summary"),
+        `historical mutation must not emit a live SSE summary, got ${extraChunk ?? "<none>"}`,
+      );
+    } finally {
+      clearTimeout(timeout);
+      await sseReader?.cancel().catch(() => {});
+      sseController.abort();
+    }
   });
 
   it("POST /api/chat returns affectedDate for non-today summary queries", async () => {

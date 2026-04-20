@@ -151,6 +151,71 @@ describe("meal correction service", () => {
     assert.equal(secondPass.fromPending, true);
   });
 
+  it("accepts shared historical date phrases for meal targeting", async () => {
+    const marchMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+    const lastFridayMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-04-10T10:30:00.000Z",
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 28,
+      carbs: 76,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const slashDateResult = await mealCorrectionService.findMeals(
+      deviceId,
+      "update",
+      "把 3/25 的雞腿飯改成 500 卡",
+    );
+    assert.equal(slashDateResult.status, "resolved");
+    assert.equal(slashDateResult.resolvedMealId, marchMeal.id);
+    assert.equal(slashDateResult.candidate.dateKey, "2026-03-25");
+    await mealCorrectionService.clearPendingSelection(deviceId);
+
+    const relativeWeekResult = await mealCorrectionService.findMeals(
+      deviceId,
+      "delete",
+      "把上週五的牛肉麵刪掉",
+    );
+    assert.equal(relativeWeekResult.status, "resolved");
+    assert.equal(relativeWeekResult.resolvedMealId, lastFridayMeal.id);
+    assert.equal(relativeWeekResult.candidate.dateKey, "2026-04-10");
+  });
+
+  it("clarifies unsupported or multi-date mutation targets instead of defaulting to today", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+
+    const unsupported = await mealCorrectionService.findMeals(deviceId, "delete", "把前幾天的雞腿飯刪掉");
+    assert.equal(unsupported.status, "needs_clarification");
+    assert.match(unsupported.prompt, /再說一次日期|哪一天/);
+
+    const multiDate = await mealCorrectionService.findMeals(deviceId, "delete", "把昨天和前天的雞腿飯刪掉");
+    assert.equal(multiDate.status, "needs_clarification");
+    assert.match(multiDate.prompt, /一個日期|哪一天/);
+  });
+
   it("supports partial single-item updates by preserving unspecified fields", async () => {
     const original = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿",
@@ -193,6 +258,25 @@ describe("meal correction service", () => {
     assert.equal(result.updatedMeal.fat, 6);
   });
 
+  it("returns affectedDate for historical updates and keeps it in sync with dailySummary.date", async () => {
+    const original = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+
+    const result = await mealCorrectionService.updateMeal(deviceId, original.id, {
+      patch: { calories: 500 },
+    });
+
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.equal(result.dailySummary.date, result.affectedDate);
+    assert.equal(result.updatedMeal.calories, 500);
+  });
+
   it("creates a pending clarification state when multiple meals match and resolves the next numbered reply", async () => {
     const first = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",
@@ -222,5 +306,23 @@ describe("meal correction service", () => {
     assert.equal(secondPass.resolvedMealId, first.id);
     assert.notEqual(secondPass.resolvedMealId, second.id);
     assert.equal(secondPass.fromPending, true);
+  });
+
+  it("returns affectedDate for historical deletes and keeps it in sync with dailySummary.date", async () => {
+    const meal = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-03-25T10:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.deleteMeal(deviceId, meal.id);
+
+    assert.equal(result.deletedMealId, meal.id);
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.equal(result.dailySummary.date, result.affectedDate);
+    assert.equal(result.dailySummary.mealCount, 0);
   });
 });

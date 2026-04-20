@@ -224,11 +224,17 @@ export async function getDaySnapshot(
   };
 }
 
-export async function deleteMeal(mealId: string): Promise<void> {
+export interface DeleteMealResponse {
+  affectedDate: string;
+  dailySummary: DailySummary;
+}
+
+export async function deleteMeal(mealId: string): Promise<DeleteMealResponse> {
   const res = await fetch(`/api/meals/${mealId}`, {
     method: "DELETE",
     headers: getHeaders(),
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to delete meal");
+  return res.json() as Promise<DeleteMealResponse>;
 }

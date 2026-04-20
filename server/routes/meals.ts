@@ -4,6 +4,7 @@ import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService } from "../services/summary.js";
 import type { createDeviceService } from "../services/device.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
+import { currentAppDate, formatLocalDate } from "../lib/time.js";
 
 interface Deps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
@@ -67,7 +68,12 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       deviceId,
       new Date(`${affectedDateKey}T12:00:00`),
     );
-    publisher.publishDailySummary(deviceId, dailySummary);
-    return reply.code(204).send();
+    if (dailySummary.date === formatLocalDate(currentAppDate())) {
+      publisher.publishDailySummary(deviceId, dailySummary);
+    }
+    return {
+      affectedDate: affectedDateKey,
+      dailySummary,
+    };
   });
 }
