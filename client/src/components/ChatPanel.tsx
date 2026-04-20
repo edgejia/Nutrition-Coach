@@ -1,7 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { sendMessageStream, loadHistory } from "../api.js";
-import { type FollowMode, deriveFollowModeOnScroll, shouldShowJumpToLatest } from "../lib/chat-scroll.js";
+import {
+  type FollowMode,
+  type LiveUpdateSnapshot,
+  deriveFollowModeOnScroll,
+  getLiveUpdateSources,
+  shouldFollowLatestOnLiveUpdate,
+  shouldShowJumpToLatest,
+} from "../lib/chat-scroll.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
 import { DashboardMiniBar } from "./DashboardMiniBar.js";
@@ -28,6 +35,7 @@ export function ChatPanel() {
   const contentRef = useRef<HTMLDivElement>(null);
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
   const isFirstMount = useRef(true);
+  const liveUpdateSnapshotRef = useRef<LiveUpdateSnapshot | null>(null);
   const previousScrollTopRef = useRef(0);
   const followModeRef = useRef<FollowMode>("attached");
   const scrollFrameRef = useRef<number | null>(null);
@@ -48,6 +56,19 @@ export function ChatPanel() {
 
   function getDistanceFromLatest(container: HTMLDivElement) {
     return container.scrollHeight - container.scrollTop - container.clientHeight;
+  }
+
+  function buildLiveUpdateSnapshot(): LiveUpdateSnapshot {
+    const lastMessage = messages[messages.length - 1];
+    return {
+      messageCount: messages.length,
+      lastMessageId: lastMessage?.id ?? null,
+      lastMessageRole: lastMessage?.role ?? null,
+      lastMessageHasImagePreview: Boolean(lastMessage?.imagePreviewUrl),
+      provisionalId: provisionalBubble?.id ?? null,
+      provisionalStatusLabel: provisionalBubble?.statusLabel ?? "",
+      provisionalContentLength: provisionalBubble?.content.length ?? 0,
+    };
   }
 
   function scrollLatestIntoView(behavior: ScrollBehavior) {
@@ -224,17 +245,30 @@ export function ChatPanel() {
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
+    const nextSnapshot = buildLiveUpdateSnapshot();
 
     if (isFirstMount.current) {
       scrollLatestIntoView("instant");
       previousScrollTopRef.current = container.scrollTop;
+      liveUpdateSnapshotRef.current = nextSnapshot;
       isFirstMount.current = false;
       return;
     }
 
-    if (followModeRef.current === "attached") {
+    const previousSnapshot = liveUpdateSnapshotRef.current;
+    const nextSources = previousSnapshot ? getLiveUpdateSources(previousSnapshot, nextSnapshot) : [];
+    const shouldFollow = nextSources.some((source) =>
+      shouldFollowLatestOnLiveUpdate({
+        mode: followModeRef.current,
+        source,
+      }),
+    );
+
+    if (shouldFollow) {
       scheduleLatestIntoView();
     }
+
+    liveUpdateSnapshotRef.current = nextSnapshot;
   }, [messages, provisionalBubble?.id, provisionalBubble?.statusLabel, provisionalBubble?.content]);
 
   useEffect(() => () => cancelScheduledScroll(), []);
@@ -250,8 +284,17 @@ export function ChatPanel() {
       return;
     }
 
-    const observer = new ResizeObserver(() => {
-      scheduleLatestIntoView();
+    const observer = new ResizeObserver((entries) => {
+      const shouldFollow = entries.some((entry) =>
+        shouldFollowLatestOnLiveUpdate({
+          mode: followModeRef.current,
+          source: entry.target === content ? "content-resize" : "container-resize",
+        }),
+      );
+
+      if (shouldFollow) {
+        scheduleLatestIntoView();
+      }
     });
 
     observer.observe(content);
