@@ -204,6 +204,24 @@ export async function getMeals(options?: { refreshReason?: "day_rollover" }): Pr
   };
 }
 
+export async function getDaySnapshot(
+  dateKey: string,
+): Promise<{ date: string; summary: DailySummary; meals: MealEntry[] }> {
+  const res = await fetch(`/api/day-snapshot?date=${encodeURIComponent(dateKey)}`, {
+    headers: getHeaders(),
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error("Failed to load day snapshot");
+  const body = await res.json() as { date: string; summary: DailySummary; meals: MealEntry[] };
+  return {
+    ...body,
+    meals: body.meals.map((meal) => ({
+      ...meal,
+      imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
+    })),
+  };
+}
+
 export async function deleteMeal(mealId: string): Promise<void> {
   const res = await fetch(`/api/meals/${mealId}`, {
     method: "DELETE",

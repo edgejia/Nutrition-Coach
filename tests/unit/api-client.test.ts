@@ -188,6 +188,67 @@ describe("API Client", () => {
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1?deviceId=d-1");
   });
 
+  it("getDaySnapshot requests the explicit day with X-Device-Id", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      date: "2026-03-25",
+      summary: {
+        date: "2026-03-25",
+        totalCalories: 520,
+        totalProtein: 42,
+        totalCarbs: 48,
+        totalFat: 18,
+        mealCount: 1,
+      },
+      meals: [],
+    });
+
+    const result = await api.getDaySnapshot("2026-03-25");
+
+    assert.equal(fetchCalls[0].url, "/api/day-snapshot?date=2026-03-25");
+    const headers = fetchCalls[0].init.headers as Record<string, string>;
+    assert.equal(headers["X-Device-Id"], "d-1");
+    assert.equal(result.date, "2026-03-25");
+  });
+
+  it("getDaySnapshot appends deviceId to meal image urls for browser image fetches", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      date: "2026-03-25",
+      summary: {
+        date: "2026-03-25",
+        totalCalories: 520,
+        totalProtein: 42,
+        totalCarbs: 48,
+        totalFat: 18,
+        mealCount: 1,
+      },
+      meals: [
+        {
+          id: "meal-1",
+          foodName: "雞胸肉便當",
+          calories: 520,
+          protein: 42,
+          carbs: 48,
+          fat: 18,
+          imageAssetId: "asset-1",
+          imageUrl: "/api/assets/asset-1",
+          loggedAt: "2026-03-25T04:30:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.getDaySnapshot("2026-03-25");
+
+    assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1?deviceId=d-1");
+  });
+
+  it("getDaySnapshot throws UNAUTHORIZED on 401", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(401, { error: "Invalid" });
+    await assert.rejects(() => api.getDaySnapshot("2026-03-25"), { message: "UNAUTHORIZED" });
+  });
+
   it("deleteMeal sends DELETE and resolves without a body", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(204, null);
