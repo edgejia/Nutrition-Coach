@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { sendMessageStream, loadHistory } from "../api.js";
+import { type FollowMode, deriveFollowModeOnScroll, shouldShowJumpToLatest } from "../lib/chat-scroll.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
 import { DashboardMiniBar } from "./DashboardMiniBar.js";
@@ -23,14 +24,33 @@ export function ChatPanel() {
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
-  const endRef = useRef<HTMLDivElement>(null);
+  const latestAnchorRef = useRef<HTMLDivElement>(null);
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
   const isFirstMount = useRef(true);
-  const isAtBottom = useRef(true);
+  const previousScrollTopRef = useRef(0);
+  const followModeRef = useRef<FollowMode>("attached");
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const [followMode, setFollowMode] = useState<FollowMode>("attached");
 
   const isChatLocked = sending;
+  const showJumpToLatest = shouldShowJumpToLatest({
+    mode: followMode,
+    hasMessages: messages.length > 0,
+    hasProvisionalBubble: provisionalBubble !== null,
+  });
+
+  function setLocalFollowMode(nextMode: FollowMode) {
+    followModeRef.current = nextMode;
+    setFollowMode((currentMode) => (currentMode === nextMode ? currentMode : nextMode));
+  }
+
+  function getDistanceFromLatest(container: HTMLDivElement) {
+    return container.scrollHeight - container.scrollTop - container.clientHeight;
+  }
+
+  function scrollLatestIntoView(behavior: ScrollBehavior) {
+    latestAnchorRef.current?.scrollIntoView({ behavior, block: "end", inline: "nearest" });
+  }
 
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
     const activeDeviceId = useStore.getState().deviceId;
@@ -160,28 +180,43 @@ export function ChatPanel() {
     };
   }, [deviceId, setMessages, clearDevice, setPendingHomeChatDraft]);
 
-  // Effect 1: scroll-on-message-update
-  useEffect(() => {
+  // Keep the latest anchor visible for initial load and local chat updates while attached.
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
     if (isFirstMount.current) {
-      endRef.current?.scrollIntoView({ behavior: "instant" });
+      scrollLatestIntoView("instant");
+      previousScrollTopRef.current = container.scrollTop;
       isFirstMount.current = false;
       return;
     }
-    if (isAtBottom.current) {
-      endRef.current?.scrollIntoView({ behavior: "smooth" });
+
+    if (followModeRef.current === "attached") {
+      scrollLatestIntoView("instant");
+      previousScrollTopRef.current = container.scrollTop;
     }
   }, [messages, provisionalBubble?.content]);
 
-  // Effect 2: scroll position tracker (runs once on mount)
+  // Track user-initiated upward scrolling and re-attach when they return near latest.
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
+
+    previousScrollTopRef.current = container.scrollTop;
+
     const handleScroll = () => {
-      const distanceFromBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight;
-      isAtBottom.current = distanceFromBottom < 100;
-      setIsScrolledUp(distanceFromBottom >= 100);
+      const nextScrollTop = container.scrollTop;
+      const nextMode = deriveFollowModeOnScroll({
+        mode: followModeRef.current,
+        distanceFromLatest: getDistanceFromLatest(container),
+        scrollDelta: nextScrollTop - previousScrollTopRef.current,
+      });
+
+      previousScrollTopRef.current = nextScrollTop;
+      setLocalFollowMode(nextMode);
     };
+
     container.addEventListener("scroll", handleScroll, { passive: true });
     return () => container.removeEventListener("scroll", handleScroll);
   }, []);
@@ -271,13 +306,14 @@ export function ChatPanel() {
               isStatusLabel={provisionalBubble.statusLabel.length > 0}
             />
           )}
-          <div ref={endRef} />
+          <div ref={latestAnchorRef} />
         </div>
-        {isScrolledUp && (messages.length > 0 || provisionalBubble !== null) && (
+        {showJumpToLatest && (
           <button
             type="button"
             onClick={() => {
-              endRef.current?.scrollIntoView({ behavior: "smooth" });
+              setLocalFollowMode("attached");
+              scrollLatestIntoView("smooth");
             }}
             className="absolute bottom-4 left-1/2 z-10 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full text-lg text-white transition-opacity duration-150"
             style={{
