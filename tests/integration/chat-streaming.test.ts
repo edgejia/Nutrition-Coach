@@ -92,6 +92,28 @@ function createLogFoodToolCall(): ToolCall {
   };
 }
 
+function createTrustedLogFoodToolCall(): ToolCall {
+  return {
+    id: "call_trusted_1",
+    type: "function",
+    function: {
+      name: "log_food",
+      arguments: JSON.stringify({
+        food_name: "雞腿便當",
+        calories: 620,
+        protein: 30,
+        carbs: 70,
+        fat: 18,
+        protein_sources: [
+          { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+          { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+          { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+        ],
+      }),
+    },
+  };
+}
+
 function createGroupedLogFoodToolCall(): ToolCall {
   return {
     id: "call_grouped",
@@ -897,11 +919,11 @@ describe("chat-streaming", () => {
   });
 
   it("POST /api/chat D-09: when log_food succeeds but chatRound final-reply throws, meal is kept and partial-success fallback written to history", async () => {
-    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
     mockLLM.queueRoundError(new Error("LLM reply generation failed"));
 
     const form = new FormData();
-    form.append("message", "我吃了蘋果");
+    form.append("message", "我吃了雞腿便當");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -941,23 +963,25 @@ describe("chat-streaming", () => {
         /已完成記錄，但回覆生成失敗/,
         "D-09 must use the partial-success fallback, not the generic route catch fallback",
       );
+      assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
+      assert.match(assistantMsgs[0]!.content, /其他配菜不列入 headline/);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
         headers: { "x-device-id": deviceId },
       });
       const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
-      assert.ok(mealsJson.meals.some((m) => m.foodName === "蘋果"), "meal must be kept even when final reply fails");
+      assert.ok(mealsJson.meals.some((m) => m.foodName === "雞腿便當"), "meal must be kept even when final reply fails");
     } finally {
       clearTimeout(timeout);
     }
   });
 
   it("POST /api/chat D-09: when streamed final reply throws after log_food, meal state is preserved", async () => {
-    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
     mockLLM.queueChatStreamError(["已"], new Error("stream interrupted after log_food"));
 
     const form = new FormData();
-    form.append("message", "我吃了蘋果");
+    form.append("message", "我吃了雞腿便當");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -992,6 +1016,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
       assert.match(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
     } finally {
       clearTimeout(timeout);
     }
@@ -1039,6 +1064,14 @@ describe("chat-streaming", () => {
         ["蘋果、優格"],
         "grouped log_food should persist one transaction row for the turn",
       );
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { "x-device-id": deviceId },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMsgs.length, 1);
+      assert.match(assistantMsgs[0]!.content, /蛋白質先按優格作為主要來源估算/);
     } finally {
       clearTimeout(timeout);
     }

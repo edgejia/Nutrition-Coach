@@ -182,4 +182,26 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /脂肪：60 g/);
     assert.doesNotMatch(prompt, /get_current_goals/);
   });
+
+  it("includes trusted-protein rules and the one-sentence explanation contract", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+
+    assert.match(prompt, /可信蛋白/);
+    assert.match(prompt, /白飯/);
+    assert.match(prompt, /麵/);
+    assert.match(prompt, /蔬菜/);
+    assert.match(prompt, /醬料/);
+    assert.match(prompt, /油脂/);
+    assert.match(prompt, /豆類/);
+    assert.match(prompt, /堅果/);
+    assert.match(prompt, /全穀/);
+    assert.match(prompt, /protein_sources/);
+    assert.match(prompt, /一句簡短繁體中文/);
+    assert.match(prompt, /主要蛋白來源/);
+  });
 });

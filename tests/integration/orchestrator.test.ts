@@ -128,7 +128,17 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "沙拉", calories: 180, protein: 8, carbs: 12, fat: 10 }),
+          arguments: JSON.stringify({
+            food_name: "雞肉沙拉",
+            calories: 180,
+            protein: 8,
+            carbs: 12,
+            fat: 10,
+            protein_sources: [
+              { name: "雞肉", protein: 8, is_primary: true, certainty: "clear" },
+              { name: "生菜", protein: 1, is_primary: false, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
@@ -141,7 +151,8 @@ describe("Orchestrator", () => {
       "asset:meal-image"
     );
     assertReplyResult(result);
-    assert.equal(result.reply, "已先依照片做保守估算並完成記錄：沙拉，約 180 kcal。若你想更精準，我可以再依份量幫你調整。");
+    assert.match(result.reply, /已先依照片做保守估算並完成記錄：雞肉沙拉，約 180 kcal。/);
+    assert.match(result.reply, /蛋白質先按雞肉作為主要來源估算/);
     assert.equal(result.didLogMeal, true);
 
     const firstRoundUserMessage = mockLLM.chatCalls[0].messages.find((message) => Array.isArray(message.content));

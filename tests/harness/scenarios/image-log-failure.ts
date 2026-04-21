@@ -18,7 +18,6 @@ import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioSte
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log-failure", "uploads");
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
-const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 interface DailySummaryPayload {
@@ -263,6 +262,7 @@ const scenario: VerificationScenario = {
                 fat: 8,
                 protein_sources: [
                   { name: "雞腿", protein: 10, is_primary: true, certainty: "clear" },
+                  { name: "白飯", protein: 2, is_primary: false, certainty: "clear" },
                 ],
               }),
             },
@@ -296,7 +296,12 @@ const scenario: VerificationScenario = {
           };
         }
         if (assistantMsgs.length !== 1) return { ok: false, error: `D-10: expected 1 assistant msg, got ${assistantMsgs.length}`, evidence };
-        if (fallbackContent !== PARTIAL_SUCCESS_FALLBACK) return { ok: false, error: "D-09: expected partial-success fallback wording", evidence };
+        if (!/已完成記錄，但回覆生成失敗。/.test(fallbackContent)) {
+          return { ok: false, error: "D-09: expected partial-success fallback wording", evidence };
+        }
+        if (!/蛋白質先按雞腿作為主要來源估算/.test(fallbackContent)) {
+          return { ok: false, error: "D-09: expected trusted-protein explanation in partial-success fallback", evidence };
+        }
         if (!mealKept) return { ok: false, error: "D-09: meal must be kept when log_food succeeded before reply failed", evidence };
 
         return { ok: true, evidence };

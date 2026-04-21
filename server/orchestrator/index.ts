@@ -7,7 +7,13 @@ import type { createMealCorrectionService } from "../services/meal-correction.js
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { getToolDefinitions, executeTool, isFatalToolError, redactToolArgsForHook } from "./tools.js";
+import {
+  getToolDefinitions,
+  executeTool,
+  isFatalToolError,
+  redactToolArgsForHook,
+  type ToolExecutionResult,
+} from "./tools.js";
 import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
 import type { OrchestratorHooks } from "./hooks.js";
 
@@ -35,6 +41,7 @@ export type OrchestratorResult =
       dailySummary?: DailySummary;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
+      loggedMeal?: LoggedMealReceipt;
     }
   | {
       streamGenerator: AsyncGenerator<string>;
@@ -43,7 +50,10 @@ export type OrchestratorResult =
       dailySummary?: DailySummary;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
+      loggedMeal?: LoggedMealReceipt;
     };
+
+type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
 
 function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined): DailySummary {
   if (!dailySummary) {
@@ -61,8 +71,45 @@ function isImageOnlyMessage(userMessage: string, imageBase64?: string): boolean 
   return Boolean(imageBase64) && userMessage.trim() === IMAGE_PLACEHOLDER;
 }
 
-function buildImageLoggedReply(loggedMeal: { foodName: string; calories: number }): string {
-  return `已先依照片做保守估算並完成記錄：${loggedMeal.foodName}，約 ${formatCalories(loggedMeal.calories)} kcal。若你想更精準，我可以再依份量幫你調整。`;
+function joinProteinSourceNames(names: string[]): string {
+  if (names.length <= 1) {
+    return names[0] ?? "";
+  }
+  if (names.length === 2) {
+    return `${names[0]}和${names[1]}`;
+  }
+  return `${names[0]}、${names[1]}等主要來源`;
+}
+
+function buildTrustedProteinExplanation(loggedMeal: LoggedMealReceipt): string {
+  const countedSourceNames = [...new Set(
+    loggedMeal.countedSources
+      .map((source) => source.name.trim())
+      .filter(Boolean),
+  )].slice(0, 3);
+
+  if (countedSourceNames.length === 0) {
+    return loggedMeal.usedConservativeAssumption
+      ? "蛋白質目前缺少清楚主來源，先用保守方式低估，不把配菜列入 headline。"
+      : "蛋白質目前沒有明確主來源，先不把配菜列入 headline。";
+  }
+
+  const sourceLabel = joinProteinSourceNames(countedSourceNames);
+  if (loggedMeal.usedConservativeAssumption) {
+    return `蛋白質先按${sourceLabel}作為主要來源保守估算；其他配菜不列入 headline，份量不清楚時先抓低一些。`;
+  }
+  if (loggedMeal.excludedSources.length > 0) {
+    return `蛋白質先按${sourceLabel}作為主要來源估算，其他配菜不列入 headline。`;
+  }
+  return `蛋白質先按${sourceLabel}作為主要來源估算。`;
+}
+
+function buildImageLoggedReply(loggedMeal: LoggedMealReceipt): string {
+  return `已先依照片做保守估算並完成記錄：${loggedMeal.foodName}，約 ${formatCalories(loggedMeal.calories)} kcal。${buildTrustedProteinExplanation(loggedMeal)} 若你想更精準，我可以再依份量幫你調整。`;
+}
+
+export function buildPartialSuccessLoggedReply(loggedMeal: LoggedMealReceipt): string {
+  return `已完成記錄，但回覆生成失敗。${buildTrustedProteinExplanation(loggedMeal)} 請稍後確認今日攝取摘要。`;
 }
 
 function ensureGoalReceipt(reply: string, receipt: string | undefined): string {
@@ -203,13 +250,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let successfulGoalTargets: DailyTargets | undefined;
       let resolvedAffectedDate: string | undefined;
       let loggedMeal:
-        | {
-            foodName: string;
-            calories: number;
-            protein: number;
-            carbs: number;
-            fat: number;
-          }
+        | LoggedMealReceipt
         | undefined;
 
       // The orchestrator may use tools in the first completion, then produce the
@@ -232,6 +273,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 dailySummary: logMealSummary,
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
+                loggedMeal,
               };
             }
             response = roundResult.response;
@@ -248,6 +290,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 dailySummary: logMealSummary,
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
+                loggedMeal,
               };
             }
 
@@ -263,11 +306,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               dailySummary: logMealSummary,
               dailyTargets: successfulGoalTargets,
               affectedDate: resolvedAffectedDate,
+              loggedMeal,
             };
           }
           if (didMutateMeal) {
             const partialFallback = didLogMeal
-              ? "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。"
+              ? (loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。")
               : "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
             return {
               reply: partialFallback,
@@ -275,6 +319,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didMutateMeal: true,
               dailySummary: requireDailySummaryForLoggedMeal(logMealSummary),
               affectedDate: resolvedAffectedDate,
+              loggedMeal,
             };
           }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
@@ -284,6 +329,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             didMutateMeal,
             dailySummary: logMealSummary,
             affectedDate: resolvedAffectedDate,
+            loggedMeal,
           };
         }
 
@@ -296,6 +342,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             dailySummary: logMealSummary,
             dailyTargets: successfulGoalTargets,
             affectedDate: resolvedAffectedDate,
+            loggedMeal,
           };
         }
 
@@ -394,6 +441,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     dailySummary: logMealSummary,
                     dailyTargets: successfulGoalTargets,
                     affectedDate: resolvedAffectedDate,
+                    loggedMeal,
                   };
                 }
                 throw err;
@@ -415,6 +463,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didMutateMeal,
               dailySummary: logMealSummary,
               affectedDate: resolvedAffectedDate,
+              loggedMeal,
             };
           }
           shouldStreamFinalReply = true;
@@ -433,6 +482,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           dailySummary: logMealSummary,
           dailyTargets: successfulGoalTargets,
           affectedDate: resolvedAffectedDate,
+          loggedMeal,
         };
       }
       return {
@@ -441,6 +491,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         didMutateMeal,
         dailySummary: logMealSummary,
         affectedDate: resolvedAffectedDate,
+        loggedMeal,
       };
     },
   };

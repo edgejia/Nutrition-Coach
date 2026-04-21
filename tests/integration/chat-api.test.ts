@@ -605,14 +605,25 @@ describe("Chat API", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "香蕉", calories: 90, protein: 1, carbs: 23, fat: 0.3 }),
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
     mockLLM.queueChatError(new Error("API timeout"));
 
     const form = new FormData();
-    form.append("message", "我吃了香蕉");
+    form.append("message", "我吃了雞腿便當");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { "x-device-id": deviceId },
@@ -622,12 +633,13 @@ describe("Chat API", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.didLogMeal, true, "meal was persisted; didLogMeal must survive LLM failure");
-    assert.equal(body.reply, "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。");
+    assert.match(body.reply, /已完成記錄，但回覆生成失敗。/);
+    assert.match(body.reply, /蛋白質先按雞腿作為主要來源估算/);
     assert.deepEqual(body.dailySummary, {
-      totalCalories: 90,
-      totalProtein: 0,
-      totalCarbs: 23,
-      totalFat: 0.3,
+      totalCalories: 620,
+      totalProtein: 24,
+      totalCarbs: 70,
+      totalFat: 18,
       mealCount: 1,
       date: formatLocalDate(new Date()),
     });

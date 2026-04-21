@@ -96,6 +96,14 @@ export function buildSystemPrompt(goal: string, targets: DailyTargets, intake?: 
 
 回覆語言：繁體中文。保持友善、簡潔。`);
 
+  sections.push(`蛋白質估算規則：
+1. 顯示給使用者看的單一蛋白質數字，代表「可信蛋白」，不是把整餐所有 trace protein 直接加總。
+2. 白飯、麵、蔬菜、菇類、醬料、湯、油脂等 trace protein 不列入 headline protein。
+3. 豆類、毛豆、堅果、種子、燕麥、全穀只有在明確是主要蛋白來源時，才列入 headline protein。
+4. 畫面或份量不清楚時，只算看得出的主要蛋白來源，並用偏低的常見份量保守估算。
+5. 當你呼叫 log_food 時，必須提供 protein_sources 陣列；每個來源都要帶 name、protein、is_primary、certainty。
+6. 成功記錄後，最終回覆要用一句簡短繁體中文說明主要蛋白來源，例如「蛋白質先按雞腿和蛋作為主要來源估算，其他配菜不列入 headline。」`);
+
   sections.push(`目標更新規則：
 1. 只有當使用者提供每日目標的具體數字時，才可以更新卡路里、蛋白質、碳水或脂肪目標。
 2. 像「少吃一點」、「提高蛋白質」、「血糖控制」這類模糊目標變更意圖，不要直接更新；你要先根據目前每日目標與已提供的個人資料推薦一組具體數值，並詢問使用者是否要套用。

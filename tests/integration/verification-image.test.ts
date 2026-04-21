@@ -178,5 +178,6 @@ test("image-log-failure artifacts show sub_c_reply_fail with mealKept true", asy
   assert.equal(subC.donePayload?.didLogMeal, true, "D-09: done.didLogMeal must remain true");
   assert.ok(subC.donePayload?.dailySummary, "D-09: dailySummary must be preserved");
   assert.match(subC.fallbackContent ?? "", /已完成記錄，但回覆生成失敗/);
+  assert.match(subC.fallbackContent ?? "", /蛋白質先按雞腿作為主要來源估算/);
   assert.equal(subC.mealKept, true, "D-09: meal must be kept when log_food succeeded before reply failed");
 });

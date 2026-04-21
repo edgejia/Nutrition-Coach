@@ -209,7 +209,7 @@ describe("Orchestrator - didLogMeal", () => {
     });
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
-    const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    const result = await orchestrator.handleMessage(deviceId, "我吃了雞腿便當");
     if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.reply, "已幫你記錄蘋果！");
     assert.equal(result.didLogMeal, true);
@@ -292,7 +292,18 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
@@ -300,6 +311,10 @@ describe("Orchestrator - didLogMeal", () => {
 
     const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assert.equal(result.didLogMeal, true);
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.match(result.reply, /已完成記錄，但回覆生成失敗。/);
+    assert.match(result.reply, /蛋白質先按雞腿作為主要來源估算/);
+    assert.match(result.reply, /其他配菜不列入 headline/);
   });
 
   it("handleMessage throws when log_food persists but summary recomputation fails afterward", async () => {
@@ -455,7 +470,18 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "豬肉燒烤飯盒", calories: 680, protein: 35, carbs: 86, fat: 22 }),
+          arguments: JSON.stringify({
+            food_name: "豬肉燒烤飯盒",
+            calories: 680,
+            protein: 35,
+            carbs: 86,
+            fat: 22,
+            protein_sources: [
+              { name: "豬肉", protein: 28, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 5, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
@@ -469,7 +495,9 @@ describe("Orchestrator - didLogMeal", () => {
 
     if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.didLogMeal, true);
-    assert.match(result.reply, /已先依照片做保守估算並完成記錄：豬肉燒烤飯盒，約 680 kcal。若你想更精準，我可以再依份量幫你調整。/);
+    assert.match(result.reply, /已先依照片做保守估算並完成記錄：豬肉燒烤飯盒，約 680 kcal。/);
+    assert.match(result.reply, /蛋白質先按豬肉作為主要來源估算/);
+    assert.match(result.reply, /其他配菜不列入 headline/);
     assert.equal(mockLLM.chatCalls.length, 1, "image-only logging should not require a second LLM round");
   });
 

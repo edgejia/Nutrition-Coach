@@ -11,6 +11,7 @@ import type { DailySummary } from "../services/summary.js";
 import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
+import { buildPartialSuccessLoggedReply } from "../orchestrator/index.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 
@@ -349,6 +350,7 @@ async function handleOrchestratorSSE(
   let streamDailySummary: unknown;
   let streamDailyTargets: unknown;
   let streamAffectedDate: string | undefined;
+  let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
 
   try {
     if (image) {
@@ -380,12 +382,13 @@ async function handleOrchestratorSSE(
     );
 
     if ("streamGenerator" in result) {
-      const { streamGenerator, didLogMeal, dailySummary, affectedDate } = result;
+      const { streamGenerator, didLogMeal, dailySummary, affectedDate, loggedMeal } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
       streamDailyTargets = result.dailyTargets;
       streamAffectedDate = affectedDate;
+      streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -410,12 +413,13 @@ async function handleOrchestratorSSE(
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
     } else {
-      const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate } = result;
+      const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate, loggedMeal } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
       streamDailyTargets = dailyTargets;
       streamAffectedDate = affectedDate;
+      streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
       const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, normalizedReply);
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
@@ -431,7 +435,7 @@ async function handleOrchestratorSSE(
     }
   } catch {
     const fallback = streamDidLogMeal
-      ? PARTIAL_SUCCESS_FALLBACK
+      ? (streamLoggedMeal ?? PARTIAL_SUCCESS_FALLBACK)
       : streamDidMutateMeal
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
@@ -506,6 +510,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonDailySummary: unknown;
       let jsonDailyTargets: unknown;
       let jsonAffectedDate: string | undefined;
+      let jsonLoggedMealFallback: string | undefined;
 
       try {
         const durableAsset = await createDurableAssetIfNeeded(assetService, deviceId, image);
@@ -529,6 +534,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonDailySummary = result.dailySummary;
         jsonDailyTargets = result.dailyTargets;
         jsonAffectedDate = result.affectedDate;
+        jsonLoggedMealFallback = result.loggedMeal
+          ? buildPartialSuccessLoggedReply(result.loggedMeal)
+          : undefined;
 
         if (result.didLogMeal && !result.dailySummary) {
           throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
@@ -578,7 +586,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         };
       } catch {
         const fallback = jsonDidLogMeal
-          ? PARTIAL_SUCCESS_FALLBACK
+          ? (jsonLoggedMealFallback ?? PARTIAL_SUCCESS_FALLBACK)
           : jsonDidMutateMeal
             ? PARTIAL_MUTATION_FALLBACK
             : UNIFIED_FALLBACK;
