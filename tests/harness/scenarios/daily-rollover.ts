@@ -50,7 +50,7 @@ const dailyRolloverScenario: VerificationScenario = {
     try {
       try {
         const pingRes = await fetch(`${fixture.address}/api/meals`, {
-          headers: { "x-device-id": fixture.deviceId },
+          headers: { cookie: fixture.cookieHeader },
         });
         if (pingRes.status !== 200) {
           steps.push(fail("bootstrap", `Expected 200 from /api/meals, got ${pingRes.status}`));
@@ -132,8 +132,8 @@ const dailyRolloverScenario: VerificationScenario = {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
-        const sseRes = await fetch(`${fixture.address}/api/sse?deviceId=${fixture.deviceId}`, {
-          headers: { Accept: "text/event-stream" },
+        const sseRes = await fetch(`${fixture.address}/api/sse`, {
+          headers: { cookie: fixture.cookieHeader, Accept: "text/event-stream" },
           signal: controller.signal,
         });
         if (sseRes.status !== 200 || !sseRes.body) {

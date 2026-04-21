@@ -80,6 +80,7 @@ describe("connectSSE", () => {
 
     const es = FakeEventSource.instances[0];
     assert.ok(es, "FakeEventSource should have been constructed");
+    assert.equal(es.url, "/api/sse");
 
     const summary: DailySummary = {
       date: "2026-04-18",

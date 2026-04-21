@@ -12,7 +12,7 @@ const FIELD_LABELS: Record<string, string> = {
 export function GoalSettings({ onClose }: { onClose: () => void }) {
   const dailyTargets = useStore((s) => s.dailyTargets);
   const setDailyTargets = useStore((s) => s.setDailyTargets);
-  const clearDevice = useStore((s) => s.clearDevice);
+  const recoverGuestSession = useStore((s) => s.recoverGuestSession);
 
   const [form, setForm] = useState({
     calories: dailyTargets?.calories ?? 0,
@@ -30,7 +30,7 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
       onClose();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
-        clearDevice();
+        void recoverGuestSession();
       } else {
         alert("更新目標失敗，請稍後再試。");
       }

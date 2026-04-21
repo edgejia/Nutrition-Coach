@@ -22,11 +22,9 @@ function isValidTargets(value: unknown): value is DailyTargets {
   );
 }
 
-export function connectSSE(deviceId: string, handlers: SSEHandlers) {
+export function connectSSE(_deviceId: string, handlers: SSEHandlers) {
   disconnectSSE();
-  // Spec uses X-Device-Id for authenticated APIs, but EventSource cannot send custom headers.
-  // The backend therefore exposes an SSE-specific query-param fallback implemented in Plan 4.
-  eventSource = new EventSource(`/api/sse?deviceId=${deviceId}`);
+  eventSource = new EventSource("/api/sse");
 
   eventSource.addEventListener("daily_summary", (event) => {
     const summary = JSON.parse((event as MessageEvent<string>).data) as DailySummary;

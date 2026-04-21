@@ -32,6 +32,8 @@ export interface ScenarioAppContext {
   address: string;
   /** The device ID seeded during boot — use in every scenario request. */
   deviceId: string;
+  /** Seeded guest-session cookies for protected browser routes. */
+  cookieHeader: string;
   /** In-process service handles for deterministic harness setup. */
   services: ScenarioAppServices;
   /** Shut down the app and release the port. */
@@ -43,6 +45,11 @@ export interface ScenarioAppServices {
   chatService: AppServices["chatService"];
   foodLoggingService: AppServices["foodLoggingService"];
   summaryService: AppServices["summaryService"];
+}
+
+function toCookieHeader(rawHeader: string | string[] | undefined) {
+  const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+  return values.map((value) => value.split(";", 1)[0]).join("; ");
 }
 
 /**
@@ -95,6 +102,7 @@ export async function createScenarioApp(
   }
 
   const deviceId = (deviceRes.json() as { deviceId: string }).deviceId;
+  const cookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
 
   const address = await app.listen({ port: 0, host: "127.0.0.1" });
 
@@ -102,6 +110,7 @@ export async function createScenarioApp(
     app,
     address,
     deviceId,
+    cookieHeader,
     services,
     close: async () => {
       if (app.server.listening) {

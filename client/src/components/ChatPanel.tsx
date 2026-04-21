@@ -37,7 +37,7 @@ export function ChatPanel() {
   const provisionalBubble = useStore((s) => s.provisionalBubble);
   const setProvisionalBubble = useStore((s) => s.setProvisionalBubble);
   const commitProvisionalBubble = useStore((s) => s.commitProvisionalBubble);
-  const clearDevice = useStore((s) => s.clearDevice);
+  const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
@@ -374,7 +374,7 @@ export function ChatPanel() {
         if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
           clearPendingHomeChatDraft();
         }
-        clearDevice();
+        void recoverGuestSession();
         return;
       }
       useStore.getState().setProvisionalBubble({
@@ -428,7 +428,7 @@ export function ChatPanel() {
       .catch(async (err) => {
         if (cancelled) return;
         if (err instanceof Error && err.message === "UNAUTHORIZED") {
-          clearDevice();
+          void recoverGuestSession();
           return;
         }
         const draft = useStore.getState().pendingHomeChatDraft;
@@ -439,7 +439,7 @@ export function ChatPanel() {
     return () => {
       cancelled = true;
     };
-  }, [deviceId, setMessages, clearDevice, setPendingHomeChatDraft]);
+  }, [deviceId, setMessages, recoverGuestSession, setPendingHomeChatDraft]);
 
   // Keep the latest edge visible for initial load and local chat updates while attached.
   useLayoutEffect(() => {

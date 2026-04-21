@@ -96,6 +96,7 @@ async function assertUploadsEmpty(
 
 async function collectAssetEvidence(params: {
   address: string;
+  cookieHeader: string;
   deviceId: string;
   assetService: ScenarioAppContext["services"]["assetService"];
   chatService: ScenarioAppContext["services"]["chatService"];
@@ -115,14 +116,14 @@ async function collectAssetEvidence(params: {
   assetsDirEntries: string[];
 }> {
   const historyRes = await fetch(`${params.address}/api/chat/history?limit=10`, {
-    headers: { "x-device-id": params.deviceId },
+    headers: { cookie: params.cookieHeader },
   });
   const historyJson = await historyRes.json() as {
     messages: Array<{ role: string; content: string } & ImageAssetDto>;
   };
 
   const mealsRes = await fetch(`${params.address}/api/meals`, {
-    headers: { "x-device-id": params.deviceId },
+    headers: { cookie: params.cookieHeader },
   });
   const mealsJson = await mealsRes.json() as {
     meals: Array<{ foodName: string } & ImageAssetDto>;
@@ -153,7 +154,7 @@ async function collectAssetEvidence(params: {
 
   if (assetUrl) {
     const assetRes = await fetch(`${params.address}${assetUrl}`, {
-      headers: { "x-device-id": params.deviceId },
+      headers: { cookie: params.cookieHeader },
     });
     fetchStatus = assetRes.status;
     fetchContentType = assetRes.headers.get("content-type");
@@ -205,7 +206,7 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
 
   try {
     const pingRes = await fetch(`${fixture.address}/api/meals`, {
-      headers: { "x-device-id": fixture.deviceId },
+      headers: { cookie: fixture.cookieHeader },
     });
     if (pingRes.status !== 200) {
       steps.push(fail("bootstrap", `Expected 200, got ${pingRes.status}`));
@@ -219,7 +220,7 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
 
     const chatRes = await fetch(`${fixture.address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": fixture.deviceId, Accept: "text/event-stream" },
+      headers: { cookie: fixture.cookieHeader, Accept: "text/event-stream" },
       body: form,
     });
     if (chatRes.status !== 200 || !chatRes.body) {
@@ -245,6 +246,7 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
 
     const assetEvidence = await collectAssetEvidence({
       address: fixture.address,
+      cookieHeader: fixture.cookieHeader,
       deviceId: fixture.deviceId,
       assetService: fixture.services.assetService,
       chatService: fixture.services.chatService,
@@ -317,7 +319,7 @@ async function runUploadCleanupFailure(): Promise<ScenarioResult> {
 
   try {
     const pingRes = await fetch(`${fixture.address}/api/meals`, {
-      headers: { "x-device-id": fixture.deviceId },
+      headers: { cookie: fixture.cookieHeader },
     });
     if (pingRes.status !== 200) {
       steps.push(fail("bootstrap", `Expected 200, got ${pingRes.status}`));
@@ -331,7 +333,7 @@ async function runUploadCleanupFailure(): Promise<ScenarioResult> {
 
     const chatRes = await fetch(`${fixture.address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": fixture.deviceId, Accept: "text/event-stream" },
+      headers: { cookie: fixture.cookieHeader, Accept: "text/event-stream" },
       body: form,
     });
     if (!chatRes.body) {
@@ -352,6 +354,7 @@ async function runUploadCleanupFailure(): Promise<ScenarioResult> {
 
     const assetEvidence = await collectAssetEvidence({
       address: fixture.address,
+      cookieHeader: fixture.cookieHeader,
       deviceId: fixture.deviceId,
       assetService: fixture.services.assetService,
       chatService: fixture.services.chatService,

@@ -6,7 +6,7 @@
  *
  * Steps:
  *   1. bootstrap       — verify the seeded app is responsive
- *   2. subscribe_summary — open /api/sse?deviceId= and collect the initial daily_summary
+ *   2. subscribe_summary — open /api/sse and collect the initial daily_summary
  *   3. post_chat       — POST multipart text-only to /api/chat with Accept: text/event-stream
  *   4. collect_stream  — read SSE frames until event: done, verify didLogMeal === true
  *   5. verify_history  — GET /api/chat/history, verify last assistant message content
@@ -140,7 +140,7 @@ const textLogScenario: VerificationScenario = {
       // ------------------------------------------------------------------
       try {
         const pingRes = await fetch(`${fixture.address}/api/meals`, {
-          headers: { "x-device-id": fixture.deviceId },
+          headers: { cookie: fixture.cookieHeader },
         });
         if (pingRes.status !== 200) {
           const stepResult = fail("bootstrap", `Expected 200 from /api/meals, got ${pingRes.status}`);
@@ -155,7 +155,7 @@ const textLogScenario: VerificationScenario = {
       }
 
       // ------------------------------------------------------------------
-      // Step 2: subscribe_summary — open /api/sse?deviceId= before posting chat
+      // Step 2: subscribe_summary — open /api/sse before posting chat
       // ------------------------------------------------------------------
       let sseController: AbortController | undefined;
       let sseReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -167,9 +167,9 @@ const textLogScenario: VerificationScenario = {
         const sseTimeout = setTimeout(() => sseController!.abort(), 5000);
 
         const sseRes = await fetch(
-          `${fixture.address}/api/sse?deviceId=${fixture.deviceId}`,
+          `${fixture.address}/api/sse`,
           {
-            headers: { Accept: "text/event-stream" },
+            headers: { cookie: fixture.cookieHeader, Accept: "text/event-stream" },
             signal: sseController.signal,
           },
         );
@@ -251,7 +251,7 @@ const textLogScenario: VerificationScenario = {
         chatRes = await fetch(`${fixture.address}/api/chat`, {
           method: "POST",
           headers: {
-            "x-device-id": fixture.deviceId,
+            cookie: fixture.cookieHeader,
             Accept: "text/event-stream",
           },
           signal: chatController.signal,
@@ -369,7 +369,7 @@ const textLogScenario: VerificationScenario = {
       try {
         const historyRes = await fetch(
           `${fixture.address}/api/chat/history?limit=10`,
-          { headers: { "x-device-id": fixture.deviceId } },
+          { headers: { cookie: fixture.cookieHeader } },
         );
 
         if (historyRes.status !== 200) {
@@ -422,7 +422,7 @@ const textLogScenario: VerificationScenario = {
       // ------------------------------------------------------------------
       try {
         const mealsRes = await fetch(`${fixture.address}/api/meals`, {
-          headers: { "x-device-id": fixture.deviceId },
+          headers: { cookie: fixture.cookieHeader },
         });
 
         if (mealsRes.status !== 200) {

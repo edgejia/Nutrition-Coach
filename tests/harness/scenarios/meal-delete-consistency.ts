@@ -166,7 +166,7 @@ const scenario: VerificationScenario = {
 
     try {
       const bootstrapRes = await fetch(`${fixture.address}/api/meals`, {
-        headers: { "x-device-id": fixture.deviceId },
+        headers: { cookie: fixture.cookieHeader },
       });
       if (bootstrapRes.status !== 200) {
         steps.push(fail("bootstrap", `Expected 200 from /api/meals, got ${bootstrapRes.status}`));
@@ -177,8 +177,8 @@ const scenario: VerificationScenario = {
       sseController = new AbortController();
       sseTimeout = setTimeout(() => sseController?.abort(), 10000);
 
-      const sseRes = await fetch(`${fixture.address}/api/sse?deviceId=${fixture.deviceId}`, {
-        headers: { Accept: "text/event-stream" },
+      const sseRes = await fetch(`${fixture.address}/api/sse`, {
+        headers: { cookie: fixture.cookieHeader, Accept: "text/event-stream" },
         signal: sseController.signal,
       });
       if (sseRes.status !== 200 || !sseRes.body) {
@@ -215,7 +215,7 @@ const scenario: VerificationScenario = {
       const chatRes = await fetch(`${fixture.address}/api/chat`, {
         method: "POST",
         headers: {
-          "x-device-id": fixture.deviceId,
+          cookie: fixture.cookieHeader,
           Accept: "text/event-stream",
         },
         body: form,
@@ -268,7 +268,7 @@ const scenario: VerificationScenario = {
       steps.push(pass("collect_stream", { statusLabels, donePayload }));
 
       const preDeleteMealsRes = await fetch(`${fixture.address}/api/meals`, {
-        headers: { "x-device-id": fixture.deviceId },
+        headers: { cookie: fixture.cookieHeader },
       });
       if (preDeleteMealsRes.status !== 200) {
         steps.push(fail("verify_pre_delete_meal", `Expected 200 from /api/meals, got ${preDeleteMealsRes.status}`));
@@ -315,7 +315,7 @@ const scenario: VerificationScenario = {
       // DELETE /api/meals/:id is the transaction-level soft delete contract under test.
       const deleteRes = await fetch(`${fixture.address}/api/meals/${deletedMeal.id}`, {
         method: "DELETE",
-        headers: { "x-device-id": fixture.deviceId },
+        headers: { cookie: fixture.cookieHeader },
       });
       const deleteBody = await deleteRes.json() as {
         affectedDate?: string;
@@ -371,7 +371,7 @@ const scenario: VerificationScenario = {
       steps.push(pass("verify_summary_after_delete", postDeleteSummaryState.summary));
 
       const postDeleteMealsRes = await fetch(`${fixture.address}/api/meals`, {
-        headers: { "x-device-id": fixture.deviceId },
+        headers: { cookie: fixture.cookieHeader },
       });
       if (postDeleteMealsRes.status !== 200) {
         steps.push(fail("verify_meals_after_delete", `Expected 200 from /api/meals, got ${postDeleteMealsRes.status}`));
@@ -386,7 +386,7 @@ const scenario: VerificationScenario = {
       steps.push(pass("verify_meals_after_delete", { mealCount: postDeleteMeals.length, meals: postDeleteMeals }));
 
       const historyRes = await fetch(`${fixture.address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": fixture.deviceId },
+        headers: { cookie: fixture.cookieHeader },
       });
       if (historyRes.status !== 200) {
         steps.push(fail("verify_history_image", `Expected 200 from /api/chat/history, got ${historyRes.status}`));
@@ -428,7 +428,7 @@ const scenario: VerificationScenario = {
         return failResult(scenarioName, steps, "verify_asset_fetch", artifacts);
       }
       const assetRes = await fetch(`${fixture.address}${userImageMessage.imageUrl}`, {
-        headers: { "x-device-id": fixture.deviceId },
+        headers: { cookie: fixture.cookieHeader },
       });
       artifacts.assetFetch = {
         imageUrl: userImageMessage.imageUrl,

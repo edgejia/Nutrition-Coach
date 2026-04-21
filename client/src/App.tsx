@@ -1,43 +1,28 @@
 import { useEffect } from "react";
-import { establishGuestSession } from "./api.js";
 import { useStore } from "./store.js";
 import { Onboarding } from "./components/Onboarding.js";
+import { GuestSessionRecoveryGate } from "./components/GuestSessionRecoveryGate.js";
 import { MainLayout } from "./components/MainLayout.js";
 
 export function App() {
   const deviceId = useStore((s) => s.deviceId);
   const guestSessionStatus = useStore((s) => s.guestSessionStatus);
-  const setDevice = useStore((s) => s.setDevice);
-  const setGuestSessionStatus = useStore((s) => s.setGuestSessionStatus);
+  const bootstrapGuestSession = useStore((s) => s.bootstrapGuestSession);
 
   useEffect(() => {
     if (!deviceId || guestSessionStatus !== "unknown") {
       return;
     }
 
-    let cancelled = false;
-    setGuestSessionStatus("establishing");
-
-    establishGuestSession({ legacyDeviceId: deviceId })
-      .then((session) => {
-        if (cancelled) {
-          return;
-        }
-        setDevice(session.deviceId, session.goal, session.dailyTargets);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setGuestSessionStatus("recovery_required");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [deviceId, guestSessionStatus, setDevice, setGuestSessionStatus]);
+    void bootstrapGuestSession();
+  }, [deviceId, guestSessionStatus, bootstrapGuestSession]);
 
   if (!deviceId) {
     return <Onboarding />;
+  }
+
+  if (guestSessionStatus === "recovery_required") {
+    return <GuestSessionRecoveryGate />;
   }
 
   if (guestSessionStatus !== "ready") {

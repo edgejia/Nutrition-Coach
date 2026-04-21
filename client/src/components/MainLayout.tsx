@@ -13,7 +13,7 @@ export function MainLayout() {
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setDailyTargets = useStore((s) => s.setDailyTargets);
   const setMeals = useStore((s) => s.setMeals);
-  const clearDevice = useStore((s) => s.clearDevice);
+  const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setRolloverRefreshHandler = useStore((s) => s.setRolloverRefreshHandler);
   const activeScreen = useStore((s) => s.activeScreen);
   const showSettings = useStore((s) => s.showSettings);
@@ -30,10 +30,10 @@ export function MainLayout() {
       setMeals(meals);
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
-        clearDevice();
+        void recoverGuestSession();
       }
     }
-  }, [deviceId, setDailySummary, setDailyTargets, setMeals, clearDevice]);
+  }, [deviceId, setDailySummary, setDailyTargets, setMeals, recoverGuestSession]);
 
   useEffect(() => {
     if (!deviceId) return;

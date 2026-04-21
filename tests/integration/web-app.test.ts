@@ -52,6 +52,6 @@ describe("Web App", () => {
     const res = await app.inject({ method: "GET", url: "/api/meals" });
 
     assert.equal(res.statusCode, 401);
-    assert.deepEqual(res.json(), { error: "Missing X-Device-Id" });
+    assert.deepEqual(res.json(), { error: "Guest session required" });
   });
 });

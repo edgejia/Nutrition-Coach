@@ -124,12 +124,12 @@ describe("API Client", () => {
     });
   });
 
-  it("sendMessage includes X-Device-Id header from localStorage", async () => {
+  it("sendMessage uses same-origin credentials without raw device headers", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, { reply: "OK" });
     await api.sendMessage("hello");
-    const headers = fetchCalls[0].init.headers as Record<string, string>;
-    assert.equal(headers["X-Device-Id"], "d-1");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.equal(fetchCalls[0].init.headers, undefined);
   });
 
   it("sendMessage returns didLogMeal when the backend provides it", async () => {
@@ -147,7 +147,7 @@ describe("API Client", () => {
     await assert.rejects(() => api.sendMessage("hello"), { message: "UNAUTHORIZED" });
   });
 
-  it("loadHistory appends deviceId to asset urls for browser image fetches", async () => {
+  it("loadHistory leaves asset urls on the cookie-backed path", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
       messages: [
@@ -164,10 +164,10 @@ describe("API Client", () => {
 
     const result = await api.loadHistory();
 
-    assert.equal(result.messages[0]?.imageUrl, "/api/assets/asset-1?deviceId=d-1");
+    assert.equal(result.messages[0]?.imageUrl, "/api/assets/asset-1");
   });
 
-  it("getMeals includes X-Device-Id", async () => {
+  it("getMeals uses same-origin credentials without raw device headers", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
       meals: [
@@ -185,13 +185,13 @@ describe("API Client", () => {
 
     const result = await api.getMeals();
 
-    const headers = fetchCalls[0].init.headers as Record<string, string>;
     assert.equal(fetchCalls[0].url, "/api/meals");
-    assert.equal(headers["X-Device-Id"], "d-1");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(fetchCalls[0].init.headers, {});
     assert.equal(result.meals.length, 1);
   });
 
-  it("getMeals appends deviceId to meal image urls for browser image fetches", async () => {
+  it("getMeals leaves meal image urls on the cookie-backed path", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
       meals: [
@@ -211,10 +211,10 @@ describe("API Client", () => {
 
     const result = await api.getMeals();
 
-    assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1?deviceId=d-1");
+    assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
   });
 
-  it("getDaySnapshot requests the explicit day with X-Device-Id", async () => {
+  it("getDaySnapshot requests the explicit day with same-origin credentials", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
       date: "2026-03-25",
@@ -232,12 +232,11 @@ describe("API Client", () => {
     const result = await api.getDaySnapshot("2026-03-25");
 
     assert.equal(fetchCalls[0].url, "/api/day-snapshot?date=2026-03-25");
-    const headers = fetchCalls[0].init.headers as Record<string, string>;
-    assert.equal(headers["X-Device-Id"], "d-1");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.equal(result.date, "2026-03-25");
   });
 
-  it("getDaySnapshot appends deviceId to meal image urls for browser image fetches", async () => {
+  it("getDaySnapshot leaves meal image urls on the cookie-backed path", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
       date: "2026-03-25",
@@ -266,7 +265,7 @@ describe("API Client", () => {
 
     const result = await api.getDaySnapshot("2026-03-25");
 
-    assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1?deviceId=d-1");
+    assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
   });
 
   it("getDaySnapshot throws UNAUTHORIZED on 401", async () => {
@@ -304,8 +303,7 @@ describe("API Client", () => {
     });
     assert.equal(fetchCalls[0].url, "/api/meals/meal-1");
     assert.equal(fetchCalls[0].init.method, "DELETE");
-    const headers = fetchCalls[0].init.headers as Record<string, string>;
-    assert.equal(headers["X-Device-Id"], "d-1");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
   });
 
   it("loadHistory throws UNAUTHORIZED on 401", async () => {
@@ -320,12 +318,12 @@ describe("API Client", () => {
     await assert.rejects(() => api.updateGoals({ calories: 2000 }), { message: "UNAUTHORIZED" });
   });
 
-  it("withAuthorizedAssetUrl preserves existing deviceId query params", () => {
+  it("withAuthorizedAssetUrl removes legacy deviceId query params", () => {
     storage.set("deviceId", "device-123");
 
     assert.equal(
       api.withAuthorizedAssetUrl("/api/assets/asset-1?deviceId=existing-device"),
-      "/api/assets/asset-1?deviceId=existing-device",
+      "/api/assets/asset-1",
     );
   });
 

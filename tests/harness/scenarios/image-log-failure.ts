@@ -56,17 +56,17 @@ function buildResult(
   return { ok, failedStep, steps, artifacts, consoleSummary };
 }
 
-async function fetchHistory(address: string, deviceId: string): Promise<Array<{ role: string; content: string }>> {
+async function fetchHistory(address: string, cookieHeader: string): Promise<Array<{ role: string; content: string }>> {
   const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-    headers: { "x-device-id": deviceId },
+    headers: { cookie: cookieHeader },
   });
   const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
   return historyJson.messages;
 }
 
-async function fetchMeals(address: string, deviceId: string): Promise<Array<{ foodName: string }>> {
+async function fetchMeals(address: string, cookieHeader: string): Promise<Array<{ foodName: string }>> {
   const mealsRes = await fetch(`${address}/api/meals`, {
-    headers: { "x-device-id": deviceId },
+    headers: { cookie: cookieHeader },
   });
   const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
   return mealsJson.meals;
@@ -95,6 +95,7 @@ async function runSubScenario(
     rawSSE: string;
     address: string;
     deviceId: string;
+    cookieHeader: string;
   }) => Promise<{ ok: boolean; error?: string; evidence: unknown }>,
   options: { message?: string } = {},
 ): Promise<{ steps: ScenarioStepResult[]; artifacts: Record<string, unknown>; ok: boolean; failedStep?: string }> {
@@ -120,7 +121,7 @@ async function runSubScenario(
       const res = await fetch(`${scenarioCtx.address}/api/chat`, {
         method: "POST",
         headers: {
-          "x-device-id": scenarioCtx.deviceId,
+          cookie: scenarioCtx.cookieHeader,
           "Accept": "text/event-stream",
         },
         signal: controller.signal,
@@ -140,6 +141,7 @@ async function runSubScenario(
       rawSSE,
       address: scenarioCtx.address,
       deviceId: scenarioCtx.deviceId,
+      cookieHeader: scenarioCtx.cookieHeader,
     });
     artifacts[label] = result.evidence;
     if (!result.ok) {
@@ -170,10 +172,10 @@ const scenario: VerificationScenario = {
       (llm) => {
         llm.queueRoundError(new Error("Vision API timeout"));
       },
-      async ({ rawSSE, address, deviceId }) => {
+      async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
-        const assistantMsgs = (await fetchHistory(address, deviceId)).filter((m) => m.role === "assistant");
-        const meals = await fetchMeals(address, deviceId);
+        const assistantMsgs = (await fetchHistory(address, cookieHeader)).filter((m) => m.role === "assistant");
+        const meals = await fetchMeals(address, cookieHeader);
         const fallbackContent = assistantMsgs[0]?.content ?? "";
 
         const evidence = {
@@ -215,10 +217,10 @@ const scenario: VerificationScenario = {
           }],
         });
       },
-      async ({ rawSSE, address, deviceId }) => {
+      async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
-        const assistantMsgs = (await fetchHistory(address, deviceId)).filter((m) => m.role === "assistant");
-        const meals = await fetchMeals(address, deviceId);
+        const assistantMsgs = (await fetchHistory(address, cookieHeader)).filter((m) => m.role === "assistant");
+        const meals = await fetchMeals(address, cookieHeader);
         const fallbackContent = assistantMsgs[0]?.content ?? "";
 
         const evidence = {
@@ -270,11 +272,11 @@ const scenario: VerificationScenario = {
         });
         llm.queueRoundError(new Error("LLM reply generation failed"));
       },
-      async ({ rawSSE, address, deviceId }) => {
+      async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
-        const assistantMsgs = (await fetchHistory(address, deviceId)).filter((m) => m.role === "assistant");
+        const assistantMsgs = (await fetchHistory(address, cookieHeader)).filter((m) => m.role === "assistant");
         const fallbackContent = assistantMsgs[0]?.content ?? "";
-        const meals = await fetchMeals(address, deviceId);
+        const meals = await fetchMeals(address, cookieHeader);
         const mealKept = meals.some((m) => m.foodName === "測試餐點C");
 
         const evidence = {

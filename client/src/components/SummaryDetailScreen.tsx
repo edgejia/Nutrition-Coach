@@ -35,7 +35,7 @@ function shiftMonthKey(monthKey: string, delta: number) {
 }
 
 export function SummaryDetailScreen() {
-  const clearDevice = useStore((s) => s.clearDevice);
+  const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const liveSummary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
@@ -74,7 +74,7 @@ export function SummaryDetailScreen() {
         }
 
         if (err instanceof Error && err.message === "UNAUTHORIZED") {
-          clearDevice();
+          void recoverGuestSession();
           return;
         }
 
@@ -89,7 +89,7 @@ export function SummaryDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [selectedDateKey, clearDevice]);
+  }, [selectedDateKey, recoverGuestSession]);
 
   async function handleDelete(mealId: string) {
     const previousSnapshot = snapshot;
@@ -110,7 +110,7 @@ export function SummaryDetailScreen() {
     } catch (err) {
       setSnapshot(previousSnapshot);
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
-        clearDevice();
+        void recoverGuestSession();
         return;
       }
       alert("刪除失敗，請再試一次。");

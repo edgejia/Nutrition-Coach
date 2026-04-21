@@ -93,7 +93,12 @@ function makeJpegBytes(): ArrayBuffer {
   return bytes.buffer as ArrayBuffer;
 }
 
-async function createFreshDevice(app: ScenarioContext["app"]): Promise<string> {
+function toCookieHeader(rawHeader: string | string[] | undefined) {
+  const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+  return values.map((value) => value.split(";", 1)[0]).join("; ");
+}
+
+async function createFreshDevice(app: ScenarioContext["app"]): Promise<{ deviceId: string; cookieHeader: string }> {
   const res = await app.inject({
     method: "POST",
     url: "/api/device",
@@ -102,7 +107,10 @@ async function createFreshDevice(app: ScenarioContext["app"]): Promise<string> {
   if (res.statusCode !== 200 && res.statusCode !== 201) {
     throw new Error(`device seed failed: ${res.statusCode}`);
   }
-  return (res.json() as { deviceId: string }).deviceId;
+  return {
+    deviceId: (res.json() as { deviceId: string }).deviceId,
+    cookieHeader: toCookieHeader(res.headers["set-cookie"]),
+  };
 }
 
 function parseReplyText(rawSSE: string): string {
@@ -130,17 +138,17 @@ function parseDonePayload(rawSSE: string): DonePayload | undefined {
   }
 }
 
-async function fetchMeals(address: string, deviceId: string): Promise<MealDto[]> {
+async function fetchMeals(address: string, cookieHeader: string): Promise<MealDto[]> {
   const res = await fetch(`${address}/api/meals`, {
-    headers: { "x-device-id": deviceId },
+    headers: { cookie: cookieHeader },
   });
   const json = await res.json() as { meals: MealDto[] };
   return json.meals;
 }
 
-async function fetchHistory(address: string, deviceId: string): Promise<HistoryDto[]> {
+async function fetchHistory(address: string, cookieHeader: string): Promise<HistoryDto[]> {
   const res = await fetch(`${address}/api/chat/history?limit=10`, {
-    headers: { "x-device-id": deviceId },
+    headers: { cookie: cookieHeader },
   });
   const json = await res.json() as { messages: HistoryDto[] };
   return json.messages;
@@ -152,7 +160,7 @@ async function runProteinTrustCase(
   trustCase: ProteinTrustCase,
 ): Promise<Record<string, unknown>> {
   llm.reset();
-  const deviceId = await createFreshDevice(fixture.app);
+  const { deviceId, cookieHeader } = await createFreshDevice(fixture.app);
 
   llm.queueRoundResponse({
     toolCalls: [{
@@ -177,7 +185,7 @@ async function runProteinTrustCase(
   const res = await fetch(`${fixture.address}/api/chat`, {
     method: "POST",
     headers: {
-      "x-device-id": deviceId,
+      cookie: cookieHeader,
       "Accept": "text/event-stream",
     },
     body: form,
@@ -190,8 +198,8 @@ async function runProteinTrustCase(
   const rawSSE = await readStreamUntilEvent(res.body.getReader(), "done", 60);
   const donePayload = parseDonePayload(rawSSE);
   const replyText = parseReplyText(rawSSE);
-  const history = await fetchHistory(fixture.address, deviceId);
-  const meals = await fetchMeals(fixture.address, deviceId);
+  const history = await fetchHistory(fixture.address, cookieHeader);
+  const meals = await fetchMeals(fixture.address, cookieHeader);
   const meal = meals.find((entry) => entry.foodName === trustCase.expectedFoodName);
   const assistantReply = history.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
   const statusLabels = parseSSEEvents(rawSSE)

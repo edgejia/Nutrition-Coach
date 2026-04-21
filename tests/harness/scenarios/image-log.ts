@@ -142,7 +142,7 @@ const scenario: VerificationScenario = {
         const res = await fetch(`${scenarioCtx.address}/api/chat`, {
           method: "POST",
           headers: {
-            "x-device-id": scenarioCtx.deviceId,
+            cookie: scenarioCtx.cookieHeader,
             "Accept": "text/event-stream",
           },
           signal: controller.signal,
@@ -267,7 +267,7 @@ const scenario: VerificationScenario = {
       // ------------------------------------------------------------------
       const historyRes = await fetch(
         `${scenarioCtx.address}/api/chat/history?limit=10`,
-        { headers: { "x-device-id": scenarioCtx.deviceId } },
+        { headers: { cookie: scenarioCtx.cookieHeader } },
       );
       if (historyRes.status !== 200) {
         steps.push(stepFail("verify_history", `HTTP ${historyRes.status}`));
@@ -327,7 +327,7 @@ const scenario: VerificationScenario = {
       // Step: verify_meals
       // ------------------------------------------------------------------
       const mealsRes = await fetch(`${scenarioCtx.address}/api/meals`, {
-        headers: { "x-device-id": scenarioCtx.deviceId },
+        headers: { cookie: scenarioCtx.cookieHeader },
       });
       if (mealsRes.status !== 200) {
         steps.push(stepFail("verify_meals", `HTTP ${mealsRes.status}`));
@@ -385,7 +385,7 @@ const scenario: VerificationScenario = {
       }
 
       const assetRes = await fetch(`${scenarioCtx.address}${assetUrl}`, {
-        headers: { "x-device-id": scenarioCtx.deviceId },
+        headers: { cookie: scenarioCtx.cookieHeader },
       });
       if (assetRes.status !== 200) {
         steps.push(stepFail("verify_asset_fetch", `HTTP ${assetRes.status}`, { assetUrl }));

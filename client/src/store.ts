@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { clearGuestSession, establishGuestSession } from "./api.js";
 import type {
   ActiveScreen,
   DailyTargets,
@@ -47,6 +48,9 @@ interface AppState {
   clearPendingHomeChatDraft: () => void;
   setShowSettings: (showSettings: boolean) => void;
   setDevice: (deviceId: string, goal: string, dailyTargets: DailyTargets) => void;
+  bootstrapGuestSession: () => Promise<boolean>;
+  recoverGuestSession: () => Promise<boolean>;
+  rebuildGuestSession: () => Promise<void>;
   setGuestSessionStatus: (status: GuestSessionStatus) => void;
   markGuestSessionRecoveryAttempted: () => void;
   resetGuestSessionRecovery: () => void;
@@ -101,6 +105,74 @@ export const useStore = create<AppState>((set, get) => ({
       dailyTargets,
       showSettings: false,
     });
+  },
+  bootstrapGuestSession: async () => {
+    const currentState = get();
+    if (!currentState.deviceId || currentState.guestSessionStatus === "establishing") {
+      return false;
+    }
+
+    set({ guestSessionStatus: "establishing" });
+
+    try {
+      const session = await establishGuestSession({ legacyDeviceId: currentState.deviceId });
+      localStorage.setItem("deviceId", session.deviceId);
+      localStorage.setItem("goal", session.goal);
+      localStorage.setItem("dailyTargets", JSON.stringify(session.dailyTargets));
+      set((state) => ({
+        deviceId: session.deviceId,
+        goal: session.goal,
+        dailyTargets: session.dailyTargets,
+        guestSessionStatus: "ready",
+        guestSessionRecoveryAttempted: state.guestSessionRecoveryAttempted,
+      }));
+      return true;
+    } catch {
+      set({ guestSessionStatus: "recovery_required" });
+      return false;
+    }
+  },
+  recoverGuestSession: async () => {
+    const currentState = get();
+    if (!currentState.deviceId) {
+      return false;
+    }
+    if (currentState.guestSessionStatus === "establishing") {
+      return false;
+    }
+    if (currentState.guestSessionRecoveryAttempted) {
+      set({ guestSessionStatus: "recovery_required" });
+      return false;
+    }
+
+    set({ guestSessionStatus: "establishing", guestSessionRecoveryAttempted: true });
+
+    try {
+      const session = await establishGuestSession();
+      localStorage.setItem("deviceId", session.deviceId);
+      localStorage.setItem("goal", session.goal);
+      localStorage.setItem("dailyTargets", JSON.stringify(session.dailyTargets));
+      set((state) => ({
+        deviceId: session.deviceId,
+        goal: session.goal,
+        dailyTargets: session.dailyTargets,
+        guestSessionStatus: "ready",
+        guestSessionRecoveryAttempted: state.guestSessionRecoveryAttempted,
+      }));
+      return true;
+    } catch {
+      set({ guestSessionStatus: "recovery_required" });
+      return false;
+    }
+  },
+  rebuildGuestSession: async () => {
+    try {
+      await clearGuestSession();
+    } catch {
+      // The local reset remains authoritative for the rebuild CTA even if the
+      // cookie-clear request fails.
+    }
+    get().clearDevice();
   },
   setGuestSessionStatus: (guestSessionStatus) => set({ guestSessionStatus }),
   markGuestSessionRecoveryAttempted: () => set({ guestSessionRecoveryAttempted: true }),
