@@ -261,6 +261,9 @@ const scenario: VerificationScenario = {
                 protein: 10,
                 carbs: 40,
                 fat: 8,
+                protein_sources: [
+                  { name: "雞腿", protein: 10, is_primary: true, certainty: "clear" },
+                ],
               }),
             },
           }],

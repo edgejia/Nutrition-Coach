@@ -361,12 +361,52 @@ describe("Chat API", () => {
     assert.equal(body.didLogMeal, true);
     assert.deepEqual(body.dailySummary, {
       totalCalories: 95,
-      totalProtein: 0.5,
+      totalProtein: 0,
       totalCarbs: 25,
       totalFat: 0.3,
       mealCount: 1,
       date: formatLocalDate(new Date()),
     });
+  });
+
+  it("POST /api/chat dailySummary uses trusted protein for a mixed lunchbox log", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_trusted_lunchbox",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 640,
+            protein: 30,
+            carbs: 78,
+            fat: 20,
+            protein_sources: [
+              { name: "雞腿", protein: 18, is_primary: true, certainty: "clear" },
+              { name: "滷蛋", protein: 6, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄雞腿便當！" });
+
+    const form = new FormData();
+    form.append("message", "我午餐吃雞腿便當");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.dailySummary?.totalProtein, 24);
+    assert.equal(body.dailySummary?.totalCalories, 640);
   });
 
   it("POST /api/chat returns affectedDate for historical logging without changing the summary payload shape", async () => {
@@ -585,7 +625,7 @@ describe("Chat API", () => {
     assert.equal(body.reply, "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。");
     assert.deepEqual(body.dailySummary, {
       totalCalories: 90,
-      totalProtein: 1,
+      totalProtein: 0,
       totalCarbs: 23,
       totalFat: 0.3,
       mealCount: 1,

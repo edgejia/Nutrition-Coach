@@ -93,7 +93,16 @@ describe("Meals API", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "早餐", calories: 350, protein: 18, carbs: 45, fat: 10 }),
+          arguments: JSON.stringify({
+            food_name: "早餐",
+            calories: 350,
+            protein: 18,
+            carbs: 45,
+            fat: 10,
+            protein_sources: [
+              { name: "蛋餅", protein: 18, is_primary: true, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
@@ -106,7 +115,16 @@ describe("Meals API", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "晚餐", calories: 620, protein: 34, carbs: 58, fat: 24 }),
+          arguments: JSON.stringify({
+            food_name: "晚餐",
+            calories: 620,
+            protein: 34,
+            carbs: 58,
+            fat: 24,
+            protein_sources: [
+              { name: "雞腿", protein: 34, is_primary: true, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
@@ -131,7 +149,16 @@ describe("Meals API", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "午餐", calories: 600, protein: 35, carbs: 55, fat: 22 }),
+          arguments: JSON.stringify({
+            food_name: "午餐",
+            calories: 600,
+            protein: 35,
+            carbs: 55,
+            fat: 22,
+            protein_sources: [
+              { name: "雞腿排", protein: 35, is_primary: true, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
@@ -280,7 +307,17 @@ describe("Meals API", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "便當", calories: 640, protein: 32, carbs: 78, fat: 21 }),
+          arguments: JSON.stringify({
+            food_name: "便當",
+            calories: 640,
+            protein: 32,
+            carbs: 78,
+            fat: 21,
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "滷蛋", protein: 8, is_primary: true, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });

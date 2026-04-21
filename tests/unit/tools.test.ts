@@ -64,13 +64,21 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.ok(result.loggedMeal, "loggedMeal must be returned");
     assert.equal(result.loggedMeal.foodName, "蘋果");
     assert.equal(result.loggedMeal.calories, 100);
-    assert.equal(result.loggedMeal.protein, 1);
+    assert.equal(result.loggedMeal.protein, 0);
     assert.equal(result.loggedMeal.carbs, 20);
     assert.equal(result.loggedMeal.fat, 0.5);
+    assert.deepEqual(result.loggedMeal.countedSources, []);
+    assert.deepEqual(result.loggedMeal.excludedSources, [{
+      name: "蘋果",
+      protein: 1,
+      reason: "trace",
+    }]);
+    assert.equal(result.loggedMeal.usedConservativeAssumption, false);
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 1);
     assert.equal(meals[0].foodName, "蘋果");
+    assert.equal(meals[0].protein, 0);
   });
 
   it("Test 1b: log_food items[] writes one transaction with multiple revision items and returns dailySummary/loggedMeal", async () => {
@@ -107,13 +115,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     assert.ok(result.dailySummary, "dailySummary must be returned for grouped writes");
     assert.equal(result.dailySummary.mealCount, 1);
-    assert.deepEqual(result.loggedMeal, {
-      foodName: "蘋果、優格",
-      calories: 215,
-      protein: 8.5,
-      carbs: 37,
-      fat: 4.3,
-    });
+    assert.equal(result.dailySummary.totalProtein, 8);
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "蘋果、優格");
+    assert.equal(result.loggedMeal.calories, 215);
+    assert.equal(result.loggedMeal.protein, 8);
+    assert.equal(result.loggedMeal.carbs, 37);
+    assert.equal(result.loggedMeal.fat, 4.3);
+    assert.deepEqual(result.loggedMeal.countedSources.map((source) => source.name), ["優格"]);
+    assert.deepEqual(result.loggedMeal.excludedSources.map((source) => source.name), ["蘋果"]);
 
     const transactions = await db.select().from(mealTransactions);
     const revisions = await db.select().from(mealRevisions);
@@ -131,6 +141,52 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(meals.length, 1);
     assert.equal(meals[0].id, transactions[0]!.id);
     assert.equal(meals[0].foodName, "蘋果、優格");
+    assert.equal(meals[0].protein, 8);
+    assert.deepEqual(
+      revisionItems.map((item) => item.protein),
+      [0, 8],
+      "trace-only grouped items should store protein = 0",
+    );
+  });
+
+  it("Test 1c: mixed lunchbox persists trusted protein from protein_sources instead of raw proposal", async () => {
+    const lunchboxCall: ToolCall = {
+      id: "call_lunchbox",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "雞腿便當",
+          calories: 640,
+          protein: 30,
+          carbs: 78,
+          fat: 20,
+          protein_sources: [
+            { name: "雞腿", protein: 18, is_primary: true, certainty: "clear" },
+            { name: "滷蛋", protein: 6, is_primary: true, certainty: "clear" },
+            { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+            { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(lunchboxCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.ok(result.dailySummary);
+    assert.equal(result.dailySummary.totalProtein, 24);
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "雞腿便當");
+    assert.equal(result.loggedMeal.protein, 24);
+    assert.deepEqual(result.loggedMeal.countedSources.map((source) => source.name), ["雞腿", "滷蛋"]);
+    assert.deepEqual(result.loggedMeal.excludedSources.map((source) => source.name), ["白飯", "青菜"]);
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0].protein, 24);
   });
 
   it("Test 2: log_food summary recomputation failure persists meal and returns controlled failureReason:execute", async () => {
@@ -166,6 +222,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 1);
     assert.equal(meals[0].foodName, "蘋果");
+    assert.equal(meals[0].protein, 0);
 
     // The orchestrator-facing wrapper continues to surface this as
     // FatalToolError so the existing executed:false hook path stays intact.

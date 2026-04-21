@@ -17,6 +17,14 @@ import {
   type ToolContract,
   type RunContractContext,
 } from "./tool-contract.js";
+import {
+  classifyProteinSource,
+  normalizeTrustedProteinEstimate,
+  type ExcludedProteinSource,
+  type ProteinSourceCertainty,
+  type ProteinSourceInput,
+  type TrustedProteinSource,
+} from "./protein-trust.js";
 
 // ---------------------------------------------------------------------------
 // Public types preserved for the orchestrator (Phase 8/9 callers).
@@ -52,6 +60,9 @@ export interface ToolExecutionResult {
     protein: number;
     carbs: number;
     fat: number;
+    countedSources: TrustedProteinSource[];
+    excludedSources: ExcludedProteinSource[];
+    usedConservativeAssumption: boolean;
   };
 }
 
@@ -79,15 +90,25 @@ interface LogFoodItemArgs {
   fat: number;
 }
 
+interface ProteinSourceArgs {
+  name: string;
+  protein: number;
+  is_primary: boolean;
+  certainty: ProteinSourceCertainty;
+}
+
 interface HistoricalDateToolArgs {
   date_text?: string;
   meal_period?: HistoricalMealPeriod;
 }
 
-interface LogFoodLegacyArgs extends LogFoodItemArgs, HistoricalDateToolArgs {}
+interface LogFoodLegacyArgs extends LogFoodItemArgs, HistoricalDateToolArgs {
+  protein_sources?: ProteinSourceArgs[];
+}
 
 interface LogFoodGroupedArgs extends HistoricalDateToolArgs {
   items: LogFoodItemArgs[];
+  protein_sources?: ProteinSourceArgs[];
 }
 
 type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
@@ -128,6 +149,9 @@ interface LogFoodSuccessResult {
     protein: number;
     carbs: number;
     fat: number;
+    countedSources: TrustedProteinSource[];
+    excludedSources: ExcludedProteinSource[];
+    usedConservativeAssumption: boolean;
   };
 }
 
@@ -180,6 +204,14 @@ interface UpdateGoalsResult {
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
 const historicalDateTextSchema = z.string().min(1, "date_text must be non-empty").optional();
 const historicalMealPeriodSchema = z.enum(["breakfast", "lunch", "dinner", "late_night"]).optional();
+const proteinSourceSchema = z
+  .object({
+    name: z.string().min(1, "protein_sources[].name must be non-empty"),
+    protein: finiteNumber,
+    is_primary: z.boolean(),
+    certainty: z.enum(["clear", "uncertain"]),
+  })
+  .strict();
 
 const logFoodItemSchema = z
   .object({
@@ -187,8 +219,8 @@ const logFoodItemSchema = z
     calories: finiteNumber,
     protein: finiteNumber,
     carbs: finiteNumber,
-    fat: finiteNumber,
-  })
+      fat: finiteNumber,
+    })
   .strict();
 
 const logFoodSchema = z.union([
@@ -196,6 +228,7 @@ const logFoodSchema = z.union([
     .extend({
       date_text: historicalDateTextSchema,
       meal_period: historicalMealPeriodSchema,
+      protein_sources: z.array(proteinSourceSchema).min(1).optional(),
     })
     .strict(),
   z
@@ -203,6 +236,7 @@ const logFoodSchema = z.union([
       items: z.array(logFoodItemSchema).min(1, "items must contain at least one entry"),
       date_text: historicalDateTextSchema,
       meal_period: historicalMealPeriodSchema,
+      protein_sources: z.array(proteinSourceSchema).min(1).optional(),
     })
     .strict(),
 ]);
@@ -309,6 +343,170 @@ function buildLocalMidpointDate(dateKey: string): Date {
   return new Date(`${dateKey}T12:00:00`);
 }
 
+function roundProtein(value: number): number {
+  return Math.round(Math.max(value, 0) * 10) / 10;
+}
+
+function normalizeComparableName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function namesLikelyMatch(left: string, right: string): boolean {
+  const normalizedLeft = normalizeComparableName(left);
+  const normalizedRight = normalizeComparableName(right);
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+  return normalizedLeft === normalizedRight
+    || normalizedLeft.includes(normalizedRight)
+    || normalizedRight.includes(normalizedLeft);
+}
+
+function inferProteinSourcesFromItem(item: LogFoodItemArgs): ProteinSourceInput[] {
+  const category = classifyProteinSource(item.food_name);
+  if (category === "unknown" && item.protein <= 0) {
+    return [];
+  }
+
+  return [{
+    name: item.food_name.trim(),
+    protein: roundProtein(item.protein),
+    isPrimary: category !== "trace",
+    certainty: "clear",
+  }];
+}
+
+function resolveProteinSourceInputs(
+  args: LogFoodArgs,
+): { proteinSources: ProteinSourceInput[]; usedExplicitProteinSources: boolean } {
+  if (args.protein_sources && args.protein_sources.length > 0) {
+    return {
+      usedExplicitProteinSources: true,
+      proteinSources: args.protein_sources.map((source) => ({
+        name: source.name.trim(),
+        protein: roundProtein(source.protein),
+        isPrimary: source.is_primary,
+        certainty: source.certainty,
+      })),
+    };
+  }
+
+  if ("items" in args) {
+    return {
+      usedExplicitProteinSources: false,
+      proteinSources: args.items.flatMap((item) => inferProteinSourcesFromItem(item)),
+    };
+  }
+
+  return {
+    usedExplicitProteinSources: false,
+    proteinSources: inferProteinSourcesFromItem(args),
+  };
+}
+
+function totalProposedProtein(args: LogFoodArgs): number {
+  return "items" in args
+    ? roundProtein(args.items.reduce((sum, item) => sum + item.protein, 0))
+    : roundProtein(args.protein);
+}
+
+function shouldRejectTrustedProteinPersistence(
+  args: LogFoodArgs,
+  countedSourceCount: number,
+): boolean {
+  if (countedSourceCount > 0) {
+    return false;
+  }
+
+  const proposedProtein = totalProposedProtein(args);
+  if (proposedProtein <= 0) {
+    return false;
+  }
+
+  const labels = "items" in args ? args.items.map((item) => item.food_name) : [args.food_name];
+  const categories = labels.map((label) => classifyProteinSource(label));
+  return !categories.every((category) => category === "trace");
+}
+
+function scaleGroupedProteinValues(
+  items: Array<{ index: number; protein: number }>,
+  targetProtein: number,
+): Map<number, number> {
+  const scaled = new Map<number, number>();
+  const roundedTarget = roundProtein(targetProtein);
+
+  if (items.length === 0 || roundedTarget <= 0) {
+    return scaled;
+  }
+
+  const currentTotal = items.reduce((sum, item) => sum + item.protein, 0);
+  if (currentTotal <= 0) {
+    return scaled;
+  }
+
+  let remainingProtein = roundedTarget;
+  let remainingCurrent = currentTotal;
+
+  items.forEach((item, index) => {
+    const isLast = index === items.length - 1;
+    const nextProtein = isLast
+      ? remainingProtein
+      : roundProtein((item.protein / remainingCurrent) * remainingProtein);
+    scaled.set(item.index, nextProtein);
+    remainingProtein = roundProtein(remainingProtein - nextProtein);
+    remainingCurrent -= item.protein;
+  });
+
+  return scaled;
+}
+
+function buildNormalizedGroupedItems(
+  args: LogFoodGroupedArgs,
+  countedSources: TrustedProteinSource[],
+  trustedProtein: number,
+  usedExplicitProteinSources: boolean,
+): Array<{
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}> {
+  const countedSourceNames = countedSources.map((source) => source.name);
+  const countedItems = args.items
+    .map((item, index) => {
+      const category = classifyProteinSource(item.food_name);
+      const matchesCountedSource = countedSourceNames.some((sourceName) =>
+        namesLikelyMatch(item.food_name, sourceName),
+      );
+      const shouldCount = category !== "trace"
+        && (usedExplicitProteinSources ? matchesCountedSource : category !== "unknown");
+
+      return {
+        index,
+        foodName: item.food_name.trim(),
+        calories: item.calories,
+        protein: roundProtein(item.protein),
+        carbs: item.carbs,
+        fat: item.fat,
+        shouldCount,
+      };
+    });
+
+  const countedItemInputs = countedItems
+    .filter((item) => item.shouldCount)
+    .map((item) => ({ index: item.index, protein: item.protein }));
+  const scaledProteins = scaleGroupedProteinValues(countedItemInputs, trustedProtein);
+
+  return countedItems.map((item) => ({
+    foodName: item.foodName,
+    calories: item.calories,
+    protein: scaledProteins.get(item.index) ?? 0,
+    carbs: item.carbs,
+    fat: item.fat,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Contracts. logSummary returns redacted shape (D-30); macros are part of
 // existing Phase 8 behavior for log_food (intentional, see plan).
@@ -325,6 +523,23 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       protein: { type: "number" },
       carbs: { type: "number" },
       fat: { type: "number" },
+      protein_sources: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string" },
+            protein: { type: "number" },
+            is_primary: { type: "boolean" },
+            certainty: {
+              type: "string",
+              enum: ["clear", "uncertain"],
+            },
+          },
+          required: ["name", "protein", "is_primary", "certainty"],
+        },
+      },
       date_text: { type: "string" },
       meal_period: {
         type: "string",
@@ -357,6 +572,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
     protein: "items" in args ? args.items.reduce((sum, item) => sum + item.protein, 0) : args.protein,
     carbs: "items" in args ? args.items.reduce((sum, item) => sum + item.carbs, 0) : args.carbs,
     fat: "items" in args ? args.items.reduce((sum, item) => sum + item.fat, 0) : args.fat,
+    proteinSourceCount: args.protein_sources?.length ?? 0,
   }),
   execute: async (args, context) => {
     const deps = context.deps?.toolDeps as ToolDeps | undefined;
@@ -405,22 +621,35 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
           mealPeriod: args.meal_period ?? extractHistoricalMealPeriod(context.currentUserMessage),
         })
       : undefined;
+
+    const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(args);
+    const normalizedProtein = normalizeTrustedProteinEstimate({
+      mealName: "items" in args
+        ? args.items.map((item) => item.food_name.trim()).join("、")
+        : args.food_name.trim(),
+      proposedProtein: totalProposedProtein(args),
+      proteinSources,
+    });
+
+    if (shouldRejectTrustedProteinPersistence(args, normalizedProtein.countedSources.length)) {
+      throw new FatalToolError("trusted protein basis required for this meal");
+    }
+
     const loggedMeal = "items" in args
       ? await deps.foodLoggingService.logGroupedMeal(deviceId, {
         imagePath: deps.imagePath,
         loggedAt,
-        items: args.items.map((item) => ({
-          foodName: item.food_name.trim(),
-          calories: item.calories,
-          protein: item.protein,
-          carbs: item.carbs,
-          fat: item.fat,
-        })),
+        items: buildNormalizedGroupedItems(
+          args,
+          normalizedProtein.countedSources,
+          normalizedProtein.trustedProtein,
+          usedExplicitProteinSources,
+        ),
       })
       : await deps.foodLoggingService.logFood(deviceId, {
         foodName: args.food_name.trim(),
         calories: args.calories,
-        protein: args.protein,
+        protein: normalizedProtein.trustedProtein,
         carbs: args.carbs,
         fat: args.fat,
         imagePath: deps.imagePath,
@@ -455,6 +684,9 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
           protein: loggedMeal.protein,
           carbs: loggedMeal.carbs,
           fat: loggedMeal.fat,
+          countedSources: normalizedProtein.countedSources,
+          excludedSources: normalizedProtein.excludedSources,
+          usedConservativeAssumption: normalizedProtein.usedConservativeAssumption,
         },
       },
       toolMessage: "食物已成功記錄",

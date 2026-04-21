@@ -96,7 +96,7 @@ describe("Orchestrator", () => {
     assert.equal(result.didLogMeal, true);
     assert.deepEqual(result.dailySummary, {
       totalCalories: 100,
-      totalProtein: 5,
+      totalProtein: 0,
       totalCarbs: 20,
       totalFat: 2,
       mealCount: 1,
