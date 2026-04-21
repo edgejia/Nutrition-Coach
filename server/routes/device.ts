@@ -1,9 +1,11 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { createDeviceService, Goal, IntakeFields } from "../services/device.js";
+import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
 
 interface Deps {
   deviceService: ReturnType<typeof createDeviceService>;
+  guestSessionService: ReturnType<typeof createGuestSessionService>;
   targetGenerationService: ReturnType<typeof createTargetGenerationService>;
 }
 
@@ -59,6 +61,38 @@ function isAllowedTrainingFrequency(value: string): value is IntakeFields["train
 
 function validateRange(value: number, min: number, max: number) {
   return value >= min && value <= max;
+}
+
+function setGuestSessionCookies(
+  reply: FastifyReply,
+  guestSessionService: ReturnType<typeof createGuestSessionService>,
+  deviceId: string,
+) {
+  reply.header("set-cookie", guestSessionService.issue(deviceId).cookies);
+}
+
+function clearGuestSessionCookies(
+  reply: FastifyReply,
+  guestSessionService: ReturnType<typeof createGuestSessionService>,
+) {
+  reply.header("set-cookie", guestSessionService.clearSessionCookies());
+}
+
+function buildDeviceSessionResponse(device: Awaited<ReturnType<ReturnType<typeof createDeviceService>["getDevice"]>>) {
+  if (!device) {
+    return null;
+  }
+
+  return {
+    deviceId: device.id,
+    goal: device.goal,
+    dailyTargets: {
+      calories: device.dailyCalories,
+      protein: device.dailyProtein,
+      carbs: device.dailyCarbs,
+      fat: device.dailyFat,
+    },
+  };
 }
 
 function buildIntake(body: Record<string, unknown>): IntakeFields | null {
@@ -118,7 +152,10 @@ function buildIntake(body: Record<string, unknown>): IntakeFields | null {
   };
 }
 
-export function registerDeviceRoutes(app: FastifyInstance, { deviceService, targetGenerationService }: Deps) {
+export function registerDeviceRoutes(
+  app: FastifyInstance,
+  { deviceService, guestSessionService, targetGenerationService }: Deps,
+) {
   app.post("/api/device", async (request, reply) => {
     const body = request.body;
     if (!isRecord(body)) {
@@ -132,6 +169,7 @@ export function registerDeviceRoutes(app: FastifyInstance, { deviceService, targ
 
     if (!hasAnyIntakeField(body)) {
       const result = await deviceService.createDevice(goal as Goal);
+      setGuestSessionCookies(reply, guestSessionService, result.deviceId);
       return { ...result, coachExplanation: null };
     }
 
@@ -146,7 +184,55 @@ export function registerDeviceRoutes(app: FastifyInstance, { deviceService, targ
 
     const { dailyTargets, coachExplanation } = await targetGenerationService.generateTargets(goal, intake);
     const result = await deviceService.createDevice(goal as Goal, intake, dailyTargets, coachExplanation);
+    setGuestSessionCookies(reply, guestSessionService, result.deviceId);
     return { ...result, coachExplanation };
+  });
+
+  app.post("/api/device/session", async (request, reply) => {
+    if (request.body !== undefined && !isRecord(request.body)) {
+      return reply.code(400).send({ error: "Request body must be a JSON object." });
+    }
+
+    const body = isRecord(request.body) ? request.body : {};
+    const { activeToken, resumeToken } = guestSessionService.readTokens(request.headers.cookie);
+
+    const activeSession = guestSessionService.verifyActiveSession(activeToken);
+    if (activeSession.ok) {
+      const device = buildDeviceSessionResponse(await deviceService.getDevice(activeSession.deviceId));
+      if (!device) {
+        clearGuestSessionCookies(reply, guestSessionService);
+        return reply.code(401).send({ error: "Invalid guest session" });
+      }
+      return { ...device, establishedBy: "active" as const };
+    }
+
+    const resumedSession = guestSessionService.resumeSession(resumeToken);
+    if (resumedSession.ok) {
+      const device = buildDeviceSessionResponse(await deviceService.getDevice(resumedSession.deviceId));
+      if (!device) {
+        clearGuestSessionCookies(reply, guestSessionService);
+        return reply.code(401).send({ error: "Invalid guest session" });
+      }
+      reply.header("set-cookie", resumedSession.cookies);
+      return { ...device, establishedBy: "resume" as const };
+    }
+
+    if ("legacyDeviceId" in body && typeof body.legacyDeviceId !== "string") {
+      return reply.code(400).send({ error: "legacyDeviceId must be a string." });
+    }
+
+    const legacyDeviceId = typeof body.legacyDeviceId === "string" ? body.legacyDeviceId.trim() : "";
+    if (!legacyDeviceId) {
+      return reply.code(401).send({ error: "No guest session available" });
+    }
+
+    const device = buildDeviceSessionResponse(await deviceService.getDevice(legacyDeviceId));
+    if (!device) {
+      return reply.code(401).send({ error: "Invalid device ID" });
+    }
+
+    setGuestSessionCookies(reply, guestSessionService, device.deviceId);
+    return { ...device, establishedBy: "legacy_migration" as const };
   });
 
   app.put("/api/device/goals", async (request, reply) => {

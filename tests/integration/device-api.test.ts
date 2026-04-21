@@ -5,6 +5,14 @@ import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
 
+function getSetCookieHeaders(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
+  const rawHeader = res.headers["set-cookie"];
+  if (Array.isArray(rawHeader)) {
+    return rawHeader;
+  }
+  return typeof rawHeader === "string" ? [rawHeader] : [];
+}
+
 describe("Device API", () => {
   let app: FastifyInstance;
 
@@ -27,6 +35,10 @@ describe("Device API", () => {
     assert.ok(body.deviceId);
     assert.equal(body.dailyTargets.calories, 1500);
     assert.equal(body.dailyTargets.protein, 120);
+    const setCookieHeaders = getSetCookieHeaders(res);
+    assert.equal(setCookieHeaders.length, 2);
+    assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));
+    assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session_resume=")));
   });
 
   it("POST /api/device rejects invalid goal", async () => {
@@ -76,6 +88,44 @@ describe("Device API", () => {
     assert.ok(body.deviceId);
     assert.equal(body.dailyTargets.calories, 2500);
     assert.equal(body.dailyTargets.protein, 180);
+  });
+
+  it("POST /api/device/session migrates a legacy device into cookie-backed mode", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const { deviceId, dailyTargets } = create.json();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      payload: { legacyDeviceId: deviceId },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), {
+      deviceId,
+      goal: "fat_loss",
+      dailyTargets,
+      establishedBy: "legacy_migration",
+    });
+    const setCookieHeaders = getSetCookieHeaders(res);
+    assert.equal(setCookieHeaders.length, 2);
+    assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));
+    assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session_resume=")));
+  });
+
+  it("POST /api/device/session rejects invalid legacy device ids", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      payload: { legacyDeviceId: "missing-device" },
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.json(), { error: "Invalid device ID" });
   });
 
   it("PUT /api/device/goals rejects negative values", async () => {

@@ -48,6 +48,8 @@ describe("AppStore", () => {
       deviceId: null,
       goal: null,
       activeScreen: "onboarding",
+      guestSessionStatus: "ready",
+      guestSessionRecoveryAttempted: false,
       dailyTargets: null,
       messages: [],
       dailySummary: null,
@@ -64,6 +66,7 @@ describe("AppStore", () => {
   it("defaults activeScreen to onboarding without a stored device", async () => {
     const freshStore = await loadFreshStore(`store-no-device-${Date.now()}`);
     assert.equal(freshStore.useStore.getState().activeScreen, "onboarding");
+    assert.equal(freshStore.useStore.getState().guestSessionStatus, "ready");
   });
 
   it("defaults activeScreen to home when a device is already stored", async () => {
@@ -73,15 +76,31 @@ describe("AppStore", () => {
 
     const freshStore = await loadFreshStore(`store-with-device-${Date.now()}`);
     assert.equal(freshStore.useStore.getState().activeScreen, "home");
+    assert.equal(freshStore.useStore.getState().guestSessionStatus, "unknown");
   });
 
   it("setDevice persists deviceId, goal, and targets to localStorage and enters home", () => {
     useStore.getState().setDevice("d-1", "fat_loss", { calories: 1500, protein: 120, carbs: 150, fat: 50 });
     assert.equal(useStore.getState().deviceId, "d-1");
     assert.equal(useStore.getState().activeScreen, "home");
+    assert.equal(useStore.getState().guestSessionStatus, "ready");
     assert.equal(storage.get("deviceId"), "d-1");
     assert.equal(storage.get("goal"), "fat_loss");
     assert.ok(storage.get("dailyTargets"));
+  });
+
+  it("tracks guest-session bootstrap and recovery state without clearing device identity", () => {
+    useStore.getState().setDevice("d-1", "fat_loss", { calories: 1500, protein: 120, carbs: 150, fat: 50 });
+    useStore.getState().setGuestSessionStatus("establishing");
+    useStore.getState().markGuestSessionRecoveryAttempted();
+    useStore.getState().setGuestSessionStatus("recovery_required");
+
+    assert.equal(useStore.getState().deviceId, "d-1");
+    assert.equal(useStore.getState().guestSessionStatus, "recovery_required");
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, true);
+
+    useStore.getState().resetGuestSessionRecovery();
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, false);
   });
 
   it("clearDevice removes all localStorage entries and resets dashboard-first state", () => {
@@ -94,6 +113,8 @@ describe("AppStore", () => {
 
     assert.equal(useStore.getState().deviceId, null);
     assert.equal(useStore.getState().activeScreen, "onboarding");
+    assert.equal(useStore.getState().guestSessionStatus, "ready");
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, false);
     assert.equal(useStore.getState().coachAdvice, null);
     assert.deepEqual(useStore.getState().meals, []);
     assert.equal(useStore.getState().pendingHomeChatDraft, null);
@@ -221,6 +242,8 @@ describe("ProvisionalBubble actions", () => {
       dailySummary: null,
       sending: false,
       provisionalBubble: null,
+      guestSessionStatus: "ready",
+      guestSessionRecoveryAttempted: false,
     });
     // Reset rollover refresh handler to avoid cross-test leakage (D-19)
     useStore.getState().setRolloverRefreshHandler(null);

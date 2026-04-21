@@ -67,6 +67,7 @@ describe("API Client", () => {
     assert.equal(result.deviceId, "d-1");
     assert.equal(fetchCalls[0].url, "/api/device");
     assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
   });
 
   it("submitIntake sends POST to /api/device with intake payload and returns coachExplanation", async () => {
@@ -94,8 +95,33 @@ describe("API Client", () => {
 
     assert.equal(fetchCalls[0].url, "/api/device");
     assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), intake);
     assert.equal(result.coachExplanation, "Use a modest deficit.");
+  });
+
+  it("establishGuestSession migrates a legacy device into cookie-backed mode", async () => {
+    mockFetch(200, {
+      deviceId: "d-legacy",
+      goal: "fat_loss",
+      dailyTargets: { calories: 1500, protein: 120, carbs: 150, fat: 50 },
+      establishedBy: "legacy_migration",
+    });
+
+    const result = await api.establishGuestSession({ legacyDeviceId: "d-legacy" });
+
+    assert.equal(fetchCalls[0].url, "/api/device/session");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), { legacyDeviceId: "d-legacy" });
+    assert.equal(result.establishedBy, "legacy_migration");
+  });
+
+  it("establishGuestSession throws UNAUTHORIZED on 401", async () => {
+    mockFetch(401, { error: "Invalid device ID" });
+    await assert.rejects(() => api.establishGuestSession({ legacyDeviceId: "missing-device" }), {
+      message: "UNAUTHORIZED",
+    });
   });
 
   it("sendMessage includes X-Device-Id header from localStorage", async () => {

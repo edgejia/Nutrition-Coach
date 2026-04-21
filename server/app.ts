@@ -110,7 +110,7 @@ export async function buildApp(opts: AppOptions) {
   // Keep the parser limit above the product limit so the chat route can return a controlled 400 at 5MB.
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
-  registerDeviceRoutes(app, { deviceService, targetGenerationService });
+  registerDeviceRoutes(app, { deviceService, guestSessionService, targetGenerationService });
   registerChatRoutes(app, {
     orchestrator,
     chatService,

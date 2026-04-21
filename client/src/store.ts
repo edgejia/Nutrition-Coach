@@ -23,11 +23,14 @@ function readStoredJson<T>(key: string): T | null {
 // so SSE/chat callers never see it as a reactive field and tests can reset per case (D-13, D-19).
 type RolloverRefreshHandler = () => void | Promise<void>;
 let rolloverRefreshHandler: RolloverRefreshHandler | null = null;
+type GuestSessionStatus = "unknown" | "establishing" | "ready" | "recovery_required";
 
 interface AppState {
   deviceId: string | null;
   goal: string | null;
   activeScreen: ActiveScreen;
+  guestSessionStatus: GuestSessionStatus;
+  guestSessionRecoveryAttempted: boolean;
   dailyTargets: DailyTargets | null;
   messages: Message[];
   dailySummary: DailySummary | null;
@@ -44,6 +47,9 @@ interface AppState {
   clearPendingHomeChatDraft: () => void;
   setShowSettings: (showSettings: boolean) => void;
   setDevice: (deviceId: string, goal: string, dailyTargets: DailyTargets) => void;
+  setGuestSessionStatus: (status: GuestSessionStatus) => void;
+  markGuestSessionRecoveryAttempted: () => void;
+  resetGuestSessionRecovery: () => void;
   addMessage: (message: Message) => void;
   setMessages: (messages: Message[]) => void;
   setDailySummary: (summary: DailySummary) => void;
@@ -62,6 +68,8 @@ export const useStore = create<AppState>((set, get) => ({
   deviceId: localStorage.getItem("deviceId"),
   goal: localStorage.getItem("goal"),
   activeScreen: localStorage.getItem("deviceId") ? "home" : "onboarding",
+  guestSessionStatus: localStorage.getItem("deviceId") ? "unknown" : "ready",
+  guestSessionRecoveryAttempted: false,
   dailyTargets: readStoredJson<DailyTargets>("dailyTargets"),
   messages: [],
   dailySummary: null,
@@ -84,8 +92,19 @@ export const useStore = create<AppState>((set, get) => ({
     localStorage.setItem("deviceId", deviceId);
     localStorage.setItem("goal", goal);
     localStorage.setItem("dailyTargets", JSON.stringify(dailyTargets));
-    set({ deviceId, goal, dailyTargets, activeScreen: "home", showSettings: false });
+    set({
+      deviceId,
+      goal,
+      activeScreen: "home",
+      guestSessionStatus: "ready",
+      guestSessionRecoveryAttempted: false,
+      dailyTargets,
+      showSettings: false,
+    });
   },
+  setGuestSessionStatus: (guestSessionStatus) => set({ guestSessionStatus }),
+  markGuestSessionRecoveryAttempted: () => set({ guestSessionRecoveryAttempted: true }),
+  resetGuestSessionRecovery: () => set({ guestSessionRecoveryAttempted: false }),
 
   addMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
   setMessages: (messages) => set({ messages }),
@@ -176,6 +195,8 @@ export const useStore = create<AppState>((set, get) => ({
       deviceId: null,
       goal: null,
       activeScreen: "onboarding",
+      guestSessionStatus: "ready",
+      guestSessionRecoveryAttempted: false,
       dailyTargets: null,
       messages: [],
       dailySummary: null,

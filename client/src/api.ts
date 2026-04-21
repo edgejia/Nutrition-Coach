@@ -1,5 +1,12 @@
 import type { ChatReply, DailySummary, DailyTargets, IntakeData, IntakeResult, MealEntry, Message } from "./types.js";
 
+export interface GuestSessionBootstrapResult {
+  deviceId: string;
+  goal: "fat_loss" | "muscle_gain";
+  dailyTargets: DailyTargets;
+  establishedBy: "active" | "resume" | "legacy_migration";
+}
+
 function getHeaders(): Record<string, string> {
   const deviceId = localStorage.getItem("deviceId");
   return deviceId ? { "X-Device-Id": deviceId } : {};
@@ -26,6 +33,7 @@ export function withAuthorizedAssetUrl(
 export async function registerDevice(goal: string): Promise<{ deviceId: string; dailyTargets: DailyTargets }> {
   const res = await fetch("/api/device", {
     method: "POST",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ goal }),
   });
@@ -36,11 +44,28 @@ export async function registerDevice(goal: string): Promise<{ deviceId: string; 
 export async function submitIntake(data: IntakeData): Promise<IntakeResult> {
   const res = await fetch("/api/device", {
     method: "POST",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to submit intake");
   return res.json();
+}
+
+export async function establishGuestSession(
+  options?: { legacyDeviceId?: string | null },
+): Promise<GuestSessionBootstrapResult> {
+  const payload = options?.legacyDeviceId ? { legacyDeviceId: options.legacyDeviceId } : {};
+  const res = await fetch("/api/device/session", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error("Failed to establish guest session");
+  return res.json() as Promise<GuestSessionBootstrapResult>;
 }
 
 export async function updateGoals(goals: Partial<DailyTargets>): Promise<{ dailyTargets: DailyTargets }> {
