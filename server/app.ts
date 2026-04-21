@@ -12,6 +12,7 @@ import { createDaySnapshotService } from "./services/day-snapshot.js";
 import { createChatService } from "./services/chat.js";
 import { createAssetService } from "./services/assets.js";
 import { createMealCorrectionService } from "./services/meal-correction.js";
+import { createGuestSessionService } from "./services/guest-session.js";
 import { createOrchestrator } from "./orchestrator/index.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
 import { RealtimePublisher } from "./realtime/publisher.js";
@@ -28,6 +29,7 @@ export interface AppServices {
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  guestSessionService: ReturnType<typeof createGuestSessionService>;
   mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   summaryService: ReturnType<typeof createSummaryService>;
 }
@@ -71,6 +73,14 @@ export async function buildApp(opts: AppOptions) {
   const deviceService = createDeviceService(db);
   const targetGenerationService = createTargetGenerationService(llmProvider, app.log);
   const foodLoggingService = createFoodLoggingService(db);
+  const guestSessionService = createGuestSessionService({
+    secret: config.guestSessionSecret,
+    activeCookieName: config.guestSessionCookieName,
+    resumeCookieName: config.guestSessionResumeCookieName,
+    activeTtlSeconds: config.guestSessionTtlSeconds,
+    resumeTtlSeconds: config.guestSessionResumeTtlSeconds,
+    secure: config.guestSessionCookieSecure,
+  });
   const summaryService = createSummaryService(db);
   const daySnapshotService = createDaySnapshotService({ summaryService, foodLoggingService });
   const chatService = createChatService(db);
@@ -78,7 +88,14 @@ export async function buildApp(opts: AppOptions) {
   const mealCorrectionService = createMealCorrectionService(db);
   const publisher = new RealtimePublisher();
 
-  opts.onServicesReady?.({ assetService, chatService, foodLoggingService, mealCorrectionService, summaryService });
+  opts.onServicesReady?.({
+    assetService,
+    chatService,
+    foodLoggingService,
+    guestSessionService,
+    mealCorrectionService,
+    summaryService,
+  });
 
   const orchestrator = createOrchestrator({
     llmProvider,
