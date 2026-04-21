@@ -92,6 +92,7 @@ interface SummaryArtifact {
   consoleSummary: string;
   totalSteps: number;
   passedSteps: number;
+  stepNames: string[];
   writtenAt: string;
 }
 
@@ -103,6 +104,7 @@ function buildSummary(scenarioName: string, result: ScenarioResult): SummaryArti
     consoleSummary: result.consoleSummary,
     totalSteps: result.steps.length,
     passedSteps,
+    stepNames: result.steps.map((step) => step.name),
     writtenAt: new Date().toISOString(),
   };
   if (result.failedStep !== undefined) {
