@@ -168,7 +168,7 @@ describe("harness-foundation", () => {
 
       // Verify device is usable
       const res = await fetch(`${ctx.address}/api/chat/history?limit=5`, {
-        headers: { "x-device-id": ctx.deviceId },
+        headers: { cookie: ctx.cookieHeader },
       });
       assert.equal(res.status, 200);
     } finally {
