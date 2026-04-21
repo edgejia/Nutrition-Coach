@@ -14,12 +14,15 @@ import type { OrchestratorHooks } from "../orchestrator/hooks.js";
 import { buildPartialSuccessLoggedReply } from "../orchestrator/index.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
+import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import type { createGuestSessionService } from "../services/guest-session.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
   deviceService: ReturnType<typeof createDeviceService>;
+  guestSessionService: ReturnType<typeof createGuestSessionService>;
   publisher: RealtimePublisher;
   /**
    * Override the upload storage directory. When undefined the route falls back
@@ -478,15 +481,23 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     assetService,
     chatService,
     deviceService,
+    guestSessionService,
     publisher,
     uploadsDir: injectedUploadsDir,
   } = deps;
 
   app.post("/api/chat", async (request, reply) => {
-    const deviceId = request.headers["x-device-id"] as string;
-    if (!deviceId) return reply.code(401).send({ error: "Missing X-Device-Id" });
-    const device = await deviceService.getDevice(deviceId);
-    if (!device) return reply.code(401).send({ error: "Invalid device ID" });
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    const { deviceId } = session;
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
+    }
 
     const resolvedUploadsDir = injectedUploadsDir ?? config.uploadsStagingDir;
     const parseResult = await parseMultipartRequest(request, resolvedUploadsDir);
@@ -647,10 +658,17 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get("/api/chat/history", async (request, reply) => {
-    const deviceId = request.headers["x-device-id"] as string;
-    if (!deviceId) return reply.code(401).send({ error: "Missing X-Device-Id" });
-    const device = await deviceService.getDevice(deviceId);
-    if (!device) return reply.code(401).send({ error: "Invalid device ID" });
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    const { deviceId } = session;
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
+    }
 
     const { limit } = request.query as { limit?: string };
     const parsedLimit = limit === undefined ? 50 : Number(limit);

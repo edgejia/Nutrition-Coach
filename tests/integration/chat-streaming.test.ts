@@ -205,7 +205,13 @@ describe("chat-streaming", () => {
   let app: FastifyInstance;
   let mockLLM: StreamingLLMProvider;
   let deviceId: string;
+  let sessionCookieHeader: string;
   let address: string;
+
+  function toCookieHeader(rawHeader: string | string[] | undefined) {
+    const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+    return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
 
   beforeEach(async () => {
     mockLLM = new StreamingLLMProvider();
@@ -217,6 +223,7 @@ describe("chat-streaming", () => {
       payload: { goal: "fat_loss" },
     });
     deviceId = res.json().deviceId;
+    sessionCookieHeader = toCookieHeader(res.headers["set-cookie"]);
     address = await app.listen({ port: 0 });
   });
 
@@ -239,7 +246,7 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -266,7 +273,7 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -298,7 +305,7 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -314,7 +321,7 @@ describe("chat-streaming", () => {
       assert.doesNotThrow(() => JSON.parse(doneDataMatch[1]));
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=5`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       assert.equal(historyRes.status, 200);
       const historyJson = await historyRes.json();
@@ -359,7 +366,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -416,7 +423,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -427,7 +434,7 @@ describe("chat-streaming", () => {
       assert.match(text, /3\/25/);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=5`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json();
       assert.match(historyJson.messages.at(-1)?.content ?? "", /3\/25/);
@@ -451,7 +458,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -491,7 +498,7 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -524,7 +531,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -557,7 +564,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -595,7 +602,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -635,7 +642,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -678,7 +685,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -693,7 +700,7 @@ describe("chat-streaming", () => {
       assert.match(text, /event: done/, "expected event: done");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       assert.equal(historyRes.status, 200);
       const historyJson = await historyRes.json() as {
@@ -728,7 +735,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -747,7 +754,7 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didLogMeal, false);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
@@ -770,7 +777,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -806,7 +813,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -825,7 +832,7 @@ describe("chat-streaming", () => {
       assert.match(combinedChunkText, /抱歉|無法/, "live SSE path must surface the fallback reply before done");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
@@ -850,7 +857,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -862,7 +869,7 @@ describe("chat-streaming", () => {
       assert.match(text, /event: done/);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
@@ -894,7 +901,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -906,7 +913,7 @@ describe("chat-streaming", () => {
       assert.match(text, /event: done/);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
@@ -931,7 +938,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -953,7 +960,7 @@ describe("chat-streaming", () => {
       );
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
@@ -967,7 +974,7 @@ describe("chat-streaming", () => {
       assert.match(assistantMsgs[0]!.content, /其他配菜不列入 headline/);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
       assert.ok(mealsJson.meals.some((m) => m.foodName === "雞腿便當"), "meal must be kept even when final reply fails");
@@ -989,7 +996,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -1010,7 +1017,7 @@ describe("chat-streaming", () => {
       );
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
@@ -1035,7 +1042,7 @@ describe("chat-streaming", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -1056,7 +1063,7 @@ describe("chat-streaming", () => {
       assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
       assert.deepEqual(
@@ -1066,7 +1073,7 @@ describe("chat-streaming", () => {
       );
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");

@@ -2,21 +2,30 @@ import type { FastifyInstance } from "fastify";
 import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
 import type { createDaySnapshotService } from "../services/day-snapshot.js";
 import type { createDeviceService } from "../services/device.js";
+import type { createGuestSessionService } from "../services/guest-session.js";
+import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 
 interface Deps {
   daySnapshotService: ReturnType<typeof createDaySnapshotService>;
   deviceService: ReturnType<typeof createDeviceService>;
+  guestSessionService: ReturnType<typeof createGuestSessionService>;
 }
 
 export function registerDaySnapshotRoutes(app: FastifyInstance, deps: Deps) {
-  const { daySnapshotService, deviceService } = deps;
+  const { daySnapshotService, deviceService, guestSessionService } = deps;
 
   app.get("/api/day-snapshot", async (request, reply) => {
-    const deviceId = request.headers["x-device-id"] as string;
-    if (!deviceId) return reply.code(401).send({ error: "Missing X-Device-Id" });
-
-    const device = await deviceService.getDevice(deviceId);
-    if (!device) return reply.code(401).send({ error: "Invalid device ID" });
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    const { deviceId } = session;
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
+    }
 
     const { date } = request.query as { date?: string };
     if (!date) {

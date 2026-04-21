@@ -15,7 +15,13 @@ describe("Assets API", () => {
   let stagingDir: string;
   let services: AppServices | undefined;
   let ownerDeviceId: string;
-  let foreignDeviceId: string;
+  let ownerCookieHeader: string;
+  let foreignCookieHeader: string;
+
+  function toCookieHeader(rawHeader: string | string[] | undefined) {
+    const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+    return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
 
   beforeEach(async () => {
     assetsDir = await mkdtemp(path.join(os.tmpdir(), "nutrition-assets-api-"));
@@ -29,12 +35,12 @@ describe("Assets API", () => {
       },
     });
 
-    ownerDeviceId = (
-      await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } })
-    ).json().deviceId as string;
-    foreignDeviceId = (
-      await app.inject({ method: "POST", url: "/api/device", payload: { goal: "muscle_gain" } })
-    ).json().deviceId as string;
+    const ownerDevice = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
+    ownerDeviceId = ownerDevice.json().deviceId as string;
+    ownerCookieHeader = toCookieHeader(ownerDevice.headers["set-cookie"]);
+
+    const foreignDevice = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "muscle_gain" } });
+    foreignCookieHeader = toCookieHeader(foreignDevice.headers["set-cookie"]);
   });
 
   afterEach(async () => {
@@ -58,7 +64,7 @@ describe("Assets API", () => {
     });
   }
 
-  it("GET /api/assets/:id returns 401 without X-Device-Id", async () => {
+  it("GET /api/assets/:id returns 401 without guest-session cookies", async () => {
     const asset = await createOwnedAsset();
 
     const res = await app.inject({
@@ -67,7 +73,7 @@ describe("Assets API", () => {
     });
 
     assert.equal(res.statusCode, 401);
-    assert.deepEqual(res.json(), { error: "Missing X-Device-Id" });
+    assert.deepEqual(res.json(), { error: "Guest session required" });
   });
 
   it("GET /api/assets/:id returns 404 for a foreign device", async () => {
@@ -76,20 +82,20 @@ describe("Assets API", () => {
     const res = await app.inject({
       method: "GET",
       url: `/api/assets/${asset.id}`,
-      headers: { "x-device-id": foreignDeviceId },
+      headers: { cookie: foreignCookieHeader },
     });
 
     assert.equal(res.statusCode, 404);
     assert.deepEqual(res.json(), { error: "Asset not found" });
   });
 
-  it("GET /api/assets/:id returns bytes and mime type for the owner", async () => {
+  it("GET /api/assets/:id returns bytes and mime type for the cookie owner", async () => {
     const asset = await createOwnedAsset();
 
     const res = await app.inject({
       method: "GET",
       url: `/api/assets/${asset.id}`,
-      headers: { "x-device-id": ownerDeviceId },
+      headers: { cookie: ownerCookieHeader },
     });
 
     assert.equal(res.statusCode, 200);
@@ -97,7 +103,7 @@ describe("Assets API", () => {
     assert.equal(res.body.length > 0, true);
   });
 
-  it("GET /api/assets/:id accepts deviceId in the query string for browser image requests", async () => {
+  it("GET /api/assets/:id rejects raw deviceId query-string auth", async () => {
     const asset = await createOwnedAsset();
 
     const res = await app.inject({
@@ -105,8 +111,7 @@ describe("Assets API", () => {
       url: `/api/assets/${asset.id}?deviceId=${ownerDeviceId}`,
     });
 
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.headers["content-type"], "image/png");
-    assert.equal(res.body.length > 0, true);
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.json(), { error: "Guest session required" });
   });
 });

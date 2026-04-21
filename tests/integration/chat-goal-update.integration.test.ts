@@ -17,13 +17,18 @@ describe("chat goal update integration", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
   let address: string;
-  let deviceId: string;
+  let sessionCookieHeader: string;
+
+  function toCookieHeader(rawHeader: string | string[] | undefined) {
+    const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+    return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
     app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
-    deviceId = res.json().deviceId;
+    sessionCookieHeader = toCookieHeader(res.headers["set-cookie"]);
     address = await app.listen({ port: 0 });
   });
 
@@ -42,7 +47,7 @@ describe("chat goal update integration", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -54,7 +59,7 @@ describe("chat goal update integration", () => {
       method: "PUT",
       headers: {
         "content-type": "application/json",
-        "x-device-id": deviceId,
+        cookie: sessionCookieHeader,
       },
       body: JSON.stringify({ fat: 50 }),
     });

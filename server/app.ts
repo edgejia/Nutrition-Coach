@@ -115,14 +115,15 @@ export async function buildApp(opts: AppOptions) {
     orchestrator,
     chatService,
     deviceService,
+    guestSessionService,
     assetService,
     publisher,
     uploadsDir: opts.uploadsDir,
   });
-  registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, publisher });
-  registerDaySnapshotRoutes(app, { daySnapshotService, deviceService });
-  registerAssetRoutes(app, { assetService, deviceService });
-  registerSSERoutes(app, { publisher, summaryService, deviceService });
+  registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, publisher });
+  registerDaySnapshotRoutes(app, { daySnapshotService, deviceService, guestSessionService });
+  registerAssetRoutes(app, { assetService, deviceService, guestSessionService });
+  registerSSERoutes(app, { publisher, summaryService, deviceService, guestSessionService });
 
   let hasClientDist = false;
   try {

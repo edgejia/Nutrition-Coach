@@ -13,6 +13,10 @@ function getSetCookieHeaders(res: Awaited<ReturnType<FastifyInstance["inject"]>>
   return typeof rawHeader === "string" ? [rawHeader] : [];
 }
 
+function toCookieHeader(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
+  return getSetCookieHeaders(res).map((value) => value.split(";", 1)[0]).join("; ");
+}
+
 describe("Device API", () => {
   let app: FastifyInstance;
 
@@ -23,6 +27,20 @@ describe("Device API", () => {
   afterEach(async () => {
     await app.close();
   });
+
+  async function createGuestDevice(goal: "fat_loss" | "muscle_gain" = "fat_loss") {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal },
+    });
+
+    return {
+      response: res,
+      cookieHeader: toCookieHeader(res),
+      ...(res.json() as { deviceId: string; dailyTargets: { calories: number; protein: number; carbs: number; fat: number } }),
+    };
+  }
 
   it("POST /api/device creates a device", async () => {
     const res = await app.inject({
@@ -51,30 +69,26 @@ describe("Device API", () => {
   });
 
   it("PUT /api/device/goals updates targets", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: create.cookieHeader },
       payload: { protein: 150 },
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().dailyTargets.protein, 150);
   });
 
-  it("PUT /api/device/goals returns 401 without header", async () => {
+  it("PUT /api/device/goals returns 401 without a guest session", async () => {
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
       payload: { protein: 150 },
     });
     assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.json(), { error: "Guest session required" });
   });
 
   it("POST /api/device creates a device with muscle_gain goal", async () => {
@@ -91,12 +105,8 @@ describe("Device API", () => {
   });
 
   it("POST /api/device/session migrates a legacy device into cookie-backed mode", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId, dailyTargets } = create.json();
+    const create = await createGuestDevice();
+    const { deviceId, dailyTargets } = create;
 
     const res = await app.inject({
       method: "POST",
@@ -129,45 +139,36 @@ describe("Device API", () => {
   });
 
   it("PUT /api/device/goals rejects negative values", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: create.cookieHeader },
       payload: { calories: -100 },
     });
     assert.equal(res.statusCode, 400);
   });
 
-  it("PUT /api/device/goals returns 401 with invalid device id", async () => {
+  it("PUT /api/device/goals returns 401 with invalid guest-session cookies", async () => {
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
-      headers: { "x-device-id": "non-existent-id" },
+      headers: { cookie: "guest_session=invalid; guest_session_resume=invalid" },
       payload: { protein: 150 },
     });
     assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.json(), { error: "Invalid guest session" });
   });
 
   it("PUT /api/device/goals returns 400 for null body", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
       headers: {
-        "x-device-id": deviceId,
+        cookie: create.cookieHeader,
         "content-type": "application/json",
       },
       body: "null",
@@ -177,18 +178,13 @@ describe("Device API", () => {
   });
 
   it("PUT /api/device/goals returns 400 for array body", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
       headers: {
-        "x-device-id": deviceId,
+        cookie: create.cookieHeader,
         "content-type": "application/json",
       },
       body: "[1,2,3]",
@@ -198,18 +194,13 @@ describe("Device API", () => {
   });
 
   it("PUT /api/device/goals returns 400 for string body", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
       headers: {
-        "x-device-id": deviceId,
+        cookie: create.cookieHeader,
         "content-type": "application/json",
       },
       body: '"hello"',
@@ -219,17 +210,12 @@ describe("Device API", () => {
   });
 
   it("PUT /api/device/goals returns 400 for empty object body", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: create.cookieHeader },
       payload: {},
     });
     assert.equal(res.statusCode, 400);
@@ -237,17 +223,12 @@ describe("Device API", () => {
   });
 
   it("PUT /api/device/goals returns 400 for unknown-only keys", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: create.cookieHeader },
       payload: { sodium: 1 },
     });
     assert.equal(res.statusCode, 400);
@@ -255,17 +236,12 @@ describe("Device API", () => {
   });
 
   it("PUT /api/device/goals returns 400 for string field value", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: create.cookieHeader },
       payload: { protein: "150" },
     });
     assert.equal(res.statusCode, 400);
@@ -273,17 +249,12 @@ describe("Device API", () => {
   });
 
   it("PUT /api/device/goals returns 400 for null field value", async () => {
-    const create = await app.inject({
-      method: "POST",
-      url: "/api/device",
-      payload: { goal: "fat_loss" },
-    });
-    const { deviceId } = create.json();
+    const create = await createGuestDevice();
 
     const res = await app.inject({
       method: "PUT",
       url: "/api/device/goals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: create.cookieHeader },
       payload: { protein: null },
     });
     assert.equal(res.statusCode, 400);

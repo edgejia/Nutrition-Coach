@@ -48,7 +48,13 @@ describe("chat meal correction integration", () => {
   let mockLLM: MockLLMProvider;
   let address: string;
   let deviceId: string;
+  let sessionCookieHeader: string;
   let services: AppServices;
+
+  function toCookieHeader(rawHeader: string | string[] | undefined) {
+    const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+    return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
 
   beforeEach(async () => {
     globalThis.Date = FixedDate as DateConstructor;
@@ -62,6 +68,7 @@ describe("chat meal correction integration", () => {
     });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
     deviceId = res.json().deviceId;
+    sessionCookieHeader = toCookieHeader(res.headers["set-cookie"]);
     address = await app.listen({ port: 0 });
   });
 
@@ -94,7 +101,7 @@ describe("chat meal correction integration", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -103,7 +110,7 @@ describe("chat meal correction integration", () => {
 
   async function getMeals() {
     const res = await fetch(`${address}/api/meals`, {
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(res.status, 200);
     return (await res.json() as { meals: Array<{

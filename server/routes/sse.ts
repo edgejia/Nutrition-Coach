@@ -1,35 +1,43 @@
+import type { OutgoingHttpHeaders } from "node:http";
 import type { FastifyInstance } from "fastify";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import type { createSummaryService } from "../services/summary.js";
 import type { createDeviceService } from "../services/device.js";
+import type { createGuestSessionService } from "../services/guest-session.js";
 import { currentAppDate } from "../lib/time.js";
+import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 
 interface Deps {
   publisher: RealtimePublisher;
   summaryService: ReturnType<typeof createSummaryService>;
   deviceService: ReturnType<typeof createDeviceService>;
+  guestSessionService: ReturnType<typeof createGuestSessionService>;
 }
 
 export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
-  const { publisher, summaryService, deviceService } = deps;
+  const { publisher, summaryService, deviceService, guestSessionService } = deps;
 
   app.get("/api/sse", async (request, reply) => {
-    // Normal API routes use the X-Device-Id request header for device identification.
-    // SSE additionally accepts a ?deviceId= query-param fallback because the browser
-    // EventSource API cannot send custom headers. This is INTENTIONAL — do NOT remove the query-param path.
-    // When OAuth (PROD-02) lands in v2, this fallback will be replaced by a session-cookie check. (D-07)
-    const deviceId = (request.headers["x-device-id"] ?? (request.query as { deviceId?: string }).deviceId) as string;
-    if (!deviceId) return reply.code(401).send({ error: "Missing X-Device-Id" });
-    const device = await deviceService.getDevice(deviceId);
-    if (!device) return reply.code(401).send({ error: "Invalid device ID" });
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    const { deviceId } = session;
 
     // Tell Fastify we're handling the response manually
     reply.hijack();
-    reply.raw.writeHead(200, {
+    const headers: OutgoingHttpHeaders = {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
       connection: "keep-alive",
-    });
+    };
+    if (session.setCookies) {
+      headers["set-cookie"] = [...session.setCookies];
+    }
+    reply.raw.writeHead(200, headers);
 
     // Send initial daily summary
     const summary = await summaryService.getDailySummary(deviceId, currentAppDate());

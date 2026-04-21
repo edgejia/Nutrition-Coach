@@ -11,6 +11,18 @@ interface SSEFrame {
   data: string;
 }
 
+function getSetCookieHeaders(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
+  const rawHeader = res.headers["set-cookie"];
+  if (Array.isArray(rawHeader)) {
+    return rawHeader;
+  }
+  return typeof rawHeader === "string" ? [rawHeader] : [];
+}
+
+function toCookieHeader(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
+  return getSetCookieHeaders(res).map((value) => value.split(";", 1)[0]).join("; ");
+}
+
 function parseSSEFrames(raw: string): SSEFrame[] {
   return raw
     .split("\n\n")
@@ -61,13 +73,13 @@ async function readOptionalSSEChunk(
 describe("SSE API", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
-  let deviceId: string;
+  let sessionCookieHeader: string;
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
     app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
-    deviceId = res.json().deviceId;
+    sessionCookieHeader = toCookieHeader(res);
   });
 
   afterEach(async () => {
@@ -76,22 +88,24 @@ describe("SSE API", () => {
     }
   });
 
-  it("GET /api/sse returns 401 without device id", async () => {
+  it("GET /api/sse returns 401 without a guest session", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/sse",
     });
     assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.json(), { error: "Guest session required" });
   });
 
-  it("GET /api/sse accepts the EventSource query-param fallback", async () => {
+  it("GET /api/sse accepts cookie-backed guest sessions for EventSource", async () => {
     // Use a real HTTP request since hijack() bypasses inject() response collection
     const address = await app.listen({ port: 0 });
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const controller = new AbortController();
       timeout = setTimeout(() => controller.abort(), 1000);
-      const res = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+      const res = await fetch(`${address}/api/sse`, {
+        headers: { cookie: sessionCookieHeader },
         signal: controller.signal,
       });
       if (timeout) clearTimeout(timeout);
@@ -131,7 +145,8 @@ describe("SSE API", () => {
     try {
       const controller = new AbortController();
       timeout = setTimeout(() => controller.abort(), 2000);
-      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+      const sseRes = await fetch(`${address}/api/sse`, {
+        headers: { cookie: sessionCookieHeader },
         signal: controller.signal,
       });
       const reader = sseRes.body?.getReader();
@@ -143,7 +158,7 @@ describe("SSE API", () => {
       form.append("message", "我吃了蘋果");
       await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
         body: form,
       });
 
@@ -181,20 +196,21 @@ describe("SSE API", () => {
       form.append("message", "這是我的午餐");
       await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
         body: form,
       });
 
       const mealsRes = await app.inject({
         method: "GET",
         url: "/api/meals",
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const mealId = mealsRes.json().meals[0].id as string;
 
       const controller = new AbortController();
       timeout = setTimeout(() => controller.abort(), 2000);
-      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+      const sseRes = await fetch(`${address}/api/sse`, {
+        headers: { cookie: sessionCookieHeader },
         signal: controller.signal,
       });
       const reader = sseRes.body?.getReader();
@@ -204,7 +220,7 @@ describe("SSE API", () => {
 
       await fetch(`${address}/api/meals/${mealId}`, {
         method: "DELETE",
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
 
       const secondChunk = await reader.read();
@@ -243,7 +259,8 @@ describe("SSE API", () => {
     try {
       const controller = new AbortController();
       timeout = setTimeout(() => controller.abort(), 3000);
-      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+      const sseRes = await fetch(`${address}/api/sse`, {
+        headers: { cookie: sessionCookieHeader },
         signal: controller.signal,
       });
       reader = sseRes.body?.getReader();
@@ -255,7 +272,7 @@ describe("SSE API", () => {
       form.append("message", "卡路里改成 1800，蛋白質 130 克");
       const chatRes = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
         body: form,
       });
       assert.equal(chatRes.status, 200);

@@ -13,10 +13,16 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 describe("Day snapshot API", () => {
   let app: FastifyInstance;
   let deviceId: string;
+  let sessionCookieHeader: string;
   let tempRoot: string;
   let uploadsDir: string;
   let assetsDir: string;
   let services: AppServices | undefined;
+
+  function toCookieHeader(rawHeader: string | string[] | undefined) {
+    const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+    return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
 
   beforeEach(async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-day-snapshot-api-"));
@@ -31,9 +37,9 @@ describe("Day snapshot API", () => {
         services = readyServices;
       },
     });
-    deviceId = (
-      await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } })
-    ).json().deviceId;
+    const deviceRes = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
+    deviceId = deviceRes.json().deviceId;
+    sessionCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
   });
 
   afterEach(async () => {
@@ -75,7 +81,7 @@ describe("Day snapshot API", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/day-snapshot?date=2026-03-25",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
 
     assert.equal(res.statusCode, 200);
@@ -142,7 +148,7 @@ describe("Day snapshot API", () => {
     const missingDate = await app.inject({
       method: "GET",
       url: "/api/day-snapshot",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(missingDate.statusCode, 400);
     assert.deepEqual(missingDate.json(), { error: "Missing date query" });
@@ -150,26 +156,26 @@ describe("Day snapshot API", () => {
     const malformedDate = await app.inject({
       method: "GET",
       url: "/api/day-snapshot?date=2026-02-31",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(malformedDate.statusCode, 400);
     assert.deepEqual(malformedDate.json(), { error: "Invalid date query" });
   });
 
-  it("GET /api/day-snapshot requires a valid device header", async () => {
+  it("GET /api/day-snapshot requires a valid guest session", async () => {
     const missingDevice = await app.inject({
       method: "GET",
       url: "/api/day-snapshot?date=2026-03-25",
     });
     assert.equal(missingDevice.statusCode, 401);
-    assert.deepEqual(missingDevice.json(), { error: "Missing X-Device-Id" });
+    assert.deepEqual(missingDevice.json(), { error: "Guest session required" });
 
     const invalidDevice = await app.inject({
       method: "GET",
       url: "/api/day-snapshot?date=2026-03-25",
-      headers: { "x-device-id": "invalid-device" },
+      headers: { cookie: "guest_session=invalid; guest_session_resume=invalid" },
     });
     assert.equal(invalidDevice.statusCode, 401);
-    assert.deepEqual(invalidDevice.json(), { error: "Invalid device ID" });
+    assert.deepEqual(invalidDevice.json(), { error: "Invalid guest session" });
   });
 });

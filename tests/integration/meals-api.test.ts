@@ -17,11 +17,17 @@ describe("Meals API", () => {
   let mockLLM: MockLLMProvider;
   let address: string;
   let deviceId: string;
-  let otherDeviceId: string;
+  let deviceCookieHeader: string;
+  let otherCookieHeader: string;
   let tempRoot: string;
   let uploadsDir: string;
   let assetsDir: string;
   let services: AppServices | undefined;
+
+  function toCookieHeader(rawHeader: string | string[] | undefined) {
+    const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+    return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
@@ -37,12 +43,12 @@ describe("Meals API", () => {
         services = readyServices;
       },
     });
-    deviceId = (
-      await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } })
-    ).json().deviceId;
-    otherDeviceId = (
-      await app.inject({ method: "POST", url: "/api/device", payload: { goal: "muscle_gain" } })
-    ).json().deviceId;
+    const deviceRes = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
+    deviceId = deviceRes.json().deviceId;
+    deviceCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+
+    const otherDeviceRes = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "muscle_gain" } });
+    otherCookieHeader = toCookieHeader(otherDeviceRes.headers["set-cookie"]);
     address = await app.listen({ port: 0 });
   });
 
@@ -58,7 +64,7 @@ describe("Meals API", () => {
     form.append("message", message);
     return fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: deviceCookieHeader },
       body: form,
     });
   }
@@ -69,7 +75,7 @@ describe("Meals API", () => {
     form.append("image", new Blob(["fake image"], { type: "image/png" }), fileName);
     return fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: deviceCookieHeader },
       body: form,
     });
   }
@@ -134,7 +140,7 @@ describe("Meals API", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/meals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: deviceCookieHeader },
     });
 
     assert.equal(res.statusCode, 200);
@@ -168,14 +174,14 @@ describe("Meals API", () => {
     const mealsRes = await app.inject({
       method: "GET",
       url: "/api/meals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: deviceCookieHeader },
     });
     const mealId = mealsRes.json().meals[0].id as string;
 
     const foreignDelete = await app.inject({
       method: "DELETE",
       url: `/api/meals/${mealId}`,
-      headers: { "x-device-id": otherDeviceId },
+      headers: { cookie: otherCookieHeader },
     });
     assert.equal(foreignDelete.statusCode, 404);
     assert.deepEqual(foreignDelete.json(), { error: "Meal not found" });
@@ -183,7 +189,7 @@ describe("Meals API", () => {
     const ownDelete = await app.inject({
       method: "DELETE",
       url: `/api/meals/${mealId}`,
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: deviceCookieHeader },
     });
     assert.equal(ownDelete.statusCode, 200);
     assert.deepEqual(ownDelete.json(), {
@@ -201,7 +207,7 @@ describe("Meals API", () => {
     const remainingMeals = await app.inject({
       method: "GET",
       url: "/api/meals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: deviceCookieHeader },
     });
     assert.deepEqual(remainingMeals.json().meals, []);
   });
@@ -230,7 +236,7 @@ describe("Meals API", () => {
       const deleteRes = await app.inject({
         method: "DELETE",
         url: `/api/meals/${meal.id}`,
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: deviceCookieHeader },
       });
 
       assert.equal(deleteRes.statusCode, 200);
@@ -262,7 +268,8 @@ describe("Meals API", () => {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
-      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+      const sseRes = await fetch(`${address}/api/sse`, {
+        headers: { cookie: deviceCookieHeader },
         signal: controller.signal,
       });
       assert.equal(sseRes.status, 200);
@@ -273,7 +280,7 @@ describe("Meals API", () => {
 
       const deleteRes = await fetch(`${address}/api/meals/${meal.id}`, {
         method: "DELETE",
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: deviceCookieHeader },
       });
       assert.equal(deleteRes.status, 200);
       assert.deepEqual(await deleteRes.json(), {
@@ -329,7 +336,7 @@ describe("Meals API", () => {
     const mealsRes = await app.inject({
       method: "GET",
       url: "/api/meals",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: deviceCookieHeader },
     });
 
     assert.equal(mealsRes.statusCode, 200);
@@ -360,15 +367,15 @@ describe("Meals API", () => {
       logger: { level: "info", stream: logStream },
     });
 
-    const rolloverDeviceId = (
-      await rolloverApp.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } })
-    ).json().deviceId as string;
+    const rolloverDevice = await rolloverApp.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
+    const rolloverDeviceId = rolloverDevice.json().deviceId as string;
+    const rolloverCookieHeader = toCookieHeader(rolloverDevice.headers["set-cookie"]);
 
     const res = await rolloverApp.inject({
       method: "GET",
       url: "/api/meals",
       headers: {
-        "x-device-id": rolloverDeviceId,
+        cookie: rolloverCookieHeader,
         "x-refresh-reason": "day_rollover",
       },
     });

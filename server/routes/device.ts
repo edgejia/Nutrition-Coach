@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { createDeviceService, Goal, IntakeFields } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
+import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 
 interface Deps {
   deviceService: ReturnType<typeof createDeviceService>;
@@ -235,12 +236,23 @@ export function registerDeviceRoutes(
     return { ...device, establishedBy: "legacy_migration" as const };
   });
 
-  app.put("/api/device/goals", async (request, reply) => {
-    const deviceId = request.headers["x-device-id"] as string;
-    if (!deviceId) return reply.code(401).send({ error: "Missing X-Device-Id" });
+  app.delete("/api/device/session", async (_request, reply) => {
+    clearGuestSessionCookies(reply, guestSessionService);
+    return reply.code(204).send();
+  });
 
-    const device = await deviceService.getDevice(deviceId);
-    if (!device) return reply.code(401).send({ error: "Invalid device ID" });
+  app.put("/api/device/goals", async (request, reply) => {
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        clearGuestSessionCookies(reply, guestSessionService);
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    const { deviceId } = session;
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
+    }
 
     const body = request.body;
     if (!isRecord(body)) {

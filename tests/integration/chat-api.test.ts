@@ -75,11 +75,17 @@ describe("Chat API", () => {
   let mockLLM: MockLLMProvider;
   let address: string;
   let deviceId: string;
+  let sessionCookieHeader: string;
   let tempRoot: string;
   let uploadsDir: string;
   let assetsDir: string;
   let dbPath: string;
   let services: AppServices | undefined;
+
+  function toCookieHeader(rawHeader: string | string[] | undefined) {
+    const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+    return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
@@ -101,6 +107,7 @@ describe("Chat API", () => {
     });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
     deviceId = res.json().deviceId;
+    sessionCookieHeader = toCookieHeader(res.headers["set-cookie"]);
     address = await app.listen({ port: 0 });
   });
 
@@ -117,7 +124,7 @@ describe("Chat API", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -133,7 +140,7 @@ describe("Chat API", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -144,7 +151,7 @@ describe("Chat API", () => {
     const historyRes = await app.inject({
       method: "GET",
       url: "/api/chat/history?limit=10",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     const history = historyRes.json() as {
       messages: Array<{
@@ -205,7 +212,7 @@ describe("Chat API", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, "Accept": "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, Accept: "text/event-stream" },
         body: form,
       });
 
@@ -224,7 +231,7 @@ describe("Chat API", () => {
       const historyRes = await app.inject({
         method: "GET",
         url: "/api/chat/history?limit=10",
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
       });
       const history = historyRes.json() as {
         messages: Array<{
@@ -258,7 +265,7 @@ describe("Chat API", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -272,7 +279,7 @@ describe("Chat API", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -294,13 +301,13 @@ describe("Chat API", () => {
     form.append("message", "你好");
     await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
     const res = await app.inject({
       method: "GET",
       url: "/api/chat/history?limit=50",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(res.statusCode, 200);
     const { messages } = res.json();
@@ -326,7 +333,7 @@ describe("Chat API", () => {
     form.append("message", "我吃了蘋果");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -352,7 +359,7 @@ describe("Chat API", () => {
     form.append("message", "我吃了蘋果");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -398,7 +405,7 @@ describe("Chat API", () => {
     form.append("message", "我午餐吃雞腿便當");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -434,7 +441,7 @@ describe("Chat API", () => {
     form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -470,7 +477,7 @@ describe("Chat API", () => {
     form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -486,7 +493,8 @@ describe("Chat API", () => {
     let sseReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
-      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+      const sseRes = await fetch(`${address}/api/sse`, {
+        headers: { cookie: sessionCookieHeader },
         signal: sseController.signal,
       });
       assert.equal(sseRes.status, 200);
@@ -518,7 +526,7 @@ describe("Chat API", () => {
       form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId },
+        headers: { cookie: sessionCookieHeader },
         body: form,
       });
 
@@ -567,7 +575,7 @@ describe("Chat API", () => {
     form.append("message", "2026-03-25 吃了多少蛋白質？");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -586,7 +594,7 @@ describe("Chat API", () => {
     form.append("message", "今天天氣真好");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -626,7 +634,7 @@ describe("Chat API", () => {
     form.append("message", "我吃了雞腿便當");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -662,14 +670,14 @@ describe("Chat API", () => {
     form.append("message", "我吃了蘋果");
     await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
     const historyRes = await app.inject({
       method: "GET",
       url: "/api/chat/history?limit=50",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
 
     assert.equal(historyRes.statusCode, 200);
@@ -686,7 +694,7 @@ describe("Chat API", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -700,7 +708,7 @@ describe("Chat API", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/chat/history?limit=0",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(res.statusCode, 400);
   });
@@ -709,12 +717,12 @@ describe("Chat API", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/chat/history?limit=201",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(res.statusCode, 400);
   });
 
-  it("GET /api/chat/history returns 401 without device id", async () => {
+  it("GET /api/chat/history returns 401 without a guest session", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/chat/history",
@@ -722,12 +730,12 @@ describe("Chat API", () => {
     assert.equal(res.statusCode, 401);
   });
 
-  it("POST /api/chat returns 401 with invalid device id", async () => {
+  it("POST /api/chat returns 401 with invalid guest-session cookies", async () => {
     const form = new FormData();
     form.append("message", "hello");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": "non-existent-id" },
+      headers: { cookie: "guest_session=invalid; guest_session_resume=invalid" },
       body: form,
     });
     assert.equal(res.status, 401);
@@ -737,7 +745,7 @@ describe("Chat API", () => {
     const form = new FormData();
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
     assert.equal(res.status, 400);
@@ -751,7 +759,7 @@ describe("Chat API", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -761,7 +769,7 @@ describe("Chat API", () => {
     assert.doesNotMatch(body.reply, /get_daily_summary/, "get_daily_summary must not appear in JSON reply");
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(historyRes.status, 200);
 
@@ -793,7 +801,7 @@ describe("Chat API", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -805,7 +813,7 @@ describe("Chat API", () => {
     assert.doesNotMatch(body.reply, /log_food|FatalToolError|bad json/);
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
     const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
@@ -838,7 +846,7 @@ describe("Chat API", () => {
     try {
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, Accept: "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, Accept: "text/event-stream" },
         signal: controller.signal,
         body: form,
       });
@@ -866,7 +874,7 @@ describe("Chat API", () => {
     }
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(historyRes.status, 200);
 
@@ -896,7 +904,7 @@ describe("Chat API", () => {
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
@@ -907,7 +915,7 @@ describe("Chat API", () => {
     assert.match(body.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
-      headers: { "x-device-id": deviceId },
+      headers: { cookie: sessionCookieHeader },
     });
     assert.equal(historyRes.status, 200);
 
@@ -938,7 +946,8 @@ describe("Chat API", () => {
     let chatReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
-      const sseRes = await fetch(`${address}/api/sse?deviceId=${deviceId}`, {
+      const sseRes = await fetch(`${address}/api/sse`, {
+        headers: { cookie: sessionCookieHeader },
         signal: sseController.signal,
       });
       assert.equal(sseRes.status, 200);
@@ -953,7 +962,7 @@ describe("Chat API", () => {
 
       const chatRes = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { "x-device-id": deviceId, Accept: "text/event-stream" },
+        headers: { cookie: sessionCookieHeader, Accept: "text/event-stream" },
         body: form,
       });
       assert.equal(chatRes.status, 200);
@@ -982,7 +991,7 @@ describe("Chat API", () => {
     }
   });
 
-  it("POST /api/chat JSON body returns 401 when x-device-id header is missing", async () => {
+  it("POST /api/chat JSON body returns 401 when the guest session is missing", async () => {
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -992,7 +1001,7 @@ describe("Chat API", () => {
     assert.equal(res.status, 401);
   });
 
-  it("POST /api/chat multipart returns 401 when x-device-id header is missing", async () => {
+  it("POST /api/chat multipart returns 401 when the guest session is missing", async () => {
     const form = new FormData();
     form.append("message", "test");
 
@@ -1004,16 +1013,18 @@ describe("Chat API", () => {
     assert.equal(res.status, 401);
   });
 
-  it("GET /api/chat/history returns 401 with invalid (non-existent) device id", async () => {
+  it("GET /api/chat/history returns 401 with invalid guest-session cookies", async () => {
     const res = await fetch(`${address}/api/chat/history?limit=10`, {
-      headers: { "x-device-id": "non-existent-id" },
+      headers: { cookie: "guest_session=invalid; guest_session_resume=invalid" },
     });
 
     assert.equal(res.status, 401);
   });
 
-  it("GET /api/sse returns 401 with invalid device id via query param", async () => {
-    const res = await fetch(`${address}/api/sse?deviceId=non-existent-id`);
+  it("GET /api/sse returns 401 with invalid guest-session cookies", async () => {
+    const res = await fetch(`${address}/api/sse`, {
+      headers: { cookie: "guest_session=invalid; guest_session_resume=invalid" },
+    });
 
     assert.equal(res.status, 401);
   });
@@ -1043,13 +1054,14 @@ describe("Chat API", () => {
       payload: { goal: "fat_loss" },
     });
     const obs04DeviceId = deviceRes.json().deviceId as string;
+    const obs04CookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
     const obs04Address = await obs04App.listen({ port: 0 });
 
     const form = new FormData();
     form.append("message", "我吃了機密測試食物");
     await fetch(`${obs04Address}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": obs04DeviceId },
+      headers: { cookie: obs04CookieHeader },
       body: form,
     });
 
@@ -1103,6 +1115,7 @@ describe("Chat API", () => {
       payload: { goal: "fat_loss" },
     });
     const obs04ImageDeviceId = deviceRes.json().deviceId as string;
+    const obs04ImageCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
     const obs04ImageAddress = await obs04ImageApp.listen({ port: 0 });
 
     // Create a minimal 1x1 JPEG in memory (smallest valid JPEG bytes)
@@ -1117,7 +1130,7 @@ describe("Chat API", () => {
 
     await fetch(`${obs04ImageAddress}/api/chat`, {
       method: "POST",
-      headers: { "x-device-id": obs04ImageDeviceId },
+      headers: { cookie: obs04ImageCookieHeader },
       body: form,
     });
 

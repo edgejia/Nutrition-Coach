@@ -1,28 +1,29 @@
 import type { FastifyInstance } from "fastify";
 import type { createAssetService } from "../services/assets.js";
 import type { createDeviceService } from "../services/device.js";
+import type { createGuestSessionService } from "../services/guest-session.js";
+import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 
 interface Deps {
   assetService: ReturnType<typeof createAssetService>;
   deviceService: ReturnType<typeof createDeviceService>;
+  guestSessionService: ReturnType<typeof createGuestSessionService>;
 }
 
 export function registerAssetRoutes(app: FastifyInstance, deps: Deps) {
-  const { assetService, deviceService } = deps;
+  const { assetService, deviceService, guestSessionService } = deps;
 
   app.get("/api/assets/:id", async (request, reply) => {
-    const queryDeviceId =
-      typeof (request.query as { deviceId?: unknown } | undefined)?.deviceId === "string"
-        ? ((request.query as { deviceId?: string }).deviceId ?? "")
-        : "";
-    const deviceId = (request.headers["x-device-id"] as string | undefined) ?? queryDeviceId;
-    if (!deviceId) {
-      return reply.code(401).send({ error: "Missing X-Device-Id" });
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
     }
-
-    const device = await deviceService.getDevice(deviceId);
-    if (!device) {
-      return reply.code(401).send({ error: "Invalid device ID" });
+    const { deviceId } = session;
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
     }
 
     const { id } = request.params as { id: string };
