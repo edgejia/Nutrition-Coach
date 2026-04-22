@@ -11,10 +11,10 @@
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "node --import tsx server/db/migrate.ts",
     "start": "node --import tsx server/index.ts",
-    "test": "node --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
-    "test:unit": "node --import tsx --test tests/unit/*.test.ts",
-    "test:integration": "node --import tsx --test tests/integration/*.test.ts",
-    "verify:harness": "node --import tsx tests/harness/run.ts"
+    "test": "TZ=Asia/Taipei node --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "TZ=Asia/Taipei node --import tsx --test tests/unit/*.test.ts",
+    "test:integration": "TZ=Asia/Taipei node --import tsx --test tests/integration/*.test.ts",
+    "verify:harness": "TZ=Asia/Taipei node --import tsx tests/harness/run.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
