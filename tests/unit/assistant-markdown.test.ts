@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const { parseAssistantMarkdown, parseAssistantMarkdownInline } = await import("../../client/src/lib/assistant-markdown.js");
+const { AssistantMarkdown } = await import("../../client/src/components/AssistantMarkdown.js");
 
 describe("Assistant Markdown", () => {
   it("parses paragraphs and bold text within the approved subset", () => {
@@ -86,5 +89,30 @@ describe("Assistant Markdown", () => {
     assert.deepEqual(inlineTokens, [
       { type: "text", text: "<b>bold</b> [連結](https://example.com) # 標題" },
     ]);
+  });
+
+  it("renders supported headings as semantic tags without leaking raw markers", () => {
+    const markup = renderToStaticMarkup(createElement(AssistantMarkdown, { content: "# 早餐" }));
+
+    assert.match(markup, /<h1>早餐<\/h1>/);
+    assert.doesNotMatch(markup, /# 早餐/);
+  });
+
+  it("preserves source order across headings, paragraphs, and lists", () => {
+    const markup = renderToStaticMarkup(createElement(AssistantMarkdown, { content: "## 午餐\n內文\n\n- 優格" }));
+
+    const h2Index = markup.indexOf("<h2>午餐</h2>");
+    const paragraphIndex = markup.indexOf("<p>內文</p>");
+    const listIndex = markup.indexOf("<ul><li>優格</li></ul>");
+
+    assert.ok(h2Index >= 0);
+    assert.ok(paragraphIndex > h2Index);
+    assert.ok(listIndex > paragraphIndex);
+  });
+
+  it("reuses inline token rendering inside headings", () => {
+    const markup = renderToStaticMarkup(createElement(AssistantMarkdown, { content: "### **蛋白質** 估算" }));
+
+    assert.match(markup, /<h3><strong>蛋白質<\/strong> 估算<\/h3>/);
   });
 });
