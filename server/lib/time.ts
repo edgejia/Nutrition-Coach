@@ -1,6 +1,8 @@
 // server/lib/time.ts
 import { config } from "../config.js";
 
+const INVALID_TZ_PREFIX = "[nutrition-coach] Invalid TZ configuration:";
+
 export function formatLocalDate(date: Date): string {
   return [
     date.getFullYear(),
@@ -24,17 +26,14 @@ export function getLocalDayBounds(date: Date) {
   };
 }
 
-/**
- * Call once at startup to verify TZ is set. Day-boundary logic depends on
- * the process timezone matching the configured TZ env var (default: Asia/Taipei).
- * Logs a warning if TZ is unset so operators notice misconfiguration early.
- */
-export function validateTimezone(log?: any) {
-  if (!config.tzWasProvided && log?.warn) {
-    const message =
-      "[nutrition-coach] WARNING: TZ env var is not set. " +
-      "Day-boundary calculations default to the system timezone. " +
-      "Set TZ=Asia/Taipei in .env for correct behaviour.";
-    log.warn(message);
+export function validateTimezone(log?: { info?: (payload: { tz: string }, message: string) => void }) {
+  if (config.tz === undefined) {
+    throw new Error(`${INVALID_TZ_PREFIX} TZ must be explicitly set to Asia/Taipei.`);
   }
+
+  if (config.tz !== config.requiredTimezone) {
+    throw new Error(`${INVALID_TZ_PREFIX} expected Asia/Taipei but received ${config.tz}.`);
+  }
+
+  log?.info?.({ tz: config.tz }, "Timezone contract verified");
 }

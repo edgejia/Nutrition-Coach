@@ -66,7 +66,7 @@ export async function buildApp(opts: AppOptions) {
 
   const app = Fastify({ logger: opts.logger ?? false });
 
-  // Warn early if TZ is misconfigured (day-boundary logic depends on it).
+  // Fail fast if the runtime timezone contract is misconfigured.
   const { validateTimezone } = await import("./lib/time.js");
   validateTimezone(app.log);
 

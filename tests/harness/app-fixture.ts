@@ -6,8 +6,6 @@
  * deterministic LLM provider, seeds one device, starts the server on an
  * ephemeral port, and returns handles needed by scenarios.
  */
-
-import { buildApp } from "../../server/app.js";
 import { StreamingLLMProvider } from "./streaming-llm.js";
 import type { AppServices } from "../../server/app.js";
 import type { LLMProvider } from "../../server/llm/types.js";
@@ -64,16 +62,17 @@ export async function createScenarioApp(
 ): Promise<ScenarioAppContext> {
   // TZ must be set before server boot for day-boundary correctness.
   process.env.TZ = "Asia/Taipei";
+  const { buildApp } = await import("../../server/app.js");
 
   const llmProvider = opts.llmProvider ?? new StreamingLLMProvider();
   let services: ScenarioAppServices | undefined;
 
-  const buildOpts: Parameters<typeof buildApp>[0] = {
+  const buildOpts = {
     dbPath: ":memory:",
     llmProvider,
     ...(opts.uploadsDir !== undefined ? { uploadsDir: opts.uploadsDir } : {}),
     ...(opts.assetsDir !== undefined ? { assetsDir: opts.assetsDir } : {}),
-    onServicesReady: (readyServices) => {
+    onServicesReady: (readyServices: AppServices) => {
       services = {
         assetService: readyServices.assetService,
         chatService: readyServices.chatService,

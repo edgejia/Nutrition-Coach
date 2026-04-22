@@ -6,7 +6,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
-import { buildApp } from "../../server/app.js";
 import type { AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 
@@ -28,6 +27,7 @@ describe("Day snapshot API", () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-day-snapshot-api-"));
     uploadsDir = path.join(tempRoot, "uploads");
     assetsDir = path.join(tempRoot, "assets");
+    const { buildApp } = await import("../../server/app.js");
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: new MockLLMProvider(),

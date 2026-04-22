@@ -47,15 +47,14 @@ export const config = {
   /**
    * Process timezone expected by day-boundary logic.
    * The actual TZ enforcement is handled by server/lib/time.ts validateTimezone().
-   * Phase 9 consumers use this value directly.
+   * Phase 22 requires an explicit runtime TZ instead of an implicit fallback.
    */
-  tz: process.env.TZ ?? "Asia/Taipei",
+  tz: process.env.TZ,
 
   /**
-   * Whether TZ was explicitly provided in the environment.
-   * Consumed by server/lib/time.ts to decide whether to emit the startup warning.
+   * Required process timezone for day-boundary correctness.
    */
-  tzWasProvided: process.env.TZ !== undefined,
+  requiredTimezone: "Asia/Taipei",
 
   /**
    * Enable debug-level logging.
