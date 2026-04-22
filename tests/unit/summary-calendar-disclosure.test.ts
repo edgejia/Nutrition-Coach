@@ -62,15 +62,16 @@ describe("summary-calendar-disclosure contract", () => {
   });
 
   it("ignores future dates", () => {
+    const state = {
+      ...BASE_STATE,
+      isCalendarOpen: true,
+    };
     const nextState = selectSummaryCalendarDate(
-      {
-        ...BASE_STATE,
-        isCalendarOpen: true,
-      },
+      state,
       "2026-04-22",
     );
 
-    assert.equal(nextState, BASE_STATE);
+    assert.equal(nextState, state);
   });
 
   it("selects valid dates, syncs the month, and auto-collapses", () => {
