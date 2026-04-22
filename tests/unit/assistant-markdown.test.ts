@@ -42,6 +42,44 @@ describe("Assistant Markdown", () => {
     });
   });
 
+  it("parses supported heading markers as dedicated heading blocks", () => {
+    assert.deepEqual(parseAssistantMarkdown("# 早餐"), [
+      {
+        type: "heading",
+        level: 1,
+        content: [{ type: "text", text: "早餐" }],
+      },
+    ]);
+
+    assert.deepEqual(parseAssistantMarkdown("## 午餐\n\n### 點心"), [
+      {
+        type: "heading",
+        level: 2,
+        content: [{ type: "text", text: "午餐" }],
+      },
+      {
+        type: "heading",
+        level: 3,
+        content: [{ type: "text", text: "點心" }],
+      },
+    ]);
+  });
+
+  it("keeps unsupported heading-like syntax as plain text", () => {
+    const blocks = parseAssistantMarkdown("#### 過深\n#NoSpace\n###");
+
+    assert.equal(blocks.length, 1);
+    assert.equal(blocks[0]?.type, "paragraph");
+    if (blocks[0]?.type !== "paragraph") {
+      throw new Error("expected paragraph block");
+    }
+    assert.deepEqual(blocks[0].lines, [
+      [{ type: "text", text: "#### 過深" }],
+      [{ type: "text", text: "#NoSpace" }],
+      [{ type: "text", text: "###" }],
+    ]);
+  });
+
   it("keeps unsupported syntax as plain text instead of interpreting it", () => {
     const inlineTokens = parseAssistantMarkdownInline("<b>bold</b> [連結](https://example.com) # 標題");
 

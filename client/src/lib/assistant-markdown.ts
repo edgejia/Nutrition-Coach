@@ -2,7 +2,10 @@ export type AssistantMarkdownInline =
   | { type: "text"; text: string }
   | { type: "bold"; text: string };
 
+export type AssistantMarkdownHeadingLevel = 1 | 2 | 3;
+
 export type AssistantMarkdownBlock =
+  | { type: "heading"; level: AssistantMarkdownHeadingLevel; content: AssistantMarkdownInline[] }
   | { type: "paragraph"; lines: AssistantMarkdownInline[][] }
   | { type: "list"; ordered: boolean; items: AssistantMarkdownInline[][][] };
 
@@ -16,6 +19,24 @@ function isOrderedListLine(line: string) {
 
 function isUnorderedListLine(line: string) {
   return /^[-*]\s+/.test(line);
+}
+
+export function matchHeadingLine(line: string): { level: AssistantMarkdownHeadingLevel; text: string } | null {
+  const trimmed = line.trim();
+  const match = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+
+  const text = match[2].trim();
+  if (!text) {
+    return null;
+  }
+
+  return {
+    level: match[1].length as AssistantMarkdownHeadingLevel,
+    text,
+  };
 }
 
 function stripListMarker(line: string) {
@@ -90,6 +111,17 @@ export function parseAssistantMarkdown(content: string): AssistantMarkdownBlock[
       continue;
     }
 
+    const heading = matchHeadingLine(trimmed);
+    if (heading) {
+      blocks.push({
+        type: "heading",
+        level: heading.level,
+        content: parseAssistantMarkdownInline(heading.text),
+      });
+      index += 1;
+      continue;
+    }
+
     const paragraphLines: string[] = [];
     while (index < lines.length) {
       const candidate = lines[index];
@@ -97,7 +129,11 @@ export function parseAssistantMarkdown(content: string): AssistantMarkdownBlock[
       if (!candidateTrimmed) {
         break;
       }
-      if (isOrderedListLine(candidateTrimmed) || isUnorderedListLine(candidateTrimmed)) {
+      if (
+        isOrderedListLine(candidateTrimmed) ||
+        isUnorderedListLine(candidateTrimmed) ||
+        matchHeadingLine(candidateTrimmed)
+      ) {
         break;
       }
       paragraphLines.push(candidate);

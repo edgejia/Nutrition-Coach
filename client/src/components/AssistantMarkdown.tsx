@@ -16,6 +16,11 @@ export function AssistantMarkdown(props: { content: string }) {
   return (
     <div className="assistant-markdown">
       {blocks.map((block, blockIndex) => {
+        if (block.type === "heading") {
+          const HeadingTag = block.level === 1 ? "h1" : block.level === 2 ? "h2" : "h3";
+          return <HeadingTag key={`block-${blockIndex}`}>{renderInline(block.content)}</HeadingTag>;
+        }
+
         if (block.type === "list") {
           const ListTag = block.ordered ? "ol" : "ul";
           return (
