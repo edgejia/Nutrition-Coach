@@ -101,6 +101,7 @@ describe("SummaryDetailScreen disclosure shell", () => {
       loading: false,
       deletingMealId: null,
       error: null,
+      sending: false,
       liveSummary: {
         date: todayKey,
         totalCalories: 920,
