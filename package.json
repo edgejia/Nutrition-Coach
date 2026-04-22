@@ -7,7 +7,7 @@
     "dev:server": "node --env-file=.env --import tsx --watch server/index.ts",
     "dev:client": "vite dev --config client/vite.config.ts",
     "build": "vite build --config client/vite.config.ts",
-    "release:check": "node scripts/release-check.mjs",
+    "release:check": "node --env-file=.env scripts/release-check.mjs",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "node --import tsx server/db/migrate.ts",
     "start": "node --import tsx server/index.ts",

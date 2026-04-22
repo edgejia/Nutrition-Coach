@@ -4,6 +4,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import process from "node:process";
 
 const YARN_BIN = process.platform === "win32" ? "yarn.cmd" : "yarn";
+const REQUIRED_TZ = "Asia/Taipei";
+const DRY_RUN_FLAG = "--dry-run";
 
 function runGit(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -86,7 +88,19 @@ function runStep(label, args) {
   }
 }
 
+function validateTimezoneContract() {
+  const runtimeTz = process.env.TZ;
+  if (runtimeTz !== REQUIRED_TZ) {
+    const received = runtimeTz === undefined ? "<missing>" : runtimeTz;
+    console.error(`[release-check] FAIL: TZ must be ${REQUIRED_TZ}; received ${received}`);
+    process.exit(1);
+  }
+
+  console.log(`[release-check] Timezone contract: ${REQUIRED_TZ}`);
+}
+
 const args = process.argv.slice(2);
+const isDryRun = args.includes(DRY_RUN_FLAG);
 const baseInfo = resolveBaseRef(args);
 const changedFiles = collectChangedFiles(baseInfo);
 const touchesServerBoundary = changedFiles.some(
@@ -104,6 +118,13 @@ if (changedFiles.length > 0) {
   console.log(`[release-check] Changed files considered: ${changedFiles.length}`);
 } else {
   console.log("[release-check] No changed files detected; running core release gates anyway");
+}
+
+validateTimezoneContract();
+
+if (isDryRun) {
+  console.log("\n[release-check] Dry run complete");
+  process.exit(0);
 }
 
 runStep("TypeScript gate", ["tsc", "--noEmit"]);
