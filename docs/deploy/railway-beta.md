@@ -57,6 +57,12 @@ WHERE image_path LIKE '%/uploads/%'
 
 If either count is non-zero, stop the rollout and record the cleanup or backfill that removed the legacy rows.
 
+### Timezone Contract Check
+
+- `Railway Variables`: open the service variables view and confirm the deployed service still sets `TZ=Asia/Taipei` before smoke, promotion, or rollback decisions.
+- Promotion evidence: capture a local `yarn release:check` run from a checkout whose `.env` also sets `TZ=Asia/Taipei` so the release gate and the deployed service are checked against the same timezone contract.
+- Stop condition: if boot logs show `[nutrition-coach] Invalid TZ configuration:` or the Railway service never becomes healthy after deploy, stop the rollout and fix the timezone configuration instead of bypassing the guard.
+
 ## Manual Smoke Checklist
 
 Run this checklist from the public domain before marking the beta ready. Public beta smoke stays deployment-gated, so do not treat localhost-only build smoke as equivalent to a real deployed domain.
