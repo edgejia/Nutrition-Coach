@@ -3,6 +3,7 @@
 AI 驅動的飲食紀錄與熱量追蹤應用。透過對話方式記錄餐點，LLM 自動分析營養成分，即時更新每日進度。
 
 文件導覽請見 [docs/README.md](docs/README.md)。
+Codex project-specific workflow notes are summarized in [docs/codex.md](docs/codex.md)。
 
 ## 目前進度
 
@@ -125,7 +126,7 @@ yarn verify:harness -- guest-session-hardening
 ├── docs/              # 部署與文件索引
 ├── data/              # 本地 SQLite、資產與 upload staging（git 只保留 .gitkeep）
 ├── .planning/         # GSD 規劃、milestone archive、codebase intel
-├── .claude/           # agent skills / hooks / review profiles
+├── .claude/           # legacy Claude prompts / hooks / review profiles kept for migration
 └── tests/
     ├── unit/          # Unit tests
     ├── integration/   # Integration tests
