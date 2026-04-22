@@ -18,6 +18,7 @@ tests/harness/artifacts/*/latest/
 .planning/seeds/
 .planning/ui-reviews/
 docs/*
+!docs/README.md
 !docs/deploy/
 !docs/deploy/**
 .env
