@@ -68,8 +68,33 @@ describe("Assistant Markdown", () => {
     ]);
   });
 
-  it("keeps unsupported heading-like syntax as plain text", () => {
-    const blocks = parseAssistantMarkdown("#### 過深\n#NoSpace\n###");
+  it("normalizes any deeper markdown headings into the existing h3 visual level", () => {
+    assert.deepEqual(parseAssistantMarkdown("#### 過深\n##### 更深\n###### 最深\n####### 超深"), [
+      {
+        type: "heading",
+        level: 3,
+        content: [{ type: "text", text: "過深" }],
+      },
+      {
+        type: "heading",
+        level: 3,
+        content: [{ type: "text", text: "更深" }],
+      },
+      {
+        type: "heading",
+        level: 3,
+        content: [{ type: "text", text: "最深" }],
+      },
+      {
+        type: "heading",
+        level: 3,
+        content: [{ type: "text", text: "超深" }],
+      },
+    ]);
+  });
+
+  it("keeps invalid heading-like syntax as plain text", () => {
+    const blocks = parseAssistantMarkdown("#NoSpace\n###");
 
     assert.equal(blocks.length, 1);
     assert.equal(blocks[0]?.type, "paragraph");
@@ -77,7 +102,6 @@ describe("Assistant Markdown", () => {
       throw new Error("expected paragraph block");
     }
     assert.deepEqual(blocks[0].lines, [
-      [{ type: "text", text: "#### 過深" }],
       [{ type: "text", text: "#NoSpace" }],
       [{ type: "text", text: "###" }],
     ]);
@@ -114,5 +138,12 @@ describe("Assistant Markdown", () => {
     const markup = renderToStaticMarkup(createElement(AssistantMarkdown, { content: "### **蛋白質** 估算" }));
 
     assert.match(markup, /<h3><strong>蛋白質<\/strong> 估算<\/h3>/);
+  });
+
+  it("renders any deeper markdown headings as h3 without leaking raw markers", () => {
+    const markup = renderToStaticMarkup(createElement(AssistantMarkdown, { content: "####### 點心提醒" }));
+
+    assert.match(markup, /<h3>點心提醒<\/h3>/);
+    assert.doesNotMatch(markup, /####### 點心提醒/);
   });
 });

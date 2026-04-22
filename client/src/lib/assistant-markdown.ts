@@ -23,7 +23,7 @@ function isUnorderedListLine(line: string) {
 
 export function matchHeadingLine(line: string): { level: AssistantMarkdownHeadingLevel; text: string } | null {
   const trimmed = line.trim();
-  const match = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+  const match = /^(#+)\s+(.+)$/.exec(trimmed);
   if (!match) {
     return null;
   }
@@ -34,7 +34,7 @@ export function matchHeadingLine(line: string): { level: AssistantMarkdownHeadin
   }
 
   return {
-    level: match[1].length as AssistantMarkdownHeadingLevel,
+    level: Math.min(match[1].length, 3) as AssistantMarkdownHeadingLevel,
     text,
   };
 }
