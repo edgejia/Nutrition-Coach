@@ -60,7 +60,7 @@ If either count is non-zero, stop the rollout and record the cleanup or backfill
 ### Timezone Contract Check
 
 - `Railway Variables`: open the service variables view and confirm the deployed service still sets `TZ=Asia/Taipei` before smoke, promotion, or rollback decisions.
-- Promotion evidence: capture a local `yarn release:check` run from a checkout whose `.env` also sets `TZ=Asia/Taipei` so the release gate and the deployed service are checked against the same timezone contract.
+- Promotion evidence: capture a local `yarn release:check` run. The repo wrapper forces `TZ=Asia/Taipei` for that local gate; still treat `Railway Variables` as the deploy-time source of truth and confirm the service variable itself is exactly `TZ=Asia/Taipei`.
 - Stop condition: if boot logs show `[nutrition-coach] Invalid TZ configuration:` or the Railway service never becomes healthy after deploy, stop the rollout and fix the timezone configuration instead of bypassing the guard.
 
 ## Manual Smoke Checklist
