@@ -2,13 +2,25 @@
 
 AI 驅動的飲食紀錄與熱量追蹤應用。透過對話方式記錄餐點，LLM 自動分析營養成分，即時更新每日進度。
 
+文件導覽請見 [docs/README.md](docs/README.md)。
+
+## 目前進度
+
+`v1.4` 已於 `2026-04-21` 出貨並封存，目前沒有 active milestone。產品現在已具備：
+
+- 文字與圖片餐點記錄，含 final-round SSE 串流與明確狀態文字
+- 歷史日期摘要瀏覽、read-only historical snapshot，以及 mutation 後的 `affectedDate` transport
+- trusted-protein normalization 與保守估算說明文案
+- cookie-backed guest-session browser auth、same-browser resume、tamper fail-closed 與 explicit rebuild recovery
+- deployed-domain beta / production smoke 已完成
 ## 功能
 
 - **對話式記錄**：用自然語言描述你吃了什麼，支援文字與圖片上傳
-- **AI 營養分析**：LLM 自動估算卡路里、蛋白質、碳水、脂肪（保守估算隱藏熱量）
+- **AI 營養分析**：LLM 自動估算卡路里、蛋白質、碳水、脂肪，並以 trusted-protein 規則避免 trace protein 灌高 headline 蛋白質
 - **即時儀表板**：SSE 推播，餐點記錄後即時更新進度條
+- **歷史日體驗**：支援查看昨天、前天或明確 past date 的 summary / meals，且 historical mutation 不會污染今天的 live dashboard
 - **目標設定**：設定每日營養目標，追蹤達成率
-- **匿名裝置認證**：無需帳號，以裝置 ID 識別使用者
+- **訪客工作階段**：無需帳號，使用 cookie-backed guest session 維持同瀏覽器 continuity 與 recovery flow
 
 ## 技術架構
 
@@ -70,6 +82,8 @@ yarn start
 beta / production 會由同一個 Fastify 進程同時提供 API 與 `dist/client`。
 部署時請使用持久化主機與掛載磁碟，並維持 `TZ=Asia/Taipei`、`DB_PATH`、`ASSETS_DIR`、`UPLOADS_STAGING_DIR`、`CLIENT_DIST_DIR` 的一致設定。public beta smoke 應在 real deployed domain 上執行，不以 localhost build smoke 取代。詳細的 Railway baseline 請見 [`docs/deploy/railway-beta.md`](docs/deploy/railway-beta.md)。
 
+目前 release promotion 順序固定為 `feature/* -> staging -> main`，正式 promote 前請先跑 `yarn release:check`。
+
 ## 測試
 
 ```bash
@@ -81,26 +95,41 @@ yarn test:unit
 
 # 只跑 integration tests
 yarn test:integration
+
+# release gate
+yarn release:check
+
+# deterministic harness
+yarn verify:harness -- protein-trust
+yarn verify:harness -- guest-session-hardening
 ```
 
 ## 專案結構
 
 ```
-├── client/          # React 前端
+├── client/            # React 前端與 Vite 設定
 │   └── src/
 │       ├── components/  # UI 元件（Dashboard, ChatPanel, Onboarding 等）
 │       ├── store.ts     # Zustand 狀態管理
 │       ├── api.ts       # API client
 │       └── sse.ts       # SSE 即時更新
-├── server/          # Fastify 後端
-│   ├── routes/      # API 路由（device, chat, sse）
-│   ├── services/    # 業務邏輯
-│   ├── orchestrator/ # LLM 對話流程
-│   ├── llm/         # LLM provider（OpenAI / mock）
-│   └── db/          # Drizzle schema & client
+├── server/            # Fastify 後端
+│   ├── routes/        # HTTP / SSE transport boundary
+│   ├── services/      # 業務邏輯與 persistence
+│   ├── orchestrator/  # LLM 對話流程、tool contract、fallback
+│   ├── llm/           # LLM provider（OpenAI / mock）
+│   ├── realtime/      # SSE publisher
+│   └── db/            # Drizzle schema & client
+├── drizzle/           # SQL migrations 與 schema snapshots
+├── scripts/           # release / workflow scripts
+├── docs/              # 部署與文件索引
+├── data/              # 本地 SQLite、資產與 upload staging（git 只保留 .gitkeep）
+├── .planning/         # GSD 規劃、milestone archive、codebase intel
+├── .claude/           # agent skills / hooks / review profiles
 └── tests/
-    ├── unit/        # Unit tests
-    └── integration/ # Integration tests
+    ├── unit/          # Unit tests
+    ├── integration/   # Integration tests
+    └── harness/       # deterministic scenario verification + redacted artifacts
 ```
 
 ## 環境變數
