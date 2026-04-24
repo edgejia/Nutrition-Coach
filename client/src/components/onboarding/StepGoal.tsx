@@ -1,8 +1,9 @@
 interface Props {
   onSelect: (goal: "fat_loss" | "muscle_gain") => void;
+  error?: string;
 }
 
-export function StepGoal({ onSelect }: Props) {
+export function StepGoal({ onSelect, error }: Props) {
   return (
     <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
       <div className="mb-3 text-xs font-bold tracking-widest uppercase" style={{ color: "var(--orange)", letterSpacing: "0.2em" }}>
@@ -14,6 +15,25 @@ export function StepGoal({ onSelect }: Props) {
       <p className="mb-8 text-sm" style={{ color: "var(--text-2)" }}>
         選擇一個主要方向，教練會根據這個目標為你規劃。
       </p>
+
+      {error ? (
+        <div
+          className="mb-5 rounded-xl px-4 py-3"
+          role="alert"
+          style={{
+            background: "rgba(229,85,85,0.12)",
+            border: "1px solid rgba(229,85,85,0.45)",
+            color: "var(--text)",
+          }}
+        >
+          <div className="mb-1 text-xs font-bold uppercase tracking-wide" style={{ color: "var(--red)" }}>
+            需要重新選擇
+          </div>
+          <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+            {error}
+          </p>
+        </div>
+      ) : null}
 
       <div className="space-y-3">
         <button

@@ -52,7 +52,7 @@ export function MainLayout() {
   useDailyRollover(refreshForRollover);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden" style={{ background: "var(--bg)" }}>
+    <div className="app-viewport flex flex-col" style={{ background: "var(--bg)" }}>
       {activeScreen === "home" && <HomeScreen />}
       {activeScreen === "summary" && <SummaryDetailScreen />}
       {activeScreen === "chat" && <ChatPanel />}

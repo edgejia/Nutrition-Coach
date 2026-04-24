@@ -14,6 +14,7 @@ globalThis.localStorage = {
 } as Storage;
 
 const originalFetch = globalThis.fetch;
+const originalLocationDescriptor = Object.getOwnPropertyDescriptor(globalThis, "location");
 let fetchCalls: Array<{ url: string; init: RequestInit }> = [];
 
 function mockFetch(status: number, body: unknown) {
@@ -59,6 +60,11 @@ describe("API Client", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (originalLocationDescriptor) {
+      Object.defineProperty(globalThis, "location", originalLocationDescriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, "location");
+    }
   });
 
   it("registerDevice sends POST with goal", async () => {
@@ -98,6 +104,83 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), intake);
     assert.equal(result.coachExplanation, "Use a modest deficit.");
+  });
+
+  it("submitIntake throws IntakeValidationError for VALIDATION_ERROR responses", async () => {
+    const intake: IntakeData = {
+      goal: "fat_loss",
+      sex: "female",
+      age: 31,
+      heightCm: 165,
+      weightKg: 58,
+      activityLevel: "moderate",
+      trainingFrequency: "3_4",
+    };
+
+    mockFetch(400, {
+      error: "VALIDATION_ERROR",
+      errors: [
+        {
+          field: "goalClarification",
+          code: "GOAL_CLARIFICATION_TOO_LONG",
+          step: 2,
+          message: "目標補充最多 300 字",
+        },
+        {
+          field: "age",
+          code: "AGE_OUT_OF_RANGE",
+          step: 3,
+          message: "年齡需介於 10-120",
+        },
+      ],
+    });
+
+    await assert.rejects(
+      () => api.submitIntake(intake),
+      (error: unknown) => {
+        assert.ok(error instanceof api.IntakeValidationError);
+        assert.equal(error.kind, "validation");
+        assert.equal(error.step, 2);
+        assert.equal(error.errors[0]?.code, "GOAL_CLARIFICATION_TOO_LONG");
+        assert.equal(error.errors[1]?.code, "AGE_OUT_OF_RANGE");
+        return true;
+      },
+    );
+  });
+
+  it("submitIntake can mock one local-dev goal validation error for UAT", async () => {
+    const intake: IntakeData = {
+      goal: "fat_loss",
+      sex: "female",
+      age: 31,
+      heightCm: 165,
+      weightKg: 58,
+      activityLevel: "moderate",
+      trainingFrequency: "3_4",
+    };
+    Object.defineProperty(globalThis, "location", {
+      value: { hostname: "localhost" },
+      configurable: true,
+    });
+    localStorage.setItem("nutritionCoach:mockNextIntakeValidationError", "goal");
+    mockFetch(200, {
+      deviceId: "d-2",
+      dailyTargets: { calories: 1600, protein: 110, carbs: 140, fat: 55 },
+      coachExplanation: "Use a modest deficit.",
+    });
+
+    await assert.rejects(
+      () => api.submitIntake(intake),
+      (error: unknown) => {
+        assert.ok(error instanceof api.IntakeValidationError);
+        assert.equal(error.step, 1);
+        assert.equal(error.errors[0]?.field, "goal");
+        assert.equal(error.errors[0]?.code, "INVALID_GOAL");
+        return true;
+      },
+    );
+    assert.equal(fetchCalls.length, 0);
+    assert.equal(localStorage.getItem("nutritionCoach:mockNextIntakeValidationError"), null);
   });
 
   it("establishGuestSession migrates a legacy device into cookie-backed mode", async () => {

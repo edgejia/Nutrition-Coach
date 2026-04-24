@@ -1,15 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { IntakeData, OnboardingField } from "../../types.js";
 
 interface Props {
   onNext: (data: { sex: "male" | "female"; age: number; heightCm: number; weightKg: number }) => void;
   onBack: () => void;
+  initialData?: Partial<IntakeData>;
+  errors?: Partial<Record<OnboardingField, string>>;
+  onFieldEdit?: (field: OnboardingField) => void;
 }
 
-export function StepBodyData({ onNext, onBack }: Props) {
-  const [sex, setSex] = useState<"male" | "female" | null>(null);
-  const [age, setAge] = useState("");
-  const [height, setHeight] = useState("");
-  const [weight, setWeight] = useState("");
+export function StepBodyData({ onNext, onBack, initialData, errors, onFieldEdit }: Props) {
+  const [sex, setSex] = useState<"male" | "female" | null>(initialData?.sex ?? null);
+  const [age, setAge] = useState(initialData?.age?.toString() ?? "");
+  const [height, setHeight] = useState(initialData?.heightCm?.toString() ?? "");
+  const [weight, setWeight] = useState(initialData?.weightKg?.toString() ?? "");
+
+  useEffect(() => {
+    setSex(initialData?.sex ?? null);
+    setAge(initialData?.age?.toString() ?? "");
+    setHeight(initialData?.heightCm?.toString() ?? "");
+    setWeight(initialData?.weightKg?.toString() ?? "");
+  }, [initialData]);
 
   const canProceed = sex && age && height && weight &&
     Number(age) > 0 && Number(height) > 0 && Number(weight) > 0;
@@ -38,7 +49,11 @@ export function StepBodyData({ onNext, onBack }: Props) {
           {(["male", "female"] as const).map((s) => (
             <button
               key={s}
-              onClick={() => setSex(s)}
+              onClick={() => {
+                setSex(s);
+                onFieldEdit?.("sex");
+              }}
+              aria-pressed={sex === s}
               className="flex-1 rounded-lg py-3 text-sm font-medium"
               style={{
                 background: sex === s ? "var(--orange)" : "var(--bg-raised)",
@@ -50,13 +65,18 @@ export function StepBodyData({ onNext, onBack }: Props) {
             </button>
           ))}
         </div>
+        {errors?.sex ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+            {errors.sex}
+          </p>
+        ) : null}
       </div>
 
       {/* Age, Height, Weight */}
       {[
-        { label: "年齡", value: age, setter: setAge, unit: "歲", placeholder: "25" },
-        { label: "身高", value: height, setter: setHeight, unit: "cm", placeholder: "175" },
-        { label: "體重", value: weight, setter: setWeight, unit: "kg", placeholder: "70" },
+        { key: "age" as const, label: "年齡", value: age, setter: setAge, unit: "歲", placeholder: "25" },
+        { key: "heightCm" as const, label: "身高", value: height, setter: setHeight, unit: "cm", placeholder: "175" },
+        { key: "weightKg" as const, label: "體重", value: weight, setter: setWeight, unit: "kg", placeholder: "70" },
       ].map(({ label, value, setter, unit, placeholder }) => (
         <div key={label} className="mb-4">
           <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>{label}</label>
@@ -65,13 +85,23 @@ export function StepBodyData({ onNext, onBack }: Props) {
               type="number"
               inputMode="decimal"
               value={value}
-              onChange={(e) => setter(e.target.value)}
+              onChange={(e) => {
+                setter(e.target.value);
+                onFieldEdit?.(
+                  label === "年齡" ? "age" : label === "身高" ? "heightCm" : "weightKg",
+                );
+              }}
               placeholder={placeholder}
               className="flex-1 rounded-lg px-4 py-3 text-sm"
               style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
             />
             <span className="text-sm" style={{ color: "var(--text-2)" }}>{unit}</span>
           </div>
+          {errors?.[label === "年齡" ? "age" : label === "身高" ? "heightCm" : "weightKg"] ? (
+            <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+              {errors[label === "年齡" ? "age" : label === "身高" ? "heightCm" : "weightKg"]}
+            </p>
+          ) : null}
         </div>
       ))}
 

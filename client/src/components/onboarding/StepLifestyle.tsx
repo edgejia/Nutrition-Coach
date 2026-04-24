@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { IntakeData } from "../../types.js";
+import type { OnboardingField } from "../../types.js";
 
 type ActivityLevel = IntakeData["activityLevel"];
 type TrainingFreq = IntakeData["trainingFrequency"];
@@ -7,6 +8,9 @@ type TrainingFreq = IntakeData["trainingFrequency"];
 interface Props {
   onNext: (data: { activityLevel: ActivityLevel; trainingFrequency: TrainingFreq; allergies?: string }) => void;
   onBack: () => void;
+  initialData?: Partial<IntakeData>;
+  errors?: Partial<Record<OnboardingField, string>>;
+  onFieldEdit?: (field: OnboardingField) => void;
 }
 
 const ACTIVITY_OPTIONS: readonly { value: ActivityLevel; label: string }[] = [
@@ -24,10 +28,16 @@ const TRAINING_OPTIONS: readonly { value: TrainingFreq; label: string }[] = [
   { value: "5_plus", label: "5+ 次/週" },
 ];
 
-export function StepLifestyle({ onNext, onBack }: Props) {
-  const [activity, setActivity] = useState<ActivityLevel | "">("");
-  const [training, setTraining] = useState<TrainingFreq | "">("");
-  const [allergies, setAllergies] = useState("");
+export function StepLifestyle({ onNext, onBack, initialData, errors, onFieldEdit }: Props) {
+  const [activity, setActivity] = useState<ActivityLevel | "">(initialData?.activityLevel ?? "");
+  const [training, setTraining] = useState<TrainingFreq | "">(initialData?.trainingFrequency ?? "");
+  const [allergies, setAllergies] = useState(initialData?.allergies ?? "");
+
+  useEffect(() => {
+    setActivity(initialData?.activityLevel ?? "");
+    setTraining(initialData?.trainingFrequency ?? "");
+    setAllergies(initialData?.allergies ?? "");
+  }, [initialData]);
 
   const canProceed = activity && training;
 
@@ -55,7 +65,11 @@ export function StepLifestyle({ onNext, onBack }: Props) {
           {ACTIVITY_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              onClick={() => setActivity(opt.value)}
+              onClick={() => {
+                setActivity(opt.value);
+                onFieldEdit?.("activityLevel");
+              }}
+              aria-pressed={activity === opt.value}
               className="rounded-lg px-4 py-2 text-sm"
               style={{
                 background: activity === opt.value ? "var(--orange)" : "var(--bg-raised)",
@@ -67,6 +81,11 @@ export function StepLifestyle({ onNext, onBack }: Props) {
             </button>
           ))}
         </div>
+        {errors?.activityLevel ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+            {errors.activityLevel}
+          </p>
+        ) : null}
       </div>
 
       {/* Training Frequency */}
@@ -76,7 +95,11 @@ export function StepLifestyle({ onNext, onBack }: Props) {
           {TRAINING_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              onClick={() => setTraining(opt.value)}
+              onClick={() => {
+                setTraining(opt.value);
+                onFieldEdit?.("trainingFrequency");
+              }}
+              aria-pressed={training === opt.value}
               className="rounded-lg px-4 py-2 text-sm"
               style={{
                 background: training === opt.value ? "var(--orange)" : "var(--bg-raised)",
@@ -88,6 +111,11 @@ export function StepLifestyle({ onNext, onBack }: Props) {
             </button>
           ))}
         </div>
+        {errors?.trainingFrequency ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+            {errors.trainingFrequency}
+          </p>
+        ) : null}
       </div>
 
       {/* Allergies */}
@@ -96,11 +124,19 @@ export function StepLifestyle({ onNext, onBack }: Props) {
         <input
           type="text"
           value={allergies}
-          onChange={(e) => setAllergies(e.target.value)}
+          onChange={(e) => {
+            setAllergies(e.target.value);
+            onFieldEdit?.("allergies");
+          }}
           placeholder="例如：花生、乳糖不耐、素食..."
           className="w-full rounded-lg px-4 py-3 text-sm"
           style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
         />
+        {errors?.allergies ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+            {errors.allergies}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex gap-3">

@@ -595,8 +595,8 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--bg)" }}>
-      <div className="shrink-0 px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
+    <div className="screen-shell">
+      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
         <button
           type="button"
           onClick={handleBackToHome}
@@ -634,25 +634,25 @@ export function ChatPanel() {
       </div>
       {pendingHomeChatDraft?.status === "failed" && (
         <div
-          className="shrink-0 px-4 py-3 text-sm"
+          className="screen-bar px-4 py-3 text-sm"
           style={{
             borderBottom: "1px solid var(--border)",
             background: "rgba(232,160,32,0.06)",
             color: "var(--amber)",
           }}
         >
-          上一筆草稿送出失敗。
+          上一筆任務送出失敗。
           <button type="button" onClick={() => sendPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
             重試送出
           </button>
           <button type="button" onClick={clearPendingHomeChatDraft} className="ml-3 font-semibold underline">
-            取消草稿
+            取消送出
           </button>
         </div>
       )}
 
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollContainerRef} className="h-full overflow-y-auto p-4">
+        <div ref={scrollContainerRef} className="screen-scroll-with-input h-full p-4">
           <div ref={contentRef} className="space-y-3 pb-4">
             {messages.map((m) => (
               <MessageBubble
@@ -700,7 +700,7 @@ export function ChatPanel() {
         )}
       </div>
 
-      <div className="shrink-0 px-3 pb-safe" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
+      <div className="screen-bar px-3 pb-safe" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
         <ChatInput onSend={handleSend} onBeforeSend={handleBeforeSend} disabled={sending} />
       </div>
     </div>

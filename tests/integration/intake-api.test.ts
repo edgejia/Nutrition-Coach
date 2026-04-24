@@ -38,6 +38,17 @@ describe("Intake API", () => {
     assert.equal(typeof value, "string");
   }
 
+  function assertValidationErrorBody(value: unknown): asserts value is {
+    error: "VALIDATION_ERROR";
+    errors: Array<{ field: string; code: string; step: number; message: string }>;
+  } {
+    assert.equal(typeof value, "object");
+    assert.ok(value);
+    const body = value as { error?: unknown; errors?: unknown };
+    assert.equal(body.error, "VALIDATION_ERROR");
+    assert.ok(Array.isArray(body.errors));
+  }
+
   it("POST /api/device with intake returns AI-generated targets", async () => {
     mockLLM.queueChatResponse({
       content: JSON.stringify({
@@ -124,7 +135,18 @@ describe("Intake API", () => {
     });
 
     assert.equal(res.statusCode, 400);
-    assert.deepEqual(res.json(), { error: "Invalid goal. Must be fat_loss or muscle_gain." });
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const body = res.json();
+    assertValidationErrorBody(body);
+    assert.deepEqual(body.errors, [
+      {
+        field: "goal",
+        code: "INVALID_GOAL",
+        step: 1,
+        message: "請選擇減脂或增肌目標",
+      },
+    ]);
   });
 
   it("POST /api/device rejects out-of-range body data", async () => {
@@ -136,6 +158,41 @@ describe("Intake API", () => {
 
     assert.equal(res.statusCode, 400);
     assert.equal(mockLLM.chatCalls.length, 0);
+
+    const body = res.json();
+    assertValidationErrorBody(body);
+    assert.ok(
+      body.errors.some((issue) => issue.field === "age" && issue.code === "AGE_OUT_OF_RANGE" && issue.step === 3),
+    );
+  });
+
+  it("POST /api/device rejects malformed numeric intake values", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: createIntakePayload({
+        age: "30",
+        heightCm: "175",
+        bodyFatPercent: "18",
+        tdee: "2400",
+      }),
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const body = res.json();
+    assertValidationErrorBody(body);
+    assert.ok(body.errors.some((issue) => issue.field === "age" && issue.code === "INVALID_AGE" && issue.step === 3));
+    assert.ok(
+      body.errors.some((issue) => issue.field === "heightCm" && issue.code === "INVALID_HEIGHT_CM" && issue.step === 3),
+    );
+    assert.ok(
+      body.errors.some(
+        (issue) => issue.field === "bodyFatPercent" && issue.code === "INVALID_BODY_FAT_PERCENT" && issue.step === 5,
+      ),
+    );
+    assert.ok(body.errors.some((issue) => issue.field === "tdee" && issue.code === "INVALID_TDEE" && issue.step === 5));
   });
 
   it("POST /api/device rejects partial intake payloads", async () => {
@@ -151,7 +208,13 @@ describe("Intake API", () => {
 
     assert.equal(res.statusCode, 400);
     assert.equal(mockLLM.chatCalls.length, 0);
-    assert.deepEqual(res.json(), { error: "Incomplete intake data" });
+
+    const body = res.json();
+    assertValidationErrorBody(body);
+    assert.deepEqual(
+      body.errors.map((issue) => issue.field),
+      ["heightCm", "weightKg", "activityLevel", "trainingFrequency"],
+    );
   });
 
   it("POST /api/device rejects invalid enum-like intake values", async () => {
@@ -166,7 +229,52 @@ describe("Intake API", () => {
 
     assert.equal(res.statusCode, 400);
     assert.equal(mockLLM.chatCalls.length, 0);
-    assert.deepEqual(res.json(), { error: "Invalid intake data" });
+
+    const body = res.json();
+    assertValidationErrorBody(body);
+    assert.ok(
+      body.errors.some(
+        (issue) => issue.field === "activityLevel" && issue.code === "INVALID_ACTIVITY_LEVEL" && issue.step === 4,
+      ),
+    );
+    assert.ok(
+      body.errors.some(
+        (issue) =>
+          issue.field === "trainingFrequency" &&
+          issue.code === "INVALID_TRAINING_FREQUENCY" &&
+          issue.step === 4,
+      ),
+    );
+  });
+
+  it("POST /api/device preserves multi-step validation issues in one response", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: createIntakePayload({
+        goalClarification: "a".repeat(301),
+        age: 9,
+      }),
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const body = res.json();
+    assertValidationErrorBody(body);
+    assert.ok(
+      body.errors.some(
+        (issue) =>
+          issue.field === "goalClarification" &&
+          issue.code === "GOAL_CLARIFICATION_TOO_LONG" &&
+          issue.step === 2,
+      ),
+    );
+    assert.ok(body.errors.some((issue) => issue.field === "age" && issue.code === "AGE_OUT_OF_RANGE" && issue.step === 3));
+    assert.deepEqual(
+      [...new Set(body.errors.map((issue) => issue.step))].sort((a, b) => a - b),
+      [2, 3],
+    );
   });
 
   it("POST /api/device rejects malformed non-object bodies with a clear error", async () => {
