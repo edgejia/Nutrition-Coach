@@ -2,13 +2,13 @@ import type { IntakeResult } from "../../types.js";
 
 interface Props {
   loading: boolean;
-  error: string | null;
+  transportError: string | null;
   result: IntakeResult | null;
   onStart: () => void;
   onRetry: () => void;
 }
 
-export function StepCoachHandoff({ loading, error, result, onStart, onRetry }: Props) {
+export function StepCoachHandoff({ loading, transportError, result, onStart, onRetry }: Props) {
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center p-8" style={{ background: "var(--bg)" }}>
@@ -23,13 +23,13 @@ export function StepCoachHandoff({ loading, error, result, onStart, onRetry }: P
     );
   }
 
-  if (error) {
+  if (transportError) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center p-8" style={{ background: "var(--bg)" }}>
         <h2 className="mb-4 text-xl font-bold" style={{ color: "var(--text)" }}>
           連線失敗
         </h2>
-        <p className="mb-6 text-sm" style={{ color: "var(--text-2)" }}>{error}</p>
+        <p className="mb-6 text-sm" style={{ color: "var(--text-2)" }}>{transportError}</p>
         <button
           onClick={onRetry}
           className="rounded-xl px-8 py-3 text-sm font-bold"

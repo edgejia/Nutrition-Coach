@@ -1,10 +1,80 @@
-import type { ChatReply, DailySummary, DailyTargets, IntakeData, IntakeResult, MealEntry, Message } from "./types.js";
+import type {
+  ChatReply,
+  DailySummary,
+  DailyTargets,
+  IntakeData,
+  IntakeResult,
+  IntakeValidationIssue,
+  MealEntry,
+  Message,
+} from "./types.js";
+import { getEarliestValidationStep } from "./lib/onboarding-intake-validation.js";
 
 export interface GuestSessionBootstrapResult {
   deviceId: string;
   goal: "fat_loss" | "muscle_gain";
   dailyTargets: DailyTargets;
   establishedBy: "active" | "resume" | "legacy_migration";
+}
+
+export class IntakeValidationError extends Error {
+  readonly kind = "validation";
+
+  constructor(
+    readonly errors: IntakeValidationIssue[],
+    readonly step: ReturnType<typeof getEarliestValidationStep>,
+  ) {
+    super("Failed to submit intake");
+    this.name = "IntakeValidationError";
+  }
+}
+
+const MOCK_NEXT_INTAKE_VALIDATION_ERROR_KEY = "nutritionCoach:mockNextIntakeValidationError";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isIntakeValidationIssue(value: unknown): value is IntakeValidationIssue {
+  return (
+    isRecord(value) &&
+    typeof value.field === "string" &&
+    typeof value.code === "string" &&
+    typeof value.step === "number" &&
+    typeof value.message === "string"
+  );
+}
+
+async function readJsonSafe(res: Response): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+function isLocalDevelopmentRuntime(): boolean {
+  const viteEnv = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env;
+  if (viteEnv?.DEV === true) return true;
+
+  return ["localhost", "127.0.0.1", "::1"].includes(globalThis.location?.hostname ?? "");
+}
+
+function consumeMockIntakeValidationError(): IntakeValidationIssue[] | null {
+  if (!isLocalDevelopmentRuntime()) return null;
+
+  const nextMock = globalThis.localStorage?.getItem(MOCK_NEXT_INTAKE_VALIDATION_ERROR_KEY);
+  if (nextMock !== "goal") return null;
+
+  globalThis.localStorage?.removeItem(MOCK_NEXT_INTAKE_VALIDATION_ERROR_KEY);
+  return [
+    {
+      field: "goal",
+      code: "INVALID_GOAL",
+      step: 1,
+      message: "請選擇有效的目標",
+    },
+  ];
 }
 
 export function withAuthorizedAssetUrl(
@@ -34,13 +104,33 @@ export async function registerDevice(goal: string): Promise<{ deviceId: string; 
 }
 
 export async function submitIntake(data: IntakeData): Promise<IntakeResult> {
+  const mockErrors = consumeMockIntakeValidationError();
+  if (mockErrors) {
+    throw new IntakeValidationError(mockErrors, getEarliestValidationStep(mockErrors));
+  }
+
   const res = await fetch("/api/device", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error("Failed to submit intake");
+
+  if (!res.ok) {
+    const body = await readJsonSafe(res);
+    if (
+      res.status === 400 &&
+      isRecord(body) &&
+      body.error === "VALIDATION_ERROR" &&
+      Array.isArray(body.errors) &&
+      body.errors.every(isIntakeValidationIssue)
+    ) {
+      throw new IntakeValidationError(body.errors, getEarliestValidationStep(body.errors));
+    }
+
+    throw new Error("Failed to submit intake");
+  }
+
   return res.json();
 }
 

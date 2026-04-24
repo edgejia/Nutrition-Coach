@@ -94,6 +94,29 @@ export interface CoachCTAIntent {
 
 export type CoachCTA = readonly CoachCTAIntent[];
 
+export type OnboardingStep = 1 | 2 | 3 | 4 | 5;
+
+export type OnboardingField =
+  | "goal"
+  | "goalClarification"
+  | "sex"
+  | "age"
+  | "heightCm"
+  | "weightKg"
+  | "activityLevel"
+  | "trainingFrequency"
+  | "allergies"
+  | "bodyFatPercent"
+  | "tdee"
+  | "advancedNotes";
+
+export interface IntakeValidationIssue {
+  field: OnboardingField;
+  code: string;
+  step: OnboardingStep;
+  message: string;
+}
+
 export interface IntakeData {
   goal: "fat_loss" | "muscle_gain";
   sex: "male" | "female";
