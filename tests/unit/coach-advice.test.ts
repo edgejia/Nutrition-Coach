@@ -65,10 +65,10 @@ describe("getCoachCTA", () => {
     );
   });
 
-  it("returns 2-4 short intent CTAs when summary is null", () => {
+  it("returns the top three short intent CTAs when summary is null", () => {
     const cta = getCoachCTA(null, targets, 12);
-    assert.equal(cta.length, 4);
-    assert.deepEqual(cta.map((intent) => intent.label), ["安排下一餐", "補蛋白質", "控制熱量", "記錄飲食"]);
+    assert.equal(cta.length, 3);
+    assert.deepEqual(cta.map((intent) => intent.label), ["安排下一餐", "補蛋白質", "控制熱量"]);
   });
 
   it("returns default intent ordering when targets is null", () => {
@@ -78,7 +78,7 @@ describe("getCoachCTA", () => {
       12,
     );
     assert.equal(cta[0]?.id, "next_meal");
-    assert.equal(cta.at(-1)?.id, "food_logging");
+    assert.equal(cta.at(-1)?.id, "calorie_control");
   });
 
   it("prioritizes protein intent when protein gap > 30g", () => {
@@ -109,13 +109,23 @@ describe("getCoachCTA", () => {
     assert.equal(cta[0]?.id, "calorie_control");
   });
 
-  it("keeps protein priority when no meals are logged and protein gap is large", () => {
+  it("prioritizes food logging when no meals are logged", () => {
     const cta = getCoachCTA(
       { date: "2026-04-01", totalCalories: 0, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealCount: 0 },
       targets,
       12,
     );
-    assert.equal(cta[0]?.id, "protein");
+    assert.equal(cta[0]?.id, "food_logging");
+    assert.ok(cta.some((intent) => intent.id === "protein"));
+    assert.equal(cta.length, 3);
+  });
+
+  it("keeps food logging available when it is the strongest signal", () => {
+    const cta = getCoachCTA(
+      { date: "2026-04-01", totalCalories: 0, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealCount: 0 },
+      targets,
+      18,
+    );
     assert.ok(cta.some((intent) => intent.id === "food_logging"));
   });
 
@@ -128,14 +138,14 @@ describe("getCoachCTA", () => {
     assert.equal(cta[0]?.id, "next_meal");
   });
 
-  it("keeps each intent exactly once and keeps food logging available", () => {
+  it("keeps each visible intent exactly once", () => {
     const cta = getCoachCTA(
       { date: "2026-04-01", totalCalories: 1200, totalProtein: 100, totalCarbs: 130, totalFat: 40, mealCount: 2 },
       targets,
       18,
     );
     assert.equal(new Set(cta.map((intent) => intent.id)).size, cta.length);
-    assert.ok(cta.some((intent) => intent.id === "food_logging"));
+    assert.equal(cta.length, 3);
   });
 
   it("prioritizes protein gap over calorie-remaining when both apply", () => {

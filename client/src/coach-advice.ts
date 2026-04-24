@@ -113,10 +113,13 @@ export const COACH_CTA_INTENTS = [
   },
 ] as const satisfies readonly CoachCTAIntent[];
 
+const HOME_CTA_INTENT_LIMIT = 3;
+
 function orderIntents(leadId: CoachCTAIntentId): CoachCTA {
   const lead = COACH_CTA_INTENTS.find((intent) => intent.id === leadId);
   const rest = COACH_CTA_INTENTS.filter((intent) => intent.id !== leadId);
-  return lead ? [lead, ...rest] : COACH_CTA_INTENTS;
+  const ordered = lead ? [lead, ...rest] : COACH_CTA_INTENTS;
+  return ordered.slice(0, HOME_CTA_INTENT_LIMIT);
 }
 
 export function getCoachCTA(
@@ -128,16 +131,16 @@ export function getCoachCTA(
     return orderIntents("next_meal");
   }
 
+  if (summary.mealCount === 0) {
+    return orderIntents("food_logging");
+  }
+
   if (targets.protein - summary.totalProtein > 30) {
     return orderIntents("protein");
   }
 
   if (targets.calories - summary.totalCalories <= 200) {
     return orderIntents("calorie_control");
-  }
-
-  if (summary.mealCount === 0) {
-    return orderIntents("food_logging");
   }
 
   return orderIntents("next_meal");
