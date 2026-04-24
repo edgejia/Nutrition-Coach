@@ -641,12 +641,12 @@ export function ChatPanel() {
             color: "var(--amber)",
           }}
         >
-          上一筆草稿送出失敗。
+          上一筆任務送出失敗。
           <button type="button" onClick={() => sendPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
             重試送出
           </button>
           <button type="button" onClick={clearPendingHomeChatDraft} className="ml-3 font-semibold underline">
-            取消草稿
+            取消送出
           </button>
         </div>
       )}

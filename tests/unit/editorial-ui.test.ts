@@ -1,5 +1,7 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 const storage = new Map<string, string>();
 globalThis.localStorage = {
   getItem: (key: string) => storage.get(key) ?? null,
@@ -138,8 +140,7 @@ describe("Editorial UI", () => {
   it("simulates CTA click by setting pending draft and switching to chat", () => {
     useStore.getState().setActiveScreen("home");
 
-    // Simulate what handleCtaClick does
-    const ctaText = "問我怎麼補蛋白質";
+    const ctaText = "推薦三個便利商店高蛋白選擇";
     useStore.getState().setPendingHomeChatDraft({
       id: "test-cta",
       text: ctaText,
@@ -151,6 +152,18 @@ describe("Editorial UI", () => {
     assert.equal(state.activeScreen, "chat");
     assert.equal(state.pendingHomeChatDraft?.text, ctaText);
     assert.equal(state.pendingHomeChatDraft?.status, "staged");
+  });
+
+  it("guards task-oriented failed staged-send copy", async () => {
+    const chatPanelSource = await readFile(
+      fileURLToPath(new URL("../../client/src/components/ChatPanel.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    assert.match(chatPanelSource, /上一筆任務送出失敗。/);
+    assert.match(chatPanelSource, /重試送出/);
+    assert.match(chatPanelSource, /取消送出/);
+    assert.doesNotMatch(chatPanelSource, /上一筆草稿送出失敗。|取消草稿/);
   });
 
   it("prefers persisted imageUrl when restoring image-only user chat messages", () => {
