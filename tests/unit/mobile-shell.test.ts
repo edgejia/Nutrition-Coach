@@ -32,6 +32,24 @@ function countPrimaryScrollHelpers(source: string) {
   return countMatches(source, /\bscreen-scroll(?:-with-input|-safe)?\b/g);
 }
 
+function cssBlock(selector: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escapedSelector}\\s*\\{([^}]+)\\}`).exec(sources.appCss);
+  assert.ok(match, `${selector} should be defined`);
+  return match[1] ?? "";
+}
+
+function assertIncludesInOrder(source: string, labels: Array<[string, string]>) {
+  let previousIndex = -1;
+
+  for (const [label, needle] of labels) {
+    const nextIndex = source.indexOf(needle);
+    assert.notEqual(nextIndex, -1, `${label} should exist`);
+    assert.ok(nextIndex > previousIndex, `${label} should appear in shell order`);
+    previousIndex = nextIndex;
+  }
+}
+
 describe("mobile shell source contract", () => {
   it("defines the shared viewport and screen shell helpers", () => {
     assert.match(sources.appCss, /\.app-viewport\s*\{/);
@@ -43,6 +61,37 @@ describe("mobile shell source contract", () => {
     assert.match(sources.appCss, /\.screen-scroll-safe\s*\{/);
   });
 
+  it("keeps shell helpers wired to viewport, fixed-bar, and scrolling declarations", () => {
+    assert.match(cssBlock(".app-viewport"), /min-height:\s*100vh/);
+    assert.match(cssBlock(".app-viewport"), /height:\s*100vh/);
+    assert.match(cssBlock(".app-viewport"), /height:\s*100dvh/);
+    assert.match(cssBlock(".app-viewport"), /overflow:\s*hidden/);
+
+    assert.match(cssBlock(".screen-shell"), /min-height:\s*0/);
+    assert.match(cssBlock(".screen-shell"), /flex:\s*1 1 auto/);
+    assert.match(cssBlock(".screen-shell"), /display:\s*flex/);
+    assert.match(cssBlock(".screen-shell"), /flex-direction:\s*column/);
+    assert.match(cssBlock(".screen-shell"), /overflow:\s*hidden/);
+    assert.match(cssBlock(".screen-shell"), /background:\s*var\(--bg\)/);
+
+    assert.match(cssBlock(".screen-bar"), /flex-shrink:\s*0/);
+
+    for (const selector of [".screen-scroll", ".screen-scroll-with-input", ".screen-scroll-safe"]) {
+      const block = cssBlock(selector);
+      assert.match(block, /min-height:\s*0/);
+      assert.match(block, /flex:\s*1 1 auto/);
+      assert.match(block, /overflow-y:\s*auto/);
+      assert.match(block, /overscroll-behavior:\s*contain/);
+      assert.match(block, /-webkit-overflow-scrolling:\s*touch/);
+    }
+
+    assert.match(cssBlock(".screen-scroll-with-input"), /padding-bottom:\s*6rem/);
+    assert.match(
+      cssBlock(".screen-scroll-safe"),
+      /padding-bottom:\s*max\(2rem,\s*env\(safe-area-inset-bottom\)\)/,
+    );
+  });
+
   it("keeps MainLayout as the app viewport boundary", () => {
     assert.match(sources.mainLayout, /\bapp-viewport\b/);
   });
@@ -52,6 +101,12 @@ describe("mobile shell source contract", () => {
     assert.match(sources.homeScreen, /\bscreen-bar\b/);
     assert.match(sources.homeScreen, /\bscreen-scroll-with-input\b/);
     assert.match(sources.homeScreen, /\bpb-safe\b/);
+    assertIncludesInOrder(sources.homeScreen, [
+      ["Home screen shell", '<div className="screen-shell">'],
+      ["Home header", "<HomeHeader />"],
+      ["Home content scroller", '<main className="screen-scroll-with-input'],
+      ["Home bottom input bar", '<div className="screen-bar border-t px-3 pb-safe"'],
+    ]);
   });
 
   it("keeps Chat scroll ownership on the existing scrollContainerRef element", () => {
@@ -67,6 +122,12 @@ describe("mobile shell source contract", () => {
     assert.ok(scrollContainerMatch, "ChatPanel should keep scrollContainerRef on a div");
     const scrollContainerClassName = scrollContainerMatch[1] ?? "";
     assert.match(scrollContainerClassName, /\bscreen-scroll-with-input\b/);
+    assertIncludesInOrder(sources.chatPanel, [
+      ["Chat screen shell", '<div className="screen-shell">'],
+      ["Chat header bar", '<div className="screen-bar px-5 pb-3 pt-4"'],
+      ["Chat message scroller", '<div ref={scrollContainerRef} className="screen-scroll-with-input'],
+      ["Chat bottom input bar", '<div className="screen-bar px-3 pb-safe"'],
+    ]);
 
     if (sources.chatPanel.includes("overflow-y-auto")) {
       assert.match(scrollContainerClassName, /\boverflow-y-auto\b/);
@@ -82,6 +143,11 @@ describe("mobile shell source contract", () => {
     assert.match(sources.summaryDetailScreen, /\bscreen-shell\b/);
     assert.match(sources.summaryDetailScreen, /\bscreen-bar\b/);
     assert.match(sources.summaryDetailScreen, /\bscreen-scroll-safe\b/);
+    assertIncludesInOrder(sources.summaryDetailScreen, [
+      ["Summary screen shell", '<div className="screen-shell">'],
+      ["Summary header bar", '<div className="screen-bar px-5 pb-3 pt-4"'],
+      ["Summary content scroller", '<main className="screen-scroll-safe'],
+    ]);
   });
 
   it("exposes exactly one primary scroll helper on each primary screen", () => {
