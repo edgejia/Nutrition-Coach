@@ -18,7 +18,9 @@ globalThis.localStorage = {
   key: (index: number) => [...storage.keys()][index] ?? null,
 } as Storage;
 
-const { getDisplayedCoachAdvice, formatHomeHeaderDate } = await import("../../client/src/components/HomeScreen.js");
+const { getDisplayedCoachAdvice, formatHomeHeaderDate, stageHomeTaskOptionPrompt } = await import(
+  "../../client/src/components/HomeScreen.js"
+);
 
 describe("Home screen helpers", () => {
   it("prefers freshly derived coach advice over stale stored advice", () => {
@@ -57,5 +59,26 @@ describe("Home screen helpers", () => {
     });
 
     assert.equal(formatHomeHeaderDate("not-a-date"), expected);
+  });
+
+  it("stages a second-layer task option prompt and switches to chat", () => {
+    const staged: unknown[] = [];
+    const screens: string[] = [];
+
+    stageHomeTaskOptionPrompt(
+      "推薦三個便利商店高蛋白選擇",
+      (draft) => staged.push(draft),
+      (screen) => screens.push(screen),
+      () => "task-option-1",
+    );
+
+    assert.deepEqual(staged, [
+      {
+        id: "task-option-1",
+        text: "推薦三個便利商店高蛋白選擇",
+        status: "staged",
+      },
+    ]);
+    assert.deepEqual(screens, ["chat"]);
   });
 });

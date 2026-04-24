@@ -5,6 +5,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { Dashboard } from "./Dashboard.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { ChatEntryBar } from "./ChatEntryBar.js";
+import type { ActiveScreen, PendingHomeChatDraft, CoachCTATaskOption } from "../types.js";
 
 export function getDisplayedCoachAdvice(
   storedAdvice: string | null,
@@ -26,6 +27,16 @@ export function formatHomeHeaderDate(dateKey: string): string {
     day: "numeric",
     weekday: "short",
   });
+}
+
+export function stageHomeTaskOptionPrompt(
+  prompt: string,
+  setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void,
+  setActiveScreen: (screen: ActiveScreen) => void,
+  createId: () => string = () => crypto.randomUUID(),
+) {
+  setPendingHomeChatDraft({ id: createId(), text: prompt, status: "staged" });
+  setActiveScreen("chat");
 }
 
 function HomeHeader() {
@@ -105,16 +116,15 @@ export function HomeScreen() {
     setActiveScreen("chat");
   }
 
-  function handleCtaClick(text: string) {
-    setPendingHomeChatDraft({ id: crypto.randomUUID(), text, status: "staged" });
-    setActiveScreen("chat");
+  function handleTaskOptionClick(option: CoachCTATaskOption) {
+    stageHomeTaskOptionPrompt(option.prompt, setPendingHomeChatDraft, setActiveScreen);
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--bg)" }}>
       <main className="flex-1 space-y-3 overflow-y-auto px-4 pb-24 pt-2">
         <HomeHeader />
-        <CoachAdviceCard advice={coachAdvice} cta={cta} onCtaClick={handleCtaClick} />
+        <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
         <Dashboard onTap={() => { if (!sending) setActiveScreen("summary"); }} />
       </main>
       <div className="shrink-0 border-t px-3 pb-safe" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>

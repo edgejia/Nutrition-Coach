@@ -1,5 +1,13 @@
+import { useState } from "react";
 import { useStore } from "../store.js";
-import type { DailySummary, DailyTargets, CoachCTA } from "../types.js";
+import type {
+  CoachCTA,
+  CoachCTAIntent,
+  CoachCTAIntentId,
+  CoachCTATaskOption,
+  DailySummary,
+  DailyTargets,
+} from "../types.js";
 
 export function splitAdvice(advice: string): { headline: string; body: string } {
   const dotIdx = advice.indexOf("。");
@@ -56,46 +64,102 @@ export function getAdvicePresentation(
   };
 }
 
+export function CoachCTAControls({
+  intents,
+  selectedIntentId,
+  onIntentSelect,
+  onTaskOptionClick,
+  disabled = false,
+}: {
+  intents: readonly CoachCTAIntent[];
+  selectedIntentId: CoachCTAIntentId | null;
+  onIntentSelect: (intentId: CoachCTAIntentId) => void;
+  onTaskOptionClick: (option: CoachCTATaskOption, intent: CoachCTAIntent) => void;
+  disabled?: boolean;
+}) {
+  const selectedIntent = intents.find((intent) => intent.id === selectedIntentId) ?? null;
+
+  if (intents.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <div className="flex flex-wrap gap-2">
+        {intents.map((intent) => {
+          const selected = intent.id === selectedIntentId;
+          const optionsId = `coach-cta-options-${intent.id}`;
+          return (
+            <button
+              key={intent.id}
+              type="button"
+              aria-pressed={selected}
+              aria-expanded={selected}
+              aria-controls={optionsId}
+              disabled={disabled}
+              onClick={() => onIntentSelect(intent.id)}
+              className="min-h-11 rounded-xl px-4 py-2 text-sm font-bold leading-tight disabled:opacity-40"
+              style={{
+                background: selected ? "var(--orange)" : "var(--bg-raised)",
+                border: selected ? "1px solid transparent" : "1px solid var(--border-med)",
+                color: selected ? "white" : "var(--text-2)",
+                boxShadow: selected ? "0 4px 16px rgba(232,104,42,0.3)" : "none",
+              }}
+            >
+              {intent.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedIntent && (
+        <div id={`coach-cta-options-${selectedIntent.id}`} className="flex flex-col gap-2">
+          {selectedIntent.options.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              disabled={disabled}
+              onClick={() => onTaskOptionClick(option, selectedIntent)}
+              className="min-h-11 rounded-xl px-4 py-2 text-left text-sm leading-relaxed disabled:opacity-40"
+              style={{
+                background: "rgba(109,191,163,0.08)",
+                border: "1px solid var(--teal-border)",
+                color: "var(--text)",
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CoachAdviceCard({
   advice,
   cta = null,
-  onCtaClick,
+  onTaskOptionClick,
+  disabled = false,
 }: {
   advice: string | null;
   cta?: CoachCTA | null;
-  onCtaClick?: (text: string) => void;
+  onTaskOptionClick?: (option: CoachCTATaskOption, intent: CoachCTAIntent) => void;
+  disabled?: boolean;
 }) {
+  const [selectedIntentId, setSelectedIntentId] = useState<CoachCTAIntentId | null>(null);
   const summary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
   const presentation = getAdvicePresentation(summary, targets, advice);
 
-  const ctaBlock = cta && (
-    <div className="mt-3 flex flex-col gap-2">
-      <button
-        type="button"
-        onClick={() => onCtaClick?.(cta.primary)}
-        className="w-full rounded-xl px-4 py-2.5 text-sm font-bold"
-        style={{
-          background: "var(--orange)",
-          color: "white",
-          boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
-        }}
-      >
-        {cta.primary}
-      </button>
-      <button
-        type="button"
-        onClick={() => onCtaClick?.(cta.secondary)}
-        className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold"
-        style={{
-          background: "var(--bg-raised)",
-          border: "1px solid var(--border-med)",
-          color: "var(--text-2)",
-        }}
-      >
-        {cta.secondary}
-      </button>
-    </div>
+  const ctaBlock = cta && presentation.state !== "loading" && (
+    <CoachCTAControls
+      intents={cta}
+      selectedIntentId={selectedIntentId}
+      onIntentSelect={setSelectedIntentId}
+      onTaskOptionClick={(option, intent) => onTaskOptionClick?.(option, intent)}
+      disabled={disabled}
+    />
   );
 
   if (presentation.state === "loading") {
