@@ -65,6 +65,7 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".app-viewport"), /min-height:\s*100vh/);
     assert.match(cssBlock(".app-viewport"), /height:\s*100vh/);
     assert.match(cssBlock(".app-viewport"), /height:\s*100dvh/);
+    assert.match(cssBlock(".app-viewport"), /height:\s*var\(--app-viewport-height,\s*100dvh\)/);
     assert.match(cssBlock(".app-viewport"), /overflow:\s*hidden/);
 
     assert.match(cssBlock(".screen-shell"), /min-height:\s*0/);
@@ -94,6 +95,8 @@ describe("mobile shell source contract", () => {
 
   it("keeps MainLayout as the app viewport boundary", () => {
     assert.match(sources.mainLayout, /\bapp-viewport\b/);
+    assert.match(sources.mainLayout, /\bvisualViewport\b/);
+    assert.match(sources.mainLayout, /--app-viewport-height/);
   });
 
   it("keeps Home fixed regions outside the middle content scroller", () => {
