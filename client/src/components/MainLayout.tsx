@@ -8,36 +8,6 @@ import { ChatPanel } from "./ChatPanel.js";
 import { GoalSettings } from "./GoalSettings.js";
 import { SummaryDetailScreen } from "./SummaryDetailScreen.js";
 
-function syncAppViewportHeight() {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  const root = document.documentElement;
-  const viewport = window.visualViewport;
-
-  function applyViewportHeight() {
-    root.style.setProperty(
-      "--app-viewport-height",
-      `${Math.round(viewport?.height ?? window.innerHeight)}px`,
-    );
-  }
-
-  applyViewportHeight();
-  window.addEventListener("resize", applyViewportHeight);
-  window.addEventListener("orientationchange", applyViewportHeight);
-  viewport?.addEventListener("resize", applyViewportHeight);
-  viewport?.addEventListener("scroll", applyViewportHeight);
-
-  return () => {
-    window.removeEventListener("resize", applyViewportHeight);
-    window.removeEventListener("orientationchange", applyViewportHeight);
-    viewport?.removeEventListener("resize", applyViewportHeight);
-    viewport?.removeEventListener("scroll", applyViewportHeight);
-    root.style.removeProperty("--app-viewport-height");
-  };
-}
-
 export function MainLayout() {
   const deviceId = useStore((s) => s.deviceId);
   const setDailySummary = useStore((s) => s.setDailySummary);
@@ -80,8 +50,6 @@ export function MainLayout() {
   }, [deviceId, refreshForRollover, setRolloverRefreshHandler]);
 
   useDailyRollover(refreshForRollover);
-
-  useEffect(() => syncAppViewportHeight(), []);
 
   return (
     <div className="app-viewport flex flex-col" style={{ background: "var(--bg)" }}>

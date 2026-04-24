@@ -56,6 +56,7 @@ describe("mobile shell source contract", () => {
     assert.match(sources.appCss, /height:\s*100dvh/);
     assert.match(sources.appCss, /\.screen-shell\s*\{/);
     assert.match(sources.appCss, /\.screen-bar\s*\{/);
+    assert.match(sources.appCss, /\.screen-bottom-bar\s*\{/);
     assert.match(sources.appCss, /\.screen-scroll\s*\{/);
     assert.match(sources.appCss, /\.screen-scroll-with-input\s*\{/);
     assert.match(sources.appCss, /\.screen-scroll-safe\s*\{/);
@@ -65,7 +66,6 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".app-viewport"), /min-height:\s*100vh/);
     assert.match(cssBlock(".app-viewport"), /height:\s*100vh/);
     assert.match(cssBlock(".app-viewport"), /height:\s*100dvh/);
-    assert.match(cssBlock(".app-viewport"), /height:\s*var\(--app-viewport-height,\s*100dvh\)/);
     assert.match(cssBlock(".app-viewport"), /overflow:\s*hidden/);
 
     assert.match(cssBlock(".screen-shell"), /min-height:\s*0/);
@@ -76,6 +76,8 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".screen-shell"), /background:\s*var\(--bg\)/);
 
     assert.match(cssBlock(".screen-bar"), /flex-shrink:\s*0/);
+    assert.match(cssBlock(".screen-bottom-bar"), /flex-shrink:\s*0/);
+    assert.match(cssBlock(".screen-bottom-bar"), /padding-bottom:\s*max\(1\.5rem,\s*calc\(env\(safe-area-inset-bottom\) \+ 1\.25rem\)\)/);
 
     for (const selector of [".screen-scroll", ".screen-scroll-with-input", ".screen-scroll-safe"]) {
       const block = cssBlock(selector);
@@ -95,28 +97,28 @@ describe("mobile shell source contract", () => {
 
   it("keeps MainLayout as the app viewport boundary", () => {
     assert.match(sources.mainLayout, /\bapp-viewport\b/);
-    assert.match(sources.mainLayout, /\bvisualViewport\b/);
-    assert.match(sources.mainLayout, /--app-viewport-height/);
+    assert.doesNotMatch(sources.mainLayout, /\bvisualViewport\b/);
+    assert.doesNotMatch(sources.mainLayout, /--app-viewport-height/);
   });
 
   it("keeps Home fixed regions outside the middle content scroller", () => {
     assert.match(sources.homeScreen, /\bscreen-shell\b/);
     assert.match(sources.homeScreen, /\bscreen-bar\b/);
+    assert.match(sources.homeScreen, /\bscreen-bottom-bar\b/);
     assert.match(sources.homeScreen, /\bscreen-scroll-with-input\b/);
-    assert.match(sources.homeScreen, /\bpb-safe\b/);
     assertIncludesInOrder(sources.homeScreen, [
       ["Home screen shell", '<div className="screen-shell">'],
       ["Home header", "<HomeHeader />"],
       ["Home content scroller", '<main className="screen-scroll-with-input'],
-      ["Home bottom input bar", '<div className="screen-bar border-t px-3 pb-safe"'],
+      ["Home bottom input bar", '<div className="screen-bottom-bar border-t px-3"'],
     ]);
   });
 
   it("keeps Chat scroll ownership on the existing scrollContainerRef element", () => {
     assert.match(sources.chatPanel, /\bscreen-shell\b/);
     assert.match(sources.chatPanel, /\bscreen-bar\b/);
+    assert.match(sources.chatPanel, /\bscreen-bottom-bar\b/);
     assert.match(sources.chatPanel, /\bscreen-scroll-with-input\b/);
-    assert.match(sources.chatPanel, /\bpb-safe\b/);
     assert.match(sources.chatPanel, /\bscrollContainerRef\b/);
 
     const scrollContainerMatch = /<div ref=\{scrollContainerRef\} className="([^"]+)"/.exec(
@@ -129,7 +131,7 @@ describe("mobile shell source contract", () => {
       ["Chat screen shell", '<div className="screen-shell">'],
       ["Chat header bar", '<div className="screen-bar px-5 pb-3 pt-4"'],
       ["Chat message scroller", '<div ref={scrollContainerRef} className="screen-scroll-with-input'],
-      ["Chat bottom input bar", '<div className="screen-bar px-3 pb-safe"'],
+      ["Chat bottom input bar", '<div className="screen-bottom-bar px-3"'],
     ]);
 
     if (sources.chatPanel.includes("overflow-y-auto")) {

@@ -127,7 +127,7 @@ export function HomeScreen() {
         <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
         <Dashboard onTap={() => { if (!sending) setActiveScreen("summary"); }} />
       </main>
-      <div className="screen-bar border-t px-3 pb-safe" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
+      <div className="screen-bottom-bar border-t px-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
         <ChatEntryBar onSend={handleSend} disabled={sending} />
       </div>
     </div>

@@ -700,7 +700,7 @@ export function ChatPanel() {
         )}
       </div>
 
-      <div className="screen-bar px-3 pb-safe" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
+      <div className="screen-bottom-bar px-3" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
         <ChatInput onSend={handleSend} onBeforeSend={handleBeforeSend} disabled={sending} />
       </div>
     </div>
