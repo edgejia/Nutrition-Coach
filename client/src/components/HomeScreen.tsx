@@ -48,7 +48,7 @@ function HomeHeader() {
   const dateStr = formatHomeHeaderDate(dateKey);
 
   return (
-    <div className="flex items-center justify-between px-5 pb-2 pt-4">
+    <div className="screen-bar flex items-center justify-between px-5 pb-2 pt-4">
       <div>
         <span
           className="text-sm font-bold"
@@ -121,13 +121,13 @@ export function HomeScreen() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--bg)" }}>
-      <main className="flex-1 space-y-3 overflow-y-auto px-4 pb-24 pt-2">
-        <HomeHeader />
+    <div className="screen-shell">
+      <HomeHeader />
+      <main className="screen-scroll-with-input space-y-3 px-4 pt-2">
         <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
         <Dashboard onTap={() => { if (!sending) setActiveScreen("summary"); }} />
       </main>
-      <div className="shrink-0 border-t px-3 pb-safe" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
+      <div className="screen-bar border-t px-3 pb-safe" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
         <ChatEntryBar onSend={handleSend} disabled={sending} />
       </div>
     </div>

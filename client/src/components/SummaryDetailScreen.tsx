@@ -114,8 +114,8 @@ export function SummaryDetailScreenPresentation(props: SummaryDetailScreenPresen
     : "載入中...";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--bg)" }}>
-      <div className="shrink-0 px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
+    <div className="screen-shell">
+      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
         <button
           type="button"
           onClick={onBack}
@@ -161,7 +161,7 @@ export function SummaryDetailScreenPresentation(props: SummaryDetailScreenPresen
         </div>
       </div>
 
-      <main className="flex-1 space-y-3 overflow-y-auto p-4">
+      <main className="screen-scroll-safe space-y-3 p-4">
         <section
           className="rounded-2xl p-3.5"
           style={{
