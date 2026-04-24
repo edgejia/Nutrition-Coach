@@ -31,7 +31,6 @@ html,
 body,
 #root {
   min-height: 100%;
-  height: 100%;
 }
 
 body {
@@ -39,7 +38,6 @@ body {
   background-color: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
-  overflow: hidden;
 }
 
 button,
@@ -52,7 +50,6 @@ textarea {
   min-height: 100vh;
   height: 100vh;
   height: 100dvh;
-  height: var(--app-viewport-height, 100dvh);
   overflow: hidden;
 }
 
@@ -67,6 +64,11 @@ textarea {
 
 .screen-bar {
   flex-shrink: 0;
+}
+
+.screen-bottom-bar {
+  flex-shrink: 0;
+  padding-bottom: max(1.5rem, calc(env(safe-area-inset-bottom) + 1.25rem));
 }
 
 .screen-scroll {
