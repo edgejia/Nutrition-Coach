@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store.js";
+import { recordHomeCtaIntentSelected } from "../api.js";
 import type {
   CoachCTA,
   CoachCTAIntent,
@@ -8,6 +9,14 @@ import type {
   DailySummary,
   DailyTargets,
 } from "../types.js";
+
+export function recordAndSelectHomeCtaIntent(
+  intentId: CoachCTAIntentId,
+  setSelectedIntentId: (intentId: CoachCTAIntentId) => void,
+) {
+  void recordHomeCtaIntentSelected(intentId);
+  setSelectedIntentId(intentId);
+}
 
 export function splitAdvice(advice: string): { headline: string; body: string } {
   const dotIdx = advice.indexOf("。");
@@ -156,7 +165,7 @@ export function CoachAdviceCard({
     <CoachCTAControls
       intents={cta}
       selectedIntentId={selectedIntentId}
-      onIntentSelect={setSelectedIntentId}
+      onIntentSelect={(intentId) => recordAndSelectHomeCtaIntent(intentId, setSelectedIntentId)}
       onTaskOptionClick={(option, intent) => onTaskOptionClick?.(option, intent)}
       disabled={disabled}
     />

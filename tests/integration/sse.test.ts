@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
@@ -35,6 +36,46 @@ function parseSSEFrames(raw: string): SSEFrame[] {
         data: lines.find((line) => line.startsWith("data: "))?.slice("data: ".length) ?? "",
       };
     });
+}
+
+function createLogCapture() {
+  const logLines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _, cb) {
+      chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+      cb();
+    },
+  });
+
+  return { logLines, stream };
+}
+
+function parseLogLines(logLines: string[]) {
+  const records: Record<string, unknown>[] = [];
+  for (const line of logLines) {
+    try {
+      records.push(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      // Ignore non-JSON logger diagnostics.
+    }
+  }
+  return records;
+}
+
+function sseStateEvents(logLines: string[]) {
+  return parseLogLines(logLines).filter((record) => record.event === "sse_connection_state");
+}
+
+async function waitForSseState(logLines: string[], state: string, timeoutMs = 1000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const event = sseStateEvents(logLines).find((record) => record.state === state);
+    if (event) {
+      return event;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Expected sse_connection_state ${state}, got ${JSON.stringify(sseStateEvents(logLines))}`);
 }
 
 async function readSSEFrame(
@@ -95,6 +136,81 @@ describe("SSE API", () => {
     });
     assert.equal(res.statusCode, 401);
     assert.deepEqual(res.json(), { error: "Guest session required" });
+  });
+
+  it("logs rejected SSE connection state without device identifiers", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+
+    try {
+      const res = await logApp.inject({
+        method: "GET",
+        url: "/api/sse",
+      });
+
+      assert.equal(res.statusCode, 401);
+      const events = sseStateEvents(logLines);
+      assert.deepEqual(events.map((event) => event.state), ["rejected"]);
+      assert.ok(!JSON.stringify(parseLogLines(logLines)).includes(logDeviceId));
+    } finally {
+      await logApp.close();
+    }
+  });
+
+  it("logs opened and closed SSE states while preserving the initial daily_summary frame", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+    const logCookieHeader = toCookieHeader(deviceRes);
+    const address = await logApp.listen({ port: 0 });
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/sse`, {
+        headers: { cookie: logCookieHeader },
+        signal: controller.signal,
+      });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("content-type"), "text/event-stream");
+      reader = res.body?.getReader();
+      assert.ok(reader);
+
+      const frame = await readSSEFrame(reader, "daily_summary");
+      assert.match(frame.data, /"date":"\d{4}-\d{2}-\d{2}"/);
+      await waitForSseState(logLines, "opened");
+
+      await reader.cancel();
+      controller.abort();
+      await waitForSseState(logLines, "closed");
+
+      const states = sseStateEvents(logLines).map((event) => event.state);
+      assert.deepEqual(states, ["opened", "closed"]);
+      assert.ok(!JSON.stringify(parseLogLines(logLines)).includes(logDeviceId));
+    } finally {
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+      await logApp.close();
+    }
   });
 
   it("GET /api/sse accepts cookie-backed guest sessions for EventSource", async () => {

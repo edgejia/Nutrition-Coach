@@ -16,6 +16,7 @@ import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
+import { logChatTurnCompleted } from "../observability/events.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -343,6 +344,7 @@ async function handleOrchestratorSSE(
   deviceId: string,
   message: string,
   image: { dataUri: string; path: string; mimeType: string; originalFilename?: string } | undefined,
+  startedAt: number,
   hooks?: OrchestratorHooks,
 ): Promise<void> {
   let durableAssetId: string | undefined;
@@ -414,6 +416,13 @@ async function handleOrchestratorSSE(
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+      logChatTurnCompleted(deps.log, {
+        source: "sse",
+        didLogMeal: streamDidLogMeal,
+        didMutateMeal: streamDidMutateMeal,
+        hadImage: Boolean(image),
+        latencyMs: Date.now() - startedAt,
+      });
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
     } else {
       const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate, loggedMeal } = result;
@@ -434,6 +443,13 @@ async function handleOrchestratorSSE(
         ...(affectedDate ? { affectedDate } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+      logChatTurnCompleted(deps.log, {
+        source: "sse",
+        didLogMeal,
+        didMutateMeal: streamDidMutateMeal,
+        hadImage: Boolean(image),
+        latencyMs: Date.now() - startedAt,
+      });
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, deps.log);
     }
   } catch {
@@ -461,6 +477,13 @@ async function handleOrchestratorSSE(
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+    logChatTurnCompleted(deps.log, {
+      source: "sse",
+      didLogMeal: streamDidLogMeal,
+      didMutateMeal: streamDidMutateMeal,
+      hadImage: Boolean(image),
+      latencyMs: Date.now() - startedAt,
+    });
     publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
   } finally {
     await cleanupDurableAssetSafe(
@@ -507,6 +530,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     }
 
     const { message, image } = parseResult;
+    const chatTurnStartedAt = Date.now();
+    const hadImage = Boolean(image);
 
     // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
     const acceptHeader = request.headers["accept"] ?? "";
@@ -571,6 +596,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             dailySummary,
             request.log,
           );
+          logChatTurnCompleted(request.log, {
+            source: "json",
+            didLogMeal,
+            didMutateMeal: result.didMutateMeal ?? didLogMeal,
+            hadImage,
+            latencyMs: Date.now() - chatTurnStartedAt,
+          });
           return {
             reply: sanitized,
             didLogMeal,
@@ -587,6 +619,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, request.log);
+        logChatTurnCompleted(request.log, {
+          source: "json",
+          didLogMeal,
+          didMutateMeal: jsonDidMutateMeal,
+          hadImage,
+          latencyMs: Date.now() - chatTurnStartedAt,
+        });
         return {
           reply: sanitizedJson,
           didLogMeal,
@@ -609,6 +648,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, request.log);
+        logChatTurnCompleted(request.log, {
+          source: "json",
+          didLogMeal: jsonDidLogMeal,
+          didMutateMeal: jsonDidMutateMeal,
+          hadImage,
+          latencyMs: Date.now() - chatTurnStartedAt,
+        });
         return {
           reply: sanitizedJson,
           didLogMeal: jsonDidLogMeal,
@@ -650,6 +696,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         deviceId,
         message,
         image,
+        chatTurnStartedAt,
         hooks,
       );
     });
