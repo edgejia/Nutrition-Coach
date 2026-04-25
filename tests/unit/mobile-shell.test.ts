@@ -63,32 +63,39 @@ describe("mobile shell source contract", () => {
   });
 
   it("keeps shell helpers wired to viewport, fixed-bar, and scrolling declarations", () => {
-    assert.match(cssBlock(".app-viewport"), /min-height:\s*100vh/);
+    assert.match(cssBlock(".app-viewport"), /min-height:\s*100svh/);
     assert.match(cssBlock(".app-viewport"), /height:\s*100vh/);
     assert.match(cssBlock(".app-viewport"), /height:\s*100dvh/);
-    assert.match(cssBlock(".app-viewport"), /overflow:\s*hidden/);
+    assert.match(cssBlock(".app-viewport"), /height:\s*min\(100dvh,\s*var\(--app-visual-viewport-height,\s*100dvh\)\)/);
+    assert.match(cssBlock(".app-viewport"), /overflow:\s*clip/);
 
     assert.match(cssBlock(".screen-shell"), /min-height:\s*0/);
     assert.match(cssBlock(".screen-shell"), /flex:\s*1 1 auto/);
     assert.match(cssBlock(".screen-shell"), /display:\s*flex/);
     assert.match(cssBlock(".screen-shell"), /flex-direction:\s*column/);
-    assert.match(cssBlock(".screen-shell"), /overflow:\s*hidden/);
+    assert.match(cssBlock(".screen-shell"), /overflow:\s*clip/);
     assert.match(cssBlock(".screen-shell"), /background:\s*var\(--bg\)/);
 
     assert.match(cssBlock(".screen-bar"), /flex-shrink:\s*0/);
     assert.match(cssBlock(".screen-bottom-bar"), /flex-shrink:\s*0/);
-    assert.match(cssBlock(".screen-bottom-bar"), /padding-bottom:\s*max\(1\.5rem,\s*calc\(env\(safe-area-inset-bottom\) \+ 1\.25rem\)\)/);
+    assert.match(cssBlock(".screen-bottom-bar"), /position:\s*relative/);
+    assert.match(cssBlock(".screen-bottom-bar"), /z-index:\s*10/);
+    assert.match(cssBlock(".screen-bottom-bar"), /padding-bottom:\s*max\(0\.75rem,\s*calc\(env\(safe-area-inset-bottom\) \+ 0\.75rem\)\)/);
+    assert.match(
+      cssBlock(".screen-bottom-bar"),
+      /transform:\s*translate3d\(0,\s*calc\(-1 \* var\(--app-bottom-occlusion,\s*0px\)\),\s*0\)/,
+    );
 
     for (const selector of [".screen-scroll", ".screen-scroll-with-input", ".screen-scroll-safe"]) {
       const block = cssBlock(selector);
       assert.match(block, /min-height:\s*0/);
       assert.match(block, /flex:\s*1 1 auto/);
       assert.match(block, /overflow-y:\s*auto/);
-      assert.match(block, /overscroll-behavior:\s*contain/);
+      assert.doesNotMatch(block, /overscroll-behavior:\s*contain/);
       assert.match(block, /-webkit-overflow-scrolling:\s*touch/);
     }
 
-    assert.match(cssBlock(".screen-scroll-with-input"), /padding-bottom:\s*6rem/);
+    assert.match(cssBlock(".screen-scroll-with-input"), /padding-bottom:\s*calc\(6rem \+ var\(--app-bottom-occlusion,\s*0px\)\)/);
     assert.match(
       cssBlock(".screen-scroll-safe"),
       /padding-bottom:\s*max\(2rem,\s*env\(safe-area-inset-bottom\)\)/,
@@ -97,8 +104,10 @@ describe("mobile shell source contract", () => {
 
   it("keeps MainLayout as the app viewport boundary", () => {
     assert.match(sources.mainLayout, /\bapp-viewport\b/);
-    assert.doesNotMatch(sources.mainLayout, /\bvisualViewport\b/);
-    assert.doesNotMatch(sources.mainLayout, /--app-viewport-height/);
+    assert.match(sources.mainLayout, /\bvisualViewport\b/);
+    assert.match(sources.mainLayout, /--app-visual-viewport-height/);
+    assert.match(sources.mainLayout, /--app-bottom-occlusion/);
+    assert.doesNotMatch(sources.mainLayout, /document\.body\.style\.overflow/);
   });
 
   it("keeps Home fixed regions outside the middle content scroller", () => {

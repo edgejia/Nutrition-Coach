@@ -47,10 +47,11 @@ textarea {
 }
 
 .app-viewport {
-  min-height: 100vh;
+  min-height: 100svh;
   height: 100vh;
   height: 100dvh;
-  overflow: hidden;
+  height: min(100dvh, var(--app-visual-viewport-height, 100dvh));
+  overflow: clip;
 }
 
 .screen-shell {
@@ -58,7 +59,7 @@ textarea {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: clip;
   background: var(--bg);
 }
 
@@ -68,14 +69,17 @@ textarea {
 
 .screen-bottom-bar {
   flex-shrink: 0;
-  padding-bottom: max(1.5rem, calc(env(safe-area-inset-bottom) + 1.25rem));
+  position: relative;
+  z-index: 10;
+  padding-bottom: max(0.75rem, calc(env(safe-area-inset-bottom) + 0.75rem));
+  transform: translate3d(0, calc(-1 * var(--app-bottom-occlusion, 0px)), 0);
+  will-change: transform;
 }
 
 .screen-scroll {
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
-  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -83,16 +87,14 @@ textarea {
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
-  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 6rem;
+  padding-bottom: calc(6rem + var(--app-bottom-occlusion, 0px));
 }
 
 .screen-scroll-safe {
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
-  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   padding-bottom: max(2rem, env(safe-area-inset-bottom));
 }
