@@ -136,7 +136,7 @@ describe("Observability API", () => {
     assert.equal(eventLogs[0]?.promptKey, "describe_meal");
 
     const serialized = JSON.stringify(eventLogs[0]);
-    assert.doesNotMatch(serialized, /prompt/);
+    assert.doesNotMatch(serialized, /"prompt"/);
     assert.doesNotMatch(serialized, /assistant reply text/);
     assert.doesNotMatch(serialized, /imagePath/);
     assert.doesNotMatch(serialized, /photo\.jpg/);

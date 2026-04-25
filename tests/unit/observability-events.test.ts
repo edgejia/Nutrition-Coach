@@ -50,7 +50,7 @@ const FORBIDDEN_STRINGS = [
   "130",
 ];
 
-function assertLockedPayload(payload: Record<string, unknown>) {
+function assertLockedPayload(payload: { event: RedactedObservabilityEventName } & object) {
   assert.ok(LOCKED_EVENT_NAMES.includes(payload.event as RedactedObservabilityEventName));
   for (const key of Object.keys(payload)) {
     if (key === "event") continue;
