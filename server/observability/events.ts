@@ -28,8 +28,10 @@ const INTAKE_FIELDS = [
   "tdee",
   "advancedNotes",
 ] as const;
+const GOAL_UPDATE_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
 
 const INTAKE_FIELD_SET = new Set<string>(INTAKE_FIELDS);
+const GOAL_UPDATE_FIELD_SET = new Set<string>(GOAL_UPDATE_FIELDS);
 const VALID_IDENTIFIER = /^[a-z0-9_-]{1,64}$/;
 const VALID_CODE = /^[A-Z0-9_]{1,64}$/;
 
@@ -116,7 +118,7 @@ function sanitizeCodes(codes: readonly string[]): string[] {
 }
 
 function sanitizeUpdatedFields(fields: readonly string[]): string[] {
-  return uniqueSorted(fields.filter((field) => INTAKE_FIELD_SET.has(field)));
+  return uniqueSorted(fields.filter((field) => GOAL_UPDATE_FIELD_SET.has(field)));
 }
 
 function isIdentifier(value: unknown): value is string {

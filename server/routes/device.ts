@@ -4,6 +4,7 @@ import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import {
+  logDeviceGoalsUpdatedRest,
   logOnboardingSubmitStarted,
   logOnboardingSubmitSucceeded,
   logOnboardingValidationFailed,
@@ -483,6 +484,7 @@ export function registerDeviceRoutes(
       return reply.code(400).send({ error: "Request must include at least one valid goal field (calories, protein, carbs, fat)" });
     }
     const dailyTargets = await deviceService.updateGoals(deviceId, goals);
+    logDeviceGoalsUpdatedRest(request.log, { updatedFields: Object.keys(goals) });
     return { dailyTargets };
   });
 }
