@@ -106,7 +106,7 @@ describe("redacted observability event builders", () => {
         didLogMeal: false,
         didMutateMeal: false,
         hadImage: true,
-        latencyMs: 1800,
+        latencyMs: 42,
       }),
       buildDeviceGoalsUpdatedRestEvent({ updatedFields: ["calories", "protein"] }),
     ];
