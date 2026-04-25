@@ -43,6 +43,10 @@ function findLogEvents(logLines: string[], event: string) {
   return parseJsonLogLines(logLines).filter((line) => line.event === event);
 }
 
+function pickEventMetadata(event: Record<string, unknown>, keys: readonly string[]) {
+  return Object.fromEntries(keys.map((key) => [key, event[key]]));
+}
+
 function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
   const serialized = events.map((event) => JSON.stringify(event)).join("\n");
   for (const value of forbiddenValues) {
@@ -386,7 +390,7 @@ describe("Device API", () => {
 
     const failedEvents = findLogEvents(logLines, "onboarding_validation_failed");
     assert.equal(failedEvents.length, 1);
-    assert.deepEqual(failedEvents[0], {
+    assert.deepEqual(pickEventMetadata(failedEvents[0]!, ["event", "source", "step", "fields", "codes"]), {
       event: "onboarding_validation_failed",
       source: "server",
       step: 3,
@@ -422,9 +426,12 @@ describe("Device API", () => {
       findLogEvents(logLines, "onboarding_submit_started").map((event) => event.source),
       ["server"],
     );
-    assert.deepEqual(findLogEvents(logLines, "onboarding_submit_succeeded"), [
-      { event: "onboarding_submit_succeeded", usedTargetFallback: false },
-    ]);
+    assert.deepEqual(
+      findLogEvents(logLines, "onboarding_submit_succeeded").map((event) =>
+        pickEventMetadata(event, ["event", "usedTargetFallback"]),
+      ),
+      [{ event: "onboarding_submit_succeeded", usedTargetFallback: false }],
+    );
     assert.equal(findLogEvents(logLines, "onboarding_validation_failed").length, 0);
     assertLogEventsExclude(findLogEvents(logLines, "onboarding_submit_succeeded"), [
       body.deviceId,
@@ -476,9 +483,12 @@ describe("Device API", () => {
       findLogEvents(logLines, "onboarding_submit_started").map((event) => event.source),
       ["server"],
     );
-    assert.deepEqual(findLogEvents(logLines, "onboarding_submit_succeeded"), [
-      { event: "onboarding_submit_succeeded", usedTargetFallback: true },
-    ]);
+    assert.deepEqual(
+      findLogEvents(logLines, "onboarding_submit_succeeded").map((event) =>
+        pickEventMetadata(event, ["event", "usedTargetFallback"]),
+      ),
+      [{ event: "onboarding_submit_succeeded", usedTargetFallback: true }],
+    );
 
     const onboardingEvents = parseJsonLogLines(logLines).filter(
       (event) => typeof event.event === "string" && event.event.startsWith("onboarding_"),

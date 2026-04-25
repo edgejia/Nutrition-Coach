@@ -3,6 +3,11 @@ import type { createDeviceService, Goal, IntakeFields } from "../services/device
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import {
+  logOnboardingSubmitStarted,
+  logOnboardingSubmitSucceeded,
+  logOnboardingValidationFailed,
+} from "../observability/events.js";
 
 interface Deps {
   deviceService: ReturnType<typeof createDeviceService>;
@@ -146,6 +151,19 @@ function buildDeviceSessionResponse(device: Awaited<ReturnType<ReturnType<typeof
 
 function buildGoalValidationIssue(): IntakeValidationIssue {
   return createValidationIssue("goal", "INVALID_GOAL", 1, "請選擇減脂或增肌目標");
+}
+
+function logOnboardingValidationIssues(
+  log: Parameters<typeof logOnboardingValidationFailed>[0],
+  errors: readonly IntakeValidationIssue[],
+) {
+  const earliestStep = Math.min(...errors.map((error) => error.step)) as IntakeValidationStep;
+  logOnboardingValidationFailed(log, {
+    source: "server",
+    step: earliestStep,
+    fields: errors.map((error) => error.field),
+    codes: errors.map((error) => error.code),
+  });
 }
 
 function buildIntake(
@@ -345,23 +363,28 @@ export function registerDeviceRoutes(
     if (!isRecord(body)) {
       return reply.code(400).send({ error: "Request body must be a JSON object." });
     }
+    logOnboardingSubmitStarted(request.log, { source: "server" });
 
     if (!hasAnyIntakeField(body)) {
       if (!isGoal(body.goal)) {
-        return reply.code(400).send({ error: "VALIDATION_ERROR", errors: [buildGoalValidationIssue()] });
+        const errors = [buildGoalValidationIssue()];
+        logOnboardingValidationIssues(request.log, errors);
+        return reply.code(400).send({ error: "VALIDATION_ERROR", errors });
       }
 
       const result = await deviceService.createDevice(body.goal);
+      logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: false });
       setGuestSessionCookies(reply, guestSessionService, result.deviceId);
       return { ...result, coachExplanation: null };
     }
 
     const intakeResult = buildIntake(body);
     if (!intakeResult.ok) {
+      logOnboardingValidationIssues(request.log, intakeResult.errors);
       return reply.code(400).send({ error: "VALIDATION_ERROR", errors: intakeResult.errors });
     }
 
-    const { dailyTargets, coachExplanation } = await targetGenerationService.generateTargets(
+    const { dailyTargets, coachExplanation, usedFallback } = await targetGenerationService.generateTargets(
       intakeResult.goal,
       intakeResult.intake,
     );
@@ -371,6 +394,7 @@ export function registerDeviceRoutes(
       dailyTargets,
       coachExplanation,
     );
+    logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: usedFallback });
     setGuestSessionCookies(reply, guestSessionService, result.deviceId);
     return { ...result, coachExplanation };
   });
