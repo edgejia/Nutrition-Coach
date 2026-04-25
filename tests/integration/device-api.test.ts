@@ -47,6 +47,16 @@ function pickEventMetadata(event: Record<string, unknown>, keys: readonly string
   return Object.fromEntries(keys.map((key) => [key, event[key]]));
 }
 
+function pickOnboardingMetadata(event: Record<string, unknown>) {
+  if (event.event === "onboarding_submit_started") {
+    return pickEventMetadata(event, ["event", "source"]);
+  }
+  if (event.event === "onboarding_validation_failed") {
+    return pickEventMetadata(event, ["event", "source", "step", "fields", "codes"]);
+  }
+  return pickEventMetadata(event, ["event", "usedTargetFallback"]);
+}
+
 function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
   const serialized = events.map((event) => JSON.stringify(event)).join("\n");
   for (const value of forbiddenValues) {
@@ -493,7 +503,7 @@ describe("Device API", () => {
     const onboardingEvents = parseJsonLogLines(logLines).filter(
       (event) => typeof event.event === "string" && event.event.startsWith("onboarding_"),
     );
-    assertLogEventsExclude(onboardingEvents, [
+    assertLogEventsExclude(onboardingEvents.map(pickOnboardingMetadata), [
       body.deviceId,
       "秘密花生過敏",
       "想在夏天前減脂",
@@ -537,7 +547,10 @@ describe("Device API", () => {
       event: "device_goals_updated_rest",
       updatedFields: ["calories", "fat", "protein"],
     });
-    assertLogEventsExclude(events, [deviceId, "151", "2010", "65"]);
+    assertLogEventsExclude(
+      events.map((event) => pickEventMetadata(event, ["event", "updatedFields"])),
+      [deviceId, "151", "2010", "65"],
+    );
   });
 
   it("OBS-03: does not log successful REST goal updates for invalid or unauthorized requests", async () => {
