@@ -7,6 +7,8 @@ import type {
   IntakeValidationIssue,
   MealEntry,
   Message,
+  CoachCTAIntentId,
+  CoachCTAOptionId,
 } from "./types.js";
 import { getEarliestValidationStep } from "./lib/onboarding-intake-validation.js";
 
@@ -51,6 +53,31 @@ async function readJsonSafe(res: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+type HomeCtaClientEventPayload =
+  | { event: "home_cta_intent_selected"; intent: CoachCTAIntentId }
+  | { event: "home_cta_option_sent"; intent: CoachCTAIntentId; promptKey: CoachCTAOptionId };
+
+async function recordClientEvent(payload: HomeCtaClientEventPayload): Promise<void> {
+  try {
+    await fetch("/api/observability/client-event", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // Observability is best-effort and must never block the CTA flow.
+  }
+}
+
+export function recordHomeCtaIntentSelected(intent: CoachCTAIntentId): Promise<void> {
+  return recordClientEvent({ event: "home_cta_intent_selected", intent });
+}
+
+export function recordHomeCtaOptionSent(intent: CoachCTAIntentId, promptKey: CoachCTAOptionId): Promise<void> {
+  return recordClientEvent({ event: "home_cta_option_sent", intent, promptKey });
 }
 
 function isLocalDevelopmentRuntime(): boolean {
