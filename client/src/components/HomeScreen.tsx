@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { useStore } from "../store.js";
+import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { formatLocalDate } from "../lib/time.js";
 import { Dashboard } from "./Dashboard.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { ChatEntryBar } from "./ChatEntryBar.js";
-import type { ActiveScreen, PendingHomeChatDraft, CoachCTATaskOption } from "../types.js";
+import type { ActiveScreen, PendingHomeChatDraft, CoachCTAIntent, CoachCTATaskOption } from "../types.js";
 
 export function getDisplayedCoachAdvice(
   storedAdvice: string | null,
@@ -37,6 +38,17 @@ export function stageHomeTaskOptionPrompt(
 ) {
   setPendingHomeChatDraft({ id: createId(), text: prompt, status: "staged" });
   setActiveScreen("chat");
+}
+
+export function sendHomeCtaTaskOption(
+  option: CoachCTATaskOption,
+  intent: CoachCTAIntent,
+  setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void,
+  setActiveScreen: (screen: ActiveScreen) => void,
+  createId: () => string = () => crypto.randomUUID(),
+) {
+  void recordHomeCtaOptionSent(intent.id, option.id);
+  stageHomeTaskOptionPrompt(option.prompt, setPendingHomeChatDraft, setActiveScreen, createId);
 }
 
 function HomeHeader() {
@@ -116,8 +128,8 @@ export function HomeScreen() {
     setActiveScreen("chat");
   }
 
-  function handleTaskOptionClick(option: CoachCTATaskOption) {
-    stageHomeTaskOptionPrompt(option.prompt, setPendingHomeChatDraft, setActiveScreen);
+  function handleTaskOptionClick(option: CoachCTATaskOption, intent: CoachCTAIntent) {
+    sendHomeCtaTaskOption(option, intent, setPendingHomeChatDraft, setActiveScreen);
   }
 
   return (
