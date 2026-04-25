@@ -21,6 +21,15 @@ globalThis.localStorage = {
 const { getDisplayedCoachAdvice, formatHomeHeaderDate, stageHomeTaskOptionPrompt } = await import(
   "../../client/src/components/HomeScreen.js"
 );
+const { recordHomeCtaIntentSelected, recordHomeCtaOptionSent } = await import("../../client/src/api.js");
+
+function installFetchStub(handler: typeof fetch) {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = handler;
+  return () => {
+    globalThis.fetch = previousFetch;
+  };
+}
 
 describe("Home screen helpers", () => {
   it("prefers freshly derived coach advice over stale stored advice", () => {
@@ -80,5 +89,73 @@ describe("Home screen helpers", () => {
       },
     ]);
     assert.deepEqual(screens, ["chat"]);
+  });
+
+  it("posts redacted Home CTA intent selection events", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const restoreFetch = installFetchStub(async (input, init) => {
+      requests.push({ url: String(input), init: init ?? {} });
+      return new Response(null, { status: 204 });
+    });
+
+    try {
+      await recordHomeCtaIntentSelected("protein");
+    } finally {
+      restoreFetch();
+    }
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.url, "/api/observability/client-event");
+    assert.equal(requests[0]?.init.method, "POST");
+    assert.equal(requests[0]?.init.credentials, "same-origin");
+    assert.deepEqual(requests[0]?.init.headers, { "Content-Type": "application/json" });
+    assert.deepEqual(JSON.parse(String(requests[0]?.init.body)), {
+      event: "home_cta_intent_selected",
+      intent: "protein",
+    });
+  });
+
+  it("posts redacted Home CTA option events without prompt text", async () => {
+    const rawPrompt = "推薦三個便利商店高蛋白選擇";
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const restoreFetch = installFetchStub(async (input, init) => {
+      requests.push({ url: String(input), init: init ?? {} });
+      return new Response(null, { status: 204 });
+    });
+
+    try {
+      await recordHomeCtaOptionSent("protein", "protein-convenience-store");
+    } finally {
+      restoreFetch();
+    }
+
+    const body = String(requests[0]?.init.body);
+    assert.deepEqual(JSON.parse(body), {
+      event: "home_cta_option_sent",
+      intent: "protein",
+      promptKey: "protein-convenience-store",
+    });
+    assert.doesNotMatch(body, /prompt"/);
+    assert.doesNotMatch(body, new RegExp(rawPrompt));
+  });
+
+  it("swallows failed Home CTA observability posts", async () => {
+    const restoreFetch = installFetchStub(async () => new Response(null, { status: 500 }));
+
+    try {
+      await assert.doesNotReject(recordHomeCtaOptionSent("next_meal", "next-meal-eating-out"));
+    } finally {
+      restoreFetch();
+    }
+
+    const restoreRejectedFetch = installFetchStub(async () => {
+      throw new Error("network unavailable");
+    });
+
+    try {
+      await assert.doesNotReject(recordHomeCtaIntentSelected("food_logging"));
+    } finally {
+      restoreRejectedFetch();
+    }
   });
 });
