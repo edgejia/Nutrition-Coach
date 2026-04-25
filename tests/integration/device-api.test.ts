@@ -504,4 +504,73 @@ describe("Device API", () => {
       String(body.dailyTargets.fat),
     ]);
   });
+
+  it("OBS-03: logs REST goal updates by field name only", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const obs03App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    const create = await obs03App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const cookieHeader = toCookieHeader(create);
+    const deviceId = (create.json() as { deviceId: string }).deviceId;
+
+    const res = await obs03App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { protein: 151, calories: 2010, fat: 65 },
+    });
+
+    await obs03App.close();
+
+    assert.equal(res.statusCode, 200);
+    const events = findLogEvents(logLines, "device_goals_updated_rest");
+    assert.equal(events.length, 1);
+    assert.deepEqual(pickEventMetadata(events[0]!, ["event", "updatedFields"]), {
+      event: "device_goals_updated_rest",
+      updatedFields: ["calories", "fat", "protein"],
+    });
+    assertLogEventsExclude(events, [deviceId, "151", "2010", "65"]);
+  });
+
+  it("OBS-03: does not log successful REST goal updates for invalid or unauthorized requests", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const obs03App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    const create = await obs03App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const cookieHeader = toCookieHeader(create);
+
+    const invalid = await obs03App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { protein: "151" },
+    });
+    const unauthorized = await obs03App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      payload: { protein: 151 },
+    });
+
+    await obs03App.close();
+
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(unauthorized.statusCode, 401);
+    assert.equal(findLogEvents(logLines, "device_goals_updated_rest").length, 0);
+  });
 });
