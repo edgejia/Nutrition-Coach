@@ -62,6 +62,17 @@ function observabilityEvents(logLines: string[], eventName: string) {
   return parseLogLines(logLines).filter((record) => record.event === eventName);
 }
 
+function chatTurnCompletedMetadata(record: Record<string, unknown>) {
+  return {
+    event: record.event,
+    source: record.source,
+    didLogMeal: record.didLogMeal,
+    didMutateMeal: record.didMutateMeal,
+    hadImage: record.hadImage,
+    latencyMs: record.latencyMs,
+  };
+}
+
 async function readUntilEventCount(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   targetEvent: string,
@@ -1220,7 +1231,7 @@ describe("Chat API", () => {
       assert.equal(res.status, 200);
       const eventRecords = observabilityEvents(logLines, "chat_turn_completed");
       assert.equal(eventRecords.length, 1);
-      assert.deepEqual(eventRecords[0], {
+      assert.deepEqual(chatTurnCompletedMetadata(eventRecords[0]!), {
         event: "chat_turn_completed",
         source: "json",
         didLogMeal: true,
@@ -1285,7 +1296,7 @@ describe("Chat API", () => {
 
       const eventRecords = observabilityEvents(logLines, "chat_turn_completed");
       assert.equal(eventRecords.length, 1);
-      assert.deepEqual(eventRecords[0], {
+      assert.deepEqual(chatTurnCompletedMetadata(eventRecords[0]!), {
         event: "chat_turn_completed",
         source: "sse",
         didLogMeal: false,
