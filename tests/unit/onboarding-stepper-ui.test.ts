@@ -1,0 +1,123 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+const storage = new Map<string, string>();
+globalThis.localStorage = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    storage.set(key, value);
+  },
+  removeItem: (key: string) => {
+    storage.delete(key);
+  },
+  clear: () => {
+    storage.clear();
+  },
+  get length() {
+    return storage.size;
+  },
+  key: (index: number) => [...storage.keys()][index] ?? null,
+} as Storage;
+
+const { OnboardingStepperPresentation } = await import("../../client/src/components/onboarding/OnboardingStepper.js");
+const { StepCoachHandoff } = await import("../../client/src/components/onboarding/StepCoachHandoff.js");
+
+describe("onboarding stepper UI", () => {
+  it("renders Step 1 goal recovery with validation copy and selectable goals", () => {
+    const html = renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
+      step: 1,
+      data: {
+        goal: "fat_loss",
+        sex: "female",
+        age: 31,
+        heightCm: 165,
+        weightKg: 58,
+      },
+      validationIssues: [
+        {
+          field: "goal",
+          code: "INVALID_GOAL",
+          step: 1,
+          message: "請選擇有效的目標",
+        },
+      ],
+      loading: false,
+      transportError: null,
+      result: null,
+      onGoalSelect: () => undefined,
+      onGoalClarificationNext: () => undefined,
+      onBodyDataNext: () => undefined,
+      onLifestyleNext: () => undefined,
+      onAdvancedMetricsNext: () => undefined,
+      onAdvancedMetricsSkip: () => undefined,
+      onBack: () => undefined,
+      onStart: () => undefined,
+      onRetry: () => undefined,
+      onFieldEdit: () => undefined,
+    }));
+
+    assert.match(html, /你的目標是什麼/);
+    assert.match(html, /請選擇有效的目標/);
+    assert.match(html, /減脂 · FAT LOSS/);
+    assert.match(html, /增肌 · MUSCLE GAIN/);
+    assert.doesNotMatch(html, /連線失敗/);
+    assert.doesNotMatch(html, /重試/);
+  });
+
+  it("renders the editable recovery surface instead of Step 6 retry copy for validation issues", () => {
+    const html = renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
+      step: 3,
+      data: {
+        goal: "fat_loss",
+        sex: "female",
+        age: 9,
+        heightCm: 165,
+        weightKg: 58,
+      },
+      validationIssues: [
+        {
+          field: "age",
+          code: "AGE_OUT_OF_RANGE",
+          step: 3,
+          message: "年齡需介於 10-120",
+        },
+      ],
+      loading: false,
+      transportError: null,
+      result: null,
+      onGoalSelect: () => undefined,
+      onGoalClarificationNext: () => undefined,
+      onBodyDataNext: () => undefined,
+      onLifestyleNext: () => undefined,
+      onAdvancedMetricsNext: () => undefined,
+      onAdvancedMetricsSkip: () => undefined,
+      onBack: () => undefined,
+      onStart: () => undefined,
+      onRetry: () => undefined,
+      onFieldEdit: () => undefined,
+    }));
+
+    assert.match(html, /基本身體數據/);
+    assert.match(html, /value="9"/);
+    assert.match(html, /value="165"/);
+    assert.match(html, /value="58"/);
+    assert.match(html, /年齡需介於 10-120/);
+    assert.doesNotMatch(html, /連線失敗/);
+    assert.doesNotMatch(html, /重試/);
+  });
+
+  it("renders transport retry copy only in StepCoachHandoff transport mode", () => {
+    const html = renderToStaticMarkup(createElement(StepCoachHandoff, {
+      loading: false,
+      transportError: "無法連線，請稍後再試。",
+      result: null,
+      onStart: () => undefined,
+      onRetry: () => undefined,
+    }));
+
+    assert.match(html, /連線失敗/);
+    assert.match(html, /重試/);
+  });
+});

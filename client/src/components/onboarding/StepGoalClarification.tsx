@@ -1,14 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
   goal: "fat_loss" | "muscle_gain";
   onNext: (clarification?: string) => void;
   onBack: () => void;
+  initialValue?: string;
+  error?: string;
+  onFieldEdit?: () => void;
 }
 
-export function StepGoalClarification({ goal, onNext, onBack }: Props) {
-  const [text, setText] = useState("");
+export function StepGoalClarification({ goal, onNext, onBack, initialValue, error, onFieldEdit }: Props) {
+  const [text, setText] = useState(initialValue ?? "");
   const goalLabel = goal === "fat_loss" ? "減脂" : "增肌";
+
+  useEffect(() => {
+    setText(initialValue ?? "");
+  }, [initialValue]);
 
   return (
     <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
@@ -24,7 +31,10 @@ export function StepGoalClarification({ goal, onNext, onBack }: Props) {
 
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onFieldEdit?.();
+        }}
         placeholder="例如：不想影響重訓表現、想慢慢減不要太激進..."
         rows={3}
         className="mb-6 w-full rounded-xl p-4 text-sm"
@@ -35,6 +45,12 @@ export function StepGoalClarification({ goal, onNext, onBack }: Props) {
           resize: "none",
         }}
       />
+
+      {error ? (
+        <p className="mb-4 text-sm" style={{ color: "var(--orange)" }}>
+          {error}
+        </p>
+      ) : null}
 
       <div className="flex gap-3">
         <button

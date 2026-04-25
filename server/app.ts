@@ -22,6 +22,7 @@ import { registerMealRoutes } from "./routes/meals.js";
 import { registerDaySnapshotRoutes } from "./routes/day-snapshot.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerSSERoutes } from "./routes/sse.js";
+import { registerObservabilityRoutes } from "./routes/observability.js";
 import type { LLMProvider } from "./llm/types.js";
 import { config } from "./config.js";
 
@@ -123,6 +124,7 @@ export async function buildApp(opts: AppOptions) {
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, publisher });
   registerDaySnapshotRoutes(app, { daySnapshotService, deviceService, guestSessionService });
   registerAssetRoutes(app, { assetService, deviceService, guestSessionService });
+  registerObservabilityRoutes(app, { deviceService, guestSessionService });
   registerSSERoutes(app, { publisher, summaryService, deviceService, guestSessionService });
 
   let hasClientDist = false;

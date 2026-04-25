@@ -33,6 +33,46 @@ function parseSSEEvents(raw: string): SSEEvent[] {
     });
 }
 
+function createLogCapture() {
+  const logLines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _, cb) {
+      chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+      cb();
+    },
+  });
+
+  return { logLines, stream };
+}
+
+function parseLogLines(logLines: string[]) {
+  const records: Record<string, unknown>[] = [];
+  for (const line of logLines) {
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      records.push(parsed);
+    } catch {
+      // Ignore non-JSON diagnostic output from the logger stream.
+    }
+  }
+  return records;
+}
+
+function observabilityEvents(logLines: string[], eventName: string) {
+  return parseLogLines(logLines).filter((record) => record.event === eventName);
+}
+
+function chatTurnCompletedMetadata(record: Record<string, unknown>) {
+  return {
+    event: record.event,
+    source: record.source,
+    didLogMeal: record.didLogMeal,
+    didMutateMeal: record.didMutateMeal,
+    hadImage: record.hadImage,
+    latencyMs: record.latencyMs,
+  };
+}
+
 async function readUntilEventCount(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   targetEvent: string,
@@ -1030,14 +1070,7 @@ describe("Chat API", () => {
   });
 
   it("OBS-04: production logs contain no raw deviceId or meal text (text path)", async () => {
-    const logLines: string[] = [];
-    const logStream = new Writable({
-      write(chunk, _, cb) {
-        // Split because pino may batch multiple newline-delimited records per write() call (Gap 2)
-        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
-        cb();
-      },
-    });
+    const { logLines, stream: logStream } = createLogCapture();
 
     const obs04LLM = new MockLLMProvider();
     obs04LLM.queueChatResponse({ content: "測試回覆" });
@@ -1092,13 +1125,7 @@ describe("Chat API", () => {
   });
 
   it("OBS-04: production logs contain no absolute upload path (image path)", async () => {
-    const logLines: string[] = [];
-    const logStream = new Writable({
-      write(chunk, _, cb) {
-        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
-        cb();
-      },
-    });
+    const { logLines, stream: logStream } = createLogCapture();
 
     const obs04ImageLLM = new MockLLMProvider();
     obs04ImageLLM.queueChatResponse({ content: "圖片已記錄" });
@@ -1159,5 +1186,135 @@ describe("Chat API", () => {
       );
     }
     assert.ok(parsedCount > 0, `Expected at least 1 parsed log line for image path, got ${parsedCount}. Total lines: ${logLines.length}`);
+  });
+
+  it("logs one redacted chat_turn_completed event for JSON text requests", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const rawMealText = "我吃了祕密雞胸便當";
+    const assistantReply = "已幫你記錄祕密雞胸便當！";
+    const logLLM = new MockLLMProvider();
+    logLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_redacted_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "祕密雞胸便當", calories: 520, protein: 36, carbs: 60, fat: 12 }),
+        },
+      }],
+    });
+    logLLM.queueChatResponse({ content: assistantReply });
+
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: logLLM,
+      logger: { level: "info", stream: logStream },
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", rawMealText);
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const eventRecords = observabilityEvents(logLines, "chat_turn_completed");
+      assert.equal(eventRecords.length, 1);
+      assert.deepEqual(chatTurnCompletedMetadata(eventRecords[0]!), {
+        event: "chat_turn_completed",
+        source: "json",
+        didLogMeal: true,
+        didMutateMeal: true,
+        hadImage: false,
+        latencyMs: eventRecords[0]?.latencyMs,
+      });
+      assert.equal(typeof eventRecords[0]?.latencyMs, "number");
+
+      const serializedLogs = JSON.stringify(parseLogLines(logLines));
+      assert.doesNotMatch(serializedLogs, /祕密雞胸便當/);
+      assert.ok(!serializedLogs.includes(rawMealText));
+      assert.ok(!serializedLogs.includes(assistantReply));
+      assert.ok(!serializedLogs.includes(logDeviceId));
+    } finally {
+      await logApp.close();
+    }
+  });
+
+  it("logs one redacted chat_turn_completed event for SSE image requests", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const rawMealText = "這張圖是機密牛肉飯";
+    const assistantReply = "看起來是機密牛肉飯，已記錄。";
+    const logLLM = new MockLLMProvider();
+    logLLM.queueChatResponse({ content: assistantReply });
+    const logTempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-chat-log-"));
+    const logUploadsDir = path.join(logTempRoot, "uploads");
+    const logAssetsDir = path.join(logTempRoot, "assets");
+
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: logLLM,
+      uploadsDir: logUploadsDir,
+      assetsDir: logAssetsDir,
+      logger: { level: "info", stream: logStream },
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const form = new FormData();
+      form.append("message", rawMealText);
+      form.append("image", new Blob(["fake image"], { type: "image/png" }), "secret-meal.png");
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader, Accept: "text/event-stream" },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      reader = res.body?.getReader();
+      assert.ok(reader);
+      const { raw } = await readUntilEventCount(reader, "done", 1);
+      assert.match(raw, /event: done/);
+
+      const eventRecords = observabilityEvents(logLines, "chat_turn_completed");
+      assert.equal(eventRecords.length, 1);
+      assert.deepEqual(chatTurnCompletedMetadata(eventRecords[0]!), {
+        event: "chat_turn_completed",
+        source: "sse",
+        didLogMeal: false,
+        didMutateMeal: false,
+        hadImage: true,
+        latencyMs: eventRecords[0]?.latencyMs,
+      });
+      assert.equal(typeof eventRecords[0]?.latencyMs, "number");
+
+      const serializedLogs = JSON.stringify(parseLogLines(logLines));
+      assert.ok(!serializedLogs.includes(rawMealText));
+      assert.ok(!serializedLogs.includes(assistantReply));
+      assert.ok(!serializedLogs.includes(logDeviceId));
+      assert.doesNotMatch(serializedLogs, /secret-meal|\/uploads\/|\/assets\//);
+    } finally {
+      await reader?.cancel().catch(() => {});
+      await logApp.close();
+      await rm(logTempRoot, { recursive: true, force: true });
+    }
   });
 });

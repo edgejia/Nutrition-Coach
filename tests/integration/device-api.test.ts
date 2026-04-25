@@ -17,6 +17,53 @@ function toCookieHeader(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
   return getSetCookieHeaders(res).map((value) => value.split(";", 1)[0]).join("; ");
 }
 
+function createLogCapture() {
+  const logLines: string[] = [];
+  const logStream = new Writable({
+    write(chunk, _, cb) {
+      chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+      cb();
+    },
+  });
+
+  return { logLines, logStream };
+}
+
+function parseJsonLogLines(logLines: string[]) {
+  return logLines.flatMap((line) => {
+    try {
+      return [JSON.parse(line) as Record<string, unknown>];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function findLogEvents(logLines: string[], event: string) {
+  return parseJsonLogLines(logLines).filter((line) => line.event === event);
+}
+
+function pickEventMetadata(event: Record<string, unknown>, keys: readonly string[]) {
+  return Object.fromEntries(keys.map((key) => [key, event[key]]));
+}
+
+function pickOnboardingMetadata(event: Record<string, unknown>) {
+  if (event.event === "onboarding_submit_started") {
+    return pickEventMetadata(event, ["event", "source"]);
+  }
+  if (event.event === "onboarding_validation_failed") {
+    return pickEventMetadata(event, ["event", "source", "step", "fields", "codes"]);
+  }
+  return pickEventMetadata(event, ["event", "usedTargetFallback"]);
+}
+
+function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  for (const value of forbiddenValues) {
+    assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+  }
+}
+
 describe("Device API", () => {
   let app: FastifyInstance;
 
@@ -262,13 +309,7 @@ describe("Device API", () => {
   });
 
   it("OBS-02: emits target_gen_fallback event when LLM returns invalid targets", async () => {
-    const logLines: string[] = [];
-    const logStream = new Writable({
-      write(chunk, _, cb) {
-        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
-        cb();
-      },
-    });
+    const { logLines, logStream } = createLogCapture();
 
     const obs02LLM = new MockLLMProvider();
     // Queue 2 invalid responses — target-generation makes 2 attempts before fallback
@@ -323,5 +364,231 @@ describe("Device API", () => {
       fallbackEventFound,
       `Expected a log line with event="target_gen_fallback" but none found. Lines captured: ${logLines.length}`,
     );
+  });
+
+  it("OBS-01: logs onboarding validation failure with redacted fields and codes", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const obs01App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    const res = await obs01App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: {
+        goal: "fat_loss",
+        sex: "female",
+        age: 9,
+        heightCm: 49,
+        weightKg: 60,
+        activityLevel: "moderate",
+        trainingFrequency: "3_4",
+        allergies: "秘密花生過敏",
+        advancedNotes: "不要把這段備註寫進 log",
+      },
+    });
+
+    await obs01App.close();
+
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(
+      findLogEvents(logLines, "onboarding_submit_started").map((event) => event.source),
+      ["server"],
+    );
+
+    const failedEvents = findLogEvents(logLines, "onboarding_validation_failed");
+    assert.equal(failedEvents.length, 1);
+    assert.deepEqual(pickEventMetadata(failedEvents[0]!, ["event", "source", "step", "fields", "codes"]), {
+      event: "onboarding_validation_failed",
+      source: "server",
+      step: 3,
+      fields: ["age", "heightCm"],
+      codes: ["AGE_OUT_OF_RANGE", "HEIGHT_OUT_OF_RANGE"],
+    });
+    assert.equal(findLogEvents(logLines, "onboarding_submit_succeeded").length, 0);
+    assertLogEventsExclude(failedEvents, ["秘密花生過敏", "不要把這段備註寫進 log"]);
+  });
+
+  it("OBS-01: logs goal-only onboarding success without generated targets or device id", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const obs01App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    const res = await obs01App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "muscle_gain" },
+    });
+
+    await obs01App.close();
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as {
+      deviceId: string;
+      dailyTargets: { calories: number; protein: number; carbs: number; fat: number };
+    };
+    assert.deepEqual(
+      findLogEvents(logLines, "onboarding_submit_started").map((event) => event.source),
+      ["server"],
+    );
+    assert.deepEqual(
+      findLogEvents(logLines, "onboarding_submit_succeeded").map((event) =>
+        pickEventMetadata(event, ["event", "usedTargetFallback"]),
+      ),
+      [{ event: "onboarding_submit_succeeded", usedTargetFallback: false }],
+    );
+    assert.equal(findLogEvents(logLines, "onboarding_validation_failed").length, 0);
+    assertLogEventsExclude(
+      findLogEvents(logLines, "onboarding_submit_succeeded").map((event) =>
+        pickEventMetadata(event, ["event", "usedTargetFallback"]),
+      ),
+      [
+        body.deviceId,
+        String(body.dailyTargets.calories),
+        String(body.dailyTargets.protein),
+        String(body.dailyTargets.carbs),
+        String(body.dailyTargets.fat),
+      ],
+    );
+  });
+
+  it("OBS-01: logs intake onboarding success with fallback status only", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const obs01LLM = new MockLLMProvider();
+    obs01LLM.queueChatResponse({ content: "not valid json" });
+    obs01LLM.queueChatResponse({ content: "still not valid json" });
+    const obs01App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: obs01LLM,
+      logger: { level: "info", stream: logStream },
+    });
+
+    const res = await obs01App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: {
+        goal: "fat_loss",
+        sex: "female",
+        age: 30,
+        heightCm: 165,
+        weightKg: 60,
+        activityLevel: "moderate",
+        trainingFrequency: "3_4",
+        allergies: "秘密花生過敏",
+        goalClarification: "想在夏天前減脂",
+        bodyFatPercent: 24,
+        tdee: 1900,
+        advancedNotes: "不要把這段備註寫進 log",
+      },
+    });
+
+    await obs01App.close();
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as {
+      deviceId: string;
+      dailyTargets: { calories: number; protein: number; carbs: number; fat: number };
+    };
+    assert.deepEqual(
+      findLogEvents(logLines, "onboarding_submit_started").map((event) => event.source),
+      ["server"],
+    );
+    assert.deepEqual(
+      findLogEvents(logLines, "onboarding_submit_succeeded").map((event) =>
+        pickEventMetadata(event, ["event", "usedTargetFallback"]),
+      ),
+      [{ event: "onboarding_submit_succeeded", usedTargetFallback: true }],
+    );
+
+    const onboardingEvents = parseJsonLogLines(logLines).filter(
+      (event) => typeof event.event === "string" && event.event.startsWith("onboarding_"),
+    );
+    assertLogEventsExclude(onboardingEvents.map(pickOnboardingMetadata), [
+      body.deviceId,
+      "秘密花生過敏",
+      "想在夏天前減脂",
+      "不要把這段備註寫進 log",
+      String(body.dailyTargets.calories),
+      String(body.dailyTargets.protein),
+      String(body.dailyTargets.carbs),
+      String(body.dailyTargets.fat),
+    ]);
+  });
+
+  it("OBS-03: logs REST goal updates by field name only", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const obs03App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    const create = await obs03App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const cookieHeader = toCookieHeader(create);
+    const deviceId = (create.json() as { deviceId: string }).deviceId;
+
+    const res = await obs03App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { protein: 151, calories: 2010, fat: 65 },
+    });
+
+    await obs03App.close();
+
+    assert.equal(res.statusCode, 200);
+    const events = findLogEvents(logLines, "device_goals_updated_rest");
+    assert.equal(events.length, 1);
+    assert.deepEqual(pickEventMetadata(events[0]!, ["event", "updatedFields"]), {
+      event: "device_goals_updated_rest",
+      updatedFields: ["calories", "fat", "protein"],
+    });
+    assertLogEventsExclude(
+      events.map((event) => pickEventMetadata(event, ["event", "updatedFields"])),
+      [deviceId, "151", "2010", "65"],
+    );
+  });
+
+  it("OBS-03: does not log successful REST goal updates for invalid or unauthorized requests", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const obs03App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    const create = await obs03App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const cookieHeader = toCookieHeader(create);
+
+    const invalid = await obs03App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { protein: "151" },
+    });
+    const unauthorized = await obs03App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      payload: { protein: 151 },
+    });
+
+    await obs03App.close();
+
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(unauthorized.statusCode, 401);
+    assert.equal(findLogEvents(logLines, "device_goals_updated_rest").length, 0);
   });
 });

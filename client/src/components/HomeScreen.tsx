@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { useStore } from "../store.js";
+import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { formatLocalDate } from "../lib/time.js";
 import { Dashboard } from "./Dashboard.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { ChatEntryBar } from "./ChatEntryBar.js";
+import type { ActiveScreen, PendingHomeChatDraft, CoachCTAIntent, CoachCTATaskOption } from "../types.js";
 
 export function getDisplayedCoachAdvice(
   storedAdvice: string | null,
@@ -28,6 +30,27 @@ export function formatHomeHeaderDate(dateKey: string): string {
   });
 }
 
+export function stageHomeTaskOptionPrompt(
+  prompt: string,
+  setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void,
+  setActiveScreen: (screen: ActiveScreen) => void,
+  createId: () => string = () => crypto.randomUUID(),
+) {
+  setPendingHomeChatDraft({ id: createId(), text: prompt, status: "staged" });
+  setActiveScreen("chat");
+}
+
+export function sendHomeCtaTaskOption(
+  option: CoachCTATaskOption,
+  intent: CoachCTAIntent,
+  setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void,
+  setActiveScreen: (screen: ActiveScreen) => void,
+  createId: () => string = () => crypto.randomUUID(),
+) {
+  void recordHomeCtaOptionSent(intent.id, option.id);
+  stageHomeTaskOptionPrompt(option.prompt, setPendingHomeChatDraft, setActiveScreen, createId);
+}
+
 function HomeHeader() {
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const setShowSettings = useStore((s) => s.setShowSettings);
@@ -37,7 +60,7 @@ function HomeHeader() {
   const dateStr = formatHomeHeaderDate(dateKey);
 
   return (
-    <div className="flex items-center justify-between px-5 pb-2 pt-4">
+    <div className="screen-bar flex items-center justify-between px-5 pb-2 pt-4">
       <div>
         <span
           className="text-sm font-bold"
@@ -105,19 +128,18 @@ export function HomeScreen() {
     setActiveScreen("chat");
   }
 
-  function handleCtaClick(text: string) {
-    setPendingHomeChatDraft({ id: crypto.randomUUID(), text, status: "staged" });
-    setActiveScreen("chat");
+  function handleTaskOptionClick(option: CoachCTATaskOption, intent: CoachCTAIntent) {
+    sendHomeCtaTaskOption(option, intent, setPendingHomeChatDraft, setActiveScreen);
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" style={{ background: "var(--bg)" }}>
-      <main className="flex-1 space-y-3 overflow-y-auto px-4 pb-24 pt-2">
-        <HomeHeader />
-        <CoachAdviceCard advice={coachAdvice} cta={cta} onCtaClick={handleCtaClick} />
+    <div className="screen-shell">
+      <HomeHeader />
+      <main className="screen-scroll-with-input space-y-3 px-4 pt-2">
+        <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
         <Dashboard onTap={() => { if (!sending) setActiveScreen("summary"); }} />
       </main>
-      <div className="shrink-0 border-t px-3 pb-safe" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
+      <div className="screen-bottom-bar border-t px-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
         <ChatEntryBar onSend={handleSend} disabled={sending} />
       </div>
     </div>

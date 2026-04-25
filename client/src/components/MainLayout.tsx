@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect } from "react";
 import { useStore } from "../store.js";
 import { getMeals } from "../api.js";
 import { connectSSE, disconnectSSE } from "../sse.js";
@@ -7,6 +7,60 @@ import { HomeScreen } from "./HomeScreen.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { GoalSettings } from "./GoalSettings.js";
 import { SummaryDetailScreen } from "./SummaryDetailScreen.js";
+
+function useVisualViewportShellVars() {
+  useLayoutEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return;
+    }
+
+    const root = document.documentElement;
+    const viewport = window.visualViewport;
+    let frameId: number | null = null;
+
+    const syncViewportVars = () => {
+      frameId = null;
+      const layoutHeight = Math.max(window.innerHeight, root.clientHeight);
+      const visualHeight = viewport?.height ?? window.innerHeight;
+      const visualOffsetTop = viewport?.offsetTop ?? 0;
+      const visibleBottom = visualOffsetTop + visualHeight;
+      const bottomOcclusion = Math.max(0, layoutHeight - visibleBottom);
+
+      root.style.setProperty("--app-visual-viewport-height", `${Math.round(visualHeight)}px`);
+      root.style.setProperty("--app-bottom-occlusion", `${Math.round(bottomOcclusion)}px`);
+    };
+
+    const scheduleSync = () => {
+      if (frameId !== null) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(syncViewportVars);
+    };
+
+    syncViewportVars();
+    window.addEventListener("resize", scheduleSync, { passive: true });
+    window.addEventListener("orientationchange", scheduleSync);
+    window.addEventListener("focusin", scheduleSync);
+    window.addEventListener("focusout", scheduleSync);
+    viewport?.addEventListener("resize", scheduleSync, { passive: true });
+    viewport?.addEventListener("scroll", scheduleSync, { passive: true });
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+      window.removeEventListener("resize", scheduleSync);
+      window.removeEventListener("orientationchange", scheduleSync);
+      window.removeEventListener("focusin", scheduleSync);
+      window.removeEventListener("focusout", scheduleSync);
+      viewport?.removeEventListener("resize", scheduleSync);
+      viewport?.removeEventListener("scroll", scheduleSync);
+      root.style.removeProperty("--app-visual-viewport-height");
+      root.style.removeProperty("--app-bottom-occlusion");
+    };
+  }, []);
+}
 
 export function MainLayout() {
   const deviceId = useStore((s) => s.deviceId);
@@ -18,6 +72,8 @@ export function MainLayout() {
   const activeScreen = useStore((s) => s.activeScreen);
   const showSettings = useStore((s) => s.showSettings);
   const setShowSettings = useStore((s) => s.setShowSettings);
+
+  useVisualViewportShellVars();
 
   const refreshForRollover = useCallback(async () => {
     if (!deviceId) return;
@@ -52,7 +108,7 @@ export function MainLayout() {
   useDailyRollover(refreshForRollover);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden" style={{ background: "var(--bg)" }}>
+    <div className="app-viewport flex flex-col" style={{ background: "var(--bg)" }}>
       {activeScreen === "home" && <HomeScreen />}
       {activeScreen === "summary" && <SummaryDetailScreen />}
       {activeScreen === "chat" && <ChatPanel />}

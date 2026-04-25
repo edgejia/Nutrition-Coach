@@ -1,15 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { IntakeData, OnboardingField } from "../../types.js";
 
 interface Props {
   onNext: (data: { bodyFatPercent?: number; tdee?: number; advancedNotes?: string }) => void;
   onSkip: () => void;
   onBack: () => void;
+  initialData?: Partial<IntakeData>;
+  errors?: Partial<Record<OnboardingField, string>>;
+  onFieldEdit?: (field: OnboardingField) => void;
 }
 
-export function StepAdvancedMetrics({ onNext, onSkip, onBack }: Props) {
-  const [bodyFat, setBodyFat] = useState("");
-  const [tdee, setTdee] = useState("");
-  const [notes, setNotes] = useState("");
+export function StepAdvancedMetrics({ onNext, onSkip, onBack, initialData, errors, onFieldEdit }: Props) {
+  const [bodyFat, setBodyFat] = useState(initialData?.bodyFatPercent?.toString() ?? "");
+  const [tdee, setTdee] = useState(initialData?.tdee?.toString() ?? "");
+  const [notes, setNotes] = useState(initialData?.advancedNotes ?? "");
+
+  useEffect(() => {
+    setBodyFat(initialData?.bodyFatPercent?.toString() ?? "");
+    setTdee(initialData?.tdee?.toString() ?? "");
+    setNotes(initialData?.advancedNotes ?? "");
+  }, [initialData]);
 
   const hasData = bodyFat || tdee || notes.trim();
 
@@ -40,13 +50,21 @@ export function StepAdvancedMetrics({ onNext, onSkip, onBack }: Props) {
             type="number"
             inputMode="decimal"
             value={bodyFat}
-            onChange={(e) => setBodyFat(e.target.value)}
+            onChange={(e) => {
+              setBodyFat(e.target.value);
+              onFieldEdit?.("bodyFatPercent");
+            }}
             placeholder="20"
             className="flex-1 rounded-lg px-4 py-3 text-sm"
             style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
           />
           <span className="text-sm" style={{ color: "var(--text-2)" }}>%</span>
         </div>
+        {errors?.bodyFatPercent ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+            {errors.bodyFatPercent}
+          </p>
+        ) : null}
       </div>
 
       <div className="mb-4">
@@ -56,13 +74,21 @@ export function StepAdvancedMetrics({ onNext, onSkip, onBack }: Props) {
             type="number"
             inputMode="numeric"
             value={tdee}
-            onChange={(e) => setTdee(e.target.value)}
+            onChange={(e) => {
+              setTdee(e.target.value);
+              onFieldEdit?.("tdee");
+            }}
             placeholder="2200"
             className="flex-1 rounded-lg px-4 py-3 text-sm"
             style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
           />
           <span className="text-sm" style={{ color: "var(--text-2)" }}>kcal</span>
         </div>
+        {errors?.tdee ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+            {errors.tdee}
+          </p>
+        ) : null}
       </div>
 
       <div className="mb-6">
@@ -70,11 +96,19 @@ export function StepAdvancedMetrics({ onNext, onSkip, onBack }: Props) {
         <input
           type="text"
           value={notes}
-          onChange={(e) => setNotes(e.target.value)}
+          onChange={(e) => {
+            setNotes(e.target.value);
+            onFieldEdit?.("advancedNotes");
+          }}
           placeholder="任何你覺得教練該知道的事..."
           className="w-full rounded-lg px-4 py-3 text-sm"
           style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
         />
+        {errors?.advancedNotes ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+            {errors.advancedNotes}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex gap-3">

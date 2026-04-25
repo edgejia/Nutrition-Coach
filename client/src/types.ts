@@ -64,9 +64,57 @@ export interface ChatReply {
   affectedDate?: string;
 }
 
-export interface CoachCTA {
-  primary: string;
-  secondary: string;
+export type CoachCTAIntentId = "protein" | "next_meal" | "calorie_control" | "food_logging";
+
+export type CoachCTAOptionId =
+  | "protein-convenience-store"
+  | "protein-dinner-budget"
+  | "protein-gap-estimate"
+  | "next-meal-calorie-budget"
+  | "next-meal-eating-out"
+  | "next-meal-low-oil-protein-dinner"
+  | "calorie-remaining-estimate"
+  | "calorie-low-calorie-finishers"
+  | "calorie-dinner-adjustment"
+  | "food-logging-guided"
+  | "food-logging-estimate-meal"
+  | "food-logging-today-review";
+
+export interface CoachCTATaskOption {
+  id: CoachCTAOptionId;
+  label: string;
+  prompt: string;
+}
+
+export interface CoachCTAIntent {
+  id: CoachCTAIntentId;
+  label: string;
+  options: readonly CoachCTATaskOption[];
+}
+
+export type CoachCTA = readonly CoachCTAIntent[];
+
+export type OnboardingStep = 1 | 2 | 3 | 4 | 5;
+
+export type OnboardingField =
+  | "goal"
+  | "goalClarification"
+  | "sex"
+  | "age"
+  | "heightCm"
+  | "weightKg"
+  | "activityLevel"
+  | "trainingFrequency"
+  | "allergies"
+  | "bodyFatPercent"
+  | "tdee"
+  | "advancedNotes";
+
+export interface IntakeValidationIssue {
+  field: OnboardingField;
+  code: string;
+  step: OnboardingStep;
+  message: string;
 }
 
 export interface IntakeData {

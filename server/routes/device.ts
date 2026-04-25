@@ -3,6 +3,12 @@ import type { createDeviceService, Goal, IntakeFields } from "../services/device
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import {
+  logDeviceGoalsUpdatedRest,
+  logOnboardingSubmitStarted,
+  logOnboardingSubmitSucceeded,
+  logOnboardingValidationFailed,
+} from "../observability/events.js";
 
 interface Deps {
   deviceService: ReturnType<typeof createDeviceService>;
@@ -17,6 +23,33 @@ const VALID_TRAINING_FREQUENCIES = ["none", "1_2", "3_4", "5_plus"] as const;
 const REQUIRED_INTAKE_KEYS = ["sex", "age", "heightCm", "weightKg", "activityLevel", "trainingFrequency"] as const;
 const OPTIONAL_INTAKE_KEYS = ["allergies", "goalClarification", "bodyFatPercent", "tdee", "advancedNotes"] as const;
 const INTAKE_KEYS = [...REQUIRED_INTAKE_KEYS, ...OPTIONAL_INTAKE_KEYS] as const;
+const STEP_TEXT_LIMITS = {
+  goalClarification: 300,
+  allergies: 300,
+  advancedNotes: 500,
+} as const;
+
+type IntakeValidationStep = 1 | 2 | 3 | 4 | 5;
+type IntakeValidationField =
+  | "goal"
+  | "goalClarification"
+  | "sex"
+  | "age"
+  | "heightCm"
+  | "weightKg"
+  | "activityLevel"
+  | "trainingFrequency"
+  | "allergies"
+  | "bodyFatPercent"
+  | "tdee"
+  | "advancedNotes";
+
+interface IntakeValidationIssue {
+  field: IntakeValidationField;
+  code: string;
+  step: IntakeValidationStep;
+  message: string;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -28,24 +61,6 @@ function isGoal(value: unknown): value is Goal {
 
 function hasAnyIntakeField(body: Record<string, unknown>): boolean {
   return INTAKE_KEYS.some((key) => key in body);
-}
-
-function hasAllRequiredIntakeFields(body: Record<string, unknown>): boolean {
-  return REQUIRED_INTAKE_KEYS.every((key) => key in body);
-}
-
-function readRequiredString(body: Record<string, unknown>, key: (typeof REQUIRED_INTAKE_KEYS)[number]): string | null {
-  return typeof body[key] === "string" ? (body[key] as string) : null;
-}
-
-function readOptionalString(body: Record<string, unknown>, key: (typeof OPTIONAL_INTAKE_KEYS)[number]): string | undefined | null {
-  if (!(key in body)) return undefined;
-  return typeof body[key] === "string" ? (body[key] as string) : null;
-}
-
-function readOptionalNumber(body: Record<string, unknown>, key: "bodyFatPercent" | "tdee"): number | undefined | null {
-  if (!(key in body)) return undefined;
-  return typeof body[key] === "number" && Number.isFinite(body[key]) ? (body[key] as number) : null;
 }
 
 function isAllowedSex(value: string): value is IntakeFields["sex"] {
@@ -62,6 +77,45 @@ function isAllowedTrainingFrequency(value: string): value is IntakeFields["train
 
 function validateRange(value: number, min: number, max: number) {
   return value >= min && value <= max;
+}
+
+function createValidationIssue(
+  field: IntakeValidationField,
+  code: string,
+  step: IntakeValidationStep,
+  message: string,
+): IntakeValidationIssue {
+  return { field, code, step, message };
+}
+
+function readTrimmedOptionalString(body: Record<string, unknown>, key: "allergies" | "goalClarification" | "advancedNotes") {
+  if (!(key in body)) return { present: false as const };
+  if (typeof body[key] !== "string") return { present: true as const, valid: false as const };
+
+  const trimmed = (body[key] as string).trim();
+  return {
+    present: true as const,
+    valid: true as const,
+    value: trimmed.length > 0 ? trimmed : undefined,
+  };
+}
+
+function readRequiredFiniteNumber(body: Record<string, unknown>, key: "age" | "heightCm" | "weightKg") {
+  if (!(key in body)) return { present: false as const };
+  if (typeof body[key] !== "number" || !Number.isFinite(body[key])) {
+    return { present: true as const, valid: false as const };
+  }
+
+  return { present: true as const, valid: true as const, value: body[key] as number };
+}
+
+function readOptionalFiniteNumber(body: Record<string, unknown>, key: "bodyFatPercent" | "tdee") {
+  if (!(key in body)) return { present: false as const };
+  if (typeof body[key] !== "number" || !Number.isFinite(body[key])) {
+    return { present: true as const, valid: false as const };
+  }
+
+  return { present: true as const, valid: true as const, value: body[key] as number };
 }
 
 function setGuestSessionCookies(
@@ -96,60 +150,208 @@ function buildDeviceSessionResponse(device: Awaited<ReturnType<ReturnType<typeof
   };
 }
 
-function buildIntake(body: Record<string, unknown>): IntakeFields | null {
-  const sex = readRequiredString(body, "sex");
-  const activityLevel = readRequiredString(body, "activityLevel");
-  const trainingFrequency = readRequiredString(body, "trainingFrequency");
-  const age = typeof body.age === "number" && Number.isFinite(body.age) ? body.age : null;
-  const heightCm = typeof body.heightCm === "number" && Number.isFinite(body.heightCm) ? body.heightCm : null;
-  const weightKg = typeof body.weightKg === "number" && Number.isFinite(body.weightKg) ? body.weightKg : null;
-  const bodyFatPercent = readOptionalNumber(body, "bodyFatPercent");
-  const tdee = readOptionalNumber(body, "tdee");
+function buildGoalValidationIssue(): IntakeValidationIssue {
+  return createValidationIssue("goal", "INVALID_GOAL", 1, "請選擇減脂或增肌目標");
+}
 
+function logOnboardingValidationIssues(
+  log: Parameters<typeof logOnboardingValidationFailed>[0],
+  errors: readonly IntakeValidationIssue[],
+) {
+  const earliestStep = Math.min(...errors.map((error) => error.step)) as IntakeValidationStep;
+  logOnboardingValidationFailed(log, {
+    source: "server",
+    step: earliestStep,
+    fields: errors.map((error) => error.field),
+    codes: errors.map((error) => error.code),
+  });
+}
+
+function buildIntake(
+  body: Record<string, unknown>,
+): { ok: true; goal: Goal; intake: IntakeFields } | { ok: false; errors: IntakeValidationIssue[] } {
+  const errors: IntakeValidationIssue[] = [];
+
+  let goal: Goal | null = null;
+  if (!isGoal(body.goal)) {
+    errors.push(buildGoalValidationIssue());
+  } else {
+    goal = body.goal;
+  }
+
+  let sex: IntakeFields["sex"] | undefined;
+  if (!("sex" in body) || typeof body.sex !== "string" || body.sex.trim().length === 0) {
+    errors.push(createValidationIssue("sex", "MISSING_SEX", 3, "請選擇性別"));
+  } else {
+    const trimmed = body.sex.trim();
+    if (!isAllowedSex(trimmed)) {
+      errors.push(createValidationIssue("sex", "INVALID_SEX", 3, "請選擇有效的性別"));
+    } else {
+      sex = trimmed;
+    }
+  }
+
+  const ageResult = readRequiredFiniteNumber(body, "age");
+  let age: number | undefined;
+  if (!ageResult.present) {
+    errors.push(createValidationIssue("age", "MISSING_AGE", 3, "請輸入年齡"));
+  } else if (!ageResult.valid) {
+    errors.push(createValidationIssue("age", "INVALID_AGE", 3, "請輸入有效的年齡"));
+  } else if (!validateRange(ageResult.value, 10, 120)) {
+    errors.push(createValidationIssue("age", "AGE_OUT_OF_RANGE", 3, "年齡需介於 10-120"));
+  } else {
+    age = ageResult.value;
+  }
+
+  const heightResult = readRequiredFiniteNumber(body, "heightCm");
+  let heightCm: number | undefined;
+  if (!heightResult.present) {
+    errors.push(createValidationIssue("heightCm", "MISSING_HEIGHT_CM", 3, "請輸入身高"));
+  } else if (!heightResult.valid) {
+    errors.push(createValidationIssue("heightCm", "INVALID_HEIGHT_CM", 3, "請輸入有效的身高"));
+  } else if (!validateRange(heightResult.value, 50, 300)) {
+    errors.push(createValidationIssue("heightCm", "HEIGHT_OUT_OF_RANGE", 3, "身高需介於 50-300 cm"));
+  } else {
+    heightCm = heightResult.value;
+  }
+
+  const weightResult = readRequiredFiniteNumber(body, "weightKg");
+  let weightKg: number | undefined;
+  if (!weightResult.present) {
+    errors.push(createValidationIssue("weightKg", "MISSING_WEIGHT_KG", 3, "請輸入體重"));
+  } else if (!weightResult.valid) {
+    errors.push(createValidationIssue("weightKg", "INVALID_WEIGHT_KG", 3, "請輸入有效的體重"));
+  } else if (!validateRange(weightResult.value, 20, 500)) {
+    errors.push(createValidationIssue("weightKg", "WEIGHT_OUT_OF_RANGE", 3, "體重需介於 20-500 kg"));
+  } else {
+    weightKg = weightResult.value;
+  }
+
+  let activityLevel: IntakeFields["activityLevel"] | undefined;
+  if (!("activityLevel" in body) || typeof body.activityLevel !== "string" || body.activityLevel.trim().length === 0) {
+    errors.push(createValidationIssue("activityLevel", "MISSING_ACTIVITY_LEVEL", 4, "請選擇活動量"));
+  } else {
+    const trimmed = body.activityLevel.trim();
+    if (!isAllowedActivityLevel(trimmed)) {
+      errors.push(createValidationIssue("activityLevel", "INVALID_ACTIVITY_LEVEL", 4, "請選擇有效的活動量"));
+    } else {
+      activityLevel = trimmed;
+    }
+  }
+
+  let trainingFrequency: IntakeFields["trainingFrequency"] | undefined;
   if (
-    sex === null ||
-    activityLevel === null ||
-    trainingFrequency === null ||
-    age === null ||
-    heightCm === null ||
-    weightKg === null
+    !("trainingFrequency" in body) ||
+    typeof body.trainingFrequency !== "string" ||
+    body.trainingFrequency.trim().length === 0
   ) {
-    return null;
+    errors.push(createValidationIssue("trainingFrequency", "MISSING_TRAINING_FREQUENCY", 4, "請選擇訓練頻率"));
+  } else {
+    const trimmed = body.trainingFrequency.trim();
+    if (!isAllowedTrainingFrequency(trimmed)) {
+      errors.push(
+        createValidationIssue("trainingFrequency", "INVALID_TRAINING_FREQUENCY", 4, "請選擇有效的訓練頻率"),
+      );
+    } else {
+      trainingFrequency = trimmed;
+    }
   }
 
-  if (!isAllowedSex(sex) || !isAllowedActivityLevel(activityLevel) || !isAllowedTrainingFrequency(trainingFrequency)) {
-    return null;
+  const goalClarificationResult = readTrimmedOptionalString(body, "goalClarification");
+  let goalClarification: string | undefined;
+  if (goalClarificationResult.present && !goalClarificationResult.valid) {
+    errors.push(
+      createValidationIssue("goalClarification", "INVALID_GOAL_CLARIFICATION", 2, "目標補充需為文字"),
+    );
+  } else if (goalClarificationResult.present) {
+    if ((goalClarificationResult.value?.length ?? 0) > STEP_TEXT_LIMITS.goalClarification) {
+      errors.push(
+        createValidationIssue(
+          "goalClarification",
+          "GOAL_CLARIFICATION_TOO_LONG",
+          2,
+          "目標補充最多 300 字",
+        ),
+      );
+    } else {
+      goalClarification = goalClarificationResult.value;
+    }
   }
 
-  if (!validateRange(age, 10, 120)) return null;
-  if (!validateRange(heightCm, 50, 300)) return null;
-  if (!validateRange(weightKg, 20, 500)) return null;
-  if (bodyFatPercent !== undefined && (bodyFatPercent === null || !validateRange(bodyFatPercent, 2, 70))) {
-    return null;
-  }
-  if (tdee !== undefined && (tdee === null || !validateRange(tdee, 500, 8000))) {
-    return null;
+  const allergiesResult = readTrimmedOptionalString(body, "allergies");
+  let allergies: string | undefined;
+  if (allergiesResult.present && !allergiesResult.valid) {
+    errors.push(createValidationIssue("allergies", "INVALID_ALLERGIES", 4, "過敏資訊需為文字"));
+  } else if (allergiesResult.present) {
+    if ((allergiesResult.value?.length ?? 0) > STEP_TEXT_LIMITS.allergies) {
+      errors.push(createValidationIssue("allergies", "ALLERGIES_TOO_LONG", 4, "過敏資訊最多 300 字"));
+    } else {
+      allergies = allergiesResult.value;
+    }
   }
 
-  const allergies = readOptionalString(body, "allergies");
-  const goalClarification = readOptionalString(body, "goalClarification");
-  const advancedNotes = readOptionalString(body, "advancedNotes");
-  if (allergies === null || goalClarification === null || advancedNotes === null) {
-    return null;
+  const bodyFatResult = readOptionalFiniteNumber(body, "bodyFatPercent");
+  let bodyFatPercent: number | undefined;
+  if (bodyFatResult.present && !bodyFatResult.valid) {
+    errors.push(
+      createValidationIssue("bodyFatPercent", "INVALID_BODY_FAT_PERCENT", 5, "請輸入有效的體脂率"),
+    );
+  } else if (bodyFatResult.present) {
+    if (!validateRange(bodyFatResult.value, 2, 70)) {
+      errors.push(
+        createValidationIssue("bodyFatPercent", "BODY_FAT_OUT_OF_RANGE", 5, "體脂率需介於 2-70"),
+      );
+    } else {
+      bodyFatPercent = bodyFatResult.value;
+    }
+  }
+
+  const tdeeResult = readOptionalFiniteNumber(body, "tdee");
+  let tdee: number | undefined;
+  if (tdeeResult.present && !tdeeResult.valid) {
+    errors.push(createValidationIssue("tdee", "INVALID_TDEE", 5, "請輸入有效的 TDEE"));
+  } else if (tdeeResult.present) {
+    if (!validateRange(tdeeResult.value, 500, 8000)) {
+      errors.push(createValidationIssue("tdee", "TDEE_OUT_OF_RANGE", 5, "TDEE 需介於 500-8000"));
+    } else {
+      tdee = tdeeResult.value;
+    }
+  }
+
+  const advancedNotesResult = readTrimmedOptionalString(body, "advancedNotes");
+  let advancedNotes: string | undefined;
+  if (advancedNotesResult.present && !advancedNotesResult.valid) {
+    errors.push(createValidationIssue("advancedNotes", "INVALID_ADVANCED_NOTES", 5, "備註需為文字"));
+  } else if (advancedNotesResult.present) {
+    if ((advancedNotesResult.value?.length ?? 0) > STEP_TEXT_LIMITS.advancedNotes) {
+      errors.push(
+        createValidationIssue("advancedNotes", "ADVANCED_NOTES_TOO_LONG", 5, "其他備註最多 500 字"),
+      );
+    } else {
+      advancedNotes = advancedNotesResult.value;
+    }
+  }
+
+  if (errors.length > 0 || goal === null || !sex || age === undefined || heightCm === undefined || weightKg === undefined || !activityLevel || !trainingFrequency) {
+    return { ok: false, errors };
   }
 
   return {
-    sex,
-    age,
-    heightCm,
-    weightKg,
-    activityLevel,
-    trainingFrequency,
-    allergies,
-    goalClarification,
-    bodyFatPercent,
-    tdee,
-    advancedNotes,
+    ok: true,
+    goal,
+    intake: {
+      sex,
+      age,
+      heightCm,
+      weightKg,
+      activityLevel,
+      trainingFrequency,
+      allergies,
+      goalClarification,
+      bodyFatPercent,
+      tdee,
+      advancedNotes,
+    },
   };
 }
 
@@ -162,29 +364,38 @@ export function registerDeviceRoutes(
     if (!isRecord(body)) {
       return reply.code(400).send({ error: "Request body must be a JSON object." });
     }
-
-    const { goal } = body;
-    if (!isGoal(goal)) {
-      return reply.code(400).send({ error: "Invalid goal. Must be fat_loss or muscle_gain." });
-    }
+    logOnboardingSubmitStarted(request.log, { source: "server" });
 
     if (!hasAnyIntakeField(body)) {
-      const result = await deviceService.createDevice(goal as Goal);
+      if (!isGoal(body.goal)) {
+        const errors = [buildGoalValidationIssue()];
+        logOnboardingValidationIssues(request.log, errors);
+        return reply.code(400).send({ error: "VALIDATION_ERROR", errors });
+      }
+
+      const result = await deviceService.createDevice(body.goal);
+      logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: false });
       setGuestSessionCookies(reply, guestSessionService, result.deviceId);
       return { ...result, coachExplanation: null };
     }
 
-    if (!hasAllRequiredIntakeFields(body)) {
-      return reply.code(400).send({ error: "Incomplete intake data" });
+    const intakeResult = buildIntake(body);
+    if (!intakeResult.ok) {
+      logOnboardingValidationIssues(request.log, intakeResult.errors);
+      return reply.code(400).send({ error: "VALIDATION_ERROR", errors: intakeResult.errors });
     }
 
-    const intake = buildIntake(body);
-    if (intake === null) {
-      return reply.code(400).send({ error: "Invalid intake data" });
-    }
-
-    const { dailyTargets, coachExplanation } = await targetGenerationService.generateTargets(goal, intake);
-    const result = await deviceService.createDevice(goal as Goal, intake, dailyTargets, coachExplanation);
+    const { dailyTargets, coachExplanation, usedFallback } = await targetGenerationService.generateTargets(
+      intakeResult.goal,
+      intakeResult.intake,
+    );
+    const result = await deviceService.createDevice(
+      intakeResult.goal,
+      intakeResult.intake,
+      dailyTargets,
+      coachExplanation,
+    );
+    logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: usedFallback });
     setGuestSessionCookies(reply, guestSessionService, result.deviceId);
     return { ...result, coachExplanation };
   });
@@ -273,6 +484,7 @@ export function registerDeviceRoutes(
       return reply.code(400).send({ error: "Request must include at least one valid goal field (calories, protein, carbs, fat)" });
     }
     const dailyTargets = await deviceService.updateGoals(deviceId, goals);
+    logDeviceGoalsUpdatedRest(request.log, { updatedFields: Object.keys(goals) });
     return { dailyTargets };
   });
 }

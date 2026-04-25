@@ -6,6 +6,7 @@ import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import { currentAppDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import { logSseConnectionState } from "../observability/events.js";
 
 interface Deps {
   publisher: RealtimePublisher;
@@ -23,6 +24,7 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
       if (session.clearCookies) {
         reply.header("set-cookie", guestSessionService.clearSessionCookies());
       }
+      logSseConnectionState(request.log, { state: "rejected" });
       return reply.code(401).send({ error: session.error });
     }
     const { deviceId } = session;
@@ -45,6 +47,7 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
 
     // Subscribe for future updates
     publisher.subscribe(deviceId, reply);
+    logSseConnectionState(request.log, { state: "opened" });
 
     // Keepalive every 30s
     const keepalive = setInterval(() => {
@@ -55,6 +58,7 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
     request.raw.on("close", () => {
       clearInterval(keepalive);
       publisher.unsubscribe(deviceId, reply);
+      logSseConnectionState(request.log, { state: "closed" });
     });
   });
 }
