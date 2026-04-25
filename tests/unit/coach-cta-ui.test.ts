@@ -22,7 +22,9 @@ globalThis.localStorage = {
 } as Storage;
 
 const { COACH_CTA_INTENTS } = await import("../../client/src/coach-advice.js");
-const { CoachAdviceCard, CoachCTAControls } = await import("../../client/src/components/CoachAdviceCard.js");
+const { CoachAdviceCard, CoachCTAControls, recordAndSelectHomeCtaIntent } = await import(
+  "../../client/src/components/CoachAdviceCard.js"
+);
 const { useStore } = await import("../../client/src/store.js");
 const fakeDialoguePattern = new RegExp(
   [
@@ -113,5 +115,21 @@ describe("CoachCTAControls", () => {
     );
 
     assert.doesNotMatch(html, fakeDialoguePattern);
+  });
+
+  it("records intent selection without blocking selected intent state", () => {
+    const selected: string[] = [];
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("observability unavailable");
+    };
+
+    try {
+      recordAndSelectHomeCtaIntent("protein", (intentId) => selected.push(intentId));
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+
+    assert.deepEqual(selected, ["protein"]);
   });
 });

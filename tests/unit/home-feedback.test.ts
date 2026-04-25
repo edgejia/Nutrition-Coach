@@ -18,7 +18,7 @@ globalThis.localStorage = {
   key: (index: number) => [...storage.keys()][index] ?? null,
 } as Storage;
 
-const { getDisplayedCoachAdvice, formatHomeHeaderDate, stageHomeTaskOptionPrompt } = await import(
+const { getDisplayedCoachAdvice, formatHomeHeaderDate, stageHomeTaskOptionPrompt, sendHomeCtaTaskOption } = await import(
   "../../client/src/components/HomeScreen.js"
 );
 const { recordHomeCtaIntentSelected, recordHomeCtaOptionSent } = await import("../../client/src/api.js");
@@ -157,5 +157,53 @@ describe("Home screen helpers", () => {
     } finally {
       restoreRejectedFetch();
     }
+  });
+
+  it("records second-layer task option IDs while preserving prompt handoff", () => {
+    const rawPrompt = "推薦三個便利商店高蛋白選擇";
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const staged: unknown[] = [];
+    const screens: string[] = [];
+    const restoreFetch = installFetchStub(async (input, init) => {
+      requests.push({ url: String(input), init: init ?? {} });
+      throw new Error("observability unavailable");
+    });
+
+    try {
+      sendHomeCtaTaskOption(
+        {
+          id: "protein-convenience-store",
+          label: rawPrompt,
+          prompt: rawPrompt,
+        },
+        {
+          id: "protein",
+          label: "補蛋白質",
+          options: [],
+        },
+        (draft) => staged.push(draft),
+        (screen) => screens.push(screen),
+        () => "task-option-2",
+      );
+    } finally {
+      restoreFetch();
+    }
+
+    assert.equal(requests.length, 1);
+    const body = String(requests[0]?.init.body);
+    assert.deepEqual(JSON.parse(body), {
+      event: "home_cta_option_sent",
+      intent: "protein",
+      promptKey: "protein-convenience-store",
+    });
+    assert.doesNotMatch(body, new RegExp(rawPrompt));
+    assert.deepEqual(staged, [
+      {
+        id: "task-option-2",
+        text: rawPrompt,
+        status: "staged",
+      },
+    ]);
+    assert.deepEqual(screens, ["chat"]);
   });
 });
