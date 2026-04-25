@@ -443,13 +443,18 @@ describe("Device API", () => {
       [{ event: "onboarding_submit_succeeded", usedTargetFallback: false }],
     );
     assert.equal(findLogEvents(logLines, "onboarding_validation_failed").length, 0);
-    assertLogEventsExclude(findLogEvents(logLines, "onboarding_submit_succeeded"), [
-      body.deviceId,
-      String(body.dailyTargets.calories),
-      String(body.dailyTargets.protein),
-      String(body.dailyTargets.carbs),
-      String(body.dailyTargets.fat),
-    ]);
+    assertLogEventsExclude(
+      findLogEvents(logLines, "onboarding_submit_succeeded").map((event) =>
+        pickEventMetadata(event, ["event", "usedTargetFallback"]),
+      ),
+      [
+        body.deviceId,
+        String(body.dailyTargets.calories),
+        String(body.dailyTargets.protein),
+        String(body.dailyTargets.carbs),
+        String(body.dailyTargets.fat),
+      ],
+    );
   });
 
   it("OBS-01: logs intake onboarding success with fallback status only", async () => {
