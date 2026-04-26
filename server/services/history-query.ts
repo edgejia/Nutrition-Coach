@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   mealRevisionItems,
@@ -55,6 +55,11 @@ interface HistoryDateRange {
   endIso: string;
 }
 
+interface HistoryCursor {
+  loggedAt: string;
+  id: string;
+}
+
 function invalidIssue(field: string): HistoryQueryIssue {
   return { field, message: `${field} must be a valid YYYY-MM-DD date` };
 }
@@ -85,6 +90,49 @@ function resolveHistoryDateRange(from: string, to: string): HistoryDateRange {
   const { startIso } = getLocalDayBounds(fromDate);
   const { endIso } = getLocalDayBounds(toDate);
   return { fromDate, toDate, startIso, endIso };
+}
+
+export function encodeHistoryCursor(cursor: HistoryCursor): string {
+  return Buffer.from(JSON.stringify({ v: 1, loggedAt: cursor.loggedAt, id: cursor.id }), "utf8").toString("base64url");
+}
+
+function invalidCursor(): HistoryQueryValidationError {
+  return new HistoryQueryValidationError([
+    { field: "cursor", message: "cursor is invalid" },
+  ]);
+}
+
+export function decodeHistoryCursor(value: string): HistoryCursor {
+  try {
+    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
+    if (
+      decoded === null ||
+      typeof decoded !== "object" ||
+      !("v" in decoded) ||
+      !("loggedAt" in decoded) ||
+      !("id" in decoded)
+    ) {
+      throw invalidCursor();
+    }
+
+    const cursor = decoded as { v: unknown; loggedAt: unknown; id: unknown };
+    if (
+      cursor.v !== 1 ||
+      typeof cursor.loggedAt !== "string" ||
+      cursor.loggedAt.length === 0 ||
+      typeof cursor.id !== "string" ||
+      cursor.id.length === 0
+    ) {
+      throw invalidCursor();
+    }
+
+    return { loggedAt: cursor.loggedAt, id: cursor.id };
+  } catch (error) {
+    if (error instanceof HistoryQueryValidationError) {
+      throw error;
+    }
+    throw invalidCursor();
+  }
 }
 
 function buildGroupedFoodName(items: Array<{ foodName: string }>) {
@@ -196,13 +244,32 @@ export function createHistoryQueryService(
       limit: number;
       cursor?: string;
     }): Promise<{ meals: HistoryMealDto[]; nextCursor: string | null }> {
-      if (args.cursor) {
-        throw new HistoryQueryValidationError([
-          { field: "cursor", message: "Invalid cursor" },
-        ]);
-      }
-
       const range = resolveHistoryDateRange(args.from, args.to);
+      const cursor = args.cursor ? decodeHistoryCursor(args.cursor) : null;
+      const seekFilter = cursor
+        ? or(
+            lt(mealTransactions.loggedAt, cursor.loggedAt),
+            and(
+              eq(mealTransactions.loggedAt, cursor.loggedAt),
+              lt(mealTransactions.id, cursor.id),
+            ),
+          )
+        : undefined;
+      const whereFilter = seekFilter
+        ? and(
+            eq(mealTransactions.deviceId, args.deviceId),
+            isNull(mealTransactions.deletedAt),
+            gte(mealTransactions.loggedAt, range.startIso),
+            lt(mealTransactions.loggedAt, range.endIso),
+            seekFilter,
+          )
+        : and(
+            eq(mealTransactions.deviceId, args.deviceId),
+            isNull(mealTransactions.deletedAt),
+            gte(mealTransactions.loggedAt, range.startIso),
+            lt(mealTransactions.loggedAt, range.endIso),
+          );
+      const fetchLimit = args.limit + 1;
       const headers = await db
         .select({
           id: mealTransactions.id,
@@ -211,18 +278,19 @@ export function createHistoryQueryService(
           currentRevisionNumber: mealTransactions.currentRevisionNumber,
         })
         .from(mealTransactions)
-        .where(
-          and(
-            eq(mealTransactions.deviceId, args.deviceId),
-            isNull(mealTransactions.deletedAt),
-            gte(mealTransactions.loggedAt, range.startIso),
-            lt(mealTransactions.loggedAt, range.endIso),
-          ),
-        )
+        .where(whereFilter)
         .orderBy(desc(mealTransactions.loggedAt), desc(mealTransactions.id))
-        .limit(args.limit);
+        .limit(fetchLimit);
 
-      return { meals: await projectHistoryMeals(db, headers), nextCursor: null };
+      const returnedHeaders = headers.slice(0, args.limit);
+      const meals = await projectHistoryMeals(db, returnedHeaders);
+      const lastReturned = returnedHeaders.at(-1);
+      const nextCursor =
+        headers.length > args.limit && lastReturned
+          ? encodeHistoryCursor({ loggedAt: lastReturned.loggedAt, id: lastReturned.id })
+          : null;
+
+      return { meals, nextCursor };
     },
 
     async getDaySnapshot(args: {
