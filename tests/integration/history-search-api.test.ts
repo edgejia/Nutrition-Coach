@@ -176,6 +176,18 @@ describe("History search API", () => {
     return { chickenMeal, chineseMeal, updatedMeal, deletedMeal };
   }
 
+  async function seedNutritionBoundMeal() {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    return services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T10:00:00.000Z",
+      items: [
+        { foodName: "Edamame Snack", calories: 130, protein: 8, carbs: 12, fat: 5 },
+        { foodName: "Grilled Chicken", calories: 400, protein: 35, carbs: 8, fat: 12 },
+      ],
+    });
+  }
+
   it("GET /api/history/search matches current item names and returns safe parent meal context", async () => {
     const seeded = await seedSearchContractMeals();
 
@@ -273,5 +285,102 @@ describe("History search API", () => {
     const deletedBody = deletedRes.json() as { results: HistorySearchResult[]; nextCursor: string | null };
     assert.ok(!deletedBody.results.some((result) => result.meal.id === seeded.deletedMeal.id));
     assert.deepEqual(deletedBody, { results: [], nextCursor: null });
+  });
+
+  it("GET /api/history/search applies flat nutrition bounds to parent meal totals", async () => {
+    const boundedMeal = await seedNutritionBoundMeal();
+
+    const res = await app.inject({
+      method: "GET",
+      url:
+        "/api/history/search?q=edamame&from=2026-03-25&to=2026-03-25" +
+        "&caloriesMin=500&caloriesMax=600" +
+        "&proteinMin=40&proteinMax=50" +
+        "&carbsMin=15&carbsMax=25" +
+        "&fatMin=10&fatMax=20",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { results: HistorySearchResult[]; nextCursor: string | null };
+    assert.equal(body.nextCursor, null);
+    assert.deepEqual(
+      body.results.map((result) => ({
+        itemName: result.item.name,
+        itemProtein: result.item.nutrition.protein,
+        mealId: result.meal.id,
+        mealProtein: result.meal.nutrition.protein,
+      })),
+      [
+        {
+          itemName: "Edamame Snack",
+          itemProtein: 8,
+          mealId: boundedMeal.id,
+          mealProtein: 43,
+        },
+      ],
+      "nutrition filters must evaluate parent meal totals, not the matched item nutrition",
+    );
+    assert.deepEqual(body.results[0]?.meal.nutrition, { calories: 530, protein: 43, carbs: 20, fat: 17 });
+    assertNoUnsafeHistoryFields(body);
+  });
+
+  it("GET /api/history/search returns INVALID_QUERY for empty q and invalid nutrition bounds", async () => {
+    const cases = [
+      {
+        name: "missing q",
+        url: "/api/history/search?from=2026-03-25&to=2026-03-25",
+        issue: { field: "q", message: "q is required" },
+      },
+      {
+        name: "trimmed empty q",
+        url: "/api/history/search?q=%20%20%20&from=2026-03-25&to=2026-03-25",
+        issue: { field: "q", message: "q is required" },
+      },
+      {
+        name: "negative caloriesMin",
+        url: "/api/history/search?q=chicken&from=2026-03-25&to=2026-03-25&caloriesMin=-1",
+        issue: { field: "caloriesMin", message: "caloriesMin must be a non-negative number" },
+      },
+      {
+        name: "non-numeric proteinMax",
+        url: "/api/history/search?q=chicken&from=2026-03-25&to=2026-03-25&proteinMax=abc",
+        issue: { field: "proteinMax", message: "proteinMax must be a non-negative number" },
+      },
+      {
+        name: "carbsMin above carbsMax",
+        url: "/api/history/search?q=chicken&from=2026-03-25&to=2026-03-25&carbsMin=20&carbsMax=10",
+        issue: { field: "carbsMin", message: "carbsMin must be less than or equal to carbsMax" },
+      },
+      {
+        name: "nested nutrition filter",
+        url: "/api/history/search?q=chicken&from=2026-03-25&to=2026-03-25&nutrition%5Bprotein%5D%5Bmin%5D=10",
+        issue: { field: "nutrition[protein][min]", message: "nutrition[protein][min] is not supported" },
+      },
+      {
+        name: "JSON filters",
+        url: "/api/history/search?q=chicken&from=2026-03-25&to=2026-03-25&filters=%7B%22proteinMin%22%3A10%7D",
+        issue: { field: "filters", message: "filters is not supported" },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const res = await app.inject({
+        method: "GET",
+        url: testCase.url,
+        headers: { cookie: sessionCookieHeader },
+      });
+
+      assert.equal(res.statusCode, 400, testCase.name);
+      assert.deepEqual(
+        res.json(),
+        {
+          error: "Invalid query",
+          code: "INVALID_QUERY",
+          issues: [testCase.issue],
+        },
+        testCase.name,
+      );
+    }
   });
 });
