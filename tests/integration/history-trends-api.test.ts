@@ -216,4 +216,161 @@ describe("History trends API", () => {
       );
     }
   });
+
+  it("classifies empty, sparse, and complete ranges from meal presence only", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const deletedMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "已刪除早餐",
+      calories: 450,
+      protein: 30,
+      carbs: 45,
+      fat: 15,
+      loggedAt: "2026-03-24T02:00:00.000Z",
+    });
+    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id);
+    await services.foodLoggingService.logFood(foreignDeviceId, {
+      foodName: "外部裝置晚餐",
+      calories: 700,
+      protein: 40,
+      carbs: 70,
+      fat: 20,
+      loggedAt: "2026-03-25T10:00:00.000Z",
+    });
+
+    const emptyRes = await app.inject({
+      method: "GET",
+      url: "/api/history/trends?from=2026-03-24&to=2026-03-26",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(emptyRes.statusCode, 200);
+    const emptyBody = emptyRes.json() as TrendsResponse;
+    assert.equal(emptyBody.completeness, "empty");
+    assert.equal(emptyBody.daily.length, 3);
+    assert.deepEqual(emptyBody.daily, [
+      { date: "2026-03-24", calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
+      { date: "2026-03-25", calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
+      { date: "2026-03-26", calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
+    ]);
+    assert.deepEqual(emptyBody.totals, { calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 });
+    assert.deepEqual(emptyBody.averages, { calories: 0, protein: 0, carbs: 0, fat: 0, mealsPerDay: 0 });
+
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "稀疏範圍午餐",
+      calories: 300,
+      protein: 20,
+      carbs: 35,
+      fat: 10,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+
+    const sparseRes = await app.inject({
+      method: "GET",
+      url: "/api/history/trends?from=2026-03-24&to=2026-03-26",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(sparseRes.statusCode, 200);
+    const sparseBody = sparseRes.json() as TrendsResponse;
+    assert.equal(sparseBody.completeness, "sparse");
+    assert.deepEqual(sparseBody.daily, [
+      { date: "2026-03-24", calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
+      { date: "2026-03-25", calories: 300, protein: 20, carbs: 35, fat: 10, mealCount: 1 },
+      { date: "2026-03-26", calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
+    ]);
+    assert.deepEqual(sparseBody.totals, { calories: 300, protein: 20, carbs: 35, fat: 10, mealCount: 1 });
+    assert.deepEqual(sparseBody.averages, {
+      calories: 100,
+      protein: 20 / 3,
+      carbs: 35 / 3,
+      fat: 10 / 3,
+      mealsPerDay: 1 / 3,
+    });
+
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "完整範圍第一天",
+      calories: 10,
+      protein: 1,
+      carbs: 1,
+      fat: 1,
+      loggedAt: "2026-03-24T05:00:00.000Z",
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "完整範圍第三天",
+      calories: 20,
+      protein: 2,
+      carbs: 2,
+      fat: 2,
+      loggedAt: "2026-03-25T16:30:00.000Z",
+    });
+
+    const completeRes = await app.inject({
+      method: "GET",
+      url: "/api/history/trends?from=2026-03-24&to=2026-03-26",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(completeRes.statusCode, 200);
+    const completeBody = completeRes.json() as TrendsResponse;
+    assert.equal(completeBody.completeness, "complete");
+    assert.deepEqual(completeBody.daily, [
+      { date: "2026-03-24", calories: 10, protein: 1, carbs: 1, fat: 1, mealCount: 1 },
+      { date: "2026-03-25", calories: 300, protein: 20, carbs: 35, fat: 10, mealCount: 1 },
+      { date: "2026-03-26", calories: 20, protein: 2, carbs: 2, fat: 2, mealCount: 1 },
+    ]);
+    assert.deepEqual(completeBody.totals, { calories: 330, protein: 23, carbs: 38, fat: 13, mealCount: 3 });
+  });
+
+  it("uses current revisions and excludes deleted or raw foreign-device selector rows", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const updatedMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "原始便當",
+      calories: 900,
+      protein: 10,
+      carbs: 100,
+      fat: 40,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+    await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+      loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "修正雞胸便當", calories: 500, protein: 50, carbs: 40, fat: 12 },
+      ],
+    });
+    const deletedMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "已刪除點心",
+      calories: 250,
+      protein: 5,
+      carbs: 30,
+      fat: 11,
+      loggedAt: "2026-03-25T07:00:00.000Z",
+    });
+    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id);
+    await services.foodLoggingService.logFood(foreignDeviceId, {
+      foodName: "外部裝置高熱量晚餐",
+      calories: 999,
+      protein: 99,
+      carbs: 99,
+      fat: 99,
+      loggedAt: "2026-03-25T08:00:00.000Z",
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/history/trends?from=2026-03-25&to=2026-03-25&deviceId=${foreignDeviceId}`,
+      headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as TrendsResponse;
+
+    assert.equal(body.completeness, "complete");
+    assert.deepEqual(body.daily, [
+      { date: "2026-03-25", calories: 500, protein: 50, carbs: 40, fat: 12, mealCount: 1 },
+    ]);
+    assert.deepEqual(body.totals, { calories: 500, protein: 50, carbs: 40, fat: 12, mealCount: 1 });
+    assert.deepEqual(body.averages, { calories: 500, protein: 50, carbs: 40, fat: 12, mealsPerDay: 1 });
+  });
 });
