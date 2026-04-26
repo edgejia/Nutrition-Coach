@@ -110,6 +110,10 @@ interface HistoryCursor {
   id: string;
 }
 
+interface HistorySearchCursor extends HistoryCursor {
+  matchedItemPosition: number;
+}
+
 interface MatchedHistoryMealHeader extends HistoryMealHeader {
   matchedItemPosition: number;
   matchedItemName: string;
@@ -196,6 +200,75 @@ export function decodeHistoryCursor(value: string): HistoryCursor {
   }
 }
 
+function encodeHistorySearchCursor(cursor: HistorySearchCursor): string {
+  return Buffer.from(
+    JSON.stringify({
+      v: 2,
+      type: "history-search",
+      loggedAt: cursor.loggedAt,
+      createdAt: cursor.createdAt,
+      id: cursor.id,
+      matchedItemPosition: cursor.matchedItemPosition,
+    }),
+    "utf8",
+  ).toString("base64url");
+}
+
+function decodeHistorySearchCursor(value: string): HistorySearchCursor {
+  try {
+    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
+    if (
+      decoded === null ||
+      typeof decoded !== "object" ||
+      !("v" in decoded) ||
+      !("type" in decoded) ||
+      !("loggedAt" in decoded) ||
+      !("createdAt" in decoded) ||
+      !("id" in decoded) ||
+      !("matchedItemPosition" in decoded)
+    ) {
+      throw invalidCursor();
+    }
+
+    const cursor = decoded as {
+      v: unknown;
+      type: unknown;
+      loggedAt: unknown;
+      createdAt: unknown;
+      id: unknown;
+      matchedItemPosition: unknown;
+    };
+    const matchedItemPosition = cursor.matchedItemPosition;
+    if (
+      cursor.v !== 2 ||
+      cursor.type !== "history-search" ||
+      typeof cursor.loggedAt !== "string" ||
+      cursor.loggedAt.length === 0 ||
+      typeof cursor.createdAt !== "string" ||
+      cursor.createdAt.length === 0 ||
+      typeof cursor.id !== "string" ||
+      cursor.id.length === 0 ||
+      typeof matchedItemPosition !== "number" ||
+      !Number.isInteger(matchedItemPosition) ||
+      matchedItemPosition < 0
+    ) {
+      throw invalidCursor();
+    }
+
+    return {
+      loggedAt: cursor.loggedAt,
+      createdAt: cursor.createdAt,
+      id: cursor.id,
+      matchedItemPosition,
+    };
+  } catch (error) {
+    if (error instanceof HistoryQueryValidationError) {
+      throw error;
+    }
+    throw invalidCursor();
+  }
+}
+
 function buildGroupedFoodName(items: Array<{ foodName: string }>) {
   if (items.length === 1) {
     return items[0]!.foodName;
@@ -220,6 +293,27 @@ function createCursorSeekFilter(cursor: HistoryCursor) {
       eq(mealTransactions.loggedAt, cursor.loggedAt),
       eq(mealTransactions.createdAt, cursor.createdAt),
       gt(mealTransactions.id, cursor.id),
+    ),
+  );
+}
+
+function createSearchCursorSeekFilter(cursor: HistorySearchCursor) {
+  return or(
+    lt(mealTransactions.loggedAt, cursor.loggedAt),
+    and(
+      eq(mealTransactions.loggedAt, cursor.loggedAt),
+      lt(mealTransactions.createdAt, cursor.createdAt),
+    ),
+    and(
+      eq(mealTransactions.loggedAt, cursor.loggedAt),
+      eq(mealTransactions.createdAt, cursor.createdAt),
+      gt(mealTransactions.id, cursor.id),
+    ),
+    and(
+      eq(mealTransactions.loggedAt, cursor.loggedAt),
+      eq(mealTransactions.createdAt, cursor.createdAt),
+      eq(mealTransactions.id, cursor.id),
+      gt(mealRevisionItems.position, cursor.matchedItemPosition),
     ),
   );
 }
@@ -419,57 +513,82 @@ export function createHistoryQueryService(
       }
 
       const range = resolveHistoryDateRange(args.from, args.to);
-      const cursor = args.cursor ? decodeHistoryCursor(args.cursor) : null;
-      const seekFilter = cursor ? createCursorSeekFilter(cursor) : undefined;
+      let cursor = args.cursor ? decodeHistorySearchCursor(args.cursor) : null;
       const likePattern = `%${trimmedQ}%`;
-      const filters = [
-        eq(mealTransactions.deviceId, args.deviceId),
-        isNull(mealTransactions.deletedAt),
-        gte(mealTransactions.loggedAt, range.startIso),
-        lt(mealTransactions.loggedAt, range.endIso),
-        sql`lower(${mealRevisionItems.foodName}) like lower(${likePattern})`,
-      ];
+      const fetchLimit = args.limit + 1;
+      const boundedHeaders: MatchedHistoryMealHeader[] = [];
 
-      if (seekFilter) {
-        filters.push(seekFilter);
+      while (boundedHeaders.length < fetchLimit) {
+        const seekFilter = cursor ? createSearchCursorSeekFilter(cursor) : undefined;
+        const filters = [
+          eq(mealTransactions.deviceId, args.deviceId),
+          isNull(mealTransactions.deletedAt),
+          gte(mealTransactions.loggedAt, range.startIso),
+          lt(mealTransactions.loggedAt, range.endIso),
+          sql`lower(${mealRevisionItems.foodName}) like lower(${likePattern})`,
+        ];
+
+        if (seekFilter) {
+          filters.push(seekFilter);
+        }
+
+        const matchedHeaders = await db
+          .select({
+            id: mealTransactions.id,
+            loggedAt: mealTransactions.loggedAt,
+            createdAt: mealTransactions.createdAt,
+            currentRevisionId: mealTransactions.currentRevisionId,
+            currentRevisionNumber: mealTransactions.currentRevisionNumber,
+            matchedItemPosition: mealRevisionItems.position,
+            matchedItemName: mealRevisionItems.foodName,
+          })
+          .from(mealTransactions)
+          .innerJoin(
+            mealRevisions,
+            eq(mealTransactions.currentRevisionId, mealRevisions.id),
+          )
+          .innerJoin(
+            mealRevisionItems,
+            eq(mealTransactions.currentRevisionId, mealRevisionItems.revisionId),
+          )
+          .where(and(...filters))
+          .orderBy(
+            desc(mealTransactions.loggedAt),
+            desc(mealTransactions.createdAt),
+            asc(mealTransactions.id),
+            asc(mealRevisionItems.position),
+          )
+          .limit(fetchLimit);
+
+        if (matchedHeaders.length === 0) {
+          break;
+        }
+
+        const projectedMeals = await projectHistoryMeals(db, matchedHeaders);
+        const mealsById = new Map(projectedMeals.map((meal) => [meal.id, meal]));
+        boundedHeaders.push(
+          ...matchedHeaders.filter((header) => {
+            const meal = mealsById.get(header.id);
+            return meal ? mealMatchesNutritionBounds(meal, args.nutritionBounds) : false;
+          }),
+        );
+
+        const lastMatched = matchedHeaders.at(-1)!;
+        cursor = {
+          loggedAt: lastMatched.loggedAt,
+          createdAt: lastMatched.createdAt,
+          id: lastMatched.id,
+          matchedItemPosition: lastMatched.matchedItemPosition,
+        };
+
+        if (matchedHeaders.length < fetchLimit) {
+          break;
+        }
       }
 
-      const fetchLimit = args.limit + 1;
-      const matchedHeaders = await db
-        .select({
-          id: mealTransactions.id,
-          loggedAt: mealTransactions.loggedAt,
-          createdAt: mealTransactions.createdAt,
-          currentRevisionId: mealTransactions.currentRevisionId,
-          currentRevisionNumber: mealTransactions.currentRevisionNumber,
-          matchedItemPosition: mealRevisionItems.position,
-          matchedItemName: mealRevisionItems.foodName,
-        })
-        .from(mealTransactions)
-        .innerJoin(
-          mealRevisions,
-          eq(mealTransactions.currentRevisionId, mealRevisions.id),
-        )
-        .innerJoin(
-          mealRevisionItems,
-          eq(mealTransactions.currentRevisionId, mealRevisionItems.revisionId),
-        )
-        .where(and(...filters))
-        .orderBy(
-          desc(mealTransactions.loggedAt),
-          desc(mealTransactions.createdAt),
-          asc(mealTransactions.id),
-          asc(mealRevisionItems.position),
-        )
-        .limit(fetchLimit);
-
-      const projectedMeals = await projectHistoryMeals(db, matchedHeaders);
-      const mealsById = new Map(projectedMeals.map((meal) => [meal.id, meal]));
-      const boundedHeaders = matchedHeaders.filter((header) => {
-        const meal = mealsById.get(header.id);
-        return meal ? mealMatchesNutritionBounds(meal, args.nutritionBounds) : false;
-      });
       const returnedHeaders = boundedHeaders.slice(0, args.limit);
+      const projectedMeals = await projectHistoryMeals(db, returnedHeaders);
+      const mealsById = new Map(projectedMeals.map((meal) => [meal.id, meal]));
       const results = returnedHeaders.flatMap((header) => {
         const meal = mealsById.get(header.id);
         const item = meal?.items.find(
@@ -483,10 +602,11 @@ export function createHistoryQueryService(
       const lastReturned = returnedHeaders.at(-1);
       const nextCursor =
         boundedHeaders.length > args.limit && lastReturned
-          ? encodeHistoryCursor({
+          ? encodeHistorySearchCursor({
               loggedAt: lastReturned.loggedAt,
               createdAt: lastReturned.createdAt,
               id: lastReturned.id,
+              matchedItemPosition: lastReturned.matchedItemPosition,
             })
           : null;
 

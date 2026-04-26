@@ -325,6 +325,83 @@ describe("History search API", () => {
     assertNoUnsafeHistoryFields(body);
   });
 
+  it("GET /api/history/search keeps scanning when early raw matches fail nutrition bounds", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+    const boundedMeal = await seedNutritionBoundMeal();
+
+    for (let index = 0; index < 3; index += 1) {
+      await services.foodLoggingService.logFood(deviceId, {
+        foodName: `Chicken filler ${index}`,
+        calories: 120,
+        protein: 5,
+        carbs: 12,
+        fat: 4,
+        loggedAt: `2026-03-25T11:0${index}:00.000Z`,
+      });
+    }
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/history/search?q=chicken&from=2026-03-25&to=2026-03-25&proteinMin=40&limit=2",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { results: HistorySearchResult[]; nextCursor: string | null };
+    assert.equal(body.nextCursor, null);
+    assert.deepEqual(
+      body.results.map((result) => ({
+        itemName: result.item.name,
+        mealId: result.meal.id,
+        mealProtein: result.meal.nutrition.protein,
+      })),
+      [{ itemName: "Grilled Chicken", mealId: boundedMeal.id, mealProtein: 43 }],
+    );
+  });
+
+  it("GET /api/history/search cursor preserves multiple matched items in the same meal", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+    const groupedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T12:00:00.000Z",
+      items: [
+        { foodName: "Chicken breast", calories: 240, protein: 45, carbs: 0, fat: 5 },
+        { foodName: "Chicken soup", calories: 180, protein: 20, carbs: 8, fat: 6 },
+      ],
+    });
+
+    const firstRes = await app.inject({
+      method: "GET",
+      url: "/api/history/search?q=chicken&from=2026-03-25&to=2026-03-25&limit=1",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(firstRes.statusCode, 200);
+    const firstBody = firstRes.json() as { results: HistorySearchResult[]; nextCursor: string | null };
+    assert.equal(firstBody.results.length, 1);
+    assert.equal(firstBody.results[0]?.meal.id, groupedMeal.id);
+    assert.equal(firstBody.results[0]?.item.name, "Chicken breast");
+    assert.ok(firstBody.nextCursor);
+
+    const secondRes = await app.inject({
+      method: "GET",
+      url:
+        "/api/history/search?q=chicken&from=2026-03-25&to=2026-03-25&limit=1" +
+        `&cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(secondRes.statusCode, 200);
+    const secondBody = secondRes.json() as { results: HistorySearchResult[]; nextCursor: string | null };
+    assert.equal(secondBody.nextCursor, null);
+    assert.deepEqual(
+      secondBody.results.map((result) => ({
+        itemName: result.item.name,
+        mealId: result.meal.id,
+      })),
+      [{ itemName: "Chicken soup", mealId: groupedMeal.id }],
+    );
+  });
+
   it("GET /api/history/search returns INVALID_QUERY for empty q and invalid nutrition bounds", async () => {
     const cases = [
       {
