@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   mealRevisionItems,
@@ -31,6 +31,22 @@ export interface HistoryMealDto {
   revision: { currentRevisionNumber: number };
 }
 
+export interface HistorySearchResultDto {
+  item: {
+    name: string;
+    position: number;
+    nutrition: { calories: number; protein: number; carbs: number; fat: number };
+  };
+  meal: HistoryMealDto;
+}
+
+export interface HistoryNutritionBounds {
+  calories?: { min?: number; max?: number };
+  protein?: { min?: number; max?: number };
+  carbs?: { min?: number; max?: number };
+  fat?: { min?: number; max?: number };
+}
+
 export class HistoryQueryValidationError extends Error {
   readonly issues: HistoryQueryIssue[];
 
@@ -60,6 +76,11 @@ interface HistoryCursor {
   loggedAt: string;
   createdAt: string;
   id: string;
+}
+
+interface MatchedHistoryMealHeader extends HistoryMealHeader {
+  matchedItemPosition: number;
+  matchedItemName: string;
 }
 
 function invalidIssue(field: string): HistoryQueryIssue {
@@ -154,6 +175,38 @@ function buildGroupedFoodName(items: Array<{ foodName: string }>) {
 
   const count = items.length;
   return `${items[0]?.foodName ?? "餐點"}、${items[1]?.foodName ?? "項目"} 等${count}項`;
+}
+
+function createCursorSeekFilter(cursor: HistoryCursor) {
+  return or(
+    lt(mealTransactions.loggedAt, cursor.loggedAt),
+    and(
+      eq(mealTransactions.loggedAt, cursor.loggedAt),
+      lt(mealTransactions.createdAt, cursor.createdAt),
+    ),
+    and(
+      eq(mealTransactions.loggedAt, cursor.loggedAt),
+      eq(mealTransactions.createdAt, cursor.createdAt),
+      gt(mealTransactions.id, cursor.id),
+    ),
+  );
+}
+
+function mealMatchesNutritionBounds(meal: HistoryMealDto, bounds?: HistoryNutritionBounds): boolean {
+  if (!bounds) {
+    return true;
+  }
+
+  return (
+    (typeof bounds.calories?.min === "undefined" || meal.nutrition.calories >= bounds.calories.min) &&
+    (typeof bounds.calories?.max === "undefined" || meal.nutrition.calories <= bounds.calories.max) &&
+    (typeof bounds.protein?.min === "undefined" || meal.nutrition.protein >= bounds.protein.min) &&
+    (typeof bounds.protein?.max === "undefined" || meal.nutrition.protein <= bounds.protein.max) &&
+    (typeof bounds.carbs?.min === "undefined" || meal.nutrition.carbs >= bounds.carbs.min) &&
+    (typeof bounds.carbs?.max === "undefined" || meal.nutrition.carbs <= bounds.carbs.max) &&
+    (typeof bounds.fat?.min === "undefined" || meal.nutrition.fat >= bounds.fat.min) &&
+    (typeof bounds.fat?.max === "undefined" || meal.nutrition.fat <= bounds.fat.max)
+  );
 }
 
 async function projectHistoryMeals(
@@ -254,20 +307,7 @@ export function createHistoryQueryService(
     }): Promise<{ meals: HistoryMealDto[]; nextCursor: string | null }> {
       const range = resolveHistoryDateRange(args.from, args.to);
       const cursor = args.cursor ? decodeHistoryCursor(args.cursor) : null;
-      const seekFilter = cursor
-        ? or(
-            lt(mealTransactions.loggedAt, cursor.loggedAt),
-            and(
-              eq(mealTransactions.loggedAt, cursor.loggedAt),
-              lt(mealTransactions.createdAt, cursor.createdAt),
-            ),
-            and(
-              eq(mealTransactions.loggedAt, cursor.loggedAt),
-              eq(mealTransactions.createdAt, cursor.createdAt),
-              gt(mealTransactions.id, cursor.id),
-            ),
-          )
-        : undefined;
+      const seekFilter = cursor ? createCursorSeekFilter(cursor) : undefined;
       const whereFilter = seekFilter
         ? and(
             eq(mealTransactions.deviceId, args.deviceId),
@@ -309,6 +349,95 @@ export function createHistoryQueryService(
           : null;
 
       return { meals, nextCursor };
+    },
+
+    async searchMeals(args: {
+      deviceId: string;
+      q: string;
+      from: string;
+      to: string;
+      limit: number;
+      cursor?: string;
+      nutritionBounds?: HistoryNutritionBounds;
+    }): Promise<{ results: HistorySearchResultDto[]; nextCursor: string | null }> {
+      const trimmedQ = args.q.trim();
+      if (trimmedQ.length === 0) {
+        throw new HistoryQueryValidationError([{ field: "q", message: "q is required" }]);
+      }
+
+      const range = resolveHistoryDateRange(args.from, args.to);
+      const cursor = args.cursor ? decodeHistoryCursor(args.cursor) : null;
+      const seekFilter = cursor ? createCursorSeekFilter(cursor) : undefined;
+      const likePattern = `%${trimmedQ}%`;
+      const filters = [
+        eq(mealTransactions.deviceId, args.deviceId),
+        isNull(mealTransactions.deletedAt),
+        gte(mealTransactions.loggedAt, range.startIso),
+        lt(mealTransactions.loggedAt, range.endIso),
+        sql`lower(${mealRevisionItems.foodName}) like lower(${likePattern})`,
+      ];
+
+      if (seekFilter) {
+        filters.push(seekFilter);
+      }
+
+      const fetchLimit = args.limit + 1;
+      const matchedHeaders = await db
+        .select({
+          id: mealTransactions.id,
+          loggedAt: mealTransactions.loggedAt,
+          createdAt: mealTransactions.createdAt,
+          currentRevisionId: mealTransactions.currentRevisionId,
+          currentRevisionNumber: mealTransactions.currentRevisionNumber,
+          matchedItemPosition: mealRevisionItems.position,
+          matchedItemName: mealRevisionItems.foodName,
+        })
+        .from(mealTransactions)
+        .innerJoin(
+          mealRevisions,
+          eq(mealTransactions.currentRevisionId, mealRevisions.id),
+        )
+        .innerJoin(
+          mealRevisionItems,
+          eq(mealTransactions.currentRevisionId, mealRevisionItems.revisionId),
+        )
+        .where(and(...filters))
+        .orderBy(
+          desc(mealTransactions.loggedAt),
+          desc(mealTransactions.createdAt),
+          asc(mealTransactions.id),
+          asc(mealRevisionItems.position),
+        )
+        .limit(fetchLimit);
+
+      const projectedMeals = await projectHistoryMeals(db, matchedHeaders);
+      const mealsById = new Map(projectedMeals.map((meal) => [meal.id, meal]));
+      const boundedHeaders = matchedHeaders.filter((header) => {
+        const meal = mealsById.get(header.id);
+        return meal ? mealMatchesNutritionBounds(meal, args.nutritionBounds) : false;
+      });
+      const returnedHeaders = boundedHeaders.slice(0, args.limit);
+      const results = returnedHeaders.flatMap((header) => {
+        const meal = mealsById.get(header.id);
+        const item = meal?.items.find(
+          (candidate) =>
+            candidate.position === header.matchedItemPosition &&
+            candidate.name === header.matchedItemName,
+        );
+
+        return meal && item ? [{ item, meal }] : [];
+      });
+      const lastReturned = returnedHeaders.at(-1);
+      const nextCursor =
+        boundedHeaders.length > args.limit && lastReturned
+          ? encodeHistoryCursor({
+              loggedAt: lastReturned.loggedAt,
+              createdAt: lastReturned.createdAt,
+              id: lastReturned.id,
+            })
+          : null;
+
+      return { results, nextCursor };
     },
 
     async getDaySnapshot(args: {
