@@ -47,6 +47,38 @@ export interface HistoryNutritionBounds {
   fat?: { min?: number; max?: number };
 }
 
+export type HistoryTrendCompleteness = "empty" | "sparse" | "complete";
+
+export interface HistoryTrendBucketDto {
+  date: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  mealCount: number;
+}
+
+export interface HistoryTrendResponseDto {
+  from: string;
+  to: string;
+  completeness: HistoryTrendCompleteness;
+  daily: HistoryTrendBucketDto[];
+  totals: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    mealCount: number;
+  };
+  averages: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    mealsPerDay: number;
+  };
+}
+
 export class HistoryQueryValidationError extends Error {
   readonly issues: HistoryQueryIssue[];
 
@@ -207,6 +239,27 @@ function mealMatchesNutritionBounds(meal: HistoryMealDto, bounds?: HistoryNutrit
     (typeof bounds.fat?.min === "undefined" || meal.nutrition.fat >= bounds.fat.min) &&
     (typeof bounds.fat?.max === "undefined" || meal.nutrition.fat <= bounds.fat.max)
   );
+}
+
+function buildInclusiveLocalDateKeys(fromDate: Date, toDate: Date): string[] {
+  const dateKeys: string[] = [];
+  const cursor = new Date(fromDate);
+
+  while (cursor.getTime() <= toDate.getTime()) {
+    dateKeys.push(formatLocalDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dateKeys;
+}
+
+function classifyTrendCompleteness(buckets: HistoryTrendBucketDto[]): HistoryTrendCompleteness {
+  const populatedDays = buckets.filter((bucket) => bucket.mealCount > 0).length;
+  if (populatedDays === 0) {
+    return "empty";
+  }
+
+  return populatedDays === buckets.length ? "complete" : "sparse";
 }
 
 async function projectHistoryMeals(
@@ -438,6 +491,108 @@ export function createHistoryQueryService(
           : null;
 
       return { results, nextCursor };
+    },
+
+    async getTrends(args: {
+      deviceId: string;
+      from: string;
+      to: string;
+    }): Promise<HistoryTrendResponseDto> {
+      const range = resolveHistoryDateRange(args.from, args.to);
+      const dateKeys = buildInclusiveLocalDateKeys(range.fromDate, range.toDate);
+      const bucketsByDate = new Map<string, HistoryTrendBucketDto & { transactionIds: Set<string> }>();
+
+      for (const dateKey of dateKeys) {
+        bucketsByDate.set(dateKey, {
+          date: dateKey,
+          calories: 0,
+          protein: 0,
+          carbs: 0,
+          fat: 0,
+          mealCount: 0,
+          transactionIds: new Set<string>(),
+        });
+      }
+
+      const rows = await db
+        .select({
+          transactionId: mealTransactions.id,
+          loggedAt: mealTransactions.loggedAt,
+          calories: mealRevisionItems.calories,
+          protein: mealRevisionItems.protein,
+          carbs: mealRevisionItems.carbs,
+          fat: mealRevisionItems.fat,
+        })
+        .from(mealTransactions)
+        .innerJoin(
+          mealRevisions,
+          eq(mealTransactions.currentRevisionId, mealRevisions.id),
+        )
+        .innerJoin(
+          mealRevisionItems,
+          eq(mealRevisionItems.revisionId, mealRevisions.id),
+        )
+        .where(
+          and(
+            eq(mealTransactions.deviceId, args.deviceId),
+            isNull(mealTransactions.deletedAt),
+            gte(mealTransactions.loggedAt, range.startIso),
+            lt(mealTransactions.loggedAt, range.endIso),
+          ),
+        );
+
+      for (const row of rows) {
+        const dateKey = formatLocalDate(new Date(row.loggedAt));
+        const bucket = bucketsByDate.get(dateKey);
+        if (!bucket) {
+          continue;
+        }
+
+        bucket.calories += row.calories;
+        bucket.protein += row.protein;
+        bucket.carbs += row.carbs;
+        bucket.fat += row.fat;
+        bucket.transactionIds.add(row.transactionId);
+        bucket.mealCount = bucket.transactionIds.size;
+      }
+
+      const daily = dateKeys.map((dateKey) => {
+        const bucket = bucketsByDate.get(dateKey)!;
+        return {
+          date: bucket.date,
+          calories: bucket.calories,
+          protein: bucket.protein,
+          carbs: bucket.carbs,
+          fat: bucket.fat,
+          mealCount: bucket.mealCount,
+        };
+      });
+      const totals = daily.reduce(
+        (sum, bucket) => ({
+          calories: sum.calories + bucket.calories,
+          protein: sum.protein + bucket.protein,
+          carbs: sum.carbs + bucket.carbs,
+          fat: sum.fat + bucket.fat,
+          mealCount: sum.mealCount + bucket.mealCount,
+        }),
+        { calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
+      );
+      const dayCount = daily.length;
+
+      return {
+        from: args.from,
+        to: args.to,
+        completeness: classifyTrendCompleteness(daily),
+        daily,
+        totals,
+        averages: {
+          calories: totals.calories / dayCount,
+          protein: totals.protein / dayCount,
+          carbs: totals.carbs / dayCount,
+          fat: totals.fat / dayCount,
+          mealsPerDay: totals.mealCount / dayCount,
+        },
+      };
     },
 
     async getDaySnapshot(args: {
