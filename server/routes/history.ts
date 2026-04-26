@@ -263,6 +263,50 @@ export function registerHistoryRoutes(app: FastifyInstance, deps: Deps) {
     }
   });
 
+  app.get("/api/history/trends", async (request, reply) => {
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    const { deviceId } = session;
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
+    }
+
+    const query = request.query as Record<string, unknown>;
+    const fromResult = queryStringValue(query, "from");
+    if (!fromResult.ok) {
+      return reply.code(400).send(invalidQuery([fromResult.issue]));
+    }
+    if (!fromResult.value) {
+      return reply.code(400).send(invalidQuery([{ field: "from", message: "from is required" }]));
+    }
+
+    const toResult = queryStringValue(query, "to");
+    if (!toResult.ok) {
+      return reply.code(400).send(invalidQuery([toResult.issue]));
+    }
+    if (!toResult.value) {
+      return reply.code(400).send(invalidQuery([{ field: "to", message: "to is required" }]));
+    }
+
+    try {
+      return await historyQueryService.getTrends({
+        deviceId,
+        from: fromResult.value,
+        to: toResult.value,
+      });
+    } catch (error) {
+      if (error instanceof HistoryQueryValidationError) {
+        return reply.code(400).send(invalidQuery(error.issues));
+      }
+      throw error;
+    }
+  });
+
   app.get("/api/history/days/:date", async (request, reply) => {
     const session = await resolveGuestSession(request, { deviceService, guestSessionService });
     if (!session.ok) {
