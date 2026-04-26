@@ -9,6 +9,7 @@ import { createDeviceService } from "./services/device.js";
 import { createFoodLoggingService } from "./services/food-logging.js";
 import { createSummaryService } from "./services/summary.js";
 import { createDaySnapshotService } from "./services/day-snapshot.js";
+import { createHistoryQueryService } from "./services/history-query.js";
 import { createChatService } from "./services/chat.js";
 import { createAssetService } from "./services/assets.js";
 import { createMealCorrectionService } from "./services/meal-correction.js";
@@ -20,6 +21,7 @@ import { registerDeviceRoutes } from "./routes/device.js";
 import { registerChatRoutes } from "./routes/chat.js";
 import { registerMealRoutes } from "./routes/meals.js";
 import { registerDaySnapshotRoutes } from "./routes/day-snapshot.js";
+import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
@@ -31,6 +33,7 @@ export interface AppServices {
   chatService: ReturnType<typeof createChatService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
+  historyQueryService: ReturnType<typeof createHistoryQueryService>;
   mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   summaryService: ReturnType<typeof createSummaryService>;
 }
@@ -83,6 +86,7 @@ export async function buildApp(opts: AppOptions) {
     secure: config.guestSessionCookieSecure,
   });
   const summaryService = createSummaryService(db);
+  const historyQueryService = createHistoryQueryService(db, { summaryService });
   const daySnapshotService = createDaySnapshotService({ summaryService, foodLoggingService });
   const chatService = createChatService(db);
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
@@ -94,6 +98,7 @@ export async function buildApp(opts: AppOptions) {
     chatService,
     foodLoggingService,
     guestSessionService,
+    historyQueryService,
     mealCorrectionService,
     summaryService,
   });
@@ -123,6 +128,7 @@ export async function buildApp(opts: AppOptions) {
   });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, publisher });
   registerDaySnapshotRoutes(app, { daySnapshotService, deviceService, guestSessionService });
+  registerHistoryRoutes(app, { historyQueryService, deviceService, guestSessionService });
   registerAssetRoutes(app, { assetService, deviceService, guestSessionService });
   registerObservabilityRoutes(app, { deviceService, guestSessionService });
   registerSSERoutes(app, { publisher, summaryService, deviceService, guestSessionService });

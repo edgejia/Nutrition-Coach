@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, or } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   mealRevisionItems,
@@ -44,6 +44,7 @@ export class HistoryQueryValidationError extends Error {
 interface HistoryMealHeader {
   id: string;
   loggedAt: string;
+  createdAt: string;
   currentRevisionId: string;
   currentRevisionNumber: number;
 }
@@ -57,6 +58,7 @@ interface HistoryDateRange {
 
 interface HistoryCursor {
   loggedAt: string;
+  createdAt: string;
   id: string;
 }
 
@@ -83,7 +85,7 @@ function resolveHistoryDateRange(from: string, to: string): HistoryDateRange {
 
   if (fromDate.getTime() > toDate.getTime()) {
     throw new HistoryQueryValidationError([
-      { field: "to", message: "to must be on or after from" },
+      { field: "from", message: "from must be on or before to" },
     ]);
   }
 
@@ -93,7 +95,10 @@ function resolveHistoryDateRange(from: string, to: string): HistoryDateRange {
 }
 
 export function encodeHistoryCursor(cursor: HistoryCursor): string {
-  return Buffer.from(JSON.stringify({ v: 1, loggedAt: cursor.loggedAt, id: cursor.id }), "utf8").toString("base64url");
+  return Buffer.from(
+    JSON.stringify({ v: 1, loggedAt: cursor.loggedAt, createdAt: cursor.createdAt, id: cursor.id }),
+    "utf8",
+  ).toString("base64url");
 }
 
 function invalidCursor(): HistoryQueryValidationError {
@@ -110,23 +115,26 @@ export function decodeHistoryCursor(value: string): HistoryCursor {
       typeof decoded !== "object" ||
       !("v" in decoded) ||
       !("loggedAt" in decoded) ||
+      !("createdAt" in decoded) ||
       !("id" in decoded)
     ) {
       throw invalidCursor();
     }
 
-    const cursor = decoded as { v: unknown; loggedAt: unknown; id: unknown };
+    const cursor = decoded as { v: unknown; loggedAt: unknown; createdAt: unknown; id: unknown };
     if (
       cursor.v !== 1 ||
       typeof cursor.loggedAt !== "string" ||
       cursor.loggedAt.length === 0 ||
+      typeof cursor.createdAt !== "string" ||
+      cursor.createdAt.length === 0 ||
       typeof cursor.id !== "string" ||
       cursor.id.length === 0
     ) {
       throw invalidCursor();
     }
 
-    return { loggedAt: cursor.loggedAt, id: cursor.id };
+    return { loggedAt: cursor.loggedAt, createdAt: cursor.createdAt, id: cursor.id };
   } catch (error) {
     if (error instanceof HistoryQueryValidationError) {
       throw error;
@@ -251,7 +259,12 @@ export function createHistoryQueryService(
             lt(mealTransactions.loggedAt, cursor.loggedAt),
             and(
               eq(mealTransactions.loggedAt, cursor.loggedAt),
-              lt(mealTransactions.id, cursor.id),
+              lt(mealTransactions.createdAt, cursor.createdAt),
+            ),
+            and(
+              eq(mealTransactions.loggedAt, cursor.loggedAt),
+              eq(mealTransactions.createdAt, cursor.createdAt),
+              gt(mealTransactions.id, cursor.id),
             ),
           )
         : undefined;
@@ -274,12 +287,13 @@ export function createHistoryQueryService(
         .select({
           id: mealTransactions.id,
           loggedAt: mealTransactions.loggedAt,
+          createdAt: mealTransactions.createdAt,
           currentRevisionId: mealTransactions.currentRevisionId,
           currentRevisionNumber: mealTransactions.currentRevisionNumber,
         })
         .from(mealTransactions)
         .where(whereFilter)
-        .orderBy(desc(mealTransactions.loggedAt), desc(mealTransactions.id))
+        .orderBy(desc(mealTransactions.loggedAt), desc(mealTransactions.createdAt), asc(mealTransactions.id))
         .limit(fetchLimit);
 
       const returnedHeaders = headers.slice(0, args.limit);
@@ -287,7 +301,11 @@ export function createHistoryQueryService(
       const lastReturned = returnedHeaders.at(-1);
       const nextCursor =
         headers.length > args.limit && lastReturned
-          ? encodeHistoryCursor({ loggedAt: lastReturned.loggedAt, id: lastReturned.id })
+          ? encodeHistoryCursor({
+              loggedAt: lastReturned.loggedAt,
+              createdAt: lastReturned.createdAt,
+              id: lastReturned.id,
+            })
           : null;
 
       return { meals, nextCursor };
