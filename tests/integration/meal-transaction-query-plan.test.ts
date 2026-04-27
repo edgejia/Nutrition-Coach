@@ -113,7 +113,7 @@ describe("Meal transaction query plan contracts", () => {
       sqlite,
       `
         SELECT id, logged_at, created_at, current_revision_id, current_revision_number
-        FROM meal_transactions
+        FROM meal_transactions INDEXED BY meal_tx_active_device_logged_created_id_idx
         WHERE device_id = ? AND deleted_at IS NULL AND logged_at >= ? AND logged_at < ?
         ORDER BY logged_at DESC, created_at DESC, id ASC
         LIMIT ?
@@ -126,6 +126,9 @@ describe("Meal transaction query plan contracts", () => {
   });
 
   it("uses active transaction and revision-item indexes for history search", () => {
+    // Food-name substring search uses LIKE '%q%', so a normal B-tree food_name
+    // index would not protect this query. Phase 29 guards the owner/date
+    // narrowing and current-revision item join; FTS remains future search work.
     const details = explainQueryPlan(
       sqlite,
       `
@@ -179,7 +182,7 @@ describe("Meal transaction query plan contracts", () => {
           meal_revision_items.protein,
           meal_revision_items.carbs,
           meal_revision_items.fat
-        FROM meal_transactions
+        FROM meal_transactions INDEXED BY meal_tx_active_device_logged_created_id_idx
         INNER JOIN meal_revisions
           ON meal_transactions.current_revision_id = meal_revisions.id
         INNER JOIN meal_revision_items

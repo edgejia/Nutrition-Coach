@@ -77,6 +77,9 @@ export const mealTransactions = sqliteTable(
     index("meal_tx_active_device_logged_at_idx")
       .on(table.deviceId, table.loggedAt)
       .where(sql`${table.deletedAt} is null`),
+    index("meal_tx_active_device_logged_created_id_idx")
+      .on(table.deviceId, table.loggedAt, table.createdAt, table.id)
+      .where(sql`${table.deletedAt} is null`),
     index("meal_tx_device_id_id_idx").on(table.deviceId, table.id),
   ],
 );
