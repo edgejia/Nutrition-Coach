@@ -634,8 +634,8 @@
           "name": "meal_tx_active_device_logged_created_id_idx",
           "columns": [
             "device_id",
-            "logged_at",
-            "created_at",
+            "\"logged_at\" desc",
+            "\"created_at\" desc",
             "id"
           ],
           "isUnique": false,
@@ -855,6 +855,17 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {}
+    "indexes": {
+      "meal_tx_active_device_logged_created_id_idx": {
+        "columns": {
+          "\"logged_at\" desc": {
+            "isExpression": true
+          },
+          "\"created_at\" desc": {
+            "isExpression": true
+          }
+        }
+      }
+    }
   }
 }

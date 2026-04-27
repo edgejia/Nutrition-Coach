@@ -15,6 +15,7 @@ interface QueryPlanRow {
 const MEAL_TRANSACTIONS_SCAN = "SCAN meal_transactions";
 const ASSET_REFERENCES_SCAN = "SCAN asset_references";
 const ACTIVE_HISTORY_ORDERING_INDEX = "meal_tx_active_device_logged_created_id_idx";
+const ACTIVE_DEVICE_LOGGED_AT_INDEX = "meal_tx_active_device_logged_at_idx";
 const REVISION_ITEM_POSITION_INDEX = "meal_rev_items_revision_position_uq";
 
 describe("Meal transaction query plan contracts", () => {
@@ -113,7 +114,7 @@ describe("Meal transaction query plan contracts", () => {
       sqlite,
       `
         SELECT id, logged_at, created_at, current_revision_id, current_revision_number
-        FROM meal_transactions INDEXED BY meal_tx_active_device_logged_created_id_idx
+        FROM meal_transactions
         WHERE device_id = ? AND deleted_at IS NULL AND logged_at >= ? AND logged_at < ?
         ORDER BY logged_at DESC, created_at DESC, id ASC
         LIMIT ?
@@ -182,7 +183,7 @@ describe("Meal transaction query plan contracts", () => {
           meal_revision_items.protein,
           meal_revision_items.carbs,
           meal_revision_items.fat
-        FROM meal_transactions INDEXED BY meal_tx_active_device_logged_created_id_idx
+        FROM meal_transactions
         INNER JOIN meal_revisions
           ON meal_transactions.current_revision_id = meal_revisions.id
         INNER JOIN meal_revision_items
@@ -195,7 +196,7 @@ describe("Meal transaction query plan contracts", () => {
       ["device-query-plan", "2026-04-19T00:00:00.000Z", "2026-04-20T00:00:00.000Z"],
     );
 
-    assertHasIndex(details, ACTIVE_HISTORY_ORDERING_INDEX);
+    assertHasIndex(details, ACTIVE_DEVICE_LOGGED_AT_INDEX);
     assertHasIndex(details, REVISION_ITEM_POSITION_INDEX);
     assertNoFullTableScan(details, MEAL_TRANSACTIONS_SCAN);
   });
