@@ -287,6 +287,35 @@ describe("History search API", () => {
     assert.deepEqual(deletedBody, { results: [], nextCursor: null });
   });
 
+  it("GET /api/history/search returns safe parent asset projection", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+    const assetMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T11:00:00.000Z",
+      imagePath: "asset:asset-search",
+      items: [
+        { foodName: "Asset Chicken", calories: 410, protein: 36, carbs: 30, fat: 14 },
+        { foodName: "Asset Rice", calories: 260, protein: 5, carbs: 58, fat: 1 },
+      ],
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/history/search?q=Asset%20Chicken&from=2026-03-25&to=2026-03-25",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { results: HistorySearchResult[]; nextCursor: string | null };
+    assert.equal(body.nextCursor, null);
+    assert.equal(body.results[0]?.meal.id, assetMeal.id);
+    assert.equal(body.results[0]?.item.name, "Asset Chicken");
+    assert.deepEqual(body.results[0]?.meal.asset, {
+      imageAssetId: "asset-search",
+      imageUrl: "/api/assets/asset-search",
+    });
+    assertNoUnsafeHistoryFields(body);
+  });
+
   it("GET /api/history/search applies flat nutrition bounds to parent meal totals", async () => {
     const boundedMeal = await seedNutritionBoundMeal();
 
