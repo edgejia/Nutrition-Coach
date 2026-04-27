@@ -14,6 +14,8 @@ interface QueryPlanRow {
 
 const MEAL_TRANSACTIONS_SCAN = "SCAN meal_transactions";
 const ASSET_REFERENCES_SCAN = "SCAN asset_references";
+const ACTIVE_HISTORY_ORDERING_INDEX = "meal_tx_active_device_logged_created_id_idx";
+const REVISION_ITEM_POSITION_INDEX = "meal_rev_items_revision_position_uq";
 
 describe("Meal transaction query plan contracts", () => {
   let tempRoot: string;
@@ -105,6 +107,95 @@ describe("Meal transaction query plan contracts", () => {
     assertHasIndex(details, "asset_refs_asset_id_idx");
     assertNoFullTableScan(details, ASSET_REFERENCES_SCAN);
   });
+
+  it("uses the active history ordering index for history meals pagination", () => {
+    const details = explainQueryPlan(
+      sqlite,
+      `
+        SELECT id, logged_at, created_at, current_revision_id, current_revision_number
+        FROM meal_transactions
+        WHERE device_id = ? AND deleted_at IS NULL AND logged_at >= ? AND logged_at < ?
+        ORDER BY logged_at DESC, created_at DESC, id ASC
+        LIMIT ?
+      `,
+      ["device-query-plan", "2026-04-19T00:00:00.000Z", "2026-04-20T00:00:00.000Z", 11],
+    );
+
+    assertHasIndex(details, ACTIVE_HISTORY_ORDERING_INDEX);
+    assertNoFullTableScan(details, MEAL_TRANSACTIONS_SCAN);
+  });
+
+  it("uses active transaction and revision-item indexes for history search", () => {
+    const details = explainQueryPlan(
+      sqlite,
+      `
+        SELECT
+          meal_transactions.id,
+          meal_transactions.logged_at,
+          meal_transactions.created_at,
+          meal_transactions.current_revision_id,
+          meal_transactions.current_revision_number,
+          meal_revision_items.position,
+          meal_revision_items.food_name
+        FROM meal_transactions
+        INNER JOIN meal_revisions
+          ON meal_transactions.current_revision_id = meal_revisions.id
+        INNER JOIN meal_revision_items
+          ON meal_transactions.current_revision_id = meal_revision_items.revision_id
+        WHERE meal_transactions.device_id = ?
+          AND meal_transactions.deleted_at IS NULL
+          AND meal_transactions.logged_at >= ?
+          AND meal_transactions.logged_at < ?
+          AND lower(meal_revision_items.food_name) LIKE lower(?)
+        ORDER BY
+          meal_transactions.logged_at DESC,
+          meal_transactions.created_at DESC,
+          meal_transactions.id ASC,
+          meal_revision_items.position ASC
+        LIMIT ?
+      `,
+      [
+        "device-query-plan",
+        "2026-04-19T00:00:00.000Z",
+        "2026-04-20T00:00:00.000Z",
+        "%chicken%",
+        11,
+      ],
+    );
+
+    assertHasIndex(details, ACTIVE_HISTORY_ORDERING_INDEX);
+    assertHasIndex(details, REVISION_ITEM_POSITION_INDEX);
+    assertNoFullTableScan(details, MEAL_TRANSACTIONS_SCAN);
+  });
+
+  it("uses active transaction and revision-item indexes for history trends", () => {
+    const details = explainQueryPlan(
+      sqlite,
+      `
+        SELECT
+          meal_transactions.id,
+          meal_transactions.logged_at,
+          meal_revision_items.calories,
+          meal_revision_items.protein,
+          meal_revision_items.carbs,
+          meal_revision_items.fat
+        FROM meal_transactions
+        INNER JOIN meal_revisions
+          ON meal_transactions.current_revision_id = meal_revisions.id
+        INNER JOIN meal_revision_items
+          ON meal_revision_items.revision_id = meal_revisions.id
+        WHERE meal_transactions.device_id = ?
+          AND meal_transactions.deleted_at IS NULL
+          AND meal_transactions.logged_at >= ?
+          AND meal_transactions.logged_at < ?
+      `,
+      ["device-query-plan", "2026-04-19T00:00:00.000Z", "2026-04-20T00:00:00.000Z"],
+    );
+
+    assertHasIndex(details, ACTIVE_HISTORY_ORDERING_INDEX);
+    assertHasIndex(details, REVISION_ITEM_POSITION_INDEX);
+    assertNoFullTableScan(details, MEAL_TRANSACTIONS_SCAN);
+  });
 });
 
 function explainQueryPlan(
@@ -187,6 +278,15 @@ function seedRepresentativeData(sqlite: Database.Database) {
       '2026-04-19T04:00:00.000Z'
     ),
     (
+      'tx-active-late-create',
+      'device-query-plan',
+      '2026-04-19T04:00:00.000Z',
+      'tx-active-late-create:r1',
+      1,
+      NULL,
+      '2026-04-19T04:30:00.000Z'
+    ),
+    (
       'tx-deleted',
       'device-query-plan',
       '2026-04-19T05:00:00.000Z',
@@ -213,6 +313,15 @@ function seedRepresentativeData(sqlite: Database.Database) {
       'asset-query-plan',
       'create',
       '2026-04-19T04:00:00.000Z'
+    ),
+    (
+      'tx-active-late-create:r1',
+      'tx-active-late-create',
+      1,
+      NULL,
+      'asset-query-plan',
+      'create',
+      '2026-04-19T04:30:00.000Z'
     ),
     (
       'tx-deleted:r1',
@@ -250,6 +359,15 @@ function seedRepresentativeData(sqlite: Database.Database) {
       32,
       74,
       20
+    ),
+    (
+      'tx-active-late-create:r1',
+      0,
+      'Chicken salad',
+      460,
+      42,
+      18,
+      21
     ),
     (
       'tx-deleted:r1',
