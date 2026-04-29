@@ -1,8 +1,22 @@
 // server/services/chat.ts
-import { eq, and, asc, desc, sql } from "drizzle-orm";
-import { assetReferences, assets, chatMessages } from "../db/schema.js";
+import { eq, and, asc, desc, gte, inArray, lte, sql } from "drizzle-orm";
+import {
+  assetReferences,
+  assets,
+  chatMessages,
+  mealRevisionItems,
+  mealTransactions,
+} from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
 import { parseAssetRef } from "./assets.js";
+
+interface LoggedMealReceipt {
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
 
 function formatToolSummary(toolName: string, content: string): string {
   if (toolName === "log_food") {
@@ -23,7 +37,72 @@ function formatToolSummary(toolName: string, content: string): string {
   return `[系統工具已完成：${content}]`;
 }
 
+function buildGroupedFoodName(items: Array<{ foodName: string }>) {
+  if (items.length === 1) {
+    return items[0]!.foodName;
+  }
+
+  if (items.length === 2) {
+    return `${items[0]!.foodName}、${items[1]!.foodName}`;
+  }
+
+  return `${items[0]!.foodName}、${items[1]!.foodName} 等${items.length}項`;
+}
+
 export function createChatService(db: AppDatabase) {
+  async function getLoggedMealReceiptForTurn(
+    deviceId: string,
+    turnStartAt: string | undefined,
+    assistantCreatedAt: string,
+  ): Promise<LoggedMealReceipt | undefined> {
+    const createdAfter = turnStartAt ?? assistantCreatedAt;
+    const transactions = await db
+      .select({
+        id: mealTransactions.id,
+        currentRevisionId: mealTransactions.currentRevisionId,
+        createdAt: mealTransactions.createdAt,
+      })
+      .from(mealTransactions)
+      .where(
+        and(
+          eq(mealTransactions.deviceId, deviceId),
+          gte(mealTransactions.createdAt, createdAfter),
+          lte(mealTransactions.createdAt, assistantCreatedAt),
+        ),
+      )
+      .orderBy(desc(mealTransactions.createdAt), desc(mealTransactions.id))
+      .limit(1);
+
+    const revisionId = transactions[0]?.currentRevisionId;
+    if (!revisionId) {
+      return undefined;
+    }
+
+    const items = await db
+      .select({
+        foodName: mealRevisionItems.foodName,
+        calories: mealRevisionItems.calories,
+        protein: mealRevisionItems.protein,
+        carbs: mealRevisionItems.carbs,
+        fat: mealRevisionItems.fat,
+      })
+      .from(mealRevisionItems)
+      .where(inArray(mealRevisionItems.revisionId, [revisionId]))
+      .orderBy(asc(mealRevisionItems.position));
+
+    if (items.length === 0) {
+      return undefined;
+    }
+
+    return {
+      foodName: buildGroupedFoodName(items),
+      calories: items.reduce((sum, item) => sum + item.calories, 0),
+      protein: items.reduce((sum, item) => sum + item.protein, 0),
+      carbs: items.reduce((sum, item) => sum + item.carbs, 0),
+      fat: items.reduce((sum, item) => sum + item.fat, 0),
+    };
+  }
+
   return {
     async saveMessage(
       deviceId: string,
@@ -107,14 +186,18 @@ export function createChatService(db: AppDatabase) {
         imagePath: string | null;
         createdAt: string;
         didLogMeal?: boolean;
+        loggedMeal?: LoggedMealReceipt;
       }> = [];
 
       let pendingDidLogMeal = false;
+      let pendingTurnStartAt: string | undefined;
+      let latestUserCreatedAt: string | undefined;
 
       for (const row of chronological) {
         if (row.role === "tool") {
           if (row.toolName === "log_food") {
             pendingDidLogMeal = true;
+            pendingTurnStartAt = latestUserCreatedAt;
           }
           continue;
         }
@@ -124,13 +207,23 @@ export function createChatService(db: AppDatabase) {
         }
 
         if (row.role === "assistant") {
-          projected.push({ ...row, didLogMeal: pendingDidLogMeal || undefined });
+          const loggedMeal = pendingDidLogMeal
+            ? await getLoggedMealReceiptForTurn(deviceId, pendingTurnStartAt, row.createdAt)
+            : undefined;
+          projected.push({
+            ...row,
+            didLogMeal: pendingDidLogMeal || undefined,
+            ...(loggedMeal ? { loggedMeal } : {}),
+          });
           pendingDidLogMeal = false;
+          pendingTurnStartAt = undefined;
           continue;
         }
 
         projected.push(row);
         pendingDidLogMeal = false;
+        pendingTurnStartAt = undefined;
+        latestUserCreatedAt = row.createdAt;
       }
 
       return projected.slice(-limit);

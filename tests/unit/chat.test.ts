@@ -4,15 +4,18 @@ import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createChatService } from "../../server/services/chat.js";
+import { createFoodLoggingService } from "../../server/services/food-logging.js";
 
 describe("ChatService", () => {
   let chatService: ReturnType<typeof createChatService>;
+  let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let deviceId: string;
 
   beforeEach(async () => {
     const db = createDb(":memory:");
     const deviceService = createDeviceService(db);
     chatService = createChatService(db);
+    foodLoggingService = createFoodLoggingService(db);
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
   });
 
@@ -41,6 +44,31 @@ describe("ChatService", () => {
     const history = await chatService.getHistory(deviceId, 50);
     assert.equal(history.length, 1);
     assert.equal(history[0].imagePath, "asset:lunch-image");
+  });
+
+  it("projects loggedMeal receipt for persisted meal-logging assistant replies", async () => {
+    await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "asset:lunch-image" });
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "煎肉餅", calories: 420, protein: 24, carbs: 6, fat: 32 },
+        { foodName: "漢堡排", calories: 100, protein: 8, carbs: 2, fat: 6 },
+      ],
+      imagePath: "asset:lunch-image",
+    });
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    await chatService.saveMessage(deviceId, "assistant", "已先依照片做保守估算並完成記錄。");
+
+    const history = await chatService.getHistory(deviceId, 50);
+    const assistant = history.find((message) => message.role === "assistant");
+
+    assert.equal(assistant?.didLogMeal, true);
+    assert.deepEqual(assistant?.loggedMeal, {
+      foodName: "煎肉餅、漢堡排",
+      calories: 520,
+      protein: 32,
+      carbs: 8,
+      fat: 38,
+    });
   });
 
   it("loads compressed history for LLM context", async () => {

@@ -724,6 +724,13 @@ describe("Chat API", () => {
     const historyBody = historyRes.json();
     const assistantMessage = historyBody.messages.find((message: { role: string }) => message.role === "assistant");
     assert.equal(assistantMessage.didLogMeal, true);
+    assert.deepEqual(assistantMessage.loggedMeal, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0,
+      carbs: 25,
+      fat: 0.3,
+    });
   });
 
   it("POST /api/chat without SSE accept header still returns JSON", async () => {
