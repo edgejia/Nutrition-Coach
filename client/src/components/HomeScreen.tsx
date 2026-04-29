@@ -6,6 +6,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { Dashboard } from "./Dashboard.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { ChatEntryBar } from "./ChatEntryBar.js";
+import { SettingsIcon } from "./SketchIcons.js";
 import type { ActiveScreen, PendingHomeChatDraft, CoachCTAIntent, CoachCTATaskOption } from "../types.js";
 
 export function getDisplayedCoachAdvice(
@@ -63,12 +64,12 @@ function HomeHeader() {
     <div className="screen-bar flex items-center justify-between px-5 pb-2 pt-4">
       <div>
         <span
-          className="text-sm font-bold"
-          style={{ fontFamily: "var(--font-display)", color: "var(--text)" }}
+          className="sk-heading text-lg"
+          style={{ color: "var(--sk-ink)" }}
         >
           ChatGPT-Gain ProTein
         </span>
-        <div className="text-xs" style={{ color: "var(--text-2)" }}>
+        <div className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
           {dateStr}
         </div>
       </div>
@@ -81,9 +82,9 @@ function HomeHeader() {
           disabled={sending}
           className="rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-40"
           style={{
-            background: "var(--bg-raised)",
-            border: "1px solid var(--border-med)",
-            color: "var(--text-2)",
+            background: "var(--sk-paper)",
+            border: "1.25px solid var(--sk-ink)",
+            color: "var(--sk-ink)",
           }}
         >
           聊天
@@ -96,12 +97,13 @@ function HomeHeader() {
           disabled={sending}
           className="flex h-7 w-7 items-center justify-center rounded-lg text-sm disabled:opacity-40"
           style={{
-            background: "var(--bg-raised)",
-            border: "1px solid var(--border-med)",
-            color: "var(--text-2)",
+            background: "var(--sk-paper)",
+            border: "1.25px solid var(--sk-ink)",
+            color: "var(--sk-ink)",
           }}
+          aria-label="設定"
         >
-          ⚙
+          <SettingsIcon size={16} />
         </button>
       </div>
     </div>
@@ -134,13 +136,13 @@ export function HomeScreen() {
   }
 
   return (
-    <div className="screen-shell">
+    <div className="screen-shell sk-screen">
       <HomeHeader />
       <main className="screen-scroll-with-input space-y-3 px-4 pt-2">
         <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
         <Dashboard onTap={() => { if (!sending) openSecondaryScreen("dayDetail", "history"); }} />
       </main>
-      <div className="screen-bottom-bar border-t px-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
+      <div className="screen-bottom-bar border-t px-3" style={{ background: "var(--sk-paper)", borderColor: "var(--sk-ink)" }}>
         <ChatEntryBar onSend={handleSend} disabled={sending} />
       </div>
     </div>
