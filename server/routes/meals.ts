@@ -16,6 +16,54 @@ interface Deps {
   publisher: RealtimePublisher;
 }
 
+interface MealUpdateBody {
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  imageAssetId?: string | null;
+}
+
+function isFiniteNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function parseMealUpdateBody(body: unknown): MealUpdateBody | null {
+  if (!body || typeof body !== "object") {
+    return null;
+  }
+
+  const input = body as Record<string, unknown>;
+  const foodName = typeof input.foodName === "string" ? input.foodName.trim() : "";
+  const imageAssetId =
+    typeof input.imageAssetId === "string" && input.imageAssetId.trim()
+      ? input.imageAssetId.trim()
+      : null;
+
+  if (!foodName) {
+    return null;
+  }
+
+  if (
+    !isFiniteNonNegativeNumber(input.calories) ||
+    !isFiniteNonNegativeNumber(input.protein) ||
+    !isFiniteNonNegativeNumber(input.carbs) ||
+    !isFiniteNonNegativeNumber(input.fat)
+  ) {
+    return null;
+  }
+
+  return {
+    foodName,
+    calories: input.calories,
+    protein: input.protein,
+    carbs: input.carbs,
+    fat: input.fat,
+    imageAssetId,
+  };
+}
+
 export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
   const { foodLoggingService, summaryService, deviceService, guestSessionService, publisher } = deps;
 
@@ -52,6 +100,74 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
           loggedAt: meal.loggedAt,
         };
       }),
+    };
+  });
+
+  app.patch("/api/meals/:id", async (request, reply) => {
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    const { deviceId } = session;
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
+    }
+
+    const update = parseMealUpdateBody(request.body);
+    if (!update) {
+      return reply.code(400).send({ error: "Invalid meal update" });
+    }
+
+    const { id } = request.params as { id: string };
+    let affectedDateKey: string;
+    let updatedMeal: Awaited<ReturnType<typeof foodLoggingService.updateMeal>>;
+    try {
+      updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
+        imagePath: update.imageAssetId ? `asset:${update.imageAssetId}` : null,
+        items: [
+          {
+            foodName: update.foodName,
+            calories: update.calories,
+            protein: update.protein,
+            carbs: update.carbs,
+            fat: update.fat,
+          },
+        ],
+      });
+      affectedDateKey = formatLocalDate(new Date(updatedMeal.loggedAt));
+    } catch (error) {
+      if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
+        return reply.code(404).send({ error: "Meal not found" });
+      }
+      throw error;
+    }
+
+    const dailySummary = await summaryService.getDailySummary(
+      deviceId,
+      new Date(`${affectedDateKey}T12:00:00`),
+    );
+    if (dailySummary.date === formatLocalDate(currentAppDate())) {
+      publisher.publishDailySummary(deviceId, dailySummary);
+    }
+
+    const imageAssetId = parseAssetRef(updatedMeal.imagePath);
+    return {
+      affectedDate: affectedDateKey,
+      dailySummary,
+      meal: {
+        id: updatedMeal.id,
+        foodName: updatedMeal.foodName,
+        calories: updatedMeal.calories,
+        protein: updatedMeal.protein,
+        carbs: updatedMeal.carbs,
+        fat: updatedMeal.fat,
+        imageAssetId,
+        imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+        loggedAt: updatedMeal.loggedAt,
+      },
     };
   });
 
