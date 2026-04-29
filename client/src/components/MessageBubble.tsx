@@ -14,6 +14,7 @@ function isImagePlaceholderContent(content: string): boolean {
 function hasCompleteLoggedMealReceipt(message: Message) {
   const receipt = message.loggedMeal;
   return Boolean(
+    message.didLogMeal === true &&
     receipt &&
     receipt.foodName.trim().length > 0 &&
     Number.isFinite(receipt.calories) &&

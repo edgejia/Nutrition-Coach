@@ -596,7 +596,7 @@ export function ChatPanel() {
 
   return (
     <div className="screen-shell sk-screen">
-      <div className="screen-bar px-5 pb-2 pt-4" style={{ borderBottom: "1.25px solid var(--sk-ink)" }}>
+      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1.25px solid var(--sk-ink)" }}>
         <button
           type="button"
           onClick={handleBackToHome}

@@ -14,6 +14,7 @@ describe("chat bubble source contract", () => {
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
 
     assert.match(bubble, /已記錄 ✓/);
+    assert.match(bubble, /message\.didLogMeal === true/);
     assert.match(bubble, /loggedMeal/);
     assert.match(bubble, /熱量/);
     assert.match(bubble, /蛋白/);
