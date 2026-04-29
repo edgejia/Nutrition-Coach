@@ -54,7 +54,8 @@ describe("navigation shell source contract", () => {
     assert.match(sources.mainLayout, /BottomTabBar/);
     assert.match(sources.mainLayout, /secondaryScreen/);
     assert.match(sources.mainLayout, /HistoryScreen/);
-    assert.match(sources.mainLayout, /Day Detail shell/);
+    assert.match(sources.mainLayout, /HistoryDayDetailScreen/);
+    assert.doesNotMatch(sources.mainLayout, /Day Detail shell/);
     assert.match(sources.mainLayout, /Meal Edit shell/);
     assert.doesNotMatch(sources.mainLayout, /BrowserRouter/);
     assert.doesNotMatch(sources.mainLayout, /activeScreen === "summary"/);

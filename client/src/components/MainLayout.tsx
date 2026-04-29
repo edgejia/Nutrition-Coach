@@ -7,6 +7,7 @@ import { BottomTabBar } from "./BottomTabBar.js";
 import { HomeScreen } from "./HomeScreen.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { GoalSettings } from "./GoalSettings.js";
+import { HistoryDayDetailScreen } from "./HistoryDayDetailScreen.js";
 import { HistoryScreen } from "./HistoryScreen.js";
 import { SecondaryHeader, SketchScreen } from "./SketchPrimitives.js";
 
@@ -143,9 +144,7 @@ export function MainLayout() {
       {activeScreen === "history" && <HistoryScreen />}
       <BottomTabBar />
       {secondaryScreen?.screen === "settings" && <GoalSettings onClose={closeSecondaryScreen} />}
-      {secondaryScreen?.screen === "dayDetail" && (
-        <SecondaryPlaceholder title="Day Detail" backLabel="‹ 歷史" body="Day Detail shell" onBack={closeSecondaryScreen} />
-      )}
+      {secondaryScreen?.screen === "dayDetail" && <HistoryDayDetailScreen onBack={closeSecondaryScreen} />}
       {secondaryScreen?.screen === "mealEdit" && (
         <SecondaryPlaceholder title="Meal Edit" backLabel="‹ 對話" body="Meal Edit shell" onBack={closeSecondaryScreen} />
       )}
