@@ -59,9 +59,12 @@ describe("onboarding stepper UI", () => {
     }));
 
     assert.match(html, /你的目標是什麼/);
+    assert.match(html, /sk-/);
     assert.match(html, /請選擇有效的目標/);
     assert.match(html, /減脂 · FAT LOSS/);
     assert.match(html, /增肌 · MUSCLE GAIN/);
+    assert.doesNotMatch(html, /ChatInput/);
+    assert.doesNotMatch(html, /ChatEntryBar/);
     assert.doesNotMatch(html, /連線失敗/);
     assert.doesNotMatch(html, /重試/);
   });
@@ -119,5 +122,6 @@ describe("onboarding stepper UI", () => {
 
     assert.match(html, /連線失敗/);
     assert.match(html, /重試/);
+    assert.match(html, /sk-(?:btn|box)/);
   });
 });

@@ -54,6 +54,7 @@ describe("onboarding step components", () => {
     }));
 
     assert.match(html, /value="31"/);
+    assert.match(html, /sk-/);
     assert.match(html, /value="165"/);
     assert.match(html, /value="58"/);
     assert.match(html, /年齡需介於 10-120/);
@@ -76,6 +77,7 @@ describe("onboarding step components", () => {
     }));
 
     assert.match(html, /value="乳糖不耐"/);
+    assert.match(html, /sk-/);
     assert.match(html, /請選擇有效的活動量/);
     assert.match(html, /過敏資訊最多 300 字/);
     assert.equal(html.match(/aria-pressed="true"/g)?.length, 2);
