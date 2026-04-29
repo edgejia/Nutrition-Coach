@@ -4,6 +4,7 @@ import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService } from "../services/summary.js";
 import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
+import type { createAssetService } from "../services/assets.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
@@ -13,6 +14,7 @@ interface Deps {
   summaryService: ReturnType<typeof createSummaryService>;
   deviceService: ReturnType<typeof createDeviceService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
+  assetService: ReturnType<typeof createAssetService>;
   publisher: RealtimePublisher;
 }
 
@@ -65,7 +67,7 @@ function parseMealUpdateBody(body: unknown): MealUpdateBody | null {
 }
 
 export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
-  const { foodLoggingService, summaryService, deviceService, guestSessionService, publisher } = deps;
+  const { foodLoggingService, summaryService, deviceService, guestSessionService, assetService, publisher } = deps;
 
   app.get("/api/meals", async (request, reply) => {
     const session = await resolveGuestSession(request, { deviceService, guestSessionService });
@@ -125,6 +127,13 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     let affectedDateKey: string;
     let updatedMeal: Awaited<ReturnType<typeof foodLoggingService.updateMeal>>;
     try {
+      if (update.imageAssetId) {
+        const ownedAsset = await assetService.getOwnedAsset(deviceId, update.imageAssetId);
+        if (!ownedAsset) {
+          return reply.code(400).send({ error: "Invalid meal image asset" });
+        }
+      }
+
       updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
         imagePath: update.imageAssetId ? `asset:${update.imageAssetId}` : null,
         items: [

@@ -126,7 +126,7 @@ export async function buildApp(opts: AppOptions) {
     publisher,
     uploadsDir: opts.uploadsDir,
   });
-  registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, publisher });
+  registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, assetService, publisher });
   registerDaySnapshotRoutes(app, { daySnapshotService, deviceService, guestSessionService });
   registerHistoryRoutes(app, { historyQueryService, deviceService, guestSessionService });
   registerAssetRoutes(app, { assetService, deviceService, guestSessionService });

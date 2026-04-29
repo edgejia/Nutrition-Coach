@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteMeal, getDaySnapshot } from "../api.js";
+import { deleteMeal, getDaySnapshot, getMeals } from "../api.js";
 import {
   browseSummaryCalendarMonth,
   closeSummaryCalendar,
@@ -385,6 +385,9 @@ export function SummaryDetailScreenPresentation(props: SummaryDetailScreenPresen
 export function SummaryDetailScreen() {
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
+  const setDailySummary = useStore((s) => s.setDailySummary);
+  const setMeals = useStore((s) => s.setMeals);
+  const recordMealMutation = useStore((s) => s.recordMealMutation);
   const liveSummary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
   const sending = useStore((s) => s.sending);
@@ -504,7 +507,13 @@ export function SummaryDetailScreen() {
     );
 
     try {
-      await deleteMeal(mealId);
+      const { affectedDate, dailySummary } = await deleteMeal(mealId);
+      recordMealMutation(affectedDate);
+      if (dailySummary.date === todayKey) {
+        setDailySummary(dailySummary);
+        const { meals } = await getMeals({ refreshReason: "meal_mutation" });
+        setMeals(meals);
+      }
       const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
       setSnapshot(refreshedSnapshot);
     } catch (err) {

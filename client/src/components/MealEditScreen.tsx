@@ -35,13 +35,19 @@ function createDraft(payload: MealEditPayload): DraftState {
 
 function parseDraft(draft: DraftState) {
   const foodName = draft.foodName.trim();
-  const calories = Number(draft.calories);
-  const protein = Number(draft.protein);
-  const carbs = Number(draft.carbs);
-  const fat = Number(draft.fat);
-  const values = [calories, protein, carbs, fat];
+  const rawValues = [draft.calories, draft.protein, draft.carbs, draft.fat];
+  if (!foodName || rawValues.some((value) => value.trim() === "")) {
+    return null;
+  }
 
-  if (!foodName || values.some((value) => !Number.isFinite(value) || value < 0)) {
+  const [calories, protein, carbs, fat] = rawValues.map(Number);
+  if (
+    calories === undefined ||
+    protein === undefined ||
+    carbs === undefined ||
+    fat === undefined ||
+    [calories, protein, carbs, fat].some((value) => !Number.isFinite(value) || value < 0)
+  ) {
     return null;
   }
 

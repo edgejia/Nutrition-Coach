@@ -2,7 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -17,6 +17,7 @@ describe("Meals API", () => {
   let mockLLM: MockLLMProvider;
   let address: string;
   let deviceId: string;
+  let otherDeviceId: string;
   let deviceCookieHeader: string;
   let otherCookieHeader: string;
   let tempRoot: string;
@@ -48,6 +49,7 @@ describe("Meals API", () => {
     deviceCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
 
     const otherDeviceRes = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "muscle_gain" } });
+    otherDeviceId = otherDeviceRes.json().deviceId;
     otherCookieHeader = toCookieHeader(otherDeviceRes.headers["set-cookie"]);
     address = await app.listen({ port: 0 });
   });
@@ -77,6 +79,17 @@ describe("Meals API", () => {
       method: "POST",
       headers: { cookie: deviceCookieHeader },
       body: form,
+    });
+  }
+
+  async function createOwnedAsset(ownerDeviceId: string, fileName: string) {
+    assert.ok(services, "expected onServicesReady to capture app services");
+    const stagedPath = path.join(tempRoot, fileName);
+    await writeFile(stagedPath, "fake image");
+    return services.assetService.createAsset(ownerDeviceId, {
+      stagedPath,
+      mimeType: "image/png",
+      originalFilename: fileName,
     });
   }
 
@@ -300,6 +313,38 @@ describe("Meals API", () => {
 
     assert.equal(updateRes.statusCode, 400);
     assert.deepEqual(updateRes.json(), { error: "Invalid meal update" });
+  });
+
+  it("PATCH /api/meals/:id rejects nonexistent or foreign image assets", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+    const foreignAsset = await createOwnedAsset(otherDeviceId, "foreign.png");
+
+    for (const imageAssetId of ["missing-asset", foreignAsset.id]) {
+      const updateRes = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId,
+        },
+      });
+
+      assert.equal(updateRes.statusCode, 400);
+      assert.deepEqual(updateRes.json(), { error: "Invalid meal image asset" });
+    }
   });
 
   it("DELETE /api/meals/:id recomputes the deleted transaction's affected local day", async () => {

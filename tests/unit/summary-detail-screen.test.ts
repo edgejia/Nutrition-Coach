@@ -1,5 +1,7 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -27,6 +29,10 @@ const {
   SummaryDetailScreen,
   SummaryDetailScreenPresentation,
 } = await import("../../client/src/components/SummaryDetailScreen.js");
+const summaryDetailSource = await readFile(
+  fileURLToPath(new URL("../../client/src/components/SummaryDetailScreen.tsx", import.meta.url)),
+  "utf8",
+);
 
 function formatSummaryDateLabel(dateKey: string) {
   const [year, month, day] = dateKey.split("-").map(Number);
@@ -138,5 +144,12 @@ describe("SummaryDetailScreen disclosure shell", () => {
     assert.match(html, /aria-expanded="false"/);
     assert.match(html, /歷史快照/);
     assert.match(html, /今天的即時更新不會覆蓋這個畫面。/);
+  });
+
+  it("refreshes shared today state after Summary Detail meal deletion", () => {
+    assert.match(summaryDetailSource, /recordMealMutation\(affectedDate\)/);
+    assert.match(summaryDetailSource, /setDailySummary\(dailySummary\)/);
+    assert.match(summaryDetailSource, /getMeals\(\{ refreshReason: "meal_mutation" \}\)/);
+    assert.match(summaryDetailSource, /setMeals\(meals\)/);
   });
 });

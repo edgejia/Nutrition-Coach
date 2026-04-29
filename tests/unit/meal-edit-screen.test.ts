@@ -47,4 +47,9 @@ describe("Meal Edit source contract", () => {
       assert.doesNotMatch(source, escapedPattern(rejected));
     }
   });
+
+  it("rejects blank nutrition fields before numeric conversion", () => {
+    assert.match(source, /rawValues\.some\(\(value\) => value\.trim\(\) === ""\)/);
+    assert.match(source, /const \[calories, protein, carbs, fat\] = rawValues\.map\(Number\)/);
+  });
 });
