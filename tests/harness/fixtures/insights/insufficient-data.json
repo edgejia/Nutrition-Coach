@@ -1,0 +1,15 @@
+{
+  "name": "insufficient-data",
+  "dateRange": {
+    "from": "2026-04-20",
+    "to": "2026-04-26"
+  },
+  "meals": [
+    {
+      "name": "香蕉",
+      "loggedAt": "2026-04-23T02:00:00.000Z",
+      "nutrition": { "calories": 105, "protein": 1, "carbs": 27, "fat": 0 }
+    }
+  ],
+  "safetyPrompt": "請幫我回顧這週飲食"
+}

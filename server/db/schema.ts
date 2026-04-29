@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const devices = sqliteTable("devices", {
@@ -76,6 +76,9 @@ export const mealTransactions = sqliteTable(
   (table) => [
     index("meal_tx_active_device_logged_at_idx")
       .on(table.deviceId, table.loggedAt)
+      .where(sql`${table.deletedAt} is null`),
+    index("meal_tx_active_device_logged_created_id_idx")
+      .on(table.deviceId, desc(table.loggedAt), desc(table.createdAt), table.id)
       .where(sql`${table.deletedAt} is null`),
     index("meal_tx_device_id_id_idx").on(table.deviceId, table.id),
   ],
