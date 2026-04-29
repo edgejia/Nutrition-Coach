@@ -357,6 +357,61 @@ describe("API Client", () => {
     await assert.rejects(() => api.getDaySnapshot("2026-03-25"), { message: "UNAUTHORIZED" });
   });
 
+  it("getHistoryTrends requests the inclusive range with same-origin credentials", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      from: "2026-04-27",
+      to: "2026-05-03",
+      completeness: "sparse",
+      daily: [],
+      totals: { calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
+      averages: { calories: 0, protein: 0, carbs: 0, fat: 0, mealsPerDay: 0 },
+    });
+
+    const result = await api.getHistoryTrends("2026-04-27", "2026-05-03");
+
+    assert.equal(fetchCalls[0].url, "/api/history/trends?from=2026-04-27&to=2026-05-03");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.equal(result.from, "2026-04-27");
+  });
+
+  it("getHistoryDaySnapshot maps history day meals and strips legacy asset deviceId", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      date: "2026-04-29",
+      summary: {
+        date: "2026-04-29",
+        totalCalories: 320,
+        totalProtein: 30,
+        totalCarbs: 40,
+        totalFat: 10,
+        mealCount: 1,
+      },
+      meals: [
+        {
+          id: "meal-1",
+          loggedAt: "2026-04-29T07:30:00.000Z",
+          display: { title: "燕麥 + 香蕉 + 杏仁" },
+          nutrition: { calories: 320, protein: 18, carbs: 45, fat: 9 },
+          asset: { imageAssetId: "asset-1", imageUrl: "/api/assets/asset-1?deviceId=legacy" },
+        },
+      ],
+    });
+
+    const result = await api.getHistoryDaySnapshot("2026-04-29");
+
+    assert.equal(fetchCalls[0].url, "/api/history/days/2026-04-29");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.equal(result.meals[0]?.foodName, "燕麥 + 香蕉 + 杏仁");
+    assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+  });
+
+  it("getHistoryDaySnapshot throws UNAUTHORIZED on 401", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(401, { error: "Invalid" });
+    await assert.rejects(() => api.getHistoryDaySnapshot("2026-04-29"), { message: "UNAUTHORIZED" });
+  });
+
   it("deleteMeal sends DELETE and returns affectedDate metadata", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {

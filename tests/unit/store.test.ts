@@ -234,6 +234,26 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-1");
   });
 
+  it("opens Day Detail with payload without clearing pending chat draft", () => {
+    useStore.getState().setActiveScreen("history");
+    useStore.getState().setPendingHomeChatDraft({ id: "draft-2", text: "午餐吃了沙拉", status: "staged" });
+    useStore.getState().openDayDetail(
+      { dateKey: "2026-04-29", targetMealId: "meal-2", label: "history-snapshot" },
+      "history",
+    );
+
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "dayDetail",
+      origin: "history",
+      payload: { dateKey: "2026-04-29", targetMealId: "meal-2", label: "history-snapshot" },
+    });
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-2");
+
+    useStore.getState().closeSecondaryScreen();
+    assert.equal(useStore.getState().secondaryScreen, null);
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-2");
+  });
+
   it("stores and clears the pending home chat draft", () => {
     useStore.getState().setPendingHomeChatDraft({ id: "draft-1", text: "晚餐吃了鮭魚", status: "staged" });
     assert.deepEqual(useStore.getState().pendingHomeChatDraft, {

@@ -4,6 +4,7 @@ import type {
   ActiveScreen,
   DailyTargets,
   DailySummary,
+  DayDetailPayload,
   MealEntry,
   Message,
   LoggedMealReceipt,
@@ -47,6 +48,7 @@ interface AppState {
   sending: boolean;
   setActiveScreen: (screen: ActiveScreen) => void;
   openSecondaryScreen: (screen: SecondaryScreen, origin?: PrimaryTab) => void;
+  openDayDetail: (payload: DayDetailPayload, origin?: PrimaryTab) => void;
   closeSecondaryScreen: () => void;
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
@@ -98,6 +100,14 @@ export const useStore = create<AppState>((set, get) => ({
       secondaryScreen: {
         screen,
         origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
+      },
+    })),
+  openDayDetail: (payload, origin) =>
+    set((state) => ({
+      secondaryScreen: {
+        screen: "dayDetail",
+        origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
+        payload,
       },
     })),
   closeSecondaryScreen: () => set({ secondaryScreen: null }),

@@ -2,6 +2,8 @@ import type {
   ChatReply,
   DailySummary,
   DailyTargets,
+  HistoryDaySnapshot,
+  HistoryTrendResponse,
   IntakeData,
   IntakeResult,
   IntakeValidationIssue,
@@ -382,6 +384,55 @@ export async function getDaySnapshot(
       ...meal,
       imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
     })),
+  };
+}
+
+interface HistoryMealDto {
+  id: string;
+  loggedAt: string;
+  display?: { title?: string };
+  nutrition?: { calories?: number; protein?: number; carbs?: number; fat?: number };
+  asset?: { imageAssetId?: string | null; imageUrl?: string | null };
+  foodName?: string;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
+}
+
+function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
+  return {
+    id: meal.id,
+    foodName: meal.display?.title ?? meal.foodName ?? "未命名餐點",
+    calories: meal.nutrition?.calories ?? meal.calories ?? 0,
+    protein: meal.nutrition?.protein ?? meal.protein ?? 0,
+    carbs: meal.nutrition?.carbs ?? meal.carbs ?? 0,
+    fat: meal.nutrition?.fat ?? meal.fat ?? 0,
+    imageAssetId: meal.asset?.imageAssetId ?? meal.imageAssetId ?? null,
+    imageUrl: withAuthorizedAssetUrl(meal.asset?.imageUrl ?? meal.imageUrl ?? null) ?? null,
+    loggedAt: meal.loggedAt,
+  };
+}
+
+export async function getHistoryTrends(from: string, to: string): Promise<HistoryTrendResponse> {
+  const params = new URLSearchParams({ from, to });
+  const res = await fetch(`/api/history/trends?${params.toString()}`, { credentials: "same-origin" });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error("Failed to load history trends");
+  return res.json() as Promise<HistoryTrendResponse>;
+}
+
+export async function getHistoryDaySnapshot(dateKey: string): Promise<HistoryDaySnapshot> {
+  const res = await fetch(`/api/history/days/${encodeURIComponent(dateKey)}`, { credentials: "same-origin" });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error("Failed to load history day snapshot");
+  const body = await res.json() as { date: string; summary: DailySummary; meals: HistoryMealDto[] };
+  return {
+    date: body.date,
+    summary: body.summary,
+    meals: body.meals.map(normalizeHistoryMeal),
   };
 }
 

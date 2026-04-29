@@ -1,6 +1,14 @@
 export type PrimaryTab = "home" | "chat" | "history";
 export type SecondaryScreen = "settings" | "dayDetail" | "mealEdit";
-export type SecondaryScreenState = { screen: SecondaryScreen; origin: PrimaryTab } | null;
+export interface DayDetailPayload {
+  dateKey: string;
+  targetMealId?: string;
+  label?: "today-live" | "history-snapshot";
+}
+export type SecondaryScreenState =
+  | { screen: "dayDetail"; origin: PrimaryTab; payload?: DayDetailPayload }
+  | { screen: "settings" | "mealEdit"; origin: PrimaryTab }
+  | null;
 export type ActiveScreen = PrimaryTab | "onboarding";
 
 export interface DailyTargets {
@@ -45,6 +53,42 @@ export interface MealEntry {
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt: string;
+}
+
+export interface HistoryTrendBucket {
+  date: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  mealCount: number;
+}
+
+export interface HistoryTrendResponse {
+  from: string;
+  to: string;
+  completeness: "empty" | "sparse" | "complete";
+  daily: HistoryTrendBucket[];
+  totals: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    mealCount: number;
+  };
+  averages: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    mealsPerDay: number;
+  };
+}
+
+export interface HistoryDaySnapshot {
+  date: string;
+  summary: DailySummary;
+  meals: MealEntry[];
 }
 
 export interface Message {
