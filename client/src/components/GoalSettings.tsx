@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store.js";
 import { updateGoals } from "../api.js";
+import { SecondaryHeader } from "./SketchPrimitives.js";
 
 const FIELD_LABELS: Record<string, string> = {
   calories: "熱量 (kcal)",
@@ -40,21 +41,20 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: "rgba(0,0,0,0.7)" }}>
+    <div className="absolute inset-0 z-50 flex flex-col" style={{ background: "var(--sk-paper)" }}>
+      <SecondaryHeader title="設定" backLabel="‹ 首頁" onBack={onClose} />
       <div
-        className="w-full max-w-sm space-y-5 rounded-2xl p-6"
+        className="screen-scroll-safe w-full space-y-5 p-5"
         style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-med)",
+          background: "var(--sk-paper)",
         }}
       >
         <h2
           style={{
-            fontFamily: "var(--font-display)",
+            fontFamily: "var(--sk-font-hand)",
             fontSize: 22,
             fontWeight: 800,
-            color: "var(--text)",
-            letterSpacing: "-0.02em",
+            color: "var(--sk-ink)",
           }}
         >
           自訂每日目標
@@ -64,7 +64,7 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
           <label key={key} className="block">
             <span
               className="mb-1.5 block text-xs font-semibold uppercase tracking-wider"
-              style={{ color: "var(--text-2)" }}
+              style={{ color: "var(--sk-ink-soft)" }}
             >
               {FIELD_LABELS[key]}
             </span>
@@ -74,10 +74,10 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
               onChange={(e) => setForm({ ...form, [key]: Number(e.target.value) })}
               className="w-full rounded-xl px-3 py-2.5 text-sm focus:outline-none"
               style={{
-                background: "var(--bg-raised)",
-                border: "1px solid var(--border-med)",
-                color: "var(--text)",
-                fontFamily: "var(--font-body)",
+                background: "var(--sk-paper)",
+                border: "1.25px solid var(--sk-ink)",
+                color: "var(--sk-ink)",
+                fontFamily: "var(--sk-font-mono)",
               }}
             />
           </label>
@@ -88,9 +88,9 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
             onClick={onClose}
             className="flex-1 rounded-xl py-2.5 text-sm font-semibold"
             style={{
-              background: "var(--bg-raised)",
-              border: "1px solid var(--border-med)",
-              color: "var(--text-2)",
+              background: "var(--sk-paper)",
+              border: "1.25px solid var(--sk-ink)",
+              color: "var(--sk-ink-soft)",
             }}
           >
             取消
@@ -100,8 +100,9 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
             disabled={saving}
             className="flex-1 rounded-xl py-2.5 text-sm font-bold text-white disabled:opacity-50"
             style={{
-              background: "var(--orange)",
-              boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
+              background: "var(--sk-accent)",
+              border: "1.25px solid var(--sk-ink)",
+              boxShadow: "1px 1.5px 0 var(--sk-ink)",
             }}
           >
             {saving ? "儲存中..." : "儲存"}

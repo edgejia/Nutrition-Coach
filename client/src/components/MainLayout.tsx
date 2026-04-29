@@ -7,6 +7,7 @@ import { BottomTabBar } from "./BottomTabBar.js";
 import { HomeScreen } from "./HomeScreen.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { GoalSettings } from "./GoalSettings.js";
+import { HistoryScreen } from "./HistoryScreen.js";
 import { SecondaryHeader, SketchScreen } from "./SketchPrimitives.js";
 
 function useVisualViewportShellVars() {
@@ -63,33 +64,15 @@ function useVisualViewportShellVars() {
   }, []);
 }
 
-function HistoryScreen() {
-  return (
-    <SketchScreen>
-      <header className="sk-screen-header">
-        <span aria-hidden="true" />
-        <h1 className="sk-heading text-xl">歷史</h1>
-        <span aria-hidden="true" />
-      </header>
-      <main className="sk-screen-content screen-scroll-safe p-4">
-        <div className="sk-box-soft p-4">
-          <h2 className="sk-heading text-lg">還沒有資料</h2>
-          <p className="sk-body mt-2" style={{ color: "var(--sk-ink-soft)" }}>
-            History content lands in Phase 34
-          </p>
-        </div>
-      </main>
-    </SketchScreen>
-  );
-}
-
 function SecondaryPlaceholder({
   title,
   backLabel,
+  body,
   onBack,
 }: {
   title: string;
   backLabel: string;
+  body: string;
   onBack: () => void;
 }) {
   return (
@@ -99,7 +82,7 @@ function SecondaryPlaceholder({
         <main className="sk-screen-content screen-scroll-safe p-4">
           <div className="sk-box-dashed p-4">
             <p className="sk-body" style={{ color: "var(--sk-ink-soft)" }}>
-              {title} shell lands in a later v1.8 phase.
+              {body}
             </p>
           </div>
         </main>
@@ -161,10 +144,10 @@ export function MainLayout() {
       <BottomTabBar />
       {secondaryScreen?.screen === "settings" && <GoalSettings onClose={closeSecondaryScreen} />}
       {secondaryScreen?.screen === "dayDetail" && (
-        <SecondaryPlaceholder title="Day Detail" backLabel="‹ 歷史" onBack={closeSecondaryScreen} />
+        <SecondaryPlaceholder title="Day Detail" backLabel="‹ 歷史" body="Day Detail shell" onBack={closeSecondaryScreen} />
       )}
       {secondaryScreen?.screen === "mealEdit" && (
-        <SecondaryPlaceholder title="Meal Edit" backLabel="‹ 對話" onBack={closeSecondaryScreen} />
+        <SecondaryPlaceholder title="Meal Edit" backLabel="‹ 對話" body="Meal Edit shell" onBack={closeSecondaryScreen} />
       )}
     </div>
   );
