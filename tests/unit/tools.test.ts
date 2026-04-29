@@ -149,6 +149,79 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     );
   });
 
+  it("accepts grouped log_food calls that include aggregate totals and serving metadata", async () => {
+    const groupedCall: ToolCall = {
+      id: "call_grouped_with_totals",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "高蛋白粉、肌酸、燕麥片、低糖豆漿",
+          calories: 390,
+          protein: 34,
+          carbs: 34,
+          fat: 9,
+          items: [
+            {
+              food_name: "高蛋白粉",
+              quantity_g: 30,
+              calories: 120,
+              protein: 24,
+              carbs: 3,
+              fat: 2,
+            },
+            {
+              food_name: "肌酸",
+              quantity_g: 5,
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+            {
+              food_name: "燕麥片",
+              amount: "20g",
+              calories: 76,
+              protein: 2.5,
+              carbs: 13,
+              fat: 1.5,
+            },
+            {
+              food_name: "低糖豆漿",
+              quantity_ml: 400,
+              calories: 194,
+              protein: 14,
+              carbs: 18,
+              fat: 5.5,
+            },
+          ],
+          protein_sources: [
+            { name: "高蛋白粉", protein: 24, is_primary: true, certainty: "clear" },
+            { name: "低糖豆漿", protein: 14, is_primary: true, certainty: "clear" },
+            { name: "燕麥片", protein: 2.5, is_primary: false, certainty: "clear" },
+            { name: "肌酸", protein: 0, is_primary: false, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(groupedCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "高蛋白粉、肌酸 等4項");
+    assert.equal(result.loggedMeal.calories, 390);
+    assert.equal(result.loggedMeal.protein, 38);
+    assert.equal(result.loggedMeal.carbs, 34);
+    assert.equal(result.loggedMeal.fat, 9);
+    assert.deepEqual(
+      result.loggedMeal.countedSources.map((source) => source.name),
+      ["高蛋白粉", "低糖豆漿"],
+    );
+  });
+
   it("Test 1c: mixed lunchbox persists trusted protein from protein_sources instead of raw proposal", async () => {
     const lunchboxCall: ToolCall = {
       id: "call_lunchbox",
