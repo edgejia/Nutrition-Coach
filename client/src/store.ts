@@ -5,7 +5,9 @@ import type {
   DailyTargets,
   DailySummary,
   DayDetailPayload,
+  MealEditPayload,
   MealEntry,
+  MealMutationNotice,
   Message,
   LoggedMealReceipt,
   PendingHomeChatDraft,
@@ -43,16 +45,19 @@ interface AppState {
   coachAdvice: string | null;
   meals: MealEntry[];
   pendingHomeChatDraft: PendingHomeChatDraft | null;
+  lastMealMutation: MealMutationNotice | null;
   showSettings: boolean;
   secondaryScreen: SecondaryScreenState;
   sending: boolean;
   setActiveScreen: (screen: ActiveScreen) => void;
-  openSecondaryScreen: (screen: SecondaryScreen, origin?: PrimaryTab) => void;
+  openSecondaryScreen: (screen: Exclude<SecondaryScreen, "mealEdit">, origin?: PrimaryTab) => void;
   openDayDetail: (payload: DayDetailPayload, origin?: PrimaryTab) => void;
+  openMealEdit: (payload: MealEditPayload, origin?: PrimaryTab) => void;
   closeSecondaryScreen: () => void;
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
   removeMeal: (mealId: string) => void;
+  recordMealMutation: (affectedDate: string) => void;
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void;
   clearPendingHomeChatDraft: () => void;
   setShowSettings: (showSettings: boolean) => void;
@@ -89,6 +94,7 @@ export const useStore = create<AppState>((set, get) => ({
   coachAdvice: null,
   meals: [],
   pendingHomeChatDraft: null,
+  lastMealMutation: null,
   showSettings: false,
   secondaryScreen: null,
   sending: false,
@@ -110,10 +116,25 @@ export const useStore = create<AppState>((set, get) => ({
         payload,
       },
     })),
+  openMealEdit: (payload, origin) =>
+    set((state) => ({
+      secondaryScreen: {
+        screen: "mealEdit",
+        origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
+        payload,
+      },
+    })),
   closeSecondaryScreen: () => set({ secondaryScreen: null }),
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
   setMeals: (meals) => set({ meals }),
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
+  recordMealMutation: (affectedDate) =>
+    set((state) => ({
+      lastMealMutation: {
+        affectedDate,
+        nonce: (state.lastMealMutation?.nonce ?? 0) + 1,
+      },
+    })),
   setPendingHomeChatDraft: (pendingHomeChatDraft) => set({ pendingHomeChatDraft }),
   clearPendingHomeChatDraft: () => set({ pendingHomeChatDraft: null }),
   setShowSettings: (showSettings) => set({ showSettings }),
@@ -303,6 +324,7 @@ export const useStore = create<AppState>((set, get) => ({
       coachAdvice: null,
       meals: [],
       pendingHomeChatDraft: null,
+      lastMealMutation: null,
       showSettings: false,
       secondaryScreen: null,
       sending: false,

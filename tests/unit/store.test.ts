@@ -225,9 +225,9 @@ describe("AppStore", () => {
   it("tracks secondary screen stack without clearing tab state", () => {
     useStore.getState().setActiveScreen("chat");
     useStore.getState().setPendingHomeChatDraft({ id: "draft-1", text: "晚餐吃了鮭魚", status: "staged" });
-    useStore.getState().openSecondaryScreen("mealEdit");
+    useStore.getState().openSecondaryScreen("settings");
 
-    assert.deepEqual(useStore.getState().secondaryScreen, { screen: "mealEdit", origin: "chat" });
+    assert.deepEqual(useStore.getState().secondaryScreen, { screen: "settings", origin: "chat" });
     assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-1");
 
     useStore.getState().closeSecondaryScreen();

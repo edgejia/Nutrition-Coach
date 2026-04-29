@@ -12,6 +12,8 @@ import type {
   Message,
   CoachCTAIntentId,
   CoachCTAOptionId,
+  UpdateMealInput,
+  UpdateMealResponse,
 } from "./types.js";
 import { getEarliestValidationStep } from "./lib/onboarding-intake-validation.js";
 
@@ -449,4 +451,23 @@ export async function deleteMeal(mealId: string): Promise<DeleteMealResponse> {
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to delete meal");
   return res.json() as Promise<DeleteMealResponse>;
+}
+
+export async function updateMeal(mealId: string, input: UpdateMealInput): Promise<UpdateMealResponse> {
+  const res = await fetch(`/api/meals/${encodeURIComponent(mealId)}`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error("Failed to update meal");
+  const body = await res.json() as UpdateMealResponse;
+  return {
+    ...body,
+    meal: {
+      ...body.meal,
+      imageUrl: withAuthorizedAssetUrl(body.meal.imageUrl) ?? null,
+    },
+  };
 }

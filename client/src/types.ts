@@ -5,9 +5,22 @@ export interface DayDetailPayload {
   targetMealId?: string;
   label?: "today-live" | "history-snapshot";
 }
+export interface MealEditPayload {
+  mealId: string;
+  dateKey: string;
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
+  loggedAt?: string;
+}
 export type SecondaryScreenState =
   | { screen: "dayDetail"; origin: PrimaryTab; payload?: DayDetailPayload }
-  | { screen: "settings" | "mealEdit"; origin: PrimaryTab }
+  | { screen: "settings"; origin: PrimaryTab }
+  | { screen: "mealEdit"; origin: PrimaryTab; payload: MealEditPayload }
   | null;
 export type ActiveScreen = PrimaryTab | "onboarding";
 
@@ -53,6 +66,26 @@ export interface MealEntry {
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt: string;
+}
+
+export interface UpdateMealInput {
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  imageAssetId?: string | null;
+}
+
+export interface UpdateMealResponse {
+  affectedDate: string;
+  dailySummary: DailySummary;
+  meal: MealEntry;
+}
+
+export interface MealMutationNotice {
+  affectedDate: string;
+  nonce: number;
 }
 
 export interface HistoryTrendBucket {
