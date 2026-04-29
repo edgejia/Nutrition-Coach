@@ -355,10 +355,10 @@ export async function sendMessageStream(
   }
 }
 
-export async function getMeals(options?: { refreshReason?: "day_rollover" }): Promise<{ meals: MealEntry[] }> {
+export async function getMeals(options?: { refreshReason?: "day_rollover" | "meal_mutation" }): Promise<{ meals: MealEntry[] }> {
   const headers: Record<string, string> = {};
-  if (options?.refreshReason === "day_rollover") {
-    headers["X-Refresh-Reason"] = "day_rollover";
+  if (options?.refreshReason) {
+    headers["X-Refresh-Reason"] = options.refreshReason;
   }
 
   const res = await fetch("/api/meals", { credentials: "same-origin", headers });
