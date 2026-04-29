@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { sendMessageStream, loadHistory } from "../api.js";
+import { formatLocalDate } from "../lib/time.js";
 import {
   type FollowMode,
   type LiveUpdateSnapshot,
@@ -15,7 +16,7 @@ import {
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
 import { DashboardMiniBar } from "./DashboardMiniBar.js";
-import type { PendingHomeChatDraft } from "../types.js";
+import type { MealEntry, PendingHomeChatDraft } from "../types.js";
 
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
 const ENTRY_SETTLE_WINDOW_MS = 240;
@@ -23,6 +24,10 @@ const UPLOAD_SETTLE_WINDOW_MS = 320;
 
 function getNowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function formatMealCalories(calories: number) {
+  return `${Math.round(calories).toLocaleString("en-US")} kcal`;
 }
 
 export function ChatPanel() {
@@ -42,6 +47,8 @@ export function ChatPanel() {
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
+  const meals = useStore((s) => s.meals);
+  const openMealEdit = useStore((s) => s.openMealEdit);
   const contentRef = useRef<HTMLDivElement>(null);
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
   const hadMessagesOnEntryRef = useRef(messages.length > 0);
@@ -60,6 +67,8 @@ export function ChatPanel() {
   const [followMode, setFollowMode] = useState<FollowMode>("attached");
 
   const isChatLocked = sending;
+  const todayKey = formatLocalDate(new Date());
+  const todayMeals = meals.filter((meal) => formatLocalDate(new Date(meal.loggedAt)) === todayKey);
   const showJumpToLatest = shouldShowJumpToLatest({
     mode: followMode,
     hasMessages: messages.length > 0,
@@ -594,6 +603,21 @@ export function ChatPanel() {
     setActiveScreen("home");
   }
 
+  function handleOpenMealEdit(meal: MealEntry) {
+    openMealEdit({
+      mealId: meal.id,
+      dateKey: formatLocalDate(new Date(meal.loggedAt)),
+      foodName: meal.foodName,
+      calories: meal.calories,
+      protein: meal.protein,
+      carbs: meal.carbs,
+      fat: meal.fat,
+      imageAssetId: meal.imageAssetId ?? null,
+      imageUrl: meal.imageUrl ?? null,
+      loggedAt: meal.loggedAt,
+    }, "chat");
+  }
+
   return (
     <div className="screen-shell sk-screen">
       <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1.25px solid var(--sk-ink)" }}>
@@ -627,6 +651,39 @@ export function ChatPanel() {
           對話
         </h2>
         <DashboardMiniBar />
+        {todayMeals.length > 0 && (
+          <div className="mt-3 rounded-2xl px-3 py-2" style={{ background: "var(--sk-paper-soft)", border: "1px solid var(--sk-line-soft)" }}>
+            <div className="mb-1 flex items-center justify-between gap-3">
+              <span className="text-[11px] font-extrabold tracking-normal" style={{ color: "var(--sk-ink-soft)" }}>
+                今日餐點
+              </span>
+              <span className="text-[11px] font-semibold" style={{ color: "var(--sk-ink-faint)" }}>
+                {todayMeals.length} 筆
+              </span>
+            </div>
+            <div className="grid gap-1">
+              {todayMeals.slice(0, 3).map((meal) => (
+                <button
+                  key={meal.id}
+                  type="button"
+                  onClick={() => handleOpenMealEdit(meal)}
+                  disabled={isChatLocked}
+                  className="flex min-h-9 w-full items-center justify-between gap-3 rounded-xl px-2 py-1.5 text-left text-xs disabled:opacity-40"
+                  style={{
+                    background: "var(--sk-paper)",
+                    border: "1px solid var(--sk-line-soft)",
+                    color: "var(--sk-ink)",
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate font-semibold">{meal.foodName}</span>
+                  <span className="shrink-0 font-bold" style={{ color: "var(--sk-ink-soft)" }}>
+                    {formatMealCalories(meal.calories)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       {pendingHomeChatDraft?.status === "failed" && (
         <div
