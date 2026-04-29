@@ -33,10 +33,34 @@ describe("chat bubble source contract", () => {
   });
 
   it("does not wire logged meal bubbles to the Meal Edit secondary screen", async () => {
-    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
     const legacyActionTarget = 'openSecondaryScreen("mealEdit", "chat")';
 
-    assert.doesNotMatch(chatPanel, /onOpenSummary=\{m\.didLogMeal/);
-    assert.doesNotMatch(chatPanel, new RegExp(legacyActionTarget.replace(/[()"]/g, "\\$&")));
+    assert.doesNotMatch(bubble, /openMealEdit/);
+    assert.doesNotMatch(bubble, new RegExp(legacyActionTarget.replace(/[()"]/g, "\\$&")));
+    assert.doesNotMatch(bubble, /onOpenSummary=\{m\.didLogMeal/);
+  });
+
+  it("allows ChatPanel to open Meal Edit only from a neutral current-day review surface", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+
+    assert.match(chatPanel, /openMealEdit/);
+    assert.match(chatPanel, /今日餐點/);
+    assert.match(chatPanel, /openMealEdit\(\s*\{/);
+    assert.match(chatPanel, /}\s*,\s*"chat"\s*\)/);
+    for (const field of [
+      "mealId",
+      "dateKey",
+      "foodName",
+      "calories",
+      "protein",
+      "carbs",
+      "fat",
+      "imageAssetId",
+      "imageUrl",
+      "loggedAt",
+    ]) {
+      assert.match(chatPanel, new RegExp(`${field}:`));
+    }
   });
 });
