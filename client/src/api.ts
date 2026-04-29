@@ -76,6 +76,44 @@ async function readJsonSafe(res: Response): Promise<unknown> {
   }
 }
 
+function getResponseErrorMessage(body: unknown): string | null {
+  if (!isRecord(body) || typeof body.error !== "string" || !body.error.trim()) {
+    return null;
+  }
+
+  return body.error;
+}
+
+function getImageExtension(filename: string): string {
+  const match = /\.([a-z0-9]+)$/i.exec(filename.trim());
+  return match?.[1]?.toLowerCase() ?? "";
+}
+
+function getSupportedImageMimeType(file: File): "image/jpeg" | "image/png" | "image/webp" | null {
+  if (file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp") {
+    return file.type;
+  }
+
+  const extension = getImageExtension(file.name);
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "png") return "image/png";
+  if (extension === "webp") return "image/webp";
+  return null;
+}
+
+function normalizeSupportedImageFile(file: File): File {
+  const mimeType = getSupportedImageMimeType(file);
+  if (!mimeType) {
+    throw new Error("目前只支援 JPG、PNG、WebP 照片。若是 iPhone HEIC，請先轉成 JPG 後再上傳。");
+  }
+
+  if (file.type === mimeType) {
+    return file;
+  }
+
+  return new File([file], file.name, { type: mimeType, lastModified: file.lastModified });
+}
+
 type HomeCtaClientEventPayload =
   | { event: "home_cta_intent_selected"; intent: CoachCTAIntentId }
   | { event: "home_cta_option_sent"; intent: CoachCTAIntentId; promptKey: CoachCTAOptionId };
@@ -222,7 +260,7 @@ export async function sendMessage(message: string, image?: File): Promise<ChatRe
   const form = new FormData();
   form.append("message", message);
   if (image) {
-    form.append("image", image);
+    form.append("image", normalizeSupportedImageFile(image));
   }
   const res = await fetch("/api/chat", {
     method: "POST",
@@ -230,7 +268,10 @@ export async function sendMessage(message: string, image?: File): Promise<ChatRe
     body: form,
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) throw new Error("Failed to send message");
+  if (!res.ok) {
+    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    throw new Error(errorMessage ?? "Failed to send message");
+  }
   return res.json();
 }
 
@@ -269,7 +310,7 @@ export async function sendMessageStream(
   const form = new FormData();
   form.append("message", message);
   if (image) {
-    form.append("image", image);
+    form.append("image", normalizeSupportedImageFile(image));
   }
 
   const res = await fetch("/api/chat", {
@@ -280,7 +321,10 @@ export async function sendMessageStream(
   });
 
   if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) throw new Error("Failed to send message");
+  if (!res.ok) {
+    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    throw new Error(errorMessage ?? "Failed to send message");
+  }
 
   const reader = res.body?.getReader();
   if (!reader) {

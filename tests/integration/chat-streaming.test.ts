@@ -260,6 +260,22 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat returns readable validation error for unsupported upload types", async () => {
+    const form = new FormData();
+    form.append("message", "這是什麼食物");
+    form.append("image", new Blob(["not-heic"], { type: "image/heic" }), "food.heic");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Invalid image type. Allowed: jpeg, png, webp" });
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
   it("POST /api/chat stream includes event: chunk", async () => {
     mockLLM.queueChatStream(["直接", "回覆"]);
 

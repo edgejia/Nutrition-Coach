@@ -715,4 +715,51 @@ describe("sendMessageStream", () => {
       { message: "UNAUTHORIZED" },
     );
   });
+
+  it("surfaces server validation messages for rejected chat uploads", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(400, { error: "Invalid image type. Allowed: jpeg, png, webp" });
+
+    await assert.rejects(() => api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {},
+    }), { message: "Invalid image type. Allowed: jpeg, png, webp" });
+  });
+
+  it("rejects unsupported image types before sending chat uploads", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, ['event: done\ndata: {"didLogMeal":false}\n\n']);
+    const heic = new File(["not-real-heic"], "meal.heic", { type: "image/heic" });
+
+    await assert.rejects(() => api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {},
+    }, heic), { message: "目前只支援 JPG、PNG、WebP 照片。若是 iPhone HEIC，請先轉成 JPG 後再上傳。" });
+
+    assert.equal(fetchCalls.length, 0);
+  });
+
+  it("normalizes extension-only supported image files before chat upload", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, ['event: done\ndata: {"didLogMeal":false}\n\n']);
+    const jpeg = new File(["jpeg-bytes"], "meal.JPG", { type: "" });
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {},
+    }, jpeg);
+
+    const form = fetchCalls[0]?.init.body;
+    assert.ok(form instanceof FormData);
+    const uploaded = form.get("image");
+    assert.ok(uploaded instanceof File);
+    assert.equal(uploaded.type, "image/jpeg");
+    assert.equal(uploaded.name, "meal.JPG");
+  });
 });

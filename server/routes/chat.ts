@@ -551,6 +551,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const parseResult = await parseMultipartRequest(request, resolvedUploadsDir);
 
     if ("error" in parseResult) {
+      request.log.warn({ event: "chat_multipart_rejected", reason: parseResult.error }, "Chat multipart request rejected");
       return reply.code(parseResult.code).send({ error: parseResult.error });
     }
 

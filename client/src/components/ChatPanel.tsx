@@ -386,10 +386,13 @@ export function ChatPanel() {
         void recoverGuestSession();
         return;
       }
+      const errorMessage = err instanceof Error && err.message
+        ? err.message
+        : "抱歉，發生錯誤，請再試一次。";
       useStore.getState().setProvisionalBubble({
         id: bubbleId,
         statusLabel: "",
-        content: "抱歉，發生錯誤，請再試一次。",
+        content: errorMessage,
         isStreaming: false,
       });
       commitProvisionalBubble({ didLogMeal: false });
