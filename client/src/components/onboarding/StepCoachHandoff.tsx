@@ -1,3 +1,4 @@
+import { SketchBox, SketchButton, SketchPill, SketchSoftBox } from "../SketchPrimitives.js";
 import type { IntakeResult } from "../../types.js";
 
 interface Props {
@@ -11,32 +12,32 @@ interface Props {
 export function StepCoachHandoff({ loading, transportError, result, onStart, onRetry }: Props) {
   if (loading) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-8" style={{ background: "var(--bg)" }}>
-        <div className="mb-4 text-4xl">🏋️</div>
-        <h2 className="mb-2 text-xl font-bold" style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>
-          教練正在分析你的資料…
-        </h2>
-        <p className="text-sm" style={{ color: "var(--text-2)" }}>
-          根據你提供的數據，量身打造營養計畫
-        </p>
+      <div className="flex min-h-0 flex-1 flex-col justify-center p-4">
+        <SketchBox className="p-5 text-center">
+          <div className="mb-4 text-4xl">🏋️</div>
+          <h2 className="sk-heading mb-2 text-2xl">
+            教練正在分析你的資料…
+          </h2>
+          <p className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+            根據你提供的數據，量身打造營養計畫
+          </p>
+        </SketchBox>
       </div>
     );
   }
 
   if (transportError) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-8" style={{ background: "var(--bg)" }}>
-        <h2 className="mb-4 text-xl font-bold" style={{ color: "var(--text)" }}>
-          連線失敗
-        </h2>
-        <p className="mb-6 text-sm" style={{ color: "var(--text-2)" }}>{transportError}</p>
-        <button
-          onClick={onRetry}
-          className="rounded-xl px-8 py-3 text-sm font-bold"
-          style={{ background: "var(--orange)", color: "#000" }}
-        >
-          重試
-        </button>
+      <div className="flex min-h-0 flex-1 flex-col justify-center p-4">
+        <SketchBox className="p-5 text-center" role="alert" style={{ background: "var(--sk-accent-soft)" }}>
+          <h2 className="sk-heading mb-3 text-2xl">
+            連線失敗
+          </h2>
+          <p className="sk-body mb-5 text-sm" style={{ color: "var(--sk-ink-soft)" }}>{transportError}</p>
+          <SketchButton onClick={onRetry} variant="accent">
+            重試
+          </SketchButton>
+        </SketchBox>
       </div>
     );
   }
@@ -46,57 +47,53 @@ export function StepCoachHandoff({ loading, transportError, result, onStart, onR
   const { dailyTargets, coachExplanation } = result;
 
   return (
-    <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
-      <div className="mb-3 text-xs font-bold tracking-widest uppercase" style={{ color: "var(--orange)", letterSpacing: "0.2em" }}>
+    <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 p-4">
+      <SketchPill className="self-start">
         YOUR PLAN
-      </div>
-      <h2 className="mb-6 text-2xl font-bold" style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>
+      </SketchPill>
+      <h2 className="sk-heading text-2xl">
         你的專屬營養計畫
       </h2>
 
       {/* Targets Grid */}
-      <div className="mb-6 grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         {[
-          { label: "每日熱量", value: `${dailyTargets.calories}`, unit: "kcal", color: "var(--orange)" },
-          { label: "蛋白質", value: `${dailyTargets.protein}`, unit: "g", color: "var(--green)" },
-          { label: "碳水化合物", value: `${dailyTargets.carbs}`, unit: "g", color: "var(--blue)" },
-          { label: "脂肪", value: `${dailyTargets.fat}`, unit: "g", color: "var(--text-2)" },
-        ].map(({ label, value, unit, color }) => (
-          <div
+          { label: "每日熱量", value: `${dailyTargets.calories}`, unit: "kcal" },
+          { label: "蛋白質", value: `${dailyTargets.protein}`, unit: "g" },
+          { label: "碳水化合物", value: `${dailyTargets.carbs}`, unit: "g" },
+          { label: "脂肪", value: `${dailyTargets.fat}`, unit: "g" },
+        ].map(({ label, value, unit }) => (
+          <SketchSoftBox
             key={label}
-            className="rounded-xl p-4"
-            style={{ background: "var(--bg-raised)", border: "1px solid var(--border)" }}
+            className="p-4"
           >
-            <div className="mb-1 text-xs" style={{ color: "var(--text-2)" }}>{label}</div>
-            <div className="text-2xl font-bold" style={{ color, fontFamily: "var(--font-display)" }}>
+            <div className="sk-body mb-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>{label}</div>
+            <div className="sk-heading text-2xl">
               {value}
-              <span className="ml-1 text-xs font-normal" style={{ color: "var(--text-2)" }}>{unit}</span>
+              <span className="sk-body ml-1 text-xs font-normal" style={{ color: "var(--sk-ink-soft)" }}>{unit}</span>
             </div>
-          </div>
+          </SketchSoftBox>
         ))}
       </div>
 
       {/* Coach Explanation */}
-      <div
-        className="mb-8 rounded-xl p-5"
-        style={{ background: "var(--bg-raised)", border: "1px solid var(--border)" }}
-      >
-        <div className="mb-2 text-xs font-medium uppercase tracking-wide" style={{ color: "var(--orange)" }}>
+      <SketchBox className="p-5">
+        <div className="sk-body mb-2 text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-accent)" }}>
           教練說明
         </div>
-        <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+        <p className="sk-body text-sm leading-relaxed">
           {coachExplanation}
         </p>
-      </div>
+      </SketchBox>
 
       {/* CTA */}
-      <button
+      <SketchButton
         onClick={onStart}
-        className="w-full rounded-xl py-4 text-base font-bold"
-        style={{ background: "var(--orange)", color: "#000" }}
+        className="w-full py-4"
+        variant="accent"
       >
         開始記錄飲食
-      </button>
+      </SketchButton>
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { SketchBox, SketchButton, SketchPill } from "../SketchPrimitives.js";
+
 interface Props {
   onSelect: (goal: "fat_loss" | "muscle_gain") => void;
   error?: string;
@@ -5,74 +7,61 @@ interface Props {
 
 export function StepGoal({ onSelect, error }: Props) {
   return (
-    <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
-      <div className="mb-3 text-xs font-bold tracking-widest uppercase" style={{ color: "var(--orange)", letterSpacing: "0.2em" }}>
+    <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 p-4">
+      <SketchPill className="self-start">
         STEP 1 / 6
-      </div>
-      <h2 className="mb-2 text-2xl font-bold" style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>
+      </SketchPill>
+      <div>
+        <h2 className="sk-heading text-2xl">
         你的目標是什麼？
-      </h2>
-      <p className="mb-8 text-sm" style={{ color: "var(--text-2)" }}>
-        選擇一個主要方向，教練會根據這個目標為你規劃。
-      </p>
+        </h2>
+        <p className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+          選擇一個主要方向，教練會根據這個目標為你規劃。
+        </p>
+      </div>
 
       {error ? (
-        <div
-          className="mb-5 rounded-xl px-4 py-3"
-          role="alert"
-          style={{
-            background: "rgba(229,85,85,0.12)",
-            border: "1px solid rgba(229,85,85,0.45)",
-            color: "var(--text)",
-          }}
-        >
-          <div className="mb-1 text-xs font-bold uppercase tracking-wide" style={{ color: "var(--red)" }}>
+        <SketchBox className="p-4" role="alert" style={{ background: "var(--sk-accent-soft)" }}>
+          <div className="sk-body mb-1 text-xs font-bold uppercase tracking-wide" style={{ color: "var(--sk-accent)" }}>
             需要重新選擇
           </div>
-          <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+          <p className="sk-body text-sm font-semibold">
             {error}
           </p>
-        </div>
+        </SketchBox>
       ) : null}
 
       <div className="space-y-3">
-        <button
+        <SketchButton
           onClick={() => onSelect("fat_loss")}
-          className="flex w-full items-center justify-between rounded-xl p-5 text-left"
-          style={{
-            background: "linear-gradient(135deg, #0D1A0D, #0F2010)",
-            border: "1px solid rgba(76,184,122,0.25)",
-          }}
+          className="w-full justify-between rounded-lg px-5 py-4 text-left"
+          variant="accent"
         >
           <div>
-            <div className="mb-1 text-xl font-bold tracking-wide" style={{ fontFamily: "var(--font-display)", color: "var(--green)" }}>
+            <div className="sk-heading mb-1 text-xl">
               減脂 · FAT LOSS
             </div>
-            <div className="text-sm" style={{ color: "var(--text-2)" }}>
+            <div className="sk-body text-sm">
               降低體脂，維持肌肉量
             </div>
           </div>
-          <span style={{ color: "var(--green)", fontSize: 20 }}>→</span>
-        </button>
+          <span aria-hidden="true">→</span>
+        </SketchButton>
 
-        <button
+        <SketchButton
           onClick={() => onSelect("muscle_gain")}
-          className="flex w-full items-center justify-between rounded-xl p-5 text-left"
-          style={{
-            background: "linear-gradient(135deg, #100D1A, #181025)",
-            border: "1px solid rgba(91,150,232,0.25)",
-          }}
+          className="w-full justify-between rounded-lg px-5 py-4 text-left"
         >
           <div>
-            <div className="mb-1 text-xl font-bold tracking-wide" style={{ fontFamily: "var(--font-display)", color: "var(--blue)" }}>
+            <div className="sk-heading mb-1 text-xl">
               增肌 · MUSCLE GAIN
             </div>
-            <div className="text-sm" style={{ color: "var(--text-2)" }}>
+            <div className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
               增加肌肉，熱量盈餘策略
             </div>
           </div>
-          <span style={{ color: "var(--blue)", fontSize: 20 }}>→</span>
-        </button>
+          <span aria-hidden="true">→</span>
+        </SketchButton>
       </div>
     </div>
   );

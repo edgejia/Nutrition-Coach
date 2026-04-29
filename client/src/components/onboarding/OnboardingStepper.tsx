@@ -14,6 +14,7 @@ import { StepBodyData } from "./StepBodyData.js";
 import { StepLifestyle } from "./StepLifestyle.js";
 import { StepAdvancedMetrics } from "./StepAdvancedMetrics.js";
 import { StepCoachHandoff } from "./StepCoachHandoff.js";
+import { SketchScreen } from "../SketchPrimitives.js";
 import type { IntakeData, IntakeResult, IntakeValidationIssue, OnboardingField, OnboardingStep } from "../../types.js";
 
 type PartialIntake = Partial<IntakeData>;
@@ -74,11 +75,13 @@ export function OnboardingStepperPresentation({
   const advancedMetricErrors = getStepFieldErrors(validationIssues, 5);
   const selectedGoal = data.goal === "muscle_gain" ? "muscle_gain" : "fat_loss";
 
+  let stepContent;
   switch (step) {
     case 1:
-      return <StepGoal onSelect={onGoalSelect} error={goalError} />;
+      stepContent = <StepGoal onSelect={onGoalSelect} error={goalError} />;
+      break;
     case 2:
-      return (
+      stepContent = (
         <StepGoalClarification
           goal={selectedGoal}
           initialValue={data.goalClarification}
@@ -88,8 +91,9 @@ export function OnboardingStepperPresentation({
           onBack={() => onBack(1)}
         />
       );
+      break;
     case 3:
-      return (
+      stepContent = (
         <StepBodyData
           initialData={data}
           errors={bodyDataErrors}
@@ -98,8 +102,9 @@ export function OnboardingStepperPresentation({
           onBack={() => onBack(2)}
         />
       );
+      break;
     case 4:
-      return (
+      stepContent = (
         <StepLifestyle
           initialData={data}
           errors={lifestyleErrors}
@@ -108,8 +113,9 @@ export function OnboardingStepperPresentation({
           onBack={() => onBack(3)}
         />
       );
+      break;
     case 5:
-      return (
+      stepContent = (
         <StepAdvancedMetrics
           initialData={data}
           errors={advancedMetricErrors}
@@ -119,8 +125,9 @@ export function OnboardingStepperPresentation({
           onBack={() => onBack(4)}
         />
       );
+      break;
     case 6:
-      return (
+      stepContent = (
         <StepCoachHandoff
           loading={loading}
           transportError={transportError}
@@ -129,9 +136,18 @@ export function OnboardingStepperPresentation({
           onRetry={onRetry}
         />
       );
+      break;
     default:
-      return null;
+      stepContent = null;
   }
+
+  return (
+    <SketchScreen className="onboarding-stepper sk-screen">
+      <div className="sk-screen-content screen-scroll-safe">
+        {stepContent}
+      </div>
+    </SketchScreen>
+  );
 }
 
 export function OnboardingStepper() {

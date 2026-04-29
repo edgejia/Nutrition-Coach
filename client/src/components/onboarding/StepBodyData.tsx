@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SketchBox, SketchButton, SketchPill } from "../SketchPrimitives.js";
 import type { IntakeData, OnboardingField } from "../../types.js";
 
 interface Props {
@@ -31,42 +32,40 @@ export function StepBodyData({ onNext, onBack, initialData, errors, onFieldEdit 
   }
 
   return (
-    <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
-      <div className="mb-3 text-xs font-bold tracking-widest uppercase" style={{ color: "var(--orange)", letterSpacing: "0.2em" }}>
+    <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 p-4">
+      <SketchPill className="self-start">
         STEP 3 / 6
+      </SketchPill>
+      <div>
+        <h2 className="sk-heading text-2xl">
+          基本身體數據
+        </h2>
+        <p className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+          教練需要這些資料來計算你的營養目標。
+        </p>
       </div>
-      <h2 className="mb-2 text-2xl font-bold" style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>
-        基本身體數據
-      </h2>
-      <p className="mb-6 text-sm" style={{ color: "var(--text-2)" }}>
-        教練需要這些資料來計算你的營養目標。
-      </p>
 
       {/* Sex */}
-      <div className="mb-5">
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>性別</label>
+      <div>
+        <label className="sk-body mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-ink-soft)" }}>性別</label>
         <div className="flex gap-2">
           {(["male", "female"] as const).map((s) => (
-            <button
+            <SketchButton
               key={s}
               onClick={() => {
                 setSex(s);
                 onFieldEdit?.("sex");
               }}
               aria-pressed={sex === s}
-              className="flex-1 rounded-lg py-3 text-sm font-medium"
-              style={{
-                background: sex === s ? "var(--orange)" : "var(--bg-raised)",
-                color: sex === s ? "#000" : "var(--text)",
-                border: `1px solid ${sex === s ? "var(--orange)" : "var(--border)"}`,
-              }}
+              className="flex-1"
+              variant={sex === s ? "accent" : "default"}
             >
               {s === "male" ? "男" : "女"}
-            </button>
+            </SketchButton>
           ))}
         </div>
         {errors?.sex ? (
-          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+          <p className="sk-body mt-2 text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
             {errors.sex}
           </p>
         ) : null}
@@ -77,46 +76,46 @@ export function StepBodyData({ onNext, onBack, initialData, errors, onFieldEdit 
         { key: "age" as const, label: "年齡", value: age, setter: setAge, unit: "歲", placeholder: "25" },
         { key: "heightCm" as const, label: "身高", value: height, setter: setHeight, unit: "cm", placeholder: "175" },
         { key: "weightKg" as const, label: "體重", value: weight, setter: setWeight, unit: "kg", placeholder: "70" },
-      ].map(({ label, value, setter, unit, placeholder }) => (
-        <div key={label} className="mb-4">
-          <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>{label}</label>
+      ].map(({ key, label, value, setter, unit, placeholder }) => (
+        <div key={key}>
+          <label className="sk-body mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-ink-soft)" }}>{label}</label>
           <div className="flex items-center gap-2">
-            <input
-              type="number"
-              inputMode="decimal"
-              value={value}
-              onChange={(e) => {
-                setter(e.target.value);
-                onFieldEdit?.(
-                  label === "年齡" ? "age" : label === "身高" ? "heightCm" : "weightKg",
-                );
-              }}
-              placeholder={placeholder}
-              className="flex-1 rounded-lg px-4 py-3 text-sm"
-              style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
-            />
-            <span className="text-sm" style={{ color: "var(--text-2)" }}>{unit}</span>
+            <SketchBox className="flex flex-1 items-center px-3 py-2">
+              <input
+                type="number"
+                inputMode="decimal"
+                value={value}
+                onChange={(e) => {
+                  setter(e.target.value);
+                  onFieldEdit?.(key);
+                }}
+                placeholder={placeholder}
+                className="sk-body min-w-0 flex-1 bg-transparent text-sm outline-none"
+                style={{ color: "var(--sk-ink)" }}
+              />
+            </SketchBox>
+            <span className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>{unit}</span>
           </div>
-          {errors?.[label === "年齡" ? "age" : label === "身高" ? "heightCm" : "weightKg"] ? (
-            <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
-              {errors[label === "年齡" ? "age" : label === "身高" ? "heightCm" : "weightKg"]}
+          {errors?.[key] ? (
+            <p className="sk-body mt-2 text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
+              {errors[key]}
             </p>
           ) : null}
         </div>
       ))}
 
       <div className="mt-4 flex gap-3">
-        <button onClick={onBack} className="rounded-xl px-5 py-3 text-sm font-medium" style={{ color: "var(--text-2)", border: "1px solid var(--border)" }}>
+        <SketchButton onClick={onBack}>
           上一步
-        </button>
-        <button
+        </SketchButton>
+        <SketchButton
           onClick={handleNext}
           disabled={!canProceed}
-          className="flex-1 rounded-xl py-3 text-sm font-bold disabled:opacity-40"
-          style={{ background: "var(--orange)", color: "#000" }}
+          className="flex-1"
+          variant="accent"
         >
           下一步
-        </button>
+        </SketchButton>
       </div>
     </div>
   );

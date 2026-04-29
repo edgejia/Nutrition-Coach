@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SketchBox, SketchButton, SketchPill } from "../SketchPrimitives.js";
 import type { IntakeData, OnboardingField } from "../../types.js";
 
 interface Props {
@@ -32,96 +33,104 @@ export function StepAdvancedMetrics({ onNext, onSkip, onBack, initialData, error
   }
 
   return (
-    <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
-      <div className="mb-3 text-xs font-bold tracking-widest uppercase" style={{ color: "var(--orange)", letterSpacing: "0.2em" }}>
+    <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 p-4">
+      <SketchPill className="self-start">
         STEP 5 / 6
+      </SketchPill>
+      <div>
+        <h2 className="sk-heading text-2xl">
+          進階指標
+        </h2>
+        <p className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+          如果你有體脂率或 TDEE 的數據，教練可以算得更精準。沒有的話可以直接跳過。
+        </p>
       </div>
-      <h2 className="mb-2 text-2xl font-bold" style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>
-        進階指標
-      </h2>
-      <p className="mb-6 text-sm" style={{ color: "var(--text-2)" }}>
-        如果你有體脂率或 TDEE 的數據，教練可以算得更精準。沒有的話可以直接跳過。
-      </p>
 
-      <div className="mb-4">
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>體脂率</label>
+      <div>
+        <label className="sk-body mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-ink-soft)" }}>體脂率</label>
         <div className="flex items-center gap-2">
-          <input
-            type="number"
-            inputMode="decimal"
-            value={bodyFat}
-            onChange={(e) => {
-              setBodyFat(e.target.value);
-              onFieldEdit?.("bodyFatPercent");
-            }}
-            placeholder="20"
-            className="flex-1 rounded-lg px-4 py-3 text-sm"
-            style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
-          />
-          <span className="text-sm" style={{ color: "var(--text-2)" }}>%</span>
+          <SketchBox className="flex flex-1 items-center px-3 py-2">
+            <input
+              type="number"
+              inputMode="decimal"
+              value={bodyFat}
+              onChange={(e) => {
+                setBodyFat(e.target.value);
+                onFieldEdit?.("bodyFatPercent");
+              }}
+              placeholder="20"
+              className="sk-body min-w-0 flex-1 bg-transparent text-sm outline-none"
+              style={{ color: "var(--sk-ink)" }}
+            />
+          </SketchBox>
+          <span className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>%</span>
         </div>
         {errors?.bodyFatPercent ? (
-          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+          <p className="sk-body mt-2 text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
             {errors.bodyFatPercent}
           </p>
         ) : null}
       </div>
 
-      <div className="mb-4">
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>TDEE</label>
+      <div>
+        <label className="sk-body mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-ink-soft)" }}>TDEE</label>
         <div className="flex items-center gap-2">
-          <input
-            type="number"
-            inputMode="numeric"
-            value={tdee}
-            onChange={(e) => {
-              setTdee(e.target.value);
-              onFieldEdit?.("tdee");
-            }}
-            placeholder="2200"
-            className="flex-1 rounded-lg px-4 py-3 text-sm"
-            style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
-          />
-          <span className="text-sm" style={{ color: "var(--text-2)" }}>kcal</span>
+          <SketchBox className="flex flex-1 items-center px-3 py-2">
+            <input
+              type="number"
+              inputMode="numeric"
+              value={tdee}
+              onChange={(e) => {
+                setTdee(e.target.value);
+                onFieldEdit?.("tdee");
+              }}
+              placeholder="2200"
+              className="sk-body min-w-0 flex-1 bg-transparent text-sm outline-none"
+              style={{ color: "var(--sk-ink)" }}
+            />
+          </SketchBox>
+          <span className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>kcal</span>
         </div>
         {errors?.tdee ? (
-          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+          <p className="sk-body mt-2 text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
             {errors.tdee}
           </p>
         ) : null}
       </div>
 
-      <div className="mb-6">
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>其他備註（選填）</label>
-        <input
-          type="text"
-          value={notes}
-          onChange={(e) => {
-            setNotes(e.target.value);
-            onFieldEdit?.("advancedNotes");
-          }}
-          placeholder="任何你覺得教練該知道的事..."
-          className="w-full rounded-lg px-4 py-3 text-sm"
-          style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
-        />
+      <div>
+        <label className="sk-body mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-ink-soft)" }}>其他備註（選填）</label>
+        <SketchBox className="px-3 py-2">
+          <input
+            type="text"
+            value={notes}
+            onChange={(e) => {
+              setNotes(e.target.value);
+              onFieldEdit?.("advancedNotes");
+            }}
+            placeholder="任何你覺得教練該知道的事..."
+            className="sk-body w-full bg-transparent text-sm outline-none"
+            style={{ color: "var(--sk-ink)" }}
+          />
+        </SketchBox>
         {errors?.advancedNotes ? (
-          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+          <p className="sk-body mt-2 text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
             {errors.advancedNotes}
           </p>
         ) : null}
       </div>
 
       <div className="flex gap-3">
-        <button onClick={onBack} className="rounded-xl px-5 py-3 text-sm font-medium" style={{ color: "var(--text-2)", border: "1px solid var(--border)" }}>
+        <SketchButton onClick={onBack}>
           上一步
-        </button>
-        <button
+        </SketchButton>
+        <SketchButton
           onClick={hasData ? handleNext : onSkip}
-          className="flex-1 rounded-xl py-3 text-sm font-bold"
-          style={{ background: "var(--orange)", color: "#000" }}
+          className="flex-1"
+          variant="accent"
         >
           {hasData ? "下一步" : "跳過，開始分析"}
-        </button>
+        </SketchButton>
       </div>
     </div>
   );
