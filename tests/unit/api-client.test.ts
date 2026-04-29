@@ -15,6 +15,8 @@ globalThis.localStorage = {
 
 const originalFetch = globalThis.fetch;
 const originalLocationDescriptor = Object.getOwnPropertyDescriptor(globalThis, "location");
+const originalCreateImageBitmap = globalThis.createImageBitmap;
+const originalDocument = globalThis.document;
 let fetchCalls: Array<{ url: string; init: RequestInit }> = [];
 
 function mockFetch(status: number, body: unknown) {
@@ -60,6 +62,8 @@ describe("API Client", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    globalThis.createImageBitmap = originalCreateImageBitmap;
+    globalThis.document = originalDocument;
     if (originalLocationDescriptor) {
       Object.defineProperty(globalThis, "location", originalLocationDescriptor);
     } else {
@@ -761,5 +765,53 @@ describe("sendMessageStream", () => {
     assert.ok(uploaded instanceof File);
     assert.equal(uploaded.type, "image/jpeg");
     assert.equal(uploaded.name, "meal.JPG");
+  });
+
+  it("compresses oversized supported images before chat upload", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, ['event: done\ndata: {"didLogMeal":false}\n\n']);
+
+    globalThis.createImageBitmap = (async () => ({
+      width: 4032,
+      height: 3024,
+      close: () => {},
+    })) as typeof createImageBitmap;
+    globalThis.document = {
+      createElement: (tagName: string) => {
+        assert.equal(tagName, "canvas");
+        return {
+          width: 0,
+          height: 0,
+          getContext: (contextType: string) => {
+            assert.equal(contextType, "2d");
+            return {
+              fillStyle: "",
+              fillRect: () => {},
+              drawImage: () => {},
+            };
+          },
+          toBlob: (callback: BlobCallback, mimeType?: string) => {
+            assert.equal(mimeType, "image/jpeg");
+            callback(new Blob(["compressed-jpeg"], { type: "image/jpeg" }));
+          },
+        };
+      },
+    } as unknown as Document;
+    const largeJpeg = new File([new Uint8Array(6 * 1024 * 1024)], "meal.jpg", { type: "image/jpeg" });
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {},
+    }, largeJpeg);
+
+    const form = fetchCalls[0]?.init.body;
+    assert.ok(form instanceof FormData);
+    const uploaded = form.get("image");
+    assert.ok(uploaded instanceof File);
+    assert.equal(uploaded.type, "image/jpeg");
+    assert.equal(uploaded.name, "meal.jpg");
+    assert.ok(uploaded.size < 5 * 1024 * 1024);
   });
 });

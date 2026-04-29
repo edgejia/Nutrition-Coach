@@ -37,6 +37,8 @@ export class IntakeValidationError extends Error {
 }
 
 const MOCK_NEXT_INTAKE_VALIDATION_ERROR_KEY = "nutritionCoach:mockNextIntakeValidationError";
+const MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024;
+const CHAT_IMAGE_MAX_DIMENSION = 1600;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -112,6 +114,81 @@ function normalizeSupportedImageFile(file: File): File {
   }
 
   return new File([file], file.name, { type: mimeType, lastModified: file.lastModified });
+}
+
+function getUploadImageFilename(filename: string): string {
+  const baseName = filename.replace(/\.[^.]+$/, "").trim() || "meal-photo";
+  return `${baseName}.jpg`;
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob);
+          return;
+        }
+        reject(new Error("圖片壓縮失敗，請先縮小照片後再上傳。"));
+      },
+      "image/jpeg",
+      quality,
+    );
+  });
+}
+
+async function compressImageForUpload(file: File): Promise<File> {
+  if (typeof createImageBitmap !== "function" || typeof document === "undefined") {
+    throw new Error("圖片超過 5MB，且目前環境無法自動壓縮。請先縮小照片後再上傳。");
+  }
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("圖片壓縮失敗，請先縮小照片後再上傳。");
+    }
+
+    const initialScale = Math.min(1, CHAT_IMAGE_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    let width = Math.max(1, Math.round(bitmap.width * initialScale));
+    let height = Math.max(1, Math.round(bitmap.height * initialScale));
+    const qualities = [0.82, 0.72, 0.62, 0.52, 0.44];
+
+    for (let resizeAttempt = 0; resizeAttempt < 4; resizeAttempt += 1) {
+      canvas.width = width;
+      canvas.height = height;
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      context.drawImage(bitmap, 0, 0, width, height);
+
+      for (const quality of qualities) {
+        const blob = await canvasToBlob(canvas, quality);
+        if (blob.size <= MAX_CHAT_IMAGE_BYTES) {
+          return new File([blob], getUploadImageFilename(file.name), {
+            type: "image/jpeg",
+            lastModified: file.lastModified,
+          });
+        }
+      }
+
+      width = Math.max(1, Math.round(width * 0.82));
+      height = Math.max(1, Math.round(height * 0.82));
+    }
+  } finally {
+    bitmap.close();
+  }
+
+  throw new Error("圖片仍超過 5MB，請先縮小照片後再上傳。");
+}
+
+async function prepareImageForUpload(file: File): Promise<File> {
+  const normalized = normalizeSupportedImageFile(file);
+  if (normalized.size <= MAX_CHAT_IMAGE_BYTES) {
+    return normalized;
+  }
+
+  return compressImageForUpload(normalized);
 }
 
 type HomeCtaClientEventPayload =
@@ -260,7 +337,7 @@ export async function sendMessage(message: string, image?: File): Promise<ChatRe
   const form = new FormData();
   form.append("message", message);
   if (image) {
-    form.append("image", normalizeSupportedImageFile(image));
+    form.append("image", await prepareImageForUpload(image));
   }
   const res = await fetch("/api/chat", {
     method: "POST",
@@ -310,7 +387,7 @@ export async function sendMessageStream(
   const form = new FormData();
   form.append("message", message);
   if (image) {
-    form.append("image", normalizeSupportedImageFile(image));
+    form.append("image", await prepareImageForUpload(image));
   }
 
   const res = await fetch("/api/chat", {
