@@ -116,7 +116,7 @@ describe("mobile shell source contract", () => {
     assert.match(sources.homeScreen, /\bscreen-bottom-bar\b/);
     assert.match(sources.homeScreen, /\bscreen-scroll-with-input\b/);
     assertIncludesInOrder(sources.homeScreen, [
-      ["Home screen shell", '<div className="screen-shell">'],
+      ["Home screen shell", '<div className="screen-shell sk-screen">'],
       ["Home header", "<HomeHeader />"],
       ["Home content scroller", '<main className="screen-scroll-with-input'],
       ["Home bottom input bar", '<div className="screen-bottom-bar border-t px-3"'],
@@ -137,7 +137,7 @@ describe("mobile shell source contract", () => {
     const scrollContainerClassName = scrollContainerMatch[1] ?? "";
     assert.match(scrollContainerClassName, /\bscreen-scroll-with-input\b/);
     assertIncludesInOrder(sources.chatPanel, [
-      ["Chat screen shell", '<div className="screen-shell">'],
+      ["Chat screen shell", '<div className="screen-shell sk-screen">'],
       ["Chat header bar", '<div className="screen-bar px-5 pb-3 pt-4"'],
       ["Chat message scroller", '<div ref={scrollContainerRef} className="screen-scroll-with-input'],
       ["Chat bottom input bar", '<div className="screen-bottom-bar px-3"'],
