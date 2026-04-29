@@ -238,6 +238,11 @@ textarea {
   background: var(--bg);
 }
 
+.screen-shell.sk-screen {
+  background: var(--sk-paper);
+  color: var(--sk-ink);
+}
+
 .screen-bar {
   flex-shrink: 0;
 }
