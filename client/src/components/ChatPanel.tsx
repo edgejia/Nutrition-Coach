@@ -39,6 +39,7 @@ export function ChatPanel() {
   const commitProvisionalBubble = useStore((s) => s.commitProvisionalBubble);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
+  const openSecondaryScreen = useStore((s) => s.openSecondaryScreen);
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
@@ -658,7 +659,7 @@ export function ChatPanel() {
               <MessageBubble
                 key={m.id}
                 message={m}
-                onOpenSummary={m.didLogMeal ? () => setActiveScreen("summary") : undefined}
+                onOpenSummary={m.didLogMeal ? () => openSecondaryScreen("mealEdit", "chat") : undefined}
                 onImageSettle={handleMessageImageSettle}
               />
             ))}

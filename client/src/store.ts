@@ -7,7 +7,10 @@ import type {
   MealEntry,
   Message,
   PendingHomeChatDraft,
+  PrimaryTab,
   ProvisionalBubble,
+  SecondaryScreen,
+  SecondaryScreenState,
 } from "./types.js";
 import { formatLocalDate } from "./lib/time.js";
 
@@ -39,8 +42,11 @@ interface AppState {
   meals: MealEntry[];
   pendingHomeChatDraft: PendingHomeChatDraft | null;
   showSettings: boolean;
+  secondaryScreen: SecondaryScreenState;
   sending: boolean;
   setActiveScreen: (screen: ActiveScreen) => void;
+  openSecondaryScreen: (screen: SecondaryScreen, origin?: PrimaryTab) => void;
+  closeSecondaryScreen: () => void;
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
   removeMeal: (mealId: string) => void;
@@ -81,10 +87,19 @@ export const useStore = create<AppState>((set, get) => ({
   meals: [],
   pendingHomeChatDraft: null,
   showSettings: false,
+  secondaryScreen: null,
   sending: false,
   provisionalBubble: null,
 
   setActiveScreen: (activeScreen) => set({ activeScreen }),
+  openSecondaryScreen: (screen, origin) =>
+    set((state) => ({
+      secondaryScreen: {
+        screen,
+        origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
+      },
+    })),
+  closeSecondaryScreen: () => set({ secondaryScreen: null }),
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
   setMeals: (meals) => set({ meals }),
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
@@ -104,6 +119,7 @@ export const useStore = create<AppState>((set, get) => ({
       guestSessionRecoveryAttempted: false,
       dailyTargets,
       showSettings: false,
+      secondaryScreen: null,
     });
   },
   bootstrapGuestSession: async () => {
@@ -276,6 +292,7 @@ export const useStore = create<AppState>((set, get) => ({
       meals: [],
       pendingHomeChatDraft: null,
       showSettings: false,
+      secondaryScreen: null,
       sending: false,
       provisionalBubble: null,
     });

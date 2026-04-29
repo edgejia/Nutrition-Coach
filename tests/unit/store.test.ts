@@ -213,12 +213,25 @@ describe("AppStore", () => {
   });
 
   it("tracks activeScreen changes and meal collection helpers", () => {
-    useStore.getState().setActiveScreen("summary");
+    useStore.getState().setActiveScreen("history");
     useStore.getState().setMeals(sampleMeals);
     useStore.getState().removeMeal("meal-1");
 
-    assert.equal(useStore.getState().activeScreen, "summary");
+    assert.equal(useStore.getState().activeScreen, "history");
     assert.deepEqual(useStore.getState().meals, [sampleMeals[1]]);
+  });
+
+  it("tracks secondary screen stack without clearing tab state", () => {
+    useStore.getState().setActiveScreen("chat");
+    useStore.getState().setPendingHomeChatDraft({ id: "draft-1", text: "晚餐吃了鮭魚", status: "staged" });
+    useStore.getState().openSecondaryScreen("mealEdit");
+
+    assert.deepEqual(useStore.getState().secondaryScreen, { screen: "mealEdit", origin: "chat" });
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-1");
+
+    useStore.getState().closeSecondaryScreen();
+    assert.equal(useStore.getState().secondaryScreen, null);
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-1");
   });
 
   it("stores and clears the pending home chat draft", () => {

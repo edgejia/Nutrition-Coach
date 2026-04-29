@@ -53,7 +53,7 @@ export function sendHomeCtaTaskOption(
 
 function HomeHeader() {
   const setActiveScreen = useStore((s) => s.setActiveScreen);
-  const setShowSettings = useStore((s) => s.setShowSettings);
+  const openSecondaryScreen = useStore((s) => s.openSecondaryScreen);
   const sending = useStore((s) => s.sending);
   const dailySummary = useStore((s) => s.dailySummary);
   const dateKey = dailySummary?.date ?? formatLocalDate(new Date());
@@ -91,7 +91,7 @@ function HomeHeader() {
         <button
           type="button"
           onClick={() => {
-            if (!sending) setShowSettings(true);
+            if (!sending) openSecondaryScreen("settings", "home");
           }}
           disabled={sending}
           className="flex h-7 w-7 items-center justify-center rounded-lg text-sm disabled:opacity-40"
@@ -116,6 +116,7 @@ export function HomeScreen() {
   const sending = useStore((s) => s.sending);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
+  const openSecondaryScreen = useStore((s) => s.openSecondaryScreen);
   const coachAdvice = getDisplayedCoachAdvice(storedCoachAdvice, dailySummary, dailyTargets);
   const cta = getCoachCTA(dailySummary, dailyTargets);
 
@@ -137,7 +138,7 @@ export function HomeScreen() {
       <HomeHeader />
       <main className="screen-scroll-with-input space-y-3 px-4 pt-2">
         <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
-        <Dashboard onTap={() => { if (!sending) setActiveScreen("summary"); }} />
+        <Dashboard onTap={() => { if (!sending) openSecondaryScreen("dayDetail", "history"); }} />
       </main>
       <div className="screen-bottom-bar border-t px-3" style={{ background: "var(--bg)", borderColor: "var(--border)" }}>
         <ChatEntryBar onSend={handleSend} disabled={sending} />

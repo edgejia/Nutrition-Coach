@@ -1,4 +1,7 @@
-export type ActiveScreen = "home" | "summary" | "chat" | "onboarding";
+export type PrimaryTab = "home" | "chat" | "history";
+export type SecondaryScreen = "settings" | "dayDetail" | "mealEdit";
+export type SecondaryScreenState = { screen: SecondaryScreen; origin: PrimaryTab } | null;
+export type ActiveScreen = PrimaryTab | "onboarding";
 
 export interface DailyTargets {
   calories: number;
