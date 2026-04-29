@@ -23,6 +23,7 @@ const sources = {
   types: await readSource("../../client/src/types.ts"),
   store: await readSource("../../client/src/store.ts"),
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
+  mealEditScreen: await readSource("../../client/src/components/MealEditScreen.tsx"),
   bottomTabBar: await readSource("../../client/src/components/BottomTabBar.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
   chatPanel: await readSource("../../client/src/components/ChatPanel.tsx"),
@@ -55,8 +56,9 @@ describe("navigation shell source contract", () => {
     assert.match(sources.mainLayout, /secondaryScreen/);
     assert.match(sources.mainLayout, /HistoryScreen/);
     assert.match(sources.mainLayout, /HistoryDayDetailScreen/);
+    assert.match(sources.mainLayout, /MealEditScreen/);
     assert.doesNotMatch(sources.mainLayout, /Day Detail shell/);
-    assert.match(sources.mainLayout, /Meal Edit shell/);
+    assert.doesNotMatch(sources.mainLayout, /Meal Edit shell/);
     assert.doesNotMatch(sources.mainLayout, /BrowserRouter/);
     assert.doesNotMatch(sources.mainLayout, /activeScreen === "summary"/);
   });
