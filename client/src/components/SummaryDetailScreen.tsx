@@ -388,6 +388,7 @@ export function SummaryDetailScreen() {
   const liveSummary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
   const sending = useStore((s) => s.sending);
+  const lastMealMutation = useStore((s) => s.lastMealMutation);
   const todayKey = formatLocalDate(new Date());
   const [selectedDateKey, setSelectedDateKey] = useState(() =>
     getInitialSummaryDateKey(formatLocalDate(new Date())),
@@ -436,6 +437,44 @@ export function SummaryDetailScreen() {
       cancelled = true;
     };
   }, [selectedDateKey, recoverGuestSession]);
+
+  useEffect(() => {
+    if (!lastMealMutation || lastMealMutation.affectedDate !== selectedDateKey) {
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    getDaySnapshot(selectedDateKey)
+      .then((nextSnapshot) => {
+        if (!cancelled) {
+          setSnapshot(nextSnapshot);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (err instanceof Error && err.message === "UNAUTHORIZED") {
+          void recoverGuestSession();
+          return;
+        }
+
+        setError("這一天的摘要暫時載入失敗。請重新整理，或切回今天後再試一次。");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lastMealMutation?.affectedDate, lastMealMutation?.nonce, selectedDateKey, recoverGuestSession]);
 
   function getDisclosureState(): SummaryCalendarDisclosureState {
     return {

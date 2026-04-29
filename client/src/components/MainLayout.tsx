@@ -9,7 +9,7 @@ import { ChatPanel } from "./ChatPanel.js";
 import { GoalSettings } from "./GoalSettings.js";
 import { HistoryDayDetailScreen } from "./HistoryDayDetailScreen.js";
 import { HistoryScreen } from "./HistoryScreen.js";
-import { SecondaryHeader, SketchScreen } from "./SketchPrimitives.js";
+import { MealEditScreen } from "./MealEditScreen.js";
 
 function useVisualViewportShellVars() {
   useLayoutEffect(() => {
@@ -65,33 +65,6 @@ function useVisualViewportShellVars() {
   }, []);
 }
 
-function SecondaryPlaceholder({
-  title,
-  backLabel,
-  body,
-  onBack,
-}: {
-  title: string;
-  backLabel: string;
-  body: string;
-  onBack: () => void;
-}) {
-  return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-[var(--sk-paper)]">
-      <SketchScreen>
-        <SecondaryHeader title={title} backLabel={backLabel} onBack={onBack} />
-        <main className="sk-screen-content screen-scroll-safe p-4">
-          <div className="sk-box-dashed p-4">
-            <p className="sk-body" style={{ color: "var(--sk-ink-soft)" }}>
-              {body}
-            </p>
-          </div>
-        </main>
-      </SketchScreen>
-    </div>
-  );
-}
-
 export function MainLayout() {
   const deviceId = useStore((s) => s.deviceId);
   const setDailySummary = useStore((s) => s.setDailySummary);
@@ -145,9 +118,7 @@ export function MainLayout() {
       <BottomTabBar />
       {secondaryScreen?.screen === "settings" && <GoalSettings onClose={closeSecondaryScreen} />}
       {secondaryScreen?.screen === "dayDetail" && <HistoryDayDetailScreen onBack={closeSecondaryScreen} />}
-      {secondaryScreen?.screen === "mealEdit" && (
-        <SecondaryPlaceholder title="Meal Edit" backLabel="‹ 對話" body="Meal Edit shell" onBack={closeSecondaryScreen} />
-      )}
+      {secondaryScreen?.screen === "mealEdit" && <MealEditScreen onBack={closeSecondaryScreen} />}
     </div>
   );
 }
