@@ -33,8 +33,9 @@ describe("chat bubble source contract", () => {
 
   it("does not wire logged meal bubbles to the Meal Edit secondary screen", async () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const legacyActionTarget = 'openSecondaryScreen("mealEdit", "chat")';
 
     assert.doesNotMatch(chatPanel, /onOpenSummary=\{m\.didLogMeal/);
-    assert.doesNotMatch(chatPanel, /openSecondaryScreen\("mealEdit", "chat"\)/);
+    assert.doesNotMatch(chatPanel, new RegExp(legacyActionTarget.replace(/[()"]/g, "\\$&")));
   });
 });

@@ -315,6 +315,7 @@ describe("chat-streaming", () => {
 
       const text = await readStreamUntil(reader, "event: done");
       assert.match(text, /event: done/);
+      assert.equal(parseSSEEvents(text).filter((event) => event.event === "done").length, 1);
 
       const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
       assert.ok(doneDataMatch);
