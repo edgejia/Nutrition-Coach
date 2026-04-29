@@ -88,6 +88,12 @@ interface LogFoodItemArgs {
   protein: number;
   carbs: number;
   fat: number;
+  quantity?: number;
+  quantity_g?: number;
+  quantity_ml?: number;
+  amount?: string;
+  unit?: string;
+  serving_size?: string;
 }
 
 interface ProteinSourceArgs {
@@ -109,6 +115,11 @@ interface LogFoodLegacyArgs extends LogFoodItemArgs, HistoricalDateToolArgs {
 interface LogFoodGroupedArgs extends HistoricalDateToolArgs {
   items: LogFoodItemArgs[];
   protein_sources?: ProteinSourceArgs[];
+  food_name?: string;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
 }
 
 type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
@@ -219,8 +230,14 @@ const logFoodItemSchema = z
     calories: finiteNumber,
     protein: finiteNumber,
     carbs: finiteNumber,
-      fat: finiteNumber,
-    })
+    fat: finiteNumber,
+    quantity: finiteNumber.optional(),
+    quantity_g: finiteNumber.optional(),
+    quantity_ml: finiteNumber.optional(),
+    amount: z.string().optional(),
+    unit: z.string().optional(),
+    serving_size: z.string().optional(),
+  })
   .strict();
 
 const logFoodSchema = z.union([
@@ -237,6 +254,11 @@ const logFoodSchema = z.union([
       date_text: historicalDateTextSchema,
       meal_period: historicalMealPeriodSchema,
       protein_sources: z.array(proteinSourceSchema).min(1).optional(),
+      food_name: z.string().min(1).optional(),
+      calories: finiteNumber.optional(),
+      protein: finiteNumber.optional(),
+      carbs: finiteNumber.optional(),
+      fat: finiteNumber.optional(),
     })
     .strict(),
 ]);
