@@ -27,6 +27,14 @@ export interface DailySummary {
   mealCount: number;
 }
 
+export interface LoggedMealReceipt {
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 export interface MealEntry {
   id: string;
   foodName: string;
@@ -49,6 +57,7 @@ export interface Message {
   imagePreviewUrl?: string;
   createdAt: string;
   didLogMeal?: boolean;
+  loggedMeal?: LoggedMealReceipt;
 }
 
 export interface PendingHomeChatDraft {
@@ -62,6 +71,7 @@ export interface ChatReply {
   reply: string;
   didLogMeal?: boolean;
   didMutateMeal?: boolean;
+  loggedMeal?: LoggedMealReceipt;
   dailySummary?: DailySummary;
   dailyTargets?: DailyTargets;
   affectedDate?: string;

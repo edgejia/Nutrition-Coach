@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { CameraIcon, SendIcon } from "./SketchIcons.js";
 
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
@@ -38,7 +39,7 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-end gap-2.5 py-2">
+    <form onSubmit={handleSubmit} className="flex items-end gap-2 py-2">
       <input
         ref={fileRef}
         type="file"
@@ -50,18 +51,26 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
         type="button"
         onClick={() => fileRef.current?.click()}
         disabled={disabled}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg disabled:opacity-50"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
         style={{
-          background: "var(--bg-raised)",
-          border: "1px solid var(--border-med)",
-          color: "var(--text-2)",
+          background: "var(--sk-paper)",
+          border: "1.5px solid var(--sk-ink)",
+          color: "var(--sk-ink)",
+          boxShadow: "1px 1.5px 0 var(--sk-ink)",
+        }}
+        aria-label="附加照片"
+      >
+        <CameraIcon size={20} />
+      </button>
+      <div
+        className="flex min-h-11 flex-1 flex-col justify-center rounded-[22px] px-3 py-1.5"
+        style={{
+          background: "var(--sk-paper)",
+          border: "1.5px solid var(--sk-ink)",
         }}
       >
-        📷
-      </button>
-      <div className="flex flex-1 flex-col">
         {image && (
-          <span className="mb-1 text-xs" style={{ color: "var(--text-3)" }}>
+          <span className="mb-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
             {image.name}{" "}
             <button
               type="button"
@@ -69,7 +78,8 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
                 setImage(null);
                 if (fileRef.current) fileRef.current.value = "";
               }}
-              style={{ color: "var(--red)" }}
+              style={{ color: "var(--sk-accent)" }}
+              aria-label="移除照片"
             >
               ×
             </button>
@@ -79,31 +89,30 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="描述餐點、提問，或上傳照片..."
+          placeholder="記錄 ／ 提問 ／ 修改…"
           disabled={disabled}
           rows={1}
-          className="w-full resize-none rounded-xl px-3 py-2.5 text-sm focus:outline-none disabled:opacity-50"
+          className="max-h-24 min-h-7 w-full resize-none bg-transparent px-0 py-1 text-sm focus:outline-none disabled:opacity-50"
           style={{
-            background: "var(--bg-raised)",
-            border: "1px solid var(--border-med)",
-            color: "var(--text)",
-            fontFamily: "var(--font-body)",
+            color: "var(--sk-ink)",
+            fontFamily: "var(--sk-font-print)",
           }}
         />
       </div>
       <button
         type="submit"
         disabled={disabled || !canSend}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg font-bold disabled:opacity-50"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
         style={{
-          background: canSend ? "var(--orange)" : "var(--bg-raised)",
-          border: canSend ? "none" : "1px solid var(--border-med)",
-          color: canSend ? "white" : "var(--text-3)",
-          boxShadow: canSend ? "0 4px 16px rgba(232,104,42,0.3)" : "none",
-          transition: "all 0.15s",
+          background: canSend ? "var(--sk-ink)" : "var(--sk-paper)",
+          border: "1.5px solid var(--sk-ink)",
+          color: canSend ? "var(--sk-paper)" : "var(--sk-ink-faint)",
+          boxShadow: canSend ? "1px 1.5px 0 var(--sk-ink)" : "none",
+          transition: "background 0.15s, color 0.15s, box-shadow 0.15s",
         }}
+        aria-label="送出"
       >
-        ↑
+        <SendIcon size={18} />
       </button>
     </form>
   );

@@ -5,6 +5,7 @@ import type {
   IntakeData,
   IntakeResult,
   IntakeValidationIssue,
+  LoggedMealReceipt,
   MealEntry,
   Message,
   CoachCTAIntentId,
@@ -44,6 +45,22 @@ function isIntakeValidationIssue(value: unknown): value is IntakeValidationIssue
     typeof value.code === "string" &&
     typeof value.step === "number" &&
     typeof value.message === "string"
+  );
+}
+
+function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
+  return (
+    isRecord(value) &&
+    typeof value.foodName === "string" &&
+    value.foodName.trim().length > 0 &&
+    typeof value.calories === "number" &&
+    Number.isFinite(value.calories) &&
+    typeof value.protein === "number" &&
+    Number.isFinite(value.protein) &&
+    typeof value.carbs === "number" &&
+    Number.isFinite(value.carbs) &&
+    typeof value.fat === "number" &&
+    Number.isFinite(value.fat)
   );
 }
 
@@ -232,6 +249,7 @@ export interface StreamCallbacks {
   onDone: (data: {
     didLogMeal: boolean;
     didMutateMeal?: boolean;
+    loggedMeal?: LoggedMealReceipt;
     dailySummary?: DailySummary;
     dailyTargets?: DailyTargets;
     affectedDate?: string;
@@ -313,6 +331,7 @@ export async function sendMessageStream(
           callbacks.onDone({
             didLogMeal: Boolean(parsed.didLogMeal),
             ...(parsed.didMutateMeal !== undefined ? { didMutateMeal: Boolean(parsed.didMutateMeal) } : {}),
+            ...(isLoggedMealReceipt(parsed.loggedMeal) ? { loggedMeal: parsed.loggedMeal } : {}),
             ...(parsed.dailySummary ? { dailySummary: parsed.dailySummary as DailySummary } : {}),
             ...(parsed.dailyTargets ? { dailyTargets: parsed.dailyTargets as DailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),

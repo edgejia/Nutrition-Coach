@@ -291,12 +291,12 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat stream ends with event: done", async () => {
-    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+  it("POST /api/chat stream ends with event: done and structured loggedMeal", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
     mockLLM.queueChatStream(["測試", "回覆"]);
 
     const form = new FormData();
-    form.append("message", "我吃了蘋果");
+    form.append("message", "我吃了雞腿便當");
 
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -318,7 +318,20 @@ describe("chat-streaming", () => {
 
       const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
       assert.ok(doneDataMatch);
-      assert.doesNotThrow(() => JSON.parse(doneDataMatch[1]));
+      const donePayload = JSON.parse(doneDataMatch[1]) as {
+        didLogMeal: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: unknown;
+        loggedMeal?: { foodName?: string; calories?: unknown; protein?: unknown; carbs?: unknown; fat?: unknown };
+      };
+      assert.equal(donePayload.didLogMeal, true);
+      assert.equal(donePayload.didMutateMeal, true);
+      assert.ok(donePayload.dailySummary);
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
+      assert.equal(typeof donePayload.loggedMeal?.calories, "number");
+      assert.equal(typeof donePayload.loggedMeal?.protein, "number");
+      assert.equal(typeof donePayload.loggedMeal?.carbs, "number");
+      assert.equal(typeof donePayload.loggedMeal?.fat, "number");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=5`, {
         headers: { cookie: sessionCookieHeader },

@@ -6,6 +6,7 @@ import type {
   DailySummary,
   MealEntry,
   Message,
+  LoggedMealReceipt,
   PendingHomeChatDraft,
   PrimaryTab,
   ProvisionalBubble,
@@ -70,7 +71,7 @@ interface AppState {
   setProvisionalBubble: (bubble: ProvisionalBubble | null) => void;
   appendProvisionalToken: (token: string) => void;
   setProvisionalStatus: (label: string) => void;
-  commitProvisionalBubble: (extra: { didLogMeal?: boolean; dailySummary?: DailySummary }) => void;
+  commitProvisionalBubble: (extra: { didLogMeal?: boolean; loggedMeal?: LoggedMealReceipt; dailySummary?: DailySummary }) => void;
   clearDevice: () => void;
 }
 
@@ -267,6 +268,7 @@ export const useStore = create<AppState>((set, get) => ({
         content: state.provisionalBubble.content,
         createdAt: new Date().toISOString(),
         didLogMeal: extra.didLogMeal,
+        ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
       };
 
       return { messages: [...state.messages, finalMessage], provisionalBubble: null };

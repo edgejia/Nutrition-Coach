@@ -39,7 +39,6 @@ export function ChatPanel() {
   const commitProvisionalBubble = useStore((s) => s.commitProvisionalBubble);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
-  const openSecondaryScreen = useStore((s) => s.openSecondaryScreen);
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
@@ -335,7 +334,7 @@ export function ChatPanel() {
           onToken: (token) => {
             useStore.getState().appendProvisionalToken(token);
           },
-          onDone: ({ didLogMeal, didMutateMeal, dailySummary, dailyTargets }) => {
+          onDone: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -346,7 +345,7 @@ export function ChatPanel() {
             if ((didLogMeal || didMutateMeal) && dailySummary) {
               setDailySummary(dailySummary);
             }
-            commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary });
+            commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary, loggedMeal });
             setSending(false);
           },
           onError: (errorMessage) => {
@@ -597,7 +596,7 @@ export function ChatPanel() {
 
   return (
     <div className="screen-shell sk-screen">
-      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1.25px solid var(--sk-ink)" }}>
+      <div className="screen-bar px-5 pb-2 pt-4" style={{ borderBottom: "1.25px solid var(--sk-ink)" }}>
         <button
           type="button"
           onClick={handleBackToHome}
@@ -627,9 +626,6 @@ export function ChatPanel() {
         >
           對話
         </h2>
-        <p className="mb-2.5 text-xs leading-relaxed" style={{ color: "var(--sk-ink-soft)" }}>
-          同一個輸入框同時處理提問與記錄。AI 回覆會直接連回今日攝取狀態。
-        </p>
         <DashboardMiniBar />
       </div>
       {pendingHomeChatDraft?.status === "failed" && (
@@ -658,7 +654,6 @@ export function ChatPanel() {
               <MessageBubble
                 key={m.id}
                 message={m}
-                onOpenSummary={m.didLogMeal ? () => openSecondaryScreen("mealEdit", "chat") : undefined}
                 onImageSettle={handleMessageImageSettle}
               />
             ))}

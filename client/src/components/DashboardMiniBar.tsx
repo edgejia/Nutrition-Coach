@@ -1,61 +1,46 @@
 import { useStore } from "../store.js";
 
+function formatValue(value: number | undefined, unit = "") {
+  return value === undefined ? `--${unit}` : `${Math.round(value)}${unit}`;
+}
+
+function MacroChip({ label, current, target }: { label: string; current?: number; target?: number }) {
+  return (
+    <span
+      className="sk-pill flex shrink-0 items-center gap-1 px-2.5 py-1 text-[11px]"
+      style={{ color: "var(--sk-ink)" }}
+    >
+      <span style={{ color: "var(--sk-ink-soft)" }}>{label}</span>
+      <span className="sk-metric text-[11px]">
+        {formatValue(current)} / {formatValue(target, "g")}
+      </span>
+    </span>
+  );
+}
+
 export function DashboardMiniBar() {
   const summary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
 
-  if (!summary) return null;
-
-  const fatPct = targets && targets.fat > 0 ? (summary.totalFat / targets.fat) * 100 : 0;
-  const isFatHigh = fatPct >= 85;
+  const remainingCalories = summary && targets
+    ? Math.max(0, Math.round(targets.calories - summary.totalCalories))
+    : undefined;
 
   return (
     <div
-      className="flex gap-2 overflow-x-auto px-4 py-2.5 scrollbar-none"
-      style={{ borderBottom: "1px solid var(--border)" }}
+      className="flex min-h-9 gap-1.5 overflow-x-auto py-1 scrollbar-none"
+      aria-label="今日營養摘要"
     >
       <span
-        className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
-        style={{
-          background: "rgba(76,184,122,0.08)",
-          border: "1px solid rgba(76,184,122,0.25)",
-          color: "var(--green)",
-        }}
+        className="sk-pill flex shrink-0 items-center gap-1 px-2.5 py-1 text-[11px]"
+        style={{ color: "var(--sk-ink)" }}
       >
-        Synced to today
+        <span style={{ color: "var(--sk-ink-soft)" }}>還能吃</span>
+        <span className="sk-metric text-[11px]">{formatValue(remainingCalories, " kcal")}</span>
       </span>
-      <span
-        className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
-        style={{
-          background: "var(--bg-raised)",
-          border: "1px solid var(--border-med)",
-          color: "var(--text-2)",
-        }}
-      >
-        {Math.round(summary.totalCalories)} / {targets?.calories ?? "—"} kcal
-      </span>
-      <span
-        className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
-        style={{
-          background: "var(--bg-raised)",
-          border: "1px solid var(--border-med)",
-          color: "var(--text-2)",
-        }}
-      >
-        P {Math.round(summary.totalProtein)} / {targets?.protein ?? "—"}g
-      </span>
-      {isFatHigh && (
-        <span
-          className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
-          style={{
-            background: "rgba(232,160,32,0.08)",
-            border: "1px solid rgba(232,160,32,0.3)",
-            color: "var(--amber)",
-          }}
-        >
-          Fat near limit
-        </span>
-      )}
+      <MacroChip label="蛋白" current={summary?.totalProtein} target={targets?.protein} />
+      <MacroChip label="碳水" current={summary?.totalCarbs} target={targets?.carbs} />
+      <MacroChip label="脂肪" current={summary?.totalFat} target={targets?.fat} />
     </div>
   );
 }

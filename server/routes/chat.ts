@@ -12,6 +12,7 @@ import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
 import { buildPartialSuccessLoggedReply } from "../orchestrator/index.js";
+import type { ToolExecutionResult } from "../orchestrator/tools.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
@@ -39,6 +40,7 @@ const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
+type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
@@ -194,6 +196,23 @@ function publishSummarySafe(
       "Summary publish failed (non-fatal)",
     );
   }
+}
+
+function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
+  if (!loggedMeal) return undefined;
+
+  const { foodName, calories, protein, carbs, fat } = loggedMeal;
+  if (
+    !foodName.trim() ||
+    !Number.isFinite(calories) ||
+    !Number.isFinite(protein) ||
+    !Number.isFinite(carbs) ||
+    !Number.isFinite(fat)
+  ) {
+    return undefined;
+  }
+
+  return { foodName, calories, protein, carbs, fat };
 }
 
 async function cleanupUploadSafe(imagePath: string | undefined, log: FastifyBaseLogger): Promise<void> {
@@ -356,6 +375,7 @@ async function handleOrchestratorSSE(
   let streamDailyTargets: unknown;
   let streamAffectedDate: string | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
+  let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
 
   try {
     if (image) {
@@ -394,6 +414,7 @@ async function handleOrchestratorSSE(
       streamDailyTargets = result.dailyTargets;
       streamAffectedDate = affectedDate;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
+      streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -411,6 +432,7 @@ async function handleOrchestratorSSE(
       const doneData = {
         didLogMeal: streamDidLogMeal,
         didMutateMeal: streamDidMutateMeal,
+        ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
@@ -432,12 +454,14 @@ async function handleOrchestratorSSE(
       streamDailyTargets = dailyTargets;
       streamAffectedDate = affectedDate;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
+      streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
       const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, normalizedReply);
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
         didLogMeal,
         didMutateMeal: streamDidMutateMeal,
+        ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(dailySummary ? { dailySummary } : {}),
         ...(dailyTargets ? { dailyTargets } : {}),
         ...(affectedDate ? { affectedDate } : {}),
@@ -472,6 +496,7 @@ async function handleOrchestratorSSE(
     const doneData = {
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
+      ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
