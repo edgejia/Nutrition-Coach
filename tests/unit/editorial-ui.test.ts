@@ -111,7 +111,7 @@ describe("Editorial UI", () => {
 
     assert.deepEqual(presentation, {
       state: "empty",
-      message: "還沒有今天的紀錄，拍張照或打字告訴我你吃了什麼吧！",
+      message: "先用對話記下第一餐。今天還沒有紀錄。到「對話」描述你吃了什麼。",
     });
   });
 

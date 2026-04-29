@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaIntentSelected } from "../api.js";
+import { SketchButton, SketchPill } from "./SketchPrimitives.js";
 import type {
   CoachCTA,
   CoachCTAIntent,
@@ -60,7 +61,7 @@ export function getAdvicePresentation(
   if (summary.mealCount === 0) {
     return {
       state: "empty" as const,
-      message: "還沒有今天的紀錄，拍張照或打字告訴我你吃了什麼吧！",
+      message: "先用對話記下第一餐。今天還沒有紀錄。到「對話」描述你吃了什麼。",
     };
   }
 
@@ -99,24 +100,21 @@ export function CoachCTAControls({
           const selected = intent.id === selectedIntentId;
           const optionsId = `coach-cta-options-${intent.id}`;
           return (
-            <button
+            <SketchButton
               key={intent.id}
-              type="button"
               aria-pressed={selected}
               aria-expanded={selected}
               aria-controls={optionsId}
               disabled={disabled}
               onClick={() => onIntentSelect(intent.id)}
-              className="min-h-11 rounded-xl px-4 py-2 text-sm font-bold leading-tight disabled:opacity-40"
+              className="min-h-10 px-3 py-2 text-sm leading-tight disabled:opacity-40"
               style={{
-                background: selected ? "var(--orange)" : "var(--bg-raised)",
-                border: selected ? "1px solid transparent" : "1px solid var(--border-med)",
-                color: selected ? "white" : "var(--text-2)",
-                boxShadow: selected ? "0 4px 16px rgba(232,104,42,0.3)" : "none",
+                background: selected ? "var(--sk-accent)" : "var(--sk-paper)",
+                color: "var(--sk-ink)",
               }}
             >
               {intent.label}
-            </button>
+            </SketchButton>
           );
         })}
       </div>
@@ -124,20 +122,18 @@ export function CoachCTAControls({
       {selectedIntent && (
         <div id={`coach-cta-options-${selectedIntent.id}`} className="flex flex-col gap-2">
           {selectedIntent.options.map((option) => (
-            <button
+            <SketchButton
               key={option.id}
-              type="button"
               disabled={disabled}
               onClick={() => onTaskOptionClick(option, selectedIntent)}
-              className="min-h-11 rounded-xl px-4 py-2 text-left text-sm leading-relaxed disabled:opacity-40"
+              className="min-h-11 justify-start px-4 py-2 text-left text-sm leading-relaxed disabled:opacity-40"
               style={{
-                background: "rgba(109,191,163,0.08)",
-                border: "1px solid var(--teal-border)",
-                color: "var(--text)",
+                background: "var(--sk-paper)",
+                color: "var(--sk-ink)",
               }}
             >
               {option.label}
-            </button>
+            </SketchButton>
           ))}
         </div>
       )}
@@ -174,12 +170,12 @@ export function CoachAdviceCard({
   if (presentation.state === "loading") {
     return (
       <div
-        className="animate-pulse rounded-2xl p-4"
-        style={{ background: "var(--bg-teal)", border: "1px solid var(--teal-border)" }}
+        className="sk-box-soft animate-pulse p-4"
+        style={{ background: "var(--sk-accent-soft)", borderColor: "var(--sk-accent)" }}
       >
-        <div className="mb-2 h-5 w-3/4 rounded" style={{ background: "rgba(109,191,163,0.15)" }} />
-        <div className="h-4 w-full rounded" style={{ background: "rgba(109,191,163,0.1)" }} />
-        <div className="mt-1 h-4 w-2/3 rounded" style={{ background: "rgba(109,191,163,0.1)" }} />
+        <div className="mb-2 h-5 w-3/4 rounded" style={{ background: "var(--sk-paper-warm)" }} />
+        <div className="h-4 w-full rounded" style={{ background: "var(--sk-paper-warm)" }} />
+        <div className="mt-1 h-4 w-2/3 rounded" style={{ background: "var(--sk-paper-warm)" }} />
       </div>
     );
   }
@@ -187,10 +183,10 @@ export function CoachAdviceCard({
   if (presentation.state === "empty") {
     return (
       <div
-        className="rounded-2xl p-4"
-        style={{ background: "var(--bg-teal)", border: "1px solid var(--teal-border)" }}
+        className="sk-box-soft p-4"
+        style={{ background: "var(--sk-accent-soft)", borderColor: "var(--sk-accent)" }}
       >
-        <p className="text-sm leading-relaxed" style={{ color: "var(--teal-text)" }}>
+        <p className="sk-heading text-xl leading-snug" style={{ color: "var(--sk-ink)" }}>
           {presentation.message}
         </p>
         {ctaBlock}
@@ -199,29 +195,19 @@ export function CoachAdviceCard({
   }
 
   return (
-    <div
-      className="rounded-2xl p-4"
-      style={{
-        background: "var(--bg-teal)",
-        border: "1px solid var(--teal-border)",
-      }}
-    >
+    <div className="sk-box-soft p-4" style={{ background: "var(--sk-accent-soft)", borderColor: "var(--sk-accent)" }}>
       {advice && (
         <>
           <p
-            className="mb-2 leading-snug"
+            className="sk-heading mb-2 text-xl leading-snug"
             style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 20,
-              fontWeight: 800,
-              color: "var(--text)",
-              letterSpacing: "-0.015em",
+              color: "var(--sk-ink)",
             }}
           >
             {presentation.headline}
           </p>
           {presentation.body && (
-            <p className="mb-3 text-sm leading-relaxed" style={{ color: "var(--teal-text)" }}>
+            <p className="sk-body mb-3 text-sm leading-relaxed" style={{ color: "var(--sk-ink-soft)" }}>
               {presentation.body}
             </p>
           )}
@@ -230,17 +216,16 @@ export function CoachAdviceCard({
       {presentation.tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {presentation.tags.map((tag) => (
-            <span
+            <SketchPill
               key={tag}
-              className="rounded-full px-2.5 py-1 text-xs font-semibold"
+              className="text-xs"
               style={{
-                background: "rgba(109,191,163,0.08)",
-                border: "1px solid rgba(109,191,163,0.2)",
-                color: "var(--teal-text)",
+                background: "var(--sk-paper)",
+                color: "var(--sk-ink)",
               }}
             >
               {tag}
-            </span>
+            </SketchPill>
           ))}
         </div>
       )}

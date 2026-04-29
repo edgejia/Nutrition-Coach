@@ -113,13 +113,13 @@ describe("mobile shell source contract", () => {
   it("keeps Home fixed regions outside the middle content scroller", () => {
     assert.match(sources.homeScreen, /\bscreen-shell\b/);
     assert.match(sources.homeScreen, /\bscreen-bar\b/);
-    assert.match(sources.homeScreen, /\bscreen-bottom-bar\b/);
-    assert.match(sources.homeScreen, /\bscreen-scroll-with-input\b/);
+    assert.match(sources.homeScreen, /\bscreen-scroll\b/);
+    assert.doesNotMatch(sources.homeScreen, /\bscreen-bottom-bar\b/);
+    assert.doesNotMatch(sources.homeScreen, /\bscreen-scroll-with-input\b/);
     assertIncludesInOrder(sources.homeScreen, [
       ["Home screen shell", '<div className="screen-shell sk-screen">'],
       ["Home header", "<HomeHeader />"],
-      ["Home content scroller", '<main className="screen-scroll-with-input'],
-      ["Home bottom input bar", '<div className="screen-bottom-bar border-t px-3"'],
+      ["Home content scroller", '<main className="screen-scroll'],
     ]);
   });
 
