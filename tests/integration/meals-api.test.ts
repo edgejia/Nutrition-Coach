@@ -212,6 +212,96 @@ describe("Meals API", () => {
     assert.deepEqual(remainingMeals.json().meals, []);
   });
 
+  it("PATCH /api/meals/:id updates the meal for the owner and returns the affected daily summary", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${meal.id}`,
+      headers: { cookie: deviceCookieHeader },
+      payload: {
+        foodName: "雞胸肉沙拉半份",
+        calories: 260,
+        protein: 20,
+        carbs: 8,
+        fat: 12,
+        imageAssetId: null,
+      },
+    });
+
+    assert.equal(updateRes.statusCode, 200);
+    const body = updateRes.json();
+    assert.equal(body.affectedDate, formatLocalDate(new Date(meal.loggedAt)));
+    assert.equal(body.dailySummary.totalCalories, 260);
+    assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
+  });
+
+  it("PATCH /api/meals/:id returns 404 for another device", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${meal.id}`,
+      headers: { cookie: otherCookieHeader },
+      payload: {
+        foodName: "雞胸肉沙拉半份",
+        calories: 260,
+        protein: 20,
+        carbs: 8,
+        fat: 12,
+        imageAssetId: null,
+      },
+    });
+
+    assert.equal(updateRes.statusCode, 404);
+    assert.deepEqual(updateRes.json(), { error: "Meal not found" });
+  });
+
+  it("PATCH /api/meals/:id rejects negative nutrition values", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${meal.id}`,
+      headers: { cookie: deviceCookieHeader },
+      payload: {
+        foodName: "雞胸肉沙拉半份",
+        calories: -1,
+        protein: 20,
+        carbs: 8,
+        fat: 12,
+        imageAssetId: null,
+      },
+    });
+
+    assert.equal(updateRes.statusCode, 400);
+    assert.deepEqual(updateRes.json(), { error: "Invalid meal update" });
+  });
+
   it("DELETE /api/meals/:id recomputes the deleted transaction's affected local day", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
