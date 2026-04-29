@@ -596,20 +596,20 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="screen-shell">
-      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
+    <div className="screen-shell sk-screen">
+      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1.25px solid var(--sk-ink)" }}>
         <button
           type="button"
           onClick={handleBackToHome}
           disabled={isChatLocked}
           className="mb-3 flex items-center gap-2 text-xs font-semibold disabled:opacity-40"
-          style={{ color: "var(--text-2)" }}
+          style={{ color: "var(--sk-ink-soft)" }}
         >
           <span
             className="flex h-6 w-6 items-center justify-center rounded-lg text-xs"
             style={{
               background: "var(--bg-raised)",
-              border: "1px solid var(--border-med)",
+              border: "1px solid var(--sk-ink)",
             }}
           >
             ‹
@@ -619,16 +619,15 @@ export function ChatPanel() {
         <h2
           className="mb-1 leading-none"
           style={{
-            fontFamily: "var(--font-display)",
+            fontFamily: "var(--sk-font-hand)",
             fontSize: 28,
             fontWeight: 800,
-            color: "var(--text)",
-            letterSpacing: "-0.025em",
+            color: "var(--sk-ink)",
           }}
         >
-          教練對話
+          對話
         </h2>
-        <p className="mb-2.5 text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
+        <p className="mb-2.5 text-xs leading-relaxed" style={{ color: "var(--sk-ink-soft)" }}>
           同一個輸入框同時處理提問與記錄。AI 回覆會直接連回今日攝取狀態。
         </p>
         <DashboardMiniBar />
@@ -701,7 +700,7 @@ export function ChatPanel() {
         )}
       </div>
 
-      <div className="screen-bottom-bar px-3" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
+      <div className="screen-bottom-bar px-3" style={{ borderTop: "1.25px solid var(--sk-ink)", background: "var(--sk-paper)" }}>
         <ChatInput onSend={handleSend} onBeforeSend={handleBeforeSend} disabled={sending} />
       </div>
     </div>
