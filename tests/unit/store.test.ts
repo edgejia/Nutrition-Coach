@@ -56,6 +56,7 @@ describe("AppStore", () => {
       coachAdvice: null,
       meals: [],
       pendingHomeChatDraft: null,
+      lastMealMutation: null,
       sending: false,
       provisionalBubble: null,
     });
@@ -252,6 +253,49 @@ describe("AppStore", () => {
     useStore.getState().closeSecondaryScreen();
     assert.equal(useStore.getState().secondaryScreen, null);
     assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-2");
+  });
+
+  it("openMealEdit stores payload and preserves pending Home Chat draft", () => {
+    useStore.getState().setActiveScreen("chat");
+    useStore.getState().setPendingHomeChatDraft({ id: "draft-3", text: "晚餐要補蛋白", status: "staged" });
+
+    useStore.getState().openMealEdit(
+      {
+        mealId: "meal-1",
+        dateKey: "2026-04-30",
+        foodName: "雞胸肉沙拉",
+        calories: 420,
+        protein: 32,
+        carbs: 14,
+        fat: 22,
+      },
+      "chat",
+    );
+
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "mealEdit",
+      origin: "chat",
+      payload: {
+        mealId: "meal-1",
+        dateKey: "2026-04-30",
+        foodName: "雞胸肉沙拉",
+        calories: 420,
+        protein: 32,
+        carbs: 14,
+        fat: 22,
+      },
+    });
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-3");
+  });
+
+  it("recordMealMutation tracks affected date with a monotonic nonce", () => {
+    useStore.getState().recordMealMutation("2026-04-30");
+    const first = useStore.getState().lastMealMutation;
+    useStore.getState().recordMealMutation("2026-04-30");
+    const second = useStore.getState().lastMealMutation;
+
+    assert.deepEqual(first, { affectedDate: "2026-04-30", nonce: 1 });
+    assert.deepEqual(second, { affectedDate: "2026-04-30", nonce: 2 });
   });
 
   it("stores and clears the pending home chat draft", () => {

@@ -444,6 +444,70 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
   });
 
+  it("updateMeal sends PATCH with same-origin JSON body and returns refreshed daily summary", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      dailySummary: {
+        date: "2026-04-30",
+        totalCalories: 260,
+        totalProtein: 20,
+        totalCarbs: 8,
+        totalFat: 12,
+        mealCount: 1,
+      },
+      meal: {
+        id: "meal-1",
+        foodName: "雞胸肉沙拉半份",
+        calories: 260,
+        protein: 20,
+        carbs: 8,
+        fat: 12,
+        imageAssetId: null,
+        imageUrl: null,
+        loggedAt: "2026-04-30T04:00:00.000Z",
+      },
+    });
+
+    const input = {
+      foodName: "雞胸肉沙拉半份",
+      calories: 260,
+      protein: 20,
+      carbs: 8,
+      fat: 12,
+      imageAssetId: null,
+    };
+    const result = await api.updateMeal("meal-1", input);
+
+    assert.equal(fetchCalls[0].url, "/api/meals/meal-1");
+    assert.equal(fetchCalls[0].init.method, "PATCH");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(fetchCalls[0].init.headers, { "content-type": "application/json" });
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), input);
+    assert.equal(result.dailySummary.totalCalories, 260);
+    assert.equal(result.meal.foodName, "雞胸肉沙拉半份");
+  });
+
+  it("updateMeal URL-encodes meal id and throws UNAUTHORIZED on 401", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(401, { error: "Invalid" });
+
+    await assert.rejects(
+      () =>
+        api.updateMeal("meal 1/with slash", {
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId: null,
+        }),
+      { message: "UNAUTHORIZED" },
+    );
+    assert.equal(fetchCalls[0].url, "/api/meals/meal%201%2Fwith%20slash");
+    assert.equal(fetchCalls[0].init.method, "PATCH");
+  });
+
   it("loadHistory throws UNAUTHORIZED on 401", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
