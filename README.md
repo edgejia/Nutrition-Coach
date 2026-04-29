@@ -7,13 +7,16 @@ Codex project-specific workflow notes are summarized in [docs/codex.md](docs/cod
 
 ## 目前進度
 
-`v1.4` 已於 `2026-04-21` 出貨並封存，目前沒有 active milestone。產品現在已具備：
+`v1.7` 已於 `2026-04-29` 出貨並封存，目前沒有 active milestone。產品現在已具備：
 
 - 文字與圖片餐點記錄，含 final-round SSE 串流與明確狀態文字
 - 歷史日期摘要瀏覽、read-only historical snapshot，以及 mutation 後的 `affectedDate` transport
 - trusted-protein normalization 與保守估算說明文案
 - cookie-backed guest-session browser auth、same-browser resume、tamper fail-closed 與 explicit rebuild recovery
+- history meals / search / trends API foundation，含 cursor pagination、current active revisions、SQLite query-plan coverage
+- deterministic insight eval harness foundation，含 reusable fixtures、redacted trace artifacts、groundedness / safety assertions
 - deployed-domain beta / production smoke 已完成
+
 ## 功能
 
 - **對話式記錄**：用自然語言描述你吃了什麼，支援文字與圖片上傳
@@ -83,7 +86,13 @@ yarn start
 beta / production 會由同一個 Fastify 進程同時提供 API 與 `dist/client`。
 部署時請使用持久化主機與掛載磁碟，並維持 `TZ=Asia/Taipei`、`DB_PATH`、`ASSETS_DIR`、`UPLOADS_STAGING_DIR`、`CLIENT_DIST_DIR` 的一致設定。public beta smoke 應在 real deployed domain 上執行，不以 localhost build smoke 取代。詳細的 Railway baseline 請見 [`docs/deploy/railway-beta.md`](docs/deploy/railway-beta.md)。
 
-目前 release promotion 順序固定為 `feature/* -> staging -> main`，正式 promote 前請先跑 `yarn release:check`。
+## Git / release workflow
+
+- `main` 是 Railway production branch；不要直接在 `main` 上做 active development。
+- `staging` 是 Railway testing branch，只用於 deploy verification 與 smoke checks。
+- 新 milestone / feature work 從乾淨的 `feature/*` 分支開始；目前 milestone branch 慣例是 `feature/rNN-vX-Y-dev`，例如 `feature/r12-v1-7-dev`。
+- Release promotion 順序固定為 `feature/* -> staging -> main`。
+- merge 或 promote 到 `staging` / `main` 前必須先跑 `yarn release:check`。
 
 ## 測試
 
