@@ -137,7 +137,7 @@ export function MainLayout() {
   useDailyRollover(refreshForRollover);
 
   return (
-    <div className="app-viewport sk-app-canvas flex flex-col">
+    <div className="app-viewport sk-app-canvas relative flex flex-col">
       {activeScreen === "home" && <HomeScreen />}
       {activeScreen === "chat" && <ChatPanel />}
       {activeScreen === "history" && <HistoryScreen />}
