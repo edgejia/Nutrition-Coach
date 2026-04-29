@@ -42,7 +42,7 @@ describe("History Day Detail source contract", () => {
       "儲存",
       "不對",
       "新增餐點",
-      "openSecondaryScreen(\"mealEdit\"",
+      'openSecondaryScreen("mealEdit"',
       "setDailySummary",
       "setMeals",
     ]) {
