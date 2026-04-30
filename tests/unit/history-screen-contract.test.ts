@@ -23,6 +23,18 @@ describe("History screen source contract", () => {
       "今天 · 即時",
       "這天還沒有餐點",
       "到「對話」描述你吃了什麼，AI 會幫你記錄。",
+      "waterLevel",
+      "calorieStatus",
+      "目標同步中，暫不顯示水位",
+      "history-week-water-box",
+      "history-week-water-fill",
+      "history-timeline",
+      "history-timeline-node",
+      "history-timeline-rail",
+      "history-timeline-meal",
+      "onTimelineOpen",
+      "targetMealId: meal.id",
+      "event.stopPropagation()",
     ]) {
       assert.match(source, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
@@ -40,6 +52,10 @@ describe("History screen source contract", () => {
       "儲存",
       "不對",
       "蛋白/碳水/脂肪",
+      "deleteMeal",
+      "onDelete",
+      "跳到",
+      "date picker",
       "setDailySummary",
       "setMeals",
     ]) {
