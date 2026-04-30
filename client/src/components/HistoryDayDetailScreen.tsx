@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getHistoryDaySnapshot } from "../api.js";
+import { getHistoryCalorieStatus, type HistoryCalorieStatus } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, MealEntry } from "../types.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SecondaryHeader, SketchDivider, SketchSoftBox } from "./SketchPrimitives.js";
+import { SecondaryHeader, SketchSoftBox } from "./SketchPrimitives.js";
 
 function formatDetailDate(dateKey: string): string {
   const [year, month, day] = dateKey.split("-").map(Number);
@@ -24,6 +25,23 @@ function macroUnit(value: number) {
   return `${Math.round(value)}g`;
 }
 
+function macroPair(current: number, target: number | undefined) {
+  return target && target > 0 ? `${Math.round(current)}/${Math.round(target)}` : `${Math.round(current)}`;
+}
+
+function detailStatusBadge(status: HistoryCalorieStatus, totalCalories: number, targetCalories: number | null) {
+  if (!targetCalories || targetCalories <= 0 || status === "targetMissing" || status === "empty") {
+    return null;
+  }
+
+  const delta = Math.round(totalCalories - targetCalories);
+  if (status === "low") return `偏低 -${Math.abs(delta).toLocaleString("en-US")}`;
+  if (status === "slightlyLow") return `略低 -${Math.abs(delta).toLocaleString("en-US")}`;
+  if (status === "over") return `超標 +${Math.max(0, delta).toLocaleString("en-US")}`;
+  if (status === "highOver") return `明顯超標 +${Math.max(0, delta).toLocaleString("en-US")}`;
+  return "達標範圍";
+}
+
 function MealDetailRow({
   meal,
   registerRef,
@@ -37,12 +55,7 @@ function MealDetailRow({
     <article
       ref={registerRef}
       data-target-highlight={highlighted ? "true" : "false"}
-      className="rounded-lg px-4 py-3 transition-colors duration-500"
-      style={{
-        background: highlighted ? "var(--sk-accent-soft)" : "var(--sk-paper)",
-        border: "2px solid var(--sk-ink)",
-        boxShadow: "1px 2px 0 var(--sk-ink)",
-      }}
+      className="history-day-meal transition-colors duration-500"
     >
       <div className="flex items-start gap-3">
         <PersistedAssetImage
@@ -66,7 +79,7 @@ function MealDetailRow({
         </div>
         <div className="sk-heading shrink-0 text-2xl">{Math.round(meal.calories)}</div>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+      <div className="history-day-meal-macros mt-3 grid grid-cols-3 gap-2 text-center">
         <div>
           <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
             protein
@@ -142,49 +155,66 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
   }, [snapshot, targetMealId]);
 
   const summary = snapshot?.summary;
+  const totalCalories = Math.round(summary?.totalCalories ?? 0);
+  const targetCalories = dailyTargets?.calories ?? null;
+  const calorieStatus = getHistoryCalorieStatus({
+    calories: totalCalories,
+    mealCount: summary?.mealCount ?? snapshot?.meals.length ?? 0,
+    targetCalories,
+  });
+  const statusBadge = detailStatusBadge(calorieStatus.status, totalCalories, targetCalories);
+  const progressVariant = calorieStatus.isOverTolerance ? "accent" : "ink";
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-[var(--sk-paper)]">
       <section className="sk-screen flex min-h-0 flex-1 flex-col">
         <SecondaryHeader title={formatDetailDate(dateKey)} backLabel="‹ 歷史" onBack={onBack} />
         <main className="screen-scroll-safe space-y-4 px-5 pt-2">
-          <SketchSoftBox className="p-4">
+          <SketchSoftBox className="history-day-summary p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
                   {isToday ? "今天 · 即時" : "歷史快照"}
                 </div>
-                <h1 className="sk-heading mt-1 text-4xl leading-none">
-                  {Math.round(summary?.totalCalories ?? 0).toLocaleString("en-US")}
+                <h1 className="sk-heading mt-1 text-5xl leading-none">
+                  {totalCalories.toLocaleString("en-US")}
                 </h1>
                 <p className="sk-body mt-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-                  {dailyTargets?.calories ? `目標 ${Math.round(dailyTargets.calories)} kcal` : "目標尚未設定"}
+                  {targetCalories
+                    ? `${totalCalories.toLocaleString("en-US")} / ${Math.round(targetCalories).toLocaleString("en-US")} kcal`
+                    : "目標同步中，暫不顯示水位"}
                 </p>
               </div>
-              <span className="sk-pill px-3 py-1 text-xs">{isToday ? "今天 · 即時" : "歷史快照"}</span>
+              {statusBadge ? (
+                <span className="history-day-status-badge sk-pill px-3 py-1 text-xs" data-status={calorieStatus.status}>
+                  {statusBadge}
+                </span>
+              ) : null}
             </div>
-            <SketchDivider dashed className="my-4" />
-            <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="history-day-progress mt-4" data-variant={progressVariant}>
+              <i style={{ width: `${Math.round(calorieStatus.waterLevel * 100)}%` }} />
+            </div>
+            <div className="history-day-macros mt-4 grid grid-cols-3 gap-2 text-center">
               <div>
                 <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
                   protein
                 </div>
-                <div className="sk-metric">{macroUnit(summary?.totalProtein ?? 0)}</div>
+                <div className="sk-metric">P {macroPair(summary?.totalProtein ?? 0, dailyTargets?.protein)}</div>
               </div>
               <div>
                 <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
                   carbs
                 </div>
-                <div className="sk-metric">{macroUnit(summary?.totalCarbs ?? 0)}</div>
+                <div className="sk-metric">C {macroPair(summary?.totalCarbs ?? 0, dailyTargets?.carbs)}</div>
               </div>
               <div>
                 <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
                   fat
                 </div>
-                <div className="sk-metric">{macroUnit(summary?.totalFat ?? 0)}</div>
+                <div className="sk-metric">F {macroPair(summary?.totalFat ?? 0, dailyTargets?.fat)}</div>
               </div>
             </div>
-            <p className="sk-body mt-4 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
+            <p className="sk-body mt-3 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
               {isToday ? "今天的資料會隨記錄更新；此畫面只讀檢視。" : "這是歷史快照，不會覆蓋今天的即時狀態。"}
             </p>
           </SketchSoftBox>

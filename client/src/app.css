@@ -391,6 +391,51 @@ textarea {
   box-shadow: 1px 2px 0 var(--sk-ink);
 }
 
+.history-day-status-badge[data-status="over"],
+.history-day-status-badge[data-status="highOver"] {
+  background: var(--sk-accent);
+  color: var(--sk-paper);
+}
+
+.history-day-progress {
+  position: relative;
+  height: 18px;
+  overflow: hidden;
+  border: 1.5px solid var(--sk-ink);
+  border-radius: 999px;
+  background: var(--sk-paper);
+}
+
+.history-day-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--sk-ink);
+}
+
+.history-day-progress[data-variant="accent"] > i {
+  background: var(--sk-accent);
+}
+
+.history-day-macros {
+  color: var(--sk-ink);
+}
+
+.history-day-meal {
+  border: 2px solid var(--sk-ink);
+  border-radius: 10px;
+  background: var(--sk-paper);
+  padding: 12px 14px;
+  box-shadow: 1px 2px 0 var(--sk-ink);
+}
+
+.history-day-meal[data-target-highlight="true"] {
+  background: var(--sk-accent-soft);
+}
+
+.history-day-meal-macros {
+  color: var(--sk-ink-soft);
+}
+
 .assistant-markdown {
   overflow-wrap: anywhere;
   word-break: break-word;
