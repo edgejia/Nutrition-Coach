@@ -28,6 +28,19 @@ describe("History Day Detail source contract", () => {
       "carbs",
       "fat",
       "PersistedAssetImage",
+      "getHistoryCalorieStatus",
+      "history-day-summary",
+      "history-day-status-badge",
+      "history-day-progress",
+      "history-day-macros",
+      "偏低",
+      "略低",
+      "達標範圍",
+      "超標",
+      "明顯超標",
+      "目標同步中，暫不顯示水位",
+      "歷史日 read-only；要修改請回到對話用自然語言描述。",
+      "今天 · 即時；此頁仍維持只讀。",
     ]) {
       assert.match(detailSource, escapedPattern(expected));
     }
@@ -42,6 +55,8 @@ describe("History Day Detail source contract", () => {
       "儲存",
       "不對",
       "新增餐點",
+      "跳到",
+      "date picker",
       'openSecondaryScreen("mealEdit"',
       "setDailySummary",
       "setMeals",
