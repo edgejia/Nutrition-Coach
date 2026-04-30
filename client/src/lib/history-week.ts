@@ -1,7 +1,13 @@
-import type { DailyTargets } from "../types.js";
 import { formatLocalDate } from "./time.js";
 
-export type HistoryWeekStatus = "empty" | "normal" | "overTarget";
+export type HistoryCalorieStatus =
+  | "empty"
+  | "targetMissing"
+  | "low"
+  | "slightlyLow"
+  | "inRange"
+  | "over"
+  | "highOver";
 
 export interface HistoryWeekTrend {
   date: string;
@@ -18,10 +24,22 @@ export interface HistoryWeekDay {
   dayNumber: number;
   calories: number;
   mealCount: number;
-  status: "empty" | "normal" | "overTarget";
+  status: HistoryCalorieStatus;
+  calorieRatio: number | null;
+  waterLevel: number;
+  hasTarget: boolean;
+  isOverTolerance: boolean;
   isSelected: boolean;
   isToday: boolean;
   isFuture: boolean;
+}
+
+export interface HistoryCalorieStatusResult {
+  status: HistoryCalorieStatus;
+  calorieRatio: number | null;
+  waterLevel: number;
+  hasTarget: boolean;
+  isOverTolerance: boolean;
 }
 
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -58,16 +76,46 @@ function dayOffsetFromMonday(date: Date): number {
   return (date.getDay() + 6) % 7;
 }
 
-function classifyStatus(trend: HistoryWeekTrend | undefined, targets?: DailyTargets | null): HistoryWeekStatus {
-  if (!trend || trend.mealCount === 0 || trend.calories <= 0) {
-    return "empty";
+export function getHistoryCalorieStatus(input: {
+  calories: number;
+  mealCount?: number;
+  targetCalories?: number | null;
+}): HistoryCalorieStatusResult {
+  if ((input.mealCount ?? 0) === 0 || input.calories <= 0) {
+    return {
+      status: "empty",
+      calorieRatio: null,
+      waterLevel: 0,
+      hasTarget: Number(input.targetCalories) > 0,
+      isOverTolerance: false,
+    };
   }
 
-  if (targets && trend.calories > targets.calories) {
-    return "overTarget";
+  if (!input.targetCalories || input.targetCalories <= 0) {
+    return {
+      status: "targetMissing",
+      calorieRatio: null,
+      waterLevel: 0,
+      hasTarget: false,
+      isOverTolerance: false,
+    };
   }
 
-  return "normal";
+  const calorieRatio = input.calories / input.targetCalories;
+  const waterLevel = Math.min(1, calorieRatio);
+  if (calorieRatio < 0.7) {
+    return { status: "low", calorieRatio, waterLevel, hasTarget: true, isOverTolerance: false };
+  }
+  if (calorieRatio < 0.9) {
+    return { status: "slightlyLow", calorieRatio, waterLevel, hasTarget: true, isOverTolerance: false };
+  }
+  if (calorieRatio <= 1.1) {
+    return { status: "inRange", calorieRatio, waterLevel, hasTarget: true, isOverTolerance: false };
+  }
+  if (calorieRatio <= 1.25) {
+    return { status: "over", calorieRatio, waterLevel, hasTarget: true, isOverTolerance: true };
+  }
+  return { status: "highOver", calorieRatio, waterLevel, hasTarget: true, isOverTolerance: true };
 }
 
 export function getMondayWeekStart(dateKey: string): string {
@@ -85,7 +133,7 @@ export function buildHistoryWeek(input: {
   selectedDateKey: string;
   todayKey: string;
   trends: HistoryWeekTrend[];
-  targets?: DailyTargets | null;
+  targets?: { calories: number } | null;
 }): HistoryWeekDay[] {
   const trendsByDate = new Map(input.trends.map((trend) => [trend.date, trend]));
 
@@ -93,14 +141,25 @@ export function buildHistoryWeek(input: {
     const dateKey = addDays(input.weekStartKey, index);
     const date = parseDateKey(dateKey);
     const trend = trendsByDate.get(dateKey);
+    const calories = trend?.calories ?? 0;
+    const mealCount = trend?.mealCount ?? 0;
+    const calorieStatus = getHistoryCalorieStatus({
+      calories,
+      mealCount,
+      targetCalories: input.targets?.calories ?? null,
+    });
 
     return {
       dateKey,
       weekday,
       dayNumber: date.getDate(),
-      calories: trend?.calories ?? 0,
-      mealCount: trend?.mealCount ?? 0,
-      status: classifyStatus(trend, input.targets),
+      calories,
+      mealCount,
+      status: calorieStatus.status,
+      calorieRatio: calorieStatus.calorieRatio,
+      waterLevel: calorieStatus.waterLevel,
+      hasTarget: calorieStatus.hasTarget,
+      isOverTolerance: calorieStatus.isOverTolerance,
       isSelected: dateKey === input.selectedDateKey,
       isToday: dateKey === input.todayKey,
       isFuture: dateKey > input.todayKey,
