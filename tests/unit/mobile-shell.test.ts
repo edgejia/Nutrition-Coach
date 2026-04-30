@@ -74,7 +74,7 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".screen-shell"), /display:\s*flex/);
     assert.match(cssBlock(".screen-shell"), /flex-direction:\s*column/);
     assert.match(cssBlock(".screen-shell"), /overflow:\s*clip/);
-    assert.match(cssBlock(".screen-shell"), /background:\s*var\(--bg\)/);
+    assert.match(cssBlock(".screen-shell"), /background:\s*var\(--sp-bg\)/);
 
     assert.match(cssBlock(".screen-bar"), /flex-shrink:\s*0/);
     assert.match(cssBlock(".screen-bottom-bar"), /flex-shrink:\s*0/);
@@ -104,10 +104,20 @@ describe("mobile shell source contract", () => {
 
   it("keeps MainLayout as the app viewport boundary", () => {
     assert.match(sources.mainLayout, /\bapp-viewport\b/);
+    assert.match(sources.mainLayout, /\bsp-app-canvas\b/);
     assert.match(sources.mainLayout, /\bvisualViewport\b/);
     assert.match(sources.mainLayout, /--app-visual-viewport-height/);
     assert.match(sources.mainLayout, /--app-bottom-occlusion/);
+    assert.doesNotMatch(sources.mainLayout, /IOSDevice/);
     assert.doesNotMatch(sources.mainLayout, /document\.body\.style\.overflow/);
+  });
+
+  it("does not introduce sport demo device-frame chrome", () => {
+    assert.doesNotMatch(sources.mainLayout, /IOSDevice/);
+    assert.doesNotMatch(sources.mainLayout, /sp-device|sp-notch|sp-statusbar/);
+    assert.doesNotMatch(sources.appCss, /\.sp-device\b/);
+    assert.doesNotMatch(sources.appCss, /\.sp-notch\b/);
+    assert.doesNotMatch(sources.appCss, /\.sp-statusbar\b/);
   });
 
   it("keeps Home fixed regions outside the middle content scroller", () => {
