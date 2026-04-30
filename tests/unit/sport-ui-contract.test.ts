@@ -38,11 +38,15 @@ describe("sport UI source contract", () => {
     assert.match(sources.indexHtml, /fonts\.googleapis\.com\/css2\?/);
 
     for (const font of [
+      "family=Architects+Daughter",
       "family=Bebas+Neue",
-      "family=Sora:wght@400;700",
+      "family=Bricolage+Grotesque:wght@400;700",
+      "family=Caveat:wght@400;700",
       "family=Inter:wght@400;700",
       "family=JetBrains+Mono:wght@400;700",
+      "family=Manrope:wght@400;700",
       "family=Noto+Sans+TC:wght@400;700",
+      "family=Sora:wght@400;700",
       "display=swap",
     ]) {
       assert.match(sources.indexHtml, escapedPattern(font));
