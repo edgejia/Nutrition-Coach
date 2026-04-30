@@ -29,6 +29,7 @@ function escapedPattern(source: string) {
 const sources = {
   appCss: await readSource("../../client/src/app.css"),
   indexHtml: await readSource("../../client/index.html"),
+  sportIcons: await readOptionalSource("../../client/src/components/SportIcons.tsx"),
   sportPrimitives: await readOptionalSource("../../client/src/components/SportPrimitives.tsx"),
 };
 
@@ -127,5 +128,36 @@ describe("sport UI source contract", () => {
     }
 
     assert.doesNotMatch(sources.sportPrimitives, /window\./);
+  });
+
+  it("exports typed sport icons without demo globals or public SVG imports", () => {
+    assert.match(sources.sportIcons, /export interface SportIconProps/);
+    assert.match(sources.sportIcons, /viewBox="0 0 24 24"/);
+    assert.match(sources.sportIcons, /stroke="currentColor"/);
+    assert.match(sources.sportIcons, /strokeLinecap="round"/);
+    assert.match(sources.sportIcons, /strokeLinejoin="round"/);
+    assert.match(sources.sportIcons, /stroke = 1\.6/);
+    assert.match(sources.sportIcons, /aria-hidden.*true/s);
+
+    for (const iconExport of [
+      "SportHomeIcon",
+      "SportChatIcon",
+      "SportHistoryIcon",
+      "SportCameraIcon",
+      "SportSendIcon",
+      "SportSettingsIcon",
+      "SportChevronLeftIcon",
+      "SportChevronRightIcon",
+      "SportFlameIcon",
+      "SportBoltIcon",
+      "SportPlusIcon",
+      "SportCloseIcon",
+    ]) {
+      assert.match(sources.sportIcons, new RegExp(`export function ${iconExport}`));
+    }
+
+    for (const blocked of ["Object.assign(window", "window.", ".svg"]) {
+      assert.doesNotMatch(sources.sportIcons, escapedPattern(blocked));
+    }
   });
 });
