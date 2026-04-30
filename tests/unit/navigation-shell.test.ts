@@ -19,6 +19,8 @@ function countPrimaryScrollHelpers(source: string) {
   return countMatches(source, /\bscreen-scroll(?:-with-input|-safe)?\b/g);
 }
 
+const hiddenDialogueLabelPattern = new RegExp(`label: "${"對話"}"`);
+
 const sources = {
   types: await readSource("../../client/src/types.ts"),
   store: await readSource("../../client/src/store.ts"),
@@ -37,11 +39,28 @@ describe("navigation shell source contract", () => {
   });
 
   it("renders exactly three bottom tabs and hides under secondary screens", () => {
-    assert.equal(countMatches(sources.bottomTabBar, /label: "首頁"/g), 1);
-    assert.equal(countMatches(sources.bottomTabBar, /label: "對話"/g), 1);
-    assert.equal(countMatches(sources.bottomTabBar, /label: "歷史"/g), 1);
+    assert.match(sources.bottomTabBar, /SportIcons.js/);
+    assert.match(sources.bottomTabBar, /SportHomeIcon/);
+    assert.match(sources.bottomTabBar, /SportChatIcon/);
+    assert.match(sources.bottomTabBar, /SportHistoryIcon/);
+    assert.match(sources.bottomTabBar, /aria-label="首頁"/);
+    assert.match(sources.bottomTabBar, /aria-label="記錄餐點"/);
+    assert.match(sources.bottomTabBar, /aria-label="歷史"/);
     assert.match(sources.bottomTabBar, /aria-label="主要導覽"/);
+    assert.match(sources.bottomTabBar, /aria-current=\{isActive \? "page" : undefined\}/);
+    assert.match(sources.bottomTabBar, /setActiveScreen\("chat"\)/);
+    assert.match(sources.bottomTabBar, /setActiveScreen\("chat"\)/, 'expected setActiveScreen("chat") route');
     assert.match(sources.bottomTabBar, /secondaryScreen[\s\S]+return null/);
+    assert.doesNotMatch(sources.bottomTabBar, /label: "首頁"/);
+    assert.doesNotMatch(sources.bottomTabBar, hiddenDialogueLabelPattern);
+    assert.doesNotMatch(sources.bottomTabBar, /label: "歷史"/);
+    assert.doesNotMatch(sources.bottomTabBar, />HOME</);
+    assert.doesNotMatch(sources.bottomTabBar, />LOG</);
+    assert.doesNotMatch(sources.bottomTabBar, />TREND</);
+    assert.doesNotMatch(sources.bottomTabBar, /<span>\{tab\.label\}<\/span>/);
+    assert.doesNotMatch(sources.bottomTabBar, /openSecondaryScreen\(\{ screen: "mealEdit"/);
+    assert.doesNotMatch(sources.bottomTabBar, /manual/i);
+    assert.doesNotMatch(sources.bottomTabBar, /modal/i);
   });
 
   it("stores the secondary stack state in Zustand", () => {
@@ -51,12 +70,13 @@ describe("navigation shell source contract", () => {
   });
 
   it("wires the app canvas, primary slots, and secondary placeholders", () => {
-    assert.match(sources.mainLayout, /sk-app-canvas/);
+    assert.match(sources.mainLayout, /sp-app-canvas/);
     assert.match(sources.mainLayout, /BottomTabBar/);
     assert.match(sources.mainLayout, /secondaryScreen/);
     assert.match(sources.mainLayout, /HistoryScreen/);
     assert.match(sources.mainLayout, /HistoryDayDetailScreen/);
     assert.match(sources.mainLayout, /MealEditScreen/);
+    assert.doesNotMatch(sources.mainLayout, /IOSDevice/);
     assert.doesNotMatch(sources.mainLayout, /Day Detail shell/);
     assert.doesNotMatch(sources.mainLayout, /Meal Edit shell/);
     assert.doesNotMatch(sources.mainLayout, /BrowserRouter/);
