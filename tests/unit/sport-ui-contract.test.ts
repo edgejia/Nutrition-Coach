@@ -11,6 +11,17 @@ async function readSource(relativePath: string) {
   return readFile(sourcePath(relativePath), "utf8");
 }
 
+async function readOptionalSource(relativePath: string) {
+  try {
+    return await readSource(relativePath);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
 function escapedPattern(source: string) {
   return new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
@@ -18,6 +29,7 @@ function escapedPattern(source: string) {
 const sources = {
   appCss: await readSource("../../client/src/app.css"),
   indexHtml: await readSource("../../client/index.html"),
+  sportPrimitives: await readOptionalSource("../../client/src/components/SportPrimitives.tsx"),
 };
 
 describe("sport UI source contract", () => {
@@ -80,5 +92,40 @@ describe("sport UI source contract", () => {
     for (const blocked of ["@import url(", "IOSDevice", ".sp-device", ".sp-notch", ".sp-statusbar"]) {
       assert.doesNotMatch(sources.appCss, escapedPattern(blocked));
     }
+  });
+
+  it("exports typed sport primitives with clamped progress and production classes", () => {
+    for (const primitiveExport of [
+      "SportScreen",
+      "SportCard",
+      "SportChip",
+      "SportIconButton",
+      "SportProgressBar",
+      "SportRing",
+      "SportReceipt",
+    ]) {
+      assert.match(sources.sportPrimitives, new RegExp(`export function ${primitiveExport}`));
+    }
+
+    assert.match(sources.sportPrimitives, /function clampUnit\(value: number\)/);
+    assert.match(sources.sportPrimitives, /Math\.max\(0, Math\.min\(1, value\)\)/);
+    assert.match(sources.sportPrimitives, /"aria-label": string/);
+
+    for (const className of [
+      "sp-screen",
+      "sp-card",
+      "sp-card-flat",
+      "sp-card-glow",
+      "sp-chip",
+      "sp-chip-zh",
+      "sp-iconbtn",
+      "sp-bar-track",
+      "sp-bar-fill",
+      "sp-receipt",
+    ]) {
+      assert.match(sources.sportPrimitives, escapedPattern(className));
+    }
+
+    assert.doesNotMatch(sources.sportPrimitives, /window\./);
   });
 });
