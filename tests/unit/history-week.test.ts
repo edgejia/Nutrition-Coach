@@ -53,6 +53,7 @@ describe("history week helpers", () => {
       "slightlyLow",
     );
     assert.equal(getHistoryCalorieStatus({ calories: 2000, mealCount: 3, targetCalories: 2000 }).status, "inRange");
+    assert.equal(getHistoryCalorieStatus({ calories: 2000, targetCalories: 2000 }).status, "inRange");
     assert.equal(getHistoryCalorieStatus({ calories: 2200, mealCount: 3, targetCalories: 2000 }).status, "inRange");
     assert.equal(getHistoryCalorieStatus({ calories: 2201, mealCount: 3, targetCalories: 2000 }).status, "over");
     assert.equal(getHistoryCalorieStatus({ calories: 2600, mealCount: 3, targetCalories: 2000 }).status, "highOver");

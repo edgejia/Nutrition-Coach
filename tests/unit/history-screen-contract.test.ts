@@ -19,8 +19,8 @@ describe("History screen source contract", () => {
       "openDayDetail",
       "查看上一週",
       "查看下一週",
-      "read-only",
-      "live",
+      "歷史快照",
+      "今天 · 即時",
       "這天還沒有餐點",
       "到「對話」描述你吃了什麼，AI 會幫你記錄。",
       "waterLevel",
@@ -34,8 +34,12 @@ describe("History screen source contract", () => {
       "history-timeline-meal",
       "history-timeline-panel",
       "history-timeline-panel-header",
-      "read-only",
-      "targetMealId: meal.id",
+      "onTimelineOpen",
+      "role=\"button\"",
+      "tabIndex={0}",
+      "event.target !== event.currentTarget",
+      "targetMealId",
+      "onTimelineOpen(meal.id)",
       "event.stopPropagation()",
     ]) {
       assert.match(source, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -60,8 +64,6 @@ describe("History screen source contract", () => {
       "date picker",
       "setDailySummary",
       "setMeals",
-      "role=\"button\"",
-      "onTimelineOpen",
     ]) {
       assert.doesNotMatch(source, new RegExp(rejected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }

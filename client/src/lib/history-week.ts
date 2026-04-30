@@ -82,7 +82,7 @@ export function getHistoryCalorieStatus(input: {
   mealCount?: number;
   targetCalories?: number | null;
 }): HistoryCalorieStatusResult {
-  if ((input.mealCount ?? 0) === 0 || input.calories <= 0) {
+  if (input.mealCount === 0 || input.calories <= 0) {
     return {
       status: "empty",
       calorieRatio: null,

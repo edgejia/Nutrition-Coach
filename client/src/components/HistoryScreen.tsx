@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { getHistoryDaySnapshot, getHistoryTrends } from "../api.js";
 import {
   buildHistoryWeek,
@@ -132,7 +132,7 @@ function TimelinePanel({
               : "目標同步中，暫不顯示水位"}
           </div>
         </div>
-        <span className="sk-pill shrink-0 px-4 py-1 text-sm">{isToday ? "live" : "read-only"}</span>
+        <span className="sk-pill shrink-0 px-4 py-1 text-sm">{isToday ? "今天 · 即時" : "歷史快照"}</span>
       </div>
 
       {loadingDay ? (
@@ -176,19 +176,38 @@ function TimelineRows({
   todayKey: string;
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
 }) {
-  function onMealOpen(meal: MealEntry) {
+  function onTimelineOpen(targetMealId?: string) {
     openDayDetail(
       {
         dateKey: selectedDateKey,
-        targetMealId: meal.id,
+        targetMealId,
         label: selectedDateKey === todayKey ? "today-live" : "history-snapshot",
       },
       "history",
     );
   }
 
+  function onMealOpen(meal: MealEntry) {
+    onTimelineOpen(meal.id);
+  }
+
+  function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onTimelineOpen();
+    }
+  }
+
   return (
-    <div className="history-timeline" aria-label="當日餐點 timeline">
+    <div
+      className="history-timeline"
+      role="button"
+      tabIndex={0}
+      aria-label="開啟當日詳情"
+      onClick={() => onTimelineOpen()}
+      onKeyDown={handleTimelineKeyDown}
+    >
       {meals.map((meal, index) => (
         <div
           key={meal.id}
