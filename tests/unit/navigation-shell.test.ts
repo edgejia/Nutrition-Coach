@@ -43,10 +43,11 @@ describe("navigation shell source contract", () => {
     assert.match(sources.bottomTabBar, /SportHomeIcon/);
     assert.match(sources.bottomTabBar, /SportChatIcon/);
     assert.match(sources.bottomTabBar, /SportHistoryIcon/);
-    assert.match(sources.bottomTabBar, /aria-label="首頁"/);
-    assert.match(sources.bottomTabBar, /aria-label="記錄餐點"/);
-    assert.match(sources.bottomTabBar, /aria-label="歷史"/);
+    assert.match(sources.bottomTabBar, /ariaLabel: "首頁"/);
+    assert.match(sources.bottomTabBar, /ariaLabel: "記錄餐點"/);
+    assert.match(sources.bottomTabBar, /ariaLabel: "歷史"/);
     assert.match(sources.bottomTabBar, /aria-label="主要導覽"/);
+    assert.match(sources.bottomTabBar, /aria-label=\{tab\.ariaLabel\}/);
     assert.match(sources.bottomTabBar, /aria-current=\{isActive \? "page" : undefined\}/);
     assert.match(sources.bottomTabBar, /setActiveScreen\("chat"\)/);
     assert.match(sources.bottomTabBar, /setActiveScreen\("chat"\)/, 'expected setActiveScreen("chat") route');

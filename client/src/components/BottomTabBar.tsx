@@ -1,11 +1,16 @@
 import { useStore } from "../store.js";
 import type { PrimaryTab } from "../types.js";
-import { CalendarDaysIcon, HomeIcon, MessageCircleIcon } from "./SketchIcons.js";
+import { SportChatIcon, SportHistoryIcon, SportHomeIcon } from "./SportIcons.js";
 
-const tabs: Array<{ id: PrimaryTab; label: string; Icon: typeof HomeIcon }> = [
-  { id: "home", label: "首頁", Icon: HomeIcon },
-  { id: "chat", label: "對話", Icon: MessageCircleIcon },
-  { id: "history", label: "歷史", Icon: CalendarDaysIcon },
+const tabs: Array<{
+  id: PrimaryTab;
+  ariaLabel: string;
+  Icon: typeof SportHomeIcon;
+  kind: "side" | "action";
+}> = [
+  { id: "home", ariaLabel: "首頁", Icon: SportHomeIcon, kind: "side" },
+  { id: "chat", ariaLabel: "記錄餐點", Icon: SportChatIcon, kind: "action" },
+  { id: "history", ariaLabel: "歷史", Icon: SportHistoryIcon, kind: "side" },
 ];
 
 export function BottomTabBar() {
@@ -18,32 +23,23 @@ export function BottomTabBar() {
   }
 
   return (
-    <nav
-      aria-label="主要導覽"
-      className="screen-bottom-bar grid grid-cols-3 gap-1 px-3 pt-2"
-      style={{ background: "var(--sk-paper-warm)", borderTop: "1.25px solid var(--sk-ink)" }}
-    >
+    <nav aria-label="主要導覽" className="screen-bottom-bar sp-tabbar">
       {tabs.map((tab) => {
         const isActive = activeScreen === tab.id;
         const { Icon } = tab;
+        const handleClick = tab.id === "chat" ? () => setActiveScreen("chat") : () => setActiveScreen(tab.id);
         return (
           <button
             key={tab.id}
+            aria-label={tab.ariaLabel}
             aria-current={isActive ? "page" : undefined}
-            className="relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-none text-[11px]"
-            onClick={() => setActiveScreen(tab.id)}
-            style={{ color: isActive ? "var(--sk-accent)" : "var(--sk-ink-faint)" }}
+            className={tab.kind === "action" ? "sp-tab sp-tab-action" : "sp-tab"}
+            data-active={isActive}
+            onClick={handleClick}
             type="button"
           >
-            <Icon size={19} />
-            <span>{tab.label}</span>
-            {isActive ? (
-              <i
-                aria-hidden="true"
-                className="absolute bottom-1 h-0.5 w-7 rounded-full"
-                style={{ background: "var(--sk-accent)" }}
-              />
-            ) : null}
+            <Icon size={tab.kind === "action" ? 26 : 21} stroke={tab.kind === "action" ? 1.9 : 1.7} />
+            <i aria-hidden="true" className="sp-tab-indicator" />
           </button>
         );
       })}
