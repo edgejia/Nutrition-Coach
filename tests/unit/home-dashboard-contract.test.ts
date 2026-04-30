@@ -140,6 +140,7 @@ describe("Home dashboard display contracts", () => {
 
   it("Home uses the Phase 39 sport dashboard surface", async () => {
     const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
 
     assert.match(homeSource, /SportScreen/);
     assert.match(homeSource, /SportCard/);
@@ -154,6 +155,8 @@ describe("Home dashboard display contracts", () => {
     assert.match(homeSource, /去對話記錄/);
     assert.match(homeSource, /setPendingHomeChatDraft/);
     assert.match(homeSource, /setActiveScreen\("chat"\)/);
+    assert.match(cssSource, /@media \(max-width:\s*360px\)[\s\S]*\.home-sport-calorie-number[\s\S]*font-size:\s*52px/);
+    assert.match(cssSource, /@media \(max-width:\s*360px\)[\s\S]*\.home-sport-calorie-copy[\s\S]*min-width:\s*0/);
 
     assert.doesNotMatch(homeSource, /SketchRing/);
     assert.doesNotMatch(homeSource, /SketchProgressBar/);

@@ -134,6 +134,7 @@ describe("CoachCTAControls", () => {
     assert.doesNotMatch(componentSource, /SketchPill/);
     assert.doesNotMatch(componentSource, /openSecondaryScreen\("mealEdit"/);
     assert.doesNotMatch(componentSource, /ChatEntryBar/);
+    assert.match(cssSource, /\.sp-coach-cta\s*\{[\s\S]*display:\s*flex;[\s\S]*flex:\s*0 0 auto;[\s\S]*flex-direction:\s*column/);
     assert.match(cssSource, /\.sp-coach-cta-option:disabled[\s\S]*opacity:\s*0\.4/);
 
     for (const selector of [
