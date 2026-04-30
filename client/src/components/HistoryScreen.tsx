@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { getHistoryDaySnapshot, getHistoryTrends } from "../api.js";
 import {
   buildHistoryWeek,
@@ -46,47 +46,35 @@ function HistoryWeekStrip({
   return (
     <div className="grid grid-cols-7 gap-1" aria-label="週紀錄">
       {days.map((day) => {
-        const statusHeight = day.status === "empty" ? "12px" : `${Math.max(14, Math.min(44, day.calories / 55))}px`;
+        const calorieStatus = day.status;
+        const fillHeight = `${Math.round(day.waterLevel * 100)}%`;
+        const showFill = day.waterLevel > 0 && !day.isFuture && calorieStatus !== "targetMissing";
         return (
           <button
             key={day.dateKey}
             type="button"
             disabled={day.isFuture}
             onClick={() => onSelect(day.dateKey)}
-            className="min-w-0 rounded-md px-1 py-2 text-center disabled:cursor-not-allowed"
-            data-status={day.status}
+            className="history-week-day min-w-0 text-center disabled:cursor-not-allowed"
+            data-calorie-status={calorieStatus}
+            data-over-tolerance={day.isOverTolerance ? "true" : "false"}
             data-selected={day.isSelected ? "true" : "false"}
-            style={{
-              minHeight: 90,
-              opacity: day.isFuture ? 0.34 : 1,
-              background: day.isSelected
-                ? "var(--sk-accent-soft)"
-                : day.isToday
-                  ? "var(--sk-paper-warm)"
-                  : "transparent",
-              border: day.isSelected ? "2px solid var(--sk-ink)" : "1px solid var(--sk-ink-faint)",
-              boxShadow: day.isSelected ? "1px 2px 0 var(--sk-ink)" : "none",
-            }}
+            data-today={day.isToday ? "true" : "false"}
+            data-future={day.isFuture ? "true" : "false"}
           >
             <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
               {day.weekday}
             </div>
-            <div className="mt-1 flex h-11 items-end justify-center">
-              <span
-                aria-hidden="true"
-                className="block w-5 rounded-sm"
-                style={{
-                  height: statusHeight,
-                  minHeight: day.status === "empty" ? 10 : undefined,
-                  background:
-                    day.status === "overTarget"
-                      ? "var(--sk-accent)"
-                      : day.status === "normal"
-                        ? "var(--sk-ink)"
-                        : "transparent",
-                  border: day.status === "empty" ? "1px dashed var(--sk-ink-faint)" : "none",
-                }}
-              />
+            <div className="history-week-water-box mt-1" aria-hidden="true">
+              {showFill ? (
+                <span
+                  className="history-week-water-fill"
+                  style={{
+                    height: fillHeight,
+                    background: day.isOverTolerance ? "var(--sk-accent)" : "var(--sk-ink)",
+                  }}
+                />
+              ) : null}
             </div>
             <div className="sk-metric mt-1 text-sm">{day.dayNumber}</div>
             {day.isToday ? (
@@ -101,26 +89,41 @@ function HistoryWeekStrip({
   );
 }
 
+function calorieStatusCopy(status: HistoryWeekDay["status"], total: number, targetCalories: number | null) {
+  if (!targetCalories || targetCalories <= 0) return "目標同步中，暫不顯示水位";
+  const delta = Math.round(total - targetCalories);
+  if (status === "low") return `偏低 -${Math.abs(delta).toLocaleString("en-US")}`;
+  if (status === "slightlyLow") return `略低 -${Math.abs(delta).toLocaleString("en-US")}`;
+  if (status === "over") return `超標 +${Math.max(0, delta).toLocaleString("en-US")}`;
+  if (status === "highOver") return `明顯超標 +${Math.max(0, delta).toLocaleString("en-US")}`;
+  return "達標範圍";
+}
+
 function SelectedDaySummary({
   selectedDateKey,
   todayKey,
   snapshot,
   targetCalories,
+  selectedDay,
 }: {
   selectedDateKey: string;
   todayKey: string;
   snapshot: HistoryDaySnapshot | null;
   targetCalories: number | null;
+  selectedDay: HistoryWeekDay | undefined;
 }) {
   const isToday = selectedDateKey === todayKey;
   const total = Math.round(snapshot?.summary.totalCalories ?? 0);
+  const status = selectedDay?.status ?? "empty";
   return (
     <SketchSoftBox className="p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="sk-heading text-2xl">{formatHistoryDate(selectedDateKey)}</h2>
           <p className="sk-body mt-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-            {isToday ? "今天的資料會隨記錄更新；此畫面只讀檢視。" : "這是歷史快照，不會覆蓋今天的即時狀態。"}
+            {targetCalories
+              ? `${total.toLocaleString("en-US")} / ${Math.round(targetCalories).toLocaleString("en-US")} kcal`
+              : "目標同步中，暫不顯示水位"}
           </p>
         </div>
         <span
@@ -130,11 +133,11 @@ function SelectedDaySummary({
           {isToday ? "今天 · 即時" : "歷史快照"}
         </span>
       </div>
-      <div className="mt-4 flex items-end justify-between">
+      <div className="mt-4 flex items-end justify-between gap-3">
         <div>
           <div className="sk-heading text-4xl leading-none">{total.toLocaleString("en-US")}</div>
           <div className="sk-body mt-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-            {targetCalories ? `目標 ${Math.round(targetCalories)} kcal` : "尚未設定目標"}
+            {calorieStatusCopy(status, total, targetCalories)}
           </div>
         </div>
         <div className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
@@ -156,42 +159,73 @@ function TimelineRows({
   todayKey: string;
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
 }) {
+  function onTimelineOpen(targetMealId?: string) {
+    openDayDetail(
+      {
+        dateKey: selectedDateKey,
+        targetMealId,
+        label: selectedDateKey === todayKey ? "today-live" : "history-snapshot",
+      },
+      "history",
+    );
+  }
+
+  function onMealOpen(meal: MealEntry) {
+    openDayDetail(
+      {
+        dateKey: selectedDateKey,
+        targetMealId: meal.id,
+        label: selectedDateKey === todayKey ? "today-live" : "history-snapshot",
+      },
+      "history",
+    );
+  }
+
+  function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onTimelineOpen();
+    }
+  }
+
   return (
-    <div className="space-y-3">
-      {meals.map((meal) => (
-        <button
+    <div
+      className="history-timeline"
+      role="button"
+      tabIndex={0}
+      aria-label="開啟當日詳情"
+      onClick={() => onTimelineOpen()}
+      onKeyDown={handleTimelineKeyDown}
+    >
+      {meals.map((meal, index) => (
+        <div
           key={meal.id}
-          type="button"
-          onClick={() =>
-            openDayDetail(
-              {
-                dateKey: selectedDateKey,
-                targetMealId: meal.id,
-                label: selectedDateKey === todayKey ? "today-live" : "history-snapshot",
-              },
-              "history",
-            )
-          }
-          className="flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left"
-          style={{
-            background: "var(--sk-paper)",
-            border: "2px solid var(--sk-ink)",
-            boxShadow: "1px 2px 0 var(--sk-ink)",
-          }}
+          className="history-timeline-row"
+          data-first={index === 0 ? "true" : "false"}
+          data-last={index === meals.length - 1 ? "true" : "false"}
         >
-          <span className="min-w-0">
-            <span className="sk-body block text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-              {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.loggedAt)}
+          <div className="history-timeline-time sk-metric">{formatMealRowTime(meal.loggedAt)}</div>
+          <div className="history-timeline-track" aria-hidden="true">
+            <span className="history-timeline-rail" />
+            <span className="history-timeline-node" />
+          </div>
+          <button
+            type="button"
+            className="history-timeline-meal"
+            onClick={(event) => {
+              event.stopPropagation();
+              onMealOpen(meal);
+            }}
+          >
+            <span className="min-w-0">
+              <span className="sk-body block text-[11px]" style={{ color: "var(--sk-ink-soft)" }}>
+                {getDisplayMealLabel(meal.loggedAt)}
+              </span>
+              <span className="sk-heading block truncate text-xl">{meal.foodName}</span>
             </span>
-            <span className="sk-heading block truncate text-xl">{meal.foodName}</span>
-          </span>
-          <span className="flex shrink-0 items-center gap-2">
-            <span className="sk-heading text-2xl">{Math.round(meal.calories)}</span>
-            <span aria-hidden="true" className="text-sm" style={{ color: "var(--sk-ink-faint)" }}>
-              &gt;
-            </span>
-          </span>
-        </button>
+            <span className="sk-heading shrink-0 text-2xl">{Math.round(meal.calories)}</span>
+          </button>
+        </div>
       ))}
     </div>
   );
@@ -219,6 +253,7 @@ export function HistoryScreen() {
     trends: trends?.daily ?? [],
     targets: dailyTargets,
   });
+  const selectedWeekDay = weekDays.find((day) => day.dateKey === selectedDateKey);
   const nextWeekStartKey = shiftHistoryWeek(weekStartKey, 1);
   const nextWeekIsFuture = nextWeekStartKey > todayKey;
 
@@ -323,6 +358,7 @@ export function HistoryScreen() {
           todayKey={todayKey}
           snapshot={selectedSnapshot}
           targetCalories={dailyTargets?.calories ?? null}
+          selectedDay={selectedWeekDay}
         />
         <div className="flex items-baseline justify-between px-1">
           <h2 className="sk-heading text-2xl">當日餐點</h2>

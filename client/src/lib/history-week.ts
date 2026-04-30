@@ -1,3 +1,4 @@
+import type { DailyTargets } from "../types.js";
 import { formatLocalDate } from "./time.js";
 
 export type HistoryCalorieStatus =
@@ -133,7 +134,7 @@ export function buildHistoryWeek(input: {
   selectedDateKey: string;
   todayKey: string;
   trends: HistoryWeekTrend[];
-  targets?: { calories: number } | null;
+  targets?: DailyTargets | null;
 }): HistoryWeekDay[] {
   const trendsByDate = new Map(input.trends.map((trend) => [trend.date, trend]));
 

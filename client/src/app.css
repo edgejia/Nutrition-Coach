@@ -279,6 +279,118 @@ textarea {
   padding-bottom: max(2rem, env(safe-area-inset-bottom));
 }
 
+.history-week-day {
+  min-height: 88px;
+  border: 1.25px solid var(--sk-ink-faint);
+  border-radius: 8px;
+  background: transparent;
+  padding: 7px 3px 6px;
+}
+
+.history-week-day[data-selected="true"] {
+  border: 2px solid var(--sk-accent);
+  background: var(--sk-accent-soft);
+  box-shadow: 1px 2px 0 var(--sk-ink);
+}
+
+.history-week-day[data-selected="false"][data-today="true"] {
+  background: var(--sk-paper-warm);
+}
+
+.history-week-day[data-future="true"] {
+  opacity: 0.34;
+}
+
+.history-week-water-box {
+  position: relative;
+  height: 42px;
+  width: 100%;
+  overflow: hidden;
+  border: 1.5px solid var(--sk-ink);
+  border-radius: 6px;
+  background: var(--sk-paper);
+}
+
+.history-week-day[data-calorie-status="empty"] .history-week-water-box,
+.history-week-day[data-calorie-status="targetMissing"] .history-week-water-box,
+.history-week-day[data-future="true"] .history-week-water-box {
+  border-style: dashed;
+  border-color: var(--sk-ink-faint);
+}
+
+.history-week-water-fill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: block;
+  min-height: 1px;
+}
+
+.history-timeline {
+  display: grid;
+  gap: 0;
+  cursor: pointer;
+}
+
+.history-timeline-row {
+  display: grid;
+  grid-template-columns: 48px 24px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 70px;
+}
+
+.history-timeline-time {
+  padding-top: 17px;
+  color: var(--sk-ink-soft);
+  text-align: right;
+}
+
+.history-timeline-track {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.history-timeline-rail {
+  width: 0;
+  border-left: 1.5px dashed var(--sk-ink-soft);
+}
+
+.history-timeline-row[data-first="true"] .history-timeline-rail {
+  margin-top: 22px;
+}
+
+.history-timeline-row[data-last="true"] .history-timeline-rail {
+  height: 22px;
+}
+
+.history-timeline-node {
+  position: absolute;
+  top: 17px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--sk-ink);
+}
+
+.history-timeline-meal {
+  display: flex;
+  min-width: 0;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  border: 2px solid var(--sk-ink);
+  border-radius: 10px;
+  background: var(--sk-paper);
+  color: var(--sk-ink);
+  padding: 8px 14px;
+  text-align: left;
+  box-shadow: 1px 2px 0 var(--sk-ink);
+}
+
 .assistant-markdown {
   overflow-wrap: anywhere;
   word-break: break-word;
