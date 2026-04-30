@@ -228,6 +228,368 @@ textarea {
   background: var(--sp-amber);
 }
 
+.sp-bar-fill-cyan {
+  background: var(--sp-cyan);
+}
+
+.home-sport-screen {
+  min-width: 0;
+}
+
+.home-sport-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 18px calc(88px + env(safe-area-inset-bottom));
+}
+
+.home-sport-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 18px 8px;
+}
+
+.home-sport-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.home-sport-title-row h1,
+.home-sport-section-header h2,
+.home-sport-empty h3 {
+  margin: 0;
+  color: var(--sp-ink);
+  font-family: var(--sp-font-zh);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.home-sport-streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--sp-lime-line);
+  border-radius: var(--sp-r-pill);
+  background: var(--sp-lime-soft);
+  color: var(--sp-lime);
+  padding: 3px 8px;
+  font-family: var(--sp-font-mono);
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.home-sport-subtitle {
+  margin-top: 4px;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.home-sport-hero {
+  min-width: 0;
+}
+
+.home-sport-hero-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.home-sport-calorie-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.home-sport-label,
+.home-sport-unit,
+.home-sport-macro-metric,
+.home-sport-macro-percent,
+.home-sport-section-header span,
+.home-sport-meal-meta,
+.home-sport-meal-macros,
+.home-sport-meal-calories small {
+  font-family: var(--sp-font-mono);
+  font-size: 10px;
+  line-height: 1.25;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sp-ink-2);
+}
+
+.home-sport-calorie-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.home-sport-calorie-number {
+  color: var(--sp-ink);
+  font-family: var(--sp-font-display);
+  font-size: 64px;
+  font-weight: 400;
+  line-height: 0.95;
+}
+
+.home-sport-calorie-target {
+  color: var(--sp-ink-3);
+  font-family: var(--sp-font-mono);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.home-sport-unit {
+  margin-top: 4px;
+}
+
+.home-sport-remaining {
+  margin-top: 14px;
+  color: var(--sp-lime);
+  font-family: var(--sp-font-zh);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.home-sport-ring {
+  flex: 0 0 auto;
+}
+
+.home-sport-ring-label {
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.home-sport-ring-label strong {
+  color: var(--sp-ink);
+  font-family: var(--sp-font-display);
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 0.95;
+}
+
+.home-sport-ring-label span {
+  margin-top: 2px;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-mono);
+  font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.home-sport-macro-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.home-sport-macro-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.home-sport-macro-label {
+  overflow: hidden;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-sport-macro-metric {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-sport-macro-value {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.home-sport-macro-value span {
+  color: var(--sp-ink);
+  font-family: var(--sp-font-display);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 0.95;
+}
+
+.home-sport-macro-value small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sp-ink-3);
+  font-family: var(--sp-font-mono);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.home-sport-meal-section,
+.home-sport-meal-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.home-sport-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.home-sport-meal-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--sp-line);
+  border-radius: var(--sp-r-md);
+  background: var(--sp-surface);
+  color: var(--sp-ink);
+  padding: 12px 14px;
+}
+
+.home-sport-meal-badge {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border: 1px solid var(--sp-line-strong);
+  border-radius: 10px;
+  background: var(--sp-surface-2);
+  color: var(--sp-ink);
+  font-family: var(--sp-font-display);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.home-sport-meal-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.home-sport-meal-meta {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 2px;
+  letter-spacing: 0.08em;
+}
+
+.home-sport-meal-title {
+  overflow: hidden;
+  color: var(--sp-ink);
+  font-family: var(--sp-font-zh);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-sport-meal-macros {
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.home-sport-meal-calories {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 2px;
+}
+
+.home-sport-meal-calories span {
+  color: var(--sp-ink);
+  font-family: var(--sp-font-display);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 0.95;
+}
+
+.home-sport-empty {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.home-sport-empty p {
+  margin: 0;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.home-sport-empty-action {
+  min-height: 44px;
+  border: 1px solid var(--sp-lime);
+  border-radius: var(--sp-r-pill);
+  background: var(--sp-lime);
+  color: var(--sp-bg);
+  padding: 10px 14px;
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+@media (max-width: 360px) {
+  .home-sport-scroll {
+    gap: 12px;
+    padding-inline: 14px;
+  }
+
+  .home-sport-header {
+    padding-inline: 14px;
+  }
+
+  .home-sport-hero-main {
+    gap: 10px;
+  }
+
+  .home-sport-ring,
+  .home-sport-ring > svg {
+    width: 96px !important;
+    height: 96px !important;
+  }
+
+  .home-sport-macro-card {
+    gap: 6px;
+    padding: 10px 8px;
+  }
+
+  .home-sport-macro-value span {
+    font-size: 24px;
+  }
+}
+
 .sp-receipt {
   border: 1px solid var(--sp-line);
   border-radius: var(--sp-r-lg);

@@ -94,7 +94,7 @@ export function SportProgressBar({
   variant = "default",
 }: {
   value: number;
-  variant?: "default" | "warn" | "amber";
+  variant?: "default" | "warn" | "amber" | "cyan";
   className?: string;
 }) {
   const clamped = clampUnit(value);
@@ -106,6 +106,7 @@ export function SportProgressBar({
           "sp-bar-fill",
           variant === "warn" && "sp-bar-fill-warn",
           variant === "amber" && "sp-bar-fill-amber",
+          variant === "cyan" && "sp-bar-fill-cyan",
         )}
         style={{ width: `${clamped * 100}%` }}
       />

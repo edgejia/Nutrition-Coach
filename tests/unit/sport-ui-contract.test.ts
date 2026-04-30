@@ -85,6 +85,7 @@ describe("sport UI source contract", () => {
       ".sp-iconbtn",
       ".sp-bar-track",
       ".sp-bar-fill",
+      ".sp-bar-fill-cyan",
       ".sp-receipt",
       ".sp-receipt-head",
       ".sp-receipt-row",
@@ -126,6 +127,7 @@ describe("sport UI source contract", () => {
       "sp-iconbtn",
       "sp-bar-track",
       "sp-bar-fill",
+      "sp-bar-fill-cyan",
       "sp-receipt",
     ]) {
       assert.match(sources.sportPrimitives, escapedPattern(className));

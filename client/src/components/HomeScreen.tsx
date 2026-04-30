@@ -4,8 +4,8 @@ import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { formatLocalDate } from "../lib/time.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
-import { SettingsIcon } from "./SketchIcons.js";
-import { SketchDivider, SketchProgressBar, SketchRing, SketchSoftBox } from "./SketchPrimitives.js";
+import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
+import { SportCard, SportIconButton, SportProgressBar, SportRing, SportScreen } from "./SportPrimitives.js";
 import type {
   ActiveScreen,
   PendingHomeChatDraft,
@@ -69,19 +69,75 @@ export function getHomeCalorieDisplay(
   const target = Math.max(0, Math.round(targets?.calories ?? 0));
   const remaining = Math.max(0, target - consumed);
   const ringValue = target > 0 ? Math.min(1, Math.round((consumed / target) * 100) / 100) : 0;
+  const percent = Math.round(ringValue * 100);
 
-  return { consumed, remaining, ringValue };
+  return { consumed, target, remaining, ringValue, percent };
+}
+
+function macroValue(value: number | undefined, target: number | undefined) {
+  const current = Math.max(0, Math.round(value ?? 0));
+  const safeTarget = Math.max(0, Math.round(target ?? 0));
+  return {
+    current,
+    target: safeTarget,
+    progress: safeTarget > 0 ? Math.min(1, current / safeTarget) : 0,
+    percent: safeTarget > 0 ? Math.round(Math.min(1, current / safeTarget) * 100) : 0,
+  };
+}
+
+export function getHomeMacroDisplays(
+  summary: Pick<DailySummary, "totalProtein" | "totalCarbs" | "totalFat"> | null,
+  targets: Pick<DailyTargets, "protein" | "carbs" | "fat"> | null,
+) {
+  return [
+    {
+      id: "protein" as const,
+      label: "蛋白" as const,
+      metric: "PROTEIN" as const,
+      variant: "default" as const,
+      ...macroValue(summary?.totalProtein, targets?.protein),
+    },
+    {
+      id: "carbs" as const,
+      label: "碳水" as const,
+      metric: "CARBS" as const,
+      variant: "cyan" as const,
+      ...macroValue(summary?.totalCarbs, targets?.carbs),
+    },
+    {
+      id: "fat" as const,
+      label: "脂肪" as const,
+      metric: "FAT" as const,
+      variant: "amber" as const,
+      ...macroValue(summary?.totalFat, targets?.fat),
+    },
+  ];
+}
+
+export function getMealMacroSummary(meal: Pick<MealEntry, "protein" | "carbs" | "fat">): string {
+  return `P ${Math.max(0, Math.round(meal.protein ?? 0))} · C ${Math.max(0, Math.round(meal.carbs ?? 0))} · F ${Math.max(0, Math.round(meal.fat ?? 0))}`;
+}
+
+export function getMealBadge(loggedAt?: string | null): "B" | "L" | "S" | "D" | "M" {
+  switch (getDisplayMealLabel(loggedAt)) {
+    case "早餐":
+      return "B";
+    case "午餐":
+      return "L";
+    case "點心":
+      return "S";
+    case "晚餐":
+      return "D";
+    default:
+      return "M";
+  }
 }
 
 export function getHomeEmptyCoachCopy() {
   return {
-    headline: "先用對話記下第一餐",
-    body: "今天還沒有紀錄。到「對話」描述你吃了什麼。",
-    actions: [
-      { label: "記錄早餐", prompt: "我想記錄早餐，請一步步引導我。" },
-      { label: "估算剛吃的", prompt: "幫我估算剛剛這餐的熱量與營養。" },
-      { label: "問晚餐建議", prompt: "如果今天還沒記錄，晚餐可以怎麼安排？" },
-    ],
+    headline: "還沒有紀錄",
+    body: "到「對話」描述你吃了什麼，AI 會幫你整理今天第一餐。",
+    actions: [{ label: "去對話記錄", prompt: "我想記錄今天第一餐，請一步步引導我。" }],
   };
 }
 
@@ -120,47 +176,29 @@ function HomeHeader() {
         : "準備記錄第一餐";
 
   return (
-    <div className="screen-bar flex items-center justify-between px-7 pb-3 pt-6">
+    <header className="screen-bar home-sport-header">
       <div>
-        <span
-          className="sk-heading text-3xl"
-          style={{ color: "var(--sk-ink)" }}
-        >
-          嗨，早安
-        </span>
-        <div className="sk-body mt-1 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+        <div className="home-sport-title-row">
+          <h1>嗨，早安</h1>
+          <span className="home-sport-streak">
+            <SportFlameIcon size={12} /> {dailySummary?.mealCount ?? 0} 筆
+          </span>
+        </div>
+        <div className="home-sport-subtitle">
           {dateStr} · {statusText}
         </div>
       </div>
-      <button
-        type="button"
+      <SportIconButton
         onClick={() => {
           if (!sending) openSecondaryScreen("settings", "home");
         }}
         disabled={sending}
-        className="grid h-12 w-12 place-items-center rounded-full disabled:opacity-40"
-        style={{
-          background: "var(--sk-paper)",
-          border: "2px solid var(--sk-ink)",
-          color: "var(--sk-ink)",
-          boxShadow: "1px 2px 0 var(--sk-ink)",
-        }}
         aria-label="設定"
       >
-        <SettingsIcon size={19} />
-      </button>
-    </div>
+        <SportSettingsIcon size={19} />
+      </SportIconButton>
+    </header>
   );
-}
-
-function macroValue(value: number | undefined, target: number | undefined) {
-  const current = Math.max(0, Math.round(value ?? 0));
-  const safeTarget = Math.max(0, Math.round(target ?? 0));
-  return {
-    current,
-    target: safeTarget,
-    progress: safeTarget > 0 ? Math.min(1, current / safeTarget) : 0,
-  };
 }
 
 function CalorieHero({
@@ -171,84 +209,96 @@ function CalorieHero({
   dailyTargets: DailyTargets | null;
 }) {
   const display = getHomeCalorieDisplay(dailySummary, dailyTargets);
-  const macros = [
-    { label: "蛋白", ...macroValue(dailySummary?.totalProtein, dailyTargets?.protein) },
-    { label: "碳水", ...macroValue(dailySummary?.totalCarbs, dailyTargets?.carbs) },
-    { label: "脂肪", ...macroValue(dailySummary?.totalFat, dailyTargets?.fat) },
-  ];
+  const macros = getHomeMacroDisplays(dailySummary, dailyTargets);
 
   return (
-    <SketchSoftBox className="p-5">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="sk-heading text-5xl leading-none">{display.consumed.toLocaleString("en-US")}</div>
-          <div className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-            還能吃 {display.remaining} kcal
+    <>
+      <SportCard className="home-sport-hero" variant="glow">
+        <div className="home-sport-hero-main">
+          <div className="home-sport-calorie-copy">
+            <div className="home-sport-label">energy · today</div>
+            <div className="home-sport-calorie-line">
+              <span className="home-sport-calorie-number">{display.consumed.toLocaleString("en-US")}</span>
+              <span className="home-sport-calorie-target">/ {display.target.toLocaleString("en-US")}</span>
+            </div>
+            <div className="home-sport-unit">kcal</div>
+            <div className="home-sport-remaining">
+              {display.remaining.toLocaleString("en-US")} kcal · 還能吃
+            </div>
           </div>
+          <SportRing
+            className="home-sport-ring"
+            value={display.ringValue}
+            label={
+              <span className="home-sport-ring-label">
+                <strong>{display.percent}</strong>
+                <span>pct</span>
+              </span>
+            }
+            size={112}
+            stroke={9}
+          />
         </div>
-        <SketchRing
-          value={display.ringValue}
-          label={`${Math.round(display.ringValue * 100)}%`}
-          size={104}
-          stroke={10}
-        />
-      </div>
-      <SketchDivider dashed className="my-5" />
-      <div className="grid grid-cols-3 gap-3">
+      </SportCard>
+      <div className="home-sport-macro-grid">
         {macros.map((macro) => (
-          <div key={macro.label} className="min-w-0">
-            <div className="sk-body mb-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-              {macro.label}
+          <SportCard key={macro.id} className="home-sport-macro-card" variant="flat">
+            <div>
+              <div className="home-sport-macro-label">{macro.label}</div>
+              <div className="home-sport-macro-metric">{macro.metric}</div>
             </div>
-            <SketchProgressBar value={macro.progress} />
-            <div className="sk-body mt-1 text-xs">
-              {macro.current}/{macro.target}g
+            <div className="home-sport-macro-value">
+              <span>{macro.current}</span>
+              <small>/{macro.target}</small>
             </div>
-          </div>
+            <SportProgressBar value={macro.progress} variant={macro.variant} />
+            <div className="home-sport-macro-percent">{macro.percent}%</div>
+          </SportCard>
         ))}
       </div>
-    </SketchSoftBox>
+    </>
   );
 }
 
-function MealRows({ meals }: { meals: MealEntry[] }) {
-  if (meals.length === 0) {
-    return (
-      <SketchSoftBox className="p-4">
-        <p className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-          今天還沒有紀錄。到「對話」描述你吃了什麼。
-        </p>
-      </SketchSoftBox>
-    );
-  }
+function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChatClick: () => void }) {
+  const emptyCopy = getHomeEmptyCoachCopy();
 
   return (
-    <div className="space-y-3">
-      {meals.map((meal) => (
-        <article
-          key={meal.id}
-          className="flex items-center justify-between gap-3 rounded-lg px-4 py-3"
-          style={{
-            background: "var(--sk-paper)",
-            border: "2px solid var(--sk-ink)",
-            boxShadow: "1px 2px 0 var(--sk-ink)",
-          }}
-        >
-          <div className="min-w-0">
-            <div className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-              {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.loggedAt)}
-            </div>
-            <div className="sk-heading truncate text-xl">{meal.foodName}</div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="sk-heading text-2xl">{Math.round(meal.calories)}</span>
-            <span aria-hidden="true" className="text-sm" style={{ color: "var(--sk-ink-faint)" }}>
-              &gt;
-            </span>
-          </div>
-        </article>
-      ))}
-    </div>
+    <section className="home-sport-meal-section">
+      <div className="home-sport-section-header">
+        <h2>今日紀錄</h2>
+        <span>{meals.length} entries</span>
+      </div>
+      {meals.length === 0 ? (
+        <SportCard className="home-sport-empty">
+          <h3>{emptyCopy.headline}</h3>
+          <p>{emptyCopy.body}</p>
+          <button type="button" className="home-sport-empty-action" onClick={onEmptyChatClick}>
+            {emptyCopy.actions[0]?.label}
+          </button>
+        </SportCard>
+      ) : (
+        <div className="home-sport-meal-list">
+          {meals.map((meal) => (
+            <article key={meal.id} className="home-sport-meal-row">
+              <div className="home-sport-meal-badge">{getMealBadge(meal.loggedAt)}</div>
+              <div className="home-sport-meal-main">
+                <div className="home-sport-meal-meta">
+                  <span>{formatMealRowTime(meal.loggedAt)}</span>
+                  <span>{getDisplayMealLabel(meal.loggedAt)}</span>
+                </div>
+                <div className="home-sport-meal-title">{meal.foodName}</div>
+                <div className="home-sport-meal-macros">{getMealMacroSummary(meal)}</div>
+              </div>
+              <div className="home-sport-meal-calories">
+                <span>{Math.max(0, Math.round(meal.calories)).toLocaleString("en-US")}</span>
+                <small>kcal</small>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -263,6 +313,7 @@ export function HomeScreen() {
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const coachAdvice = getDisplayedCoachAdvice(storedCoachAdvice, dailySummary, dailyTargets);
   const cta = getCoachCTA(dailySummary, dailyTargets);
+  const emptyCopy = getHomeEmptyCoachCopy();
 
   useEffect(() => {
     setCoachAdvice(coachAdvice);
@@ -272,20 +323,21 @@ export function HomeScreen() {
     sendHomeCtaTaskOption(option, intent, setPendingHomeChatDraft, setActiveScreen);
   }
 
+  function handleEmptyChatClick() {
+    const prompt = emptyCopy.actions[0]?.prompt ?? "我想記錄今天第一餐，請一步步引導我。";
+    stageHomeTaskOptionPrompt(prompt, setPendingHomeChatDraft, setActiveScreen);
+  }
+
   return (
     <div className="screen-shell sk-screen">
-      <HomeHeader />
-      <main className="screen-scroll space-y-4 px-5 pt-2">
-        <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
-        <div className="flex items-baseline justify-between px-1">
-          <h2 className="sk-heading text-2xl">今日餐點</h2>
-          <span className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-            {meals.length > 0 ? `${meals.length} 筆` : "還沒有晚餐"}
-          </span>
-        </div>
-        <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
-        <MealRows meals={meals} />
-      </main>
+      <SportScreen className="home-sport-screen">
+        <HomeHeader />
+        <main className="screen-scroll home-sport-scroll">
+          <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
+          <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
+          <MealRows meals={meals} onEmptyChatClick={handleEmptyChatClick} />
+        </main>
+      </SportScreen>
     </div>
   );
 }
