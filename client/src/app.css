@@ -281,14 +281,14 @@ textarea {
 
 .history-week-day {
   min-height: 88px;
-  border: 1.25px solid var(--sk-ink-faint);
+  border: 2px solid var(--sk-ink-faint);
   border-radius: 8px;
   background: transparent;
-  padding: 7px 3px 6px;
+  padding: 7px 4px 6px;
 }
 
 .history-week-day[data-selected="true"] {
-  border: 2px solid var(--sk-accent);
+  border-color: var(--sk-accent);
   background: var(--sk-accent-soft);
   box-shadow: 1px 2px 0 var(--sk-ink);
 }
@@ -327,17 +327,28 @@ textarea {
   min-height: 1px;
 }
 
+.history-timeline-panel {
+  padding: 0 2px 1rem;
+}
+
+.history-timeline-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.35rem;
+}
+
 .history-timeline {
   display: grid;
   gap: 0;
-  cursor: pointer;
 }
 
 .history-timeline-row {
   display: grid;
-  grid-template-columns: 48px 24px minmax(0, 1fr);
-  gap: 8px;
-  min-height: 70px;
+  grid-template-columns: 60px 28px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 76px;
 }
 
 .history-timeline-time {
@@ -362,7 +373,8 @@ textarea {
 }
 
 .history-timeline-row[data-last="true"] .history-timeline-rail {
-  height: 22px;
+  min-height: 22px;
+  height: 100%;
 }
 
 .history-timeline-node {

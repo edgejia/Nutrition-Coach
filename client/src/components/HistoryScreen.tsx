@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getHistoryDaySnapshot, getHistoryTrends } from "../api.js";
 import {
   buildHistoryWeek,
@@ -99,52 +99,69 @@ function calorieStatusCopy(status: HistoryWeekDay["status"], total: number, targ
   return "達標範圍";
 }
 
-function SelectedDaySummary({
+function TimelinePanel({
   selectedDateKey,
   todayKey,
   snapshot,
   targetCalories,
   selectedDay,
+  loadingDay,
+  dayError,
+  openDayDetail,
 }: {
   selectedDateKey: string;
   todayKey: string;
   snapshot: HistoryDaySnapshot | null;
   targetCalories: number | null;
   selectedDay: HistoryWeekDay | undefined;
+  loadingDay: boolean;
+  dayError: string | null;
+  openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
 }) {
   const isToday = selectedDateKey === todayKey;
   const total = Math.round(snapshot?.summary.totalCalories ?? 0);
   const status = selectedDay?.status ?? "empty";
   return (
-    <SketchSoftBox className="p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="sk-heading text-2xl">{formatHistoryDate(selectedDateKey)}</h2>
-          <p className="sk-body mt-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-            {targetCalories
-              ? `${total.toLocaleString("en-US")} / ${Math.round(targetCalories).toLocaleString("en-US")} kcal`
-              : "目標同步中，暫不顯示水位"}
-          </p>
-        </div>
-        <span
-          className="sk-pill shrink-0 px-3 py-1 text-xs"
-          style={{ background: isToday ? "var(--sk-paper-warm)" : "var(--sk-accent-soft)" }}
-        >
-          {isToday ? "今天 · 即時" : "歷史快照"}
-        </span>
-      </div>
-      <div className="mt-4 flex items-end justify-between gap-3">
+    <section className="history-timeline-panel">
+      <div className="history-timeline-panel-header">
         <div>
-          <div className="sk-heading text-4xl leading-none">{total.toLocaleString("en-US")}</div>
-          <div className="sk-body mt-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-            {calorieStatusCopy(status, total, targetCalories)}
+          <h2 className="sk-heading text-3xl">{formatHistoryDate(selectedDateKey)}</h2>
+          <div className="sk-body mt-1 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+            {targetCalories
+              ? `${total.toLocaleString("en-US")} / ${Math.round(targetCalories).toLocaleString("en-US")} kcal · ${calorieStatusCopy(status, total, targetCalories)}`
+              : "目標同步中，暫不顯示水位"}
           </div>
         </div>
-        <div className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-          {snapshot ? `${snapshot.summary.mealCount} 筆` : "同步中"}
-        </div>
+        <span className="sk-pill shrink-0 px-4 py-1 text-sm">{isToday ? "live" : "read-only"}</span>
       </div>
-    </SketchSoftBox>
+
+      {loadingDay ? (
+        <p className="sk-body mt-5 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+          載入這天餐點中...
+        </p>
+      ) : null}
+      {dayError ? (
+        <SketchSoftBox className="mt-5 p-3">
+          <p className="sk-body text-sm">{dayError}</p>
+        </SketchSoftBox>
+      ) : null}
+      {!loadingDay && !dayError && snapshot?.meals.length === 0 ? (
+        <SketchSoftBox className="mt-5 p-4">
+          <h3 className="sk-heading text-xl">這天還沒有餐點</h3>
+          <p className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+            到「對話」描述你吃了什麼，AI 會幫你記錄。
+          </p>
+        </SketchSoftBox>
+      ) : null}
+      {snapshot && snapshot.meals.length > 0 ? (
+        <TimelineRows
+          meals={snapshot.meals}
+          selectedDateKey={selectedDateKey}
+          todayKey={todayKey}
+          openDayDetail={openDayDetail}
+        />
+      ) : null}
+    </section>
   );
 }
 
@@ -159,17 +176,6 @@ function TimelineRows({
   todayKey: string;
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
 }) {
-  function onTimelineOpen(targetMealId?: string) {
-    openDayDetail(
-      {
-        dateKey: selectedDateKey,
-        targetMealId,
-        label: selectedDateKey === todayKey ? "today-live" : "history-snapshot",
-      },
-      "history",
-    );
-  }
-
   function onMealOpen(meal: MealEntry) {
     openDayDetail(
       {
@@ -181,22 +187,8 @@ function TimelineRows({
     );
   }
 
-  function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      onTimelineOpen();
-    }
-  }
-
   return (
-    <div
-      className="history-timeline"
-      role="button"
-      tabIndex={0}
-      aria-label="開啟當日詳情"
-      onClick={() => onTimelineOpen()}
-      onKeyDown={handleTimelineKeyDown}
-    >
+    <div className="history-timeline" aria-label="當日餐點 timeline">
       {meals.map((meal, index) => (
         <div
           key={meal.id}
@@ -353,45 +345,16 @@ export function HistoryScreen() {
           }}
         />
         <SketchDivider dashed />
-        <SelectedDaySummary
+        <TimelinePanel
           selectedDateKey={selectedDateKey}
           todayKey={todayKey}
           snapshot={selectedSnapshot}
           targetCalories={dailyTargets?.calories ?? null}
           selectedDay={selectedWeekDay}
+          loadingDay={loadingDay}
+          dayError={dayError}
+          openDayDetail={openDayDetail}
         />
-        <div className="flex items-baseline justify-between px-1">
-          <h2 className="sk-heading text-2xl">當日餐點</h2>
-          <span className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-            {selectedSnapshot ? `${selectedSnapshot.meals.length} 筆` : ""}
-          </span>
-        </div>
-        {loadingDay ? (
-          <p className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-            載入這天餐點中...
-          </p>
-        ) : null}
-        {dayError ? (
-          <SketchSoftBox className="p-3">
-            <p className="sk-body text-sm">{dayError}</p>
-          </SketchSoftBox>
-        ) : null}
-        {!loadingDay && !dayError && selectedSnapshot?.meals.length === 0 ? (
-          <SketchSoftBox className="p-4">
-            <h3 className="sk-heading text-xl">這天還沒有餐點</h3>
-            <p className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-              到「對話」描述你吃了什麼，AI 會幫你記錄。
-            </p>
-          </SketchSoftBox>
-        ) : null}
-        {selectedSnapshot && selectedSnapshot.meals.length > 0 ? (
-          <TimelineRows
-            meals={selectedSnapshot.meals}
-            selectedDateKey={selectedDateKey}
-            todayKey={todayKey}
-            openDayDetail={openDayDetail}
-          />
-        ) : null}
       </main>
     </div>
   );
