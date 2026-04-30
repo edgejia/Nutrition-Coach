@@ -232,6 +232,172 @@ textarea {
   background: var(--sp-cyan);
 }
 
+.sp-coach-cta {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--sp-r-lg);
+  background: var(--sp-lime);
+  color: #0a0b0d;
+  padding: 16px;
+}
+
+.sp-coach-cta-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: #0a0b0d;
+  font-family: var(--sp-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.sp-coach-cta-headline {
+  margin: 0;
+  color: #0a0b0d;
+  font-family: var(--sp-font-zh);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sp-coach-cta-body {
+  margin: 6px 0 0;
+  color: rgba(10, 11, 13, 0.78);
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sp-coach-cta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.sp-coach-cta-tag {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  border: 1px solid rgba(10, 11, 13, 0.18);
+  border-radius: var(--sp-r-pill);
+  background: rgba(10, 11, 13, 0.08);
+  color: #0a0b0d;
+  padding: 5px 9px;
+  font-family: var(--sp-font-zh);
+  font-size: 11px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.sp-coach-cta-controls {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.sp-coach-cta-intents {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sp-coach-cta-intent,
+.sp-coach-cta-option {
+  min-width: 0;
+  border-radius: var(--sp-r-pill);
+  cursor: pointer;
+  font-family: var(--sp-font-zh);
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.sp-coach-cta-intent {
+  min-height: 40px;
+  border: 1px solid rgba(10, 11, 13, 0.22);
+  background: transparent;
+  color: #0a0b0d;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sp-coach-cta-intent[data-selected="true"] {
+  border-color: #0a0b0d;
+  background: #0a0b0d;
+  color: var(--sp-lime);
+}
+
+.sp-coach-cta-options {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.sp-coach-cta-option {
+  min-height: 44px;
+  width: 100%;
+  border: 0;
+  background: #0a0b0d;
+  color: var(--sp-lime);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.sp-coach-cta-intent:focus-visible,
+.sp-coach-cta-option:focus-visible {
+  outline: 2px solid #0a0b0d;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(214, 255, 58, 0.45);
+}
+
+.sp-coach-cta-intent:disabled,
+.sp-coach-cta-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.sp-coach-cta-loading {
+  animation: pulse 1.7s ease-in-out infinite;
+}
+
+.sp-coach-cta-skeleton {
+  border-radius: var(--sp-r-pill);
+  background: rgba(10, 11, 13, 0.16);
+}
+
+.sp-coach-cta-skeleton-label {
+  width: 112px;
+  height: 16px;
+  margin-bottom: 12px;
+}
+
+.sp-coach-cta-skeleton-headline {
+  width: 76%;
+  height: 24px;
+}
+
+.sp-coach-cta-skeleton-body {
+  width: 100%;
+  height: 14px;
+  margin-top: 10px;
+}
+
 .home-sport-screen {
   min-width: 0;
 }

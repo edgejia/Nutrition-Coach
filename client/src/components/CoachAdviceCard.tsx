@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaIntentSelected } from "../api.js";
-import { SketchButton, SketchPill } from "./SketchPrimitives.js";
+import { SportBoltIcon } from "./SportIcons.js";
 import type {
   CoachCTA,
   CoachCTAIntent,
@@ -94,46 +94,41 @@ export function CoachCTAControls({
   }
 
   return (
-    <div className="mt-3 flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div className="sp-coach-cta-controls">
+      <div className="sp-coach-cta-intents">
         {intents.map((intent) => {
           const selected = intent.id === selectedIntentId;
           const optionsId = `coach-cta-options-${intent.id}`;
           return (
-            <SketchButton
+            <button
               key={intent.id}
+              type="button"
               aria-pressed={selected}
               aria-expanded={selected}
               aria-controls={optionsId}
+              data-selected={selected}
               disabled={disabled}
               onClick={() => onIntentSelect(intent.id)}
-              className="min-h-10 px-3 py-2 text-sm leading-tight disabled:opacity-40"
-              style={{
-                background: selected ? "var(--sk-accent)" : "var(--sk-paper)",
-                color: "var(--sk-ink)",
-              }}
+              className="sp-coach-cta-intent"
             >
               {intent.label}
-            </SketchButton>
+            </button>
           );
         })}
       </div>
 
       {selectedIntent && (
-        <div id={`coach-cta-options-${selectedIntent.id}`} className="flex flex-col gap-2">
+        <div id={`coach-cta-options-${selectedIntent.id}`} className="sp-coach-cta-options">
           {selectedIntent.options.map((option) => (
-            <SketchButton
+            <button
               key={option.id}
+              type="button"
               disabled={disabled}
               onClick={() => onTaskOptionClick(option, selectedIntent)}
-              className="min-h-11 justify-start px-4 py-2 text-left text-sm leading-relaxed disabled:opacity-40"
-              style={{
-                background: "var(--sk-paper)",
-                color: "var(--sk-ink)",
-              }}
+              className="sp-coach-cta-option"
             >
               {option.label}
-            </SketchButton>
+            </button>
           ))}
         </div>
       )}
@@ -169,67 +164,57 @@ export function CoachAdviceCard({
 
   if (presentation.state === "loading") {
     return (
-      <div
-        className="sk-box-soft animate-pulse p-4"
-        style={{ background: "var(--sk-accent-soft)", borderColor: "var(--sk-accent)" }}
-      >
-        <div className="mb-2 h-5 w-3/4 rounded" style={{ background: "var(--sk-paper-warm)" }} />
-        <div className="h-4 w-full rounded" style={{ background: "var(--sk-paper-warm)" }} />
-        <div className="mt-1 h-4 w-2/3 rounded" style={{ background: "var(--sk-paper-warm)" }} />
+      <div className="sp-coach-cta sp-coach-cta-loading" aria-busy="true">
+        <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-label" />
+        <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-headline" />
+        <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-body" />
       </div>
     );
   }
 
   if (presentation.state === "empty") {
     return (
-      <div
-        className="sk-box-soft p-4"
-        style={{ background: "var(--sk-accent-soft)", borderColor: "var(--sk-accent)" }}
-      >
-        <p className="sk-heading text-xl leading-snug" style={{ color: "var(--sk-ink)" }}>
+      <section className="sp-coach-cta" aria-label="Coach live">
+        <div className="sp-coach-cta-label">
+          <SportBoltIcon size={14} stroke={2} />
+          <span>coach · live</span>
+        </div>
+        <p className="sp-coach-cta-headline">
           {presentation.message}
         </p>
         {ctaBlock}
-      </div>
+      </section>
     );
   }
 
   return (
-    <div className="sk-box-soft p-4" style={{ background: "var(--sk-accent-soft)", borderColor: "var(--sk-accent)" }}>
+    <section className="sp-coach-cta" aria-label="Coach live">
+      <div className="sp-coach-cta-label">
+        <SportBoltIcon size={14} stroke={2} />
+        <span>coach · live</span>
+      </div>
       {advice && (
         <>
-          <p
-            className="sk-heading mb-2 text-xl leading-snug"
-            style={{
-              color: "var(--sk-ink)",
-            }}
-          >
+          <p className="sp-coach-cta-headline">
             {presentation.headline}
           </p>
           {presentation.body && (
-            <p className="sk-body mb-3 text-sm leading-relaxed" style={{ color: "var(--sk-ink-soft)" }}>
+            <p className="sp-coach-cta-body">
               {presentation.body}
             </p>
           )}
         </>
       )}
       {presentation.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="sp-coach-cta-tags">
           {presentation.tags.map((tag) => (
-            <SketchPill
-              key={tag}
-              className="text-xs"
-              style={{
-                background: "var(--sk-paper)",
-                color: "var(--sk-ink)",
-              }}
-            >
+            <span key={tag} className="sp-coach-cta-tag">
               {tag}
-            </SketchPill>
+            </span>
           ))}
         </div>
       )}
       {ctaBlock}
-    </div>
+    </section>
   );
 }

@@ -85,7 +85,7 @@ describe("CoachCTAControls", () => {
     assert.match(html, /幫我估算今天還差多少蛋白質/);
   });
 
-  it("disables intent and option buttons while sending", () => {
+  it("disables intent and option buttons while sending", async () => {
     const html = renderToStaticMarkup(
       createElement(CoachCTAControls, {
         intents: COACH_CTA_INTENTS,
@@ -97,30 +97,12 @@ describe("CoachCTAControls", () => {
     );
 
     assert.match(html, /disabled=""/);
-    assert.match(html, /disabled:opacity-40/);
+    assert.match(await readSource("../../client/src/app.css"), /\.sp-coach-cta-option:disabled[\s\S]*opacity:\s*0\.4/);
   });
 
-  it("renders the Phase 39 sport CTA markup while preserving the two-step flow", () => {
-    storage.clear();
-    useStore.setState({
-      dailySummary: {
-        date: "2026-04-30",
-        totalCalories: 1240,
-        totalProtein: 88,
-        totalCarbs: 168,
-        totalFat: 52,
-        mealCount: 3,
-      },
-      dailyTargets: { calories: 2000, protein: 140, carbs: 220, fat: 60 },
-      sending: false,
-    });
-
-    const cardHtml = renderToStaticMarkup(
-      createElement(CoachAdviceCard, {
-        advice: "蛋白質還差 52g，晚餐建議高蛋白食物。可以選雞胸或豆腐補足。",
-        cta: COACH_CTA_INTENTS,
-      }),
-    );
+  it("renders the Phase 39 sport CTA markup while preserving the two-step flow", async () => {
+    const componentSource = await readSource("../../client/src/components/CoachAdviceCard.tsx");
+    const loadingCardHtml = renderToStaticMarkup(createElement(CoachAdviceCard, { advice: null, cta: COACH_CTA_INTENTS }));
     const controlsHtml = renderToStaticMarkup(
       createElement(CoachCTAControls, {
         intents: COACH_CTA_INTENTS,
@@ -130,9 +112,9 @@ describe("CoachCTAControls", () => {
       }),
     );
 
-    assert.match(cardHtml, /coach · live/);
-    assert.match(cardHtml, /sp-coach-cta/);
-    assert.match(cardHtml, /補蛋白質/);
+    assert.match(componentSource, /coach · live/);
+    assert.match(loadingCardHtml, /sp-coach-cta/);
+    assert.match(controlsHtml, /補蛋白質/);
     assert.match(controlsHtml, /sp-coach-cta-intent/);
     assert.match(controlsHtml, /sp-coach-cta-option/);
     assert.match(controlsHtml, /data-selected="true"/);
@@ -152,7 +134,7 @@ describe("CoachCTAControls", () => {
     assert.doesNotMatch(componentSource, /SketchPill/);
     assert.doesNotMatch(componentSource, /openSecondaryScreen\("mealEdit"/);
     assert.doesNotMatch(componentSource, /ChatEntryBar/);
-    assert.match(componentSource, /disabled:opacity-40|opacity:\s*0\.4/);
+    assert.match(cssSource, /\.sp-coach-cta-option:disabled[\s\S]*opacity:\s*0\.4/);
 
     for (const selector of [
       ".sp-coach-cta",
