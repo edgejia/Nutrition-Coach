@@ -1,5 +1,7 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -26,6 +28,14 @@ const { CoachAdviceCard, CoachCTAControls, recordAndSelectHomeCtaIntent } = awai
   "../../client/src/components/CoachAdviceCard.js"
 );
 const { useStore } = await import("../../client/src/store.js");
+function sourcePath(relativePath: string) {
+  return fileURLToPath(new URL(relativePath, import.meta.url));
+}
+
+async function readSource(relativePath: string) {
+  return readFile(sourcePath(relativePath), "utf8");
+}
+
 const fakeDialoguePattern = new RegExp(
   [
     `問我${"怎麼"}`,
@@ -88,6 +98,79 @@ describe("CoachCTAControls", () => {
 
     assert.match(html, /disabled=""/);
     assert.match(html, /disabled:opacity-40/);
+  });
+
+  it("renders the Phase 39 sport CTA markup while preserving the two-step flow", () => {
+    storage.clear();
+    useStore.setState({
+      dailySummary: {
+        date: "2026-04-30",
+        totalCalories: 1240,
+        totalProtein: 88,
+        totalCarbs: 168,
+        totalFat: 52,
+        mealCount: 3,
+      },
+      dailyTargets: { calories: 2000, protein: 140, carbs: 220, fat: 60 },
+      sending: false,
+    });
+
+    const cardHtml = renderToStaticMarkup(
+      createElement(CoachAdviceCard, {
+        advice: "蛋白質還差 52g，晚餐建議高蛋白食物。可以選雞胸或豆腐補足。",
+        cta: COACH_CTA_INTENTS,
+      }),
+    );
+    const controlsHtml = renderToStaticMarkup(
+      createElement(CoachCTAControls, {
+        intents: COACH_CTA_INTENTS,
+        selectedIntentId: "protein",
+        onIntentSelect: () => undefined,
+        onTaskOptionClick: () => undefined,
+      }),
+    );
+
+    assert.match(cardHtml, /coach · live/);
+    assert.match(cardHtml, /sp-coach-cta/);
+    assert.match(cardHtml, /補蛋白質/);
+    assert.match(controlsHtml, /sp-coach-cta-intent/);
+    assert.match(controlsHtml, /sp-coach-cta-option/);
+    assert.match(controlsHtml, /data-selected="true"/);
+    assert.match(controlsHtml, /推薦三個便利商店高蛋白選擇/);
+  });
+
+  it("keeps the sport CTA source contracts and blocked Home logging boundaries", async () => {
+    const componentSource = await readSource("../../client/src/components/CoachAdviceCard.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
+
+    assert.match(componentSource, /SportBoltIcon/);
+    assert.match(componentSource, /sp-coach-cta/);
+    assert.match(componentSource, /sp-coach-cta-intent/);
+    assert.match(componentSource, /sp-coach-cta-option/);
+    assert.match(componentSource, /recordAndSelectHomeCtaIntent/);
+    assert.doesNotMatch(componentSource, /SketchButton/);
+    assert.doesNotMatch(componentSource, /SketchPill/);
+    assert.doesNotMatch(componentSource, /openSecondaryScreen\("mealEdit"/);
+    assert.doesNotMatch(componentSource, /ChatEntryBar/);
+    assert.match(componentSource, /disabled:opacity-40|opacity:\s*0\.4/);
+
+    for (const selector of [
+      ".sp-coach-cta",
+      ".sp-coach-cta-label",
+      ".sp-coach-cta-headline",
+      ".sp-coach-cta-body",
+      ".sp-coach-cta-tags",
+      ".sp-coach-cta-tag",
+      ".sp-coach-cta-controls",
+      ".sp-coach-cta-intents",
+      ".sp-coach-cta-intent",
+      '.sp-coach-cta-intent[data-selected="true"]',
+      ".sp-coach-cta-options",
+      ".sp-coach-cta-option",
+      ".sp-coach-cta-option:disabled",
+    ]) {
+      assert.match(cssSource, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
   });
 
   it("does not render CTA controls in loading coach card state", () => {
