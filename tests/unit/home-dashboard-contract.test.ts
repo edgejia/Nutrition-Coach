@@ -167,4 +167,19 @@ describe("Home dashboard display contracts", () => {
     assert.doesNotMatch(homeSource, /ChatEntryBar/);
     assert.doesNotMatch(homeSource, /openSecondaryScreen\("mealEdit"/);
   });
+
+  it("Home meal rows stay read-only and empty state routes through Chat", async () => {
+    const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
+
+    assert.match(homeSource, /<article key=\{meal\.id\} className="home-sport-meal-row">/);
+    assert.match(homeSource, /getMealBadge\(meal\.loggedAt\)/);
+    assert.match(homeSource, /formatMealRowTime\(meal\.loggedAt\)/);
+    assert.match(homeSource, /getDisplayMealLabel\(meal\.loggedAt\)/);
+    assert.match(homeSource, /getMealMacroSummary\(meal\)/);
+    assert.match(homeSource, /Math\.max\(0, Math\.round\(meal\.calories\)\)/);
+    assert.match(homeSource, /stageHomeTaskOptionPrompt\(prompt, setPendingHomeChatDraft, setActiveScreen\)/);
+    assert.match(homeSource, /<button type="button" className="home-sport-empty-action" onClick=\{onEmptyChatClick\}>/);
+    assert.doesNotMatch(homeSource, /<button[^>]+home-sport-meal-row/);
+    assert.doesNotMatch(homeSource, /SportPlusIcon/);
+  });
 });
