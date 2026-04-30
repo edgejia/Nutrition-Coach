@@ -511,7 +511,7 @@ textarea {
   display: flex;
   flex-direction: column;
   overflow: clip;
-  background: var(--bg);
+  background: var(--sp-bg);
 }
 
 .screen-shell.sk-screen {
