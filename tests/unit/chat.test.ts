@@ -5,6 +5,7 @@ import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createChatService } from "../../server/services/chat.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { formatLocalDate } from "../../server/lib/time.js";
 
 describe("ChatService", () => {
   let chatService: ReturnType<typeof createChatService>;
@@ -62,13 +63,68 @@ describe("ChatService", () => {
     const assistant = history.find((message) => message.role === "assistant");
 
     assert.equal(assistant?.didLogMeal, true);
-    assert.deepEqual(assistant?.loggedMeal, {
+    assert.ok(assistant?.loggedMeal);
+    assert.match(assistant.loggedMeal.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.equal(assistant.loggedMeal.dateKey, formatLocalDate(new Date(assistant.loggedMeal.loggedAt ?? "")));
+    assert.deepEqual(assistant.loggedMeal, {
+      mealId: assistant.loggedMeal.mealId,
+      dateKey: assistant.loggedMeal.dateKey,
+      loggedAt: assistant.loggedMeal.loggedAt,
+      imageAssetId: "lunch-image",
+      imageUrl: "/api/assets/lunch-image",
       foodName: "煎肉餅、漢堡排",
       calories: 520,
       protein: 32,
       carbs: 8,
       fat: 38,
     });
+    assert.equal("countedSources" in assistant.loggedMeal, false);
+    assert.equal("excludedSources" in assistant.loggedMeal, false);
+    assert.equal("usedConservativeAssumption" in assistant.loggedMeal, false);
+    assert.equal("confidence" in assistant.loggedMeal, false);
+    assert.equal("estimate" in assistant.loggedMeal, false);
+  });
+
+  it("projects loggedMeal receipt for persisted update_meal assistant replies", async () => {
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-03-25T12:00:00.000Z",
+    });
+    await chatService.saveMessage(deviceId, "user", "把 2026-03-25 的牛肉麵改成半碗");
+    const updatedMeal = await foodLoggingService.updateMeal(deviceId, loggedMeal.id, {
+      items: [
+        { foodName: "半碗牛肉麵", calories: 360, protein: 20, carbs: 45, fat: 10 },
+      ],
+    });
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "update_meal" });
+    await chatService.saveMessage(deviceId, "assistant", "已幫你更新 3/25 的牛肉麵。");
+
+    const history = await chatService.getHistory(deviceId, 50);
+    const assistant = history.find((message) => message.role === "assistant");
+
+    assert.equal(assistant?.didLogMeal, true);
+    assert.ok(assistant?.loggedMeal);
+    assert.deepEqual(assistant.loggedMeal, {
+      mealId: updatedMeal.id,
+      dateKey: "2026-03-25",
+      loggedAt: updatedMeal.loggedAt,
+      imageAssetId: null,
+      imageUrl: null,
+      foodName: "半碗牛肉麵",
+      calories: 360,
+      protein: 20,
+      carbs: 45,
+      fat: 10,
+    });
+    assert.equal("countedSources" in assistant.loggedMeal, false);
+    assert.equal("excludedSources" in assistant.loggedMeal, false);
+    assert.equal("usedConservativeAssumption" in assistant.loggedMeal, false);
+    assert.equal("confidence" in assistant.loggedMeal, false);
+    assert.equal("estimate" in assistant.loggedMeal, false);
   });
 
   it("loads compressed history for LLM context", async () => {

@@ -56,13 +56,24 @@ describe("chat stream contract", () => {
 
   it("sendMessageStream passes valid loggedMeal from event: done to onDone", async () => {
     mockStreamFetch([
-      'event: done\ndata: {"didLogMeal":true,"loggedMeal":{"foodName":"雞胸肉沙拉","calories":420,"protein":32,"carbs":14,"fat":22}}\n\n',
+      'event: done\ndata: {"didLogMeal":true,"loggedMeal":{"foodName":"雞胸肉沙拉","calories":420,"protein":32,"carbs":14,"fat":22,"mealId":"meal-1","dateKey":"2026-03-25","loggedAt":"2026-03-25T12:00:00.000Z","imageAssetId":null,"imageUrl":null}}\n\n',
     ]);
 
     let donePayload:
       | {
           didLogMeal: boolean;
-          loggedMeal?: { foodName: string; calories: number; protein: number; carbs: number; fat: number };
+          loggedMeal?: {
+            foodName: string;
+            calories: number;
+            protein: number;
+            carbs: number;
+            fat: number;
+            mealId?: string;
+            dateKey?: string;
+            loggedAt?: string;
+            imageAssetId?: string | null;
+            imageUrl?: string | null;
+          };
         }
       | undefined;
 
@@ -80,6 +91,11 @@ describe("chat stream contract", () => {
     assert.equal(donePayload?.didLogMeal, true);
     assert.equal(donePayload?.loggedMeal?.foodName, "雞胸肉沙拉");
     assert.equal(donePayload?.loggedMeal?.protein, 32);
+    assert.equal(donePayload?.loggedMeal?.mealId, "meal-1");
+    assert.equal(donePayload?.loggedMeal?.dateKey, "2026-03-25");
+    assert.equal(donePayload?.loggedMeal?.loggedAt, "2026-03-25T12:00:00.000Z");
+    assert.equal(donePayload?.loggedMeal?.imageAssetId, null);
+    assert.equal(donePayload?.loggedMeal?.imageUrl, null);
   });
 
   it("sendMessageStream ignores malformed loggedMeal payloads", async () => {
@@ -104,6 +120,28 @@ describe("chat stream contract", () => {
     assert.equal(donePayload?.loggedMeal, undefined);
   });
 
+  it("sendMessageStream rejects malformed loggedMeal optional identity fields", async () => {
+    mockStreamFetch([
+      'event: done\ndata: {"didLogMeal":true,"loggedMeal":{"foodName":"雞胸肉沙拉","calories":420,"protein":32,"carbs":14,"fat":22,"mealId":42,"dateKey":"2026-03-25","loggedAt":"2026-03-25T12:00:00.000Z"}}\n\n',
+    ]);
+
+    let donePayload: { didLogMeal: boolean; loggedMeal?: unknown } | undefined;
+
+    await sendMessageStream("bad optional", {
+      onStatus: () => undefined,
+      onToken: () => undefined,
+      onDone: (data) => {
+        donePayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.equal(donePayload?.didLogMeal, true);
+    assert.equal(donePayload?.loggedMeal, undefined);
+  });
+
   it("commitProvisionalBubble preserves loggedMeal on final assistant message", () => {
     useStore.getState().setProvisionalBubble({
       id: "bubble-1",
@@ -114,11 +152,24 @@ describe("chat stream contract", () => {
 
     useStore.getState().commitProvisionalBubble({
       didLogMeal: true,
-      loggedMeal: { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      loggedMeal: {
+        foodName: "雞胸肉沙拉",
+        calories: 420,
+        protein: 32,
+        carbs: 14,
+        fat: 22,
+        mealId: "meal-1",
+        dateKey: "2026-03-25",
+        loggedAt: "2026-03-25T12:00:00.000Z",
+        imageAssetId: null,
+        imageUrl: null,
+      },
     });
 
     const message = useStore.getState().messages[0];
     assert.equal(message?.didLogMeal === true, true);
     assert.equal(message?.loggedMeal?.foodName, "雞胸肉沙拉");
+    assert.equal(message?.loggedMeal?.mealId, "meal-1");
+    assert.equal(message?.loggedMeal?.dateKey, "2026-03-25");
   });
 });

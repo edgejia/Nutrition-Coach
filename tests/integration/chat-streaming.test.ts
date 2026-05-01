@@ -164,6 +164,46 @@ function createUpdateGoalsToolCall(): ToolCall {
   };
 }
 
+function createFindMealsToolCall(action: "update" | "delete", query: string): ToolCall {
+  return {
+    id: `find_${action}`,
+    type: "function",
+    function: {
+      name: "find_meals",
+      arguments: JSON.stringify({ action, query }),
+    },
+  };
+}
+
+function createUpdateMealToolCall(mealId: string): ToolCall {
+  return {
+    id: "update_meal_1",
+    type: "function",
+    function: {
+      name: "update_meal",
+      arguments: JSON.stringify({
+        meal_id: mealId,
+        food_name: "半碗牛肉麵",
+        calories: 360,
+        protein: 20,
+        carbs: 45,
+        fat: 10,
+      }),
+    },
+  };
+}
+
+function createDeleteMealToolCall(mealId: string): ToolCall {
+  return {
+    id: "delete_meal_1",
+    type: "function",
+    function: {
+      name: "delete_meal",
+      arguments: JSON.stringify({ meal_id: mealId }),
+    },
+  };
+}
+
 async function readStreamUntil(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   expectedText: string,
@@ -339,11 +379,23 @@ describe("chat-streaming", () => {
         didLogMeal: boolean;
         didMutateMeal?: boolean;
         dailySummary?: unknown;
-        loggedMeal?: { foodName?: string; calories?: unknown; protein?: unknown; carbs?: unknown; fat?: unknown };
+        loggedMeal?: {
+          mealId?: string;
+          dateKey?: string;
+          loggedAt?: string;
+          foodName?: string;
+          calories?: unknown;
+          protein?: unknown;
+          carbs?: unknown;
+          fat?: unknown;
+        };
       };
       assert.equal(donePayload.didLogMeal, true);
       assert.equal(donePayload.didMutateMeal, true);
       assert.ok(donePayload.dailySummary);
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.match(donePayload.loggedMeal?.dateKey ?? "", /^\d{4}-\d{2}-\d{2}$/);
+      assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
       assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
       assert.equal(typeof donePayload.loggedMeal?.calories, "number");
       assert.equal(typeof donePayload.loggedMeal?.protein, "number");
@@ -410,16 +462,160 @@ describe("chat-streaming", () => {
         didLogMeal: boolean;
         affectedDate?: string;
         dailySummary?: { date?: string };
+        loggedMeal?: { mealId?: string; dateKey?: string; loggedAt?: string; foodName?: string };
       };
 
       assert.equal(donePayload.didLogMeal, true);
       assert.equal(donePayload.affectedDate, "2026-03-25");
       assert.equal(donePayload.dailySummary?.date, "2026-03-25");
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.equal(donePayload.loggedMeal?.dateKey, "2026-03-25");
+      assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^2026-03-25T/);
+      assert.equal(donePayload.loggedMeal?.foodName, "牛肉麵");
     } finally {
       await reader?.cancel();
       controller.abort();
       clearTimeout(timeout);
     }
+  });
+
+  it("POST /api/chat stream done includes structured loggedMeal for update_meal mutations", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "seed_historical_meal",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["已補記"]);
+
+    const seedForm = new FormData();
+    seedForm.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    const seedText = await readStreamUntil(seedRes.body.getReader(), "event: done");
+    const seedDoneMatch = seedText.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(seedDoneMatch);
+    const seedDonePayload = JSON.parse(seedDoneMatch[1]) as { loggedMeal?: { mealId?: string } };
+    const mealId = seedDonePayload.loggedMeal?.mealId;
+    assert.ok(mealId);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("update", "2026-03-25 晚餐牛肉麵"),
+        createUpdateMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueChatStream(["已更新 3/25 的牛肉麵"]);
+
+    const form = new FormData();
+    form.append("message", "把 2026-03-25 晚餐牛肉麵改成半碗");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(doneDataMatch);
+    const donePayload = JSON.parse(doneDataMatch[1]) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      affectedDate?: string;
+      loggedMeal?: {
+        mealId?: string;
+        dateKey?: string;
+        loggedAt?: string;
+        foodName?: string;
+        calories?: number;
+        protein?: number;
+        carbs?: number;
+        fat?: number;
+      };
+    };
+
+    assert.equal(donePayload.didLogMeal, true);
+    assert.equal(donePayload.didMutateMeal, true);
+    assert.equal(donePayload.affectedDate, "2026-03-25");
+    assert.equal(donePayload.loggedMeal?.mealId, mealId);
+    assert.equal(donePayload.loggedMeal?.dateKey, "2026-03-25");
+    assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^2026-03-25T/);
+    assert.equal(donePayload.loggedMeal?.foodName, "半碗牛肉麵");
+    assert.equal(donePayload.loggedMeal?.calories, 360);
+    assert.equal(donePayload.loggedMeal?.protein, 20);
+    assert.equal(donePayload.loggedMeal?.carbs, 45);
+    assert.equal(donePayload.loggedMeal?.fat, 10);
+  });
+
+  it("POST /api/chat stream done keeps delete_meal confirmations non-editable", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    mockLLM.queueChatStream(["已記錄雞腿便當"]);
+
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了雞腿便當");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    await readStreamUntil(seedRes.body.getReader(), "event: done");
+
+    const mealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsJson = await mealsRes.json() as { meals: Array<{ id: string }> };
+    const mealId = mealsJson.meals[0]?.id;
+    assert.ok(mealId);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("delete", "雞腿便當"),
+        createDeleteMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueChatStream(["已刪除這筆雞腿便當。"]);
+
+    const form = new FormData();
+    form.append("message", "刪除雞腿便當");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    assert.match(text, /已刪除這筆雞腿便當/);
+    const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(doneDataMatch);
+    const donePayload = JSON.parse(doneDataMatch[1]) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+    };
+    assert.equal(donePayload.didLogMeal, true);
+    assert.equal(donePayload.didMutateMeal, true);
+    assert.equal(donePayload.loggedMeal, undefined);
   });
 
   it("POST /api/chat stream appends a concrete date when the model only says yesterday", async () => {
