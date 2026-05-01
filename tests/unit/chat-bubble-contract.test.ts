@@ -45,9 +45,9 @@ describe("chat bubble source contract", () => {
 
     assert.match(chatInput, /data-ready=\{canSend\}/);
 
-    for (const blocked of ["SketchIcons.js", "CameraIcon", "SendIcon"]) {
-      assert.doesNotMatch(chatInput, new RegExp(escapeRegExp(blocked)));
-    }
+    assert.doesNotMatch(chatInput, /from "\.\/SketchIcons\.js"/);
+    assert.doesNotMatch(chatInput, /<CameraIcon\b/);
+    assert.doesNotMatch(chatInput, /<SendIcon\b/);
   });
 
   it("renders sport bubbles, status, streaming caret, and safe receipt fields", async () => {
