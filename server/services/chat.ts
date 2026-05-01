@@ -211,7 +211,10 @@ export function createChatService(db: AppDatabase) {
 
       for (const row of chronological) {
         if (row.role === "tool") {
-          if (row.toolName === "log_food" || row.toolName === "update_meal") {
+          const isSuccessfulMutationTool =
+            (row.toolName === "log_food" || row.toolName === "update_meal") &&
+            row.content === "成功";
+          if (isSuccessfulMutationTool) {
             pendingDidLogMeal = true;
             pendingTurnStartAt = latestUserCreatedAt;
           }

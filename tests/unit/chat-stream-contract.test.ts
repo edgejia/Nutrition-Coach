@@ -1,5 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 const storage = new Map<string, string>();
 globalThis.localStorage = {
@@ -12,6 +14,12 @@ globalThis.localStorage = {
 } as Storage;
 
 const originalFetch = globalThis.fetch;
+
+const root = fileURLToPath(new URL("../..", import.meta.url));
+
+async function readSource(path: string) {
+  return readFile(`${root}/${path}`, "utf8");
+}
 
 function makeSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -171,5 +179,18 @@ describe("chat stream contract", () => {
     assert.equal(message?.loggedMeal?.foodName, "雞胸肉沙拉");
     assert.equal(message?.loggedMeal?.mealId, "meal-1");
     assert.equal(message?.loggedMeal?.dateKey, "2026-03-25");
+  });
+
+  it("clears unauthorized Chat sends out of the provisional sending state", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const unauthorizedBranch = /if \(err instanceof Error && err\.message === "UNAUTHORIZED"\) \{([\s\S]*?)\n\s*return;\n\s*\}/.exec(
+      chatPanel,
+    );
+
+    assert.ok(unauthorizedBranch, "ChatPanel should keep an explicit UNAUTHORIZED branch");
+    const branchSource = unauthorizedBranch[1] ?? "";
+    assert.match(branchSource, /setProvisionalBubble\(null\)/);
+    assert.match(branchSource, /setSending\(false\)/);
+    assert.match(branchSource, /recoverGuestSession\(\)/);
   });
 });

@@ -387,6 +387,8 @@ export function ChatPanel() {
         if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
           clearPendingHomeChatDraft();
         }
+        setProvisionalBubble(null);
+        setSending(false);
         void recoverGuestSession();
         return;
       }

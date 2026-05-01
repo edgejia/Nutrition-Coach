@@ -494,8 +494,13 @@ async function handleOrchestratorSSE(
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
     try {
-      if (!userMessagePersisted && durableAssetRef) {
-        await deps.chatService.saveMessage(deviceId, "user", message, { imagePath: durableAssetRef });
+      if (!userMessagePersisted) {
+        await deps.chatService.saveMessage(
+          deviceId,
+          "user",
+          message,
+          durableAssetRef ? { imagePath: durableAssetRef } : undefined,
+        );
         userMessagePersisted = true;
       }
       const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, fallback);
@@ -681,8 +686,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           : jsonDidMutateMeal
             ? PARTIAL_MUTATION_FALLBACK
             : UNIFIED_FALLBACK;
-        if (!userMessagePersisted && durableAssetRef) {
-          await chatService.saveMessage(deviceId, "user", message, { imagePath: durableAssetRef });
+        if (!userMessagePersisted) {
+          await chatService.saveMessage(
+            deviceId,
+            "user",
+            message,
+            durableAssetRef ? { imagePath: durableAssetRef } : undefined,
+          );
           userMessagePersisted = true;
         }
         const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);

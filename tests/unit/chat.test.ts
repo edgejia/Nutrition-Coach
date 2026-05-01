@@ -127,6 +127,25 @@ describe("ChatService", () => {
     assert.equal("estimate" in assistant.loggedMeal, false);
   });
 
+  it("does not project failed log_food tool attempts as editable receipts", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸便當",
+      calories: 620,
+      protein: 42,
+      carbs: 72,
+      fat: 18,
+    });
+    await chatService.saveMessage(deviceId, "user", "我吃了不確定的東西");
+    await chatService.saveMessage(deviceId, "tool", "需要更多資訊", { toolName: "log_food" });
+    await chatService.saveMessage(deviceId, "assistant", "我需要份量或照片才能幫你記錄。");
+
+    const history = await chatService.getHistory(deviceId, 50);
+    const assistant = history.find((message) => message.role === "assistant");
+
+    assert.equal(assistant?.didLogMeal, undefined);
+    assert.equal(assistant?.loggedMeal, undefined);
+  });
+
   it("loads compressed history for LLM context", async () => {
     await chatService.saveMessage(deviceId, "user", "我吃了蘋果", { imagePath: "asset:apple-image" });
     await chatService.saveMessage(deviceId, "tool", "蘋果, 95kcal", { toolName: "analyze_food" });

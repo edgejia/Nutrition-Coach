@@ -298,6 +298,94 @@ describe("Chat API", () => {
     }
   });
 
+  it("POST /api/chat SSE backfills the user text message when failure happens before orchestrator persistence", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+    const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);
+    services.chatService.getCompressedHistory = async () => {
+      throw new Error("pre-save history failure");
+    };
+
+    const form = new FormData();
+    form.append("message", "今天早餐是燕麥");
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, Accept: "text/event-stream" },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      reader = res.body?.getReader();
+      assert.ok(reader);
+
+      const { raw } = await readUntilEventCount(reader, "done", 1);
+      const chunkText = parseSSEEvents(raw)
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      assert.match(chunkText, /抱歉|無法/);
+
+      const historyRes = await app.inject({
+        method: "GET",
+        url: "/api/chat/history?limit=10",
+        headers: { cookie: sessionCookieHeader },
+      });
+      const history = historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const userMessages = history.messages.filter((message) => message.role === "user");
+      const assistantMessages = history.messages.filter((message) => message.role === "assistant");
+
+      assert.equal(userMessages.length, 1, "route catch should backfill exactly one failed user text message");
+      assert.equal(userMessages[0]!.content, "今天早餐是燕麥");
+      assert.equal(assistantMessages.length, 1);
+      assert.match(assistantMessages[0]!.content, /抱歉|無法/);
+    } finally {
+      await reader?.cancel();
+      services.chatService.getCompressedHistory = originalGetCompressedHistory;
+    }
+  });
+
+  it("POST /api/chat JSON backfills the user text message when failure happens before orchestrator persistence", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+    const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);
+    services.chatService.getCompressedHistory = async () => {
+      throw new Error("pre-save history failure");
+    };
+
+    const form = new FormData();
+    form.append("message", "今天午餐是雞肉沙拉");
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const json = await res.json() as { reply: string };
+      assert.match(json.reply, /抱歉|無法/);
+
+      const historyRes = await app.inject({
+        method: "GET",
+        url: "/api/chat/history?limit=10",
+        headers: { cookie: sessionCookieHeader },
+      });
+      const history = historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const userMessages = history.messages.filter((message) => message.role === "user");
+      const assistantMessages = history.messages.filter((message) => message.role === "assistant");
+
+      assert.equal(userMessages.length, 1, "JSON catch should backfill exactly one failed user text message");
+      assert.equal(userMessages[0]!.content, "今天午餐是雞肉沙拉");
+      assert.equal(assistantMessages.length, 1);
+      assert.match(assistantMessages[0]!.content, /抱歉|無法/);
+    } finally {
+      services.chatService.getCompressedHistory = originalGetCompressedHistory;
+    }
+  });
+
   it("POST /api/chat rejects invalid image types", async () => {
     const form = new FormData();
     form.append("message", "");
