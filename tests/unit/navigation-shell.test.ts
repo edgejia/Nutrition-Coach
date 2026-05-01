@@ -84,6 +84,14 @@ describe("navigation shell source contract", () => {
     assert.doesNotMatch(sources.mainLayout, /activeScreen === "summary"/);
   });
 
+  it("hides BottomTabBar only when Chat is active", () => {
+    assert.match(sources.mainLayout, /activeScreen === "home" && <HomeScreen \/>/);
+    assert.match(sources.mainLayout, /activeScreen === "chat" && <ChatPanel \/>/);
+    assert.match(sources.mainLayout, /activeScreen === "history" && <HistoryScreen \/>/);
+    assert.match(sources.mainLayout, /activeScreen !== "chat" && <BottomTabBar \/>/);
+    assert.doesNotMatch(sources.mainLayout, /activeScreen === "chat" && <BottomTabBar \/>/);
+  });
+
   it("keeps exactly one primary scroller helper per primary screen", () => {
     for (const [label, source] of [
       ["HomeScreen", sources.homeScreen],

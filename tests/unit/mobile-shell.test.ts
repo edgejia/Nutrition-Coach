@@ -133,12 +133,23 @@ describe("mobile shell source contract", () => {
     ]);
   });
 
-  it("keeps Chat scroll ownership on the existing scrollContainerRef element", () => {
+  it("keeps Chat scroll ownership inside the sport shell", () => {
     assert.match(sources.chatPanel, /\bscreen-shell\b/);
+    assert.match(sources.chatPanel, /\bsp-chat-shell\b/);
     assert.match(sources.chatPanel, /\bscreen-bar\b/);
+    assert.match(sources.chatPanel, /\bsp-chat-header\b/);
+    assert.match(sources.chatPanel, /\bsp-chat-scroll\b/);
+    assert.match(sources.chatPanel, /\bsp-chat-composer-bar\b/);
+    assert.match(sources.chatPanel, /today log/);
     assert.match(sources.chatPanel, /\bscreen-bottom-bar\b/);
     assert.match(sources.chatPanel, /\bscreen-scroll-with-input\b/);
     assert.match(sources.chatPanel, /\bscrollContainerRef\b/);
+    assert.doesNotMatch(sources.chatPanel, /DashboardMiniBar/);
+    assert.equal(
+      countMatches(sources.chatPanel, /<div ref=\{scrollContainerRef\} className=/g),
+      1,
+      "ChatPanel should keep exactly one scrollContainerRef scroller",
+    );
 
     const scrollContainerMatch = /<div ref=\{scrollContainerRef\} className="([^"]+)"/.exec(
       sources.chatPanel,
@@ -146,11 +157,12 @@ describe("mobile shell source contract", () => {
     assert.ok(scrollContainerMatch, "ChatPanel should keep scrollContainerRef on a div");
     const scrollContainerClassName = scrollContainerMatch[1] ?? "";
     assert.match(scrollContainerClassName, /\bscreen-scroll-with-input\b/);
+    assert.match(scrollContainerClassName, /\bsp-chat-scroll\b/);
     assertIncludesInOrder(sources.chatPanel, [
-      ["Chat screen shell", '<div className="screen-shell sk-screen">'],
-      ["Chat header bar", '<div className="screen-bar px-5 pb-3 pt-4"'],
-      ["Chat message scroller", '<div ref={scrollContainerRef} className="screen-scroll-with-input'],
-      ["Chat bottom input bar", '<div className="screen-bottom-bar px-3"'],
+      ["Chat screen shell", '<div className="screen-shell sp-chat-shell">'],
+      ["Chat header bar", '<header className="screen-bar sp-chat-header"'],
+      ["Chat message scroller", '<div ref={scrollContainerRef} className="screen-scroll-with-input sp-chat-scroll">'],
+      ["Chat bottom input bar", '<div className="screen-bottom-bar sp-chat-composer-bar">'],
     ]);
 
     if (sources.chatPanel.includes("overflow-y-auto")) {
