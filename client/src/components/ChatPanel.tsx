@@ -53,10 +53,10 @@ function createPhase40IncompleteReceiptMock(): Message {
   return {
     id: PHASE40_INCOMPLETE_RECEIPT_ID,
     role: "assistant",
-    content: "這張收據缺少可編輯的 mealId/dateKey，所以只能檢視，不能開啟 Meal Edit。",
+    content: "",
     createdAt: new Date().toISOString(),
     loggedMeal: {
-      foodName: "Incomplete receipt mock",
+      foodName: "鮭魚飯糰",
       calories: 780,
       protein: 38,
       carbs: 82,
