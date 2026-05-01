@@ -14,6 +14,42 @@ function escapeRegExp(value: string) {
 }
 
 describe("chat bubble source contract", () => {
+  it("uses the sport composer controls while preserving upload and send behavior", async () => {
+    const chatInput = await readSource("client/src/components/ChatInput.tsx");
+
+    assert.match(chatInput, /SportCameraIcon/);
+    assert.match(chatInput, /SportSendIcon/);
+    assert.match(chatInput, /SportCloseIcon/);
+    assert.match(chatInput, /from "\.\/SportIcons\.js"/);
+    assert.ok(chatInput.includes('accept="image/jpeg,image/png,image/webp"'));
+    assert.ok(chatInput.includes("onBeforeSend?.({"));
+    assert.match(chatInput, /onSend\(trimmedText, image \?\? undefined\)/);
+    assert.match(chatInput, /fileRef\.current\.value = ""/);
+    assert.match(chatInput, /disabled \|\| !canSend/);
+    assert.match(chatInput, /metaKey \|\| e\.ctrlKey/);
+    assert.match(chatInput, /aria-label="附加照片"/);
+    assert.match(chatInput, /aria-label="移除照片"/);
+    assert.match(chatInput, /aria-label="送出"/);
+    assert.match(chatInput, /placeholder="描述你吃了什麼…"/);
+
+    for (const className of [
+      "sp-chat-input",
+      "sp-chat-camera",
+      "sp-chat-input-well",
+      "sp-chat-textarea",
+      "sp-chat-image-chip",
+      "sp-chat-send",
+    ]) {
+      assert.match(chatInput, new RegExp(className));
+    }
+
+    assert.match(chatInput, /data-ready=\{canSend\}/);
+
+    for (const blocked of ["SketchIcons.js", "CameraIcon", "SendIcon"]) {
+      assert.doesNotMatch(chatInput, new RegExp(escapeRegExp(blocked)));
+    }
+  });
+
   it("renders sport bubbles, status, streaming caret, and safe receipt fields", async () => {
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
 

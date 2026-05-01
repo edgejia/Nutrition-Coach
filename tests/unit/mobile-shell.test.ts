@@ -21,6 +21,7 @@ const sources = {
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
   chatPanel: await readSource("../../client/src/components/ChatPanel.tsx"),
+  chatInput: await readSource("../../client/src/components/ChatInput.tsx"),
   summaryDetailScreen: await readSource("../../client/src/components/SummaryDetailScreen.tsx"),
 };
 
@@ -173,6 +174,41 @@ describe("mobile shell source contract", () => {
         "ChatPanel should keep overflow-y-auto only on the scrollContainerRef element",
       );
     }
+  });
+
+  it("keeps the sport composer wired to mobile-safe send and upload contracts", () => {
+    const chatInput = sources.chatInput;
+
+    assert.match(chatInput, /SportCameraIcon/);
+    assert.match(chatInput, /SportSendIcon/);
+    assert.match(chatInput, /SportCloseIcon/);
+    assert.match(chatInput, /from "\.\/SportIcons\.js"/);
+    assert.ok(chatInput.includes('accept="image/jpeg,image/png,image/webp"'));
+    assert.ok(chatInput.includes("onBeforeSend?.({"));
+    assert.match(chatInput, /onSend\(trimmedText, image \?\? undefined\)/);
+    assert.match(chatInput, /fileRef\.current\.value = ""/);
+    assert.match(chatInput, /disabled \|\| !canSend/);
+    assert.match(chatInput, /metaKey \|\| e\.ctrlKey/);
+    assert.match(chatInput, /aria-label="附加照片"/);
+    assert.match(chatInput, /aria-label="移除照片"/);
+    assert.match(chatInput, /aria-label="送出"/);
+    assert.match(chatInput, /placeholder="描述你吃了什麼…"/);
+
+    for (const className of [
+      "sp-chat-input",
+      "sp-chat-camera",
+      "sp-chat-input-well",
+      "sp-chat-textarea",
+      "sp-chat-image-chip",
+      "sp-chat-send",
+    ]) {
+      assert.match(chatInput, new RegExp(className));
+    }
+
+    assert.match(chatInput, /data-ready=\{canSend\}/);
+    assert.doesNotMatch(chatInput, /from "\.\/SketchIcons\.js"/);
+    assert.doesNotMatch(chatInput, /<CameraIcon\b/);
+    assert.doesNotMatch(chatInput, /<SendIcon\b/);
   });
 
   it("keeps Summary header fixed and content in a safe scroller", () => {

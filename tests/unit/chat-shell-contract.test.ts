@@ -28,10 +28,15 @@ describe("chat shell source contract", () => {
   it("uses icon-based camera and send controls with the agreed placeholder", async () => {
     const chatInput = await readSource("client/src/components/ChatInput.tsx");
 
-    assert.match(chatInput, /記錄 ／ 提問 ／ 修改…/);
-    assert.match(chatInput, /CameraIcon/);
-    assert.match(chatInput, /SendIcon/);
+    assert.match(chatInput, /描述你吃了什麼…/);
+    assert.match(chatInput, /SportCameraIcon/);
+    assert.match(chatInput, /SportSendIcon/);
+    assert.match(chatInput, /SportCloseIcon/);
+    assert.match(chatInput, /sp-chat-input/);
+    assert.match(chatInput, /sp-chat-input-well/);
+    assert.match(chatInput, /sp-chat-send/);
     assert.match(chatInput, /image\/jpeg,image\/png,image\/webp/);
+    assert.doesNotMatch(chatInput, /SketchIcons\.js/);
     assert.doesNotMatch(chatInput, /📷/);
     assert.doesNotMatch(chatInput, /↑/);
   });
