@@ -14,10 +14,14 @@ describe("chat shell source contract", () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
 
     assert.match(chatPanel, /對話/);
-    assert.match(chatPanel, /DashboardMiniBar/);
+    assert.match(chatPanel, /sp-chat-header/);
+    assert.match(chatPanel, /today log/);
     assert.match(chatPanel, /screen-scroll-with-input/);
+    assert.match(chatPanel, /sp-chat-scroll/);
+    assert.match(chatPanel, /sp-chat-composer-bar/);
     assert.match(chatPanel, /scrollContainerRef/);
     assert.match(chatPanel, /scheduleLatestAlignment/);
+    assert.doesNotMatch(chatPanel, /DashboardMiniBar/);
     assert.doesNotMatch(chatPanel, /同一個輸入框同時處理提問與記錄/);
   });
 
