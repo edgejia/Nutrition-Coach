@@ -1,6 +1,9 @@
-import type { Message } from "../types.js";
+import type { MealEditPayload, Message } from "../types.js";
+import type { KeyboardEvent } from "react";
 import { AssistantMarkdown } from "./AssistantMarkdown.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
+import { SportBoltIcon, SportChevronRightIcon } from "./SportIcons.js";
+import { SportReceipt } from "./SportPrimitives.js";
 
 type ProvisionalBubbleProps = {
   isProvisional: boolean;
@@ -11,32 +14,42 @@ function isImagePlaceholderContent(content: string): boolean {
   return content.trim() === "(圖片)";
 }
 
-function hasCompleteLoggedMealReceipt(message: Message) {
-  const receipt = message.loggedMeal;
-  return Boolean(
-    message.didLogMeal === true &&
-    receipt &&
-    receipt.foodName.trim().length > 0 &&
-    Number.isFinite(receipt.calories) &&
-    Number.isFinite(receipt.protein) &&
-    Number.isFinite(receipt.carbs) &&
-    Number.isFinite(receipt.fat),
-  );
-}
-
 function formatNutritionValue(value: number) {
   return Math.round(value).toLocaleString("en-US");
 }
 
-function NutritionRow({ label, value, unit }: { label: string; value: number; unit: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4 text-xs">
-      <span style={{ color: "var(--sk-ink-soft)" }}>{label}</span>
-      <span className="sk-metric" style={{ color: "var(--sk-ink)" }}>
-        {formatNutritionValue(value)} {unit}
-      </span>
-    </div>
-  );
+function isCompleteLoggedMealReceipt(message: Message) {
+  return getCompleteReceiptEditPayload(message) !== null;
+}
+
+export function getCompleteReceiptEditPayload(message: Message): MealEditPayload | null {
+  const loggedMeal = message.loggedMeal;
+
+  if (
+    !loggedMeal ||
+    !loggedMeal.mealId ||
+    !loggedMeal.dateKey ||
+    loggedMeal.foodName.trim().length === 0 ||
+    !Number.isFinite(loggedMeal.calories) ||
+    !Number.isFinite(loggedMeal.protein) ||
+    !Number.isFinite(loggedMeal.carbs) ||
+    !Number.isFinite(loggedMeal.fat)
+  ) {
+    return null;
+  }
+
+  return {
+    mealId: loggedMeal.mealId,
+    dateKey: loggedMeal.dateKey,
+    foodName: loggedMeal.foodName,
+    calories: loggedMeal.calories,
+    protein: loggedMeal.protein,
+    carbs: loggedMeal.carbs,
+    fat: loggedMeal.fat,
+    imageAssetId: loggedMeal.imageAssetId ?? null,
+    imageUrl: loggedMeal.imageUrl ?? null,
+    loggedAt: loggedMeal.loggedAt,
+  };
 }
 
 export function getUserMessagePresentation(message: Message) {
@@ -54,59 +67,141 @@ export function getUserMessagePresentation(message: Message) {
   };
 }
 
+function MacroRow({ label, value }: { label: "protein" | "carbs" | "fat"; value: number }) {
+  return (
+    <div className="sp-receipt-row">
+      <span>{label}</span>
+      <span>{formatNutritionValue(value)} g</span>
+    </div>
+  );
+}
+
+function ReceiptCard(props: {
+  message: Message;
+  editPayload: MealEditPayload | null;
+  onOpenMealEdit?: (payload: MealEditPayload) => void;
+}) {
+  const { message, editPayload, onOpenMealEdit } = props;
+  const loggedMeal = message.loggedMeal;
+
+  if (!loggedMeal) {
+    return null;
+  }
+
+  const canEdit = editPayload !== null && onOpenMealEdit !== undefined;
+
+  function handleOpenReceipt() {
+    if (!editPayload) {
+      return;
+    }
+    onOpenMealEdit?.(editPayload);
+  }
+
+  function handleReceiptKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!canEdit || (event.key !== "Enter" && event.key !== " ")) {
+      return;
+    }
+
+    event.preventDefault();
+    handleOpenReceipt();
+  }
+
+  return (
+    <div className="sp-message-row sp-message-row-assistant">
+      <SportReceipt
+        className={`sp-receipt-card${canEdit ? " sp-receipt-button" : ""}`}
+        onClick={canEdit ? handleOpenReceipt : undefined}
+        onKeyDown={canEdit ? handleReceiptKeyDown : undefined}
+        role={canEdit ? "button" : undefined}
+        tabIndex={canEdit ? 0 : undefined}
+      >
+        <div className="sp-receipt-head">
+          <div className="sp-receipt-title">
+            <div className="sp-receipt-label">logged</div>
+            <div className="sp-receipt-food">{loggedMeal.foodName}</div>
+          </div>
+          <div className="sp-receipt-kcal">
+            <span>{formatNutritionValue(loggedMeal.calories)}</span>
+            <small>kcal</small>
+          </div>
+          {canEdit ? (
+            <span className="sp-receipt-chevron" aria-hidden="true">
+              <SportChevronRightIcon size={16} stroke={2} />
+            </span>
+          ) : null}
+        </div>
+        <div className="sp-receipt-macros">
+          <MacroRow label="protein" value={loggedMeal.protein} />
+          <MacroRow label="carbs" value={loggedMeal.carbs} />
+          <MacroRow label="fat" value={loggedMeal.fat} />
+        </div>
+      </SportReceipt>
+    </div>
+  );
+}
+
+function AssistantTextBubble(props: {
+  message: Message;
+  isProvisional?: boolean;
+  isStatusLabel?: boolean;
+}) {
+  const { message, isProvisional, isStatusLabel } = props;
+  const isError = !isProvisional && message.content.includes("抱歉，發生錯誤");
+
+  if (!message.content.trim()) {
+    return null;
+  }
+
+  if (isStatusLabel) {
+    return (
+      <div className="sp-message-row sp-message-row-assistant">
+        <div className="sp-status-bubble">
+          <SportBoltIcon size={14} stroke={2} />
+          <span>{message.content}</span>
+          {isProvisional ? <i className="sp-status-dot" aria-hidden="true" /> : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sp-message-row sp-message-row-assistant">
+      <div className={`sp-bubble-asst${isError ? " sp-bubble-error" : ""}`}>
+        {isProvisional ? (
+          <p className="whitespace-pre-wrap">
+            {message.content}
+            <span className="sp-stream-caret" aria-hidden="true">
+              |
+            </span>
+          </p>
+        ) : (
+          <AssistantMarkdown content={message.content} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MessageBubble(props: {
   message: Message;
   onImageSettle?: () => void;
+  onOpenMealEdit?: (payload: MealEditPayload) => void;
 } & Partial<ProvisionalBubbleProps>) {
-  const { message, onImageSettle, isProvisional, isStatusLabel } = props;
+  const { message, onImageSettle, onOpenMealEdit, isProvisional, isStatusLabel } = props;
   const isUser = message.role === "user";
 
   if (isUser) {
-    const { imageSrc, text, hasImage, hasText, isImageOnly } = getUserMessagePresentation(message);
-
-    if (isImageOnly) {
-      return (
-        <div className="flex justify-end">
-          <div className="max-w-[80%] rounded-2xl p-1" style={{ background: "var(--sk-accent-soft)" }}>
-            <PersistedAssetImage
-              src={imageSrc}
-              alt="附圖"
-              imgClassName="max-h-64 max-w-full rounded-xl object-contain"
-              fallbackClassName="flex min-h-40 min-w-48 items-center justify-center rounded-xl border px-4 py-6 text-center text-xs font-semibold"
-              fallbackStyle={{
-                background: "var(--sk-paper)",
-                borderColor: "var(--sk-ink)",
-                color: "var(--sk-ink-soft)",
-              }}
-              onAssetSettle={onImageSettle}
-            />
-          </div>
-        </div>
-      );
-    }
+    const { imageSrc, text, hasImage, hasText } = getUserMessagePresentation(message);
 
     return (
-      <div className="flex justify-end">
-        <div
-          className="max-w-[80%] rounded-2xl px-4 py-3 text-sm font-normal leading-relaxed"
-          style={{
-            background: "var(--sk-accent-soft)",
-            border: "1.25px solid var(--sk-ink)",
-            borderBottomRightRadius: 6,
-            color: "var(--sk-ink)",
-          }}
-        >
+      <div className="sp-message-row sp-message-row-user">
+        <div className="sp-bubble-user">
           {hasImage && (
             <PersistedAssetImage
               src={imageSrc}
               alt="附圖"
-              imgClassName="mb-2 max-h-48 w-full rounded-xl object-contain"
-              fallbackClassName="mb-2 flex min-h-32 w-full items-center justify-center rounded-xl border px-3 py-4 text-center text-xs font-semibold"
-              fallbackStyle={{
-                background: "var(--sk-paper)",
-                borderColor: "var(--sk-ink)",
-                color: "var(--sk-ink-soft)",
-              }}
+              imgClassName="sp-message-image"
+              fallbackClassName="sp-message-image-fallback"
               onAssetSettle={onImageSettle}
             />
           )}
@@ -116,59 +211,34 @@ export function MessageBubble(props: {
     );
   }
 
-  if (hasCompleteLoggedMealReceipt(message) && message.loggedMeal) {
+  const editPayload = getCompleteReceiptEditPayload(message);
+  const shouldRenderReceipt = Boolean(message.loggedMeal);
+  const shouldRenderText = message.content.trim().length > 0;
+
+  if (shouldRenderReceipt) {
     return (
-      <div className="flex justify-start">
-        <div className="sk-box-soft max-w-[88%] px-4 py-3">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <div className="sk-heading text-base leading-none" style={{ color: "var(--sk-ink)" }}>
-                已記錄 ✓
-              </div>
-              <div className="mt-1 text-sm leading-snug" style={{ color: "var(--sk-ink)" }}>
-                {message.loggedMeal.foodName}
-              </div>
-            </div>
-          </div>
-          <div className="grid gap-1.5">
-            <NutritionRow label="熱量" value={message.loggedMeal.calories} unit="kcal" />
-            <NutritionRow label="蛋白" value={message.loggedMeal.protein} unit="g" />
-            <NutritionRow label="碳水" value={message.loggedMeal.carbs} unit="g" />
-            <NutritionRow label="脂肪" value={message.loggedMeal.fat} unit="g" />
-          </div>
-        </div>
-      </div>
+      <>
+        <ReceiptCard
+          message={message}
+          editPayload={isCompleteLoggedMealReceipt(message) ? editPayload : null}
+          onOpenMealEdit={onOpenMealEdit}
+        />
+        {shouldRenderText ? (
+          <AssistantTextBubble
+            message={message}
+            isProvisional={isProvisional}
+            isStatusLabel={isStatusLabel}
+          />
+        ) : null}
+      </>
     );
   }
 
   return (
-    <div className="flex justify-start">
-      <div className="sk-box-soft max-w-[88%] px-4 py-3 text-sm leading-relaxed" style={{ borderTopLeftRadius: 6 }}>
-        {message.content &&
-          (isStatusLabel ? (
-            <p className="text-sm leading-relaxed" style={{ color: "var(--sk-ink-soft)" }}>
-              {message.content}
-              {isProvisional && (
-                <span className="sk-caret ml-1 animate-pulse" style={{ color: "var(--sk-ink-faint)" }}>
-                  ...
-                </span>
-              )}
-            </p>
-          ) : (
-            <>
-              {isProvisional ? (
-                <p className="whitespace-pre-wrap">
-                  {message.content}
-                  <span className="sk-caret ml-0.5 animate-pulse" style={{ color: "var(--sk-accent)" }}>
-                    |
-                  </span>
-                </p>
-              ) : (
-                <AssistantMarkdown content={message.content} />
-              )}
-            </>
-          ))}
-      </div>
-    </div>
+    <AssistantTextBubble
+      message={message}
+      isProvisional={isProvisional}
+      isStatusLabel={isStatusLabel}
+    />
   );
 }

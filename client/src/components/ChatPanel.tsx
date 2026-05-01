@@ -701,6 +701,7 @@ export function ChatPanel() {
                 key={m.id}
                 message={m}
                 onImageSettle={handleMessageImageSettle}
+                onOpenMealEdit={(payload) => openMealEdit(payload, "chat")}
               />
             ))}
             {provisionalBubble && (
@@ -714,6 +715,7 @@ export function ChatPanel() {
                 }}
                 isProvisional={true}
                 isStatusLabel={provisionalBubble.statusLabel.length > 0}
+                onOpenMealEdit={(payload) => openMealEdit(payload, "chat")}
               />
             )}
           </div>
