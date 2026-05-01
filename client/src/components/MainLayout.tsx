@@ -115,7 +115,7 @@ export function MainLayout() {
       {activeScreen === "home" && <HomeScreen />}
       {activeScreen === "chat" && <ChatPanel />}
       {activeScreen === "history" && <HistoryScreen />}
-      <BottomTabBar />
+      {activeScreen !== "chat" && <BottomTabBar />}
       {secondaryScreen?.screen === "settings" && <GoalSettings onClose={closeSecondaryScreen} />}
       {secondaryScreen?.screen === "dayDetail" && <HistoryDayDetailScreen onBack={closeSecondaryScreen} />}
       {secondaryScreen?.screen === "mealEdit" && <MealEditScreen onBack={closeSecondaryScreen} />}

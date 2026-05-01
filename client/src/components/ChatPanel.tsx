@@ -15,7 +15,7 @@ import {
 } from "../lib/chat-scroll.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
-import { DashboardMiniBar } from "./DashboardMiniBar.js";
+import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
 import type { MealEntry, PendingHomeChatDraft } from "../types.js";
 
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
@@ -37,6 +37,8 @@ export function ChatPanel() {
   const addMessage = useStore((s) => s.addMessage);
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setDailyTargets = useStore((s) => s.setDailyTargets);
+  const dailySummary = useStore((s) => s.dailySummary);
+  const dailyTargets = useStore((s) => s.dailyTargets);
   const sending = useStore((s) => s.sending);
   const setSending = useStore((s) => s.setSending);
   const provisionalBubble = useStore((s) => s.provisionalBubble);
@@ -69,6 +71,8 @@ export function ChatPanel() {
   const isChatLocked = sending;
   const todayKey = formatLocalDate(new Date());
   const todayMeals = meals.filter((meal) => formatLocalDate(new Date(meal.loggedAt)) === todayKey);
+  const consumedCalories = Math.round(dailySummary?.totalCalories ?? 0).toLocaleString("en-US");
+  const targetCalories = Math.round(dailyTargets?.calories ?? 0).toLocaleString("en-US");
   const showJumpToLatest = shouldShowJumpToLatest({
     mode: followMode,
     hasMessages: messages.length > 0,
@@ -622,72 +626,54 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="screen-shell sk-screen">
-      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1.25px solid var(--sk-ink)" }}>
-        <button
-          type="button"
-          onClick={handleBackToHome}
-          disabled={isChatLocked}
-          className="mb-3 flex items-center gap-2 text-xs font-semibold disabled:opacity-40"
-          style={{ color: "var(--sk-ink-soft)" }}
-        >
-          <span
-            className="flex h-6 w-6 items-center justify-center rounded-lg text-xs"
-            style={{
-              background: "var(--bg-raised)",
-              border: "1px solid var(--sk-ink)",
-            }}
-          >
-            ‹
-          </span>
-          返回主頁
-        </button>
-        <h2
-          className="mb-1 leading-none"
-          style={{
-            fontFamily: "var(--sk-font-hand)",
-            fontSize: 28,
-            fontWeight: 800,
-            color: "var(--sk-ink)",
-          }}
-        >
-          對話
-        </h2>
-        <DashboardMiniBar />
-        {todayMeals.length > 0 && (
-          <div className="mt-3 rounded-2xl px-3 py-2" style={{ background: "var(--sk-paper-soft)", border: "1px solid var(--sk-line-soft)" }}>
-            <div className="mb-1 flex items-center justify-between gap-3">
-              <span className="text-[11px] font-extrabold tracking-normal" style={{ color: "var(--sk-ink-soft)" }}>
-                今日餐點
-              </span>
-              <span className="text-[11px] font-semibold" style={{ color: "var(--sk-ink-faint)" }}>
-                {todayMeals.length} 筆
-              </span>
+    <div className="screen-shell sp-chat-shell">
+      <header className="screen-bar sp-chat-header">
+        <div className="sp-chat-header-row">
+          <div className="sp-chat-header-slot">
+            <button
+              type="button"
+              onClick={handleBackToHome}
+              disabled={isChatLocked}
+              className="sp-iconbtn sp-chat-back"
+              aria-label="返回主頁"
+            >
+              <SportChevronLeftIcon size={18} stroke={2} />
+            </button>
+          </div>
+          <div className="sp-chat-heading">
+            <h2 className="sp-chat-title">對話</h2>
+            <div className="sp-chat-metric">
+              {consumedCalories} / {targetCalories} · {todayMeals.length} entries
             </div>
-            <div className="grid gap-1">
+          </div>
+          <div className="sp-chat-header-slot" aria-hidden="true" />
+        </div>
+        {todayMeals.length > 0 && (
+          <div className="sp-chat-today-log">
+            <div className="sp-chat-today-head">
+              <span>today log</span>
+              <span>{todayMeals.length} entries</span>
+            </div>
+            <div className="sp-chat-today-list">
               {todayMeals.slice(0, 3).map((meal) => (
                 <button
                   key={meal.id}
                   type="button"
                   onClick={() => handleOpenMealEdit(meal)}
                   disabled={isChatLocked}
-                  className="flex min-h-9 w-full items-center justify-between gap-3 rounded-xl px-2 py-1.5 text-left text-xs disabled:opacity-40"
-                  style={{
-                    background: "var(--sk-paper)",
-                    border: "1px solid var(--sk-line-soft)",
-                    color: "var(--sk-ink)",
-                  }}
+                  className="sp-chat-today-row"
                 >
-                  <span className="min-w-0 flex-1 truncate font-semibold">{meal.foodName}</span>
-                  <span className="shrink-0 font-bold" style={{ color: "var(--sk-ink-soft)" }}>
+                  <span className="sp-chat-today-name">{meal.foodName}</span>
+                  <span className="sp-chat-today-kcal">
                     {formatMealCalories(meal.calories)}
                   </span>
+                  <SportChevronRightIcon size={16} stroke={2} />
                 </button>
               ))}
             </div>
           </div>
         )}
-      </div>
+      </header>
       {pendingHomeChatDraft?.status === "failed" && (
         <div
           className="screen-bar px-4 py-3 text-sm"
@@ -708,8 +694,8 @@ export function ChatPanel() {
       )}
 
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollContainerRef} className="screen-scroll-with-input h-full p-4">
-          <div ref={contentRef} className="space-y-3 pb-4">
+        <div ref={scrollContainerRef} className="screen-scroll-with-input sp-chat-scroll">
+          <div ref={contentRef} className="sp-chat-stack">
             {messages.map((m) => (
               <MessageBubble
                 key={m.id}
@@ -742,12 +728,7 @@ export function ChatPanel() {
                 force: true,
               });
             }}
-            className="absolute bottom-3 left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center justify-center rounded-full px-4 text-[12px] font-extrabold text-white transition-all duration-150"
-            style={{
-              background: "var(--orange)",
-              boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
-              lineHeight: 1.4,
-            }}
+            className="sp-chat-jump"
             aria-label="回到最新訊息"
           >
             回到最新
@@ -755,7 +736,7 @@ export function ChatPanel() {
         )}
       </div>
 
-      <div className="screen-bottom-bar px-3" style={{ borderTop: "1.25px solid var(--sk-ink)", background: "var(--sk-paper)" }}>
+      <div className="screen-bottom-bar sp-chat-composer-bar">
         <ChatInput onSend={handleSend} onBeforeSend={handleBeforeSend} disabled={sending} />
       </div>
     </div>
