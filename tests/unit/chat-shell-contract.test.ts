@@ -16,6 +16,8 @@ describe("chat shell source contract", () => {
     assert.match(chatPanel, /對話/);
     assert.match(chatPanel, /sp-chat-header/);
     assert.match(chatPanel, /today log/);
+    assert.match(chatPanel, /formatMealCountSummary/);
+    assert.match(chatPanel, /kcal · \{todayMealCountSummary\}/);
     assert.match(chatPanel, /screen-scroll-with-input/);
     assert.match(chatPanel, /sp-chat-scroll/);
     assert.match(chatPanel, /sp-chat-composer-bar/);

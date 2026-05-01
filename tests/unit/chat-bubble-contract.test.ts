@@ -90,6 +90,7 @@ describe("chat bubble source contract", () => {
 
   it("complete receipts open Meal Edit and incomplete receipts stay read-only", async () => {
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
 
     assert.match(bubble, /getCompleteReceiptEditPayload/);
     for (const field of [
@@ -108,6 +109,10 @@ describe("chat bubble source contract", () => {
     assert.match(bubble, /onOpenMealEdit\?\.\(editPayload\)/);
     assert.match(bubble, /SportChevronRightIcon/);
     assert.match(bubble, /Number\.isFinite/);
+    assert.match(chatPanel, /PHASE40_INCOMPLETE_RECEIPT_FLAG/);
+    assert.match(chatPanel, /phase40IncompleteReceipt/);
+    assert.match(chatPanel, /createPhase40IncompleteReceiptMock/);
+    assert.match(chatPanel, /Incomplete receipt mock/);
   });
 
   it("delete mutation confirmations stay assistant text only without receipt affordances", async () => {

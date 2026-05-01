@@ -142,6 +142,8 @@ describe("mobile shell source contract", () => {
     assert.match(sources.chatPanel, /\bsp-chat-scroll\b/);
     assert.match(sources.chatPanel, /\bsp-chat-composer-bar\b/);
     assert.match(sources.chatPanel, /today log/);
+    assert.match(sources.chatPanel, /formatMealCountSummary/);
+    assert.match(sources.chatPanel, /kcal · \{todayMealCountSummary\}/);
     assert.match(sources.chatPanel, /\bscreen-bottom-bar\b/);
     assert.match(sources.chatPanel, /\bscreen-scroll-with-input\b/);
     assert.match(sources.chatPanel, /\bscrollContainerRef\b/);

@@ -16,11 +16,13 @@ import {
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
 import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
-import type { MealEntry, PendingHomeChatDraft } from "../types.js";
+import type { MealEntry, Message, PendingHomeChatDraft } from "../types.js";
 
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
 const ENTRY_SETTLE_WINDOW_MS = 240;
 const UPLOAD_SETTLE_WINDOW_MS = 320;
+const PHASE40_INCOMPLETE_RECEIPT_FLAG = "phase40IncompleteReceipt";
+const PHASE40_INCOMPLETE_RECEIPT_ID = "phase40-incomplete-receipt-mock";
 
 function getNowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -28,6 +30,55 @@ function getNowMs() {
 
 function formatMealCalories(calories: number) {
   return `${Math.round(calories).toLocaleString("en-US")} kcal`;
+}
+
+function formatMealCountSummary(mealCount: number) {
+  return `${mealCount} ${mealCount === 1 ? "meal" : "meals"} logged today`;
+}
+
+function shouldShowPhase40IncompleteReceiptMock() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const isLocalDevHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  if (!isLocalDevHost) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return (
+    params.get(PHASE40_INCOMPLETE_RECEIPT_FLAG) === "1" ||
+    window.localStorage.getItem(PHASE40_INCOMPLETE_RECEIPT_FLAG) === "1"
+  );
+}
+
+function createPhase40IncompleteReceiptMock(): Message {
+  return {
+    id: PHASE40_INCOMPLETE_RECEIPT_ID,
+    role: "assistant",
+    content: "這張收據缺少可編輯的 mealId/dateKey，所以只能檢視，不能開啟 Meal Edit。",
+    createdAt: new Date().toISOString(),
+    loggedMeal: {
+      foodName: "Incomplete receipt mock",
+      calories: 780,
+      protein: 38,
+      carbs: 82,
+      fat: 24,
+    },
+  };
+}
+
+function addPhase40IncompleteReceiptMockIfNeeded(existingMessages: Message[], addMessage: (message: Message) => void) {
+  if (!shouldShowPhase40IncompleteReceiptMock()) {
+    return;
+  }
+
+  if (existingMessages.some((message) => message.id === PHASE40_INCOMPLETE_RECEIPT_ID)) {
+    return;
+  }
+
+  addMessage(createPhase40IncompleteReceiptMock());
 }
 
 export function ChatPanel() {
@@ -73,6 +124,7 @@ export function ChatPanel() {
   const todayMeals = meals.filter((meal) => formatLocalDate(new Date(meal.loggedAt)) === todayKey);
   const consumedCalories = Math.round(dailySummary?.totalCalories ?? 0).toLocaleString("en-US");
   const targetCalories = Math.round(dailyTargets?.calories ?? 0).toLocaleString("en-US");
+  const todayMealCountSummary = formatMealCountSummary(todayMeals.length);
   const showJumpToLatest = shouldShowJumpToLatest({
     mode: followMode,
     hasMessages: messages.length > 0,
@@ -438,6 +490,7 @@ export function ChatPanel() {
           },
         });
         setMessages(messages);
+        addPhase40IncompleteReceiptMockIfNeeded(messages, addMessage);
         const draft = useStore.getState().pendingHomeChatDraft;
         if (draft && draft.status === "staged" && !attemptedDraftIdsRef.current.has(draft.id)) {
           await sendPendingDraft(draft);
@@ -457,7 +510,7 @@ export function ChatPanel() {
     return () => {
       cancelled = true;
     };
-  }, [deviceId, setMessages, recoverGuestSession, setPendingHomeChatDraft]);
+  }, [addMessage, deviceId, setMessages, recoverGuestSession, setPendingHomeChatDraft]);
 
   // Keep the latest edge visible for initial load and local chat updates while attached.
   useLayoutEffect(() => {
@@ -645,17 +698,17 @@ export function ChatPanel() {
           <div className="sp-chat-heading">
             <h2 className="sp-chat-title">對話</h2>
             <div className="sp-chat-metric">
-              {consumedCalories} / {targetCalories} · {todayMeals.length} entries
+              {consumedCalories}/{targetCalories} kcal · {todayMealCountSummary}
             </div>
           </div>
           <div className="sp-chat-header-slot" aria-hidden="true" />
         </div>
-        {todayMeals.length > 0 && (
-          <div className="sp-chat-today-log">
-            <div className="sp-chat-today-head">
-              <span>today log</span>
-              <span>{todayMeals.length} entries</span>
-            </div>
+        <div className="sp-chat-today-log">
+          <div className="sp-chat-today-head">
+            <span>today log</span>
+            <span>{todayMealCountSummary}</span>
+          </div>
+          {todayMeals.length > 0 && (
             <div className="sp-chat-today-list">
               {todayMeals.slice(0, 3).map((meal) => (
                 <button
@@ -673,8 +726,8 @@ export function ChatPanel() {
                 </button>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </header>
       {pendingHomeChatDraft?.status === "failed" && (
         <div

@@ -1105,7 +1105,7 @@ textarea {
 .sp-chat-header {
   border-bottom: 1px solid var(--sp-line);
   background: #0a0b0d;
-  padding: 16px 16px 12px;
+  padding: 10px 16px 8px;
 }
 
 .sp-chat-header-row {
@@ -1117,18 +1117,18 @@ textarea {
 
 .sp-chat-header-slot {
   display: flex;
-  width: 48px;
-  min-width: 48px;
-  height: 48px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
   align-items: center;
   justify-content: center;
 }
 
 .sp-chat-back {
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
 }
 
 .sp-chat-heading {
@@ -1155,11 +1155,11 @@ textarea {
 }
 
 .sp-chat-today-log {
-  margin-top: 12px;
+  margin-top: 8px;
   border: 1px solid var(--sp-line);
   border-radius: var(--sp-r-md);
   background: var(--sp-surface);
-  padding: 8px;
+  padding: 6px 8px;
 }
 
 .sp-chat-today-head {
@@ -1167,7 +1167,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 2px 6px;
+  padding: 0 2px;
   color: var(--sp-ink-2);
   font-family: var(--sp-font-mono);
   font-size: 12px;
@@ -1176,6 +1176,7 @@ textarea {
 
 .sp-chat-today-list {
   display: grid;
+  margin-top: 6px;
   gap: 8px;
 }
 
