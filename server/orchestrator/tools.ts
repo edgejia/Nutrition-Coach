@@ -5,7 +5,8 @@ import type { createSummaryService, DailySummary } from "../services/summary.js"
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
-import { currentAppDate } from "../lib/time.js";
+import { currentAppDate, formatLocalDate } from "../lib/time.js";
+import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
 import {
   buildHistoricalLoggedAt,
   resolveHistoricalDateIntent,
@@ -55,6 +56,11 @@ export interface ToolExecutionResult {
   affectedDate?: string;
   mealMutationKind?: "log" | "update" | "delete";
   loggedMeal?: {
+    mealId: string;
+    dateKey: string;
+    loggedAt: string;
+    imageAssetId: string | null;
+    imageUrl: string | null;
     foodName: string;
     calories: number;
     protein: number;
@@ -155,6 +161,11 @@ interface LogFoodSuccessResult {
   dailySummary: DailySummary;
   affectedDate?: string;
   loggedMeal: {
+    mealId: string;
+    dateKey: string;
+    loggedAt: string;
+    imageAssetId: string | null;
+    imageUrl: string | null;
     foodName: string;
     calories: number;
     protein: number;
@@ -529,6 +540,17 @@ function buildNormalizedGroupedItems(
   }));
 }
 
+function projectMealIdentityFields(meal: { id: string; loggedAt: string; imagePath: string | null }) {
+  const imageAssetId = parseAssetRef(meal.imagePath);
+  return {
+    mealId: meal.id,
+    dateKey: formatLocalDate(new Date(meal.loggedAt)),
+    loggedAt: meal.loggedAt,
+    imageAssetId,
+    imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Contracts. logSummary returns redacted shape (D-30); macros are part of
 // existing Phase 8 behavior for log_food (intentional, see plan).
@@ -701,6 +723,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         dailySummary,
         affectedDate: dateIntent.isHistorical ? dateIntent.dateKey : undefined,
         loggedMeal: {
+          ...projectMealIdentityFields(loggedMeal),
           foodName: loggedMeal.foodName,
           calories: loggedMeal.calories,
           protein: loggedMeal.protein,
@@ -1198,6 +1221,17 @@ export async function executeTool(
       mealMutationKind: "update",
       dailySummary: contractResult.dailySummary,
       affectedDate: contractResult.affectedDate,
+      loggedMeal: {
+        ...projectMealIdentityFields(contractResult.updatedMeal),
+        foodName: contractResult.updatedMeal.foodName,
+        calories: contractResult.updatedMeal.calories,
+        protein: contractResult.updatedMeal.protein,
+        carbs: contractResult.updatedMeal.carbs,
+        fat: contractResult.updatedMeal.fat,
+        countedSources: [],
+        excludedSources: [],
+        usedConservativeAssumption: false,
+      },
     };
   }
 

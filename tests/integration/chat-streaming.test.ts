@@ -552,7 +552,7 @@ describe("chat-streaming", () => {
       };
     };
 
-    assert.equal(donePayload.didLogMeal, true);
+    assert.equal(donePayload.didLogMeal, false);
     assert.equal(donePayload.didMutateMeal, true);
     assert.equal(donePayload.affectedDate, "2026-03-25");
     assert.equal(donePayload.loggedMeal?.mealId, mealId);
@@ -613,7 +613,7 @@ describe("chat-streaming", () => {
       didMutateMeal?: boolean;
       loggedMeal?: unknown;
     };
-    assert.equal(donePayload.didLogMeal, true);
+    assert.equal(donePayload.didLogMeal, false);
     assert.equal(donePayload.didMutateMeal, true);
     assert.equal(donePayload.loggedMeal, undefined);
   });

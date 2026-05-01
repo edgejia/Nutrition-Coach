@@ -54,6 +54,11 @@ export interface LoggedMealReceipt {
   protein: number;
   carbs: number;
   fat: number;
+  mealId?: string;
+  dateKey?: string;
+  loggedAt?: string;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
 }
 
 export interface MealEntry {

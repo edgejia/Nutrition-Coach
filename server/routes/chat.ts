@@ -201,7 +201,7 @@ function publishSummarySafe(
 function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
   if (!loggedMeal) return undefined;
 
-  const { foodName, calories, protein, carbs, fat } = loggedMeal;
+  const { mealId, dateKey, loggedAt, imageAssetId, imageUrl, foodName, calories, protein, carbs, fat } = loggedMeal;
   if (
     !foodName.trim() ||
     !Number.isFinite(calories) ||
@@ -212,7 +212,18 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     return undefined;
   }
 
-  return { foodName, calories, protein, carbs, fat };
+  return {
+    ...(typeof mealId === "string" ? { mealId } : {}),
+    ...(typeof dateKey === "string" ? { dateKey } : {}),
+    ...(typeof loggedAt === "string" ? { loggedAt } : {}),
+    ...(typeof imageAssetId === "string" || imageAssetId === null ? { imageAssetId } : {}),
+    ...(typeof imageUrl === "string" || imageUrl === null ? { imageUrl } : {}),
+    foodName,
+    calories,
+    protein,
+    carbs,
+    fat,
+  };
 }
 
 async function cleanupUploadSafe(imagePath: string | undefined, log: FastifyBaseLogger): Promise<void> {
@@ -573,6 +584,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonDailyTargets: unknown;
       let jsonAffectedDate: string | undefined;
       let jsonLoggedMealFallback: string | undefined;
+      let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
 
       try {
         const durableAsset = await createDurableAssetIfNeeded(assetService, deviceId, image);
@@ -599,6 +611,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonLoggedMealFallback = result.loggedMeal
           ? buildPartialSuccessLoggedReply(result.loggedMeal)
           : undefined;
+        jsonLoggedMealReceipt = projectLoggedMealReceipt(result.loggedMeal);
 
         if (result.didLogMeal && !result.dailySummary) {
           throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
@@ -633,6 +646,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             reply: sanitized,
             didLogMeal,
             ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
+            ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
             ...(dailySummary ? { dailySummary } : {}),
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
             ...(affectedDate ? { affectedDate } : {}),
@@ -656,6 +670,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           reply: sanitizedJson,
           didLogMeal,
           ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
+          ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(dailySummary ? { dailySummary } : {}),
           ...(dailyTargets ? { dailyTargets } : {}),
           ...(affectedDate ? { affectedDate } : {}),
@@ -685,6 +700,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           reply: sanitizedJson,
           didLogMeal: jsonDidLogMeal,
           ...(jsonDidMutateMeal ? { didMutateMeal: true } : {}),
+          ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}),
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
           ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),

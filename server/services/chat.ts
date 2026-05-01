@@ -4,13 +4,20 @@ import {
   assetReferences,
   assets,
   chatMessages,
+  mealRevisions,
   mealRevisionItems,
   mealTransactions,
 } from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
-import { parseAssetRef } from "./assets.js";
+import { buildAssetUrl, parseAssetRef } from "./assets.js";
+import { formatLocalDate } from "../lib/time.js";
 
 interface LoggedMealReceipt {
+  mealId: string;
+  dateKey: string;
+  loggedAt: string;
+  imageAssetId: string | null;
+  imageUrl: string | null;
   foodName: string;
   calories: number;
   protein: number;
@@ -60,20 +67,24 @@ export function createChatService(db: AppDatabase) {
       .select({
         id: mealTransactions.id,
         currentRevisionId: mealTransactions.currentRevisionId,
-        createdAt: mealTransactions.createdAt,
+        loggedAt: mealTransactions.loggedAt,
+        createdAt: mealRevisions.createdAt,
+        imageAssetId: mealRevisions.imageAssetId,
       })
       .from(mealTransactions)
+      .innerJoin(mealRevisions, eq(mealRevisions.id, mealTransactions.currentRevisionId))
       .where(
         and(
           eq(mealTransactions.deviceId, deviceId),
-          gte(mealTransactions.createdAt, createdAfter),
-          lte(mealTransactions.createdAt, assistantCreatedAt),
+          gte(mealRevisions.createdAt, createdAfter),
+          lte(mealRevisions.createdAt, assistantCreatedAt),
         ),
       )
-      .orderBy(desc(mealTransactions.createdAt), desc(mealTransactions.id))
+      .orderBy(desc(mealRevisions.createdAt), desc(mealTransactions.id))
       .limit(1);
 
-    const revisionId = transactions[0]?.currentRevisionId;
+    const transaction = transactions[0];
+    const revisionId = transaction?.currentRevisionId;
     if (!revisionId) {
       return undefined;
     }
@@ -95,6 +106,11 @@ export function createChatService(db: AppDatabase) {
     }
 
     return {
+      mealId: transaction.id,
+      dateKey: formatLocalDate(new Date(transaction.loggedAt)),
+      loggedAt: transaction.loggedAt,
+      imageAssetId: transaction.imageAssetId ?? null,
+      imageUrl: transaction.imageAssetId ? buildAssetUrl(transaction.imageAssetId) : null,
       foodName: buildGroupedFoodName(items),
       calories: items.reduce((sum, item) => sum + item.calories, 0),
       protein: items.reduce((sum, item) => sum + item.protein, 0),
@@ -195,9 +211,13 @@ export function createChatService(db: AppDatabase) {
 
       for (const row of chronological) {
         if (row.role === "tool") {
-          if (row.toolName === "log_food") {
+          if (row.toolName === "log_food" || row.toolName === "update_meal") {
             pendingDidLogMeal = true;
             pendingTurnStartAt = latestUserCreatedAt;
+          }
+          if (row.toolName === "delete_meal") {
+            pendingDidLogMeal = false;
+            pendingTurnStartAt = undefined;
           }
           continue;
         }

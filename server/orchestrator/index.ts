@@ -413,6 +413,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (mealMutationKind === "update" || mealMutationKind === "delete") {
                 didMutateMeal = true;
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
+                if (mealMutationKind === "update") {
+                  loggedMeal = toolLoggedMeal;
+                }
               }
               if (toolCall.function.name === "update_goals") {
                 successfulGoalReceipt = result;

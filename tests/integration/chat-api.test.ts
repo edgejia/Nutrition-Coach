@@ -724,7 +724,15 @@ describe("Chat API", () => {
     const historyBody = historyRes.json();
     const assistantMessage = historyBody.messages.find((message: { role: string }) => message.role === "assistant");
     assert.equal(assistantMessage.didLogMeal, true);
+    assert.match(assistantMessage.loggedMeal.mealId, /^[0-9a-f-]{36}$/);
+    assert.match(assistantMessage.loggedMeal.dateKey, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(assistantMessage.loggedMeal.loggedAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.deepEqual(assistantMessage.loggedMeal, {
+      mealId: assistantMessage.loggedMeal.mealId,
+      dateKey: assistantMessage.loggedMeal.dateKey,
+      loggedAt: assistantMessage.loggedMeal.loggedAt,
+      imageAssetId: null,
+      imageUrl: null,
       foodName: "蘋果",
       calories: 95,
       protein: 0,

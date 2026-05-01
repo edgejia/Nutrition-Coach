@@ -55,8 +55,11 @@ function isIntakeValidationIssue(value: unknown): value is IntakeValidationIssue
 }
 
 function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
-  return (
-    isRecord(value) &&
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (
     typeof value.foodName === "string" &&
     value.foodName.trim().length > 0 &&
     typeof value.calories === "number" &&
@@ -67,7 +70,17 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
     Number.isFinite(value.carbs) &&
     typeof value.fat === "number" &&
     Number.isFinite(value.fat)
-  );
+  ) {
+    return (
+      (value.mealId === undefined || typeof value.mealId === "string") &&
+      (value.dateKey === undefined || typeof value.dateKey === "string") &&
+      (value.loggedAt === undefined || typeof value.loggedAt === "string") &&
+      (value.imageAssetId === undefined || value.imageAssetId === null || typeof value.imageAssetId === "string") &&
+      (value.imageUrl === undefined || value.imageUrl === null || typeof value.imageUrl === "string")
+    );
+  }
+
+  return false;
 }
 
 async function readJsonSafe(res: Response): Promise<unknown> {
