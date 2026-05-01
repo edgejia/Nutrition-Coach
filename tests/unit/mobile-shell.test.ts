@@ -111,6 +111,8 @@ describe("mobile shell source contract", () => {
     assert.match(sources.mainLayout, /--app-bottom-occlusion/);
     assert.doesNotMatch(sources.mainLayout, /IOSDevice/);
     assert.doesNotMatch(sources.mainLayout, /document\.body\.style\.overflow/);
+    assert.match(sources.mainLayout, /getMeals\(\)/);
+    assert.match(sources.mainLayout, /setMeals\(meals\)/);
   });
 
   it("does not introduce sport demo device-frame chrome", () => {
@@ -141,9 +143,12 @@ describe("mobile shell source contract", () => {
     assert.match(sources.chatPanel, /\bsp-chat-header\b/);
     assert.match(sources.chatPanel, /\bsp-chat-scroll\b/);
     assert.match(sources.chatPanel, /\bsp-chat-composer-bar\b/);
-    assert.match(sources.chatPanel, /today log/);
+    assert.doesNotMatch(sources.chatPanel, /today log/);
+    assert.doesNotMatch(sources.chatPanel, /sp-chat-today-log/);
     assert.match(sources.chatPanel, /formatMealCountSummary/);
+    assert.match(sources.chatPanel, /今日已紀錄 \$\{mealCount\} 餐/);
     assert.match(sources.chatPanel, /kcal · \{todayMealCountSummary\}/);
+    assert.match(sources.chatPanel, /getMeals\(\{ refreshReason: "meal_mutation" \}\)/);
     assert.match(sources.chatPanel, /\bscreen-bottom-bar\b/);
     assert.match(sources.chatPanel, /\bscreen-scroll-with-input\b/);
     assert.match(sources.chatPanel, /\bscrollContainerRef\b/);

@@ -127,10 +127,10 @@ describe("chat bubble source contract", () => {
 
   it("passes Meal Edit callbacks from ChatPanel with chat origin", async () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
 
     assert.match(chatPanel, /onOpenMealEdit=\{\(payload\) => openMealEdit\(payload, "chat"\)\}/);
-    assert.match(chatPanel, /openMealEdit\(\s*\{/);
-    assert.match(chatPanel, /}\s*,\s*"chat"\s*\)/);
+    assert.doesNotMatch(chatPanel, /sp-chat-today-log/);
     for (const field of [
       "mealId",
       "dateKey",
@@ -143,7 +143,7 @@ describe("chat bubble source contract", () => {
       "imageUrl",
       "loggedAt",
     ]) {
-      assert.match(chatPanel, new RegExp(`${field}:`));
+      assert.match(bubble, new RegExp(`${field}:`));
     }
   });
 

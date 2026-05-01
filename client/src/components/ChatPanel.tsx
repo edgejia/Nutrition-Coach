@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
-import { sendMessageStream, loadHistory } from "../api.js";
+import { getMeals, sendMessageStream, loadHistory } from "../api.js";
 import { formatLocalDate } from "../lib/time.js";
 import {
   type FollowMode,
@@ -15,8 +15,8 @@ import {
 } from "../lib/chat-scroll.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
-import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
-import type { MealEntry, Message, PendingHomeChatDraft } from "../types.js";
+import { SportChevronLeftIcon } from "./SportIcons.js";
+import type { Message, PendingHomeChatDraft } from "../types.js";
 
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
 const ENTRY_SETTLE_WINDOW_MS = 240;
@@ -28,12 +28,8 @@ function getNowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
-function formatMealCalories(calories: number) {
-  return `${Math.round(calories).toLocaleString("en-US")} kcal`;
-}
-
 function formatMealCountSummary(mealCount: number) {
-  return `${mealCount} ${mealCount === 1 ? "meal" : "meals"} logged today`;
+  return `今日已紀錄 ${mealCount} 餐`;
 }
 
 function shouldShowPhase40IncompleteReceiptMock() {
@@ -88,6 +84,7 @@ export function ChatPanel() {
   const addMessage = useStore((s) => s.addMessage);
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setDailyTargets = useStore((s) => s.setDailyTargets);
+  const setMeals = useStore((s) => s.setMeals);
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const sending = useStore((s) => s.sending);
@@ -124,7 +121,8 @@ export function ChatPanel() {
   const todayMeals = meals.filter((meal) => formatLocalDate(new Date(meal.loggedAt)) === todayKey);
   const consumedCalories = Math.round(dailySummary?.totalCalories ?? 0).toLocaleString("en-US");
   const targetCalories = Math.round(dailyTargets?.calories ?? 0).toLocaleString("en-US");
-  const todayMealCountSummary = formatMealCountSummary(todayMeals.length);
+  const todayMealCount = dailySummary?.mealCount ?? todayMeals.length;
+  const todayMealCountSummary = formatMealCountSummary(todayMealCount);
   const showJumpToLatest = shouldShowJumpToLatest({
     mode: followMode,
     hasMessages: messages.length > 0,
@@ -359,6 +357,17 @@ export function ChatPanel() {
     scheduleLatestAlignment();
   }
 
+  async function refreshTodayMeals() {
+    try {
+      const { meals } = await getMeals({ refreshReason: "meal_mutation" });
+      setMeals(meals);
+    } catch (err) {
+      if (err instanceof Error && err.message === "UNAUTHORIZED") {
+        void recoverGuestSession();
+      }
+    }
+  }
+
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
     const activeDeviceId = useStore.getState().deviceId;
     if (!activeDeviceId) return;
@@ -409,6 +418,9 @@ export function ChatPanel() {
             }
             if ((didLogMeal || didMutateMeal) && dailySummary) {
               setDailySummary(dailySummary);
+            }
+            if (didLogMeal || didMutateMeal) {
+              void refreshTodayMeals();
             }
             commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary, loggedMeal });
             setSending(false);
@@ -665,21 +677,6 @@ export function ChatPanel() {
     setActiveScreen("home");
   }
 
-  function handleOpenMealEdit(meal: MealEntry) {
-    openMealEdit({
-      mealId: meal.id,
-      dateKey: formatLocalDate(new Date(meal.loggedAt)),
-      foodName: meal.foodName,
-      calories: meal.calories,
-      protein: meal.protein,
-      carbs: meal.carbs,
-      fat: meal.fat,
-      imageAssetId: meal.imageAssetId ?? null,
-      imageUrl: meal.imageUrl ?? null,
-      loggedAt: meal.loggedAt,
-    }, "chat");
-  }
-
   return (
     <div className="screen-shell sp-chat-shell">
       <header className="screen-bar sp-chat-header">
@@ -702,31 +699,6 @@ export function ChatPanel() {
             </div>
           </div>
           <div className="sp-chat-header-slot" aria-hidden="true" />
-        </div>
-        <div className="sp-chat-today-log">
-          <div className="sp-chat-today-head">
-            <span>today log</span>
-            <span>{todayMealCountSummary}</span>
-          </div>
-          {todayMeals.length > 0 && (
-            <div className="sp-chat-today-list">
-              {todayMeals.slice(0, 3).map((meal) => (
-                <button
-                  key={meal.id}
-                  type="button"
-                  onClick={() => handleOpenMealEdit(meal)}
-                  disabled={isChatLocked}
-                  className="sp-chat-today-row"
-                >
-                  <span className="sp-chat-today-name">{meal.foodName}</span>
-                  <span className="sp-chat-today-kcal">
-                    {formatMealCalories(meal.calories)}
-                  </span>
-                  <SportChevronRightIcon size={16} stroke={2} />
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       </header>
       {pendingHomeChatDraft?.status === "failed" && (

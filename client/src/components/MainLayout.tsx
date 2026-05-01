@@ -96,6 +96,17 @@ export function MainLayout() {
 
   useEffect(() => {
     if (!deviceId) return;
+    getMeals()
+      .then(({ meals }) => setMeals(meals))
+      .catch((err) => {
+        if (err instanceof Error && err.message === "UNAUTHORIZED") {
+          void recoverGuestSession();
+        }
+      });
+  }, [deviceId, setMeals, recoverGuestSession]);
+
+  useEffect(() => {
+    if (!deviceId) return;
     // Goal updates flow through the existing `setDailyTargets` store action so
     // Dashboard / Settings / HomeHeader re-render via existing selectors —
     // no new UI affordance (D-25, D-26).
