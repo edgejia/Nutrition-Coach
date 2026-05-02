@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getHistoryDaySnapshot } from "../api.js";
-import { getHistoryCalorieStatus, type HistoryCalorieStatus } from "../lib/history-week.js";
+import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, MealEntry } from "../types.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SecondaryHeader, SketchSoftBox } from "./SketchPrimitives.js";
+import { SportChevronLeftIcon } from "./SportIcons.js";
+import { SportCard, SportChip, SportIconButton, SportProgressBar, SportScreen } from "./SportPrimitives.js";
 
 function formatDetailDate(dateKey: string): string {
   const [year, month, day] = dateKey.split("-").map(Number);
@@ -29,17 +30,17 @@ function macroPair(current: number, target: number | undefined) {
   return target && target > 0 ? `${Math.round(current)}/${Math.round(target)}` : `${Math.round(current)}`;
 }
 
-function detailStatusBadge(status: HistoryCalorieStatus, totalCalories: number, targetCalories: number | null) {
-  if (!targetCalories || targetCalories <= 0 || status === "targetMissing" || status === "empty") {
-    return null;
-  }
+function getChipVariant(variant: ReturnType<typeof getHistorySportStatusMeta>["chipVariant"]) {
+  if (variant === "good") return "good";
+  if (variant === "warn" || variant === "danger") return "warn";
+  return "default";
+}
 
-  const delta = Math.round(totalCalories - targetCalories);
-  if (status === "low") return `偏低 -${Math.abs(delta).toLocaleString("en-US")}`;
-  if (status === "slightlyLow") return `略低 -${Math.abs(delta).toLocaleString("en-US")}`;
-  if (status === "over") return `超標 +${Math.max(0, delta).toLocaleString("en-US")}`;
-  if (status === "highOver") return `明顯超標 +${Math.max(0, delta).toLocaleString("en-US")}`;
-  return "達標範圍";
+function getProgressVariant(tone: ReturnType<typeof getHistorySportStatusMeta>["barTone"]) {
+  if (tone === "amber") return "amber";
+  if (tone === "red") return "warn";
+  if (tone === "muted") return "cyan";
+  return "default";
 }
 
 function MealDetailRow({
@@ -55,48 +56,45 @@ function MealDetailRow({
     <article
       ref={registerRef}
       data-target-highlight={highlighted ? "true" : "false"}
-      className="history-day-meal transition-colors duration-500"
+      className={`sp-history-detail-meal${highlighted ? " sp-history-detail-highlight" : ""}`}
     >
-      <div className="flex items-start gap-3">
+      <div className="sp-history-detail-meal-main">
         <PersistedAssetImage
           src={meal.imageUrl}
           alt={`${meal.foodName} 縮圖`}
-          imgClassName="h-12 w-12 shrink-0 rounded-md object-cover"
-          fallbackClassName="grid h-12 w-12 shrink-0 place-items-center rounded-md border text-[10px]"
+          imgClassName="sp-history-detail-meal-image"
+          fallbackClassName="sp-history-detail-meal-image sp-history-detail-meal-fallback"
           fallbackStyle={{
-            background: "var(--sk-paper-warm)",
-            borderColor: "var(--sk-ink-faint)",
-            color: "var(--sk-ink-soft)",
+            background: "var(--sp-surface-2)",
+            borderColor: "var(--sp-line)",
+            color: "var(--sp-ink-2)",
           }}
         />
-        <div className="min-w-0 flex-1">
-          <h3 className="sk-heading truncate text-xl">{meal.foodName}</h3>
-          <div className="sk-body mt-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
+        <div className="sp-history-detail-meal-copy">
+          <h3>{meal.foodName}</h3>
+          <div className="sp-history-detail-meal-time">
             {new Intl.DateTimeFormat("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false }).format(
               new Date(meal.loggedAt),
             )}
           </div>
         </div>
-        <div className="sk-heading shrink-0 text-2xl">{Math.round(meal.calories)}</div>
+        <div className="sp-history-detail-meal-energy">
+          <span>{Math.round(meal.calories).toLocaleString("en-US")}</span>
+          <small>kcal</small>
+        </div>
       </div>
-      <div className="history-day-meal-macros mt-3 grid grid-cols-3 gap-2 text-center">
+      <div className="sp-history-detail-meal-macros">
         <div>
-          <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
-            protein
-          </div>
-          <div className="sk-metric text-sm">{macroUnit(meal.protein)}</div>
+          <span>protein</span>
+          <strong>{macroUnit(meal.protein)}</strong>
         </div>
         <div>
-          <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
-            carbs
-          </div>
-          <div className="sk-metric text-sm">{macroUnit(meal.carbs)}</div>
+          <span>carbs</span>
+          <strong>{macroUnit(meal.carbs)}</strong>
         </div>
         <div>
-          <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
-            fat
-          </div>
-          <div className="sk-metric text-sm">{macroUnit(meal.fat)}</div>
+          <span>fat</span>
+          <strong>{macroUnit(meal.fat)}</strong>
         </div>
       </div>
     </article>
@@ -110,13 +108,14 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
   const payload = secondaryScreen?.screen === "dayDetail" ? secondaryScreen.payload : undefined;
   const dateKey = payload?.dateKey ?? todayKey;
   const targetMealId = payload?.targetMealId;
+  const payloadLabel = payload?.label;
   const [snapshot, setSnapshot] = useState<HistoryDaySnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [highlightedMealId, setHighlightedMealId] = useState<string | null>(targetMealId ?? null);
   const mealRefs = useRef(new Map<string, HTMLDivElement>());
   const dailyTargets = useStore((s) => s.dailyTargets);
-  const isToday = dateKey === todayKey;
+  const isToday = payloadLabel === "today-live" || dateKey === todayKey;
 
   useEffect(() => {
     let cancelled = false;
@@ -162,88 +161,94 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
     mealCount: summary?.mealCount ?? snapshot?.meals.length ?? 0,
     targetCalories,
   });
-  const statusBadge = detailStatusBadge(calorieStatus.status, totalCalories, targetCalories);
-  const progressVariant = calorieStatus.isOverTolerance ? "accent" : "ink";
+  const statusMeta = getHistorySportStatusMeta({
+    status: calorieStatus.status,
+    targetCalories,
+  });
 
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-[var(--sk-paper)]">
-      <section className="sk-screen flex min-h-0 flex-1 flex-col">
-        <SecondaryHeader title={formatDetailDate(dateKey)} backLabel="‹ 歷史" onBack={onBack} />
-        <main className="screen-scroll-safe space-y-4 px-5 pt-2">
-          <SketchSoftBox className="history-day-summary p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-                  {isToday ? "今天 · 即時" : "歷史快照"}
-                </div>
-                <h1 className="sk-heading mt-1 text-5xl leading-none">
-                  {totalCalories.toLocaleString("en-US")}
-                </h1>
-                <p className="sk-body mt-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
+    <div className="absolute inset-0 z-40 flex flex-col">
+      <SportScreen className="sp-history-detail-screen">
+        <header className="sp-history-detail-header">
+          <SportIconButton aria-label="返回歷史" className="sp-history-detail-back" onClick={onBack}>
+            <SportChevronLeftIcon />
+            <span>返回歷史</span>
+          </SportIconButton>
+          <div className="sp-history-detail-header-copy">
+            <h1>{formatDetailDate(dateKey)}</h1>
+            <div>{isToday ? "今天 · 即時" : "歷史快照"}</div>
+          </div>
+        </header>
+
+        <main className="screen-scroll-safe sp-history-detail-scroll">
+          <SportCard className="sp-history-detail-summary" variant="glow">
+            <div className="sp-history-detail-summary-main">
+              <div className="sp-history-detail-summary-copy">
+                <div className="sp-history-detail-kicker">{isToday ? "今天 · 即時" : "歷史快照"}</div>
+                <div className="sp-history-detail-calories">{totalCalories.toLocaleString("en-US")}</div>
+                <p>
                   {targetCalories
                     ? `${totalCalories.toLocaleString("en-US")} / ${Math.round(targetCalories).toLocaleString("en-US")} kcal`
                     : "目標同步中，暫不顯示水位"}
                 </p>
               </div>
-              {statusBadge ? (
-                <span className="history-day-status-badge sk-pill px-3 py-1 text-xs" data-status={calorieStatus.status}>
-                  {statusBadge}
-                </span>
-              ) : null}
-            </div>
-            <div className="history-day-progress mt-4" data-variant={progressVariant}>
-              <i style={{ width: `${Math.round(calorieStatus.waterLevel * 100)}%` }} />
-            </div>
-            <div className="history-day-macros mt-4 grid grid-cols-3 gap-2 text-center">
-              <div>
-                <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
-                  protein
-                </div>
-                <div className="sk-metric">P {macroPair(summary?.totalProtein ?? 0, dailyTargets?.protein)}</div>
-              </div>
-              <div>
-                <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
-                  carbs
-                </div>
-                <div className="sk-metric">C {macroPair(summary?.totalCarbs ?? 0, dailyTargets?.carbs)}</div>
-              </div>
-              <div>
-                <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
-                  fat
-                </div>
-                <div className="sk-metric">F {macroPair(summary?.totalFat ?? 0, dailyTargets?.fat)}</div>
+              <div className="sp-history-detail-summary-status">
+                {statusMeta.badge ? (
+                  <SportChip variant={getChipVariant(statusMeta.chipVariant)} zh>
+                    {statusMeta.badge}
+                  </SportChip>
+                ) : null}
               </div>
             </div>
-            <p className="sk-body mt-3 text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-              {isToday ? "今天的資料會隨記錄更新；此畫面只讀檢視。" : "這是歷史快照，不會覆蓋今天的即時狀態。"}
+            <SportProgressBar
+              className="sp-history-detail-progress"
+              value={calorieStatus.waterLevel}
+              variant={getProgressVariant(statusMeta.barTone)}
+            />
+            <div className="sp-history-detail-macros">
+              <div>
+                <span>protein</span>
+                <strong>P {macroPair(summary?.totalProtein ?? 0, dailyTargets?.protein)}</strong>
+              </div>
+              <div>
+                <span>carbs</span>
+                <strong>C {macroPair(summary?.totalCarbs ?? 0, dailyTargets?.carbs)}</strong>
+              </div>
+              <div>
+                <span>fat</span>
+                <strong>F {macroPair(summary?.totalFat ?? 0, dailyTargets?.fat)}</strong>
+              </div>
+            </div>
+            <p className="sp-history-detail-note">
+              {isToday
+                ? "今天的資料會隨記錄更新；此頁仍維持只讀檢視。"
+                : "這是當日營養快照；點選歷史中的餐點可修改內容。"}
             </p>
-          </SketchSoftBox>
+          </SportCard>
 
-          <div className="flex items-baseline justify-between px-1">
-            <h2 className="sk-heading text-2xl">當日餐點</h2>
-            <span className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+          <div className="sp-history-section-header">
+            <h2>當日餐點</h2>
+            <span>
               {snapshot ? `${snapshot.meals.length} 筆` : ""}
             </span>
           </div>
 
           {loading ? (
-            <p className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+            <SportCard className="sp-history-detail-empty" variant="flat">
               載入這天餐點中...
-            </p>
+            </SportCard>
           ) : null}
           {error ? (
-            <SketchSoftBox className="p-4">
-              <p className="sk-body text-sm">{error}</p>
-            </SketchSoftBox>
+            <SportCard className="sp-history-detail-error" variant="flat">
+              {error}
+            </SportCard>
           ) : null}
           {!loading && !error && snapshot?.meals.length === 0 ? (
-            <SketchSoftBox className="p-4">
-              <p className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-                這天還沒有餐點
-              </p>
-            </SketchSoftBox>
+            <SportCard className="sp-history-detail-empty" variant="flat">
+              這天還沒有餐點
+            </SportCard>
           ) : null}
-          <div className="space-y-3">
+          <div className="sp-history-detail-meal-list">
             {snapshot?.meals.map((meal) => (
               <MealDetailRow
                 key={meal.id}
@@ -256,13 +261,8 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
               />
             ))}
           </div>
-          <div className="sk-box-dashed p-4">
-            <p className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-              {isToday ? "今天 · 即時；此頁仍維持只讀。" : "歷史日 read-only；要修改請回到對話用自然語言描述。"}
-            </p>
-          </div>
         </main>
-      </section>
+      </SportScreen>
     </div>
   );
 }
