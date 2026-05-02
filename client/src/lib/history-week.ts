@@ -50,6 +50,15 @@ export interface HistoryWeekStats {
   mealCount: number;
 }
 
+export type HistorySportBarTone = "muted" | "amber" | "lime" | "red";
+export type HistorySportChipVariant = "neutral" | "warn" | "good" | "danger";
+
+export interface HistorySportStatusMeta {
+  badge: string | null;
+  barTone: HistorySportBarTone;
+  chipVariant: HistorySportChipVariant;
+}
+
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const WEEKDAY_LABELS: HistoryWeekDay["weekday"][] = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -185,6 +194,58 @@ export function buildHistoryWeekStats(input: {
     loggedDays: input.days.filter((day) => day.mealCount > 0 && !day.isFuture).length,
     mealCount: input.days.reduce((total, day) => total + (day.isFuture ? 0 : day.mealCount), 0),
   };
+}
+
+export function getHistorySportStatusMeta(input: {
+  status: HistoryCalorieStatus;
+  targetCalories?: number | null;
+}): HistorySportStatusMeta {
+  const hasTarget = Number(input.targetCalories) > 0;
+
+  switch (input.status) {
+    case "empty":
+      return {
+        badge: hasTarget ? null : "目標同步中",
+        barTone: "muted",
+        chipVariant: "neutral",
+      };
+    case "targetMissing":
+      return {
+        badge: "目標同步中",
+        barTone: "muted",
+        chipVariant: "neutral",
+      };
+    case "low":
+      return {
+        badge: "偏低",
+        barTone: "amber",
+        chipVariant: "warn",
+      };
+    case "slightlyLow":
+      return {
+        badge: "略低",
+        barTone: "amber",
+        chipVariant: "warn",
+      };
+    case "inRange":
+      return {
+        badge: "達標範圍",
+        barTone: "lime",
+        chipVariant: "good",
+      };
+    case "over":
+      return {
+        badge: "超標",
+        barTone: "red",
+        chipVariant: "danger",
+      };
+    case "highOver":
+      return {
+        badge: "明顯超標",
+        barTone: "red",
+        chipVariant: "danger",
+      };
+  }
 }
 
 export function selectSameWeekdayOrClosestAvailable(input: {
