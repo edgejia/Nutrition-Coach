@@ -2,10 +2,12 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildHistoryWeek,
+  buildHistoryWeekStats,
   getHistoryCalorieStatus,
   getMondayWeekStart,
   selectSameWeekdayOrClosestAvailable,
   shiftHistoryWeek,
+  type HistoryWeekDay,
 } from "../../client/src/lib/history-week.js";
 
 describe("history week helpers", () => {
@@ -80,6 +82,63 @@ describe("history week helpers", () => {
         todayKey: "2026-04-30",
       }),
       "2026-04-30",
+    );
+  });
+
+  it("builds Phase 41 weekly stats from real week days without demo metric labels", () => {
+    const baseDay: HistoryWeekDay = {
+      dateKey: "2026-04-27",
+      weekday: "一",
+      dayNumber: 27,
+      calories: 0,
+      mealCount: 0,
+      status: "empty",
+      calorieRatio: null,
+      waterLevel: 0,
+      hasTarget: true,
+      isOverTolerance: false,
+      isSelected: false,
+      isToday: false,
+      isFuture: false,
+    };
+
+    const stats = buildHistoryWeekStats({
+      averageCalories: 1666.5,
+      days: [
+        { ...baseDay, dateKey: "2026-04-27", weekday: "一", mealCount: 2, status: "inRange" },
+        { ...baseDay, dateKey: "2026-04-28", weekday: "二", mealCount: 1, status: "low" },
+        { ...baseDay, dateKey: "2026-04-29", weekday: "三", mealCount: 3, status: "inRange" },
+        { ...baseDay, dateKey: "2026-04-30", weekday: "四", mealCount: 4, status: "inRange", isFuture: true },
+      ],
+    });
+
+    assert.deepEqual(stats, {
+      averageCalories: 1667,
+      inRangeDays: 3,
+      loggedDays: 3,
+      mealCount: 6,
+    });
+
+    assert.deepEqual(buildHistoryWeekStats({ averageCalories: null, days: [] }), {
+      averageCalories: 0,
+      inRangeDays: 0,
+      loggedDays: 0,
+      mealCount: 0,
+    });
+
+    assert.deepEqual(
+      buildHistoryWeekStats({
+        averageCalories: -24,
+        days: [
+          { ...baseDay, dateKey: "2026-05-01", weekday: "五", mealCount: 2, status: "inRange", isFuture: true },
+        ],
+      }),
+      {
+        averageCalories: 0,
+        inRangeDays: 1,
+        loggedDays: 0,
+        mealCount: 0,
+      },
     );
   });
 });
