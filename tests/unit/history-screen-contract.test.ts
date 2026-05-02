@@ -90,6 +90,10 @@ describe("History screen source contract", () => {
     }
   });
 
+  it("clears stale selected-day snapshots before loading a newly selected date", () => {
+    assert.match(source, /setLoadingDay\(true\);\s+setDayError\(null\);\s+setSelectedSnapshot\(null\);\s+return getHistoryDaySnapshot\(selectedDateKey\)/);
+  });
+
   it("keeps History free of demo globals, demo labels, and inline mutation controls", () => {
     for (const rejected of [
       "AVG",

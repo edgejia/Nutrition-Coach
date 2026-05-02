@@ -389,6 +389,7 @@ export function HistoryScreen() {
     (cancelledRef?: { current: boolean }) => {
       setLoadingDay(true);
       setDayError(null);
+      setSelectedSnapshot(null);
       return getHistoryDaySnapshot(selectedDateKey)
         .then((response) => {
           if (!cancelledRef?.current) setSelectedSnapshot(response);
