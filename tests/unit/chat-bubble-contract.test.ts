@@ -74,6 +74,21 @@ describe("chat bubble source contract", () => {
     }
   });
 
+  it("renders image-only user messages without the green text bubble", async () => {
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const css = await readSource("client/src/app.css");
+
+    assert.match(bubble, /isImageOnly \? \(/);
+    assert.match(bubble, /sp-message-image sp-message-image-only/);
+    assert.match(css, /\.sp-message-image-only/);
+
+    const imageOnlyBranch = bubble.slice(
+      bubble.indexOf("{isImageOnly ? ("),
+      bubble.indexOf(") : (", bubble.indexOf("{isImageOnly ? (")),
+    );
+    assert.doesNotMatch(imageOnlyBranch, /sp-bubble-user/);
+  });
+
   it("renders receipt-first from message.loggedMeal for log and update receipts", async () => {
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
 

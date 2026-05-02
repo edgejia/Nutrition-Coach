@@ -461,6 +461,18 @@ function shouldRejectTrustedProteinPersistence(
   return !categories.every((category) => category === "trace");
 }
 
+function isMissingTrustedProteinBasisFailure(outcome: { failureReason?: string; result: string }) {
+  if (outcome.failureReason !== "execute") {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
+    return parsed.message === "trusted protein basis required for this meal";
+  } catch {
+    return false;
+  }
+}
+
 function scaleGroupedProteinValues(
   items: Array<{ index: number; protein: number }>,
   targetProtein: number,
@@ -569,6 +581,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       fat: { type: "number" },
       protein_sources: {
         type: "array",
+        description: "Required. List visually identifiable protein-bearing ingredients; mark uncertain when estimated from an image.",
         items: {
           type: "object",
           additionalProperties: false,
@@ -606,6 +619,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       },
     },
     additionalProperties: false,
+    required: ["protein_sources"],
   },
   zodSchema: logFoodSchema,
   // No sourceFields per D-11: log_food calorie estimates need not appear in
@@ -1143,6 +1157,20 @@ export async function executeTool(
   const outcome = await runContract(contract, toolCall, ctx);
 
   if (!outcome.success) {
+    if (
+      toolCall.function.name === "log_food"
+      && deps.imagePath
+      && isMissingTrustedProteinBasisFailure(outcome)
+    ) {
+      return {
+        result: outcome.result,
+        summary: "failureReason: execute",
+        success: false,
+        executed: false,
+        failureReason: outcome.failureReason,
+      };
+    }
+
     if (
       toolCall.function.name === "find_meals"
       || toolCall.function.name === "update_goals"

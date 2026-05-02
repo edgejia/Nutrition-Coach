@@ -1,5 +1,5 @@
 // server/services/chat.ts
-import { eq, and, asc, desc, gte, inArray, lte, sql } from "drizzle-orm";
+import { eq, and, asc, desc, gte, inArray, lte, or, sql } from "drizzle-orm";
 import {
   assetReferences,
   assets,
@@ -11,6 +11,8 @@ import {
 import type { AppDatabase } from "../db/client.js";
 import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
+
+const RECEIPT_REHYDRATION_GRACE_MS = 5_000;
 
 interface LoggedMealReceipt {
   mealId: string;
@@ -56,6 +58,10 @@ function buildGroupedFoodName(items: Array<{ foodName: string }>) {
   return `${items[0]!.foodName}、${items[1]!.foodName} 等${items.length}項`;
 }
 
+function addMilliseconds(isoTimestamp: string, milliseconds: number): string {
+  return new Date(new Date(isoTimestamp).getTime() + milliseconds).toISOString();
+}
+
 export function createChatService(db: AppDatabase) {
   async function getLoggedMealReceiptForTurn(
     deviceId: string,
@@ -63,12 +69,21 @@ export function createChatService(db: AppDatabase) {
     assistantCreatedAt: string,
   ): Promise<LoggedMealReceipt | undefined> {
     const createdAfter = turnStartAt ?? assistantCreatedAt;
+    const createdBefore = addMilliseconds(assistantCreatedAt, RECEIPT_REHYDRATION_GRACE_MS);
+    const turnCreatedAtMatch = and(
+      gte(mealTransactions.createdAt, createdAfter),
+      lte(mealTransactions.createdAt, createdBefore),
+    );
+    const turnCurrentRevisionMatch = and(
+      gte(mealRevisions.createdAt, createdAfter),
+      lte(mealRevisions.createdAt, createdBefore),
+    );
     const transactions = await db
       .select({
         id: mealTransactions.id,
         currentRevisionId: mealTransactions.currentRevisionId,
         loggedAt: mealTransactions.loggedAt,
-        createdAt: mealRevisions.createdAt,
+        createdAt: mealTransactions.createdAt,
         imageAssetId: mealRevisions.imageAssetId,
       })
       .from(mealTransactions)
@@ -76,11 +91,13 @@ export function createChatService(db: AppDatabase) {
       .where(
         and(
           eq(mealTransactions.deviceId, deviceId),
-          gte(mealRevisions.createdAt, createdAfter),
-          lte(mealRevisions.createdAt, assistantCreatedAt),
+          or(turnCreatedAtMatch, turnCurrentRevisionMatch),
         ),
       )
-      .orderBy(desc(mealRevisions.createdAt), desc(mealTransactions.id))
+      .orderBy(
+        desc(sql`case when ${mealRevisions.createdAt} >= ${createdAfter} and ${mealRevisions.createdAt} <= ${createdBefore} then ${mealRevisions.createdAt} else ${mealTransactions.createdAt} end`),
+        desc(mealTransactions.id),
+      )
       .limit(1);
 
     const transaction = transactions[0];

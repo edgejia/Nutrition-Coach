@@ -1246,6 +1246,10 @@ textarea {
   object-fit: contain;
 }
 
+.sp-message-image-only {
+  max-width: min(82%, 320px);
+}
+
 .sp-message-image + p {
   margin-top: 8px;
 }
@@ -1859,6 +1863,11 @@ textarea {
   box-shadow: 0 0 0 1px var(--sp-lime-line);
 }
 
+.sp-history-week-day[data-selected="false"][data-today="true"] .sp-history-week-track {
+  border-color: rgba(214, 255, 35, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(214, 255, 35, 0.12);
+}
+
 .sp-history-target-marker {
   position: absolute;
   right: 4px;
@@ -1878,7 +1887,6 @@ textarea {
 
 .sp-history-week-label,
 .sp-history-week-number,
-.sp-history-week-today,
 .sp-history-stat-sublabel,
 .sp-history-hero-date,
 .sp-history-hero-target,
@@ -1894,7 +1902,6 @@ textarea {
 }
 
 .sp-history-week-label,
-.sp-history-week-today,
 .sp-history-stat-sublabel,
 .sp-history-hero-delta-label,
 .sp-history-section-header span,
@@ -1907,7 +1914,6 @@ textarea {
   color: var(--sp-ink);
 }
 
-.sp-history-week-today,
 .sp-history-week-day[data-selected="true"] .sp-history-week-label,
 .sp-history-week-day[data-selected="true"] .sp-history-week-number {
   color: var(--sp-lime);

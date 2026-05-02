@@ -262,6 +262,38 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(meals[0].protein, 24);
   });
 
+  it("lets image log_food protein-basis failures return to the model for retry", async () => {
+    const imageRetryCall: ToolCall = {
+      id: "call_image_retry",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "照片餐點",
+          calories: 760,
+          protein: 12,
+          carbs: 92,
+          fat: 38,
+        }),
+      },
+    };
+
+    const result = await executeTool(imageRetryCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+      imagePath: "asset:image-retry",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "execute");
+    assert.equal(result.summary, "failureReason: execute");
+    assert.match(result.result, /trusted protein basis required/);
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 0);
+  });
+
   it("Test 2: log_food summary recomputation failure persists meal and returns controlled failureReason:execute", async () => {
     const throwingSummary = {
       getDailySummary: async () => {

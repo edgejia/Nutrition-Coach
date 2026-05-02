@@ -191,22 +191,32 @@ export function MessageBubble(props: {
   const isUser = message.role === "user";
 
   if (isUser) {
-    const { imageSrc, text, hasImage, hasText } = getUserMessagePresentation(message);
+    const { imageSrc, text, hasImage, hasText, isImageOnly } = getUserMessagePresentation(message);
 
     return (
       <div className="sp-message-row sp-message-row-user">
-        <div className="sp-bubble-user">
-          {hasImage && (
-            <PersistedAssetImage
-              src={imageSrc}
-              alt="附圖"
-              imgClassName="sp-message-image"
-              fallbackClassName="sp-message-image-fallback"
-              onAssetSettle={onImageSettle}
-            />
-          )}
-          {hasText && <p className="whitespace-pre-wrap">{text}</p>}
-        </div>
+        {isImageOnly ? (
+          <PersistedAssetImage
+            src={imageSrc}
+            alt="附圖"
+            imgClassName="sp-message-image sp-message-image-only"
+            fallbackClassName="sp-message-image-fallback"
+            onAssetSettle={onImageSettle}
+          />
+        ) : (
+          <div className="sp-bubble-user">
+            {hasImage && (
+              <PersistedAssetImage
+                src={imageSrc}
+                alt="附圖"
+                imgClassName="sp-message-image"
+                fallbackClassName="sp-message-image-fallback"
+                onAssetSettle={onImageSettle}
+              />
+            )}
+            {hasText && <p className="whitespace-pre-wrap">{text}</p>}
+          </div>
+        )}
       </div>
     );
   }

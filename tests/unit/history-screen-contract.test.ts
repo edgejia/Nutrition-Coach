@@ -77,6 +77,15 @@ describe("History screen source contract", () => {
     }
   });
 
+  it("sorts timeline meals from morning to night and hides meal-period tags", () => {
+    assert.match(source, /\[\.\.\.meals\]\.sort\(\s*\(\s*left,\s*right\s*\) => new Date\(left\.loggedAt\)\.getTime\(\) - new Date\(right\.loggedAt\)\.getTime\(\)/);
+    assert.match(source, /sortedMeals\.map\(\(meal\) =>/);
+    assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\}/);
+    assert.doesNotMatch(source, /getDisplayMealLabel\(meal\.loggedAt\)/);
+    assert.match(source, /\{meals\.length\}筆/);
+    assert.doesNotMatch(source, /\{meals\.length\} entries/);
+  });
+
   it("keeps day-level History activation routed to Day Detail", () => {
     for (const expected of [
       "openDayDetail",
@@ -92,6 +101,10 @@ describe("History screen source contract", () => {
 
   it("clears stale selected-day snapshots before loading a newly selected date", () => {
     assert.match(source, /setLoadingDay\(true\);\s+setDayError\(null\);\s+setSelectedSnapshot\(null\);\s+return getHistoryDaySnapshot\(selectedDateKey\)/);
+  });
+
+  it("does not flash weekly loading copy during background trend refreshes", () => {
+    assert.match(source, /loadingTrends && !trends \? \(/);
   });
 
   it("keeps History free of demo globals, demo labels, and inline mutation controls", () => {
@@ -137,6 +150,12 @@ describe("History screen source contract", () => {
     ]) {
       assert.match(cssSource, escapedPattern(expected));
     }
+  });
+
+  it("highlights today without rendering a 今天 label in the week strip", () => {
+    assert.doesNotMatch(source, /sp-history-week-today|>今天<\/span>/);
+    assert.match(cssSource, /\.sp-history-week-day\[data-selected="false"\]\[data-today="true"\] \.sp-history-week-track/);
+    assert.doesNotMatch(cssSource, /\.sp-history-week-today/);
   });
 
   it("keeps one primary scroller", () => {

@@ -38,6 +38,13 @@ export function formatHomeHeaderDate(dateKey: string): string {
   });
 }
 
+export function getHomeGreeting(now: Date = new Date()): "早安" | "午安" | "晚安" {
+  const hour = now.getHours();
+  if (hour >= 5 && hour < 11) return "早安";
+  if (hour >= 11 && hour < 17) return "午安";
+  return "晚安";
+}
+
 export function getDisplayMealLabel(loggedAt?: string | null): "早餐" | "午餐" | "點心" | "晚餐" | "餐點" {
   if (!loggedAt) return "餐點";
   const date = new Date(loggedAt);
@@ -168,6 +175,7 @@ function HomeHeader() {
   const dailySummary = useStore((s) => s.dailySummary);
   const dateKey = dailySummary?.date ?? formatLocalDate(new Date());
   const dateStr = formatHomeHeaderDate(dateKey);
+  const greeting = getHomeGreeting();
   const statusText =
     dailySummary === null
       ? "正在同步今天狀態"
@@ -179,7 +187,7 @@ function HomeHeader() {
     <header className="screen-bar home-sport-header">
       <div>
         <div className="home-sport-title-row">
-          <h1>嗨，早安</h1>
+          <h1>嗨，{greeting}</h1>
           <span className="home-sport-streak">
             <SportFlameIcon size={12} /> {dailySummary?.mealCount ?? 0} 筆
           </span>
@@ -267,7 +275,7 @@ function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChat
     <section className="home-sport-meal-section">
       <div className="home-sport-section-header">
         <h2>今日紀錄</h2>
-        <span>{meals.length} entries</span>
+        <span>{meals.length}筆</span>
       </div>
       {meals.length === 0 ? (
         <SportCard className="home-sport-empty">

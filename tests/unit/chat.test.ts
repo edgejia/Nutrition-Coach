@@ -6,14 +6,17 @@ import { createDeviceService } from "../../server/services/device.js";
 import { createChatService } from "../../server/services/chat.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { formatLocalDate } from "../../server/lib/time.js";
+import { mealRevisions, mealTransactions } from "../../server/db/schema.js";
+import { eq } from "drizzle-orm";
 
 describe("ChatService", () => {
+  let db: ReturnType<typeof createDb>;
   let chatService: ReturnType<typeof createChatService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let deviceId: string;
 
   beforeEach(async () => {
-    const db = createDb(":memory:");
+    db = createDb(":memory:");
     const deviceService = createDeviceService(db);
     chatService = createChatService(db);
     foodLoggingService = createFoodLoggingService(db);
@@ -83,6 +86,46 @@ describe("ChatService", () => {
     assert.equal("usedConservativeAssumption" in assistant.loggedMeal, false);
     assert.equal("confidence" in assistant.loggedMeal, false);
     assert.equal("estimate" in assistant.loggedMeal, false);
+  });
+
+  it("rehydrates loggedMeal receipts after the current revision changes later", async () => {
+    await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "asset:late-revision-image" });
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      imagePath: "asset:late-revision-image",
+    });
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    const assistant = await chatService.saveMessage(deviceId, "assistant", "已先依照片做保守估算並完成記錄。");
+    await foodLoggingService.updateMeal(deviceId, loggedMeal.id, {
+      items: [
+        { foodName: "半份雞腿便當", calories: 360, protein: 18, carbs: 42, fat: 12 },
+      ],
+    });
+
+    const [transaction] = await db
+      .select({ currentRevisionId: mealTransactions.currentRevisionId })
+      .from(mealTransactions)
+      .where(eq(mealTransactions.id, loggedMeal.id))
+      .limit(1);
+    assert.ok(transaction?.currentRevisionId);
+
+    const revisionCreatedAt = new Date(new Date(assistant.createdAt).getTime() + 60_000).toISOString();
+    await db
+      .update(mealRevisions)
+      .set({ createdAt: revisionCreatedAt })
+      .where(eq(mealRevisions.id, transaction.currentRevisionId))
+      .run();
+
+    const history = await chatService.getHistory(deviceId, 50);
+    const restoredAssistant = history.find((message) => message.id === assistant.id);
+
+    assert.equal(restoredAssistant?.didLogMeal, true);
+    assert.equal(restoredAssistant?.loggedMeal?.mealId, loggedMeal.id);
+    assert.equal(restoredAssistant?.loggedMeal?.foodName, "半份雞腿便當");
   });
 
   it("projects loggedMeal receipt for persisted update_meal assistant replies", async () => {

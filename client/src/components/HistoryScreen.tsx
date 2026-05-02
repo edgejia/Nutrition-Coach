@@ -13,7 +13,7 @@ import {
 import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, HistoryTrendResponse, MealEditPayload, MealEntry } from "../types.js";
-import { formatMealRowTime, getDisplayMealLabel, getMealMacroSummary } from "./HomeScreen.js";
+import { formatMealRowTime, getMealMacroSummary } from "./HomeScreen.js";
 import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
@@ -109,7 +109,6 @@ function HistoryWeekStrip({
             </span>
             <span className="sp-history-week-label">{day.weekday}</span>
             <span className="sp-history-week-number">{day.dayNumber}</span>
-            {day.isToday ? <span className="sp-history-week-today">今天</span> : null}
           </button>
         );
       })}
@@ -202,6 +201,10 @@ function TimelineRows({
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
   openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
 }) {
+  const sortedMeals = [...meals].sort(
+    (left, right) => new Date(left.loggedAt).getTime() - new Date(right.loggedAt).getTime(),
+  );
+
   function onTimelineOpen(targetMealId?: string) {
     openDayDetail(
       {
@@ -246,7 +249,7 @@ function TimelineRows({
       onClick={() => onTimelineOpen()}
       onKeyDown={handleTimelineKeyDown}
     >
-      {meals.map((meal) => (
+      {sortedMeals.map((meal) => (
         <div key={meal.id} className="sp-history-timeline-item">
           <span className="sp-history-timeline-node" aria-hidden="true" />
           <button
@@ -260,7 +263,7 @@ function TimelineRows({
           >
             <span className="sp-history-meal-copy">
               <span className="sp-history-meal-meta">
-                {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.loggedAt)}
+                {formatMealRowTime(meal.loggedAt)}
               </span>
               <span className="sp-history-meal-name">{meal.foodName}</span>
               <span className="sp-history-meal-macros">{getMealMacroSummary(meal)}</span>
@@ -299,7 +302,7 @@ function TimelinePanel({
     <section>
       <div className="sp-history-section-header">
         <h2>當日餐點</h2>
-        <span>{meals.length} entries</span>
+        <span>{meals.length}筆</span>
       </div>
 
       {loadingDay ? (
@@ -467,7 +470,7 @@ export function HistoryScreen() {
         </header>
 
         <main className="screen-scroll-safe sp-history-scroll">
-          {loadingTrends ? (
+          {loadingTrends && !trends ? (
             <SportCard className="sp-history-state-card" variant="flat">
               載入這週紀錄中...
             </SportCard>

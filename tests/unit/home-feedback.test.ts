@@ -18,7 +18,13 @@ globalThis.localStorage = {
   key: (index: number) => [...storage.keys()][index] ?? null,
 } as Storage;
 
-const { getDisplayedCoachAdvice, formatHomeHeaderDate, stageHomeTaskOptionPrompt, sendHomeCtaTaskOption } = await import(
+const {
+  getDisplayedCoachAdvice,
+  formatHomeHeaderDate,
+  getHomeGreeting,
+  stageHomeTaskOptionPrompt,
+  sendHomeCtaTaskOption,
+} = await import(
   "../../client/src/components/HomeScreen.js"
 );
 const { recordHomeCtaIntentSelected, recordHomeCtaOptionSent } = await import("../../client/src/api.js");
@@ -68,6 +74,13 @@ describe("Home screen helpers", () => {
     });
 
     assert.equal(formatHomeHeaderDate("not-a-date"), expected);
+  });
+
+  it("derives the Home greeting from the user's local hour", () => {
+    assert.equal(getHomeGreeting(new Date(2026, 4, 2, 8)), "早安");
+    assert.equal(getHomeGreeting(new Date(2026, 4, 2, 13)), "午安");
+    assert.equal(getHomeGreeting(new Date(2026, 4, 2, 23)), "晚安");
+    assert.equal(getHomeGreeting(new Date(2026, 4, 2, 2)), "晚安");
   });
 
   it("stages a second-layer task option prompt and switches to chat", () => {
