@@ -15,32 +15,32 @@ function escapedPattern(text: string) {
 }
 
 describe("History Day Detail source contract", () => {
-  it("loads and presents read-only day detail data", () => {
+  it("loads and presents the sport read-only day snapshot", () => {
     for (const expected of [
+      "SportScreen",
+      "SportCard",
+      "SportChip",
+      "SportProgressBar",
       "getHistoryDaySnapshot",
+      "recoverGuestSession",
       "targetMealId",
       "scrollIntoView",
+      "getHistoryCalorieStatus",
+      "getHistorySportStatusMeta",
       "歷史快照",
       "今天 · 即時",
       "當日餐點",
-      "這是歷史快照，不會覆蓋今天的即時狀態。",
+      "這是當日營養快照；點選歷史中的餐點可修改內容。",
+      "今天的資料會隨記錄更新；此頁仍維持只讀檢視。",
       "protein",
       "carbs",
       "fat",
       "PersistedAssetImage",
-      "getHistoryCalorieStatus",
-      "history-day-summary",
-      "history-day-status-badge",
-      "history-day-progress",
-      "history-day-macros",
-      "偏低",
-      "略低",
-      "達標範圍",
-      "超標",
-      "明顯超標",
+      "sp-history-detail-screen",
+      "sp-history-detail-summary",
+      "sp-history-detail-macros",
+      "sp-history-detail-meal",
       "目標同步中，暫不顯示水位",
-      "歷史日 read-only；要修改請回到對話用自然語言描述。",
-      "今天 · 即時；此頁仍維持只讀。",
     ]) {
       assert.match(detailSource, escapedPattern(expected));
     }
@@ -53,16 +53,21 @@ describe("History Day Detail source contract", () => {
       "調整",
       "刪除",
       "儲存",
-      "不對",
       "新增餐點",
-      "跳到",
       "date picker",
-      'openSecondaryScreen("mealEdit"',
+      "openMealEdit",
       "setDailySummary",
       "setMeals",
     ]) {
       assert.doesNotMatch(detailSource, escapedPattern(rejected));
     }
+  });
+
+  it("rejects obsolete sketch-era no-edit copy", () => {
+    assert.doesNotMatch(
+      detailSource,
+      escapedPattern("歷史日 read-only；要修改請回到對話用自然語言描述。"),
+    );
   });
 
   it("is wired into MainLayout instead of the placeholder", () => {
