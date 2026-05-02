@@ -4,6 +4,7 @@ import {
   buildHistoryWeek,
   buildHistoryWeekStats,
   getHistoryCalorieStatus,
+  getHistorySportStatusMeta,
   getMondayWeekStart,
   selectSameWeekdayOrClosestAvailable,
   shiftHistoryWeek,
@@ -140,5 +141,48 @@ describe("history week helpers", () => {
         mealCount: 0,
       },
     );
+  });
+
+  it("maps Phase 41 sport calorie statuses to badge copy and bar tones", () => {
+    assert.deepEqual(getHistorySportStatusMeta({ status: "empty", targetCalories: 2000 }), {
+      badge: null,
+      barTone: "muted",
+      chipVariant: "neutral",
+    });
+    assert.deepEqual(getHistorySportStatusMeta({ status: "empty", targetCalories: null }), {
+      badge: "目標同步中",
+      barTone: "muted",
+      chipVariant: "neutral",
+    });
+    assert.deepEqual(getHistorySportStatusMeta({ status: "targetMissing", targetCalories: null }), {
+      badge: "目標同步中",
+      barTone: "muted",
+      chipVariant: "neutral",
+    });
+    assert.deepEqual(getHistorySportStatusMeta({ status: "low", targetCalories: 2000 }), {
+      badge: "偏低",
+      barTone: "amber",
+      chipVariant: "warn",
+    });
+    assert.deepEqual(getHistorySportStatusMeta({ status: "slightlyLow", targetCalories: 2000 }), {
+      badge: "略低",
+      barTone: "amber",
+      chipVariant: "warn",
+    });
+    assert.deepEqual(getHistorySportStatusMeta({ status: "inRange", targetCalories: 2000 }), {
+      badge: "達標範圍",
+      barTone: "lime",
+      chipVariant: "good",
+    });
+    assert.deepEqual(getHistorySportStatusMeta({ status: "over", targetCalories: 2000 }), {
+      badge: "超標",
+      barTone: "red",
+      chipVariant: "danger",
+    });
+    assert.deepEqual(getHistorySportStatusMeta({ status: "highOver", targetCalories: 2000 }), {
+      badge: "明顯超標",
+      barTone: "red",
+      chipVariant: "danger",
+    });
   });
 });
