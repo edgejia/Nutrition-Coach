@@ -1,17 +1,21 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { getHistoryDaySnapshot, getHistoryTrends } from "../api.js";
 import {
   buildHistoryWeek,
+  buildHistoryWeekStats,
+  getHistorySportStatusMeta,
   getMondayWeekStart,
   selectSameWeekdayOrClosestAvailable,
   shiftHistoryWeek,
+  type HistorySportBarTone,
   type HistoryWeekDay,
 } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
-import type { HistoryDaySnapshot, HistoryTrendResponse, MealEntry } from "../types.js";
-import { getDisplayMealLabel, formatMealRowTime } from "./HomeScreen.js";
-import { SketchDivider, SketchSoftBox } from "./SketchPrimitives.js";
+import type { HistoryDaySnapshot, HistoryTrendResponse, MealEditPayload, MealEntry } from "../types.js";
+import { formatMealRowTime, getDisplayMealLabel, getMealMacroSummary } from "./HomeScreen.js";
+import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
+import { SportCard, SportChip, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
 function addLocalDays(dateKey: string, deltaDays: number): string {
   const [year, month, day] = dateKey.split("-").map(Number);
@@ -30,58 +34,82 @@ function formatHistoryDate(dateKey: string): string {
   }).format(date);
 }
 
+function formatHistoryDateRange(fromKey: string, toKey: string): string {
+  const formatPart = (dateKey: string) => {
+    const [, month, day] = dateKey.split("-").map(Number);
+    return `${month}/${day}`;
+  };
+  return `${formatPart(fromKey)} - ${formatPart(toKey)}`;
+}
+
 function historyErrorMessage(error: unknown): string {
   return error instanceof Error && error.message === "UNAUTHORIZED"
     ? "正在重新建立訪客狀態..."
     : "歷史資料暫時載入失敗。請稍後再試。";
 }
 
+function formatMetric(value: number): string {
+  return Math.max(0, Math.round(value)).toLocaleString("en-US");
+}
+
+function getBarColor(tone: HistorySportBarTone): string {
+  if (tone === "amber") return "var(--sp-amber)";
+  if (tone === "lime") return "var(--sp-lime)";
+  if (tone === "red") return "var(--sp-red)";
+  return "var(--sp-ink-3)";
+}
+
+function getChipVariant(variant: ReturnType<typeof getHistorySportStatusMeta>["chipVariant"]) {
+  if (variant === "good") return "good";
+  if (variant === "warn" || variant === "danger") return "warn";
+  return "default";
+}
+
 function HistoryWeekStrip({
   days,
+  targetCalories,
   onSelect,
 }: {
   days: HistoryWeekDay[];
+  targetCalories: number | null;
   onSelect: (dateKey: string) => void;
 }) {
+  const hasTarget = Number(targetCalories) > 0;
+
   return (
-    <div className="grid grid-cols-7 gap-1" aria-label="週紀錄">
+    <div className="sp-history-week-strip" aria-label="週紀錄">
       {days.map((day) => {
-        const calorieStatus = day.status;
-        const fillHeight = `${Math.round(day.waterLevel * 100)}%`;
-        const showFill = day.waterLevel > 0 && !day.isFuture && calorieStatus !== "targetMissing";
+        const meta = getHistorySportStatusMeta({ status: day.status, targetCalories });
+        const fillHeight = day.waterLevel > 0 ? Math.max(4, Math.round(Math.min(1, day.waterLevel) * 76)) : 0;
+        const showFill = fillHeight > 0 && !day.isFuture && day.status !== "targetMissing";
+
         return (
           <button
             key={day.dateKey}
             type="button"
             disabled={day.isFuture}
             onClick={() => onSelect(day.dateKey)}
-            className="history-week-day min-w-0 text-center disabled:cursor-not-allowed"
-            data-calorie-status={calorieStatus}
-            data-over-tolerance={day.isOverTolerance ? "true" : "false"}
+            className="sp-history-week-day"
+            data-bar-tone={meta.barTone}
             data-selected={day.isSelected ? "true" : "false"}
             data-today={day.isToday ? "true" : "false"}
             data-future={day.isFuture ? "true" : "false"}
           >
-            <div className="sk-body text-[10px]" style={{ color: "var(--sk-ink-soft)" }}>
-              {day.weekday}
-            </div>
-            <div className="history-week-water-box mt-1" aria-hidden="true">
+            <span className="sp-history-week-track">
+              {hasTarget && !day.isFuture ? <span className="sp-history-target-marker" /> : null}
               {showFill ? (
                 <span
-                  className="history-week-water-fill"
+                  className="sp-history-week-fill"
                   style={{
-                    height: fillHeight,
-                    background: day.isOverTolerance ? "var(--sk-accent)" : "var(--sk-ink)",
+                    height: `${fillHeight}px`,
+                    background: getBarColor(meta.barTone),
                   }}
                 />
               ) : null}
-            </div>
-            <div className="sk-metric mt-1 text-sm">{day.dayNumber}</div>
-            {day.isToday ? (
-              <div className="sk-body mt-0.5 text-[10px]" style={{ color: "var(--sk-accent)" }}>
-                今天
-              </div>
-            ) : null}
+            </span>
+            <span className="sp-history-week-label">{day.weekday}</span>
+            <span className="sp-history-week-number">{day.dayNumber}</span>
+            {day.isToday ? <span className="sp-history-week-today">今天</span> : null}
           </button>
         );
       })}
@@ -89,79 +117,75 @@ function HistoryWeekStrip({
   );
 }
 
-function calorieStatusCopy(status: HistoryWeekDay["status"], total: number, targetCalories: number | null) {
-  if (!targetCalories || targetCalories <= 0) return "目標同步中，暫不顯示水位";
-  const delta = Math.round(total - targetCalories);
-  if (status === "low") return `偏低 -${Math.abs(delta).toLocaleString("en-US")}`;
-  if (status === "slightlyLow") return `略低 -${Math.abs(delta).toLocaleString("en-US")}`;
-  if (status === "over") return `超標 +${Math.max(0, delta).toLocaleString("en-US")}`;
-  if (status === "highOver") return `明顯超標 +${Math.max(0, delta).toLocaleString("en-US")}`;
-  return "達標範圍";
+function HistoryStatGrid({ stats }: { stats: ReturnType<typeof buildHistoryWeekStats> }) {
+  const items = [
+    { label: "平均熱量", value: formatMetric(stats.averageCalories), sublabel: "kcal/day" },
+    { label: "達標天數", value: `${stats.inRangeDays}/${stats.loggedDays}`, sublabel: "days" },
+    { label: "紀錄餐數", value: formatMetric(stats.mealCount), sublabel: "entries" },
+  ];
+
+  return (
+    <div className="sp-history-stat-grid">
+      {items.map((item) => (
+        <SportCard key={item.label} className="sp-history-stat-card" variant="flat">
+          <div className="sp-history-stat-label">{item.label}</div>
+          <div className="sp-history-stat-value">{item.value}</div>
+          <div className="sp-history-stat-sublabel">{item.sublabel}</div>
+        </SportCard>
+      ))}
+    </div>
+  );
 }
 
-function TimelinePanel({
+function SelectedDayHero({
   selectedDateKey,
-  todayKey,
+  selectedDay,
   snapshot,
   targetCalories,
-  selectedDay,
-  loadingDay,
-  dayError,
-  openDayDetail,
 }: {
   selectedDateKey: string;
-  todayKey: string;
+  selectedDay: HistoryWeekDay | undefined;
   snapshot: HistoryDaySnapshot | null;
   targetCalories: number | null;
-  selectedDay: HistoryWeekDay | undefined;
-  loadingDay: boolean;
-  dayError: string | null;
-  openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
 }) {
-  const isToday = selectedDateKey === todayKey;
-  const total = Math.round(snapshot?.summary.totalCalories ?? 0);
-  const status = selectedDay?.status ?? "empty";
+  const consumedCalories = Math.max(0, Math.round(snapshot?.summary.totalCalories ?? 0));
+  const meta = getHistorySportStatusMeta({
+    status: selectedDay?.status ?? "empty",
+    targetCalories,
+  });
+  const hasTarget = Number(targetCalories) > 0;
+  const target = Math.max(0, Math.round(targetCalories ?? 0));
+  const delta = consumedCalories - target;
+  const deltaLabel = hasTarget
+    ? `${delta >= 0 ? "+" : ""}${delta.toLocaleString("en-US")}`
+    : "目標同步中";
+
   return (
-    <section className="history-timeline-panel">
-      <div className="history-timeline-panel-header">
-        <div>
-          <h2 className="sk-heading text-3xl">{formatHistoryDate(selectedDateKey)}</h2>
-          <div className="sk-body mt-1 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-            {targetCalories
-              ? `${total.toLocaleString("en-US")} / ${Math.round(targetCalories).toLocaleString("en-US")} kcal · ${calorieStatusCopy(status, total, targetCalories)}`
-              : "目標同步中，暫不顯示水位"}
+    <SportCard className="sp-history-hero" variant="glow">
+      <div className="sp-history-hero-main">
+        <div className="sp-history-hero-copy">
+          <div className="sp-history-hero-date">{formatHistoryDate(selectedDateKey)}</div>
+          <div className="sp-history-hero-calories">{consumedCalories.toLocaleString("en-US")}</div>
+          <div className="sp-history-hero-target">
+            {hasTarget ? `/ ${target.toLocaleString("en-US")} kcal` : "目標同步中"}
           </div>
         </div>
-        <span className="sk-pill shrink-0 px-4 py-1 text-sm">{isToday ? "今天 · 即時" : "歷史快照"}</span>
+        <div className="sp-history-hero-status">
+          {meta.badge ? (
+            <SportChip variant={getChipVariant(meta.chipVariant)} zh>
+              {meta.badge}
+            </SportChip>
+          ) : null}
+          <div className="sp-history-hero-delta" data-tone={meta.barTone}>
+            {deltaLabel}
+          </div>
+          <div className="sp-history-hero-delta-label">vs target</div>
+        </div>
       </div>
-
-      {loadingDay ? (
-        <p className="sk-body mt-5 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-          載入這天餐點中...
-        </p>
+      {!hasTarget ? (
+        <p className="sp-history-target-missing">目標同步中，暫不顯示目標比較。</p>
       ) : null}
-      {dayError ? (
-        <SketchSoftBox className="mt-5 p-3">
-          <p className="sk-body text-sm">{dayError}</p>
-        </SketchSoftBox>
-      ) : null}
-      {!loadingDay && !dayError && snapshot?.meals.length === 0 ? (
-        <SketchSoftBox className="mt-5 p-4">
-          <h3 className="sk-heading text-xl">這天還沒有餐點</h3>
-          <p className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-            到「對話」描述你吃了什麼，AI 會幫你記錄。
-          </p>
-        </SketchSoftBox>
-      ) : null}
-      {snapshot && snapshot.meals.length > 0 ? (
-        <TimelineRows
-          meals={snapshot.meals}
-          selectedDateKey={selectedDateKey}
-          todayKey={todayKey}
-          openDayDetail={openDayDetail}
-        />
-      ) : null}
-    </section>
+    </SportCard>
   );
 }
 
@@ -170,11 +194,13 @@ function TimelineRows({
   selectedDateKey,
   todayKey,
   openDayDetail,
+  openMealEdit,
 }: {
   meals: MealEntry[];
   selectedDateKey: string;
   todayKey: string;
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
+  openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
 }) {
   function onTimelineOpen(targetMealId?: string) {
     openDayDetail(
@@ -188,7 +214,19 @@ function TimelineRows({
   }
 
   function onMealOpen(meal: MealEntry) {
-    onTimelineOpen(meal.id);
+    const payload: MealEditPayload = {
+      mealId: meal.id,
+      dateKey: selectedDateKey,
+      foodName: meal.foodName,
+      calories: meal.calories,
+      protein: meal.protein,
+      carbs: meal.carbs,
+      fat: meal.fat,
+      imageAssetId: meal.imageAssetId,
+      imageUrl: meal.imageUrl,
+      loggedAt: meal.loggedAt,
+    };
+    openMealEdit(payload, "history");
   }
 
   function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -201,40 +239,36 @@ function TimelineRows({
 
   return (
     <div
-      className="history-timeline"
+      className="sp-history-timeline"
       role="button"
       tabIndex={0}
       aria-label="開啟當日詳情"
       onClick={() => onTimelineOpen()}
       onKeyDown={handleTimelineKeyDown}
     >
-      {meals.map((meal, index) => (
-        <div
-          key={meal.id}
-          className="history-timeline-row"
-          data-first={index === 0 ? "true" : "false"}
-          data-last={index === meals.length - 1 ? "true" : "false"}
-        >
-          <div className="history-timeline-time sk-metric">{formatMealRowTime(meal.loggedAt)}</div>
-          <div className="history-timeline-track" aria-hidden="true">
-            <span className="history-timeline-rail" />
-            <span className="history-timeline-node" />
-          </div>
+      {meals.map((meal) => (
+        <div key={meal.id} className="sp-history-timeline-item">
+          <span className="sp-history-timeline-node" aria-hidden="true" />
           <button
             type="button"
-            className="history-timeline-meal"
+            className="sp-history-meal-row"
+            aria-label={`編輯 ${meal.foodName}`}
             onClick={(event) => {
               event.stopPropagation();
               onMealOpen(meal);
             }}
           >
-            <span className="min-w-0">
-              <span className="sk-body block text-[11px]" style={{ color: "var(--sk-ink-soft)" }}>
-                {getDisplayMealLabel(meal.loggedAt)}
+            <span className="sp-history-meal-copy">
+              <span className="sp-history-meal-meta">
+                {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.loggedAt)}
               </span>
-              <span className="sk-heading block truncate text-xl">{meal.foodName}</span>
+              <span className="sp-history-meal-name">{meal.foodName}</span>
+              <span className="sp-history-meal-macros">{getMealMacroSummary(meal)}</span>
             </span>
-            <span className="sk-heading shrink-0 text-2xl">{Math.round(meal.calories)}</span>
+            <span className="sp-history-meal-energy">
+              <span>{Math.max(0, Math.round(meal.calories)).toLocaleString("en-US")}</span>
+              <small>kcal</small>
+            </span>
           </button>
         </div>
       ))}
@@ -242,10 +276,67 @@ function TimelineRows({
   );
 }
 
+function TimelinePanel({
+  selectedDateKey,
+  todayKey,
+  snapshot,
+  loadingDay,
+  dayError,
+  openDayDetail,
+  openMealEdit,
+}: {
+  selectedDateKey: string;
+  todayKey: string;
+  snapshot: HistoryDaySnapshot | null;
+  loadingDay: boolean;
+  dayError: string | null;
+  openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
+  openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
+}) {
+  const meals = snapshot?.meals ?? [];
+
+  return (
+    <section>
+      <div className="sp-history-section-header">
+        <h2>當日餐點</h2>
+        <span>{meals.length} entries</span>
+      </div>
+
+      {loadingDay ? (
+        <SportCard className="sp-history-state-card" variant="flat">
+          載入這天餐點中...
+        </SportCard>
+      ) : null}
+      {dayError ? (
+        <SportCard className="sp-history-state-card sp-history-state-error" variant="flat">
+          {dayError}
+        </SportCard>
+      ) : null}
+      {!loadingDay && !dayError && meals.length === 0 ? (
+        <SportCard className="sp-history-empty" variant="flat">
+          <h3>這天還沒有餐點</h3>
+          <p>選擇其他日期，或到「對話」記錄今天吃了什麼。</p>
+        </SportCard>
+      ) : null}
+      {!loadingDay && !dayError && meals.length > 0 ? (
+        <TimelineRows
+          meals={meals}
+          selectedDateKey={selectedDateKey}
+          todayKey={todayKey}
+          openDayDetail={openDayDetail}
+          openMealEdit={openMealEdit}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 export function HistoryScreen() {
   const dailyTargets = useStore((s) => s.dailyTargets);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const openDayDetail = useStore((s) => s.openDayDetail);
+  const openMealEdit = useStore((s) => s.openMealEdit);
+  const lastMealMutation = useStore((s) => s.lastMealMutation);
   const todayKey = useMemo(() => formatLocalDate(new Date()), []);
   const [weekStartKey, setWeekStartKey] = useState(() => getMondayWeekStart(todayKey));
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
@@ -257,6 +348,7 @@ export function HistoryScreen() {
   const [loadingDay, setLoadingDay] = useState(false);
 
   const weekEndKey = addLocalDays(weekStartKey, 6);
+  const targetCalories = dailyTargets?.calories ?? null;
   const weekDays = buildHistoryWeek({
     weekStartKey,
     selectedDateKey,
@@ -265,57 +357,85 @@ export function HistoryScreen() {
     targets: dailyTargets,
   });
   const selectedWeekDay = weekDays.find((day) => day.dateKey === selectedDateKey);
+  const weekStats = buildHistoryWeekStats({
+    days: weekDays,
+    averageCalories: trends?.averages.calories ?? null,
+  });
   const nextWeekStartKey = shiftHistoryWeek(weekStartKey, 1);
   const nextWeekIsFuture = nextWeekStartKey > todayKey;
 
+  const loadTrends = useCallback(
+    (cancelledRef?: { current: boolean }) => {
+      setLoadingTrends(true);
+      setTrendError(null);
+      return getHistoryTrends(weekStartKey, weekEndKey)
+        .then((response) => {
+          if (!cancelledRef?.current) setTrends(response);
+        })
+        .catch((error: unknown) => {
+          if (error instanceof Error && error.message === "UNAUTHORIZED") {
+            void recoverGuestSession();
+          }
+          if (!cancelledRef?.current) setTrendError(historyErrorMessage(error));
+        })
+        .finally(() => {
+          if (!cancelledRef?.current) setLoadingTrends(false);
+        });
+    },
+    [recoverGuestSession, weekEndKey, weekStartKey],
+  );
+
+  const loadSelectedDay = useCallback(
+    (cancelledRef?: { current: boolean }) => {
+      setLoadingDay(true);
+      setDayError(null);
+      return getHistoryDaySnapshot(selectedDateKey)
+        .then((response) => {
+          if (!cancelledRef?.current) setSelectedSnapshot(response);
+        })
+        .catch((error: unknown) => {
+          if (error instanceof Error && error.message === "UNAUTHORIZED") {
+            void recoverGuestSession();
+          }
+          if (!cancelledRef?.current) {
+            setSelectedSnapshot(null);
+            setDayError(historyErrorMessage(error));
+          }
+        })
+        .finally(() => {
+          if (!cancelledRef?.current) setLoadingDay(false);
+        });
+    },
+    [recoverGuestSession, selectedDateKey],
+  );
+
   useEffect(() => {
-    let cancelled = false;
-    setLoadingTrends(true);
-    setTrendError(null);
-    getHistoryTrends(weekStartKey, weekEndKey)
-      .then((response) => {
-        if (!cancelled) setTrends(response);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.message === "UNAUTHORIZED") {
-          void recoverGuestSession();
-        }
-        if (!cancelled) setTrendError(historyErrorMessage(error));
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingTrends(false);
-      });
-
+    const cancelledRef = { current: false };
+    void loadTrends(cancelledRef);
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
-  }, [recoverGuestSession, weekEndKey, weekStartKey]);
+  }, [loadTrends]);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoadingDay(true);
-    setDayError(null);
-    getHistoryDaySnapshot(selectedDateKey)
-      .then((response) => {
-        if (!cancelled) setSelectedSnapshot(response);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.message === "UNAUTHORIZED") {
-          void recoverGuestSession();
-        }
-        if (!cancelled) {
-          setSelectedSnapshot(null);
-          setDayError(historyErrorMessage(error));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingDay(false);
-      });
-
+    const cancelledRef = { current: false };
+    void loadSelectedDay(cancelledRef);
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
-  }, [recoverGuestSession, selectedDateKey]);
+  }, [loadSelectedDay]);
+
+  useEffect(() => {
+    if (!lastMealMutation || lastMealMutation.affectedDate !== selectedDateKey) {
+      return;
+    }
+
+    const cancelledRef = { current: false };
+    void Promise.all([loadSelectedDay(cancelledRef), loadTrends(cancelledRef)]);
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, [lastMealMutation, loadSelectedDay, loadTrends, selectedDateKey]);
 
   function moveWeek(delta: -1 | 1) {
     const nextStart = shiftHistoryWeek(weekStartKey, delta);
@@ -330,51 +450,58 @@ export function HistoryScreen() {
   }
 
   return (
-    <div className="screen-shell sk-screen">
-      <header className="sk-screen-header">
-        <button type="button" aria-label="查看上一週" onClick={() => moveWeek(-1)} className="sk-heading text-xl">
-          ‹
-        </button>
-        <h1 className="sk-heading text-xl">歷史</h1>
-        <button
-          type="button"
-          aria-label="查看下一週"
-          onClick={() => moveWeek(1)}
-          disabled={nextWeekIsFuture}
-          className="sk-heading text-xl disabled:opacity-30"
-        >
-          ›
-        </button>
-      </header>
-      <main className="screen-scroll-safe space-y-4 px-5 pt-2">
-        {loadingTrends ? (
-          <p className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-            載入這週紀錄中...
-          </p>
-        ) : null}
-        {trendError ? (
-          <SketchSoftBox className="p-3">
-            <p className="sk-body text-sm">{trendError}</p>
-          </SketchSoftBox>
-        ) : null}
-        <HistoryWeekStrip
-          days={weekDays}
-          onSelect={(dateKey) => {
-            setSelectedDateKey(dateKey);
-          }}
-        />
-        <SketchDivider dashed />
-        <TimelinePanel
-          selectedDateKey={selectedDateKey}
-          todayKey={todayKey}
-          snapshot={selectedSnapshot}
-          targetCalories={dailyTargets?.calories ?? null}
-          selectedDay={selectedWeekDay}
-          loadingDay={loadingDay}
-          dayError={dayError}
-          openDayDetail={openDayDetail}
-        />
-      </main>
+    <div className="screen-shell">
+      <SportScreen className="sp-history-screen">
+        <header className="sp-history-header">
+          <SportIconButton aria-label="查看上一週" onClick={() => moveWeek(-1)}>
+            <SportChevronLeftIcon size={18} />
+          </SportIconButton>
+          <div className="sp-history-header-copy">
+            <h1>本週</h1>
+            <div>{formatHistoryDateRange(weekStartKey, weekEndKey)}</div>
+          </div>
+          <SportIconButton aria-label="查看下一週" onClick={() => moveWeek(1)} disabled={nextWeekIsFuture}>
+            <SportChevronRightIcon size={18} />
+          </SportIconButton>
+        </header>
+
+        <main className="screen-scroll-safe sp-history-scroll">
+          {loadingTrends ? (
+            <SportCard className="sp-history-state-card" variant="flat">
+              載入這週紀錄中...
+            </SportCard>
+          ) : null}
+          {trendError ? (
+            <SportCard className="sp-history-state-card sp-history-state-error" variant="flat">
+              {trendError}
+            </SportCard>
+          ) : null}
+
+          <HistoryWeekStrip
+            days={weekDays}
+            targetCalories={targetCalories}
+            onSelect={(dateKey) => {
+              setSelectedDateKey(dateKey);
+            }}
+          />
+          <HistoryStatGrid stats={weekStats} />
+          <SelectedDayHero
+            selectedDateKey={selectedDateKey}
+            selectedDay={selectedWeekDay}
+            snapshot={selectedSnapshot}
+            targetCalories={targetCalories}
+          />
+          <TimelinePanel
+            selectedDateKey={selectedDateKey}
+            todayKey={todayKey}
+            snapshot={selectedSnapshot}
+            loadingDay={loadingDay}
+            dayError={dayError}
+            openDayDetail={openDayDetail}
+            openMealEdit={openMealEdit}
+          />
+        </main>
+      </SportScreen>
     </div>
   );
 }
