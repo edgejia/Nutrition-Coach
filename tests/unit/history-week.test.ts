@@ -61,7 +61,7 @@ describe("history week helpers", () => {
     assert.equal(getHistoryCalorieStatus({ calories: 2600, mealCount: 3, targetCalories: 2000 }).status, "highOver");
   });
 
-  it("does not produce fake water levels for empty or targetMissing days", () => {
+  it("does not produce synthetic water levels for empty or targetMissing days", () => {
     const empty = getHistoryCalorieStatus({ calories: 0, mealCount: 0, targetCalories: 2000 });
     assert.equal(empty.status, "empty");
     assert.equal(empty.calorieRatio, null);

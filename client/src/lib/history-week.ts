@@ -43,6 +43,13 @@ export interface HistoryCalorieStatusResult {
   isOverTolerance: boolean;
 }
 
+export interface HistoryWeekStats {
+  averageCalories: number;
+  inRangeDays: number;
+  loggedDays: number;
+  mealCount: number;
+}
+
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const WEEKDAY_LABELS: HistoryWeekDay["weekday"][] = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -166,6 +173,18 @@ export function buildHistoryWeek(input: {
       isFuture: dateKey > input.todayKey,
     };
   });
+}
+
+export function buildHistoryWeekStats(input: {
+  days: HistoryWeekDay[];
+  averageCalories?: number | null;
+}): HistoryWeekStats {
+  return {
+    averageCalories: Math.max(0, Math.round(input.averageCalories ?? 0)),
+    inRangeDays: input.days.filter((day) => day.status === "inRange" && day.mealCount > 0).length,
+    loggedDays: input.days.filter((day) => day.mealCount > 0 && !day.isFuture).length,
+    mealCount: input.days.reduce((total, day) => total + (day.isFuture ? 0 : day.mealCount), 0),
+  };
 }
 
 export function selectSameWeekdayOrClosestAvailable(input: {
