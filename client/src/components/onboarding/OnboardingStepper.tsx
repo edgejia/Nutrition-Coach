@@ -140,14 +140,10 @@ function SpNumberWheel({
   );
 }
 
-function SpObHeader({ onBack, right }: { onBack?: (() => void) | null; right?: React.ReactNode }) {
+function SpObHeader({ right }: { onBack?: (() => void) | null; right?: React.ReactNode }) {
   return (
     <header className="sp-header" style={{ paddingBottom: 4 }}>
-      {onBack ? (
-        <button type="button" className="sp-iconbtn" onClick={onBack} aria-label="返回">
-          <SportChevronLeftIcon size={18} />
-        </button>
-      ) : <div style={{ width: 38 }} />}
+      <div style={{ width: 38 }} />
       <div className="sp-ob-brand">
         <SportBoltIcon size={14} />
         <span className="sp-ob-brand-text">ChatGPT - Gain <b>ProTein</b></span>
@@ -883,7 +879,7 @@ export function OnboardingStepperPresentation({
   const issuesForStep = (stepNumber: OnboardingStep): StepIssue[] =>
     validationIssues.filter((issue) => issue.step === stepNumber);
 
-  if (step === 1) return <SpStepGoal value={data.goal} issues={issuesForStep(1)} onSelect={onGoalSelect} onBack={() => onBack(1)} />;
+  if (step === 1) return <SpStepGoal value={data.goal} issues={issuesForStep(1)} onSelect={onGoalSelect} onBack={null} />;
   if (step === 2) return (
     <SpStepGoalClarification
       goal={data.goal}
