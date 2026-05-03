@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store.js";
 import { updateGoals } from "../api.js";
 import { SportBoltIcon, SportChevronLeftIcon } from "./SportIcons.js";
@@ -22,27 +22,37 @@ const DATA_ROWS = [
   { label: "清除資料", note: "刪除本機日記", danger: true },
 ] as const;
 
+function createTargetForm(targets: ReturnType<typeof useStore.getState>["dailyTargets"]) {
+  return {
+    calories: targets?.calories ?? 0,
+    protein: targets?.protein ?? 0,
+    carbs: targets?.carbs ?? 0,
+    fat: targets?.fat ?? 0,
+  };
+}
+
 export function GoalSettings({ onClose }: { onClose: () => void }) {
   const dailyTargets = useStore((s) => s.dailyTargets);
   const setDailyTargets = useStore((s) => s.setDailyTargets);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
 
-  const [form, setForm] = useState({
-    calories: dailyTargets?.calories ?? 0,
-    protein: dailyTargets?.protein ?? 0,
-    carbs: dailyTargets?.carbs ?? 0,
-    fat: dailyTargets?.fat ?? 0,
-  });
+  const [form, setForm] = useState(() => createTargetForm(dailyTargets));
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (!editing) {
+      setForm(createTargetForm(dailyTargets));
+    }
+  }, [dailyTargets, editing]);
+
   function resetFormFromTargets() {
-    setForm({
-      calories: dailyTargets?.calories ?? 0,
-      protein: dailyTargets?.protein ?? 0,
-      carbs: dailyTargets?.carbs ?? 0,
-      fat: dailyTargets?.fat ?? 0,
-    });
+    setForm(createTargetForm(dailyTargets));
+  }
+
+  function startEditing() {
+    setForm(createTargetForm(dailyTargets));
+    setEditing(true);
   }
 
   function handleCancel() {
@@ -101,7 +111,7 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
               <h2 className="sp-zh mt-0.5 text-sm font-bold">每日目標</h2>
             </div>
             {!editing ? (
-              <button type="button" className="sp-btn px-3.5 py-2" onClick={() => setEditing(true)}>
+              <button type="button" className="sp-btn px-3.5 py-2" onClick={startEditing}>
                 編輯
               </button>
             ) : null}

@@ -38,7 +38,13 @@ describe("Settings source contract", () => {
     assert.ok(source.includes("updateGoals(form)"));
     assert.ok(source.includes("setDailyTargets(updated)"));
     assert.match(source, /recoverGuestSession/);
-    assert.ok(source.includes("setEditing(true)"));
+    assert.match(source, /function createTargetForm/);
+    assert.match(source, /useEffect\(\(\) => \{/);
+    assert.match(source, /if \(!editing\) \{/);
+    assert.match(source, /setForm\(createTargetForm\(dailyTargets\)\)/);
+    assert.match(source, /function startEditing\(\)/);
+    assert.match(source, /onClick=\{startEditing\}/);
+    assert.doesNotMatch(source, /onClick=\{\(\) => setEditing\(true\)\}/);
     assert.ok(source.includes("setEditing(false)"));
 
     assert.doesNotMatch(source, /from "\.\/SketchPrimitives\.js"/);
