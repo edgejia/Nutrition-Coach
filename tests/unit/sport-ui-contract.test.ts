@@ -42,17 +42,17 @@ describe("sport UI source contract", () => {
       "family=Bebas+Neue",
       "family=Bricolage+Grotesque:wght@400;700",
       "family=Caveat:wght@400;700",
-      "family=Inter:wght@400;700",
-      "family=JetBrains+Mono:wght@400;700",
+      "family=Inter:wght@400;500;600;700;800",
+      "family=JetBrains+Mono:wght@400;500;600;700",
       "family=Manrope:wght@400;700",
-      "family=Noto+Sans+TC:wght@400;700",
-      "family=Sora:wght@400;700",
+      "family=Noto+Sans+TC:wght@400;500;700;900",
+      "family=Sora:wght@400;500;600;700;800",
       "display=swap",
     ]) {
       assert.match(sources.indexHtml, escapedPattern(font));
     }
 
-    for (const blockedWeight of ["wght@300", "wght@500", "wght@600", "wght@800", "wght@900"]) {
+    for (const blockedWeight of ["wght@300"]) {
       assert.doesNotMatch(sources.indexHtml, escapedPattern(blockedWeight));
     }
   });
