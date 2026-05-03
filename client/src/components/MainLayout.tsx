@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect, type ReactNode } from "react";
 import { useStore } from "../store.js";
 import { getMeals } from "../api.js";
 import { connectSSE, disconnectSSE } from "../sse.js";
@@ -65,6 +65,12 @@ function useVisualViewportShellVars() {
   }, []);
 }
 
+export function SportAppShell({ children }: { children: ReactNode }) {
+  useVisualViewportShellVars();
+
+  return <div className="app-viewport sp-app-canvas relative flex flex-col">{children}</div>;
+}
+
 export function MainLayout() {
   const deviceId = useStore((s) => s.deviceId);
   const setDailySummary = useStore((s) => s.setDailySummary);
@@ -75,8 +81,6 @@ export function MainLayout() {
   const activeScreen = useStore((s) => s.activeScreen);
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const closeSecondaryScreen = useStore((s) => s.closeSecondaryScreen);
-
-  useVisualViewportShellVars();
 
   const refreshForRollover = useCallback(async () => {
     if (!deviceId) return;
@@ -122,7 +126,7 @@ export function MainLayout() {
   useDailyRollover(refreshForRollover);
 
   return (
-    <div className="app-viewport sp-app-canvas relative flex flex-col">
+    <SportAppShell>
       {activeScreen === "home" && <HomeScreen />}
       {activeScreen === "chat" && <ChatPanel />}
       {activeScreen === "history" && <HistoryScreen />}
@@ -134,6 +138,6 @@ export function MainLayout() {
       )}
       {secondaryScreen?.screen === "dayDetail" && <HistoryDayDetailScreen onBack={closeSecondaryScreen} />}
       {secondaryScreen?.screen === "mealEdit" && <MealEditScreen onBack={closeSecondaryScreen} />}
-    </div>
+    </SportAppShell>
   );
 }
