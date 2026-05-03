@@ -883,7 +883,7 @@ export function OnboardingStepperPresentation({
   const issuesForStep = (stepNumber: OnboardingStep): StepIssue[] =>
     validationIssues.filter((issue) => issue.step === stepNumber);
 
-  if (step === 1) return <SpStepGoal value={data.goal} issues={issuesForStep(1)} onSelect={onGoalSelect} onBack={null} />;
+  if (step === 1) return <SpStepGoal value={data.goal} issues={issuesForStep(1)} onSelect={onGoalSelect} onBack={() => onBack(1)} />;
   if (step === 2) return (
     <SpStepGoalClarification
       goal={data.goal}

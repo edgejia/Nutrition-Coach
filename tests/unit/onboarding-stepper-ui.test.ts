@@ -63,6 +63,8 @@ describe("onboarding stepper UI", () => {
     assert.match(html, /請選擇有效的目標/);
     assert.match(html, /第 01 步 \/ 共 06 步/);
     assert.match(html, /sp-screen/);
+    assert.match(html, /sp-header/);
+    assert.match(html, /aria-label="返回"/);
     assert.match(html, /sp-ob-brand/);
     assert.doesNotMatch(html, /sk-/);
     assert.match(html, /減脂/);

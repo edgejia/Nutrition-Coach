@@ -395,6 +395,15 @@ textarea {
   text-transform: none;
 }
 
+.sp-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+}
+
 .sp-iconbtn {
   display: inline-flex;
   min-width: 44px;
