@@ -22,6 +22,7 @@ describe("onboarding step components", () => {
     assert.match(html, /請選擇減脂或增肌目標/);
     assert.match(html, /減脂 · FAT LOSS/);
     assert.match(html, /增肌 · MUSCLE GAIN/);
+    assert.match(html, /維持 · MAINTAIN/);
     assert.match(html, /sp-onboarding/);
     assert.doesNotMatch(html, /sk-/);
   });
@@ -134,7 +135,12 @@ describe("onboarding step components", () => {
     assert.match(combinedSource, /ChatGPT - Gain/);
     assert.match(combinedSource, /SpNumberWheel/);
     assert.match(combinedSource, /sp-ob-actions/);
+    assert.match(combinedSource, /StepState = OnboardingStep \| 6/);
+    assert.match(combinedSource, /SpStepperBar step=\{6\}/);
+    assert.match(combinedSource, /sp-screen/);
+    assert.match(combinedSource, /sp-scroll-actions/);
     assert.doesNotMatch(combinedSource, /window\.Sp/);
+    assert.doesNotMatch(combinedSource, /PhoneFrame|IOSDevice/);
     assert.doesNotMatch(combinedSource, /setTimeout/);
     assert.doesNotMatch(combinedSource, /Sketch(?:Screen|Box|Button|Pill|SoftBox)/);
   });
