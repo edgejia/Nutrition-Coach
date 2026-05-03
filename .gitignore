@@ -1,7 +1,6 @@
 .worktrees/
 .codex/
-.claude/settings.local.json
-.claude/worktrees/
+.claude/
 .superpowers/
 node_modules/
 dist/
