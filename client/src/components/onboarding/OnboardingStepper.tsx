@@ -50,7 +50,7 @@ function SpStepperBar({ step, total = 6 }: { step: number; total?: number }) {
   return (
     <div style={{
       display: "flex", flexDirection: "column", gap: 8,
-      padding: "0 18px",
+      padding: "8px 18px 0",
       flexShrink: 0,
     }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
