@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { SketchBox, SketchButton, SketchPill } from "../SketchPrimitives.js";
 import type { IntakeData, OnboardingField } from "../../types.js";
 
 interface Props {
@@ -33,24 +32,23 @@ export function StepAdvancedMetrics({ onNext, onSkip, onBack, initialData, error
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 p-4">
-      <SketchPill className="self-start">
-        STEP 5 / 6
-      </SketchPill>
-      <div>
-        <h2 className="sk-heading text-2xl">
+    <div className="sp-onboarding-step">
+      <div className="sp-onboarding-copy">
+        <div className="sp-onboarding-kicker">選填 · 提高精準度</div>
+        <h2>
           進階指標
         </h2>
-        <p className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+        <p>
           如果你有體脂率或 TDEE 的數據，教練可以算得更精準。沒有的話可以直接跳過。
         </p>
       </div>
 
-      <div>
-        <label className="sk-body mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-ink-soft)" }}>體脂率</label>
-        <div className="flex items-center gap-2">
-          <SketchBox className="flex flex-1 items-center px-3 py-2">
+      <div className="sp-onboarding-field-group">
+        <label className="sp-onboarding-field-label" htmlFor="onboarding-body-fat">體脂率 · 選填</label>
+        <div className="sp-onboarding-input-row">
+          <div className="sp-onboarding-input-card">
             <input
+              id="onboarding-body-fat"
               type="number"
               inputMode="decimal"
               value={bodyFat}
@@ -59,24 +57,24 @@ export function StepAdvancedMetrics({ onNext, onSkip, onBack, initialData, error
                 onFieldEdit?.("bodyFatPercent");
               }}
               placeholder="20"
-              className="sk-body min-w-0 flex-1 bg-transparent text-sm outline-none"
-              style={{ color: "var(--sk-ink)" }}
+              className="sp-onboarding-input"
             />
-          </SketchBox>
-          <span className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>%</span>
+          </div>
+          <span className="sp-onboarding-unit">%</span>
         </div>
         {errors?.bodyFatPercent ? (
-          <p className="sk-body mt-2 text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
+          <p className="sp-onboarding-error" role="alert">
             {errors.bodyFatPercent}
           </p>
         ) : null}
       </div>
 
-      <div>
-        <label className="sk-body mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-ink-soft)" }}>TDEE</label>
-        <div className="flex items-center gap-2">
-          <SketchBox className="flex flex-1 items-center px-3 py-2">
+      <div className="sp-onboarding-field-group">
+        <label className="sp-onboarding-field-label" htmlFor="onboarding-tdee">TDEE · 選填</label>
+        <div className="sp-onboarding-input-row">
+          <div className="sp-onboarding-input-card">
             <input
+              id="onboarding-tdee"
               type="number"
               inputMode="numeric"
               value={tdee}
@@ -85,23 +83,23 @@ export function StepAdvancedMetrics({ onNext, onSkip, onBack, initialData, error
                 onFieldEdit?.("tdee");
               }}
               placeholder="2200"
-              className="sk-body min-w-0 flex-1 bg-transparent text-sm outline-none"
-              style={{ color: "var(--sk-ink)" }}
+              className="sp-onboarding-input"
             />
-          </SketchBox>
-          <span className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>kcal</span>
+          </div>
+          <span className="sp-onboarding-unit">kcal</span>
         </div>
         {errors?.tdee ? (
-          <p className="sk-body mt-2 text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
+          <p className="sp-onboarding-error" role="alert">
             {errors.tdee}
           </p>
         ) : null}
       </div>
 
-      <div>
-        <label className="sk-body mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-ink-soft)" }}>其他備註（選填）</label>
-        <SketchBox className="px-3 py-2">
+      <div className="sp-onboarding-field-group">
+        <label className="sp-onboarding-field-label" htmlFor="onboarding-advanced-notes">其他備註（選填）</label>
+        <div className="sp-onboarding-input-card">
           <input
+            id="onboarding-advanced-notes"
             type="text"
             value={notes}
             onChange={(e) => {
@@ -109,28 +107,31 @@ export function StepAdvancedMetrics({ onNext, onSkip, onBack, initialData, error
               onFieldEdit?.("advancedNotes");
             }}
             placeholder="任何你覺得教練該知道的事..."
-            className="sk-body w-full bg-transparent text-sm outline-none"
-            style={{ color: "var(--sk-ink)" }}
+            className="sp-onboarding-input"
           />
-        </SketchBox>
+        </div>
         {errors?.advancedNotes ? (
-          <p className="sk-body mt-2 text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
+          <p className="sp-onboarding-error" role="alert">
             {errors.advancedNotes}
           </p>
         ) : null}
       </div>
 
-      <div className="flex gap-3">
-        <SketchButton onClick={onBack}>
+      <div className="sp-onboarding-note">
+        留空時會用身高、體重、年齡和活動量估算。
+      </div>
+
+      <div className="sp-onboarding-actions">
+        <button type="button" className="sp-onboarding-secondary" onClick={onBack}>
           上一步
-        </SketchButton>
-        <SketchButton
+        </button>
+        <button
+          type="button"
           onClick={hasData ? handleNext : onSkip}
-          className="flex-1"
-          variant="accent"
+          className="sp-onboarding-primary"
         >
           {hasData ? "下一步" : "跳過，開始分析"}
-        </SketchButton>
+        </button>
       </div>
     </div>
   );

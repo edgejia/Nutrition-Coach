@@ -1,4 +1,3 @@
-import { SketchBox, SketchButton, SketchPill, SketchSoftBox } from "../SketchPrimitives.js";
 import type { IntakeResult } from "../../types.js";
 
 interface Props {
@@ -12,32 +11,35 @@ interface Props {
 export function StepCoachHandoff({ loading, transportError, result, onStart, onRetry }: Props) {
   if (loading) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col justify-center p-4">
-        <SketchBox className="p-5 text-center">
-          <div className="mb-4 text-4xl">🏋️</div>
-          <h2 className="sk-heading mb-2 text-2xl">
+      <div className="sp-onboarding-step sp-onboarding-handoff">
+        <div className="sp-onboarding-result-card">
+          <div className="sp-onboarding-result-icon" aria-hidden="true">🏋️</div>
+          <h2>
             教練正在分析你的資料…
           </h2>
-          <p className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+          <p>
             根據你提供的數據，量身打造營養計畫
           </p>
-        </SketchBox>
+        </div>
       </div>
     );
   }
 
   if (transportError) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col justify-center p-4">
-        <SketchBox className="p-5 text-center" role="alert" style={{ background: "var(--sk-accent-soft)" }}>
-          <h2 className="sk-heading mb-3 text-2xl">
+      <div className="sp-onboarding-step sp-onboarding-handoff">
+        <div className="sp-onboarding-result-card sp-onboarding-result-card-error" role="alert">
+          <div className="sp-onboarding-step-label">
+            第 06 步 / 共 06 步
+          </div>
+          <h2>
             連線失敗
           </h2>
-          <p className="sk-body mb-5 text-sm" style={{ color: "var(--sk-ink-soft)" }}>{transportError}</p>
-          <SketchButton onClick={onRetry} variant="accent">
+          <p>{transportError}</p>
+          <button type="button" className="sp-onboarding-primary" onClick={onRetry}>
             重試
-          </SketchButton>
-        </SketchBox>
+          </button>
+        </div>
       </div>
     );
   }
@@ -47,53 +49,50 @@ export function StepCoachHandoff({ loading, transportError, result, onStart, onR
   const { dailyTargets, coachExplanation } = result;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 p-4">
-      <SketchPill className="self-start">
-        YOUR PLAN
-      </SketchPill>
-      <h2 className="sk-heading text-2xl">
-        你的專屬營養計畫
-      </h2>
+    <div className="sp-onboarding-step sp-onboarding-handoff">
+      <div className="sp-onboarding-copy">
+        <div className="sp-onboarding-kicker">你的計畫已準備好</div>
+        <h2>
+          每日目標
+        </h2>
+      </div>
 
-      {/* Targets Grid */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="sp-onboarding-target-grid">
         {[
           { label: "每日熱量", value: `${dailyTargets.calories}`, unit: "kcal" },
           { label: "蛋白質", value: `${dailyTargets.protein}`, unit: "g" },
           { label: "碳水化合物", value: `${dailyTargets.carbs}`, unit: "g" },
           { label: "脂肪", value: `${dailyTargets.fat}`, unit: "g" },
         ].map(({ label, value, unit }) => (
-          <SketchSoftBox
+          <div
             key={label}
-            className="p-4"
+            className="sp-onboarding-target-card"
           >
-            <div className="sk-body mb-1 text-xs" style={{ color: "var(--sk-ink-soft)" }}>{label}</div>
-            <div className="sk-heading text-2xl">
+            <div className="sp-onboarding-target-label">{label}</div>
+            <div className="sp-onboarding-target-value">
               {value}
-              <span className="sk-body ml-1 text-xs font-normal" style={{ color: "var(--sk-ink-soft)" }}>{unit}</span>
+              <span>{unit}</span>
             </div>
-          </SketchSoftBox>
+          </div>
         ))}
       </div>
 
-      {/* Coach Explanation */}
-      <SketchBox className="p-5">
-        <div className="sk-body mb-2 text-xs font-medium uppercase tracking-wide" style={{ color: "var(--sk-accent)" }}>
+      <div className="sp-onboarding-result-card">
+        <div className="sp-onboarding-kicker">
           教練說明
         </div>
-        <p className="sk-body text-sm leading-relaxed">
+        <p>
           {coachExplanation}
         </p>
-      </SketchBox>
+      </div>
 
-      {/* CTA */}
-      <SketchButton
+      <button
+        type="button"
         onClick={onStart}
-        className="w-full py-4"
-        variant="accent"
+        className="sp-onboarding-primary"
       >
         開始記錄飲食
-      </SketchButton>
+      </button>
     </div>
   );
 }

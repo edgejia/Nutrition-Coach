@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { SketchBox, SketchButton, SketchPill } from "../SketchPrimitives.js";
 
 interface Props {
   goal: "fat_loss" | "muscle_gain";
@@ -19,50 +18,56 @@ export function StepGoalClarification({ goal, onNext, onBack, initialValue, erro
   }, [initialValue]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col justify-center gap-5 p-4">
-      <SketchPill className="self-start">
-        STEP 2 / 6
-      </SketchPill>
-      <div>
-        <h2 className="sk-heading text-2xl">
-          有什麼想補充的嗎？
+    <div className="sp-onboarding-step">
+      <div className="sp-onboarding-copy">
+        <div className="sp-onboarding-kicker">選填 · 補充教練判斷</div>
+        <h2>
+          還有什麼需要注意？
         </h2>
-        <p className="sk-body mt-2 text-sm" style={{ color: "var(--sk-ink-soft)" }}>
+        <p>
           你選了「{goalLabel}」。如果有特別在意的事，可以在這裡補充。沒有的話直接跳過。
         </p>
       </div>
 
-      <SketchBox className="p-3">
+      <div className="sp-onboarding-field-card">
+        <label className="sp-onboarding-field-label" htmlFor="goal-clarification">
+          目標補充
+        </label>
         <textarea
+          id="goal-clarification"
           value={text}
           onChange={(e) => {
             setText(e.target.value);
             onFieldEdit?.();
           }}
-          placeholder="例如：不想影響重訓表現、想慢慢減不要太激進..."
+          placeholder="例如：減脂不掉肌肉、不想影響重訓表現..."
           rows={3}
-          className="sk-body w-full resize-none bg-transparent p-1 text-sm outline-none"
-          style={{ color: "var(--sk-ink)" }}
+          className="sp-onboarding-textarea"
         />
-      </SketchBox>
+      </div>
+
+      <div className="sp-onboarding-helper-row">
+        <span>減脂不掉肌肉</span>
+        <span>不想影響重訓表現</span>
+      </div>
 
       {error ? (
-        <p className="sk-body text-sm" role="alert" style={{ color: "var(--sk-accent)" }}>
+        <p className="sp-onboarding-error" role="alert">
           {error}
         </p>
       ) : null}
 
-      <div className="flex gap-3">
-        <SketchButton onClick={onBack}>
+      <div className="sp-onboarding-actions">
+        <button type="button" className="sp-onboarding-secondary" onClick={onBack}>
           上一步
-        </SketchButton>
-        <SketchButton
+        </button>
+        <button
+          type="button"
           onClick={() => onNext(text.trim() || undefined)}
-          className="flex-1"
-          variant="accent"
+          className="sp-onboarding-primary"
         >
           {text.trim() ? "下一步" : "跳過"}
-        </SketchButton>
+        </button>
       </div>
     </div>
   );

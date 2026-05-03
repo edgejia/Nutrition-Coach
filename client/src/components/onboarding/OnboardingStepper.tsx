@@ -14,7 +14,6 @@ import { StepBodyData } from "./StepBodyData.js";
 import { StepLifestyle } from "./StepLifestyle.js";
 import { StepAdvancedMetrics } from "./StepAdvancedMetrics.js";
 import { StepCoachHandoff } from "./StepCoachHandoff.js";
-import { SketchScreen } from "../SketchPrimitives.js";
 import type { IntakeData, IntakeResult, IntakeValidationIssue, OnboardingField, OnboardingStep } from "../../types.js";
 
 type PartialIntake = Partial<IntakeData>;
@@ -47,6 +46,25 @@ function mergeStepIssues(
   nextStepIssues: IntakeValidationIssue[],
 ) {
   return [...previous.filter((issue) => issue.step !== step), ...nextStepIssues];
+}
+
+function formatStepLabel(step: StepState) {
+  return `第 ${String(step).padStart(2, "0")} 步 / 共 06 步`;
+}
+
+function OnboardingProgress({ step }: { step: StepState }) {
+  return (
+    <div className="sp-onboarding-progress" aria-label={formatStepLabel(step)}>
+      <div className="sp-onboarding-step-label">
+        {formatStepLabel(step)}
+      </div>
+      <div className="sp-onboarding-ticks" aria-hidden="true">
+        {Array.from({ length: 6 }, (_, index) => (
+          <i key={index} data-active={index < step} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function OnboardingStepperPresentation({
@@ -142,11 +160,18 @@ export function OnboardingStepperPresentation({
   }
 
   return (
-    <SketchScreen className="onboarding-stepper sk-screen">
-      <div className="sk-screen-content screen-scroll-safe">
+    <section className="sp-screen sp-onboarding-screen onboarding-stepper">
+      <header className="sp-onboarding-header">
+        <div className="sp-onboarding-brand">
+          <span aria-hidden="true">⚡</span>
+          <span>Nutrition Coach</span>
+        </div>
+      </header>
+      <OnboardingProgress step={step} />
+      <div className="sp-onboarding-scroll">
         {stepContent}
       </div>
-    </SketchScreen>
+    </section>
   );
 }
 
