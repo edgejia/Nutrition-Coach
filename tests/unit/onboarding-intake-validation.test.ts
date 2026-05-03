@@ -27,6 +27,12 @@ function issueCodes(issues: IntakeValidationIssue[]) {
 }
 
 describe("onboarding-intake-validation", () => {
+  it("validateOnboardingStep(1) accepts all demo goal choices", () => {
+    assert.deepEqual(validation.validateOnboardingStep(1, { goal: "fat_loss" } as any), []);
+    assert.deepEqual(validation.validateOnboardingStep(1, { goal: "muscle_gain" } as any), []);
+    assert.deepEqual(validation.validateOnboardingStep(1, { goal: "maintain" } as any), []);
+  });
+
   it("validateOnboardingStep(3) rejects invalid body metrics", () => {
     const issues = validation.validateOnboardingStep(3, {
       sex: "female",

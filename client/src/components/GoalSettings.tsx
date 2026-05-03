@@ -67,8 +67,7 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
-      <SportScreen>
+    <SportScreen>
         <SecondaryHeader title="設定" badge="偏好與目標" onBack={onClose} />
         <main className="sp-scroll screen-scroll-safe" style={{ paddingTop: 16 }}>
           <section
@@ -95,14 +94,14 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
                 fontSize: 22,
               }}
             >
-              NC
+              JC
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="sp-zh" style={{ fontWeight: 600, fontSize: 14, color: "var(--sp-ink)" }}>
                 訪客模式
               </div>
               <div className="sp-num" style={{ fontSize: 10, color: "var(--sp-ink-3)", marginTop: 2 }}>
-                訪客 · 瀏覽器保存
+                訪客 · 瀏覽器保存 · 12 天
               </div>
             </div>
             <span className="sp-chip sp-chip-good" style={{ padding: "3px 8px" }}>
@@ -273,8 +272,7 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
             </div>
           </section>
         </main>
-      </SportScreen>
-    </div>
+    </SportScreen>
   );
 }
 

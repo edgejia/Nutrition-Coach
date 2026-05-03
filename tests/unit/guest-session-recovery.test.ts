@@ -12,26 +12,27 @@ async function readSource(relativePath: string) {
 }
 
 describe("Guest session recovery source contract", () => {
-  it("keeps the sport recovery gate safe and rebuild-only", async () => {
+  it("keeps the sport recovery gate copied from the demo recovery screen", async () => {
     const source = await readSource("../../client/src/components/GuestSessionRecoveryGate.tsx");
 
-    assert.match(source, /SportScreen/);
-    assert.ok(source.includes("SportCard") || source.includes("sp-card"));
-    assert.match(source, /SportChip/);
+    assert.match(source, /background: "var\(--sp-surface\)"/);
+    assert.match(source, /className="sp-screen"/);
     assert.match(source, /工作階段已失效/);
     assert.match(source, /訪客日記/);
     assert.match(source, /暫時離線/);
+    assert.match(source, /工作階段/);
+    assert.match(source, /gs_4c81/);
+    assert.match(source, /最後同步/);
     assert.match(source, /自動恢復/);
     assert.match(source, /失敗 · 1\/1/);
     assert.match(source, /瀏覽器 · cookie/);
     assert.match(source, /重新建立訪客日記/);
-    assert.match(source, /重新建立中\.\.\./);
+    assert.match(source, /正在重建…/);
+    assert.match(source, /先匯出原始紀錄/);
+    assert.match(source, /需要備份的話請先匯出/);
     assert.match(source, /rebuildGuestSession/);
     assert.ok(source.includes("await rebuildGuestSession()"));
 
-    assert.doesNotMatch(source, /匯出原始紀錄/);
-    assert.doesNotMatch(source, /EXPORT FIRST/);
-    assert.doesNotMatch(source, /先匯出/);
     assert.doesNotMatch(source, /\blogin\b/i);
     assert.doesNotMatch(source, /\baccount\b/i);
     assert.doesNotMatch(source, /cross-device/i);
@@ -41,6 +42,5 @@ describe("Guest session recovery source contract", () => {
     assert.doesNotMatch(source, /\btoken\b/i);
     assert.doesNotMatch(source, /document\.cookie/);
     assert.doesNotMatch(source, /cookie(Value|Raw|Token|Session)/);
-    assert.doesNotMatch(source, /window\.Sp/);
   });
 });

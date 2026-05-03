@@ -27,6 +27,12 @@ describe("DeviceService", () => {
     assert.equal(result.dailyTargets.protein, 180);
   });
 
+  it("creates a maintain device with default targets", async () => {
+    const result = await service.createDevice("maintain");
+    assert.equal(result.dailyTargets.calories, 2000);
+    assert.equal(result.dailyTargets.protein, 150);
+  });
+
   it("creates a device with full intake data", async () => {
     const result = await service.createDevice("fat_loss", {
       sex: "male",

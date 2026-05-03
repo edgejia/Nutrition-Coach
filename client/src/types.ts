@@ -213,7 +213,7 @@ export interface IntakeValidationIssue {
 }
 
 export interface IntakeData {
-  goal: "fat_loss" | "muscle_gain";
+  goal: "fat_loss" | "muscle_gain" | "maintain";
   sex: "male" | "female";
   age: number;
   heightCm: number;

@@ -127,7 +127,11 @@ export function MainLayout() {
       {activeScreen === "chat" && <ChatPanel />}
       {activeScreen === "history" && <HistoryScreen />}
       {activeScreen !== "chat" && <BottomTabBar />}
-      {secondaryScreen?.screen === "settings" && <GoalSettings onClose={closeSecondaryScreen} />}
+      {secondaryScreen?.screen === "settings" && (
+        <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
+          <GoalSettings onClose={closeSecondaryScreen} />
+        </div>
+      )}
       {secondaryScreen?.screen === "dayDetail" && <HistoryDayDetailScreen onBack={closeSecondaryScreen} />}
       {secondaryScreen?.screen === "mealEdit" && <MealEditScreen onBack={closeSecondaryScreen} />}
     </div>

@@ -69,7 +69,7 @@ function hasMeaningfulIntake(intake: IntakeContext): boolean {
 }
 
 export function buildSystemPrompt(goal: string, targets: DailyTargets, intake?: IntakeContext): string {
-  const goalLabel = goal === "fat_loss" ? "減脂" : "增肌";
+  const goalLabel = goal === "fat_loss" ? "減脂" : goal === "maintain" ? "維持" : "增肌";
   const sections: string[] = [
     `你是一位專業的 AI 營養教練。使用者的目標是「${goalLabel}」。`,
     `每日營養目標：

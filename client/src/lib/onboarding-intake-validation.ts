@@ -2,7 +2,7 @@ import type { IntakeData, IntakeValidationIssue, OnboardingField, OnboardingStep
 
 export type { IntakeValidationIssue, OnboardingField, OnboardingStep } from "../types.js";
 
-const VALID_GOALS = ["fat_loss", "muscle_gain"] as const;
+const VALID_GOALS = ["fat_loss", "muscle_gain", "maintain"] as const;
 const VALID_SEXES = ["male", "female"] as const;
 const VALID_ACTIVITY_LEVELS = ["sedentary", "light", "moderate", "active", "very_active"] as const;
 const VALID_TRAINING_FREQUENCIES = ["none", "1_2", "3_4", "5_plus"] as const;
@@ -41,7 +41,7 @@ function readOptionalTrimmedString(value: unknown) {
 
 function validateGoal(data: ValidationInput): IntakeValidationIssue[] {
   if (!VALID_GOALS.includes(data.goal as IntakeData["goal"])) {
-    return [createIssue("goal", "INVALID_GOAL", 1, "請選擇減脂或增肌目標")];
+    return [createIssue("goal", "INVALID_GOAL", 1, "請選擇減脂、增肌或維持目標")];
   }
 
   return [];

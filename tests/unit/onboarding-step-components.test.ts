@@ -115,7 +115,7 @@ describe("onboarding step components", () => {
     assert.doesNotMatch(html, /sk-/);
   });
 
-  it("keeps production onboarding free of demo-only globals and maintain goal", async () => {
+  it("keeps production onboarding on the copied sport demo source", async () => {
     const sourcePaths = [
       "client/src/components/onboarding/OnboardingStepper.tsx",
       "client/src/components/onboarding/StepGoal.tsx",
@@ -130,7 +130,10 @@ describe("onboarding step components", () => {
 
     assert.match(combinedSource, /fat_loss/);
     assert.match(combinedSource, /muscle_gain/);
-    assert.doesNotMatch(combinedSource, /maintain/);
+    assert.match(combinedSource, /maintain/);
+    assert.match(combinedSource, /ChatGPT - Gain/);
+    assert.match(combinedSource, /SpNumberWheel/);
+    assert.match(combinedSource, /sp-ob-actions/);
     assert.doesNotMatch(combinedSource, /window\.Sp/);
     assert.doesNotMatch(combinedSource, /setTimeout/);
     assert.doesNotMatch(combinedSource, /Sketch(?:Screen|Box|Button|Pill|SoftBox)/);

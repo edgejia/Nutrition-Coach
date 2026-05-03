@@ -16,7 +16,7 @@ interface Deps {
   targetGenerationService: ReturnType<typeof createTargetGenerationService>;
 }
 
-const VALID_GOALS = ["fat_loss", "muscle_gain"] as const;
+const VALID_GOALS = ["fat_loss", "muscle_gain", "maintain"] as const;
 const VALID_SEXES = ["male", "female"] as const;
 const VALID_ACTIVITY_LEVELS = ["sedentary", "light", "moderate", "active", "very_active"] as const;
 const VALID_TRAINING_FREQUENCIES = ["none", "1_2", "3_4", "5_plus"] as const;
