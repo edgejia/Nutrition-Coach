@@ -14,12 +14,17 @@ function escapedPattern(text: string) {
 }
 
 describe("Meal Edit source contract", () => {
-  it("renders the required meal edit structure and copy", () => {
+  it("renders the required sport meal edit structure and copy", () => {
     for (const expected of [
+      "SportScreen",
+      "SportCard",
+      "SportIconButton",
+      "SportChevronLeftIcon",
       "編輯餐點",
       "AI 估算 · 點任一欄位調整",
       "修改會建立新 revision",
-      "刪除",
+      "刪除這筆餐點？這會建立刪除 revision。",
+      "取消",
       "儲存",
       "PersistedAssetImage",
     ]) {
@@ -31,19 +36,29 @@ describe("Meal Edit source contract", () => {
     for (const expected of [
       "updateMeal",
       "deleteMeal",
-      "Delete",
       "confirm",
       "setDailySummary",
       "recordMealMutation",
-      "getMeals",
+      'getMeals({ refreshReason: "meal_mutation" })',
       "setMeals",
+      "recoverGuestSession",
     ]) {
       assert.match(source, escapedPattern(expected));
     }
   });
 
-  it("does not introduce out-of-scope item editing or image replacement", () => {
-    for (const rejected of ["新增食材", "更換照片", "OCR", "items.map"]) {
+  it("does not keep sketch primitives or introduce out-of-scope image replacement", () => {
+    for (const rejected of [
+      'from "./SketchPrimitives.js"',
+      "SketchScreen",
+      "SketchSoftBox",
+      "SketchDashedBox",
+      "SketchButton",
+      "更換照片",
+      "上傳照片",
+      "OCR",
+      "items.map",
+    ]) {
       assert.doesNotMatch(source, escapedPattern(rejected));
     }
   });
