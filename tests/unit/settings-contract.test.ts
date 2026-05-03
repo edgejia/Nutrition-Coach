@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import { normalizeTargetInputValue } from "../../client/src/lib/target-input.js";
 
 function sourcePath(relativePath: string) {
   return fileURLToPath(new URL(relativePath, import.meta.url));
@@ -46,6 +47,9 @@ describe("Settings source contract", () => {
     assert.ok(source.includes("setDailyTargets(updated)"));
     assert.match(source, /recoverGuestSession/);
     assert.match(source, /function createTargetForm/);
+    assert.match(source, /normalizeTargetInputValue/);
+    assert.match(source, /inputMode="numeric"/);
+    assert.match(source, /pattern="\[0-9\]\*"/);
     assert.match(source, /useEffect\(\(\) => \{/);
     assert.match(source, /if \(!editing\) \{/);
     assert.match(source, /setForm\(createTargetForm\(dailyTargets\)\)/);
@@ -63,5 +67,13 @@ describe("Settings source contract", () => {
     assert.doesNotMatch(source, /wipe/i);
     assert.doesNotMatch(source, /deviceId\}/);
     assert.doesNotMatch(source, /deviceId:/);
+  });
+
+  it("normalizes daily target numeric input without preserving prefix zeros", () => {
+    assert.equal(normalizeTargetInputValue("0300"), 300);
+    assert.equal(normalizeTargetInputValue("000"), 0);
+    assert.equal(normalizeTargetInputValue("001850"), 1850);
+    assert.equal(normalizeTargetInputValue("12kcal"), 12);
+    assert.equal(normalizeTargetInputValue(""), 0);
   });
 });

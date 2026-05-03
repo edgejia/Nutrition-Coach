@@ -224,26 +224,40 @@ function CalorieHero({
       <SportCard className="home-sport-hero" variant="glow">
         <div className="home-sport-hero-main">
           <div className="home-sport-calorie-copy">
-            <div className="home-sport-label">energy · today</div>
-            <div className="home-sport-calorie-line">
-              <span className="home-sport-calorie-number">{display.consumed.toLocaleString("en-US")}</span>
-              <span className="home-sport-calorie-target">/ {display.target.toLocaleString("en-US")}</span>
+            <div className="sp-label" style={{ marginBottom: 8 }}>
+              今日熱量 · kcal
             </div>
-            <div className="home-sport-unit">kcal</div>
-            <div className="home-sport-remaining">
-              {display.remaining.toLocaleString("en-US")} kcal · 還能吃
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <span className="sp-display" style={{ fontSize: 72, color: "var(--sp-ink)" }}>
+                {display.consumed.toLocaleString("en-US")}
+              </span>
+              <span className="sp-num" style={{ fontSize: 13, color: "var(--sp-ink-3)" }}>
+                / {display.target.toLocaleString("en-US")}
+              </span>
+            </div>
+            <div className="sp-label" style={{ marginTop: 4, fontSize: 9 }}>
+              kcal
+            </div>
+            <div style={{ marginTop: 14, display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
+              <span className="sp-num" style={{ fontSize: 13, color: "var(--sp-lime)" }}>
+                {display.remaining.toLocaleString("en-US")}
+              </span>
+              <span className="sp-zh" style={{ fontSize: 12, color: "var(--sp-ink-2)" }}>
+                kcal · 還能吃
+              </span>
             </div>
           </div>
           <SportRing
             className="home-sport-ring"
             value={display.ringValue}
+            accentTick
             label={
               <span className="home-sport-ring-label">
-                <strong>{display.percent}</strong>
-                <span>pct</span>
+                <strong className="sp-display">{display.percent}</strong>
+                <span className="sp-label">完成率</span>
               </span>
             }
-            size={112}
+            size={120}
             stroke={9}
           />
         </div>

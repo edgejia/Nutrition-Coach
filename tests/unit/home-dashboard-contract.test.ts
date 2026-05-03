@@ -147,7 +147,9 @@ describe("Home dashboard display contracts", () => {
     assert.match(homeSource, /SportRing/);
     assert.match(homeSource, /SportProgressBar/);
     assert.match(homeSource, /SportSettingsIcon/);
-    assert.match(homeSource, /energy · today/);
+    assert.match(homeSource, /今日熱量 · kcal/);
+    assert.match(homeSource, /完成率/);
+    assert.match(homeSource, /accentTick/);
     assert.match(homeSource, /getHomeGreeting/);
     assert.doesNotMatch(homeSource, /<h1>嗨，早安<\/h1>/);
     assert.match(homeSource, /今日紀錄/);

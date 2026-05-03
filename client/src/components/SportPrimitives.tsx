@@ -120,12 +120,14 @@ export function SportRing({
   stroke = 8,
   label,
   className,
+  accentTick = false,
 }: {
   value: number;
   size?: number;
   stroke?: number;
   label?: ReactNode;
   className?: string;
+  accentTick?: boolean;
 }) {
   const clamped = clampUnit(value);
   const center = size / 2;
@@ -156,6 +158,7 @@ export function SportRing({
           strokeWidth={stroke}
           transform={`rotate(-90 ${center} ${center})`}
         />
+        {accentTick ? <circle cx={center} cy={center - radius} fill="var(--sp-ink-3)" r={3} /> : null}
       </svg>
       {label ? <span className="absolute">{label}</span> : null}
     </div>

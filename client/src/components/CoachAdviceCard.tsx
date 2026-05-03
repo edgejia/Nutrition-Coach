@@ -177,7 +177,7 @@ export function CoachAdviceCard({
       <section className="sp-coach-cta" aria-label="Coach live">
         <div className="sp-coach-cta-label">
           <SportBoltIcon size={14} stroke={2} />
-          <span>coach · live</span>
+          <span>教練建議 · 即時</span>
         </div>
         <p className="sp-coach-cta-headline">
           {presentation.message}
@@ -191,7 +191,7 @@ export function CoachAdviceCard({
     <section className="sp-coach-cta" aria-label="Coach live">
       <div className="sp-coach-cta-label">
         <SportBoltIcon size={14} stroke={2} />
-        <span>coach · live</span>
+        <span>教練建議 · 即時</span>
       </div>
       {advice && (
         <>

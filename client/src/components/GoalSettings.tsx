@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store.js";
 import { updateGoals } from "../api.js";
+import { normalizeTargetInputValue } from "../lib/target-input.js";
 import { SportBoltIcon, SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportIconButton, SportScreen } from "./SportPrimitives.js";
 
@@ -194,9 +195,11 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
                       }}
                     >
                       <input
-                        type="number"
-                        value={form[key]}
-                        onChange={(e) => setForm({ ...form, [key]: Number(e.target.value) })}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={String(form[key])}
+                        onChange={(e) => setForm({ ...form, [key]: normalizeTargetInputValue(e.target.value) })}
                         style={{
                           flex: 1,
                           minWidth: 0,

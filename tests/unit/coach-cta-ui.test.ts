@@ -112,7 +112,7 @@ describe("CoachCTAControls", () => {
       }),
     );
 
-    assert.match(componentSource, /coach · live/);
+    assert.match(componentSource, /教練建議 · 即時/);
     assert.match(loadingCardHtml, /sp-coach-cta/);
     assert.match(controlsHtml, /補蛋白質/);
     assert.match(controlsHtml, /sp-coach-cta-intent/);
@@ -135,6 +135,10 @@ describe("CoachCTAControls", () => {
     assert.doesNotMatch(componentSource, /openSecondaryScreen\("mealEdit"/);
     assert.doesNotMatch(componentSource, /ChatEntryBar/);
     assert.match(cssSource, /\.sp-coach-cta\s*\{[\s\S]*display:\s*flex;[\s\S]*flex:\s*0 0 auto;[\s\S]*flex-direction:\s*column/);
+    assert.match(cssSource, /\.sp-coach-cta\s*\{[\s\S]*background:\s*var\(--sp-surface\)/);
+    assert.match(cssSource, /\.sp-coach-cta\s*\{[\s\S]*border:\s*1px solid var\(--sp-lime-line\)/);
+    assert.match(cssSource, /\.sp-coach-cta-label\s*\{[\s\S]*color:\s*var\(--sp-lime\)/);
+    assert.doesNotMatch(cssSource, /\.sp-coach-cta\s*\{[^}]*background:\s*var\(--sp-lime\)/);
     assert.match(cssSource, /\.sp-coach-cta-option:disabled[\s\S]*opacity:\s*0\.4/);
 
     for (const selector of [
