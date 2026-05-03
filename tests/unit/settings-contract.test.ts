@@ -16,22 +16,29 @@ describe("Settings source contract", () => {
     const source = await readSource("../../client/src/components/GoalSettings.tsx");
 
     assert.match(source, /SportScreen/);
-    assert.match(source, /SportCard/);
-    assert.match(source, /SportChip/);
     assert.match(source, /SportIconButton/);
+    assert.match(source, /SportChevronRightIcon/);
+    assert.match(source, /className="absolute inset-0 z-50 flex flex-col bg-\[var\(--sp-bg\)\]"/);
+    assert.match(source, /className="sp-card"/);
+    assert.match(source, /className="sp-chip sp-chip-good"/);
     assert.match(source, /sp-/);
 
     assert.match(source, /偏好與目標/);
     assert.match(source, /設定/);
     assert.match(source, /訪客模式/);
     assert.match(source, /使用中/);
+    assert.match(source, /訪客 · 瀏覽器保存/);
     assert.match(source, /每日目標/);
+    assert.match(source, /偏好設定/);
     assert.match(source, /偏好/);
+    assert.match(source, /Asia\/Taipei/);
+    assert.match(source, /繁體中文/);
+    assert.match(source, /資料管理/);
     assert.match(source, /資料/);
     assert.match(source, /尚未開放/);
     assert.match(source, /營養教練/);
     assert.match(source, /sport/);
-    assert.match(source, /儲存中\.\.\./);
+    assert.match(source, /儲存中…/);
     assert.match(source, /儲存/);
     assert.match(source, /取消/);
 
