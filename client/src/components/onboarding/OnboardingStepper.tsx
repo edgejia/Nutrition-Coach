@@ -262,7 +262,17 @@ function SpOptionalField({
   );
 }
 
-function SpStepGoal({ value, onSelect, onBack }: { value?: string; onSelect?: (goal: IntakeData["goal"]) => void; onBack?: (() => void) | null }) {
+function SpStepGoal({
+  value,
+  issues,
+  onSelect,
+  onBack,
+}: {
+  value?: string;
+  issues?: StepIssue[];
+  onSelect?: (goal: IntakeData["goal"]) => void;
+  onBack?: (() => void) | null;
+}) {
   const choices = [
     { key: "fat_loss", zh: "減脂", desc: "降低體脂，維持肌肉量", accent: "var(--sp-lime)" },
     { key: "muscle_gain", zh: "增肌", desc: "熱量盈餘，蛋白優先", accent: "var(--sp-cyan)" },
@@ -281,6 +291,7 @@ function SpStepGoal({ value, onSelect, onBack }: { value?: string; onSelect?: (g
             選一個主要方向，教練會以這個為基準規劃熱量與蛋白配比。之後可以調整。
           </p>
         </div>
+        <SpValidationIssues issues={issues} />
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
           {choices.map((c) => {
             const on = value === c.key;
@@ -872,7 +883,7 @@ export function OnboardingStepperPresentation({
   const issuesForStep = (stepNumber: OnboardingStep): StepIssue[] =>
     validationIssues.filter((issue) => issue.step === stepNumber);
 
-  if (step === 1) return <SpStepGoal value={data.goal} onSelect={onGoalSelect} onBack={null} />;
+  if (step === 1) return <SpStepGoal value={data.goal} issues={issuesForStep(1)} onSelect={onGoalSelect} onBack={null} />;
   if (step === 2) return (
     <SpStepGoalClarification
       goal={data.goal}
