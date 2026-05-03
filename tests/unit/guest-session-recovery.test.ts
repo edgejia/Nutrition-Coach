@@ -21,7 +21,7 @@ describe("Guest session recovery source contract", () => {
     assert.match(source, /訪客日記/);
     assert.match(source, /暫時離線/);
     assert.match(source, /工作階段/);
-    assert.match(source, /gs_4c81/);
+    assert.match(source, /需重新建立/);
     assert.match(source, /最後同步/);
     assert.match(source, /自動恢復/);
     assert.match(source, /失敗 · 1\/1/);
@@ -42,6 +42,7 @@ describe("Guest session recovery source contract", () => {
     assert.doesNotMatch(source, /\bdeviceId\b/);
     assert.doesNotMatch(source, /\bsessionId\b/);
     assert.doesNotMatch(source, /\btoken\b/i);
+    assert.doesNotMatch(source, /\bgs_[A-Za-z0-9]/);
     assert.doesNotMatch(source, /document\.cookie/);
     assert.doesNotMatch(source, /cookie(Value|Raw|Token|Session)/);
   });

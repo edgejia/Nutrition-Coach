@@ -65,7 +65,7 @@ export function GuestSessionRecoveryGate() {
           display: "flex", flexDirection: "column", gap: 6,
         }}>
           {[
-            { k: "工作階段", v: "gs_4c81…3a02" },
+            { k: "工作階段", v: "需重新建立" },
             { k: "最後同步", v: "2026-04-30 09:14" },
             { k: "自動恢復", v: "失敗 · 1/1" },
             { k: "保存位置", v: "瀏覽器 · cookie" },

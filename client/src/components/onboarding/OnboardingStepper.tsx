@@ -15,6 +15,7 @@ type StepState = OnboardingStep | 6;
 type BodyForm = { sex: IntakeData["sex"]; age: string; heightCm: string; weightKg: string };
 type LifestyleForm = Pick<IntakeData, "activityLevel" | "trainingFrequency"> & Pick<Partial<IntakeData>, "allergies">;
 type AdvancedForm = { bodyFatPercent: string; tdee: string; advancedNotes: string };
+type StepIssue = Pick<IntakeValidationIssue, "message" | "field">;
 
 interface OnboardingStepperPresentationProps {
   step: StepState;
@@ -156,6 +157,30 @@ function SpObHeader({ onBack, right }: { onBack?: (() => void) | null; right?: R
   );
 }
 
+function SpValidationIssues({ issues }: { issues?: StepIssue[] }) {
+  if (!issues?.length) return null;
+
+  return (
+    <section
+      className="sp-card-flat"
+      style={{
+        border: "1px solid rgba(255,77,77,.34)",
+        background: "rgba(255,77,77,.08)",
+        color: "#ffb3b3",
+      }}
+    >
+      <div className="sp-label" style={{ color: "#ffb3b3", marginBottom: 8 }}>需要修正</div>
+      <div style={{ display: "grid", gap: 6 }}>
+        {issues.map((issue) => (
+          <p key={`${issue.field}-${issue.message}`} className="sp-zh" style={{ margin: 0, fontSize: 12, lineHeight: 1.5 }}>
+            {issue.message}
+          </p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function SpOptionalField({
   title,
   sub,
@@ -294,12 +319,14 @@ function SpStepGoal({ value, onSelect, onBack }: { value?: string; onSelect?: (g
 function SpStepGoalClarification({
   goal,
   value,
+  issues,
   onChange,
   onNext,
   onBack,
 }: {
   goal?: string;
   value?: string;
+  issues?: StepIssue[];
   onChange?: (value: string) => void;
   onNext?: () => void;
   onBack?: () => void;
@@ -325,6 +352,8 @@ function SpStepGoalClarification({
             你選了「{goalLabel}」。如果有特別在意的事，先告訴教練；沒有可以直接跳過。
           </p>
         </div>
+
+        <SpValidationIssues issues={issues} />
 
         <section className="sp-card" style={{ padding: 14 }}>
           <textarea
@@ -368,11 +397,13 @@ function SpStepGoalClarification({
 
 function SpStepBody({
   value,
+  issues,
   onChange,
   onNext,
   onBack,
 }: {
   value?: BodyForm;
+  issues?: StepIssue[];
   onChange?: (value: BodyForm) => void;
   onNext?: () => void;
   onBack?: () => void;
@@ -395,6 +426,8 @@ function SpStepBody({
             這些資料只用來算每日目標。
           </p>
         </div>
+
+        <SpValidationIssues issues={issues} />
 
         <div>
           <div className="sp-label" style={{ marginBottom: 8 }}>性別</div>
@@ -433,11 +466,13 @@ function SpStepBody({
 
 function SpStepLifestyle({
   value,
+  issues,
   onChange,
   onNext,
   onBack,
 }: {
   value?: LifestyleForm;
+  issues?: StepIssue[];
   onChange?: (value: LifestyleForm) => void;
   onNext?: () => void;
   onBack?: () => void;
@@ -474,6 +509,8 @@ function SpStepLifestyle({
             日常活動量和訓練頻率會影響每日消耗量估算。
           </p>
         </div>
+
+        <SpValidationIssues issues={issues} />
 
         <section>
           <div className="sp-label" style={{ marginBottom: 8 }}>日常活動量</div>
@@ -566,12 +603,14 @@ function SpStepLifestyle({
 
 function SpStepAdvancedMetrics({
   value,
+  issues,
   onChange,
   onNext,
   onSkip,
   onBack,
 }: {
   value?: AdvancedForm;
+  issues?: StepIssue[];
   onChange?: (value: AdvancedForm) => void;
   onNext?: () => void;
   onSkip?: () => void;
@@ -600,6 +639,8 @@ function SpStepAdvancedMetrics({
             如果你有體脂率或 TDEE，教練可以算得更精準。沒有資料也可以跳過。
           </p>
         </div>
+
+        <SpValidationIssues issues={issues} />
 
         <SpOptionalField
           title="體脂率"
@@ -775,6 +816,7 @@ function SpStepHandoff({
 export function OnboardingStepperPresentation({
   step,
   data,
+  validationIssues = [],
   loading,
   transportError,
   result,
@@ -827,11 +869,15 @@ export function OnboardingStepperPresentation({
     });
   }, [data]);
 
+  const issuesForStep = (stepNumber: OnboardingStep): StepIssue[] =>
+    validationIssues.filter((issue) => issue.step === stepNumber);
+
   if (step === 1) return <SpStepGoal value={data.goal} onSelect={onGoalSelect} onBack={null} />;
   if (step === 2) return (
     <SpStepGoalClarification
       goal={data.goal}
       value={goalClarification}
+      issues={issuesForStep(2)}
       onChange={(value) => {
         setGoalClarification(value);
         onFieldEdit("goalClarification");
@@ -843,11 +889,12 @@ export function OnboardingStepperPresentation({
   if (step === 3) return (
     <SpStepBody
       value={bodyData}
+      issues={issuesForStep(3)}
       onChange={(value) => {
+        if (value.age !== bodyData.age) onFieldEdit("age");
+        if (value.heightCm !== bodyData.heightCm) onFieldEdit("heightCm");
+        if (value.weightKg !== bodyData.weightKg) onFieldEdit("weightKg");
         setBodyData(value);
-        onFieldEdit("age");
-        onFieldEdit("heightCm");
-        onFieldEdit("weightKg");
       }}
       onNext={() => onBodyDataNext({
         sex: bodyData.sex,
@@ -861,10 +908,11 @@ export function OnboardingStepperPresentation({
   if (step === 4) return (
     <SpStepLifestyle
       value={lifestyle}
+      issues={issuesForStep(4)}
       onChange={(value) => {
+        if (value.activityLevel !== lifestyle.activityLevel) onFieldEdit("activityLevel");
+        if (value.trainingFrequency !== lifestyle.trainingFrequency) onFieldEdit("trainingFrequency");
         setLifestyle(value);
-        onFieldEdit("activityLevel");
-        onFieldEdit("trainingFrequency");
       }}
       onNext={() => onLifestyleNext(lifestyle)}
       onBack={() => onBack(3)}
@@ -873,11 +921,12 @@ export function OnboardingStepperPresentation({
   if (step === 5) return (
     <SpStepAdvancedMetrics
       value={advanced}
+      issues={issuesForStep(5)}
       onChange={(value) => {
+        if (value.bodyFatPercent !== advanced.bodyFatPercent) onFieldEdit("bodyFatPercent");
+        if (value.tdee !== advanced.tdee) onFieldEdit("tdee");
+        if (value.advancedNotes !== advanced.advancedNotes) onFieldEdit("advancedNotes");
         setAdvanced(value);
-        onFieldEdit("bodyFatPercent");
-        onFieldEdit("tdee");
-        onFieldEdit("advancedNotes");
       }}
       onNext={() => onAdvancedMetricsNext({
         bodyFatPercent: advanced.bodyFatPercent === "" ? undefined : Number(advanced.bodyFatPercent),
@@ -978,6 +1027,7 @@ export function OnboardingStepper() {
     <OnboardingStepperPresentation
       step={step}
       data={data}
+      validationIssues={validationIssues}
       loading={loading}
       transportError={transportError}
       result={result}
