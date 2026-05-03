@@ -31,7 +31,7 @@ describe("Guest session recovery source contract", () => {
     assert.match(source, /先匯出原始紀錄/);
     assert.match(source, /disabled aria-disabled="true"/);
     assert.match(source, /cursor: "not-allowed"/);
-    assert.match(source, /需要備份的話請先匯出/);
+    assert.match(source, /目前不支援從這個畫面匯出原始紀錄/);
     assert.match(source, /rebuildGuestSession/);
     assert.ok(source.includes("await rebuildGuestSession()"));
 

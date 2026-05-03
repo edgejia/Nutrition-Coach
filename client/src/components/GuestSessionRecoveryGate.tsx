@@ -128,7 +128,7 @@ export function GuestSessionRecoveryGate() {
           fontSize: 11, lineHeight: 1.6,
           color: "var(--sp-ink-3)",
         }}>
-          重新建立後，舊紀錄不會自動帶過來。需要備份的話請先匯出。
+          重新建立後，舊紀錄不會自動帶過來。目前不支援從這個畫面匯出原始紀錄。
         </p>
       </div>
     </div>
