@@ -153,6 +153,38 @@ textarea {
 .sp-ob-actions .sp-btn {
   min-height: 44px;
 }
+.sp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border: 1px solid var(--sp-line-strong);
+  border-radius: var(--sp-r-pill);
+  background: var(--sp-surface-2);
+  color: var(--sp-ink);
+  font-family: var(--sp-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background .15s, transform .08s;
+}
+.sp-btn:active {
+  transform: translateY(1px);
+}
+.sp-btn-primary {
+  border-color: var(--sp-lime);
+  background: var(--sp-lime);
+  color: var(--sp-bg);
+}
+.sp-btn-ghost {
+  border-color: var(--sp-line);
+  background: transparent;
+  color: var(--sp-ink-2);
+}
 .sp-ob-brand {
   display: inline-flex;
   align-items: center;
@@ -281,6 +313,23 @@ textarea {
 }
 .sp-optional-body {
   margin-top: 10px;
+}
+
+.sp-ticks {
+  display: flex;
+  gap: 2px;
+}
+.sp-ticks > i {
+  flex: 1;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--sp-surface-3);
+}
+.sp-ticks > i.on {
+  background: var(--sp-lime);
+}
+.sp-ticks > i.over {
+  background: var(--sp-red);
 }
 
 .sp-card {
