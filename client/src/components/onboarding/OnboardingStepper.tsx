@@ -262,12 +262,10 @@ function SpStepGoal({
   value,
   issues,
   onSelect,
-  onBack,
 }: {
   value?: string;
   issues?: StepIssue[];
   onSelect?: (goal: IntakeData["goal"]) => void;
-  onBack?: (() => void) | null;
 }) {
   const choices = [
     { key: "fat_loss", zh: "減脂", desc: "降低體脂，維持肌肉量", accent: "var(--sp-lime)" },
@@ -879,7 +877,7 @@ export function OnboardingStepperPresentation({
   const issuesForStep = (stepNumber: OnboardingStep): StepIssue[] =>
     validationIssues.filter((issue) => issue.step === stepNumber);
 
-  if (step === 1) return <SpStepGoal value={data.goal} issues={issuesForStep(1)} onSelect={onGoalSelect} onBack={null} />;
+  if (step === 1) return <SpStepGoal value={data.goal} issues={issuesForStep(1)} onSelect={onGoalSelect} />;
   if (step === 2) return (
     <SpStepGoalClarification
       goal={data.goal}
