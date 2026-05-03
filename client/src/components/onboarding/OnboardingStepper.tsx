@@ -7,7 +7,7 @@ import {
   getStepAdvanceOutcome,
   runSubmitAttempt,
 } from "../../lib/onboarding-stepper-flow.js";
-import { SportBoltIcon, SportChevronLeftIcon, SportFlameIcon } from "../SportIcons.js";
+import { SportBoltIcon, SportFlameIcon } from "../SportIcons.js";
 import type { IntakeData, IntakeResult, IntakeValidationIssue, OnboardingField, OnboardingStep } from "../../types.js";
 
 type PartialIntake = Partial<IntakeData>;
@@ -140,7 +140,7 @@ function SpNumberWheel({
   );
 }
 
-function SpObHeader({ right }: { onBack?: (() => void) | null; right?: React.ReactNode }) {
+function SpObHeader({ right }: { right?: React.ReactNode }) {
   return (
     <header className="sp-header" style={{ paddingBottom: 4 }}>
       <div style={{ width: 38 }} />
@@ -276,7 +276,7 @@ function SpStepGoal({
   ];
   return (
     <div className="sp-screen">
-      <SpObHeader onBack={onBack} />
+      <SpObHeader />
       <SpStepperBar step={1} />
       <main className="sp-scroll" style={{ paddingTop: 18 }}>
         <div style={{ padding: "0 4px 4px" }}>
@@ -347,7 +347,7 @@ function SpStepGoalClarification({
   ];
   return (
     <div className="sp-screen">
-      <SpObHeader onBack={onBack} />
+      <SpObHeader />
       <SpStepperBar step={2} />
       <main className="sp-scroll sp-scroll-actions" style={{ paddingTop: 18 }}>
         <div style={{ padding: "0 4px" }}>
@@ -424,7 +424,7 @@ function SpStepBody({
   const set = (k: keyof typeof v, val: string) => onChange?.({ ...v, [k]: val });
   return (
     <div className="sp-screen">
-      <SpObHeader onBack={onBack} />
+      <SpObHeader />
       <SpStepperBar step={3} />
       <main className="sp-scroll sp-scroll-actions" style={{ paddingTop: 18 }}>
         <div style={{ padding: "0 4px" }}>
@@ -505,7 +505,7 @@ function SpStepLifestyle({
   ];
   return (
     <div className="sp-screen">
-      <SpObHeader onBack={onBack} />
+      <SpObHeader />
       <SpStepperBar step={4} />
       <main className="sp-scroll sp-scroll-actions" style={{ paddingTop: 18 }}>
         <div style={{ padding: "0 4px" }}>
@@ -634,7 +634,7 @@ function SpStepAdvancedMetrics({
   const hasData = bfEnabled || tdeeEnabled || Boolean(v.advancedNotes?.trim());
   return (
     <div className="sp-screen">
-      <SpObHeader onBack={onBack} />
+      <SpObHeader />
       <SpStepperBar step={5} />
       <main className="sp-scroll sp-scroll-actions" style={{ paddingTop: 18 }}>
         <div style={{ padding: "0 4px" }}>
@@ -745,7 +745,7 @@ function SpStepHandoff({
   const targets = result?.dailyTargets ?? { calories: 2150, protein: 145, carbs: 240, fat: 65 };
   return (
     <div className="sp-screen">
-      <SpObHeader onBack={onBack} />
+      <SpObHeader />
       <SpStepperBar step={6} />
       <main className="sp-scroll sp-scroll-actions" style={{ paddingTop: 18 }}>
         <div style={{ padding: "0 4px" }}>
