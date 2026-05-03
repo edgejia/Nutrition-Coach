@@ -4,7 +4,8 @@ import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { DailySummary, MealEditPayload } from "../types.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SecondaryHeader, SketchButton, SketchDashedBox, SketchScreen, SketchSoftBox } from "./SketchPrimitives.js";
+import { SportCameraIcon, SportChevronLeftIcon } from "./SportIcons.js";
+import { SportCard, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
 type DraftState = {
   foodName: string;
@@ -139,146 +140,138 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
-  const backLabel = origin === "chat" ? "‹ 對話" : "‹ 返回";
+  const backLabel = origin === "chat" ? "返回對話" : origin === "history" ? "返回歷史" : "返回";
 
   if (!payload || !draft) {
     return (
-      <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sk-paper)]">
-        <SketchScreen>
-          <SecondaryHeader title="編輯餐點" backLabel="‹ 返回" onBack={onBack} />
-          <main className="screen-scroll-safe p-5">
-            <SketchDashedBox className="p-4">
-              <p className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-                找不到要編輯的餐點。
-              </p>
-            </SketchDashedBox>
+      <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
+        <SportScreen className="sp-meal-edit-screen">
+          <header className="sp-meal-edit-header">
+            <SportIconButton aria-label="返回" className="sp-meal-edit-back" onClick={onBack}>
+              <SportChevronLeftIcon size={18} stroke={2} />
+            </SportIconButton>
+            <div className="sp-meal-edit-title">
+              <h1>編輯餐點</h1>
+              <div>REV · MEAL</div>
+            </div>
+            <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
+          </header>
+          <main className="screen-scroll-safe sp-meal-edit-scroll">
+            <SportCard className="sp-meal-edit-empty" variant="flat">
+              找不到要編輯的餐點。
+            </SportCard>
           </main>
-        </SketchScreen>
+        </SportScreen>
       </div>
     );
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sk-paper)]">
-      <SketchScreen className="flex min-h-0 flex-1 flex-col">
-        <SecondaryHeader title="編輯餐點" backLabel={backLabel} onBack={onBack} />
-        <main className="screen-scroll-safe space-y-4 px-5 pb-32 pt-2">
-          <section
-            className="grid h-44 place-items-center overflow-hidden rounded-xl"
-            style={{
-              background: "var(--sk-paper-soft)",
-              border: "2px solid var(--sk-ink)",
-              boxShadow: "2px 3px 0 var(--sk-ink)",
-            }}
-          >
+    <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
+      <SportScreen className="sp-meal-edit-screen">
+        <header className="sp-meal-edit-header">
+          <SportIconButton aria-label={backLabel} className="sp-meal-edit-back" onClick={onBack}>
+            <SportChevronLeftIcon size={18} stroke={2} />
+          </SportIconButton>
+          <div className="sp-meal-edit-title">
+            <h1>編輯餐點</h1>
+            <div>REV · AI ESTIMATE</div>
+          </div>
+          <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
+        </header>
+
+        <main className="screen-scroll-safe sp-meal-edit-scroll">
+          <section className="sp-meal-edit-image-frame">
             {payload.imageUrl ? (
               <PersistedAssetImage
                 src={payload.imageUrl}
                 alt={`${payload.foodName} 照片`}
-                imgClassName="h-full w-full object-cover"
-                fallbackClassName="grid h-full w-full place-items-center text-xs"
+                imgClassName="sp-meal-edit-image"
+                fallbackClassName="sp-meal-edit-image-fallback"
                 fallbackStyle={{
-                  background: "var(--sk-paper-warm)",
-                  color: "var(--sk-ink-soft)",
+                  background: "var(--sp-surface-2)",
+                  color: "var(--sp-ink-2)",
                 }}
               />
             ) : (
-              <div className="sk-body text-sm" style={{ color: "var(--sk-ink-soft)" }}>
-                meal photo
+              <div className="sp-meal-edit-image-placeholder" aria-hidden="true">
+                <SportCameraIcon size={28} stroke={1.6} />
+                <span>meal photo</span>
               </div>
             )}
           </section>
 
-          <SketchSoftBox className="space-y-4 p-4">
-            <div>
-              <p className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
+          <SportCard className="sp-meal-edit-form">
+            <div className="sp-meal-edit-form-head">
+              <p>
                 AI 估算 · 點任一欄位調整
               </p>
-              <label className="mt-3 block">
-                <span className="mb-1 block text-xs font-semibold" style={{ color: "var(--sk-ink-soft)" }}>
-                  餐點名稱
-                </span>
-                <input
-                  value={draft.foodName}
-                  disabled={pending}
-                  onChange={(event) => setDraft({ ...draft, foodName: event.target.value })}
-                  className="w-full rounded-lg px-3 py-3 text-base focus:outline-none"
-                  style={{
-                    background: "var(--sk-paper)",
-                    border: "1.5px solid var(--sk-ink)",
-                    color: "var(--sk-ink)",
-                    fontFamily: "var(--sk-font-body)",
-                  }}
-                />
-              </label>
             </div>
 
-            <div className="space-y-2">
+            <label className="sp-meal-edit-field sp-meal-edit-name-field">
+              <span>
+                餐點名稱
+              </span>
+              <input
+                value={draft.foodName}
+                disabled={pending}
+                onChange={(event) => setDraft({ ...draft, foodName: event.target.value })}
+              />
+            </label>
+
+            <div className="sp-meal-edit-macro-head">
+              <span>營養素</span>
+              <span>會建立新 revision</span>
+            </div>
+
+            <div className="sp-meal-edit-macro-grid">
               {NUTRITION_FIELDS.map((field) => (
-                <label
-                  key={field.key}
-                  className="grid min-h-14 grid-cols-[72px_minmax(0,1fr)_40px] items-center gap-2 rounded-lg px-3 py-2"
-                  style={{
-                    background: "var(--sk-paper)",
-                    border: "1.5px solid var(--sk-ink)",
-                  }}
-                >
-                  <span className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
+                <label key={field.key} className="sp-meal-edit-field sp-meal-edit-macro-field">
+                  <span>
                     {field.label}
                   </span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    inputMode="decimal"
-                    value={draft[field.key]}
-                    disabled={pending}
-                    onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })}
-                    className="min-w-0 bg-transparent text-right text-base font-semibold focus:outline-none"
-                    style={{
-                      color: "var(--sk-ink)",
-                      fontFamily: "var(--sk-font-mono)",
-                    }}
-                  />
-                  <span className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
-                    {field.unit}
-                  </span>
+                  <div>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="decimal"
+                      value={draft[field.key]}
+                      disabled={pending}
+                      onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })}
+                    />
+                    <small>{field.unit}</small>
+                  </div>
                 </label>
               ))}
             </div>
 
-            <p className="sk-body text-xs" style={{ color: "var(--sk-ink-soft)" }}>
+            <div className="sp-meal-edit-delete-row">
+              <button type="button" onClick={handleDelete} disabled={pending}>
+                {pending ? "處理中..." : "刪除"}
+              </button>
+            </div>
+
+            <p className="sp-meal-edit-note">
               修改會建立新 revision，保留原始紀錄。
             </p>
             {error ? (
-              <div className="sk-box-dashed px-3 py-2">
-                <p className="sk-body text-xs" style={{ color: "var(--sk-accent)" }}>
-                  {error}
-                </p>
+              <div className="sp-meal-edit-error" role="alert">
+                {error}
               </div>
             ) : null}
-          </SketchSoftBox>
+          </SportCard>
         </main>
 
-        <footer
-          className="absolute inset-x-0 bottom-0 z-10 flex gap-3 px-5 pb-[calc(1rem+var(--app-bottom-occlusion,0px))] pt-3"
-          style={{
-            background: "linear-gradient(180deg, rgba(250,246,235,0) 0%, var(--sk-paper) 24%)",
-          }}
-        >
-          <SketchButton
-            aria-label="Delete meal"
-            onClick={handleDelete}
-            disabled={pending}
-            className="flex-1 py-3 text-sm"
-          >
-            {pending ? "處理中..." : "刪除"}
-          </SketchButton>
-          <SketchButton onClick={handleSave} disabled={pending} variant="accent" className="flex-1 py-3 text-sm">
+        <footer className="sp-meal-edit-footer">
+          <button type="button" className="sp-meal-edit-cancel" onClick={onBack} disabled={pending}>
+            取消
+          </button>
+          <button type="button" className="sp-meal-edit-save" onClick={handleSave} disabled={pending}>
             {pending ? "儲存中..." : "儲存"}
-          </SketchButton>
+          </button>
         </footer>
-      </SketchScreen>
+      </SportScreen>
     </div>
   );
 }

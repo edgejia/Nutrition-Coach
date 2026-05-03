@@ -1766,6 +1766,334 @@ textarea {
   font-weight: 800;
 }
 
+.sp-meal-edit-screen {
+  min-width: 0;
+  background: var(--sp-bg);
+}
+
+.sp-meal-edit-header {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--sp-line);
+  padding: 20px 18px 14px;
+}
+
+.sp-meal-edit-back {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+}
+
+.sp-meal-edit-title {
+  min-width: 0;
+  text-align: center;
+}
+
+.sp-meal-edit-title h1 {
+  margin: 0;
+  color: var(--sp-ink);
+  font-family: var(--sp-font-zh);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.sp-meal-edit-title div,
+.sp-meal-edit-form-head p,
+.sp-meal-edit-macro-head,
+.sp-meal-edit-field > span,
+.sp-meal-edit-field small,
+.sp-meal-edit-note,
+.sp-meal-edit-image-placeholder span {
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-mono);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.sp-meal-edit-title div,
+.sp-meal-edit-macro-head,
+.sp-meal-edit-field > span,
+.sp-meal-edit-field small,
+.sp-meal-edit-image-placeholder span {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sp-meal-edit-header-spacer {
+  width: 38px;
+  height: 38px;
+}
+
+.sp-meal-edit-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 14px 18px calc(128px + var(--app-bottom-occlusion, 0px) + env(safe-area-inset-bottom));
+}
+
+.sp-meal-edit-image-frame {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 10;
+  min-height: 0;
+  max-height: 236px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px dashed var(--sp-line-strong);
+  border-radius: var(--sp-r-lg);
+  background: var(--sp-surface);
+  color: var(--sp-ink-3);
+}
+
+.sp-meal-edit-image-frame::before {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.04) 1px, transparent 0);
+  background-size: 12px 12px;
+  content: "";
+}
+
+.sp-meal-edit-image,
+.sp-meal-edit-image-fallback {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  object-fit: cover;
+}
+
+.sp-meal-edit-image-fallback {
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sp-meal-edit-image-placeholder {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--sp-ink-3);
+}
+
+.sp-meal-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sp-meal-edit-form-head p,
+.sp-meal-edit-note {
+  margin: 0;
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sp-meal-edit-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sp-meal-edit-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sp-ink);
+  outline: 0;
+}
+
+.sp-meal-edit-field input:disabled {
+  color: var(--sp-ink-3);
+  cursor: not-allowed;
+}
+
+.sp-meal-edit-field:focus-within {
+  outline: 2px solid var(--sp-lime);
+  outline-offset: 2px;
+}
+
+.sp-meal-edit-name-field,
+.sp-meal-edit-macro-field {
+  border: 1px solid var(--sp-line);
+  border-radius: 10px;
+  background: var(--sp-surface-2);
+  padding: 10px 12px;
+}
+
+.sp-meal-edit-name-field input {
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.sp-meal-edit-macro-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sp-meal-edit-macro-head span:last-child {
+  overflow: hidden;
+  color: var(--sp-ink-3);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-meal-edit-macro-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sp-meal-edit-macro-field div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sp-meal-edit-macro-field input {
+  flex: 1 1 auto;
+  font-family: var(--sp-font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.sp-meal-edit-macro-field small {
+  flex: 0 0 auto;
+  color: var(--sp-ink-3);
+}
+
+.sp-meal-edit-delete-row {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.sp-meal-edit-delete-row button {
+  min-height: 38px;
+  border: 1px solid rgba(255, 77, 77, 0.32);
+  border-radius: var(--sp-r-pill);
+  background: rgba(255, 77, 77, 0.10);
+  color: #ffb3b3;
+  padding: 0 14px;
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sp-meal-edit-delete-row button:disabled {
+  color: var(--sp-ink-3);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.sp-meal-edit-delete-row button:focus-visible {
+  outline: 2px solid var(--sp-lime);
+  outline-offset: 2px;
+}
+
+.sp-meal-edit-error {
+  border: 1px solid rgba(255, 77, 77, 0.32);
+  border-radius: var(--sp-r-sm);
+  background: rgba(255, 77, 77, 0.10);
+  color: #ffb3b3;
+  padding: 10px 12px;
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sp-meal-edit-empty {
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sp-meal-edit-footer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 10px;
+  padding: 14px 18px max(20px, calc(env(safe-area-inset-bottom) + var(--app-bottom-occlusion, 0px)));
+  border-top: 1px solid var(--sp-line);
+  background: linear-gradient(to top, var(--sp-bg) 68%, rgba(10, 11, 13, 0));
+}
+
+.sp-meal-edit-footer button {
+  min-width: 0;
+  min-height: 46px;
+  border-radius: var(--sp-r-pill);
+  padding: 0 14px;
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.sp-meal-edit-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.sp-meal-edit-footer button:focus-visible {
+  outline: 2px solid var(--sp-lime);
+  outline-offset: 2px;
+}
+
+.sp-meal-edit-cancel {
+  border: 1px solid var(--sp-line);
+  background: var(--sp-surface-2);
+  color: var(--sp-ink);
+}
+
+.sp-meal-edit-save {
+  border: 1px solid var(--sp-lime);
+  background: var(--sp-lime);
+  color: #0a0b0d;
+}
+
+@media (max-width: 360px) {
+  .sp-meal-edit-header,
+  .sp-meal-edit-scroll,
+  .sp-meal-edit-footer {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .sp-meal-edit-macro-grid {
+    gap: 8px;
+  }
+
+  .sp-meal-edit-name-field,
+  .sp-meal-edit-macro-field {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+}
+
 .sp-history-screen {
   min-width: 0;
 }
