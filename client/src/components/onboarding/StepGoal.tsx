@@ -1,7 +1,35 @@
+import type { IntakeData } from "../../types.js";
+
 interface Props {
-  onSelect: (goal: "fat_loss" | "muscle_gain") => void;
+  onSelect: (goal: IntakeData["goal"]) => void;
   error?: string;
 }
+
+const GOAL_OPTIONS: readonly {
+  value: IntakeData["goal"];
+  title: string;
+  description: string;
+  accent: "lime" | "cyan" | "amber";
+}[] = [
+  {
+    value: "fat_loss",
+    title: "減脂 · FAT LOSS",
+    description: "降低體脂，維持肌肉量",
+    accent: "lime",
+  },
+  {
+    value: "muscle_gain",
+    title: "增肌 · MUSCLE GAIN",
+    description: "增加肌肉，熱量盈餘策略",
+    accent: "cyan",
+  },
+  {
+    value: "maintain",
+    title: "維持 · MAINTAIN",
+    description: "穩定體態，習慣養成",
+    accent: "amber",
+  },
+];
 
 export function StepGoal({ onSelect, error }: Props) {
   return (
@@ -27,39 +55,25 @@ export function StepGoal({ onSelect, error }: Props) {
       ) : null}
 
       <div className="sp-onboarding-goals">
-        <button
-          type="button"
-          onClick={() => onSelect("fat_loss")}
-          className="sp-onboarding-goal-card"
-          data-accent="lime"
-        >
-          <div>
-            <div className="sp-onboarding-goal-title">
-              減脂 · FAT LOSS
+        {GOAL_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onSelect(option.value)}
+            className="sp-onboarding-goal-card"
+            data-accent={option.accent}
+          >
+            <div>
+              <div className="sp-onboarding-goal-title">
+                {option.title}
+              </div>
+              <div className="sp-onboarding-goal-desc">
+                {option.description}
+              </div>
             </div>
-            <div className="sp-onboarding-goal-desc">
-              降低體脂，維持肌肉量
-            </div>
-          </div>
-          <span aria-hidden="true">→</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onSelect("muscle_gain")}
-          className="sp-onboarding-goal-card"
-          data-accent="cyan"
-        >
-          <div>
-            <div className="sp-onboarding-goal-title">
-              增肌 · MUSCLE GAIN
-            </div>
-            <div className="sp-onboarding-goal-desc">
-              增加肌肉，熱量盈餘策略
-            </div>
-          </div>
-          <span aria-hidden="true">→</span>
-        </button>
+            <span aria-hidden="true">→</span>
+          </button>
+        ))}
       </div>
     </div>
   );
