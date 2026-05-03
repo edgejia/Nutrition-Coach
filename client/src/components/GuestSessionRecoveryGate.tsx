@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store.js";
+import { SportBoltIcon } from "./SportIcons.js";
+import { SportCard, SportChip, SportScreen } from "./SportPrimitives.js";
 
 export function GuestSessionRecoveryGate() {
   const rebuildGuestSession = useStore((s) => s.rebuildGuestSession);
@@ -12,54 +14,81 @@ export function GuestSessionRecoveryGate() {
   }
 
   return (
-    <div
-      className="flex min-h-screen items-center justify-center px-6 py-10"
-      style={{ background: "var(--bg)" }}
+    <SportScreen
+      className="min-h-screen justify-center"
+      style={{ alignItems: "stretch", padding: "48px 22px" }}
     >
-      <div
-        className="w-full max-w-md rounded-[28px] p-7"
-        style={{
-          background: "linear-gradient(180deg, rgba(255,244,232,0.96) 0%, rgba(255,250,245,0.98) 100%)",
-          border: "1px solid var(--border-med)",
-          boxShadow: "0 22px 50px rgba(120, 70, 30, 0.12)",
-        }}
-      >
-        <span
-          className="inline-flex rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em]"
-          style={{
-            background: "rgba(232,104,42,0.12)",
-            color: "var(--orange)",
-          }}
+      <div className="flex flex-1 flex-col justify-center">
+        <SportChip
+          className="self-start"
+          variant="warn"
+          zh
+          style={{ marginBottom: 24 }}
         >
-          session recovery
-        </span>
-        <h1
-          className="mt-4 text-[30px] leading-tight"
-          style={{
-            color: "var(--text)",
-            fontFamily: "var(--font-display)",
-            fontWeight: 800,
-            letterSpacing: "-0.03em",
-          }}
-        >
-          這個瀏覽器的訪客工作階段已失效
+          <span
+            aria-hidden="true"
+            className="inline-block size-1.5 rounded-full"
+            style={{
+              background: "var(--sp-red)",
+              boxShadow: "0 0 10px var(--sp-red)",
+            }}
+          />
+          工作階段已失效
+        </SportChip>
+
+        <h1 className="sp-zh m-0 text-[34px] font-black leading-[1.12] text-[color:var(--sp-ink)]">
+          訪客日記
+          <br />
+          暫時離線
         </h1>
-        <p className="mt-3 text-sm leading-6" style={{ color: "var(--text-2)" }}>
-          我們已經嘗試過一次自動恢復，但這次無法安全地接回原本的日記。若要繼續使用，請明確重新建立一個新的訪客日記。
+
+        <p className="sp-zh mt-5 max-w-[320px] text-sm leading-[1.6] text-[color:var(--sp-ink-2)]">
+          這個瀏覽器的訪客工作階段已失效。我們嘗試過一次自動恢復，但無法安全地接回原本的日記。重新建立會給你一個全新的訪客日記。
         </p>
+
+        <SportCard
+          className="mt-[22px] flex flex-col gap-1.5 px-4 py-3.5"
+          variant="flat"
+          style={{ borderRadius: "var(--sp-r-md)" }}
+        >
+          <div className="sp-num flex justify-between gap-3 text-[10px] text-[color:var(--sp-ink-3)]">
+            <span>自動恢復</span>
+            <span className="text-[color:#ffb3b3]">失敗 · 1/1</span>
+          </div>
+          <div className="sp-num flex justify-between gap-3 text-[10px] text-[color:var(--sp-ink-3)]">
+            <span>保存位置</span>
+            <span className="text-[color:var(--sp-ink-2)]">瀏覽器 · cookie</span>
+          </div>
+        </SportCard>
+
         <button
           type="button"
           onClick={() => void handleRebuild()}
           disabled={rebuilding}
-          className="mt-6 w-full rounded-2xl px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+          className="sp-label mt-[18px] inline-flex min-h-12 w-full items-center justify-center gap-2.5 rounded-full px-[18px] py-4 font-bold text-[#0a0b0d] disabled:cursor-wait disabled:opacity-70"
           style={{
-            background: "var(--orange)",
-            boxShadow: "0 14px 28px rgba(232,104,42,0.28)",
+            background: "var(--sp-lime)",
+            border: 0,
+            boxShadow: "0 0 32px rgba(214,255,58,.35)",
+            color: "#0a0b0d",
           }}
         >
-          {rebuilding ? "重新建立中..." : "重新建立新的訪客日記"}
+          {rebuilding ? (
+            <>
+              <span
+                aria-hidden="true"
+                className="inline-block size-2 rounded-full bg-[#0a0b0d]"
+              />
+              重新建立中...
+            </>
+          ) : (
+            <>
+              <SportBoltIcon size={14} stroke={2.2} />
+              重新建立訪客日記
+            </>
+          )}
         </button>
       </div>
-    </div>
+    </SportScreen>
   );
 }
