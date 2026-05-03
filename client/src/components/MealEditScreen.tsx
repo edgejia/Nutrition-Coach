@@ -196,7 +196,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
             ) : (
               <div className="sp-meal-edit-image-placeholder" aria-hidden="true">
                 <SportCameraIcon size={28} stroke={1.6} />
-                <span>meal photo</span>
+                <span>餐點照片</span>
               </div>
             )}
           </section>

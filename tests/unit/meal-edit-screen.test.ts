@@ -24,6 +24,7 @@ describe("Meal Edit source contract", () => {
       "AI 估算 · 點任一欄位調整",
       "修改會建立新 revision",
       "刪除這筆餐點？這會建立刪除 revision。",
+      "餐點照片",
       "取消",
       "儲存",
       "PersistedAssetImage",

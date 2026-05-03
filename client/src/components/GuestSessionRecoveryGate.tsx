@@ -110,14 +110,15 @@ export function GuestSessionRecoveryGate() {
           )}
         </button>
 
-        <button type="button" style={{
+        <button type="button" disabled aria-disabled="true" style={{
           marginTop: 10,
           background: "transparent", color: "var(--sp-ink-2)",
           border: "1px solid var(--sp-line)", borderRadius: "var(--sp-r-pill)",
           padding: "12px 18px",
           fontFamily: "var(--sp-font-mono)", fontSize: 11,
           letterSpacing: "0.16em", textTransform: "uppercase", fontWeight: 600,
-          cursor: "pointer",
+          cursor: "not-allowed",
+          opacity: 0.55,
         }}>
           先匯出原始紀錄
         </button>
