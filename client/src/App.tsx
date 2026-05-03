@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "./store.js";
 import { Onboarding } from "./components/Onboarding.js";
 import { GuestSessionRecoveryGate } from "./components/GuestSessionRecoveryGate.js";
-import { MainLayout } from "./components/MainLayout.js";
+import { MainLayout, SportAppShell } from "./components/MainLayout.js";
 
 export function App() {
   const deviceId = useStore((s) => s.deviceId);
@@ -18,20 +18,32 @@ export function App() {
   }, [deviceId, guestSessionStatus, bootstrapGuestSession]);
 
   if (!deviceId) {
-    return <Onboarding />;
+    return (
+      <SportAppShell>
+        <Onboarding />
+      </SportAppShell>
+    );
   }
 
   if (guestSessionStatus === "recovery_required") {
-    return <GuestSessionRecoveryGate />;
+    return (
+      <SportAppShell>
+        <GuestSessionRecoveryGate />
+      </SportAppShell>
+    );
   }
 
   if (guestSessionStatus !== "ready") {
     return (
-      <div className="flex min-h-screen items-center justify-center px-6 text-center" style={{ background: "var(--bg)" }}>
-        <div className="max-w-sm">
-          <p className="text-sm font-medium text-stone-700">正在恢復你的日記工作階段...</p>
+      <SportAppShell>
+        <div className="sp-screen items-center justify-center px-6 text-center">
+          <div className="max-w-sm">
+            <p className="sp-zh text-sm font-medium" style={{ color: "var(--sp-ink-2)" }}>
+              正在恢復你的日記工作階段...
+            </p>
+          </div>
         </div>
-      </div>
+      </SportAppShell>
     );
   }
 
