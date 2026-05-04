@@ -6,11 +6,16 @@ import { buildApp } from "../../server/app.js";
 import type { FastifyInstance } from "fastify";
 import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ToolCall, ToolDefinition } from "../../server/llm/types.js";
 
+type LLMCallOptions = { signal?: AbortSignal };
+type RoundQueueItem = LLMRoundResult | Error | ((opts?: LLMCallOptions) => LLMRoundResult);
+
 class StreamingLLMProvider implements LLMProvider {
   private chatQueue: Array<LLMResponse | Error> = [];
-  private roundQueue: Array<LLMRoundResult | Error> = [];
+  private roundQueue: Array<RoundQueueItem> = [];
   private callIndex = 0;
   public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
+  public lastSignal: AbortSignal | undefined;
+  public abortObserved: Promise<void> = Promise.resolve();
 
   queueChatResponse(response: LLMResponse) {
     this.chatQueue.push(response);
@@ -26,6 +31,20 @@ class StreamingLLMProvider implements LLMProvider {
 
   queueChatStreamError(tokens: string[], error: Error) {
     this.roundQueue.push({ kind: "stream", streamGenerator: streamTokensThenThrow(tokens, error) });
+  }
+
+  queueAbortableChatStream(tokens: string[]) {
+    let resolveAbort: () => void = () => {};
+    this.abortObserved = new Promise<void>((resolve) => {
+      resolveAbort = resolve;
+    });
+    this.roundQueue.push((opts?: LLMCallOptions) => {
+      this.lastSignal = opts?.signal;
+      return {
+        kind: "stream",
+        streamGenerator: streamTokensUntilAbort(tokens, opts?.signal, resolveAbort),
+      };
+    });
   }
 
   queueRoundResponse(response: LLMResponse) {
@@ -49,11 +68,18 @@ class StreamingLLMProvider implements LLMProvider {
     return { content: "Mock: 已記錄您的飲食！" };
   }
 
-  async chatRound(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMRoundResult> {
+  async chatRound(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    opts?: LLMCallOptions,
+  ): Promise<LLMRoundResult> {
     this.chatCalls.push({ messages, tools });
     const item = this.roundQueue.shift();
     if (item instanceof Error) {
       throw item;
+    }
+    if (typeof item === "function") {
+      return item(opts);
     }
     if (item) {
       return item;
@@ -73,6 +99,46 @@ async function* streamTokensThenThrow(tokens: string[], error: Error): AsyncGene
     yield token;
   }
   throw error;
+}
+
+async function* streamTokensUntilAbort(
+  tokens: string[],
+  signal: AbortSignal | undefined,
+  onAbort: () => void,
+): AsyncGenerator<string> {
+  const [firstToken, ...remainingTokens] = tokens;
+  if (firstToken) {
+    yield firstToken;
+  }
+
+  if (!signal) {
+    return;
+  }
+
+  if (!signal.aborted) {
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, 2_000);
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timeout);
+          onAbort();
+          resolve();
+        },
+        { once: true },
+      );
+    });
+  } else {
+    onAbort();
+  }
+
+  if (signal.aborted) {
+    return;
+  }
+
+  for (const token of remainingTokens) {
+    yield token;
+  }
 }
 
 function createLogFoodToolCall(): ToolCall {
@@ -414,6 +480,91 @@ describe("chat-streaming", () => {
       if (app.server.listening) {
         await app.close();
       }
+    }
+  });
+
+  it("POST /api/chat/stop gracefully stops the active turn and persists stopped partial content", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    mockLLM.queueAbortableChatStream(["已", "完成", "記錄"]);
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const firstText = await readStreamUntil(reader, "event: chunk");
+      const firstEvents = parseSSEEvents(firstText);
+      const startPayload = firstEvents
+        .filter((event) => event.event === "status")
+        .map((event) => JSON.parse(event.data) as { turnId?: string })
+        .find((payload) => typeof payload.turnId === "string");
+      const turnId = startPayload?.turnId;
+
+      assert.ok(turnId, "stream must expose a turnId before stop");
+
+      const stopRes = await fetch(`${address}/api/chat/stop`, {
+        method: "POST",
+        headers: {
+          cookie: sessionCookieHeader,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ turnId }),
+      });
+      assert.equal(stopRes.status, 200);
+      assert.deepEqual(await stopRes.json(), { stopped: true, turnId });
+      await mockLLM.abortObserved;
+
+      const stoppedText = firstText + await readStreamUntil(reader, "event: stopped");
+      const events = parseSSEEvents(stoppedText);
+      const stoppedEvents = events.filter((event) => event.event === "stopped");
+      const doneEvents = events.filter((event) => event.event === "done");
+      assert.equal(stoppedEvents.length, 1);
+      assert.equal(doneEvents.length, 0, "stopped stream must not also emit done");
+      assert.equal(mockLLM.lastSignal?.aborted, true, "provider AbortSignal must be aborted");
+
+      const stoppedPayload = JSON.parse(stoppedEvents[0]!.data) as {
+        stopped?: boolean;
+        tokensStreamed?: number;
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: unknown;
+        loggedMeal?: { foodName?: string };
+      };
+      assert.equal(stoppedPayload.stopped, true);
+      assert.equal(stoppedPayload.tokensStreamed, 1);
+      assert.equal(stoppedPayload.didLogMeal, true);
+      assert.equal(stoppedPayload.didMutateMeal, true);
+      assert.ok(stoppedPayload.dailySummary);
+      assert.equal(stoppedPayload.loggedMeal?.foodName, "雞腿便當");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as {
+        messages: Array<{ role: string; content: string; status?: string; loggedMeal?: { foodName?: string } }>;
+      };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1, "stopped stream must persist one assistant row");
+      assert.equal(assistantMessages[0]?.content, "已");
+      assert.equal(assistantMessages[0]?.status, "stopped");
+      assert.equal(assistantMessages[0]?.loggedMeal?.foodName, "雞腿便當");
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
     }
   });
 
