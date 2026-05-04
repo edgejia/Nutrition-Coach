@@ -17,6 +17,7 @@ const AUDITED_COMPONENT_FILES = [
 
 const HANDLER_SCAN_FILES = [
   ...AUDITED_COMPONENT_FILES,
+  "client/src/components/MessageBubble.tsx",
   "client/src/components/onboarding/OnboardingStepper.tsx",
 ] as const;
 
