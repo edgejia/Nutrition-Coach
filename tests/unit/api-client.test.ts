@@ -568,6 +568,47 @@ describe("sendMessageStream", () => {
     assert.deepEqual(labels, ["分析圖片中..."]);
   });
 
+  it("sendMessageStream passes AbortSignal and optional turnId metadata without aborting itself", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, ['event: done\ndata: {"didLogMeal":false}\n\n']);
+    const controller = new AbortController();
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onError: () => {},
+    }, undefined, { signal: controller.signal, turnId: "turn-client-1" });
+
+    const call = fetchCalls[0];
+    assert.equal(call?.url, "/api/chat");
+    assert.equal(call?.init.signal, controller.signal);
+    assert.equal(controller.signal.aborted, false);
+    assert.ok(call?.init.body instanceof FormData);
+    assert.equal(call.init.body.get("turnId"), "turn-client-1");
+  });
+
+  it("stopChatTurn posts the turnId to the graceful stop endpoint", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, { stopped: true, turnId: "turn-1" });
+
+    const result = await api.stopChatTurn({ turnId: "turn-1" });
+
+    assert.deepEqual(result, { stopped: true, turnId: "turn-1" });
+    assert.equal(fetchCalls[0].url, "/api/chat/stop");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(fetchCalls[0].init.headers, { "Content-Type": "application/json" });
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), { turnId: "turn-1" });
+  });
+
+  it("stopChatTurn throws UNAUTHORIZED on 401", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(401, { error: "Invalid" });
+
+    await assert.rejects(() => api.stopChatTurn({ turnId: "turn-1" }), { message: "UNAUTHORIZED" });
+  });
+
   it("dispatches onToken for each event: chunk", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [
