@@ -1748,9 +1748,10 @@ textarea {
   color: var(--sp-ink);
   padding: 4px 0;
   font-family: var(--sp-font-zh);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.5;
   outline: 0;
+  overflow-y: auto;
 }
 
 .sp-chat-textarea::placeholder {

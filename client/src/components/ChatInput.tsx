@@ -11,6 +11,7 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
   const canSend = Boolean(text.trim() || image);
 
   function submitMessage() {
@@ -32,7 +33,18 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    if (e.nativeEvent.isComposing) return;
+    if (isComposingRef.current) return;
+    if (e.key !== "Enter") return;
+    if (e.shiftKey) return;
+
+    if (!e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      submitMessage();
+      return;
+    }
+
+    if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
       submitMessage();
     }
@@ -76,8 +88,13 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            isComposingRef.current = false;
+          }}
           placeholder="描述你吃了什麼…"
-          disabled={disabled}
           rows={1}
           className="sp-chat-textarea"
         />
