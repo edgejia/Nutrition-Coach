@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { capabilityMatrix } from "../../client/src/contracts/capability-matrix.js";
+import type { CapabilityMatrixRow } from "../../client/src/contracts/capability-matrix.js";
 
 const SUPPORT_STATES = new Set([
   "supported",
@@ -61,12 +62,13 @@ function routePattern(route: string) {
 
 describe("capability matrix contract", () => {
   it("keeps schema, taxonomy, surface, and requirement coverage locked", () => {
-    assert.ok(capabilityMatrix.length > 0);
+    const rows: readonly CapabilityMatrixRow[] = capabilityMatrix;
+    assert.ok(rows.length > 0);
 
     const surfaces = new Set<string>();
     const requirements = new Set<string>();
 
-    for (const [index, row] of capabilityMatrix.entries()) {
+    for (const [index, row] of rows.entries()) {
       const label = `row ${index} ${row.surface} ${row.affordance}`;
 
       assertNonEmptyString(row.surface, `${label} surface`);
