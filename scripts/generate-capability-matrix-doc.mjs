@@ -34,8 +34,8 @@ function renderMarkdown() {
     "",
     `Run \`yarn matrix:gen\` to update this file and \`yarn matrix:gen:check\` before commit. Phase closeout may freeze a copy at \`${FROZEN_CLOSEOUT_PATH}\`.`,
     "",
-    "| Surface | Affordance | Support State | Client/Store | Backend | Handling | Requirements | Future |",
-    "|---|---|---|---|---|---|---|---|",
+    "| Surface | Affordance | Source | Support State | Client/Store | Backend | Handling | Requirements | Future |",
+    "|---|---|---|---|---|---|---|---|---|",
   ];
 
   for (const row of rows) {
@@ -43,6 +43,7 @@ function renderMarkdown() {
       [
         row.surface,
         row.affordance,
+        row.sourceFile,
         row.supportState,
         renderReferenceList(row, ["clientApi", "storeAction"]),
         renderReferenceList(row, ["backendRoute", "backendService"]),
