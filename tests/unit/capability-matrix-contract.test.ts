@@ -37,12 +37,16 @@ async function readSource(path: string) {
 }
 
 function assertNonEmptyString(value: unknown, label: string) {
-  assert.equal(typeof value, "string", `${label} must be a string`);
+  if (typeof value !== "string") {
+    assert.fail(`${label} must be a string`);
+  }
   assert.ok(value.trim().length > 0, `${label} must be non-empty`);
 }
 
-function assertNonEmptyArray(value: readonly unknown[], label: string) {
-  assert.ok(Array.isArray(value), `${label} must be an array`);
+function assertNonEmptyArray(value: unknown, label: string) {
+  if (!Array.isArray(value)) {
+    assert.fail(`${label} must be an array`);
+  }
   assert.ok(value.length > 0, `${label} must be non-empty`);
 }
 
