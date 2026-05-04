@@ -38,6 +38,15 @@ async function readSource(path: string) {
   return readFile(path, "utf8");
 }
 
+const sourceCache = new Map<string, string>();
+
+async function cachedSource(path: string) {
+  if (!sourceCache.has(path)) {
+    sourceCache.set(path, await readSource(path));
+  }
+  return sourceCache.get(path)!;
+}
+
 function assertNonEmptyString(value: unknown, label: string) {
   if (typeof value !== "string") {
     assert.fail(`${label} must be a string`);
@@ -59,6 +68,10 @@ function symbolFromReference(reference: string) {
 function routePattern(route: string) {
   const escaped = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`["'\`]${escaped.replace(/\\:([A-Za-z]+)/g, ":[A-Za-z]+")}["'\`]`);
+}
+
+function literalPattern(value: string) {
+  return new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
 
 describe("capability matrix contract", () => {
@@ -92,6 +105,10 @@ describe("capability matrix contract", () => {
 
       if (row.supportState === "repair-needed") {
         assert.ok(REPAIR_SEVERITIES.has(row.severity), `${label} repair-needed row has actionable severity`);
+      }
+
+      if (row.activeHandler === "present" && row.sourceFile.startsWith("client/src/components/")) {
+        assertNonEmptyArray(row.handlerMatchers, `${label} handlerMatchers`);
       }
     }
 
@@ -202,8 +219,12 @@ describe("capability matrix contract", () => {
 
     for (const row of inertRows) {
       const label = `${row.surface} ${row.affordance}`;
+      const rowSource = await cachedSource(row.sourceFile);
       assert.match(row.visibleCopy ?? "", /尚未開放|未開放/, `${label} must show unavailable copy`);
       assert.match(row.disabledEvidence.join(" "), /disabled|aria-disabled="true"/, `${label} must include disabledEvidence`);
+      for (const evidence of row.disabledEvidence) {
+        assert.match(rowSource, literalPattern(evidence), `${label} missing disabledEvidence ${evidence} in ${row.sourceFile}`);
+      }
       assert.equal(row.activeHandler, "none", `${label} must have no active handler marker`);
       assert.equal(row.clientApi.length, 0, `${label} must not claim clientApi support`);
       assert.equal(row.storeAction.length, 0, `${label} must not claim storeAction support`);

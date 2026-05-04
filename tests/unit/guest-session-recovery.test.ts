@@ -22,10 +22,13 @@ describe("Guest session recovery source contract", () => {
     assert.match(source, /暫時離線/);
     assert.match(source, /工作階段/);
     assert.match(source, /需重新建立/);
-    assert.match(source, /最後同步/);
     assert.match(source, /自動恢復/);
-    assert.match(source, /失敗 · 1\/1/);
-    assert.match(source, /瀏覽器 · cookie/);
+    assert.match(source, /無法安全接回/);
+    assert.match(source, /這個瀏覽器/);
+    assert.doesNotMatch(source, /最後同步/);
+    assert.doesNotMatch(source, /2026-04-30 09:14/);
+    assert.doesNotMatch(source, /失敗 · 1\/1/);
+    assert.doesNotMatch(source, /瀏覽器 · cookie/);
     assert.match(source, /重新建立訪客日記/);
     assert.match(source, /正在重建…/);
     assert.match(source, /先匯出原始紀錄/);

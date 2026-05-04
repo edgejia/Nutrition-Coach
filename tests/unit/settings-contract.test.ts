@@ -28,7 +28,8 @@ describe("Settings source contract", () => {
     assert.match(source, /訪客模式/);
     assert.match(source, /使用中/);
     assert.match(source, /JC/);
-    assert.match(source, /訪客 · 瀏覽器保存 · 12 天/);
+    assert.match(source, /訪客 · 這個瀏覽器/);
+    assert.doesNotMatch(source, /瀏覽器保存 · 12 天/);
     assert.match(source, /每日目標/);
     assert.match(source, /偏好設定/);
     assert.match(source, /偏好/);

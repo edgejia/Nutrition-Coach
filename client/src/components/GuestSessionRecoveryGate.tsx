@@ -66,9 +66,8 @@ export function GuestSessionRecoveryGate() {
         }}>
           {[
             { k: "工作階段", v: "需重新建立" },
-            { k: "最後同步", v: "2026-04-30 09:14" },
-            { k: "自動恢復", v: "失敗 · 1/1" },
-            { k: "保存位置", v: "瀏覽器 · cookie" },
+            { k: "自動恢復", v: "無法安全接回" },
+            { k: "保存位置", v: "這個瀏覽器" },
           ].map(({ k, v }) => (
             <div key={k} style={{
               display: "flex", justifyContent: "space-between", gap: 12,

@@ -102,7 +102,7 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
                 訪客模式
               </div>
               <div className="sp-num" style={{ fontSize: 10, color: "var(--sp-ink-3)", marginTop: 2 }}>
-                訪客 · 瀏覽器保存 · 12 天
+                訪客 · 這個瀏覽器
               </div>
             </div>
             <span className="sp-chip sp-chip-good" style={{ padding: "3px 8px" }}>

@@ -36,7 +36,7 @@ const FORBIDDEN_ACTIVE_SYMBOLS = [
   "stop generation",
 ] as const;
 
-type HandlerKind = "onClick" | "onSubmit" | "onChange";
+type HandlerKind = "onClick" | "onSubmit" | "onChange" | "onKeyDown" | "onPointerDown";
 
 interface HandlerOccurrence {
   readonly file: string;
@@ -148,7 +148,7 @@ function lineAt(source: string, line: number) {
 
 function findHandlers(file: string, source: string): HandlerOccurrence[] {
   const handlers: HandlerOccurrence[] = [];
-  const pattern = /\bon(Click|Submit|Change)=\{/g;
+  const pattern = /\bon(Click|Submit|Change|KeyDown|PointerDown)=\{/g;
   for (const match of source.matchAll(pattern)) {
     const kind = `on${match[1]}` as HandlerKind;
     const index = match.index ?? 0;
@@ -188,7 +188,7 @@ function isReasonedExclusion(handler: HandlerOccurrence) {
 function hasMatrixRowNearHandler(handler: HandlerOccurrence, source: string) {
   const context = contextAroundLine(source, handler.line);
   return matrixRowsForFile(handler.file).some((row) =>
-    row.activeHandler === "present" && row.sourceMatchers.some((matcher) => sourceIncludesMatcher(context, matcher)),
+    row.activeHandler === "present" && (row.handlerMatchers ?? []).some((matcher) => sourceIncludesMatcher(context, matcher)),
   );
 }
 
