@@ -102,6 +102,12 @@ const SCANNER_EXCLUSIONS: readonly ScannerExclusion[] = [
     reason: "back navigation handler excluded because it only returns to Home and does not expose a capability affordance",
   },
   {
+    file: "client/src/components/ChatPanel.tsx",
+    lineContains: "onClick={() => {",
+    kind: "onClick",
+    reason: "local jump-to-latest viewport control excluded because it only scrolls within Chat and does not expose a backend capability",
+  },
+  {
     file: "client/src/components/MealEditScreen.tsx",
     lineContains: "onClick={onBack}",
     kind: "onClick",

@@ -23,6 +23,7 @@ const REQUIRED_SURFACES = new Set([
   "guest recovery",
 ]);
 const REQUIRED_REQUIREMENTS = new Set(["ALIGN-01", "ALIGN-02", "ALIGN-03", "ALIGN-04"]);
+const CONTRACT_BACKED_SUPPORT_STATES = new Set(["supported", "supported-read-only"]);
 const REQUIRED_SUPPORTED_ROUTES = ["/api/device/goals", "/api/meals/:id", "/api/assets/:id"];
 const REPAIR_SEVERITIES = new Set(["blocker", "must-fix", "follow-up"]);
 const ROADMAP_FUTURES = [
@@ -103,7 +104,7 @@ describe("capability matrix contract", () => {
     }
   });
 
-  it("proves supported rows reference real client, store, route, or service contracts", async () => {
+  it("proves supported and supported-read-only rows reference real client, store, route, or service contracts", async () => {
     const [
       apiSource,
       storeSource,
@@ -159,7 +160,7 @@ describe("capability matrix contract", () => {
     assert.match(storeSource, /setPendingHomeChatDraft|setActiveScreen|openDayDetail|openMealEdit|rebuildGuestSession/);
 
     for (const row of capabilityMatrix) {
-      if (row.supportState !== "supported") {
+      if (!CONTRACT_BACKED_SUPPORT_STATES.has(row.supportState)) {
         continue;
       }
 
