@@ -94,6 +94,24 @@ const SCANNER_EXCLUSIONS: readonly ScannerExclusion[] = [
     kind: "onChange",
     reason: "ordinary onboarding advanced-notes input onChange covered by Onboarding intake row",
   },
+  {
+    file: "client/src/components/ChatPanel.tsx",
+    lineContains: "onClick={handleBackToHome}",
+    kind: "onClick",
+    reason: "back navigation handler excluded because it only returns to Home and does not expose a capability affordance",
+  },
+  {
+    file: "client/src/components/MealEditScreen.tsx",
+    lineContains: "onClick={onBack}",
+    kind: "onClick",
+    reason: "back or cancel navigation handler excluded because it does not expose a new capability affordance",
+  },
+  {
+    file: "client/src/components/GoalSettings.tsx",
+    lineContains: "onClick={onBack}",
+    kind: "onClick",
+    reason: "back navigation handler excluded because it only closes Settings and does not expose a capability affordance",
+  },
 ];
 
 async function readSource(path: string) {
