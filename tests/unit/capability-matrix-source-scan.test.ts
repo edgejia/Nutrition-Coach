@@ -235,6 +235,27 @@ describe("capability matrix source scanner", () => {
     assert.ok(SCANNER_EXCLUSIONS.every((exclusion) => exclusion.reason.trim().length > 12));
   });
 
+  it("keeps scanner exclusions narrow and unable to hide an audited surface", async () => {
+    for (const exclusion of SCANNER_EXCLUSIONS) {
+      assert.doesNotMatch(
+        `${exclusion.file} ${exclusion.lineContains} ${exclusion.reason}`,
+        /ignore all|all handlers|all buttons|file-wide|handler-wide/i,
+        `${exclusion.file} uses an over-broad scanner exclusion`,
+      );
+    }
+
+    for (const file of HANDLER_SCAN_FILES) {
+      const source = await readSource(file);
+      const handlers = findHandlers(file, source);
+      const excludedHandlers = handlers.filter((handler) => isReasonedExclusion(handler));
+
+      assert.ok(
+        handlers.length === 0 || excludedHandlers.length < handlers.length,
+        `${file} must not exclude all audited handlers`,
+      );
+    }
+  });
+
   it("blocks forbidden future-control symbols from active handlers", async () => {
     for (const file of HANDLER_SCAN_FILES) {
       const source = await readSource(file);
