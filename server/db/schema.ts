@@ -47,6 +47,7 @@ export const chatMessages = sqliteTable("chat_messages", {
   toolName: text("tool_name"),
   imagePath: text("image_path"),
   createdAt: text("created_at").notNull(),
+  status: text("status").notNull().default("complete"),
 });
 
 export const assets = sqliteTable("assets", {

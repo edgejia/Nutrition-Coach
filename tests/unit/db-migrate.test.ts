@@ -68,6 +68,34 @@ async function seedLegacySchema(dbPath: string) {
   }
 }
 
+async function seedSchemaThrough0004(dbPath: string) {
+  const sqlite = new Database(dbPath);
+
+  try {
+    sqlite.pragma("journal_mode = WAL");
+    sqlite.pragma("foreign_keys = ON");
+    for (const fileName of [
+      "0000_brainy_rocket_racer.sql",
+      "0001_sleepy_vivisector.sql",
+      "0002_meal_transaction_v2_foundation.sql",
+      "0003_aspiring_masque.sql",
+      "0004_history_query_hot_path_indexes.sql",
+    ]) {
+      sqlite.exec(await readMigrationSql(fileName));
+    }
+    sqlite.exec(`CREATE TABLE "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )`);
+    sqlite
+      .prepare('INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)')
+      .run("0004-test-hash", 1777266938000);
+  } finally {
+    sqlite.close();
+  }
+}
+
 function getCanonicalTableNames(sqlite: Database.Database) {
   return sqlite
     .prepare(
@@ -412,7 +440,7 @@ describe("database migration contract", () => {
   it("treats a partial local chat_messages.status migration as already applied", async () => {
     const dbPath = await makeTempDbPath();
 
-    await runMigrations(dbPath);
+    await seedSchemaThrough0004(dbPath);
 
     const sqlite = new Database(dbPath);
     try {
