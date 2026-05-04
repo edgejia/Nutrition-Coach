@@ -40,6 +40,26 @@ function cssBlock(selector: string) {
   return match[1] ?? "";
 }
 
+function functionBody(source: string, functionName: string) {
+  const startToken = `function ${functionName}`;
+  const startIndex = source.indexOf(startToken);
+  assert.notEqual(startIndex, -1, `${functionName} should exist`);
+  const bodyStart = source.indexOf("{", startIndex);
+  assert.notEqual(bodyStart, -1, `${functionName} should have a body`);
+
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      return source.slice(bodyStart + 1, index);
+    }
+  }
+
+  assert.fail(`${functionName} body should be closed`);
+}
+
 function assertIncludesInOrder(source: string, labels: Array<[string, string]>) {
   let previousIndex = -1;
 
@@ -216,6 +236,47 @@ describe("mobile shell source contract", () => {
     assert.doesNotMatch(chatInput, /from "\.\/SketchIcons\.js"/);
     assert.doesNotMatch(chatInput, /<CameraIcon\b/);
     assert.doesNotMatch(chatInput, /<SendIcon\b/);
+  });
+
+  it("locks ChatInput Enter, Shift+Enter, Cmd/Ctrl+Enter, and IME branch order", () => {
+    const chatInput = sources.chatInput;
+    const handler = functionBody(chatInput, "handleKeyDown");
+
+    assert.match(chatInput, /const isComposingRef = useRef\(false\)/);
+    assert.match(chatInput, /onCompositionStart=\{\(\) => \{\s*isComposingRef\.current = true;\s*\}\}/);
+    assert.match(chatInput, /onCompositionEnd=\{\(\) => \{\s*isComposingRef\.current = false;\s*\}\}/);
+    assertIncludesInOrder(handler, [
+      ["native IME guard", "e.nativeEvent.isComposing"],
+      ["internal IME guard", "isComposingRef.current"],
+      ["non-Enter guard", 'e.key !== "Enter"'],
+      ["Shift+Enter fallthrough", "e.shiftKey"],
+      ["plain Enter preventDefault", "e.preventDefault()"],
+      ["plain Enter submit", "submitMessage()"],
+      ["Cmd/Ctrl+Enter branch", "e.metaKey || e.ctrlKey"],
+    ]);
+    assert.doesNotMatch(handler, /\bdisabled\b/, "disabled should stay in submitMessage, not globally swallow keydown");
+  });
+
+  it("keeps image-only send and disabled send guards inside submitMessage", () => {
+    const chatInput = sources.chatInput;
+    const submitMessage = functionBody(chatInput, "submitMessage");
+
+    assert.match(chatInput, /const canSend = Boolean\(text\.trim\(\) \|\| image\)/);
+    assert.match(submitMessage, /if \(disabled \|\| !canSend\) return/);
+    assert.match(submitMessage, /const trimmedText = text\.trim\(\)/);
+    assert.match(submitMessage, /hasImage: image !== null/);
+    assert.match(submitMessage, /hasText: trimmedText\.length > 0/);
+    assert.match(submitMessage, /onSend\(trimmedText, image \?\? undefined\)/);
+  });
+
+  it("keeps Chat textarea at mobile-safe font size and four-line growth cap", () => {
+    const textareaBlock = cssBlock(".sp-chat-textarea");
+
+    assert.match(textareaBlock, /font-size:\s*16px/);
+    assert.match(textareaBlock, /line-height:\s*1\.5/);
+    assert.match(textareaBlock, /max-height:\s*96px/);
+    assert.match(textareaBlock, /overflow-y:\s*auto/);
+    assert.match(textareaBlock, /resize:\s*none/);
   });
 
   it("keeps Summary header fixed and content in a safe scroller", () => {
