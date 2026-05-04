@@ -281,6 +281,17 @@ describe("mobile shell source contract", () => {
     assert.match(textareaBlock, /resize:\s*none/);
   });
 
+  it("keeps Chat composer and Meal Edit controls reserved above bottom occlusion", () => {
+    assert.match(cssBlock(".sp-chat-scroll"), /var\(--app-bottom-occlusion,\s*0px\)/);
+    assert.match(cssBlock(".screen-bottom-bar"), /var\(--app-bottom-occlusion,\s*0px\)/);
+    assert.match(sources.chatPanel, /className="screen-bottom-bar sp-chat-composer-bar"/);
+
+    assert.match(cssBlock(".sp-meal-edit-scroll"), /var\(--app-bottom-occlusion,\s*0px\)/);
+    assert.match(cssBlock(".sp-meal-edit-footer"), /var\(--app-bottom-occlusion,\s*0px\)/);
+    assert.match(cssBlock(".sp-meal-edit-footer button"), /min-width:\s*0/);
+    assert.match(cssBlock(".sp-meal-edit-field input"), /min-width:\s*0/);
+  });
+
   it("keeps Summary header fixed and content in a safe scroller", () => {
     assert.match(sources.summaryDetailScreen, /\bscreen-shell\b/);
     assert.match(sources.summaryDetailScreen, /\bscreen-bar\b/);
