@@ -1,9 +1,9 @@
-import type { LLMProvider, ChatMessage, ToolDefinition, LLMResponse } from "./types.js";
+import type { LLMProvider, ChatMessage, ToolDefinition, LLMResponse, LLMCallOptions } from "./types.js";
 
 export class MockLLMProvider implements LLMProvider {
   private chatQueue: Array<LLMResponse | Error> = [];
   private callIndex = 0;
-  public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
+  public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[]; opts?: LLMCallOptions }> = [];
 
   /**
    * Queue responses for sequential chat() calls.
@@ -18,8 +18,8 @@ export class MockLLMProvider implements LLMProvider {
     this.chatQueue.push(error);
   }
 
-  async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {
-    this.chatCalls.push({ messages, tools });
+  async chat(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions): Promise<LLMResponse> {
+    this.chatCalls.push({ messages, tools, opts });
     if (this.callIndex < this.chatQueue.length) {
       const item = this.chatQueue[this.callIndex++];
       if (item instanceof Error) throw item;

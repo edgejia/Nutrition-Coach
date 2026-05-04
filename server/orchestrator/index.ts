@@ -170,6 +170,7 @@ export interface HandleMessageOpts {
   onStatus?: (label: string) => void;
   hooks?: OrchestratorHooks;  // injected per-call; per-request reqId binding via createStructuredHooks
   onUserMessageSaved?: () => void;
+  signal?: AbortSignal;
 }
 
 export function createOrchestrator(deps: OrchestratorDeps) {
@@ -260,7 +261,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         let response;
         try {
           if (typeof llmProvider.chatRound === "function") {
-            const roundResult = await llmProvider.chatRound(messages, toolDefinitions);
+            const roundResult = await llmProvider.chatRound(messages, toolDefinitions, {
+              signal: opts?.signal,
+            });
             if (roundResult.kind === "stream") {
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
@@ -282,7 +285,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
                 streamGenerator: ensureGoalReceiptStream(
-                  llmProvider.chatStream(messages, []),
+                  llmProvider.chatStream(messages, [], { signal: opts?.signal }),
                   successfulGoalReceipt,
                 ),
                 didLogMeal,
@@ -294,7 +297,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               };
             }
 
-            response = await llmProvider.chat(messages, toolDefinitions);
+            response = await llmProvider.chat(messages, toolDefinitions, { signal: opts?.signal });
           }
         } catch (err) {
           opts?.hooks?.onFallback?.(didMutateMeal ? "partial_success" : "llm_error");

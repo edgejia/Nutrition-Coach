@@ -73,6 +73,8 @@ export interface ChatTurnCompletedEvent {
   didMutateMeal: boolean;
   hadImage: boolean;
   latencyMs: number;
+  stopped?: boolean;
+  tokensStreamed?: number;
 }
 
 export interface DeviceGoalsUpdatedRestEvent {
@@ -223,6 +225,8 @@ export function buildChatTurnCompletedEvent(params: {
   didMutateMeal: boolean;
   hadImage: boolean;
   latencyMs: number;
+  stopped?: boolean;
+  tokensStreamed?: number;
 }): ChatTurnCompletedEvent {
   return {
     event: "chat_turn_completed",
@@ -231,6 +235,10 @@ export function buildChatTurnCompletedEvent(params: {
     didMutateMeal: params.didMutateMeal,
     hadImage: params.hadImage,
     latencyMs: Math.max(0, Math.round(params.latencyMs)),
+    ...(params.stopped !== undefined ? { stopped: params.stopped } : {}),
+    ...(params.tokensStreamed !== undefined
+      ? { tokensStreamed: Math.max(0, Math.round(params.tokensStreamed)) }
+      : {}),
   };
 }
 

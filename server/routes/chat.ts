@@ -41,6 +41,27 @@ const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請�
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
+interface ActiveChatTurn {
+  controller: AbortController;
+  stopRequested: boolean;
+  completed: boolean;
+}
+
+interface StreamingStopControl {
+  turnId: string;
+  signal: AbortSignal;
+  isStopped(): boolean;
+}
+
+const activeChatTurns = new Map<string, ActiveChatTurn>();
+
+function activeChatTurnKey(deviceId: string, turnId: string) {
+  return `${deviceId}:${turnId}`;
+}
+
+function writeStatus(stream: PassThrough, label: string, turnId?: string) {
+  stream.write(`event: status\ndata: ${JSON.stringify({ label, ...(turnId ? { turnId } : {}) })}\n\n`);
+}
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
@@ -304,30 +325,57 @@ async function handleStreamingReply(
   dailySummary: unknown,
   affectedDate?: string,
   hooks?: OrchestratorHooks,
-): Promise<{ fullReply: string; didLogMeal: boolean; dailySummary?: unknown }> {
+  stopControl?: StreamingStopControl,
+): Promise<{
+  fullReply: string;
+  didLogMeal: boolean;
+  dailySummary?: unknown;
+  stopped?: boolean;
+  tokensStreamed: number;
+}> {
   const sanitizer = createStreamingSanitizer();
   let fullReply = "";
+  let tokensStreamed = 0;
   let hallucAccum = "";
   const heldTokens: string[] = [];
   let holdingChoicePrompt = false;
   let hallucinationDetected = false;
 
-  for await (const token of streamGenerator) {
-    hallucAccum += token;
-    if (CHOICE_PROMPT_PATTERN.test(hallucAccum)) {
-      hallucinationDetected = true;
-      break;
+  try {
+    for await (const token of streamGenerator) {
+      tokensStreamed += 1;
+      hallucAccum += token;
+      if (CHOICE_PROMPT_PATTERN.test(hallucAccum)) {
+        hallucinationDetected = true;
+        break;
+      }
+      if (holdingChoicePrompt || /方式\s*[12]/.test(hallucAccum)) {
+        holdingChoicePrompt = true;
+        heldTokens.push(token);
+        continue;
+      }
+      fullReply += token;
+      const sanitizedChunk = sanitizer.push(token);
+      if (sanitizedChunk) {
+        stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+      }
     }
-    if (holdingChoicePrompt || /方式\s*[12]/.test(hallucAccum)) {
-      holdingChoicePrompt = true;
-      heldTokens.push(token);
-      continue;
+  } catch (error) {
+    if (!stopControl?.isStopped() && !stopControl?.signal.aborted) {
+      throw error;
     }
-    fullReply += token;
-    const sanitizedChunk = sanitizer.push(token);
-    if (sanitizedChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
-    }
+  }
+
+  if (stopControl?.isStopped() || stopControl?.signal.aborted) {
+    const stoppedReply = sanitizeReply(fullReply) || "（已停止）";
+    await chatService.saveMessage(deviceId, "assistant", stoppedReply, { status: "stopped" });
+    return {
+      fullReply: stoppedReply,
+      didLogMeal,
+      dailySummary,
+      stopped: true,
+      tokensStreamed,
+    };
   }
 
   if (hallucinationDetected) {
@@ -335,7 +383,7 @@ async function handleStreamingReply(
     const retryMsg = "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
     await finalizeAssistantReply(chatService, deviceId, retryMsg);
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
-    return { fullReply: retryMsg, didLogMeal, dailySummary };
+    return { fullReply: retryMsg, didLogMeal, dailySummary, tokensStreamed };
   }
 
   for (const heldToken of heldTokens) {
@@ -359,7 +407,7 @@ async function handleStreamingReply(
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
   }
   await finalizeAssistantReply(chatService, deviceId, fullReply);
-  return { fullReply, didLogMeal, dailySummary };
+  return { fullReply, didLogMeal, dailySummary, tokensStreamed };
 }
 
 async function handleOrchestratorSSE(
@@ -376,6 +424,7 @@ async function handleOrchestratorSSE(
   image: { dataUri: string; path: string; mimeType: string; originalFilename?: string } | undefined,
   startedAt: number,
   hooks?: OrchestratorHooks,
+  stopControl?: StreamingStopControl,
 ): Promise<void> {
   let durableAssetId: string | undefined;
   let durableAssetRef: string | undefined;
@@ -389,8 +438,9 @@ async function handleOrchestratorSSE(
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
 
   try {
+    writeStatus(stream, "思考中...", stopControl?.turnId);
     if (image) {
-      stream.write(`event: status\ndata: ${JSON.stringify({ label: "分析圖片中..." })}\n\n`);
+      writeStatus(stream, "分析圖片中...", stopControl?.turnId);
     }
 
     const durableAsset = await createDurableAssetIfNeeded(
@@ -408,12 +458,13 @@ async function handleOrchestratorSSE(
       durableAssetRef,
       {
         onStatus: (label: string) => {
-          stream.write(`event: status\ndata: ${JSON.stringify({ label })}\n\n`);
+          writeStatus(stream, label, stopControl?.turnId);
         },
         onUserMessageSaved: () => {
           userMessagePersisted = true;
         },
         hooks,
+        signal: stopControl?.signal,
       }
     );
 
@@ -436,9 +487,36 @@ async function handleOrchestratorSSE(
         dailySummary,
         streamAffectedDate,
         hooks,
+        stopControl,
       );
       streamDidLogMeal = streamResult.didLogMeal;
       streamDailySummary = streamResult.dailySummary;
+
+      if (streamResult.stopped) {
+        const stoppedData = {
+          stopped: true,
+          turnId: stopControl?.turnId,
+          tokensStreamed: streamResult.tokensStreamed,
+          didLogMeal: streamDidLogMeal,
+          didMutateMeal: streamDidMutateMeal,
+          ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
+          ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
+          ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
+          ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
+        };
+        stream.write(`event: stopped\ndata: ${JSON.stringify(stoppedData)}\n\n`);
+        logChatTurnCompleted(deps.log, {
+          source: "sse",
+          didLogMeal: streamDidLogMeal,
+          didMutateMeal: streamDidMutateMeal,
+          hadImage: Boolean(image),
+          latencyMs: Date.now() - startedAt,
+          stopped: true,
+          tokensStreamed: streamResult.tokensStreamed,
+        });
+        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
+        return;
+      }
 
       const doneData = {
         didLogMeal: streamDidLogMeal,
@@ -524,6 +602,7 @@ async function handleOrchestratorSSE(
       didMutateMeal: streamDidMutateMeal,
       hadImage: Boolean(image),
       latencyMs: Date.now() - startedAt,
+      ...(stopControl?.isStopped() ? { stopped: true } : {}),
     });
     publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
   } finally {
@@ -549,6 +628,37 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     publisher,
     uploadsDir: injectedUploadsDir,
   } = deps;
+
+  app.post("/api/chat/stop", async (request, reply) => {
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
+    }
+
+    const body = request.body as { turnId?: unknown } | undefined;
+    const turnId = body?.turnId;
+    if (typeof turnId !== "string" || !turnId.trim()) {
+      return reply.code(400).send({ error: "turnId is required" });
+    }
+
+    const activeTurn = activeChatTurns.get(activeChatTurnKey(session.deviceId, turnId));
+    if (!activeTurn) {
+      return reply.code(404).send({ error: "Active turn not found" });
+    }
+
+    activeTurn.stopRequested = true;
+    if (!activeTurn.controller.signal.aborted) {
+      activeTurn.controller.abort();
+    }
+
+    return { stopped: true, turnId };
+  });
 
   app.post("/api/chat", async (request, reply) => {
     const session = await resolveGuestSession(request, { deviceService, guestSessionService });
@@ -731,6 +841,20 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     // SSE path: open stream BEFORE awaiting orchestrator so status labels are
     // visible during the real waiting period (D-03, D-04, D-05).
     const stream = new PassThrough();
+    const turnId = crypto.randomUUID();
+    const turnKey = activeChatTurnKey(deviceId, turnId);
+    const activeTurn: ActiveChatTurn = {
+      controller: new AbortController(),
+      stopRequested: false,
+      completed: false,
+    };
+    activeChatTurns.set(turnKey, activeTurn);
+
+    request.raw.on("close", () => {
+      if (!activeTurn.completed && !activeTurn.stopRequested && !activeTurn.controller.signal.aborted) {
+        activeTurn.controller.abort();
+      }
+    });
 
     reply
       .code(200)
@@ -750,7 +874,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         image,
         chatTurnStartedAt,
         hooks,
-      );
+        {
+          turnId,
+          signal: activeTurn.controller.signal,
+          isStopped: () => activeTurn.stopRequested,
+        },
+      ).finally(() => {
+        activeTurn.completed = true;
+        activeChatTurns.delete(turnKey);
+      });
     });
 
     return reply;

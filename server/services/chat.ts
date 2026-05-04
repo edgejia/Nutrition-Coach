@@ -13,6 +13,7 @@ import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
 
 const RECEIPT_REHYDRATION_GRACE_MS = 5_000;
+type ChatMessageStatus = "complete" | "stopped" | "error";
 
 interface LoggedMealReceipt {
   mealId: string;
@@ -141,7 +142,7 @@ export function createChatService(db: AppDatabase) {
       deviceId: string,
       role: string,
       content: string,
-      opts?: { toolName?: string; imagePath?: string }
+      opts?: { toolName?: string; imagePath?: string; status?: ChatMessageStatus }
     ) {
       const id = crypto.randomUUID();
       const createdAt = new Date().toISOString();
@@ -178,6 +179,7 @@ export function createChatService(db: AppDatabase) {
           toolName: opts?.toolName ?? null,
           imagePath: opts?.imagePath ?? null,
           createdAt,
+          status: opts?.status ?? "complete",
         }).run();
 
         if (imageAssetId) {
@@ -218,6 +220,7 @@ export function createChatService(db: AppDatabase) {
         toolName: string | null;
         imagePath: string | null;
         createdAt: string;
+        status: string;
         didLogMeal?: boolean;
         loggedMeal?: LoggedMealReceipt;
       }> = [];
