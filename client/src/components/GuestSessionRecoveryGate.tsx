@@ -120,7 +120,7 @@ export function GuestSessionRecoveryGate() {
           cursor: "not-allowed",
           opacity: 0.55,
         }}>
-          先匯出原始紀錄
+          尚未開放 · 先匯出原始紀錄
         </button>
 
         <p className="sp-zh" style={{

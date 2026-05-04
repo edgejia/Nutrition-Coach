@@ -37,6 +37,8 @@ describe("Settings source contract", () => {
     assert.match(source, /資料管理/);
     assert.match(source, /資料/);
     assert.match(source, /尚未開放/);
+    assert.match(source, /aria-disabled="true"/);
+    assert.match(source, /cursor: "default"/);
     assert.match(source, /營養教練/);
     assert.match(source, /sport/);
     assert.match(source, /儲存中…/);
@@ -64,6 +66,7 @@ describe("Settings source contract", () => {
     assert.doesNotMatch(source, /updateReminder/);
     assert.doesNotMatch(source, /updateTimezone/);
     assert.doesNotMatch(source, /updateLanguage/);
+    assert.doesNotMatch(source, /cursor: muted \? "default" : "pointer"/);
     assert.doesNotMatch(source, /wipe/i);
     assert.doesNotMatch(source, /deviceId\}/);
     assert.doesNotMatch(source, /deviceId:/);

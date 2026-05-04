@@ -238,8 +238,8 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
 
           <section className="sp-card" style={{ padding: 0 }}>
             <CardHeader label="偏好設定" title="偏好" />
-            <SettingsRow zh="時區" note="Asia/Taipei" value="Asia/Taipei" />
-            <SettingsRow zh="語言" note="介面語言" value="繁體中文" />
+            <SettingsRow zh="時區" note="固定為 Asia/Taipei" value="尚未開放" muted />
+            <SettingsRow zh="語言" note="目前固定為繁體中文" value="尚未開放" muted />
             <SettingsRow zh="提醒" note="餐點與目標提醒" value="尚未開放" muted last />
           </section>
 
@@ -326,13 +326,14 @@ function SettingsRow({
 }) {
   return (
     <div
+      aria-disabled="true"
       style={{
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
         padding: "12px 16px",
         borderBottom: last ? "none" : "1px dashed var(--sp-line)",
-        cursor: muted ? "default" : "pointer",
+        cursor: "default",
         opacity: muted ? 0.6 : 1,
       }}
     >
