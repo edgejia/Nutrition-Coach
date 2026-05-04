@@ -14,7 +14,9 @@
     "test": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/*.test.ts",
     "test:integration": "node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/*.test.ts",
-    "verify:harness": "node scripts/run-node-with-tz.mjs --import tsx tests/harness/run.ts"
+    "verify:harness": "node scripts/run-node-with-tz.mjs --import tsx tests/harness/run.ts",
+    "matrix:gen": "node --import tsx scripts/generate-capability-matrix-doc.mjs",
+    "matrix:gen:check": "node --import tsx scripts/generate-capability-matrix-doc.mjs --check"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
