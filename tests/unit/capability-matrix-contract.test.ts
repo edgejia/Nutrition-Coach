@@ -22,6 +22,7 @@ const REQUIRED_SURFACES = new Set([
   "guest recovery",
 ]);
 const REQUIRED_REQUIREMENTS = new Set(["ALIGN-01", "ALIGN-02", "ALIGN-03", "ALIGN-04"]);
+const REQUIRED_SUPPORTED_ROUTES = ["/api/device/goals", "/api/meals/:id", "/api/assets/:id"];
 const REPAIR_SEVERITIES = new Set(["blocker", "must-fix", "follow-up"]);
 const ROADMAP_FUTURES = [
   "Identity and Continuity",
@@ -145,9 +146,9 @@ describe("capability matrix contract", () => {
       guestSessionResolver,
     ].join("\n");
 
-    assert.match(deviceRoute, /\/api\/device\/goals/);
-    assert.match(mealsRoute, /\/api\/meals\/:id/);
-    assert.match(assetsRoute, /\/api\/assets\/:id/);
+    assert.match(deviceRoute, routePattern(REQUIRED_SUPPORTED_ROUTES[0]));
+    assert.match(mealsRoute, routePattern(REQUIRED_SUPPORTED_ROUTES[1]));
+    assert.match(assetsRoute, routePattern(REQUIRED_SUPPORTED_ROUTES[2]));
     assert.match(apiSource, /updateGoals|updateMeal|deleteMeal|establishGuestSession|withAuthorizedAssetUrl/);
     assert.match(storeSource, /setPendingHomeChatDraft|setActiveScreen|openDayDetail|openMealEdit|rebuildGuestSession/);
 

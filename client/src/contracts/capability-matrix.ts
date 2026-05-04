@@ -52,7 +52,7 @@ export const capabilityMatrix = [
     placeholderShape: "none",
     clientApi: ["recordHomeCtaIntentSelected", "recordHomeCtaOptionSent"],
     storeAction: ["setPendingHomeChatDraft", "setActiveScreen(\"chat\")"],
-    backendRoute: ["/api/observability/client-event"],
+    backendRoute: [],
     backendService: [],
     handlingDecision: "Home may stage supported prompts only when the flow lands in Chat through the existing draft and tab actions.",
     requirements: ["ALIGN-01", "ALIGN-02"],
