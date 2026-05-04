@@ -19,7 +19,9 @@ describe("chat shell source contract", () => {
     assert.doesNotMatch(chatPanel, /sp-chat-today-log/);
     assert.match(chatPanel, /formatMealCountSummary/);
     assert.match(chatPanel, /今日已紀錄 \$\{mealCount\} 餐/);
-    assert.match(chatPanel, /kcal · \{todayMealCountSummary\}/);
+    assert.match(chatPanel, /\{consumedCalories\}\/\{targetCalories\} kcal/);
+    assert.match(chatPanel, /\{todayMealCountSummary\}/);
+    assert.match(chatPanel, /sp-chat-separator/);
     assert.match(chatPanel, /getMeals\(\{ refreshReason: "meal_mutation" \}\)/);
     assert.match(chatPanel, /screen-scroll-with-input/);
     assert.match(chatPanel, /sp-chat-scroll/);
