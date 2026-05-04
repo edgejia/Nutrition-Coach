@@ -1362,14 +1362,16 @@ textarea {
 .sp-chat-header {
   border-bottom: 1px solid var(--sp-line);
   background: #0a0b0d;
-  padding: 10px 16px 8px;
+  max-height: 52px;
+  padding: 3px 16px 4px;
 }
 
 .sp-chat-header-row {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
   align-items: center;
   gap: 8px;
+  min-height: 44px;
 }
 
 .sp-chat-header-slot {
@@ -1382,33 +1384,56 @@ textarea {
 }
 
 .sp-chat-back {
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  min-height: 40px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
 }
 
 .sp-chat-heading {
+  display: flex;
   min-width: 0;
-  text-align: center;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sp-chat-title {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
   margin: 0;
   color: var(--sp-ink);
   font-family: var(--sp-font-zh);
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
   letter-spacing: 0;
-  line-height: 1.2;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-chat-separator {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  flex: 0 0 auto;
+  background: var(--sp-line-strong);
 }
 
 .sp-chat-metric {
-  margin-top: 2px;
+  min-width: 0;
+  overflow: hidden;
   color: var(--sp-ink-2);
   font-family: var(--sp-font-mono);
   font-size: 12px;
   line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sp-chat-scroll {
@@ -1643,10 +1668,40 @@ textarea {
 }
 
 .sp-chat-composer-bar {
+  display: grid;
+  gap: 8px;
   border-top: 1px solid var(--sp-line);
   background: rgba(10, 11, 13, 0.92);
   backdrop-filter: blur(16px);
   padding: 8px 16px max(16px, env(safe-area-inset-bottom));
+}
+
+.sp-chat-stop {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  border: 1px solid var(--sp-line-strong);
+  border-radius: var(--sp-r-pill);
+  background: var(--sp-surface-2);
+  color: var(--sp-ink);
+  padding: 0 14px;
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.sp-chat-stop:disabled {
+  color: var(--sp-ink-3);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.sp-chat-stop:focus-visible {
+  outline: 2px solid var(--sp-lime);
+  outline-offset: 2px;
 }
 
 .sp-chat-input {

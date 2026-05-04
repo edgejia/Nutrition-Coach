@@ -83,6 +83,37 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
   return false;
 }
 
+function isDailySummary(value: unknown): value is DailySummary {
+  return (
+    isRecord(value) &&
+    typeof value.date === "string" &&
+    typeof value.totalCalories === "number" &&
+    Number.isFinite(value.totalCalories) &&
+    typeof value.totalProtein === "number" &&
+    Number.isFinite(value.totalProtein) &&
+    typeof value.totalCarbs === "number" &&
+    Number.isFinite(value.totalCarbs) &&
+    typeof value.totalFat === "number" &&
+    Number.isFinite(value.totalFat) &&
+    typeof value.mealCount === "number" &&
+    Number.isFinite(value.mealCount)
+  );
+}
+
+function isDailyTargets(value: unknown): value is DailyTargets {
+  return (
+    isRecord(value) &&
+    typeof value.calories === "number" &&
+    Number.isFinite(value.calories) &&
+    typeof value.protein === "number" &&
+    Number.isFinite(value.protein) &&
+    typeof value.carbs === "number" &&
+    Number.isFinite(value.carbs) &&
+    typeof value.fat === "number" &&
+    Number.isFinite(value.fat)
+  );
+}
+
 async function readJsonSafe(res: Response): Promise<unknown> {
   try {
     return await res.json();
@@ -379,6 +410,7 @@ export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> 
 }
 
 export interface StreamCallbacks {
+  onTurnStart?: (turnId: string) => void;
   onStatus: (label: string) => void;
   onToken: (token: string) => void;
   onDone: (data: {
@@ -389,16 +421,36 @@ export interface StreamCallbacks {
     dailyTargets?: DailyTargets;
     affectedDate?: string;
   }) => void;
+  onStopped?: (data: {
+    stopped: true;
+    turnId?: string;
+    tokensStreamed: number;
+    didLogMeal?: boolean;
+    didMutateMeal?: boolean;
+    loggedMeal?: LoggedMealReceipt;
+    dailySummary?: DailySummary;
+    dailyTargets?: DailyTargets;
+    affectedDate?: string;
+  }) => void;
   onError: (message: string) => void;
+}
+
+export interface SendMessageStreamOptions {
+  signal?: AbortSignal;
+  turnId?: string;
 }
 
 export async function sendMessageStream(
   message: string,
   callbacks: StreamCallbacks,
   image?: File,
+  options?: SendMessageStreamOptions,
 ): Promise<void> {
   const form = new FormData();
   form.append("message", message);
+  if (options?.turnId) {
+    form.append("turnId", options.turnId);
+  }
   if (image) {
     form.append("image", await prepareImageForUpload(image));
   }
@@ -408,6 +460,7 @@ export async function sendMessageStream(
     credentials: "same-origin",
     headers: { Accept: "text/event-stream" },
     body: form,
+    signal: options?.signal,
   });
 
   if (res.status === 401) throw new Error("UNAUTHORIZED");
@@ -424,6 +477,15 @@ export async function sendMessageStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let sawTerminalEvent = false;
+  let activeTurnId: string | null = null;
+
+  function maybeEmitTurnStart(turnId: unknown) {
+    if (typeof turnId !== "string" || turnId.trim().length === 0 || turnId === activeTurnId) {
+      return;
+    }
+    activeTurnId = turnId;
+    callbacks.onTurnStart?.(turnId);
+  }
 
   while (true) {
     const { done, value } = await reader.read();
@@ -461,17 +523,37 @@ export async function sendMessageStream(
         const parsed = JSON.parse(data) as Record<string, unknown>;
 
         if (eventType === "status") {
+          maybeEmitTurnStart(parsed.turnId);
           callbacks.onStatus((parsed.label as string) ?? "");
+        } else if (eventType === "start") {
+          maybeEmitTurnStart(parsed.turnId);
         } else if (eventType === "chunk") {
           callbacks.onToken((parsed.token as string) ?? "");
         } else if (eventType === "done") {
+          maybeEmitTurnStart(parsed.turnId);
           sawTerminalEvent = true;
           callbacks.onDone({
             didLogMeal: Boolean(parsed.didLogMeal),
             ...(parsed.didMutateMeal !== undefined ? { didMutateMeal: Boolean(parsed.didMutateMeal) } : {}),
             ...(isLoggedMealReceipt(parsed.loggedMeal) ? { loggedMeal: parsed.loggedMeal } : {}),
-            ...(parsed.dailySummary ? { dailySummary: parsed.dailySummary as DailySummary } : {}),
-            ...(parsed.dailyTargets ? { dailyTargets: parsed.dailyTargets as DailyTargets } : {}),
+            ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
+            ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
+            ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
+          });
+        } else if (eventType === "stopped") {
+          maybeEmitTurnStart(parsed.turnId);
+          sawTerminalEvent = true;
+          callbacks.onStopped?.({
+            stopped: true,
+            ...(typeof parsed.turnId === "string" ? { turnId: parsed.turnId } : {}),
+            tokensStreamed: typeof parsed.tokensStreamed === "number" && Number.isFinite(parsed.tokensStreamed)
+              ? parsed.tokensStreamed
+              : 0,
+            ...(parsed.didLogMeal !== undefined ? { didLogMeal: Boolean(parsed.didLogMeal) } : {}),
+            ...(parsed.didMutateMeal !== undefined ? { didMutateMeal: Boolean(parsed.didMutateMeal) } : {}),
+            ...(isLoggedMealReceipt(parsed.loggedMeal) ? { loggedMeal: parsed.loggedMeal } : {}),
+            ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
+            ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
           });
         } else if (eventType === "error") {
@@ -487,6 +569,21 @@ export async function sendMessageStream(
   if (!sawTerminalEvent) {
     callbacks.onError("Stream interrupted");
   }
+}
+
+export async function stopChatTurn(options: { turnId: string }): Promise<{ stopped: boolean; turnId: string }> {
+  const res = await fetch("/api/chat/stop", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ turnId: options.turnId }),
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) {
+    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    throw new Error(errorMessage ?? "Failed to stop chat turn");
+  }
+  return res.json() as Promise<{ stopped: boolean; turnId: string }>;
 }
 
 export async function getMeals(options?: { refreshReason?: "day_rollover" | "meal_mutation" }): Promise<{ meals: MealEntry[] }> {

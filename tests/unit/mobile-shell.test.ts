@@ -167,7 +167,9 @@ describe("mobile shell source contract", () => {
     assert.doesNotMatch(sources.chatPanel, /sp-chat-today-log/);
     assert.match(sources.chatPanel, /formatMealCountSummary/);
     assert.match(sources.chatPanel, /今日已紀錄 \$\{mealCount\} 餐/);
-    assert.match(sources.chatPanel, /kcal · \{todayMealCountSummary\}/);
+    assert.match(sources.chatPanel, /\{consumedCalories\}\/\{targetCalories\} kcal/);
+    assert.match(sources.chatPanel, /\{todayMealCountSummary\}/);
+    assert.match(sources.chatPanel, /sp-chat-separator/);
     assert.match(sources.chatPanel, /getMeals\(\{ refreshReason: "meal_mutation" \}\)/);
     assert.match(sources.chatPanel, /\bscreen-bottom-bar\b/);
     assert.match(sources.chatPanel, /\bscreen-scroll-with-input\b/);

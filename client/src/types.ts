@@ -138,6 +138,7 @@ export interface Message {
   imageUrl?: string | null;
   imagePreviewUrl?: string;
   createdAt: string;
+  status?: "complete" | "stopped" | "error";
   didLogMeal?: boolean;
   loggedMeal?: LoggedMealReceipt;
 }
@@ -238,4 +239,5 @@ export interface ProvisionalBubble {
   statusLabel: string;
   content: string;
   isStreaming: boolean;
+  status?: "complete" | "stopped" | "error";
 }

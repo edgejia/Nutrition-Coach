@@ -290,12 +290,12 @@ describe("chat stream contract", () => {
 
   it("clears unauthorized Chat sends out of the provisional sending state", async () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
-    const unauthorizedBranch = /if \(err instanceof Error && err\.message === "UNAUTHORIZED"\) \{([\s\S]*?)\n\s*return;\n\s*\}/.exec(
-      chatPanel,
-    );
+    const unauthorizedBranches = [...chatPanel.matchAll(/if \(err instanceof Error && err\.message === "UNAUTHORIZED"\) \{([\s\S]*?)\n\s*return;\n\s*\}/g)];
+    const branchSource = unauthorizedBranches
+      .map((match) => match[1] ?? "")
+      .find((source) => source.includes("setProvisionalBubble(null)"));
 
-    assert.ok(unauthorizedBranch, "ChatPanel should keep an explicit UNAUTHORIZED branch");
-    const branchSource = unauthorizedBranch[1] ?? "";
+    assert.ok(branchSource, "ChatPanel should keep an explicit chat-send UNAUTHORIZED branch");
     assert.match(branchSource, /setProvisionalBubble\(null\)/);
     assert.match(branchSource, /setSending\(false\)/);
     assert.match(branchSource, /recoverGuestSession\(\)/);

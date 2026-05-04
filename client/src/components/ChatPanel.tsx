@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
-import { getMeals, sendMessageStream, loadHistory } from "../api.js";
+import { getMeals, sendMessageStream, loadHistory, stopChatTurn } from "../api.js";
 import { formatLocalDate } from "../lib/time.js";
 import {
   type FollowMode,
@@ -21,6 +21,7 @@ import type { Message, PendingHomeChatDraft } from "../types.js";
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
 const ENTRY_SETTLE_WINDOW_MS = 240;
 const UPLOAD_SETTLE_WINDOW_MS = 320;
+const STOP_FALLBACK_TIMEOUT_MS = 1000;
 const PHASE40_INCOMPLETE_RECEIPT_FLAG = "phase40IncompleteReceipt";
 const PHASE40_INCOMPLETE_RECEIPT_ID = "phase40-incomplete-receipt-mock";
 
@@ -92,6 +93,7 @@ export function ChatPanel() {
   const provisionalBubble = useStore((s) => s.provisionalBubble);
   const setProvisionalBubble = useStore((s) => s.setProvisionalBubble);
   const commitProvisionalBubble = useStore((s) => s.commitProvisionalBubble);
+  const commitStoppedProvisionalBubble = useStore((s) => s.commitStoppedProvisionalBubble);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
@@ -114,7 +116,13 @@ export function ChatPanel() {
   const followModeRef = useRef<FollowMode>("attached");
   const scrollFrameRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const activeTurnIdRef = useRef<string | null>(null);
+  const stopFallbackTimeoutRef = useRef<number | null>(null);
+  const stoppingRef = useRef(false);
   const [followMode, setFollowMode] = useState<FollowMode>("attached");
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
 
   const isChatLocked = sending;
   const todayKey = formatLocalDate(new Date());
@@ -194,6 +202,54 @@ export function ChatPanel() {
       window.clearTimeout(uploadSettleTimeoutRef.current);
       uploadSettleTimeoutRef.current = null;
     }
+  }
+
+  function clearStopFallbackTimeout() {
+    if (stopFallbackTimeoutRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(stopFallbackTimeoutRef.current);
+      stopFallbackTimeoutRef.current = null;
+    }
+  }
+
+  function setStoppingMode(nextStopping: boolean) {
+    stoppingRef.current = nextStopping;
+    setStopping(nextStopping);
+  }
+
+  function clearActiveStreamAfterTerminal() {
+    clearStopFallbackTimeout();
+    activeAbortControllerRef.current = null;
+    activeTurnIdRef.current = null;
+    setActiveTurnId(null);
+    setStoppingMode(false);
+  }
+
+  function cleanupActiveStream() {
+    clearStopFallbackTimeout();
+    activeAbortControllerRef.current?.abort();
+    activeAbortControllerRef.current = null;
+    activeTurnIdRef.current = null;
+    setActiveTurnId(null);
+    setStoppingMode(false);
+  }
+
+  function armStopFallback() {
+    clearStopFallbackTimeout();
+    if (typeof window === "undefined") {
+      activeAbortControllerRef.current?.abort();
+      activeAbortControllerRef.current = null;
+      activeTurnIdRef.current = null;
+      setActiveTurnId(null);
+      setStoppingMode(false);
+      return;
+    }
+    stopFallbackTimeoutRef.current = window.setTimeout(() => {
+      activeAbortControllerRef.current?.abort();
+      activeAbortControllerRef.current = null;
+      activeTurnIdRef.current = null;
+      setActiveTurnId(null);
+      setStoppingMode(false);
+    }, STOP_FALLBACK_TIMEOUT_MS);
   }
 
   function disarmEntrySettleWindow() {
@@ -368,6 +424,21 @@ export function ChatPanel() {
     }
   }
 
+  function handleStopStreaming() {
+    if (!sending || stoppingRef.current) return;
+    const turnId = activeTurnIdRef.current;
+    if (!turnId) return;
+
+    setStoppingMode(true);
+    useStore.getState().setProvisionalStatus("正在停止...");
+    armStopFallback();
+    void stopChatTurn({ turnId }).catch((err) => {
+      if (err instanceof Error && err.message === "UNAUTHORIZED") {
+        void recoverGuestSession();
+      }
+    });
+  }
+
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
     const activeDeviceId = useStore.getState().deviceId;
     if (!activeDeviceId) return;
@@ -395,6 +466,11 @@ export function ChatPanel() {
     }
 
     const bubbleId = crypto.randomUUID();
+    const abortController = new AbortController();
+    activeAbortControllerRef.current = abortController;
+    activeTurnIdRef.current = null;
+    setActiveTurnId(null);
+    setStoppingMode(false);
     setProvisionalBubble({ id: bubbleId, statusLabel: "思考中...", content: "", isStreaming: true });
     setSending(true);
 
@@ -402,6 +478,10 @@ export function ChatPanel() {
       await sendMessageStream(
         text,
         {
+          onTurnStart: (turnId) => {
+            activeTurnIdRef.current = turnId;
+            setActiveTurnId(turnId);
+          },
           onStatus: (label) => {
             useStore.getState().setProvisionalStatus(label);
           },
@@ -424,9 +504,45 @@ export function ChatPanel() {
             }
             commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary, loggedMeal });
             setSending(false);
+            clearActiveStreamAfterTerminal();
+          },
+          onStopped: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets }) => {
+            if (useStore.getState().deviceId !== activeDeviceId) return;
+            if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
+              clearPendingHomeChatDraft();
+            }
+            if (dailyTargets) {
+              setDailyTargets(dailyTargets);
+            }
+            if ((didLogMeal || didMutateMeal) && dailySummary) {
+              setDailySummary(dailySummary);
+            }
+            if (didLogMeal || didMutateMeal) {
+              void refreshTodayMeals();
+            }
+            commitStoppedProvisionalBubble({
+              didLogMeal: didLogMeal || didMutateMeal,
+              dailySummary,
+              dailyTargets,
+              loggedMeal,
+            });
+            setSending(false);
+            clearActiveStreamAfterTerminal();
           },
           onError: (errorMessage) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
+            if (stoppingRef.current) {
+              commitStoppedProvisionalBubble({ didLogMeal: false });
+              if (opts?.draftId) {
+                const currentDraft = useStore.getState().pendingHomeChatDraft;
+                if (currentDraft && currentDraft.id === opts.draftId) {
+                  setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+                }
+              }
+              setSending(false);
+              clearActiveStreamAfterTerminal();
+              return;
+            }
             useStore.getState().setProvisionalBubble({
               id: bubbleId,
               statusLabel: "",
@@ -441,9 +557,11 @@ export function ChatPanel() {
               }
             }
             setSending(false);
+            clearActiveStreamAfterTerminal();
           },
         },
         image,
+        { signal: abortController.signal },
       );
     } catch (err) {
       if (useStore.getState().deviceId !== activeDeviceId) return;
@@ -454,6 +572,18 @@ export function ChatPanel() {
         setProvisionalBubble(null);
         setSending(false);
         void recoverGuestSession();
+        return;
+      }
+      if (stoppingRef.current) {
+        commitStoppedProvisionalBubble({ didLogMeal: false });
+        if (opts?.draftId) {
+          const currentDraft = useStore.getState().pendingHomeChatDraft;
+          if (currentDraft && currentDraft.id === opts.draftId) {
+            setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+          }
+        }
+        setSending(false);
+        clearActiveStreamAfterTerminal();
         return;
       }
       const errorMessage = err instanceof Error && err.message
@@ -473,6 +603,7 @@ export function ChatPanel() {
         }
       }
       setSending(false);
+      clearActiveStreamAfterTerminal();
     }
   }
 
@@ -587,6 +718,7 @@ export function ChatPanel() {
       cancelScheduledScroll();
       disarmEntrySettleWindow();
       disarmUploadSettleWindow();
+      cleanupActiveStream();
     },
     [],
   );
@@ -694,9 +826,10 @@ export function ChatPanel() {
           </div>
           <div className="sp-chat-heading">
             <h2 className="sp-chat-title">對話</h2>
-            <div className="sp-chat-metric">
-              {consumedCalories}/{targetCalories} kcal · {todayMealCountSummary}
-            </div>
+            <span className="sp-chat-separator" aria-hidden="true" />
+            <span className="sp-chat-metric">{consumedCalories}/{targetCalories} kcal</span>
+            <span className="sp-chat-separator" aria-hidden="true" />
+            <span className="sp-chat-metric">{todayMealCountSummary}</span>
           </div>
           <div className="sp-chat-header-slot" aria-hidden="true" />
         </div>
@@ -766,6 +899,17 @@ export function ChatPanel() {
       </div>
 
       <div className="screen-bottom-bar sp-chat-composer-bar">
+        {sending && (
+          <button
+            type="button"
+            onClick={handleStopStreaming}
+            disabled={stopping || !activeTurnId}
+            className="sp-chat-stop"
+            aria-label="停止生成"
+          >
+            {stopping ? "正在停止..." : "停止生成"}
+          </button>
+        )}
         <ChatInput onSend={handleSend} onBeforeSend={handleBeforeSend} disabled={sending} />
       </div>
     </div>

@@ -32,6 +32,18 @@ function readStoredJson<T>(key: string): T | null {
 type RolloverRefreshHandler = () => void | Promise<void>;
 let rolloverRefreshHandler: RolloverRefreshHandler | null = null;
 type GuestSessionStatus = "unknown" | "establishing" | "ready" | "recovery_required";
+type CommitProvisionalBubbleExtra = {
+  didLogMeal?: boolean;
+  loggedMeal?: LoggedMealReceipt;
+  dailySummary?: DailySummary;
+  dailyTargets?: DailyTargets;
+  status?: Message["status"];
+};
+
+function getStoppedMessageContent(content: string) {
+  const trimmedContent = content.trim();
+  return trimmedContent.length > 0 ? `${trimmedContent}\n\n已停止` : "已停止，沒有產生新的回覆。";
+}
 
 interface AppState {
   deviceId: string | null;
@@ -78,7 +90,8 @@ interface AppState {
   setProvisionalBubble: (bubble: ProvisionalBubble | null) => void;
   appendProvisionalToken: (token: string) => void;
   setProvisionalStatus: (label: string) => void;
-  commitProvisionalBubble: (extra: { didLogMeal?: boolean; loggedMeal?: LoggedMealReceipt; dailySummary?: DailySummary }) => void;
+  commitProvisionalBubble: (extra: CommitProvisionalBubbleExtra) => void;
+  commitStoppedProvisionalBubble: (extra: CommitProvisionalBubbleExtra) => void;
   clearDevice: () => void;
 }
 
@@ -298,6 +311,7 @@ export const useStore = create<AppState>((set, get) => ({
         role: "assistant",
         content: state.provisionalBubble.content,
         createdAt: new Date().toISOString(),
+        ...(extra.status ? { status: extra.status } : {}),
         didLogMeal: extra.didLogMeal,
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
       };
@@ -306,6 +320,34 @@ export const useStore = create<AppState>((set, get) => ({
     });
     if (extra.dailySummary) {
       get().setDailySummary(extra.dailySummary);
+    }
+    if (extra.dailyTargets) {
+      get().setDailyTargets(extra.dailyTargets);
+    }
+  },
+  commitStoppedProvisionalBubble: (extra) => {
+    set((state) => {
+      if (!state.provisionalBubble) {
+        return {};
+      }
+
+      const finalMessage: Message = {
+        id: state.provisionalBubble.id,
+        role: "assistant",
+        content: getStoppedMessageContent(state.provisionalBubble.content),
+        createdAt: new Date().toISOString(),
+        status: "stopped",
+        didLogMeal: extra.didLogMeal ?? Boolean(extra.loggedMeal),
+        ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
+      };
+
+      return { messages: [...state.messages, finalMessage], provisionalBubble: null };
+    });
+    if (extra.dailySummary) {
+      get().setDailySummary(extra.dailySummary);
+    }
+    if (extra.dailyTargets) {
+      get().setDailyTargets(extra.dailyTargets);
     }
   },
   clearDevice: () => {
