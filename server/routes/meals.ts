@@ -128,6 +128,17 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     let affectedDateKey: string;
     let updatedMeal: Awaited<ReturnType<typeof foodLoggingService.updateMeal>>;
     try {
+      const itemCount = await foodLoggingService.getMealItemCount(deviceId, id);
+      if (itemCount === null) {
+        return reply.code(404).send({ error: "Meal not found" });
+      }
+      if (itemCount > 1) {
+        return reply.code(409).send({
+          error: "MEAL_REQUIRES_GROUPED_UPDATE",
+          message: "Grouped meals must be corrected through chat.",
+        });
+      }
+
       if (update.imageAssetId) {
         const ownedAsset = await assetService.getOwnedAsset(deviceId, update.imageAssetId);
         if (!ownedAsset) {
