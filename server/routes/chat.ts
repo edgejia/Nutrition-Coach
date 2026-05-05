@@ -41,6 +41,11 @@ const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請�
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
+type ReceiptIdentity = {
+  mealTransactionId: string;
+  mealRevisionId: string;
+  toolMessageId?: string;
+};
 interface ActiveChatTurn {
   controller: AbortController;
   stopRequested: boolean;
@@ -98,10 +103,26 @@ async function finalizeAssistantReply(
   chatService: ReturnType<typeof createChatService>,
   deviceId: string,
   rawReply: string,
-): Promise<string> {
+  receiptIdentity?: ReceiptIdentity,
+  opts?: { status?: "complete" | "stopped" | "error" },
+): Promise<{ sanitized: string; assistantMessageId: string }> {
   const sanitized = sanitizeReply(rawReply);
-  await chatService.saveMessage(deviceId, "assistant", sanitized);
-  return sanitized;
+  const assistantMessage = await chatService.saveMessage(
+    deviceId,
+    "assistant",
+    sanitized,
+    opts?.status ? { status: opts.status } : undefined,
+  );
+  if (receiptIdentity) {
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: assistantMessage.id,
+      toolMessageId: receiptIdentity.toolMessageId,
+      mealTransactionId: receiptIdentity.mealTransactionId,
+      mealRevisionId: receiptIdentity.mealRevisionId,
+    });
+  }
+  return { sanitized, assistantMessageId: assistantMessage.id };
 }
 
 function createStreamingSanitizer() {
@@ -247,6 +268,19 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
   };
 }
 
+function buildReceiptIdentity(
+  loggedMeal: LoggedMealReceipt | undefined,
+  toolMessageId: string | undefined,
+): ReceiptIdentity | undefined {
+  if (!loggedMeal) return undefined;
+
+  return {
+    mealTransactionId: loggedMeal.mealId,
+    mealRevisionId: loggedMeal.mealRevisionId,
+    ...(toolMessageId ? { toolMessageId } : {}),
+  };
+}
+
 async function cleanupUploadSafe(imagePath: string | undefined, log: FastifyBaseLogger): Promise<void> {
   if (!imagePath) return;
   try {
@@ -323,6 +357,7 @@ async function handleStreamingReply(
   deviceId: string,
   didLogMeal: boolean,
   dailySummary: unknown,
+  receiptIdentity: ReceiptIdentity | undefined,
   affectedDate?: string,
   hooks?: OrchestratorHooks,
   stopControl?: StreamingStopControl,
@@ -368,7 +403,7 @@ async function handleStreamingReply(
 
   if (stopControl?.isStopped() || stopControl?.signal.aborted) {
     const stoppedReply = sanitizeReply(fullReply) || "（已停止）";
-    await chatService.saveMessage(deviceId, "assistant", stoppedReply, { status: "stopped" });
+    await finalizeAssistantReply(chatService, deviceId, stoppedReply, receiptIdentity, { status: "stopped" });
     return {
       fullReply: stoppedReply,
       didLogMeal,
@@ -406,7 +441,7 @@ async function handleStreamingReply(
   if (finalChunk) {
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
   }
-  await finalizeAssistantReply(chatService, deviceId, fullReply);
+  await finalizeAssistantReply(chatService, deviceId, fullReply, receiptIdentity);
   return { fullReply, didLogMeal, dailySummary, tokensStreamed };
 }
 
@@ -436,6 +471,7 @@ async function handleOrchestratorSSE(
   let streamAffectedDate: string | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
+  let streamReceiptIdentity: ReceiptIdentity | undefined;
 
   try {
     writeStatus(stream, "思考中...", stopControl?.turnId);
@@ -477,6 +513,7 @@ async function handleOrchestratorSSE(
       streamAffectedDate = affectedDate;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
+      streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -485,6 +522,7 @@ async function handleOrchestratorSSE(
         deviceId,
         didLogMeal,
         dailySummary,
+        streamReceiptIdentity,
         streamAffectedDate,
         hooks,
         stopControl,
@@ -544,8 +582,14 @@ async function handleOrchestratorSSE(
       streamAffectedDate = affectedDate;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
+      streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
       const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
-      const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, normalizedReply);
+      const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
+        deps.chatService,
+        deviceId,
+        normalizedReply,
+        streamReceiptIdentity,
+      );
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
         didLogMeal,
@@ -581,7 +625,12 @@ async function handleOrchestratorSSE(
         );
         userMessagePersisted = true;
       }
-      const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, fallback);
+      const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
+        deps.chatService,
+        deviceId,
+        fallback,
+        streamReceiptIdentity,
+      );
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
     } catch {
       // If history persistence also fails, still close the stream with done.
@@ -700,6 +749,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonAffectedDate: string | undefined;
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
+      let jsonReceiptIdentity: ReceiptIdentity | undefined;
 
       try {
         const durableAsset = await createDurableAssetIfNeeded(assetService, deviceId, image);
@@ -727,6 +777,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ? buildPartialSuccessLoggedReply(result.loggedMeal)
           : undefined;
         jsonLoggedMealReceipt = projectLoggedMealReceipt(result.loggedMeal);
+        jsonReceiptIdentity = buildReceiptIdentity(result.loggedMeal, result.loggedMealToolMessageId);
 
         if (result.didLogMeal && !result.dailySummary) {
           throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
@@ -740,7 +791,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             fullReply += token;
           }
           const normalizedReply = appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
-          const sanitized = await finalizeAssistantReply(chatService, deviceId, normalizedReply);
+          const { sanitized } = await finalizeAssistantReply(
+            chatService,
+            deviceId,
+            normalizedReply,
+            jsonReceiptIdentity,
+          );
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
           // C1: try/catch ensures publish failure never changes the HTTP response or status code.
           publishSummarySafe(
@@ -770,7 +826,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
         const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate } = result;
         const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
-        const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, normalizedReply);
+        const { sanitized: sanitizedJson } = await finalizeAssistantReply(
+          chatService,
+          deviceId,
+          normalizedReply,
+          jsonReceiptIdentity,
+        );
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, request.log);
@@ -805,7 +866,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           );
           userMessagePersisted = true;
         }
-        const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);
+        const { sanitized: sanitizedJson } = await finalizeAssistantReply(
+          chatService,
+          deviceId,
+          fallback,
+          jsonReceiptIdentity,
+        );
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, request.log);

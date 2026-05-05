@@ -817,7 +817,7 @@ describe("Chat API", () => {
         .all() as Array<{ mealTransactionId: string; mealRevisionId: string }>;
       assert.equal(receiptRows.length, 1);
       assert.equal(receiptRows[0]!.mealTransactionId, chatBody.loggedMeal?.mealId);
-      assert.match(receiptRows[0]!.mealRevisionId, /^[0-9a-f-]{36}$/);
+      assert.match(receiptRows[0]!.mealRevisionId, /^[0-9a-f-]{36}:r\d+$/);
     } finally {
       sqlite.close();
     }
@@ -1124,7 +1124,7 @@ describe("Chat API", () => {
         .all() as Array<{ mealTransactionId: string; mealRevisionId: string }>;
       assert.equal(receiptRows.length, 1);
       assert.equal(receiptRows[0]!.mealTransactionId, body.loggedMeal?.mealId);
-      assert.match(receiptRows[0]!.mealRevisionId, /^[0-9a-f-]{36}$/);
+      assert.match(receiptRows[0]!.mealRevisionId, /^[0-9a-f-]{36}:r\d+$/);
     } finally {
       sqlite.close();
     }

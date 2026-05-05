@@ -42,6 +42,7 @@ export type OrchestratorResult =
       dailyTargets?: DailyTargets;
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
+      loggedMealToolMessageId?: string;
     }
   | {
       streamGenerator: AsyncGenerator<string>;
@@ -51,6 +52,7 @@ export type OrchestratorResult =
       dailyTargets?: DailyTargets;
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
+      loggedMealToolMessageId?: string;
     };
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
@@ -253,6 +255,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let loggedMeal:
         | LoggedMealReceipt
         | undefined;
+      let loggedMealToolMessageId: string | undefined;
 
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
@@ -277,6 +280,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
                 loggedMeal,
+                loggedMealToolMessageId,
               };
             }
             response = roundResult.response;
@@ -294,6 +298,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
                 loggedMeal,
+                loggedMealToolMessageId,
               };
             }
 
@@ -310,6 +315,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               dailyTargets: successfulGoalTargets,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
+              loggedMealToolMessageId,
             };
           }
           if (didMutateMeal) {
@@ -323,6 +329,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               dailySummary: requireDailySummaryForLoggedMeal(logMealSummary),
               affectedDate: resolvedAffectedDate,
               loggedMeal,
+              loggedMealToolMessageId,
             };
           }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
@@ -333,6 +340,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             dailySummary: logMealSummary,
             affectedDate: resolvedAffectedDate,
             loggedMeal,
+            loggedMealToolMessageId,
           };
         }
 
@@ -346,6 +354,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             dailyTargets: successfulGoalTargets,
             affectedDate: resolvedAffectedDate,
             loggedMeal,
+            loggedMealToolMessageId,
           };
         }
 
@@ -432,7 +441,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 updatedFields,
                 publishedEvents,
               });
-              await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
+              const toolMessage = await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
+              if (toolLoggedMeal) {
+                loggedMealToolMessageId = toolMessage.id;
+              }
               toolResults.push({ toolCall, result });
             } catch (err) {
               const errorStr = err instanceof Error ? err.message : "Tool execution failed";
@@ -448,6 +460,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     dailyTargets: successfulGoalTargets,
                     affectedDate: resolvedAffectedDate,
                     loggedMeal,
+                    loggedMealToolMessageId,
                   };
                 }
                 throw err;
@@ -470,6 +483,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               dailySummary: logMealSummary,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
+              loggedMealToolMessageId,
             };
           }
           shouldStreamFinalReply = true;
@@ -489,6 +503,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           dailyTargets: successfulGoalTargets,
           affectedDate: resolvedAffectedDate,
           loggedMeal,
+          loggedMealToolMessageId,
         };
       }
       return {
@@ -498,6 +513,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         dailySummary: logMealSummary,
         affectedDate: resolvedAffectedDate,
         loggedMeal,
+        loggedMealToolMessageId,
       };
     },
   };
