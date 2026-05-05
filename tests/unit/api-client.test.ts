@@ -228,6 +228,29 @@ describe("API Client", () => {
     assert.deepEqual(result, { reply: "已記錄", didLogMeal: true });
   });
 
+  it("sendMessage normalizes loggedMeal image urls through withAuthorizedAssetUrl", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      reply: "已記錄",
+      didLogMeal: true,
+      loggedMeal: {
+        mealId: "meal-1",
+        foodName: "照片便當",
+        calories: 640,
+        protein: 32,
+        carbs: 78,
+        fat: 21,
+        imageAssetId: "asset-1",
+        imageUrl: "/api/assets/asset-1?deviceId=legacy-device",
+      },
+    });
+
+    const result = await api.sendMessage("我吃了便當");
+
+    assert.equal(result.loggedMeal?.imageAssetId, "asset-1");
+    assert.equal(result.loggedMeal?.imageUrl, "/api/assets/asset-1");
+  });
+
   it("sendMessage throws UNAUTHORIZED on 401", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
@@ -252,6 +275,55 @@ describe("API Client", () => {
     const result = await api.loadHistory();
 
     assert.equal(result.messages[0]?.imageUrl, "/api/assets/asset-1");
+  });
+
+  it("loadHistory normalizes loggedMeal image urls without changing null image receipts", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      messages: [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: "已記錄",
+          createdAt: "2026-04-19T00:00:00.000Z",
+          didLogMeal: true,
+          loggedMeal: {
+            mealId: "meal-1",
+            foodName: "照片便當",
+            calories: 640,
+            protein: 32,
+            carbs: 78,
+            fat: 21,
+            imageAssetId: "asset-1",
+            imageUrl: "/api/assets/asset-1?deviceId=legacy-device",
+          },
+        },
+        {
+          id: "msg-2",
+          role: "assistant",
+          content: "已記錄文字",
+          createdAt: "2026-04-19T01:00:00.000Z",
+          didLogMeal: true,
+          loggedMeal: {
+            mealId: "meal-2",
+            foodName: "文字點心",
+            calories: 120,
+            protein: 6,
+            carbs: 14,
+            fat: 4,
+            imageAssetId: null,
+            imageUrl: null,
+          },
+        },
+      ],
+    });
+
+    const result = await api.loadHistory();
+
+    assert.equal(result.messages[0]?.loggedMeal?.imageAssetId, "asset-1");
+    assert.equal(result.messages[0]?.loggedMeal?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.messages[1]?.loggedMeal?.imageAssetId, null);
+    assert.equal(result.messages[1]?.loggedMeal?.imageUrl, null);
   });
 
   it("getMeals uses same-origin credentials without raw device headers", async () => {
@@ -299,6 +371,30 @@ describe("API Client", () => {
     const result = await api.getMeals();
 
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+  });
+
+  it("getMeals preserves explicit null meal image fields", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      meals: [
+        {
+          id: "meal-1",
+          foodName: "文字點心",
+          calories: 120,
+          protein: 6,
+          carbs: 14,
+          fat: 4,
+          imageAssetId: null,
+          imageUrl: null,
+          loggedAt: "2026-04-01T04:30:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.getMeals();
+
+    assert.equal(result.meals[0]?.imageAssetId, null);
+    assert.equal(result.meals[0]?.imageUrl, null);
   });
 
   it("getDaySnapshot requests the explicit day with same-origin credentials", async () => {
@@ -355,6 +451,39 @@ describe("API Client", () => {
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
   });
 
+  it("getDaySnapshot preserves explicit null meal image fields", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      date: "2026-03-25",
+      summary: {
+        date: "2026-03-25",
+        totalCalories: 120,
+        totalProtein: 6,
+        totalCarbs: 14,
+        totalFat: 4,
+        mealCount: 1,
+      },
+      meals: [
+        {
+          id: "meal-1",
+          foodName: "文字點心",
+          calories: 120,
+          protein: 6,
+          carbs: 14,
+          fat: 4,
+          imageAssetId: null,
+          imageUrl: null,
+          loggedAt: "2026-03-25T04:30:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.getDaySnapshot("2026-03-25");
+
+    assert.equal(result.meals[0]?.imageAssetId, null);
+    assert.equal(result.meals[0]?.imageUrl, null);
+  });
+
   it("getDaySnapshot throws UNAUTHORIZED on 401", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
@@ -408,6 +537,45 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.equal(result.meals[0]?.foodName, "燕麥 + 香蕉 + 杏仁");
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+  });
+
+  it("getHistoryDaySnapshot normalizes flat image fields and nested null asset fields", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      date: "2026-04-29",
+      summary: {
+        date: "2026-04-29",
+        totalCalories: 440,
+        totalProtein: 36,
+        totalCarbs: 54,
+        totalFat: 13,
+        mealCount: 2,
+      },
+      meals: [
+        {
+          id: "meal-1",
+          loggedAt: "2026-04-29T07:30:00.000Z",
+          display: { title: "照片便當" },
+          nutrition: { calories: 320, protein: 30, carbs: 40, fat: 9 },
+          imageAssetId: "asset-flat",
+          imageUrl: "/api/assets/asset-flat?deviceId=legacy",
+        },
+        {
+          id: "meal-2",
+          loggedAt: "2026-04-29T08:30:00.000Z",
+          display: { title: "文字點心" },
+          nutrition: { calories: 120, protein: 6, carbs: 14, fat: 4 },
+          asset: { imageAssetId: null, imageUrl: null },
+        },
+      ],
+    });
+
+    const result = await api.getHistoryDaySnapshot("2026-04-29");
+
+    assert.equal(result.meals[0]?.imageAssetId, "asset-flat");
+    assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-flat");
+    assert.equal(result.meals[1]?.imageAssetId, null);
+    assert.equal(result.meals[1]?.imageUrl, null);
   });
 
   it("getHistoryDaySnapshot throws UNAUTHORIZED on 401", async () => {
@@ -490,6 +658,44 @@ describe("API Client", () => {
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), input);
     assert.equal(result.dailySummary.totalCalories, 260);
     assert.equal(result.meal.foodName, "雞胸肉沙拉半份");
+  });
+
+  it("updateMeal normalizes returned image urls through withAuthorizedAssetUrl", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      dailySummary: {
+        date: "2026-04-30",
+        totalCalories: 660,
+        totalProtein: 34,
+        totalCarbs: 80,
+        totalFat: 22,
+        mealCount: 1,
+      },
+      meal: {
+        id: "meal-1",
+        foodName: "照片便當更新",
+        calories: 660,
+        protein: 34,
+        carbs: 80,
+        fat: 22,
+        imageAssetId: "asset-1",
+        imageUrl: "/api/assets/asset-1?deviceId=legacy-device",
+        loggedAt: "2026-04-30T04:00:00.000Z",
+      },
+    });
+
+    const result = await api.updateMeal("meal-1", {
+      foodName: "照片便當更新",
+      calories: 660,
+      protein: 34,
+      carbs: 80,
+      fat: 22,
+      imageAssetId: "asset-1",
+    });
+
+    assert.equal(result.meal.imageAssetId, "asset-1");
+    assert.equal(result.meal.imageUrl, "/api/assets/asset-1");
   });
 
   it("updateMeal URL-encodes meal id and throws UNAUTHORIZED on 401", async () => {
@@ -685,6 +891,71 @@ describe("sendMessageStream", () => {
     });
 
     assert.equal(affectedDate, "2026-03-25");
+  });
+
+  it("dispatches done loggedMeal image urls through withAuthorizedAssetUrl", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-1",
+          foodName: "照片便當",
+          calories: 640,
+          protein: 32,
+          carbs: 78,
+          fat: 21,
+          imageAssetId: "asset-1",
+          imageUrl: "/api/assets/asset-1?deviceId=legacy-device",
+        },
+      })}\n\n`,
+    ]);
+    let imageUrl: string | null | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        imageUrl = payload.loggedMeal?.imageUrl;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(imageUrl, "/api/assets/asset-1");
+  });
+
+  it("dispatches stopped loggedMeal image urls through withAuthorizedAssetUrl", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 3,
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-1",
+          foodName: "照片便當",
+          calories: 640,
+          protein: 32,
+          carbs: 78,
+          fat: 21,
+          imageAssetId: "asset-1",
+          imageUrl: "/api/assets/asset-1?deviceId=legacy-device",
+        },
+      })}\n\n`,
+    ]);
+    let imageUrl: string | null | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        imageUrl = payload.loggedMeal?.imageUrl;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(imageUrl, "/api/assets/asset-1");
   });
 
   it("handles SSE event split across two chunks", async () => {
