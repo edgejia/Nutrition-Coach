@@ -209,6 +209,49 @@ describe("ChatService", () => {
     assert.equal("estimate" in assistant.loggedMeal, false);
   });
 
+  it("projects explicit loggedMeal receipts even when the tool row is outside the fetched history window", async () => {
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      loggedAt: "2026-03-25T08:30:00.000Z",
+      imagePath: "asset:salmon-rice",
+    });
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+
+    for (let index = 0; index < 10; index += 1) {
+      await chatService.saveMessage(deviceId, "user", `填充訊息 ${index}`);
+      await chatService.saveMessage(deviceId, "assistant", `填充回覆 ${index}`);
+    }
+
+    const assistantMessage = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄鮭魚飯糰。");
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: assistantMessage.id,
+      mealTransactionId: loggedMeal.id,
+      mealRevisionId: loggedMeal.mealRevisionId,
+    });
+
+    const history = await chatService.getHistory(deviceId, 4);
+    const assistant = history.find((message) => message.id === assistantMessage.id);
+
+    assert.equal(assistant?.didLogMeal, true);
+    assert.deepEqual(assistant?.loggedMeal, {
+      mealId: loggedMeal.id,
+      dateKey: "2026-03-25",
+      loggedAt: loggedMeal.loggedAt,
+      imageAssetId: "salmon-rice",
+      imageUrl: "/api/assets/salmon-rice",
+      foodName: "鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+    });
+  });
+
   it("does not rehydrate receipts without explicit identity for legacy successful tools", async () => {
     await foodLoggingService.logFood(deviceId, {
       foodName: "雞胸便當",

@@ -210,7 +210,7 @@ export function createChatService(db: AppDatabase) {
     },
 
     async getHistory(deviceId: string, limit: number) {
-      // Fetch all roles (including tool) to compute the didLogMeal projection,
+      // Fetch all roles (including tool) to preserve the existing history window,
       // then filter to user+assistant before returning. Fetch limit*4 to ensure
       // we have enough rows after tool messages are dropped.
       const rows = await db
@@ -234,19 +234,8 @@ export function createChatService(db: AppDatabase) {
         loggedMeal?: LoggedMealReceipt;
       }> = [];
 
-      let pendingDidLogMeal = false;
-
       for (const row of chronological) {
         if (row.role === "tool") {
-          const isSuccessfulMutationTool =
-            (row.toolName === "log_food" || row.toolName === "update_meal") &&
-            row.content === "成功";
-          if (isSuccessfulMutationTool) {
-            pendingDidLogMeal = true;
-          }
-          if (row.toolName === "delete_meal") {
-            pendingDidLogMeal = false;
-          }
           continue;
         }
 
@@ -255,20 +244,16 @@ export function createChatService(db: AppDatabase) {
         }
 
         if (row.role === "assistant") {
-          const loggedMeal = pendingDidLogMeal
-            ? await getMealReceiptForAssistantMessage(deviceId, row.id)
-            : undefined;
+          const loggedMeal = await getMealReceiptForAssistantMessage(deviceId, row.id);
           projected.push({
             ...row,
             didLogMeal: loggedMeal ? true : undefined,
             ...(loggedMeal ? { loggedMeal } : {}),
           });
-          pendingDidLogMeal = false;
           continue;
         }
 
         projected.push(row);
-        pendingDidLogMeal = false;
       }
 
       return projected.slice(-limit);
