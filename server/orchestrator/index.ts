@@ -149,7 +149,7 @@ async function* ensureGoalReceiptStream(
 
 function detectHallucinatedChoiceFollowUp(
   userMessage: string,
-  recentMessages: Array<{ role: string; content: string; didLogMeal?: boolean }>
+  recentMessages: Array<{ role: string; content: unknown; didLogMeal?: boolean }>
 ): string | undefined {
   const trimmedMessage = userMessage.trim();
   if (!CHOICE_CONFIRM_MESSAGES.has(trimmedMessage)) {
@@ -157,11 +157,17 @@ function detectHallucinatedChoiceFollowUp(
   }
 
   const lastAssistant = [...recentMessages].reverse().find((message) => message.role === "assistant");
+  const lastAssistantContent = typeof lastAssistant?.content === "string" ? lastAssistant.content : "";
   if (!lastAssistant?.didLogMeal) {
-    return undefined;
+    const hasRecentMealMutationSummary =
+      lastAssistantContent.includes("[系統已完成餐點記錄]") ||
+      lastAssistantContent.includes("[系統已完成餐點修改]");
+    if (!hasRecentMealMutationSummary) {
+      return undefined;
+    }
   }
 
-  if (!CHOICE_PROMPT_PATTERN.test(lastAssistant.content)) {
+  if (!CHOICE_PROMPT_PATTERN.test(lastAssistantContent)) {
     return undefined;
   }
 
@@ -192,9 +198,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Load history BEFORE saving current user message to avoid duplication
       const history = await loadHistory(chatService, deviceId, 10);
-      const recentMessages = await chatService.getHistory(deviceId, 3);
-      const hallucinatedChoiceRecovery = detectHallucinatedChoiceFollowUp(userMessage, recentMessages);
-      const previousAssistantMessage = [...recentMessages]
+      const displayHistory = await chatService.getHistory(deviceId, 3);
+      const hallucinatedChoiceRecovery = detectHallucinatedChoiceFollowUp(userMessage, history);
+      const previousAssistantMessage = [...displayHistory]
         .reverse()
         .find((message) => message.role === "assistant")?.content;
 
