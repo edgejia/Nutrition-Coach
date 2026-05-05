@@ -207,6 +207,30 @@ describe("verification-artifacts", () => {
     }
   });
 
+  test("snake case and kebab case device id evidence keys are redacted across all artifact files", async () => {
+    const result = makeFailResult("redact-delimited-device-ids");
+    result.steps[0]!.actual = {
+      device_id: "snake-device-id-123",
+      owner_device_id: "owner-snake-device-id-456",
+      "foreign-device-id": "foreign-kebab-device-id-789",
+    };
+    result.artifacts.delimitedEvidence = {
+      device_id: "snake-device-id-123",
+      owner_device_id: "owner-snake-device-id-456",
+      "foreign-device-id": "foreign-kebab-device-id-789",
+    };
+    await writeScenarioArtifacts("redact-delimited-device-ids", result);
+
+    const latestDir = path.join(tmpDir, "redact-delimited-device-ids", "latest");
+    for (const fileName of ["steps.json", "snapshots.json", "scenario-result.json"]) {
+      const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
+      assert.doesNotMatch(raw, /snake-device-id-123/, `${fileName} must redact device_id`);
+      assert.doesNotMatch(raw, /owner-snake-device-id-456/, `${fileName} must redact owner_device_id`);
+      assert.doesNotMatch(raw, /foreign-kebab-device-id-789/, `${fileName} must redact foreign-device-id`);
+      assert.match(raw, /\[REDACTED\]/, `${fileName} should include redaction placeholders`);
+    }
+  });
+
   test("failed scenario produces ok=false and populated failedStep in summary.json", async () => {
     const result = makeFailResult("image-log-fail");
     await writeScenarioArtifacts("image-log-fail", result);

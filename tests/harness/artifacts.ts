@@ -9,7 +9,7 @@
  *   - `x-device-id` header values  → "[REDACTED]"
  *   - `deviceId=<value>` URL query params  → "deviceId=[REDACTED]"
  *   - Paths containing `/uploads/`  → "[REDACTED_PATH]"
- *   - Object keys containing `deviceId` or named `x-device-id`  → "[REDACTED]"
+ *   - Object keys containing `deviceId` in camelCase, snake_case, or kebab-case  → "[REDACTED]"
  */
 
 import fs from "node:fs";
@@ -71,14 +71,18 @@ function redactString(s: string): string {
 function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(obj)) {
-    const lowerKey = key.toLowerCase();
-    if (lowerKey === "x-device-id" || lowerKey.includes("deviceid")) {
+    if (shouldRedactKey(key)) {
       result[key] = REDACTED;
     } else {
       result[key] = redact(val);
     }
   }
   return result;
+}
+
+function shouldRedactKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return normalized.includes("deviceid");
 }
 
 // ---------------------------------------------------------------------------
