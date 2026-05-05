@@ -237,6 +237,42 @@ describe("Chat API", () => {
     }
   });
 
+  it("POST /api/chat cleans staged uploads when a later image part is rejected", async () => {
+    const form = new FormData();
+    form.append("message", "這是我的午餐");
+    form.append("image", new Blob(["first image"], { type: "image/png" }), "meal.png");
+    form.append("image", new Blob(["bad image"], { type: "image/heic" }), "meal.heic");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Invalid image type. Allowed: jpeg, png, webp" });
+    assert.deepEqual(await readdir(uploadsDir).catch(() => []), []);
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
+  it("POST /api/chat rejects duplicate valid image parts without leaking the first staged file", async () => {
+    const form = new FormData();
+    form.append("message", "這是我的午餐");
+    form.append("image", new Blob(["first image"], { type: "image/png" }), "meal.png");
+    form.append("image", new Blob(["second image"], { type: "image/jpeg" }), "meal.jpg");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Only one image upload is allowed" });
+    assert.deepEqual(await readdir(uploadsDir).catch(() => []), []);
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
   it("POST /api/chat SSE backfills the user image message when failure happens before orchestrator persistence", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
     const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);

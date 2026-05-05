@@ -171,6 +171,12 @@ async function parseMultipartRequest(
   let image:
     | { dataUri: string; path: string; mimeType: string; originalFilename?: string }
     | undefined;
+  const savedImagePaths: string[] = [];
+
+  async function reject(error: string, code: number) {
+    await Promise.all(savedImagePaths.map((imagePath) => cleanupUploadSafe(imagePath, request.log)));
+    return { error, code };
+  }
 
   const contentType = request.headers["content-type"] ?? "";
   if (!contentType.includes("multipart/form-data")) {
@@ -183,16 +189,20 @@ async function parseMultipartRequest(
       message = part.value as string;
     } else if (part.type === "file" && part.fieldname === "image") {
       if (!ALLOWED_TYPES.includes(part.mimetype)) {
-        return { error: "Invalid image type. Allowed: jpeg, png, webp", code: 400 };
+        return reject("Invalid image type. Allowed: jpeg, png, webp", 400);
+      }
+      if (image) {
+        return reject("Only one image upload is allowed", 400);
       }
       const buffer = await part.toBuffer();
       if (buffer.length > 5 * 1024 * 1024) {
-        return { error: "Image too large. Max 5MB.", code: 400 };
+        return reject("Image too large. Max 5MB.", 400);
       }
       const filename = `${crypto.randomUUID()}.${part.mimetype.split("/")[1]}`;
       await mkdir(uploadsDir, { recursive: true });
       const storedPath = join(uploadsDir, filename);
       await writeFile(storedPath, buffer);
+      savedImagePaths.push(storedPath);
       image = {
         dataUri: `data:${part.mimetype};base64,${buffer.toString("base64")}`,
         path: storedPath,
@@ -416,7 +426,7 @@ async function handleStreamingReply(
   if (hallucinationDetected) {
     hooks?.onFallback?.("hallucination_detected");
     const retryMsg = "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
-    await finalizeAssistantReply(chatService, deviceId, retryMsg);
+    await finalizeAssistantReply(chatService, deviceId, retryMsg, receiptIdentity);
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
     return { fullReply: retryMsg, didLogMeal, dailySummary, tokensStreamed };
   }

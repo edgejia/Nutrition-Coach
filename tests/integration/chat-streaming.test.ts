@@ -1430,6 +1430,59 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat preserves loggedMeal history when streamed hallucination fallback follows log_food", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    mockLLM.queueChatStream(["若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算。"]);
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /抱歉，無法辨識這次的請求/);
+      const doneMatch = text.match(/event: done\s+data: (.+)/);
+      assert.ok(doneMatch);
+      const donePayload = JSON.parse(doneMatch[1]) as {
+        didLogMeal?: boolean;
+        loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
+      };
+      assert.equal(donePayload.didLogMeal, true);
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as {
+        messages: Array<{
+          role: string;
+          content: string;
+          loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
+        }>;
+      };
+      const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+      assert.equal(assistantMsgs.length, 1, "hallucination fallback must persist exactly one assistant reply");
+      assert.match(assistantMsgs[0]!.content, /抱歉，無法辨識這次的請求/);
+      assert.equal(assistantMsgs[0]!.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
+      assert.equal(assistantMsgs[0]!.loggedMeal?.foodName, "雞腿便當");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat grouped log_food keeps didLogMeal and dailySummary when the final reply fails", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createGroupedLogFoodToolCall()] });
     mockLLM.queueRoundError(new Error("LLM grouped reply generation failed"));
