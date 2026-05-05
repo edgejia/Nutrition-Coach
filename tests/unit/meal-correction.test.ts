@@ -86,6 +86,7 @@ describe("meal correction service", () => {
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, latest.id);
     assert.equal(result.candidate.foodName, "雞腿飯");
+    assert.equal(result.candidate.itemCount, 1);
   });
 
   it("uses recent-reference shorthand as a recency tie-breaker instead of overriding a named food target", async () => {
@@ -251,7 +252,8 @@ describe("meal correction service", () => {
       patch: { protein: 22 },
     });
 
-    assert.equal(result.updatedMeal.foodName, "雞胸肉、白飯 等3項");
+    assert.equal(result.updatedMeal.foodName, "雞胸肉、白飯、花椰菜");
+    assert.equal(result.updatedMeal.itemCount, 3);
     assert.equal(result.updatedMeal.calories, 450);
     assert.equal(result.updatedMeal.protein, 22);
     assert.equal(result.updatedMeal.carbs, 48);

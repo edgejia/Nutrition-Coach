@@ -67,6 +67,7 @@ describe("FoodLoggingService", () => {
 
     assert.ok(meal.id);
     assert.equal(meal.foodName, "蘋果");
+    assert.equal(meal.itemCount, 1);
     assert.equal(meal.calories, 95);
     assert.equal(meal.deviceId, deviceId);
     assert.equal(meal.mealRevisionId, revisions[0]!.id);
@@ -114,6 +115,8 @@ describe("FoodLoggingService", () => {
     assert.equal(items.length, 2, "grouped input should stay grouped under one revision");
     assert.equal(meal.id, transactions[0]!.id);
     assert.equal(meal.mealRevisionId, revisions[0]!.id);
+    assert.equal(meal.foodName, "蛋餅、豆漿");
+    assert.equal(meal.itemCount, 2);
     assert.equal(legacyMeals.length, 0);
   });
 
@@ -155,6 +158,33 @@ describe("FoodLoggingService", () => {
     assert.equal(updated.id, created.id);
     assert.equal(updated.mealRevisionId, transaction!.currentRevisionId);
     assert.notEqual(updated.mealRevisionId, created.mealRevisionId);
+    assert.equal(updated.itemCount, 1);
+  });
+
+  it("returns current revision item counts only for owned active meals", async () => {
+    const grouped = await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T05:00:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 320, protein: 12, carbs: 30, fat: 16 },
+        { foodName: "豆漿", calories: 180, protein: 12, carbs: 14, fat: 8 },
+        { foodName: "香蕉", calories: 90, protein: 1, carbs: 23, fat: 0.3 },
+      ],
+    });
+
+    assert.equal(await foodService.getMealItemCount(deviceId, grouped.id), 3);
+    assert.equal(await foodService.getMealItemCount(foreignDeviceId, grouped.id), null);
+    assert.equal(await foodService.getMealItemCount(deviceId, "missing-meal-id"), null);
+
+    await foodService.updateMeal(deviceId, grouped.id, {
+      items: [
+        { foodName: "蛋餅", calories: 320, protein: 12, carbs: 30, fat: 16 },
+        { foodName: "豆漿", calories: 180, protein: 12, carbs: 14, fat: 8 },
+      ],
+    });
+    assert.equal(await foodService.getMealItemCount(deviceId, grouped.id), 2);
+
+    await foodService.deleteMeal(deviceId, grouped.id);
+    assert.equal(await foodService.getMealItemCount(deviceId, grouped.id), null);
   });
 
   it("preserves the MEAL_NOT_FOUND contract for foreign deletes while soft-deleting the owner row", async () => {
