@@ -4,7 +4,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { DailySummary, MealEditPayload } from "../types.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportCameraIcon, SportChevronLeftIcon } from "./SportIcons.js";
+import { SportChevronLeftIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
 type DraftState = {
@@ -183,20 +183,31 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
         <main className="screen-scroll-safe sp-meal-edit-scroll">
           <section className="sp-meal-edit-image-frame">
             {payload.imageUrl ? (
-              <PersistedAssetImage
-                src={payload.imageUrl}
-                alt={`${payload.foodName} 照片`}
-                imgClassName="sp-meal-edit-image"
-                fallbackClassName="sp-meal-edit-image-fallback"
-                fallbackStyle={{
-                  background: "var(--sp-surface-2)",
-                  color: "var(--sp-ink-2)",
-                }}
-              />
+              <>
+                <div className="sp-meal-edit-image-copy">
+                  <span>整餐照片</span>
+                  <p>這張照片代表整餐，不是單一食物裁切。</p>
+                </div>
+                <div className="sp-meal-edit-image-media">
+                  <PersistedAssetImage
+                    src={payload.imageUrl}
+                    alt={`${payload.foodName} 整餐照片`}
+                    imgClassName="sp-meal-edit-image"
+                    fallbackClassName="sp-meal-edit-image-fallback"
+                    fallbackStyle={{
+                      background: "var(--sp-surface-2)",
+                      color: "var(--sp-ink-2)",
+                    }}
+                  />
+                  <p className="sp-meal-edit-image-error-copy">
+                    圖片載入失敗，餐點資料仍可編輯。請稍後再試。
+                  </p>
+                </div>
+              </>
             ) : (
-              <div className="sp-meal-edit-image-placeholder" aria-hidden="true">
-                <SportCameraIcon size={28} stroke={1.6} />
-                <span>餐點照片</span>
+              <div className="sp-meal-edit-image-placeholder">
+                <span>尚未附上餐點照片</span>
+                <p>這筆餐點是文字記錄，仍可編輯名稱與營養數值。</p>
               </div>
             )}
           </section>

@@ -2203,6 +2203,7 @@ textarea {
 .sp-meal-edit-field > span,
 .sp-meal-edit-field small,
 .sp-meal-edit-note,
+.sp-meal-edit-image-copy span,
 .sp-meal-edit-image-placeholder span {
   color: var(--sp-ink-2);
   font-family: var(--sp-font-mono);
@@ -2214,6 +2215,7 @@ textarea {
 .sp-meal-edit-macro-head,
 .sp-meal-edit-field > span,
 .sp-meal-edit-field small,
+.sp-meal-edit-image-copy span,
 .sp-meal-edit-image-placeholder span {
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2234,15 +2236,17 @@ textarea {
 .sp-meal-edit-image-frame {
   position: relative;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
   aspect-ratio: 16 / 10;
-  min-height: 0;
+  min-height: 64px;
   max-height: 236px;
-  place-items: center;
   overflow: hidden;
   border: 1px dashed var(--sp-line-strong);
   border-radius: var(--sp-r-lg);
   background: var(--sp-surface);
   color: var(--sp-ink-3);
+  padding: 12px;
 }
 
 .sp-meal-edit-image-frame::before {
@@ -2264,6 +2268,44 @@ textarea {
   object-fit: cover;
 }
 
+.sp-meal-edit-image-copy,
+.sp-meal-edit-image-media,
+.sp-meal-edit-image-placeholder {
+  position: relative;
+  z-index: 1;
+}
+
+.sp-meal-edit-image-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sp-meal-edit-image-copy p,
+.sp-meal-edit-image-placeholder p,
+.sp-meal-edit-image-error-copy {
+  margin: 0;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sp-meal-edit-image-copy p {
+  text-align: right;
+}
+
+.sp-meal-edit-image-media {
+  display: grid;
+  min-height: 0;
+}
+
+.sp-meal-edit-image-media > * {
+  grid-area: 1 / 1;
+}
+
 .sp-meal-edit-image-fallback {
   color: var(--sp-ink-2);
   font-family: var(--sp-font-zh);
@@ -2271,14 +2313,34 @@ textarea {
   line-height: 1.4;
 }
 
+.sp-meal-edit-image-error-copy {
+  z-index: 2;
+  display: none;
+  align-self: end;
+  justify-self: stretch;
+  border-top: 1px solid var(--sp-line);
+  background: rgba(18, 20, 24, 0.84);
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.sp-meal-edit-image-media:has(.sp-meal-edit-image-fallback) .sp-meal-edit-image-error-copy {
+  display: block;
+}
+
 .sp-meal-edit-image-placeholder {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  min-height: 100%;
   color: var(--sp-ink-3);
+  text-align: center;
+}
+
+.sp-meal-edit-image-placeholder span {
+  color: var(--sp-ink);
+  font-size: 11px;
 }
 
 .sp-meal-edit-form {
