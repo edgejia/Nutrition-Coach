@@ -1,8 +1,9 @@
 // server/services/chat.ts
-import { eq, and, asc, desc, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { eq, and, asc, desc, sql } from "drizzle-orm";
 import {
   assetReferences,
   assets,
+  chatMealReceipts,
   chatMessages,
   mealRevisions,
   mealRevisionItems,
@@ -12,7 +13,6 @@ import type { AppDatabase } from "../db/client.js";
 import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
 
-const RECEIPT_REHYDRATION_GRACE_MS = 5_000;
 type ChatMessageStatus = "complete" | "stopped" | "error";
 
 interface LoggedMealReceipt {
@@ -59,51 +59,35 @@ function buildGroupedFoodName(items: Array<{ foodName: string }>) {
   return `${items[0]!.foodName}、${items[1]!.foodName} 等${items.length}項`;
 }
 
-function addMilliseconds(isoTimestamp: string, milliseconds: number): string {
-  return new Date(new Date(isoTimestamp).getTime() + milliseconds).toISOString();
-}
-
 export function createChatService(db: AppDatabase) {
-  async function getLoggedMealReceiptForTurn(
+  async function getMealReceiptForAssistantMessage(
     deviceId: string,
-    turnStartAt: string | undefined,
-    assistantCreatedAt: string,
+    assistantMessageId: string,
   ): Promise<LoggedMealReceipt | undefined> {
-    const createdAfter = turnStartAt ?? assistantCreatedAt;
-    const createdBefore = addMilliseconds(assistantCreatedAt, RECEIPT_REHYDRATION_GRACE_MS);
-    const turnCreatedAtMatch = and(
-      gte(mealTransactions.createdAt, createdAfter),
-      lte(mealTransactions.createdAt, createdBefore),
-    );
-    const turnCurrentRevisionMatch = and(
-      gte(mealRevisions.createdAt, createdAfter),
-      lte(mealRevisions.createdAt, createdBefore),
-    );
-    const transactions = await db
+    const receipts = await db
       .select({
-        id: mealTransactions.id,
-        currentRevisionId: mealTransactions.currentRevisionId,
+        mealTransactionId: mealTransactions.id,
+        mealRevisionId: mealRevisions.id,
         loggedAt: mealTransactions.loggedAt,
-        createdAt: mealTransactions.createdAt,
         imageAssetId: mealRevisions.imageAssetId,
       })
-      .from(mealTransactions)
-      .innerJoin(mealRevisions, eq(mealRevisions.id, mealTransactions.currentRevisionId))
+      .from(chatMealReceipts)
+      .innerJoin(chatMessages, eq(chatMessages.id, chatMealReceipts.assistantMessageId))
+      .innerJoin(mealTransactions, eq(mealTransactions.id, chatMealReceipts.mealTransactionId))
+      .innerJoin(mealRevisions, eq(mealRevisions.id, chatMealReceipts.mealRevisionId))
       .where(
         and(
+          eq(chatMealReceipts.deviceId, deviceId),
+          eq(chatMealReceipts.assistantMessageId, assistantMessageId),
+          eq(chatMessages.deviceId, deviceId),
           eq(mealTransactions.deviceId, deviceId),
-          or(turnCreatedAtMatch, turnCurrentRevisionMatch),
+          eq(mealRevisions.transactionId, mealTransactions.id),
         ),
-      )
-      .orderBy(
-        desc(sql`case when ${mealRevisions.createdAt} >= ${createdAfter} and ${mealRevisions.createdAt} <= ${createdBefore} then ${mealRevisions.createdAt} else ${mealTransactions.createdAt} end`),
-        desc(mealTransactions.id),
       )
       .limit(1);
 
-    const transaction = transactions[0];
-    const revisionId = transaction?.currentRevisionId;
-    if (!revisionId) {
+    const receipt = receipts[0];
+    if (!receipt) {
       return undefined;
     }
 
@@ -116,7 +100,7 @@ export function createChatService(db: AppDatabase) {
         fat: mealRevisionItems.fat,
       })
       .from(mealRevisionItems)
-      .where(inArray(mealRevisionItems.revisionId, [revisionId]))
+      .where(eq(mealRevisionItems.revisionId, receipt.mealRevisionId))
       .orderBy(asc(mealRevisionItems.position));
 
     if (items.length === 0) {
@@ -124,11 +108,11 @@ export function createChatService(db: AppDatabase) {
     }
 
     return {
-      mealId: transaction.id,
-      dateKey: formatLocalDate(new Date(transaction.loggedAt)),
-      loggedAt: transaction.loggedAt,
-      imageAssetId: transaction.imageAssetId ?? null,
-      imageUrl: transaction.imageAssetId ? buildAssetUrl(transaction.imageAssetId) : null,
+      mealId: receipt.mealTransactionId,
+      dateKey: formatLocalDate(new Date(receipt.loggedAt)),
+      loggedAt: receipt.loggedAt,
+      imageAssetId: receipt.imageAssetId ?? null,
+      imageUrl: receipt.imageAssetId ? buildAssetUrl(receipt.imageAssetId) : null,
       foodName: buildGroupedFoodName(items),
       calories: items.reduce((sum, item) => sum + item.calories, 0),
       protein: items.reduce((sum, item) => sum + item.protein, 0),
@@ -138,6 +122,31 @@ export function createChatService(db: AppDatabase) {
   }
 
   return {
+    async saveMealReceiptReference(input: {
+      deviceId: string;
+      assistantMessageId: string;
+      toolMessageId?: string;
+      mealTransactionId: string;
+      mealRevisionId: string;
+    }) {
+      const createdAt = new Date().toISOString();
+      const id = crypto.randomUUID();
+
+      await db.insert(chatMealReceipts).values({
+        id,
+        deviceId: input.deviceId,
+        assistantMessageId: input.assistantMessageId,
+        toolMessageId: input.toolMessageId ?? null,
+        mealTransactionId: input.mealTransactionId,
+        mealRevisionId: input.mealRevisionId,
+        createdAt,
+      });
+
+      return { id, createdAt };
+    },
+
+    getMealReceiptForAssistantMessage,
+
     async saveMessage(
       deviceId: string,
       role: string,
@@ -226,8 +235,6 @@ export function createChatService(db: AppDatabase) {
       }> = [];
 
       let pendingDidLogMeal = false;
-      let pendingTurnStartAt: string | undefined;
-      let latestUserCreatedAt: string | undefined;
 
       for (const row of chronological) {
         if (row.role === "tool") {
@@ -236,11 +243,9 @@ export function createChatService(db: AppDatabase) {
             row.content === "成功";
           if (isSuccessfulMutationTool) {
             pendingDidLogMeal = true;
-            pendingTurnStartAt = latestUserCreatedAt;
           }
           if (row.toolName === "delete_meal") {
             pendingDidLogMeal = false;
-            pendingTurnStartAt = undefined;
           }
           continue;
         }
@@ -251,22 +256,19 @@ export function createChatService(db: AppDatabase) {
 
         if (row.role === "assistant") {
           const loggedMeal = pendingDidLogMeal
-            ? await getLoggedMealReceiptForTurn(deviceId, pendingTurnStartAt, row.createdAt)
+            ? await getMealReceiptForAssistantMessage(deviceId, row.id)
             : undefined;
           projected.push({
             ...row,
-            didLogMeal: pendingDidLogMeal || undefined,
+            didLogMeal: loggedMeal ? true : undefined,
             ...(loggedMeal ? { loggedMeal } : {}),
           });
           pendingDidLogMeal = false;
-          pendingTurnStartAt = undefined;
           continue;
         }
 
         projected.push(row);
         pendingDidLogMeal = false;
-        pendingTurnStartAt = undefined;
-        latestUserCreatedAt = row.createdAt;
       }
 
       return projected.slice(-limit);
