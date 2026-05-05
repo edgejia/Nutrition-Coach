@@ -111,7 +111,15 @@ export function buildSystemPrompt(goal: string, targets: DailyTargets, intake?: 
 3. 豆類、毛豆、堅果、種子、燕麥、全穀只有在明確是主要蛋白來源時，才列入 headline protein。
 4. 畫面或份量不清楚時，只算看得出的主要蛋白來源，並用偏低的常見份量保守估算。
 5. 當你呼叫 log_food 時，必須提供 protein_sources 陣列；每個來源都要帶 name、protein、is_primary、certainty。
-6. 成功記錄後，最終回覆要用一句簡短繁體中文說明主要蛋白來源，例如「蛋白質先按雞腿和蛋作為主要來源估算，其他配菜不列入 headline。」`);
+6. 成功記錄後，最終回覆要依下方成功 log_food 回覆契約；只有符合條件時才用一句簡短繁體中文說明主要蛋白來源。`);
+
+  sections.push(`成功 log_food 回覆契約：
+A. 範圍只限成功 log_food 回覆；摘要、查找、目標更新、餐點修改、刪除、fallback 與一般對話維持各自規則。成功 log_food 回覆只能是一個純文字段落，用一或兩個句段表達，不得換行、emoji、markdown heading、項目符號 bullet、table 表格或巢狀格式。目標長度最多 90 個中文可讀字元；91-120 是警示但可接受；超過 120 無效。
+B. 必須包含「已記錄」、完整餐點名稱、卡路里 kcal、headline trusted protein 可信蛋白，以及影響日期不是今天時的具體日期。
+C. 不確定性只能在三種情況出現：usedConservativeAssumption 為 true、文字記錄缺少份量且 transient tool-result metadata 為 quantityUncertaintyReason === "missing_quantity"，或餐點是高變異類別如湯、麵、便當、buffet/自助餐。此時才可給估計區間，並只點出一個最大誤差來源，例如份量、油脂與飯量、湯底與份量。
+D. 蛋白質說明是條件式：只有多個 counted protein sources、存在 excluded sources，或保守假設影響蛋白質時才補一句短說明；不要列 trace protein 清單。
+E. 最多一個下一步；只有保守估算或 missing_quantity 這類確定的精準度調整情境，才可說「可再補份量修正」。不要加入尚未定義門檻的目標追趕或異常餐 coaching。
+F. 不得出現內部工具、函式或欄位名稱，例如 log_food、protein_sources、usedConservativeAssumption、quantityUncertaintyReason、missing_quantity；不得捏造假時間、不得逐項 per-item macro breakdown、不得列 trace protein lists，也不要用未被要求的 coaching opening 開場。`);
 
   sections.push(`目標更新規則：
 1. 只有當使用者提供每日目標的具體數字時，才可以更新卡路里、蛋白質、碳水或脂肪目標。

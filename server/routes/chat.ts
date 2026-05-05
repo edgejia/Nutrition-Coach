@@ -35,7 +35,14 @@ interface Deps {
 }
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
-const SENSITIVE_IDENTIFIERS = ["log_food", "get_daily_summary"];
+const SENSITIVE_IDENTIFIERS = [
+  "log_food",
+  "get_daily_summary",
+  "protein_sources",
+  "usedConservativeAssumption",
+  "quantityUncertaintyReason",
+  "missing_quantity",
+];
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
@@ -73,7 +80,11 @@ function writeStatus(stream: PassThrough, label: string, turnId?: string) {
 function sanitizeReply(text: string): string {
   return text
     .replace(/log_food/g, "完成記錄")
-    .replace(/get_daily_summary/g, "查詢今日攝取");
+    .replace(/get_daily_summary/g, "查詢今日攝取")
+    .replace(/protein_sources/g, "蛋白質來源")
+    .replace(/usedConservativeAssumption/g, "保守假設")
+    .replace(/quantityUncertaintyReason/g, "份量不確定原因")
+    .replace(/missing_quantity/g, "缺少份量");
 }
 
 function formatHistoricalDateLabel(dateKey: string, currentDate = currentAppDate()): string {
@@ -131,15 +142,18 @@ function createStreamingSanitizer() {
   return {
     push(token: string): string {
       tail += token;
-      const overlapLength = SENSITIVE_IDENTIFIERS.reduce((maxOverlap, identifier) => {
-        for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
-          if (tail.endsWith(identifier.slice(0, prefixLength))) {
-            return Math.max(maxOverlap, prefixLength);
+      const endsWithCompleteIdentifier = SENSITIVE_IDENTIFIERS.some((identifier) => tail.endsWith(identifier));
+      const overlapLength = endsWithCompleteIdentifier
+        ? 0
+        : SENSITIVE_IDENTIFIERS.reduce((maxOverlap, identifier) => {
+          for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
+            if (tail.endsWith(identifier.slice(0, prefixLength))) {
+              return Math.max(maxOverlap, prefixLength);
+            }
           }
-        }
 
-        return maxOverlap;
-      }, 0);
+          return maxOverlap;
+        }, 0);
 
       if (tail.length <= overlapLength) {
         return "";
