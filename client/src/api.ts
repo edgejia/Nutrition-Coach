@@ -299,6 +299,28 @@ export function withAuthorizedAssetUrl(
   return nextQuery ? `${pathname}?${nextQuery}` : pathname;
 }
 
+function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMealReceipt {
+  if (receipt.imageUrl === undefined) {
+    return receipt;
+  }
+
+  return {
+    ...receipt,
+    imageUrl: withAuthorizedAssetUrl(receipt.imageUrl) ?? null,
+  };
+}
+
+function normalizeChatReply<T extends { loggedMeal?: LoggedMealReceipt }>(reply: T): T {
+  if (!reply.loggedMeal) {
+    return reply;
+  }
+
+  return {
+    ...reply,
+    loggedMeal: normalizeLoggedMealReceipt(reply.loggedMeal),
+  };
+}
+
 export async function registerDevice(goal: string): Promise<{ deviceId: string; dailyTargets: DailyTargets }> {
   const res = await fetch("/api/device", {
     method: "POST",
@@ -393,7 +415,8 @@ export async function sendMessage(message: string, image?: File): Promise<ChatRe
     const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
     throw new Error(errorMessage ?? "Failed to send message");
   }
-  return res.json();
+  const body = await res.json() as ChatReply;
+  return normalizeChatReply(body);
 }
 
 export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> {
@@ -405,6 +428,9 @@ export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> 
     messages: body.messages.map((message) => ({
       ...message,
       imageUrl: withAuthorizedAssetUrl(message.imageUrl),
+      loggedMeal: message.loggedMeal
+        ? normalizeLoggedMealReceipt(message.loggedMeal)
+        : message.loggedMeal,
     })),
   };
 }
@@ -535,7 +561,9 @@ export async function sendMessageStream(
           callbacks.onDone({
             didLogMeal: Boolean(parsed.didLogMeal),
             ...(parsed.didMutateMeal !== undefined ? { didMutateMeal: Boolean(parsed.didMutateMeal) } : {}),
-            ...(isLoggedMealReceipt(parsed.loggedMeal) ? { loggedMeal: parsed.loggedMeal } : {}),
+            ...(isLoggedMealReceipt(parsed.loggedMeal)
+              ? { loggedMeal: normalizeLoggedMealReceipt(parsed.loggedMeal) }
+              : {}),
             ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
@@ -551,7 +579,9 @@ export async function sendMessageStream(
               : 0,
             ...(parsed.didLogMeal !== undefined ? { didLogMeal: Boolean(parsed.didLogMeal) } : {}),
             ...(parsed.didMutateMeal !== undefined ? { didMutateMeal: Boolean(parsed.didMutateMeal) } : {}),
-            ...(isLoggedMealReceipt(parsed.loggedMeal) ? { loggedMeal: parsed.loggedMeal } : {}),
+            ...(isLoggedMealReceipt(parsed.loggedMeal)
+              ? { loggedMeal: normalizeLoggedMealReceipt(parsed.loggedMeal) }
+              : {}),
             ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
