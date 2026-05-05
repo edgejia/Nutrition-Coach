@@ -75,4 +75,31 @@ describe("Home canonical Sport kit source parity", () => {
       assert.match(sources.css, escapedPattern(required));
     }
   });
+
+  it("renders Today meal rows through fixed meal-level thumbnail slots", () => {
+    for (const required of [
+      'import { PersistedAssetImage } from "./PersistedAssetImage.js";',
+      "home-sport-meal-media",
+      "home-sport-meal-image",
+      "home-sport-meal-fallback",
+      "meal.imageUrl",
+      "無照片",
+    ]) {
+      assert.match(sources.home, escapedPattern(required));
+    }
+
+    assert.match(
+      sources.home,
+      /<PersistedAssetImage[\s\S]*src=\{meal\.imageUrl\}[\s\S]*imgClassName="home-sport-meal-image"[\s\S]*fallbackClassName="home-sport-meal-fallback"/,
+    );
+  });
+
+  it("keeps Today meal thumbnail and fallback slots at fixed 40px dimensions", () => {
+    const mediaRule = /\.home-sport-meal-media\s*\{[\s\S]*?width:\s*40px;[\s\S]*?height:\s*40px;[\s\S]*?flex:\s*0 0 40px;[\s\S]*?\}/;
+    assert.match(sources.css, mediaRule);
+
+    for (const required of [".home-sport-meal-image", ".home-sport-meal-fallback"]) {
+      assert.match(sources.css, escapedPattern(required));
+    }
+  });
 });
