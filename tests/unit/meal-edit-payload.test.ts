@@ -69,7 +69,7 @@ describe("meal edit payload builders", () => {
       protein: 1,
       carbs: 1,
       fat: 1,
-    }), null);
+    } as any), null);
   });
 
   it("defaults legacy edit payloads without itemCount to single-item semantics", () => {
@@ -83,7 +83,7 @@ describe("meal edit payload builders", () => {
       imageAssetId: null,
       imageUrl: null,
       loggedAt: "2026-05-06T08:00:00.000+08:00",
-    }, "2026-05-06");
+    } as any, "2026-05-06");
     const receiptPayload = buildReceiptMealEditPayload({
       mealId: "legacy-receipt",
       dateKey: "2026-05-06",
@@ -93,7 +93,7 @@ describe("meal edit payload builders", () => {
       protein: 1,
       carbs: 27,
       fat: 0.4,
-    });
+    } as any);
 
     assert.equal((historyPayload as any).itemCount, 1);
     assert.equal((receiptPayload as any)?.itemCount, 1);

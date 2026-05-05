@@ -1,5 +1,9 @@
 import type { LoggedMealReceipt, MealEditPayload, MealEntry } from "./types.js";
 
+function normalizeItemCount(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+}
+
 export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): MealEditPayload {
   return {
     mealId: meal.id,
@@ -9,6 +13,7 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
     protein: meal.protein,
     carbs: meal.carbs,
     fat: meal.fat,
+    itemCount: normalizeItemCount(meal.itemCount),
     imageAssetId: meal.imageAssetId ?? null,
     imageUrl: meal.imageUrl ?? null,
     loggedAt: meal.loggedAt,
@@ -37,6 +42,7 @@ export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | unde
     protein: loggedMeal.protein,
     carbs: loggedMeal.carbs,
     fat: loggedMeal.fat,
+    itemCount: normalizeItemCount(loggedMeal.itemCount),
     imageAssetId: loggedMeal.imageAssetId ?? null,
     imageUrl: loggedMeal.imageUrl ?? null,
     loggedAt: loggedMeal.loggedAt,

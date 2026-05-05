@@ -44,6 +44,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function normalizeItemCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+}
+
 function isIntakeValidationIssue(value: unknown): value is IntakeValidationIssue {
   return (
     isRecord(value) &&
@@ -75,6 +79,8 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
       (value.mealId === undefined || typeof value.mealId === "string") &&
       (value.dateKey === undefined || typeof value.dateKey === "string") &&
       (value.loggedAt === undefined || typeof value.loggedAt === "string") &&
+      (value.itemCount === undefined ||
+        (typeof value.itemCount === "number" && Number.isFinite(value.itemCount) && value.itemCount > 0)) &&
       (value.imageAssetId === undefined || value.imageAssetId === null || typeof value.imageAssetId === "string") &&
       (value.imageUrl === undefined || value.imageUrl === null || typeof value.imageUrl === "string")
     );
@@ -300,13 +306,12 @@ export function withAuthorizedAssetUrl(
 }
 
 function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMealReceipt {
-  if (receipt.imageUrl === undefined) {
-    return receipt;
-  }
-
   return {
     ...receipt,
-    imageUrl: withAuthorizedAssetUrl(receipt.imageUrl) ?? null,
+    itemCount: normalizeItemCount(receipt.itemCount),
+    ...(receipt.imageUrl === undefined
+      ? {}
+      : { imageUrl: withAuthorizedAssetUrl(receipt.imageUrl) ?? null }),
   };
 }
 
@@ -629,6 +634,7 @@ export async function getMeals(options?: { refreshReason?: "day_rollover" | "mea
   return {
     meals: body.meals.map((meal) => ({
       ...meal,
+      itemCount: normalizeItemCount(meal.itemCount),
       imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
     })),
   };
@@ -645,6 +651,7 @@ export async function getDaySnapshot(
     ...body,
     meals: body.meals.map((meal) => ({
       ...meal,
+      itemCount: normalizeItemCount(meal.itemCount),
       imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
     })),
   };
@@ -661,6 +668,7 @@ interface HistoryMealDto {
   protein?: number;
   carbs?: number;
   fat?: number;
+  itemCount?: number;
   imageAssetId?: string | null;
   imageUrl?: string | null;
 }
@@ -673,6 +681,7 @@ function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
     protein: meal.nutrition?.protein ?? meal.protein ?? 0,
     carbs: meal.nutrition?.carbs ?? meal.carbs ?? 0,
     fat: meal.nutrition?.fat ?? meal.fat ?? 0,
+    itemCount: normalizeItemCount(meal.itemCount),
     imageAssetId: meal.asset?.imageAssetId ?? meal.imageAssetId ?? null,
     imageUrl: withAuthorizedAssetUrl(meal.asset?.imageUrl ?? meal.imageUrl ?? null) ?? null,
     loggedAt: meal.loggedAt,
@@ -728,6 +737,7 @@ export async function updateMeal(mealId: string, input: UpdateMealInput): Promis
     ...body,
     meal: {
       ...body.meal,
+      itemCount: normalizeItemCount(body.meal.itemCount),
       imageUrl: withAuthorizedAssetUrl(body.meal.imageUrl) ?? null,
     },
   };

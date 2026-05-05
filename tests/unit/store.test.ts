@@ -29,6 +29,7 @@ const sampleMeals = [
     protein: 42,
     carbs: 48,
     fat: 18,
+    itemCount: 1,
     loggedAt: "2026-04-01T04:30:00.000Z",
   },
   {
@@ -38,6 +39,7 @@ const sampleMeals = [
     protein: 12,
     carbs: 20,
     fat: 6,
+    itemCount: 1,
     loggedAt: "2026-04-01T08:00:00.000Z",
   },
 ];
@@ -269,6 +271,7 @@ describe("AppStore", () => {
         protein: 32,
         carbs: 14,
         fat: 22,
+        itemCount: 1,
       },
       "chat",
     );
@@ -284,6 +287,7 @@ describe("AppStore", () => {
         protein: 32,
         carbs: 14,
         fat: 22,
+        itemCount: 1,
       },
     });
     assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-3");
@@ -316,6 +320,7 @@ describe("AppStore", () => {
           protein: 30,
           carbs: 78,
           fat: 20,
+          itemCount: 1,
           imageAssetId: "asset-lunch",
           imageUrl: "/api/assets/asset-lunch",
         },
@@ -335,6 +340,7 @@ describe("AppStore", () => {
           protein: 14,
           carbs: 36,
           fat: 8,
+          itemCount: 1,
           imageAssetId: "asset-salmon",
           imageUrl: "/api/assets/asset-salmon",
         },

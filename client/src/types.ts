@@ -13,6 +13,7 @@ export interface MealEditPayload {
   protein: number;
   carbs: number;
   fat: number;
+  itemCount: number;
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt?: string;
@@ -54,6 +55,7 @@ export interface LoggedMealReceipt {
   protein: number;
   carbs: number;
   fat: number;
+  itemCount: number;
   mealId?: string;
   dateKey?: string;
   loggedAt?: string;
@@ -68,6 +70,7 @@ export interface MealEntry {
   protein: number;
   carbs: number;
   fat: number;
+  itemCount: number;
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt: string;

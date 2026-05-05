@@ -189,6 +189,7 @@ describe("Editorial UI", () => {
       protein: 34.4,
       carbs: 55.2,
       fat: 19.1,
+      itemCount: 1,
       imageAssetId: "asset-1",
       imageUrl: "/api/assets/asset-1?deviceId=device-1",
       loggedAt: "2026-04-19T12:30:00.000Z",

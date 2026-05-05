@@ -80,6 +80,7 @@ interface MealRecordDto {
   protein?: number;
   carbs?: number;
   fat?: number;
+  itemCount?: number;
   loggedAt?: string;
   imageAssetId?: string | null;
   imageUrl?: string | null;
@@ -207,6 +208,9 @@ function toClientMealEntry(meal: MealRecordDto): MealEntry {
     protein: meal.nutrition?.protein ?? meal.protein ?? 0,
     carbs: meal.nutrition?.carbs ?? meal.carbs ?? 0,
     fat: meal.nutrition?.fat ?? meal.fat ?? 0,
+    itemCount: typeof meal.itemCount === "number" && Number.isFinite(meal.itemCount) && meal.itemCount > 0
+      ? Math.floor(meal.itemCount)
+      : 1,
     imageAssetId: getMealImageAssetId(meal),
     imageUrl: getMealImageUrl(meal),
     loggedAt: meal.loggedAt ?? "",

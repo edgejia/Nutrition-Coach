@@ -67,6 +67,7 @@ function createPhase40IncompleteReceiptMock(): Message {
       protein: 38,
       carbs: 82,
       fat: 24,
+      itemCount: 1,
     },
   };
 }
