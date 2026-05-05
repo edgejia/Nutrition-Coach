@@ -36,6 +36,8 @@ type HistoryMeal = {
     imageAssetId: string | null;
     imageUrl: string | null;
   };
+  imageAssetId: string | null;
+  imageUrl: string | null;
   revision: {
     currentRevisionNumber: number;
   };
@@ -225,6 +227,8 @@ describe("History search API", () => {
           },
         ],
         asset: { imageAssetId: null, imageUrl: null },
+        imageAssetId: null,
+        imageUrl: null,
         revision: { currentRevisionNumber: 1 },
       },
     });
@@ -313,6 +317,8 @@ describe("History search API", () => {
       imageAssetId: "asset-search",
       imageUrl: "/api/assets/asset-search",
     });
+    assert.equal(body.results[0]?.meal.imageAssetId, "asset-search");
+    assert.equal(body.results[0]?.meal.imageUrl, "/api/assets/asset-search");
     assertNoUnsafeHistoryFields(body);
   });
 

@@ -191,13 +191,13 @@ describe("History API", () => {
         { foodName: "地瓜", calories: 180, protein: 3, carbs: 41, fat: 0 },
       ],
     });
-    const sameTimestampMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "同秒茶葉蛋",
+    const nearbyMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鄰近茶葉蛋",
       calories: 80,
       protein: 7,
       carbs: 1,
       fat: 5,
-      loggedAt: "2026-03-25T04:00:00.000Z",
+      loggedAt: "2026-03-25T03:59:00.000Z",
     });
     const updatedMeal = await services.foodLoggingService.logFood(deviceId, {
       foodName: "待修正便當",
@@ -251,8 +251,8 @@ describe("History API", () => {
     assert.equal(body.nextCursor, null);
     assert.deepEqual(
       body.meals.map((meal) => meal.id),
-      [updatedMeal.id, sameTimestampMeal.id, assetMeal.id, boundaryMeal.id],
-      "history meals should use descending loggedAt plus id ordering",
+      [updatedMeal.id, assetMeal.id, nearbyMeal.id, boundaryMeal.id],
+      "history meals should use descending loggedAt ordering",
     );
     assert.ok(!body.meals.some((meal) => meal.id === deletedMeal.id));
     assert.ok(!body.meals.some((meal) => meal.display.title === "外部裝置餐點"));

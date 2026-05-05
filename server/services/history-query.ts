@@ -28,6 +28,8 @@ export interface HistoryMealDto {
     nutrition: { calories: number; protein: number; carbs: number; fat: number };
   }>;
   asset: { imageAssetId: string | null; imageUrl: string | null };
+  imageAssetId: string | null;
+  imageUrl: string | null;
   revision: { currentRevisionNumber: number };
 }
 
@@ -409,6 +411,7 @@ async function projectHistoryMeals(
     const revision = revisionById.get(header.currentRevisionId);
     const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
     const imageAssetId = revision?.imageAssetId ?? null;
+    const imageUrl = imageAssetId ? buildAssetUrl(imageAssetId) : null;
 
     return {
       id: header.id,
@@ -433,8 +436,10 @@ async function projectHistoryMeals(
       })),
       asset: {
         imageAssetId,
-        imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+        imageUrl,
       },
+      imageAssetId,
+      imageUrl,
       revision: { currentRevisionNumber: header.currentRevisionNumber },
     };
   });
