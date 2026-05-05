@@ -325,7 +325,10 @@ describe("Meals API", () => {
     });
 
     assert.equal(updateRes.statusCode, 409);
-    assert.deepEqual(updateRes.json(), { error: "MEAL_REQUIRES_GROUPED_UPDATE" });
+    assert.deepEqual(updateRes.json(), {
+      error: "MEAL_REQUIRES_GROUPED_UPDATE",
+      message: "Grouped meals must be corrected through chat.",
+    });
   });
 
   it("PATCH /api/meals/:id returns 404 for another device", async () => {

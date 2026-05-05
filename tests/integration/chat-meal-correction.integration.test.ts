@@ -462,7 +462,7 @@ describe("chat meal correction integration", () => {
     assert.equal(updated?.fat, 9);
   });
 
-  it("applies grouped meal whole-meal nutrient patches without requiring full items[] replacement", async () => {
+  it("applies grouped meal whole-meal nutrient patches proportionally without requiring full items[] replacement", async () => {
     const grouped = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
       items: [
