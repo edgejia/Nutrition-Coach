@@ -11,8 +11,9 @@ import {
   type HistoryWeekDay,
 } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
+import { buildHistoryMealEditPayload } from "../meal-edit-payload.js";
 import { useStore } from "../store.js";
-import type { HistoryDaySnapshot, HistoryTrendResponse, MealEditPayload, MealEntry } from "../types.js";
+import type { HistoryDaySnapshot, HistoryTrendResponse, MealEntry } from "../types.js";
 import { formatMealRowTime, getMealMacroSummary } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
@@ -218,19 +219,7 @@ function TimelineRows({
   }
 
   function onMealOpen(meal: MealEntry) {
-    const payload: MealEditPayload = {
-      mealId: meal.id,
-      dateKey: selectedDateKey,
-      foodName: meal.foodName,
-      calories: meal.calories,
-      protein: meal.protein,
-      carbs: meal.carbs,
-      fat: meal.fat,
-      imageAssetId: meal.imageAssetId,
-      imageUrl: meal.imageUrl,
-      loggedAt: meal.loggedAt,
-    };
-    openMealEdit(payload, "history");
+    openMealEdit(buildHistoryMealEditPayload(meal, selectedDateKey), "history");
   }
 
   function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {

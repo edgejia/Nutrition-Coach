@@ -13,6 +13,8 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
+import { buildHistoryMealEditPayload } from "../../../client/src/meal-edit-payload.js";
+import type { MealEntry } from "../../../client/src/types.js";
 import type {
   ScenarioContext,
   ScenarioResult,
@@ -197,10 +199,9 @@ function getMealImageUrl(meal: MealRecordDto): string | null {
   return meal.imageUrl ?? meal.asset?.imageUrl ?? null;
 }
 
-function normalizeMealEditPayload(meal: MealRecordDto, dateKey: string) {
+function toClientMealEntry(meal: MealRecordDto): MealEntry {
   return {
-    mealId: meal.id,
-    dateKey,
+    id: meal.id,
     foodName: meal.display?.title ?? meal.foodName ?? "未命名餐點",
     calories: meal.nutrition?.calories ?? meal.calories ?? 0,
     protein: meal.nutrition?.protein ?? meal.protein ?? 0,
@@ -208,7 +209,7 @@ function normalizeMealEditPayload(meal: MealRecordDto, dateKey: string) {
     fat: meal.nutrition?.fat ?? meal.fat ?? 0,
     imageAssetId: getMealImageAssetId(meal),
     imageUrl: getMealImageUrl(meal),
-    loggedAt: meal.loggedAt,
+    loggedAt: meal.loggedAt ?? "",
   };
 }
 
@@ -412,9 +413,11 @@ const scenario: VerificationScenario = {
       }
       steps.push(pass("verify_history_day", historyIdentity.actual));
 
-      const mealEditPayload = historyDayMeal ? normalizeMealEditPayload(historyDayMeal, identity.dateKey) : null;
+      const clientMealEntry = historyDayMeal ? toClientMealEntry(historyDayMeal) : null;
+      const mealEditPayload = clientMealEntry ? buildHistoryMealEditPayload(clientMealEntry, identity.dateKey) : null;
       artifacts.verify_meal_edit_payload = {
-        source: "history-day-row-payload",
+        source: "client.buildHistoryMealEditPayload",
+        clientMealEntry,
         mealEditPayload,
         chatReceiptPayload: assistantReceipt.loggedMeal,
       };

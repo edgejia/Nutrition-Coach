@@ -59,18 +59,10 @@ describe("History screen source contract", () => {
 
   it("opens Meal Edit from meal rows with complete History-origin payload", () => {
     for (const expected of [
+      "buildHistoryMealEditPayload",
       "openMealEdit",
       "event.stopPropagation()",
-      "mealId: meal.id",
-      "dateKey: selectedDateKey",
-      "foodName: meal.foodName",
-      "calories: meal.calories",
-      "protein: meal.protein",
-      "carbs: meal.carbs",
-      "fat: meal.fat",
-      "imageAssetId: meal.imageAssetId",
-      "imageUrl: meal.imageUrl",
-      "loggedAt: meal.loggedAt",
+      "buildHistoryMealEditPayload(meal, selectedDateKey)",
       '"history"',
     ]) {
       assert.match(source, escapedPattern(expected));
@@ -85,9 +77,7 @@ describe("History screen source contract", () => {
       "sp-history-meal-fallback",
       "meal.imageUrl",
       "無照片",
-      "imageAssetId: meal.imageAssetId",
-      "imageUrl: meal.imageUrl",
-      "loggedAt: meal.loggedAt",
+      "buildHistoryMealEditPayload(meal, selectedDateKey)",
     ]) {
       assert.match(source, escapedPattern(expected));
     }

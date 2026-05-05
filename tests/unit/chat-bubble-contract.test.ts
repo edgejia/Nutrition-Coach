@@ -106,27 +106,15 @@ describe("chat bubble source contract", () => {
   it("complete receipts open Meal Edit and incomplete receipts stay read-only", async () => {
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const payloadBuilder = await readSource("client/src/meal-edit-payload.ts");
 
     assert.match(bubble, /getCompleteReceiptEditPayload/);
-    for (const field of [
-      "mealId",
-      "dateKey",
-      "foodName",
-      "calories",
-      "protein",
-      "carbs",
-      "fat",
-      "imageAssetId",
-      "imageUrl",
-      "loggedAt",
-    ]) {
-      assert.match(bubble, new RegExp(`loggedMeal\\.${field}`));
-    }
+    assert.match(bubble, /buildReceiptMealEditPayload\(message\.loggedMeal\)/);
 
     assert.match(bubble, /MealEditPayload/);
     assert.match(bubble, /onOpenMealEdit\?\.\(editPayload\)/);
     assert.match(bubble, /SportChevronRightIcon/);
-    assert.match(bubble, /Number\.isFinite/);
+    assert.match(payloadBuilder, /Number\.isFinite/);
     assert.match(chatPanel, /PHASE40_INCOMPLETE_RECEIPT_FLAG/);
     assert.match(chatPanel, /phase40IncompleteReceipt/);
     assert.match(chatPanel, /createPhase40IncompleteReceiptMock/);
@@ -171,6 +159,7 @@ describe("chat bubble source contract", () => {
   it("passes Meal Edit callbacks from ChatPanel with chat origin", async () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const payloadBuilder = await readSource("client/src/meal-edit-payload.ts");
 
     assert.match(chatPanel, /onOpenMealEdit=\{\(payload\) => openMealEdit\(payload, "chat"\)\}/);
     assert.doesNotMatch(chatPanel, /sp-chat-today-log/);
@@ -186,7 +175,7 @@ describe("chat bubble source contract", () => {
       "imageUrl",
       "loggedAt",
     ]) {
-      assert.match(bubble, new RegExp(`${field}:`));
+      assert.match(payloadBuilder, new RegExp(`${field}:`));
     }
   });
 

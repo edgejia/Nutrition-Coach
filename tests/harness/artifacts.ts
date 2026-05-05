@@ -9,7 +9,7 @@
  *   - `x-device-id` header values  → "[REDACTED]"
  *   - `deviceId=<value>` URL query params  → "deviceId=[REDACTED]"
  *   - Paths containing `/uploads/`  → "[REDACTED_PATH]"
- *   - Object keys named `deviceId` or `x-device-id`  → "[REDACTED]"
+ *   - Object keys containing `deviceId` or named `x-device-id`  → "[REDACTED]"
  */
 
 import fs from "node:fs";
@@ -72,7 +72,7 @@ function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(obj)) {
     const lowerKey = key.toLowerCase();
-    if (lowerKey === "x-device-id" || lowerKey === "deviceid") {
+    if (lowerKey === "x-device-id" || lowerKey.includes("deviceid")) {
       result[key] = REDACTED;
     } else {
       result[key] = redact(val);

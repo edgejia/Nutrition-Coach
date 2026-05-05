@@ -1,5 +1,6 @@
 import type { MealEditPayload, Message } from "../types.js";
 import type { KeyboardEvent } from "react";
+import { buildReceiptMealEditPayload } from "../meal-edit-payload.js";
 import { AssistantMarkdown } from "./AssistantMarkdown.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportBoltIcon, SportChevronRightIcon } from "./SportIcons.js";
@@ -23,33 +24,7 @@ function isCompleteLoggedMealReceipt(message: Message) {
 }
 
 export function getCompleteReceiptEditPayload(message: Message): MealEditPayload | null {
-  const loggedMeal = message.loggedMeal;
-
-  if (
-    !loggedMeal ||
-    !loggedMeal.mealId ||
-    !loggedMeal.dateKey ||
-    loggedMeal.foodName.trim().length === 0 ||
-    !Number.isFinite(loggedMeal.calories) ||
-    !Number.isFinite(loggedMeal.protein) ||
-    !Number.isFinite(loggedMeal.carbs) ||
-    !Number.isFinite(loggedMeal.fat)
-  ) {
-    return null;
-  }
-
-  return {
-    mealId: loggedMeal.mealId,
-    dateKey: loggedMeal.dateKey,
-    foodName: loggedMeal.foodName,
-    calories: loggedMeal.calories,
-    protein: loggedMeal.protein,
-    carbs: loggedMeal.carbs,
-    fat: loggedMeal.fat,
-    imageAssetId: loggedMeal.imageAssetId ?? null,
-    imageUrl: loggedMeal.imageUrl ?? null,
-    loggedAt: loggedMeal.loggedAt,
-  };
+  return buildReceiptMealEditPayload(message.loggedMeal);
 }
 
 export function getUserMessagePresentation(message: Message) {

@@ -55,6 +55,10 @@ function makeFailResult(scenarioName: string): ScenarioResult {
       },
       uploadPath: "/absolute/path/to/server/uploads/image.jpg",
       mealsSnapshot: [{ id: 1, deviceId: "secret-device-id-xyz", food_name: "apple" }],
+      assetBoundary: {
+        ownerDeviceId: "owner-device-id-123",
+        foreignDeviceId: "foreign-device-id-456",
+      },
       queryUrl: "http://127.0.0.1:54321/api/meals?deviceId=secret-device-id-xyz&limit=10",
     },
     consoleSummary: `FAIL ${scenarioName} verify-meal-persisted`,
@@ -184,6 +188,23 @@ describe("verification-artifacts", () => {
 
     // mealsSnapshot contains a deviceId field with the secret value
     assert.doesNotMatch(raw, /secret-device-id-xyz/, "all occurrences of deviceId value must be redacted");
+  });
+
+  test("camelCase device id evidence keys are redacted across all artifact files", async () => {
+    const result = makeFailResult("redact-camel-device-ids");
+    result.steps[0]!.actual = {
+      ownerDeviceId: "owner-device-id-123",
+      foreignDeviceId: "foreign-device-id-456",
+    };
+    await writeScenarioArtifacts("redact-camel-device-ids", result);
+
+    const latestDir = path.join(tmpDir, "redact-camel-device-ids", "latest");
+    for (const fileName of ["steps.json", "snapshots.json", "scenario-result.json"]) {
+      const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
+      assert.doesNotMatch(raw, /owner-device-id-123/, `${fileName} must redact ownerDeviceId`);
+      assert.doesNotMatch(raw, /foreign-device-id-456/, `${fileName} must redact foreignDeviceId`);
+      assert.match(raw, /\[REDACTED\]/, `${fileName} should include redaction placeholders`);
+    }
   });
 
   test("failed scenario produces ok=false and populated failedStep in summary.json", async () => {
