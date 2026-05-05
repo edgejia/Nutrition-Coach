@@ -116,6 +116,9 @@ describe("chat bubble source contract", () => {
       "protein",
       "carbs",
       "fat",
+      "imageAssetId",
+      "imageUrl",
+      "loggedAt",
     ]) {
       assert.match(bubble, new RegExp(`loggedMeal\\.${field}`));
     }
@@ -131,6 +134,28 @@ describe("chat bubble source contract", () => {
     assert.match(chatPanel, /content: ""/);
     assert.doesNotMatch(chatPanel, /缺少可編輯/);
     assert.doesNotMatch(chatPanel, /Incomplete receipt mock/);
+  });
+
+  it("renders logged meal receipt thumbnails through the shared persisted asset primitive", async () => {
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const css = await readSource("client/src/app.css");
+
+    assert.match(bubble, /<PersistedAssetImage/);
+    assert.match(bubble, /src=\{loggedMeal\.imageUrl\}/);
+    assert.match(bubble, /alt=\{`\$\{loggedMeal\.foodName\} 整餐照片`\}/);
+    assert.match(bubble, /imgClassName="sp-receipt-thumbnail"/);
+    assert.match(
+      bubble,
+      /fallbackClassName="sp-receipt-thumbnail sp-receipt-thumbnail-fallback"/,
+    );
+    assert.match(bubble, /className="sp-receipt-thumbnail-frame"/);
+    assert.match(bubble, /aria-label=\{canEdit \? `編輯 \$\{loggedMeal\.foodName\}` : undefined\}/);
+
+    assert.match(css, /\.sp-receipt-thumbnail-frame/);
+    assert.match(css, /width:\s*56px/);
+    assert.match(css, /height:\s*56px/);
+    assert.match(css, /\.sp-receipt-thumbnail/);
+    assert.match(css, /\.sp-receipt-thumbnail-fallback/);
   });
 
   it("delete mutation confirmations stay assistant text only without receipt affordances", async () => {
@@ -185,5 +210,7 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(bubble, /find\([^)]*foodName/);
     assert.doesNotMatch(bubble, /find\([^)]*calories/);
     assert.doesNotMatch(bubble, /foodName[^;\n]+calories/);
+    assert.doesNotMatch(bubble, /<img/);
+    assert.doesNotMatch(bubble, /backgroundImage/);
   });
 });
