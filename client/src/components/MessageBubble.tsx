@@ -110,12 +110,25 @@ function ReceiptCard(props: {
     <div className="sp-message-row sp-message-row-assistant">
       <SportReceipt
         className={`sp-receipt-card${canEdit ? " sp-receipt-button" : ""}`}
+        aria-label={canEdit ? `編輯 ${loggedMeal.foodName}` : undefined}
         onClick={canEdit ? handleOpenReceipt : undefined}
         onKeyDown={canEdit ? handleReceiptKeyDown : undefined}
         role={canEdit ? "button" : undefined}
         tabIndex={canEdit ? 0 : undefined}
       >
-        <div className="sp-receipt-head">
+        <div
+          className={`sp-receipt-head${loggedMeal.imageUrl ? " sp-receipt-head-with-thumbnail" : ""}`}
+        >
+          {loggedMeal.imageUrl ? (
+            <div className="sp-receipt-thumbnail-frame">
+              <PersistedAssetImage
+                src={loggedMeal.imageUrl}
+                alt={`${loggedMeal.foodName} 整餐照片`}
+                imgClassName="sp-receipt-thumbnail"
+                fallbackClassName="sp-receipt-thumbnail sp-receipt-thumbnail-fallback"
+              />
+            </div>
+          ) : null}
           <div className="sp-receipt-title">
             <div className="sp-receipt-label">logged</div>
             <div className="sp-receipt-food">{loggedMeal.foodName}</div>

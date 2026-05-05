@@ -1609,6 +1609,39 @@ textarea {
   padding: 12px 14px;
 }
 
+.sp-receipt-head-with-thumbnail {
+  grid-template-columns: 56px minmax(0, 1fr) auto auto;
+}
+
+.sp-receipt-thumbnail-frame {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: 8px;
+  background: var(--sp-surface-2);
+}
+
+.sp-receipt-thumbnail {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  object-fit: cover;
+}
+
+.sp-receipt-thumbnail-fallback {
+  padding: 4px;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
 .sp-receipt-title {
   min-width: 0;
 }
