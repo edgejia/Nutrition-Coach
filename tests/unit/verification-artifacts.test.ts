@@ -82,7 +82,7 @@ describe("verification-artifacts", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test("writeScenarioArtifacts creates summary.json, steps.json, and snapshots.json for a passing run", async () => {
+  test("writeScenarioArtifacts creates summary.json, steps.json, snapshots.json, and scenario-result.json for a passing run", async () => {
     const result = makePassResult("text-log");
     await writeScenarioArtifacts("text-log", result);
 
@@ -91,6 +91,7 @@ describe("verification-artifacts", () => {
     assert.ok(fs.existsSync(path.join(latestDir, "summary.json")), "summary.json missing");
     assert.ok(fs.existsSync(path.join(latestDir, "steps.json")), "steps.json missing");
     assert.ok(fs.existsSync(path.join(latestDir, "snapshots.json")), "snapshots.json missing");
+    assert.ok(fs.existsSync(path.join(latestDir, "scenario-result.json")), "scenario-result.json missing");
   });
 
   test("summary.json contains ok, failedStep, consoleSummary, and step count", async () => {

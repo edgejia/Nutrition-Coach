@@ -117,9 +117,10 @@ function buildSummary(scenarioName: string, result: ScenarioResult): SummaryArti
  * Write structured, redacted JSON artifacts for a completed scenario run.
  *
  * Files written:
- *   - `summary.json`   — ok, failedStep, consoleSummary, step counts
- *   - `steps.json`     — ordered step evidence (names, ok, actual/expected/error)
- *   - `snapshots.json` — arbitrary artifact blobs from `result.artifacts`
+ *   - `summary.json`         — ok, failedStep, consoleSummary, step counts
+ *   - `steps.json`           — ordered step evidence (names, ok, actual/expected/error)
+ *   - `snapshots.json`       — arbitrary artifact blobs from `result.artifacts`
+ *   - `scenario-result.json` — redacted full scenario result for phase evidence indexes
  *
  * The `latest/` directory is replaced on every run so callers always find
  * the most recent evidence without managing timestamped directories.
@@ -157,6 +158,13 @@ export async function writeScenarioArtifacts(
   fs.writeFileSync(
     path.join(dir, "snapshots.json"),
     JSON.stringify(snapshots, null, 2),
+    "utf-8",
+  );
+
+  const scenarioResult = redact(result);
+  fs.writeFileSync(
+    path.join(dir, "scenario-result.json"),
+    JSON.stringify(scenarioResult, null, 2),
     "utf-8",
   );
 }
