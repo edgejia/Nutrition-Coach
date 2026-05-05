@@ -605,6 +605,7 @@ export function createMealCorrectionService(db: AppDatabase) {
         protein: number;
         carbs: number;
         fat: number;
+        itemCount: number;
         imagePath: string | null;
         loggedAt: string;
       };
@@ -648,6 +649,7 @@ export function createMealCorrectionService(db: AppDatabase) {
           protein: updated.items.reduce((sum, item) => sum + item.protein, 0),
           carbs: updated.items.reduce((sum, item) => sum + item.carbs, 0),
           fat: updated.items.reduce((sum, item) => sum + item.fat, 0),
+          itemCount: updated.items.length,
           imagePath: updated.imageAssetId ? makeAssetRef(updated.imageAssetId) : null,
           loggedAt: updated.loggedAt,
         },

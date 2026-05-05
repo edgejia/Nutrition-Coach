@@ -67,6 +67,8 @@ export interface ToolExecutionResult {
     protein: number;
     carbs: number;
     fat: number;
+    itemCount: number;
+    quantityUncertaintyReason?: "missing_quantity";
     countedSources: TrustedProteinSource[];
     excludedSources: ExcludedProteinSource[];
     usedConservativeAssumption: boolean;
@@ -129,7 +131,14 @@ interface LogFoodGroupedArgs extends HistoricalDateToolArgs {
   fat?: number;
 }
 
-type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
+export type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
+type QuantityUncertaintyReason = "missing_quantity";
+
+interface NormalizedLogFoodArgs extends HistoricalDateToolArgs {
+  items: LogFoodItemArgs[];
+  protein_sources?: ProteinSourceArgs[];
+  quantityUncertaintyReason?: QuantityUncertaintyReason;
+}
 
 interface FindMealsArgs {
   action: "update" | "delete";
@@ -173,6 +182,8 @@ interface LogFoodSuccessResult {
     protein: number;
     carbs: number;
     fat: number;
+    itemCount: number;
+    quantityUncertaintyReason?: QuantityUncertaintyReason;
     countedSources: TrustedProteinSource[];
     excludedSources: ExcludedProteinSource[];
     usedConservativeAssumption: boolean;
@@ -192,6 +203,7 @@ interface UpdateMealResult {
     protein: number;
     carbs: number;
     fat: number;
+    itemCount: number;
     imagePath: string | null;
     loggedAt: string;
   };
@@ -410,6 +422,55 @@ function inferProteinSourcesFromItem(item: LogFoodItemArgs): ProteinSourceInput[
     isPrimary: category !== "trace",
     certainty: "clear",
   }];
+}
+
+function hasQuantityBearingField(item: LogFoodItemArgs): boolean {
+  return item.quantity !== undefined
+    || item.quantity_g !== undefined
+    || item.quantity_ml !== undefined
+    || /\d|[０-９]/.test(item.amount ?? "")
+    || /\d|[０-９]/.test(item.serving_size ?? "");
+}
+
+function hasQuantityLikeNumberInText(text: string): boolean {
+  return /(?:\d|[０-９]|[一二三四五六七八九十兩半])\s*(?:g|克|公斤|kg|ml|毫升|杯|碗|份|顆|片|根|條|個|包|盒|匙|湯匙|茶匙|碗|盤|瓶|罐|塊|枚|串|球|卷|張|把)?/i.test(text);
+}
+
+function shouldMarkMissingQuantity(items: LogFoodItemArgs[]): boolean {
+  return items.every(
+    (item) => !hasQuantityBearingField(item) && !hasQuantityLikeNumberInText(item.food_name),
+  );
+}
+
+export function normalizeLogFoodArgs(args: LogFoodArgs): NormalizedLogFoodArgs {
+  // When items[] is present it is authoritative; top-level aggregate fields are compatibility noise.
+  const items = "items" in args
+    ? args.items
+    : [
+        {
+          food_name: args.food_name,
+          calories: args.calories,
+          protein: args.protein,
+          carbs: args.carbs,
+          fat: args.fat,
+          ...(args.quantity !== undefined ? { quantity: args.quantity } : {}),
+          ...(args.quantity_g !== undefined ? { quantity_g: args.quantity_g } : {}),
+          ...(args.quantity_ml !== undefined ? { quantity_ml: args.quantity_ml } : {}),
+          ...(args.amount !== undefined ? { amount: args.amount } : {}),
+          ...(args.unit !== undefined ? { unit: args.unit } : {}),
+          ...(args.serving_size !== undefined ? { serving_size: args.serving_size } : {}),
+        },
+      ];
+
+  return {
+    items,
+    ...(args.date_text !== undefined ? { date_text: args.date_text } : {}),
+    ...(args.meal_period !== undefined ? { meal_period: args.meal_period } : {}),
+    ...(args.protein_sources !== undefined ? { protein_sources: args.protein_sources } : {}),
+    ...(shouldMarkMissingQuantity(items)
+      ? { quantityUncertaintyReason: "missing_quantity" as const }
+      : {}),
+  };
 }
 
 function resolveProteinSourceInputs(
@@ -689,38 +750,28 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         })
       : undefined;
 
-    const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(args);
+    const normalized = normalizeLogFoodArgs(args);
+    const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(normalized);
     const normalizedProtein = normalizeTrustedProteinEstimate({
-      mealName: "items" in args
-        ? args.items.map((item) => item.food_name.trim()).join("、")
-        : args.food_name.trim(),
-      proposedProtein: totalProposedProtein(args),
+      mealName: normalized.items.map((item) => item.food_name.trim()).join("、"),
+      proposedProtein: totalProposedProtein(normalized),
       proteinSources,
     });
 
-    if (shouldRejectTrustedProteinPersistence(args, normalizedProtein.countedSources.length)) {
+    if (shouldRejectTrustedProteinPersistence(normalized, normalizedProtein.countedSources.length)) {
       throw new FatalToolError("trusted protein basis required for this meal");
     }
 
-    const loggedMeal = "items" in args
-      ? await deps.foodLoggingService.logGroupedMeal(deviceId, {
+    const normalizedItems = buildNormalizedGroupedItems(
+      normalized,
+      normalizedProtein.countedSources,
+      normalizedProtein.trustedProtein,
+      usedExplicitProteinSources,
+    );
+    const loggedMeal = await deps.foodLoggingService.logGroupedMeal(deviceId, {
         imagePath: deps.imagePath,
         loggedAt,
-        items: buildNormalizedGroupedItems(
-          args,
-          normalizedProtein.countedSources,
-          normalizedProtein.trustedProtein,
-          usedExplicitProteinSources,
-        ),
-      })
-      : await deps.foodLoggingService.logFood(deviceId, {
-        foodName: args.food_name.trim(),
-        calories: args.calories,
-        protein: normalizedProtein.trustedProtein,
-        carbs: args.carbs,
-        fat: args.fat,
-        imagePath: deps.imagePath,
-        loggedAt,
+        items: normalizedItems,
       });
 
     // Phase 8/9 invariant: persist the meal BEFORE recomputing the daily
@@ -752,6 +803,10 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
           protein: loggedMeal.protein,
           carbs: loggedMeal.carbs,
           fat: loggedMeal.fat,
+          itemCount: normalizedItems.length,
+          ...(normalized.quantityUncertaintyReason
+            ? { quantityUncertaintyReason: normalized.quantityUncertaintyReason }
+            : {}),
           countedSources: normalizedProtein.countedSources,
           excludedSources: normalizedProtein.excludedSources,
           usedConservativeAssumption: normalizedProtein.usedConservativeAssumption,
@@ -1265,6 +1320,7 @@ export async function executeTool(
         protein: contractResult.updatedMeal.protein,
         carbs: contractResult.updatedMeal.carbs,
         fat: contractResult.updatedMeal.fat,
+        itemCount: contractResult.updatedMeal.itemCount,
         countedSources: [],
         excludedSources: [],
         usedConservativeAssumption: false,
