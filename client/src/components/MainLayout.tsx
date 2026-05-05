@@ -36,6 +36,7 @@ type ShellWindow = ShellEventTarget & {
   visualViewport?: ShellVisualViewport | null;
   requestAnimationFrame: (callback: FrameRequestCallback) => number;
   cancelAnimationFrame: (handle: number) => void;
+  scrollTo?: (x: number, y: number) => void;
 };
 
 type ShellDocument = {
@@ -55,14 +56,11 @@ export function installVisualViewportShellVars({
 
   const syncViewportVars = () => {
     frameId = null;
-    const layoutHeight = Math.max(shellWindow.innerHeight, root.clientHeight);
     const visualHeight = viewport?.height ?? shellWindow.innerHeight;
-    const visualOffsetTop = viewport?.offsetTop ?? 0;
-    const visibleBottom = visualOffsetTop + visualHeight;
-    const bottomOcclusion = Math.max(0, layoutHeight - visibleBottom);
 
     root.style.setProperty("--app-visual-viewport-height", `${Math.round(visualHeight)}px`);
-    root.style.setProperty("--app-bottom-occlusion", `${Math.round(bottomOcclusion)}px`);
+    root.style.setProperty("--app-bottom-occlusion", "0px");
+    shellWindow.scrollTo?.(0, 0);
   };
 
   const scheduleSync = () => {

@@ -84,6 +84,17 @@ describe("mobile shell source contract", () => {
   });
 
   it("keeps shell helpers wired to viewport, fixed-bar, and scrolling declarations", () => {
+    assert.match(cssBlock("html"), /height:\s*100%/);
+    assert.match(cssBlock("html"), /overflow:\s*hidden/);
+    assert.match(cssBlock("body"), /position:\s*fixed/);
+    assert.match(cssBlock("body"), /inset:\s*0/);
+    assert.match(cssBlock("#root"), /position:\s*fixed/);
+    assert.match(cssBlock("#root"), /overflow:\s*hidden/);
+
+    assert.match(cssBlock(".app-viewport"), /position:\s*fixed/);
+    assert.match(cssBlock(".app-viewport"), /top:\s*0/);
+    assert.match(cssBlock(".app-viewport"), /right:\s*0/);
+    assert.match(cssBlock(".app-viewport"), /left:\s*0/);
     assert.match(cssBlock(".app-viewport"), /min-height:\s*100svh/);
     assert.match(cssBlock(".app-viewport"), /height:\s*100vh/);
     assert.match(cssBlock(".app-viewport"), /height:\s*100dvh/);
@@ -102,10 +113,8 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".screen-bottom-bar"), /position:\s*relative/);
     assert.match(cssBlock(".screen-bottom-bar"), /z-index:\s*10/);
     assert.match(cssBlock(".screen-bottom-bar"), /padding-bottom:\s*max\(0\.75rem,\s*calc\(env\(safe-area-inset-bottom\) \+ 0\.75rem\)\)/);
-    assert.match(
-      cssBlock(".screen-bottom-bar"),
-      /transform:\s*translate3d\(0,\s*calc\(-1 \* var\(--app-bottom-occlusion,\s*0px\)\),\s*0\)/,
-    );
+    assert.doesNotMatch(cssBlock(".screen-bottom-bar"), /transform:/);
+    assert.doesNotMatch(cssBlock(".screen-bottom-bar"), /--app-bottom-occlusion/);
 
     for (const selector of [".screen-scroll", ".screen-scroll-with-input", ".screen-scroll-safe"]) {
       const block = cssBlock(selector);
@@ -281,9 +290,9 @@ describe("mobile shell source contract", () => {
     assert.match(textareaBlock, /resize:\s*none/);
   });
 
-  it("keeps Chat composer and Meal Edit controls reserved above bottom occlusion", () => {
+  it("keeps Chat composer and Meal Edit controls reserved above bottom occlusion without moving the bottom bar twice", () => {
     assert.match(cssBlock(".sp-chat-scroll"), /var\(--app-bottom-occlusion,\s*0px\)/);
-    assert.match(cssBlock(".screen-bottom-bar"), /var\(--app-bottom-occlusion,\s*0px\)/);
+    assert.doesNotMatch(cssBlock(".screen-bottom-bar"), /var\(--app-bottom-occlusion,\s*0px\)/);
     assert.match(sources.chatPanel, /className="screen-bottom-bar sp-chat-composer-bar"/);
 
     assert.match(cssBlock(".sp-meal-edit-scroll"), /var\(--app-bottom-occlusion,\s*0px\)/);

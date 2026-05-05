@@ -75,6 +75,8 @@ function createFakeShell() {
     visualViewport: typeof visualViewport;
     requestAnimationFrame: typeof window.requestAnimationFrame;
     cancelAnimationFrame: typeof window.cancelAnimationFrame;
+    scrollToCalls: Array<[number, number]>;
+    scrollTo: (x: number, y: number) => void;
   };
   const root = {
     clientHeight: 780,
@@ -83,6 +85,10 @@ function createFakeShell() {
 
   windowTarget.innerHeight = 780;
   windowTarget.visualViewport = visualViewport;
+  windowTarget.scrollToCalls = [];
+  windowTarget.scrollTo = (x: number, y: number) => {
+    windowTarget.scrollToCalls.push([x, y]);
+  };
   windowTarget.requestAnimationFrame = (callback: FrameRequestCallback) => {
     const frameId = nextFrameId;
     nextFrameId += 1;
@@ -123,7 +129,8 @@ describe("visual viewport shell variables", () => {
     });
 
     assert.equal(shell.root.style.getPropertyValue("--app-visual-viewport-height"), "520px");
-    assert.equal(shell.root.style.getPropertyValue("--app-bottom-occlusion"), "260px");
+    assert.equal(shell.root.style.getPropertyValue("--app-bottom-occlusion"), "0px");
+    assert.deepEqual(shell.windowTarget.scrollToCalls.at(-1), [0, 0]);
 
     shell.visualViewport.height = 460;
     shell.visualViewport.offsetTop = 20;
@@ -133,7 +140,8 @@ describe("visual viewport shell variables", () => {
     shell.flushFrame();
 
     assert.equal(shell.root.style.getPropertyValue("--app-visual-viewport-height"), "460px");
-    assert.equal(shell.root.style.getPropertyValue("--app-bottom-occlusion"), "300px");
+    assert.equal(shell.root.style.getPropertyValue("--app-bottom-occlusion"), "0px");
+    assert.deepEqual(shell.windowTarget.scrollToCalls.at(-1), [0, 0]);
 
     cleanup();
   });
