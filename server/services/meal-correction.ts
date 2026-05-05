@@ -10,6 +10,7 @@ import { createMealTransactionsService, type MealTransactionItemInput } from "./
 import { createTurnStateService } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
 import { makeAssetRef } from "./assets.js";
+import { buildFullMealDisplayName } from "./meal-display.js";
 
 const PENDING_SELECTION_KIND = "meal_target_selection";
 const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
@@ -334,12 +335,7 @@ export function createMealCorrectionService(db: AppDatabase) {
 
     return limitedHeaders.map((header) => {
       const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
-      const foodName =
-        revisionItems.length <= 1
-          ? revisionItems[0]?.foodName ?? "未知餐點"
-          : revisionItems.length === 2
-            ? `${revisionItems[0]!.foodName}、${revisionItems[1]!.foodName}`
-            : `${revisionItems[0]!.foodName}、${revisionItems[1]!.foodName} 等${revisionItems.length}項`;
+      const foodName = buildFullMealDisplayName(revisionItems, "未知餐點");
 
       return {
         mealId: header.id,
@@ -633,12 +629,7 @@ export function createMealCorrectionService(db: AppDatabase) {
         new Date(`${updated.affectedDateKey}T12:00:00`),
       );
 
-      const foodName =
-        updated.items.length <= 1
-          ? updated.items[0]!.foodName
-          : updated.items.length === 2
-            ? `${updated.items[0]!.foodName}、${updated.items[1]!.foodName}`
-            : `${updated.items[0]!.foodName}、${updated.items[1]!.foodName} 等${updated.items.length}項`;
+      const foodName = buildFullMealDisplayName(updated.items);
 
       return {
         updatedMeal: {

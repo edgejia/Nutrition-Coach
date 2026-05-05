@@ -12,6 +12,7 @@ import {
 import type { AppDatabase } from "../db/client.js";
 import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
+import { buildFullMealDisplayName } from "./meal-display.js";
 
 type ChatMessageStatus = "complete" | "stopped" | "error";
 
@@ -45,18 +46,6 @@ function formatToolSummary(toolName: string, content: string): string {
     return `[系統已更新今日攝取摘要：${content}]`;
   }
   return `[系統工具已完成：${content}]`;
-}
-
-function buildGroupedFoodName(items: Array<{ foodName: string }>) {
-  if (items.length === 1) {
-    return items[0]!.foodName;
-  }
-
-  if (items.length === 2) {
-    return `${items[0]!.foodName}、${items[1]!.foodName}`;
-  }
-
-  return `${items[0]!.foodName}、${items[1]!.foodName} 等${items.length}項`;
 }
 
 export function createChatService(db: AppDatabase) {
@@ -122,7 +111,7 @@ export function createChatService(db: AppDatabase) {
       loggedAt: receipt.loggedAt,
       imageAssetId: receipt.imageAssetId ?? null,
       imageUrl: receipt.imageAssetId ? buildAssetUrl(receipt.imageAssetId) : null,
-      foodName: buildGroupedFoodName(items),
+      foodName: buildFullMealDisplayName(items),
       calories: items.reduce((sum, item) => sum + item.calories, 0),
       protein: items.reduce((sum, item) => sum + item.protein, 0),
       carbs: items.reduce((sum, item) => sum + item.carbs, 0),

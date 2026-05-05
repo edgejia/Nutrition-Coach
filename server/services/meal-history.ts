@@ -7,6 +7,7 @@ import {
 } from "../db/schema.js";
 import { getLocalDayBounds } from "../lib/time.js";
 import { makeAssetRef } from "./assets.js";
+import { buildFullMealDisplayName } from "./meal-display.js";
 
 export interface MealHistoryEntry {
   id: string;
@@ -17,23 +18,6 @@ export interface MealHistoryEntry {
   fat: number;
   imagePath: string | null;
   loggedAt: string;
-}
-
-function buildGroupedFoodName(
-  items: Array<{
-    foodName: string;
-  }>,
-) {
-  if (items.length === 1) {
-    return items[0]!.foodName;
-  }
-
-  if (items.length === 2) {
-    return `${items[0]!.foodName}、${items[1]!.foodName}`;
-  }
-
-  const count = items.length;
-  return `${items[0]!.foodName}、${items[1]!.foodName} 等${count}項`;
 }
 
 export function createMealHistoryService(db: AppDatabase) {
@@ -102,7 +86,7 @@ export function createMealHistoryService(db: AppDatabase) {
 
         return {
           id: header.id,
-          foodName: buildGroupedFoodName(revisionItems),
+          foodName: buildFullMealDisplayName(revisionItems),
           calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),
           protein: revisionItems.reduce((sum, item) => sum + item.protein, 0),
           carbs: revisionItems.reduce((sum, item) => sum + item.carbs, 0),

@@ -7,6 +7,7 @@ import {
 } from "../db/schema.js";
 import { formatLocalDate, getLocalDayBounds } from "../lib/time.js";
 import { buildAssetUrl } from "./assets.js";
+import { buildFullMealDisplayName } from "./meal-display.js";
 import type { createSummaryService, DailySummary } from "./summary.js";
 
 const HISTORY_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -271,19 +272,6 @@ function decodeHistorySearchCursor(value: string): HistorySearchCursor {
   }
 }
 
-function buildGroupedFoodName(items: Array<{ foodName: string }>) {
-  if (items.length === 1) {
-    return items[0]!.foodName;
-  }
-
-  if (items.length === 2) {
-    return `${items[0]!.foodName}、${items[1]!.foodName}`;
-  }
-
-  const count = items.length;
-  return `${items[0]?.foodName ?? "餐點"}、${items[1]?.foodName ?? "項目"} 等${count}項`;
-}
-
 function createCursorSeekFilter(cursor: HistoryCursor) {
   return or(
     lt(mealTransactions.loggedAt, cursor.loggedAt),
@@ -417,7 +405,7 @@ async function projectHistoryMeals(
       id: header.id,
       dateKey: formatLocalDate(new Date(header.loggedAt)),
       loggedAt: header.loggedAt,
-      display: { title: buildGroupedFoodName(revisionItems) },
+      display: { title: buildFullMealDisplayName(revisionItems) },
       nutrition: {
         calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),
         protein: revisionItems.reduce((sum, item) => sum + item.protein, 0),

@@ -6,6 +6,7 @@ import {
   type MealTransactionItemInput,
 } from "./meal-transactions.js";
 import { createMealHistoryService } from "./meal-history.js";
+import { buildFullMealDisplayName } from "./meal-display.js";
 
 export interface FoodData {
   foodName: string;
@@ -36,18 +37,6 @@ export function createFoodLoggingService(db: AppDatabase) {
   const mealTransactionsService = createMealTransactionsService(db);
   const mealHistoryService = createMealHistoryService(db);
 
-  function buildGroupedFoodName(items: MealTransactionItemInput[]) {
-    if (items.length === 1) {
-      return items[0]!.foodName;
-    }
-
-    if (items.length === 2) {
-      return `${items[0]!.foodName}、${items[1]!.foodName}`;
-    }
-
-    return `${items[0]!.foodName}、${items[1]!.foodName} 等${items.length}項`;
-  }
-
   function projectCompatibilityEntry(
     deviceId: string,
     transactionId: string,
@@ -60,7 +49,7 @@ export function createFoodLoggingService(db: AppDatabase) {
       id: transactionId,
       mealRevisionId: revisionId,
       deviceId,
-      foodName: buildGroupedFoodName(items),
+      foodName: buildFullMealDisplayName(items),
       calories: items.reduce((sum, item) => sum + item.calories, 0),
       protein: items.reduce((sum, item) => sum + item.protein, 0),
       carbs: items.reduce((sum, item) => sum + item.carbs, 0),
