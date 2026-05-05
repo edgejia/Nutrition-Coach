@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createScenarioApp } from "../harness/app-fixture.js";
 import { parseSSEEvents, collectEventSequence, readStreamUntilEvent } from "../harness/sse.js";
 import { StreamingLLMProvider } from "../harness/streaming-llm.js";
@@ -174,5 +175,25 @@ describe("harness-foundation", () => {
     } finally {
       await ctx.close();
     }
+  });
+
+  test("meal-image-continuity scenario is registered as an identity-backed harness proof", () => {
+    const source = readFileSync("tests/harness/scenarios/meal-image-continuity.ts", "utf-8");
+
+    for (const marker of [
+      'name: "meal-image-continuity"',
+      "STEP_NAMES",
+      "capture_chat_receipt",
+      "verify_today_records",
+      "verify_history_day",
+      "verify_meal_edit_payload",
+      "verify_upload_cleanup",
+      "createScenarioApp",
+      "StreamingLLMProvider",
+    ]) {
+      assert.match(source, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
+
+    assert.doesNotMatch(source, /foodName.*find|calories.*find|protein.*find|loggedAt.*find/);
   });
 });
