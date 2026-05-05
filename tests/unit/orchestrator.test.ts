@@ -536,13 +536,17 @@ describe("Orchestrator - didLogMeal", () => {
 
     if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.didLogMeal, true);
-    assert.match(result.reply, /已先依照片做保守估算並完成記錄：豬肉燒烤飯盒，約 680 kcal。/);
-    assert.match(result.reply, /蛋白質先按豬肉作為主要來源估算/);
-    assert.match(result.reply, /其他配菜不列入 headline/);
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "豬肉燒烤飯盒",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /蛋白質 28 g（以豬肉為主）/);
+    assert.doesNotMatch(result.reply, /保守估算|headline/);
     assert.equal(mockLLM.chatCalls.length, 1, "image-only logging should not require a second LLM round");
   });
 
-  it("formats successful log replies compactly without leaking internal fields", async () => {
+  it("formats successful log replies compactly when missing_quantity metadata marks missing quantity", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_grouped_image",
@@ -573,6 +577,7 @@ describe("Orchestrator - didLogMeal", () => {
     );
 
     if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(result.loggedMeal?.quantityUncertaintyReason, "missing_quantity");
     assertSuccessfulLogReplyShape(result.reply, {
       fullFoodName: "雞腿、白飯、青菜",
       expectsUncertainty: true,

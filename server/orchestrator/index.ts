@@ -16,6 +16,7 @@ import {
 } from "./tools.js";
 import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
 import type { OrchestratorHooks } from "./hooks.js";
+import { currentAppDate, formatLocalDate } from "../lib/time.js";
 
 interface OrchestratorDeps {
   llmProvider: LLMProvider;
@@ -83,6 +84,10 @@ function joinProteinSourceNames(names: string[]): string {
   return `${names[0]}、${names[1]}等主要來源`;
 }
 
+function formatProteinGrams(protein: number): string {
+  return Number.isInteger(protein) ? String(protein) : protein.toFixed(1).replace(/\.0$/, "");
+}
+
 function buildTrustedProteinExplanation(loggedMeal: LoggedMealReceipt): string {
   const countedSourceNames = [...new Set(
     loggedMeal.countedSources
@@ -106,8 +111,61 @@ function buildTrustedProteinExplanation(loggedMeal: LoggedMealReceipt): string {
   return `蛋白質先按${sourceLabel}作為主要來源估算。`;
 }
 
+function getUniqueCountedProteinNames(loggedMeal: LoggedMealReceipt): string[] {
+  return [...new Set(
+    loggedMeal.countedSources
+      .map((source) => source.name.trim())
+      .filter(Boolean),
+  )];
+}
+
+function buildCompactProteinSuffix(loggedMeal: LoggedMealReceipt): string {
+  const countedSourceNames = getUniqueCountedProteinNames(loggedMeal);
+  if (loggedMeal.usedConservativeAssumption) {
+    return "（先抓低）";
+  }
+  if (countedSourceNames.length > 1) {
+    return `（${joinProteinSourceNames(countedSourceNames.slice(0, 3))}）`;
+  }
+  if (loggedMeal.excludedSources.length > 0 && countedSourceNames.length === 1) {
+    return `（以${countedSourceNames[0]}為主）`;
+  }
+  return "";
+}
+
+function getHighVarianceErrorSource(foodName: string): "湯底與份量" | "油脂與飯量" | "份量" | undefined {
+  if (/(湯|麵|noodle|soup)/i.test(foodName)) {
+    return "湯底與份量";
+  }
+  if (/(便當|飯盒|lunchbox|bento)/i.test(foodName)) {
+    return "油脂與飯量";
+  }
+  if (/(buffet|自助餐)/i.test(foodName)) {
+    return "份量";
+  }
+  return undefined;
+}
+
 function buildImageLoggedReply(loggedMeal: LoggedMealReceipt): string {
-  return `已先依照片做保守估算並完成記錄：${loggedMeal.foodName}，約 ${formatCalories(loggedMeal.calories)} kcal。${buildTrustedProteinExplanation(loggedMeal)} 若你想更精準，我可以再依份量幫你調整。`;
+  const todayKey = formatLocalDate(currentAppDate());
+  const datePrefix = loggedMeal.dateKey !== todayKey ? `${loggedMeal.dateKey} ` : "";
+  const calories = formatCalories(loggedMeal.calories);
+  const protein = formatProteinGrams(loggedMeal.protein);
+  const highVarianceErrorSource = getHighVarianceErrorSource(loggedMeal.foodName);
+  const uncertaintyErrorSource = highVarianceErrorSource
+    ?? (loggedMeal.usedConservativeAssumption || loggedMeal.quantityUncertaintyReason === "missing_quantity"
+      ? "份量"
+      : undefined);
+  const proteinSuffix = buildCompactProteinSuffix(loggedMeal);
+  const receipt = uncertaintyErrorSource
+    ? `已記錄${datePrefix}${loggedMeal.foodName}，估約 ${calories} kcal（區間 ${Math.floor(loggedMeal.calories * 0.85)}-${Math.ceil(loggedMeal.calories * 1.15)}），蛋白質 ${protein} g${proteinSuffix}`
+    : `已記錄${datePrefix}${loggedMeal.foodName}，${calories} kcal，蛋白質 ${protein} g${proteinSuffix}`;
+  const nextStep = loggedMeal.usedConservativeAssumption || loggedMeal.quantityUncertaintyReason === "missing_quantity"
+    ? "，可再補份量修正"
+    : "";
+  return uncertaintyErrorSource
+    ? `${receipt}。${uncertaintyErrorSource}是主要誤差${nextStep}。`
+    : `${receipt}。`;
 }
 
 export function buildPartialSuccessLoggedReply(loggedMeal: LoggedMealReceipt): string {
