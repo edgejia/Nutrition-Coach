@@ -57,10 +57,11 @@ export function installVisualViewportShellVars({
   const syncViewportVars = () => {
     frameId = null;
     const visualHeight = viewport?.height ?? shellWindow.innerHeight;
+    const visualOffsetTop = viewport?.offsetTop ?? 0;
 
+    root.style.setProperty("--app-visual-viewport-top", `${Math.max(0, Math.round(visualOffsetTop))}px`);
     root.style.setProperty("--app-visual-viewport-height", `${Math.round(visualHeight)}px`);
     root.style.setProperty("--app-bottom-occlusion", "0px");
-    shellWindow.scrollTo?.(0, 0);
   };
 
   const scheduleSync = () => {
@@ -89,6 +90,7 @@ export function installVisualViewportShellVars({
     shellWindow.removeEventListener("focusout", scheduleSync);
     viewport?.removeEventListener("resize", scheduleSync);
     viewport?.removeEventListener("scroll", scheduleSync);
+    root.style.removeProperty("--app-visual-viewport-top");
     root.style.removeProperty("--app-visual-viewport-height");
     root.style.removeProperty("--app-bottom-occlusion");
   };

@@ -899,18 +899,15 @@ export function ChatPanel() {
       </div>
 
       <div className="screen-bottom-bar sp-chat-composer-bar">
-        {sending && (
-          <button
-            type="button"
-            onClick={handleStopStreaming}
-            disabled={stopping || !activeTurnId}
-            className="sp-chat-stop"
-            aria-label="停止生成"
-          >
-            {stopping ? "正在停止..." : "停止生成"}
-          </button>
-        )}
-        <ChatInput onSend={handleSend} onBeforeSend={handleBeforeSend} disabled={sending} />
+        <ChatInput
+          onSend={handleSend}
+          onBeforeSend={handleBeforeSend}
+          onStop={handleStopStreaming}
+          disabled={sending}
+          streaming={sending}
+          stopDisabled={stopping || !activeTurnId}
+          stopping={stopping}
+        />
       </div>
     </div>
   );

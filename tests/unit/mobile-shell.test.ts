@@ -92,7 +92,7 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock("#root"), /overflow:\s*hidden/);
 
     assert.match(cssBlock(".app-viewport"), /position:\s*fixed/);
-    assert.match(cssBlock(".app-viewport"), /top:\s*0/);
+    assert.match(cssBlock(".app-viewport"), /top:\s*var\(--app-visual-viewport-top,\s*0px\)/);
     assert.match(cssBlock(".app-viewport"), /right:\s*0/);
     assert.match(cssBlock(".app-viewport"), /left:\s*0/);
     assert.match(cssBlock(".app-viewport"), /min-height:\s*100svh/);
@@ -136,6 +136,7 @@ describe("mobile shell source contract", () => {
     assert.match(sources.mainLayout, /\bapp-viewport\b/);
     assert.match(sources.mainLayout, /\bsp-app-canvas\b/);
     assert.match(sources.mainLayout, /\bvisualViewport\b/);
+    assert.match(sources.mainLayout, /--app-visual-viewport-top/);
     assert.match(sources.mainLayout, /--app-visual-viewport-height/);
     assert.match(sources.mainLayout, /--app-bottom-occlusion/);
     assert.doesNotMatch(sources.mainLayout, /IOSDevice/);
@@ -219,6 +220,7 @@ describe("mobile shell source contract", () => {
 
     assert.match(chatInput, /SportCameraIcon/);
     assert.match(chatInput, /SportSendIcon/);
+    assert.match(chatInput, /SportStopIcon/);
     assert.match(chatInput, /SportCloseIcon/);
     assert.match(chatInput, /from "\.\/SportIcons\.js"/);
     assert.ok(chatInput.includes('accept="image/jpeg,image/png,image/webp"'));
@@ -230,6 +232,7 @@ describe("mobile shell source contract", () => {
     assert.match(chatInput, /aria-label="附加照片"/);
     assert.match(chatInput, /aria-label="移除照片"/);
     assert.match(chatInput, /aria-label="送出"/);
+    assert.match(chatInput, /aria-label="停止生成"/);
     assert.match(chatInput, /placeholder="描述你吃了什麼…"/);
 
     for (const className of [
@@ -244,6 +247,9 @@ describe("mobile shell source contract", () => {
     }
 
     assert.match(chatInput, /data-ready=\{canSend\}/);
+    assert.match(chatInput, /onClick=\{submitMessage\}/);
+    assert.match(chatInput, /data-streaming="true"/);
+    assert.match(chatInput, /data-stopping=\{stopping\}/);
     assert.doesNotMatch(chatInput, /from "\.\/SketchIcons\.js"/);
     assert.doesNotMatch(chatInput, /<CameraIcon\b/);
     assert.doesNotMatch(chatInput, /<SendIcon\b/);
@@ -299,6 +305,16 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".sp-meal-edit-footer"), /var\(--app-bottom-occlusion,\s*0px\)/);
     assert.match(cssBlock(".sp-meal-edit-footer button"), /min-width:\s*0/);
     assert.match(cssBlock(".sp-meal-edit-field input"), /min-width:\s*0/);
+  });
+
+  it("keeps stop generation in the send-control slot instead of a separate composer button", () => {
+    assert.doesNotMatch(sources.chatPanel, /className="sp-chat-stop"/);
+    assert.doesNotMatch(sources.appCss, /\.sp-chat-stop\s*\{/);
+    assert.match(sources.chatPanel, /onStop=\{handleStopStreaming\}/);
+    assert.match(sources.chatPanel, /streaming=\{sending\}/);
+    assert.match(sources.chatPanel, /stopDisabled=\{stopping \|\| !activeTurnId\}/);
+    assert.match(sources.chatInput, /SportStopIcon/);
+    assert.match(sources.chatInput, /className="sp-chat-send sp-chat-send-stop"/);
   });
 
   it("keeps Summary header fixed and content in a safe scroller", () => {

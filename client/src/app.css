@@ -108,7 +108,7 @@ textarea {
 
 .app-viewport {
   position: fixed;
-  top: 0;
+  top: var(--app-visual-viewport-top, 0px);
   right: 0;
   left: 0;
   min-height: 100svh;
@@ -1690,40 +1690,10 @@ textarea {
 }
 
 .sp-chat-composer-bar {
-  display: grid;
-  gap: 8px;
   border-top: 1px solid var(--sp-line);
   background: rgba(10, 11, 13, 0.92);
   backdrop-filter: blur(16px);
   padding: 8px 16px max(16px, env(safe-area-inset-bottom));
-}
-
-.sp-chat-stop {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  justify-content: center;
-  justify-self: end;
-  border: 1px solid var(--sp-line-strong);
-  border-radius: var(--sp-r-pill);
-  background: var(--sp-surface-2);
-  color: var(--sp-ink);
-  padding: 0 14px;
-  font-family: var(--sp-font-zh);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.sp-chat-stop:disabled {
-  color: var(--sp-ink-3);
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.sp-chat-stop:focus-visible {
-  outline: 2px solid var(--sp-lime);
-  outline-offset: 2px;
 }
 
 .sp-chat-input {
@@ -1860,6 +1830,17 @@ textarea {
   border-color: var(--sp-lime);
   background: var(--sp-lime);
   color: #0a0b0d;
+}
+
+.sp-chat-send[data-streaming="true"] {
+  border-color: #f4f7ed;
+  background: #f4f7ed;
+  color: #0a0b0d;
+}
+
+.sp-chat-send.sp-chat-send-stop:disabled {
+  cursor: progress;
+  opacity: 0.78;
 }
 
 .sp-chat-send:disabled {

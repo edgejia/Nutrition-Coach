@@ -1,13 +1,25 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { SportCameraIcon, SportCloseIcon, SportSendIcon } from "./SportIcons.js";
+import { SportCameraIcon, SportCloseIcon, SportSendIcon, SportStopIcon } from "./SportIcons.js";
 
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
   onBeforeSend?: (payload: { hasImage: boolean; hasText: boolean }) => void;
+  onStop?: () => void;
   disabled: boolean;
+  streaming?: boolean;
+  stopDisabled?: boolean;
+  stopping?: boolean;
 }
 
-export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  onBeforeSend,
+  onStop,
+  disabled,
+  streaming = false,
+  stopDisabled = false,
+  stopping = false,
+}: ChatInputProps) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -98,15 +110,31 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
           rows={1}
           className="sp-chat-textarea"
         />
-        <button
-          type="submit"
-          disabled={disabled || !canSend}
-          className="sp-chat-send"
-          data-ready={canSend}
-          aria-label="送出"
-        >
-          <SportSendIcon size={18} stroke={2} />
-        </button>
+        {streaming ? (
+          <button
+            type="button"
+            onClick={onStop}
+            disabled={stopDisabled}
+            className="sp-chat-send sp-chat-send-stop"
+            data-ready="true"
+            data-streaming="true"
+            data-stopping={stopping}
+            aria-label="停止生成"
+          >
+            <SportStopIcon size={18} stroke={2} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={submitMessage}
+            disabled={disabled || !canSend}
+            className="sp-chat-send"
+            data-ready={canSend}
+            aria-label="送出"
+          >
+            <SportSendIcon size={18} stroke={2} />
+          </button>
+        )}
       </div>
     </form>
   );
