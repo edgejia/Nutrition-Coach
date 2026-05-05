@@ -268,6 +268,8 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
   } = loggedMeal;
   if (
     !foodName.trim() ||
+    !Number.isFinite(itemCount) ||
+    itemCount <= 0 ||
     !Number.isFinite(calories) ||
     !Number.isFinite(protein) ||
     !Number.isFinite(carbs) ||

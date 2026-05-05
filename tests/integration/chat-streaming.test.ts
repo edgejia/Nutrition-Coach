@@ -1542,7 +1542,7 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
-      assert.match(assistantMsgs[0]!.content, /蛋白質先按優格作為主要來源估算/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質先按優格和水煮蛋作為主要來源估算/);
     } finally {
       clearTimeout(timeout);
     }

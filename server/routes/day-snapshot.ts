@@ -42,6 +42,7 @@ export function registerDaySnapshotRoutes(app: FastifyInstance, deps: Deps) {
           return {
             id: meal.id,
             foodName: meal.foodName,
+            itemCount: meal.itemCount ?? 1,
             calories: meal.calories,
             protein: meal.protein,
             carbs: meal.carbs,

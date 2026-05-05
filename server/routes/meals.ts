@@ -93,6 +93,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
         return {
           id: meal.id,
           foodName: meal.foodName,
+          itemCount: meal.itemCount ?? 1,
           calories: meal.calories,
           protein: meal.protein,
           carbs: meal.carbs,
@@ -169,6 +170,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       meal: {
         id: updatedMeal.id,
         foodName: updatedMeal.foodName,
+        itemCount: updatedMeal.itemCount ?? 1,
         calories: updatedMeal.calories,
         protein: updatedMeal.protein,
         carbs: updatedMeal.carbs,
