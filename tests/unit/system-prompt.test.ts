@@ -213,10 +213,28 @@ describe("buildSystemPrompt", () => {
       fat: 60,
     });
 
+    assert.match(prompt, /清楚辨識多個食物/);
+    assert.match(prompt, /份量可以合理估算/);
+    assert.match(prompt, /雞腿便當/);
     assert.match(prompt, /咖哩飯/);
     assert.match(prompt, /牛肉麵/);
     assert.match(prompt, /炒飯/);
+    assert.match(prompt, /混合碗|綜合碗/);
+    assert.match(prompt, /不要拆成/);
+    assert.match(prompt, /小菜/);
+    assert.match(prompt, /配料/);
+    assert.match(prompt, /醬料/);
+    assert.match(prompt, /泡菜|醃菜/);
+    assert.match(prompt, /痕量|trace/);
+    assert.match(prompt, /合併|省略/);
+    assert.match(prompt, /文字記錄/);
+    assert.match(prompt, /明確列出多個食物/);
     assert.match(prompt, /蛋餅 \+ 豆漿 \+ 茶葉蛋/);
     assert.match(prompt, /items\.length === 1/);
+    assert.match(prompt, /protein_sources/);
+    assert.match(prompt, /最上層|top-level/);
+    assert.match(prompt, /不要放在每個 item|不是每個 item/);
+    assert.match(prompt, /若目標是多項餐點，單一數字欄位的 patch 視為整餐總量修改/);
+    assert.doesNotMatch(prompt, /progress-lag|abnormal|每日目標差距|時間門檻/);
   });
 });
