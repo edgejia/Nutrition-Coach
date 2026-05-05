@@ -44,6 +44,7 @@ function mockStreamFetch(chunks: string[]) {
 
 const { sendMessageStream } = await import("../../client/src/api.js");
 const { useStore } = await import("../../client/src/store.js");
+const { formatLocalDate } = await import("../../client/src/lib/time.js");
 
 describe("chat stream contract", () => {
   beforeEach(() => {
@@ -129,10 +130,39 @@ describe("chat stream contract", () => {
   });
 
   it("sendMessageStream exposes turnId status metadata and parses event: stopped as terminal", async () => {
+    const todayKey = formatLocalDate(new Date());
     mockStreamFetch([
       'event: status\ndata: {"label":"思考中...","turnId":"turn-1"}\n\n',
       'event: chunk\ndata: {"token":"已"}\n\n',
-      'event: stopped\ndata: {"stopped":true,"turnId":"turn-1","tokensStreamed":1,"didLogMeal":true,"didMutateMeal":true,"loggedMeal":{"foodName":"雞腿便當","calories":720,"protein":42,"carbs":80,"fat":24,"mealId":"meal-1","dateKey":"2026-05-05","loggedAt":"2026-05-05T04:00:00.000Z","imageAssetId":null,"imageUrl":null},"dailySummary":{"date":"2026-05-05","totalCalories":720,"totalProtein":42,"totalCarbs":80,"totalFat":24,"mealCount":1},"dailyTargets":{"calories":1800,"protein":130,"carbs":150,"fat":50},"affectedDate":"2026-05-05"}\n\n',
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        turnId: "turn-1",
+        tokensStreamed: 1,
+        didLogMeal: true,
+        didMutateMeal: true,
+        loggedMeal: {
+          foodName: "雞腿便當",
+          calories: 720,
+          protein: 42,
+          carbs: 80,
+          fat: 24,
+          mealId: "meal-1",
+          dateKey: todayKey,
+          loggedAt: `${todayKey}T04:00:00.000Z`,
+          imageAssetId: null,
+          imageUrl: null,
+        },
+        dailySummary: {
+          date: todayKey,
+          totalCalories: 720,
+          totalProtein: 42,
+          totalCarbs: 80,
+          totalFat: 24,
+          mealCount: 1,
+        },
+        dailyTargets: { calories: 1800, protein: 130, carbs: 150, fat: 50 },
+        affectedDate: todayKey,
+      })}\n\n`,
     ]);
 
     const turnIds: string[] = [];
@@ -176,9 +206,9 @@ describe("chat stream contract", () => {
     assert.equal(stoppedPayload?.didLogMeal, true);
     assert.equal(stoppedPayload?.didMutateMeal, true);
     assert.equal(stoppedPayload?.loggedMeal?.foodName, "雞腿便當");
-    assert.equal(stoppedPayload?.dailySummary?.date, "2026-05-05");
+    assert.equal(stoppedPayload?.dailySummary?.date, todayKey);
     assert.equal(stoppedPayload?.dailyTargets?.calories, 1800);
-    assert.equal(stoppedPayload?.affectedDate, "2026-05-05");
+    assert.equal(stoppedPayload?.affectedDate, todayKey);
   });
 
   it("sendMessageStream rejects malformed loggedMeal optional identity fields", async () => {
@@ -235,6 +265,7 @@ describe("chat stream contract", () => {
   });
 
   it("commitStoppedProvisionalBubble preserves partial text, stopped marker, receipt, and summary extras", () => {
+    const todayKey = formatLocalDate(new Date());
     useStore.getState().setProvisionalBubble({
       id: "bubble-stopped",
       statusLabel: "",
@@ -250,13 +281,13 @@ describe("chat stream contract", () => {
         carbs: 80,
         fat: 24,
         mealId: "meal-1",
-        dateKey: "2026-05-05",
-        loggedAt: "2026-05-05T04:00:00.000Z",
+        dateKey: todayKey,
+        loggedAt: `${todayKey}T04:00:00.000Z`,
         imageAssetId: null,
         imageUrl: null,
       },
       dailySummary: {
-        date: "2026-05-05",
+        date: todayKey,
         totalCalories: 720,
         totalProtein: 42,
         totalCarbs: 80,

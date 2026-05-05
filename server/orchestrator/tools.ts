@@ -57,6 +57,7 @@ export interface ToolExecutionResult {
   mealMutationKind?: "log" | "update" | "delete";
   loggedMeal?: {
     mealId: string;
+    mealRevisionId: string;
     dateKey: string;
     loggedAt: string;
     imageAssetId: string | null;
@@ -162,6 +163,7 @@ interface LogFoodSuccessResult {
   affectedDate?: string;
   loggedMeal: {
     mealId: string;
+    mealRevisionId: string;
     dateKey: string;
     loggedAt: string;
     imageAssetId: string | null;
@@ -184,6 +186,7 @@ interface UpdateMealResult {
   affectedDate: string;
   updatedMeal: {
     id: string;
+    mealRevisionId: string;
     foodName: string;
     calories: number;
     protein: number;
@@ -552,10 +555,16 @@ function buildNormalizedGroupedItems(
   }));
 }
 
-function projectMealIdentityFields(meal: { id: string; loggedAt: string; imagePath: string | null }) {
+function projectMealIdentityFields(meal: {
+  id: string;
+  mealRevisionId: string;
+  loggedAt: string;
+  imagePath: string | null;
+}) {
   const imageAssetId = parseAssetRef(meal.imagePath);
   return {
     mealId: meal.id,
+    mealRevisionId: meal.mealRevisionId,
     dateKey: formatLocalDate(new Date(meal.loggedAt)),
     loggedAt: meal.loggedAt,
     imageAssetId,

@@ -19,6 +19,7 @@ export interface FoodData {
 
 export interface MealCompatibilityEntry {
   id: string;
+  mealRevisionId: string;
   deviceId: string;
   foodName: string;
   calories: number;
@@ -50,12 +51,14 @@ export function createFoodLoggingService(db: AppDatabase) {
   function projectCompatibilityEntry(
     deviceId: string,
     transactionId: string,
+    revisionId: string,
     loggedAt: string,
     imagePath: string | null | undefined,
     items: MealTransactionItemInput[],
   ): MealCompatibilityEntry {
     return {
       id: transactionId,
+      mealRevisionId: revisionId,
       deviceId,
       foodName: buildGroupedFoodName(items),
       calories: items.reduce((sum, item) => sum + item.calories, 0),
@@ -86,6 +89,7 @@ export function createFoodLoggingService(db: AppDatabase) {
       return projectCompatibilityEntry(
         deviceId,
         created.transactionId,
+        created.revisionId,
         created.loggedAt,
         created.imagePath,
         created.items,
@@ -97,6 +101,7 @@ export function createFoodLoggingService(db: AppDatabase) {
       return projectCompatibilityEntry(
         deviceId,
         created.transactionId,
+        created.revisionId,
         created.loggedAt,
         created.imagePath,
         created.items,
@@ -120,6 +125,7 @@ export function createFoodLoggingService(db: AppDatabase) {
       return projectCompatibilityEntry(
         deviceId,
         updated.transactionId,
+        updated.revisionId,
         updated.loggedAt,
         updated.imageAssetId ? `asset:${updated.imageAssetId}` : null,
         updated.items,

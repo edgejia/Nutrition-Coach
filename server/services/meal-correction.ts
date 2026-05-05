@@ -599,6 +599,7 @@ export function createMealCorrectionService(db: AppDatabase) {
     ): Promise<{
       updatedMeal: {
         id: string;
+        mealRevisionId: string;
         foodName: string;
         calories: number;
         protein: number;
@@ -641,6 +642,7 @@ export function createMealCorrectionService(db: AppDatabase) {
       return {
         updatedMeal: {
           id: updated.transactionId,
+          mealRevisionId: updated.revisionId,
           foodName,
           calories: updated.items.reduce((sum, item) => sum + item.calories, 0),
           protein: updated.items.reduce((sum, item) => sum + item.protein, 0),
