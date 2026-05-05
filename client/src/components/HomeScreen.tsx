@@ -5,6 +5,7 @@ import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { createClientId } from "../lib/clientId.js";
 import { formatLocalDate } from "../lib/time.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
+import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportProgressBar, SportRing, SportScreen } from "./SportPrimitives.js";
 import type {
@@ -304,11 +305,25 @@ function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChat
         <div className="home-sport-meal-list">
           {meals.map((meal) => (
             <article key={meal.id} className="home-sport-meal-row">
-              <div className="home-sport-meal-badge">{getMealBadge(meal.loggedAt)}</div>
+              <div className="home-sport-meal-media">
+                {meal.imageUrl ? (
+                  <PersistedAssetImage
+                    src={meal.imageUrl}
+                    alt={`${meal.foodName} 縮圖`}
+                    imgClassName="home-sport-meal-image"
+                    fallbackClassName="home-sport-meal-fallback"
+                  />
+                ) : (
+                  <div role="img" aria-label={`${meal.foodName} 無照片`} className="home-sport-meal-fallback">
+                    無照片
+                  </div>
+                )}
+              </div>
               <div className="home-sport-meal-main">
                 <div className="home-sport-meal-meta">
                   <span>{formatMealRowTime(meal.loggedAt)}</span>
                   <span>{getDisplayMealLabel(meal.loggedAt)}</span>
+                  <span>{getMealBadge(meal.loggedAt)}</span>
                 </div>
                 <div className="home-sport-meal-title">{meal.foodName}</div>
                 <div className="home-sport-meal-macros">{getMealMacroSummary(meal)}</div>
