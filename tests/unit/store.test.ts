@@ -14,6 +14,7 @@ globalThis.localStorage = {
 
 const { useStore } = await import("../../client/src/store.js");
 const { formatLocalDate } = await import("../../client/src/lib/time.js");
+const { buildReceiptMealEditPayload } = await import("../../client/src/meal-edit-payload.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
 
 async function loadFreshStore(suffix: string) {
@@ -296,6 +297,60 @@ describe("AppStore", () => {
 
     assert.deepEqual(first, { affectedDate: "2026-04-30", nonce: 1 });
     assert.deepEqual(second, { affectedDate: "2026-04-30", nonce: 2 });
+  });
+
+  it("redactChatReceiptIdentity makes matching chat receipts display-only without removing receipt content", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-1",
+        role: "assistant",
+        content: "已幫你記錄雞腿便當。",
+        createdAt: "2026-04-30T04:00:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-1",
+          dateKey: "2026-04-30",
+          loggedAt: "2026-04-30T04:00:00.000Z",
+          foodName: "雞腿便當",
+          calories: 640,
+          protein: 30,
+          carbs: 78,
+          fat: 20,
+          imageAssetId: "asset-lunch",
+          imageUrl: "/api/assets/asset-lunch",
+        },
+      },
+      {
+        id: "assistant-2",
+        role: "assistant",
+        content: "已幫你記錄鮭魚飯糰。",
+        createdAt: "2026-04-30T08:00:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-2",
+          dateKey: "2026-04-30",
+          loggedAt: "2026-04-30T08:00:00.000Z",
+          foodName: "鮭魚飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+          imageAssetId: "asset-salmon",
+          imageUrl: "/api/assets/asset-salmon",
+        },
+      },
+    ]);
+
+    useStore.getState().redactChatReceiptIdentity("meal-1");
+
+    const [redactedMessage, untouchedMessage] = useStore.getState().messages;
+    assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(redactedMessage?.loggedMeal?.imageAssetId, "asset-lunch");
+    assert.equal(buildReceiptMealEditPayload(redactedMessage?.loggedMeal), null);
+    assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-2");
+    assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-2");
   });
 
   it("stores and clears the pending home chat draft", () => {

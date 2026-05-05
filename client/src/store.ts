@@ -69,6 +69,7 @@ interface AppState {
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
   removeMeal: (mealId: string) => void;
+  redactChatReceiptIdentity: (mealId: string) => void;
   recordMealMutation: (affectedDate: string) => void;
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void;
   clearPendingHomeChatDraft: () => void;
@@ -141,6 +142,17 @@ export const useStore = create<AppState>((set, get) => ({
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
   setMeals: (meals) => set({ meals }),
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
+  redactChatReceiptIdentity: (mealId) =>
+    set((state) => ({
+      messages: state.messages.map((message) => {
+        if (message.loggedMeal?.mealId !== mealId) {
+          return message;
+        }
+
+        const { mealId: _mealId, dateKey: _dateKey, ...displayOnlyReceipt } = message.loggedMeal;
+        return { ...message, loggedMeal: displayOnlyReceipt };
+      }),
+    })),
   recordMealMutation: (affectedDate) =>
     set((state) => ({
       lastMealMutation: {

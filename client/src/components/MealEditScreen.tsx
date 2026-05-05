@@ -59,6 +59,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setMeals = useStore((s) => s.setMeals);
+  const redactChatReceiptIdentity = useStore((s) => s.redactChatReceiptIdentity);
   const recordMealMutation = useStore((s) => s.recordMealMutation);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const payload = secondaryScreen?.screen === "mealEdit" ? secondaryScreen.payload : undefined;
@@ -72,7 +73,8 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setError(null);
   }, [payload]);
 
-  async function refreshAfterMealMutation(affectedDate: string, dailySummary: DailySummary) {
+  async function refreshAfterMealMutation(mealId: string, affectedDate: string, dailySummary: DailySummary) {
+    redactChatReceiptIdentity(mealId);
     recordMealMutation(affectedDate);
     if (dailySummary.date !== formatLocalDate(new Date())) {
       return;
@@ -101,7 +103,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
         ...parsedDraft,
         imageAssetId: payload.imageAssetId ?? null,
       });
-      await refreshAfterMealMutation(response.affectedDate, response.dailySummary);
+      await refreshAfterMealMutation(payload.mealId, response.affectedDate, response.dailySummary);
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
@@ -127,7 +129,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setError(null);
     try {
       const { affectedDate, dailySummary } = await deleteMeal(payload.mealId);
-      await refreshAfterMealMutation(affectedDate, dailySummary);
+      await refreshAfterMealMutation(payload.mealId, affectedDate, dailySummary);
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
