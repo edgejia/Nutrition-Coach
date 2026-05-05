@@ -14,6 +14,41 @@ function assertString(value: unknown): asserts value is string {
   assert.equal(typeof value, "string");
 }
 
+function codePointLength(value: string) {
+  return [...value].length;
+}
+
+function assertSuccessfulLogReplyShape(
+  reply: string,
+  opts: {
+    fullFoodName: string;
+    usedConservativeAssumption: boolean;
+  },
+) {
+  assert.doesNotMatch(reply, /\n/, "successful log replies must not contain newlines");
+  assert.doesNotMatch(reply, /[\u{1F300}-\u{1FAFF}]/u, "successful log replies must not contain emoji");
+  assert.doesNotMatch(reply, /^#/m, "successful log replies must not contain markdown headings");
+  assert.doesNotMatch(reply, /(?:^|\n)\s*[-*•]\s|[|].*[|]/, "successful log replies must not contain bullets or tables");
+  assert.match(reply, /已記錄/);
+  assert.match(reply, new RegExp(opts.fullFoodName));
+  assert.match(reply, /kcal/);
+  assert.match(reply, /蛋白質/);
+  assert.ok(codePointLength(reply) <= 120, "successful log replies must be <= 120 JavaScript code points");
+
+  const nextStepClauses = reply
+    .split("。")
+    .filter((clause) => /(下次|建議|可以再|若你|如果|調整)/.test(clause));
+  assert.ok(nextStepClauses.length <= 1, "successful log replies may include at most one next-step clause");
+
+  if (opts.usedConservativeAssumption === true) {
+    assert.match(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
+  } else {
+    assert.doesNotMatch(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
+  }
+
+  assert.doesNotMatch(reply, /log_food|protein_sources|usedConservativeAssumption/);
+}
+
 class StreamingLLMProvider implements LLMProvider {
   private chatQueue: Array<LLMResponse | Error> = [];
   private roundQueue: Array<LLMRoundResult | Error> = [];
@@ -499,6 +534,43 @@ describe("Orchestrator - didLogMeal", () => {
     assert.match(result.reply, /蛋白質先按豬肉作為主要來源估算/);
     assert.match(result.reply, /其他配菜不列入 headline/);
     assert.equal(mockLLM.chatCalls.length, 1, "image-only logging should not require a second LLM round");
+  });
+
+  it("formats successful log replies compactly without leaking internal fields", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_grouped_image",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+              { food_name: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "(圖片)",
+      "data:image/png;base64,abc123",
+      "asset:grouped-image",
+    );
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "雞腿、白飯、青菜",
+      usedConservativeAssumption: result.loggedMeal?.usedConservativeAssumption ?? false,
+    });
   });
 
   it("recovers locally when the user replies 2 to a previously hallucinated choice prompt", async () => {

@@ -265,6 +265,34 @@ describe("Meals API", () => {
     assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
   });
 
+  it("PATCH /api/meals/:id returns 409 MEAL_REQUIRES_GROUPED_UPDATE for grouped direct edits", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${meal.id}`,
+      headers: { cookie: deviceCookieHeader },
+      payload: {
+        foodName: "雞腿飯",
+        calories: 540,
+        protein: 28,
+        carbs: 62,
+        fat: 12.5,
+        imageAssetId: null,
+      },
+    });
+
+    assert.equal(updateRes.statusCode, 409);
+    assert.deepEqual(updateRes.json(), { error: "MEAL_REQUIRES_GROUPED_UPDATE" });
+  });
+
   it("PATCH /api/meals/:id returns 404 for another device", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 

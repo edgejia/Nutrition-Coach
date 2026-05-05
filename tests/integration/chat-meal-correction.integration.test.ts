@@ -511,7 +511,7 @@ describe("chat meal correction integration", () => {
 
     const meals = await getMeals();
     const updated = meals.find((meal) => meal.id === grouped.id);
-    assert.equal(updated?.foodName, "雞胸肉、白飯 等3項");
+    assert.equal(updated?.foodName, "雞胸肉、白飯、花椰菜");
     assert.equal(updated?.calories, 450);
     assert.equal(updated?.protein, 22);
     assert.equal(updated?.carbs, 48);

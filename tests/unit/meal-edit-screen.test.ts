@@ -79,4 +79,24 @@ describe("Meal Edit source contract", () => {
     assert.match(source, /alt=\{`\$\{payload\.foodName\} 整餐照片`\}/);
     assert.match(source, /imageAssetId:\s*payload\.imageAssetId \?\? null/);
   });
+
+  it("locks direct editing for grouped Meal Edit payloads and points users to chat correction", () => {
+    const groupedPayloadFixture = {
+      foodName: "雞腿、白飯、青菜",
+      itemCount: 3,
+    };
+    assert.equal(groupedPayloadFixture.itemCount, 3);
+
+    assert.match(source, /payload\.itemCount\s*>\s*1/);
+    assert.match(source, escapedPattern("GROUPED"));
+    assert.match(source, escapedPattern("這筆是組合餐點"));
+    assert.match(source, escapedPattern("包含 3 項：雞腿、白飯、青菜"));
+    assert.match(source, escapedPattern("到對話修正"));
+
+    const groupedBranch = source.match(/payload\.itemCount\s*>\s*1[\s\S]+?(?=return \()/)?.[0] ?? "";
+    assert.doesNotMatch(groupedBranch, escapedPattern("儲存"));
+    assert.doesNotMatch(groupedBranch, /<input\b/);
+    assert.doesNotMatch(groupedBranch, /sp-meal-edit-macro-field/);
+    assert.doesNotMatch(groupedBranch, escapedPattern("刪除"));
+  });
 });
