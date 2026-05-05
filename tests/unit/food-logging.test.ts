@@ -69,6 +69,7 @@ describe("FoodLoggingService", () => {
     assert.equal(meal.foodName, "蘋果");
     assert.equal(meal.calories, 95);
     assert.equal(meal.deviceId, deviceId);
+    assert.equal(meal.mealRevisionId, revisions[0]!.id);
     assert.equal(meal.imagePath, "asset:asset-apple");
     assert.equal(meal.loggedAt, "2026-03-25T04:30:00.000Z");
     assert.equal(transactions.length, 1);
@@ -82,7 +83,7 @@ describe("FoodLoggingService", () => {
   it("forwards grouped items without flattening them into separate transactions", async () => {
     await createOwnedAsset("asset-breakfast");
 
-    await foodService.logGroupedMeal(deviceId, {
+    const meal = await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T05:00:00.000Z",
       imagePath: "asset:asset-breakfast",
       items: [
@@ -111,7 +112,49 @@ describe("FoodLoggingService", () => {
     assert.equal(transactions.length, 1, "grouped input should stay one transaction");
     assert.equal(revisions.length, 1);
     assert.equal(items.length, 2, "grouped input should stay grouped under one revision");
+    assert.equal(meal.id, transactions[0]!.id);
+    assert.equal(meal.mealRevisionId, revisions[0]!.id);
     assert.equal(legacyMeals.length, 0);
+  });
+
+  it("returns the current revision identity when updating a compatibility meal entry", async () => {
+    const created = await foodService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+
+    const updated = await foodService.updateMeal(deviceId, created.id, {
+      items: [
+        {
+          foodName: "蘋果半顆",
+          calories: 48,
+          protein: 0.2,
+          carbs: 12,
+          fat: 0.1,
+        },
+      ],
+    });
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, created.id))
+    )[0];
+    const revisions = await db
+      .select()
+      .from(mealRevisions)
+      .where(eq(mealRevisions.transactionId, created.id));
+
+    assert.ok(transaction);
+    assert.equal(revisions.length, 2);
+    assert.equal(updated.id, created.id);
+    assert.equal(updated.mealRevisionId, transaction!.currentRevisionId);
+    assert.notEqual(updated.mealRevisionId, created.mealRevisionId);
   });
 
   it("preserves the MEAL_NOT_FOUND contract for foreign deletes while soft-deleting the owner row", async () => {

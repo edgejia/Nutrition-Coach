@@ -1,8 +1,10 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
 import { mealRevisionItems, mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
+import { createMealCorrectionService } from "../../server/services/meal-correction.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import {
@@ -62,6 +64,8 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.dailySummary.date, formatLocalDate(new Date()));
 
     assert.ok(result.loggedMeal, "loggedMeal must be returned");
+    assert.ok(result.loggedMeal.mealId, "loggedMeal mealId must be returned");
+    assert.ok(result.loggedMeal.mealRevisionId, "loggedMeal mealRevisionId must be returned");
     assert.equal(result.loggedMeal.foodName, "蘋果");
     assert.equal(result.loggedMeal.calories, 100);
     assert.equal(result.loggedMeal.protein, 0);
@@ -77,8 +81,18 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 1);
+    assert.equal(result.loggedMeal.mealId, meals[0].id);
     assert.equal(meals[0].foodName, "蘋果");
     assert.equal(meals[0].protein, 0);
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, result.loggedMeal.mealId))
+    )[0];
+    assert.ok(transaction);
+    assert.equal(result.loggedMeal.mealRevisionId, transaction!.currentRevisionId);
   });
 
   it("Test 1b: log_food items[] writes one transaction with multiple revision items and returns dailySummary/loggedMeal", async () => {
@@ -131,6 +145,8 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     assert.equal(transactions.length, 1, "one transaction should be created for one grouped turn");
     assert.equal(revisions.length, 1, "the grouped turn should create one current revision");
+    assert.equal(result.loggedMeal.mealId, transactions[0]!.id);
+    assert.equal(result.loggedMeal.mealRevisionId, revisions[0]!.id);
     assert.equal(
       revisionItems.length,
       2,
@@ -407,6 +423,57 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       result.summary,
       `熱量 ${summary.totalCalories}kcal, P${summary.totalProtein}g, C${summary.totalCarbs}g, F${summary.totalFat}g`,
     );
+  });
+
+  it("returns the updated current revision identity from update_meal loggedMeal", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+
+    const call: ToolCall = {
+      id: "call_update",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          calories: 48,
+        }),
+      },
+    };
+
+    const result = await executeTool(call, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState: {
+        resolvedMealIds: [created.id],
+      },
+    });
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, created.id))
+    )[0];
+
+    assert.ok(result.loggedMeal);
+    assert.ok(transaction);
+    assert.equal(result.mealMutationKind, "update");
+    assert.equal(result.loggedMeal.mealId, created.id);
+    assert.equal(result.loggedMeal.mealRevisionId, transaction!.currentRevisionId);
+    assert.notEqual(result.loggedMeal.mealRevisionId, created.mealRevisionId);
+    assert.equal(result.loggedMeal.dateKey, "2026-03-25");
+    assert.equal(result.loggedMeal.loggedAt, "2026-03-25T04:30:00.000Z");
+    assert.equal(result.loggedMeal.imageAssetId, null);
+    assert.equal(result.loggedMeal.imageUrl, null);
   });
 
   it("returns affectedDate when log_food targets an explicit historical day", async () => {
