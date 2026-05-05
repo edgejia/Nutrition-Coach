@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
+import { createClientId } from "../lib/clientId.js";
 import { formatLocalDate } from "../lib/time.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
@@ -152,7 +153,7 @@ export function stageHomeTaskOptionPrompt(
   prompt: string,
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void,
   setActiveScreen: (screen: ActiveScreen) => void,
-  createId: () => string = () => crypto.randomUUID(),
+  createId: () => string = () => createClientId("draft"),
 ) {
   setPendingHomeChatDraft({ id: createId(), text: prompt, status: "staged" });
   setActiveScreen("chat");
@@ -163,7 +164,7 @@ export function sendHomeCtaTaskOption(
   intent: CoachCTAIntent,
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void,
   setActiveScreen: (screen: ActiveScreen) => void,
-  createId: () => string = () => crypto.randomUUID(),
+  createId: () => string = () => createClientId("cta"),
 ) {
   void recordHomeCtaOptionSent(intent.id, option.id);
   stageHomeTaskOptionPrompt(option.prompt, setPendingHomeChatDraft, setActiveScreen, createId);

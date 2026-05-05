@@ -221,9 +221,32 @@ function mockApiScript() {
     fat: 42 + index,
     mealCount: index % 2 === 0 ? 3 : 2,
   }));
+  const messages = [
+    {
+      id: "m1",
+      role: "assistant",
+      content: "今天先從簡單一句開始：拍照或輸入你剛吃的餐點。",
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: "m2",
+      role: "user",
+      content: "雞胸飯加青花菜",
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: "m3",
+      role: "assistant",
+      content: "已記錄這餐，蛋白質很穩。",
+      createdAt: new Date().toISOString(),
+      didLogMeal: true,
+      loggedMeal: { ...meals[0], mealId: meals[0].id, dateKey: today },
+    },
+  ];
 
   return `(() => {
     const meals = ${JSON.stringify(meals)};
+    const messages = ${JSON.stringify(messages)};
     const summary = ${JSON.stringify(summary)};
     const targets = ${JSON.stringify(targets)};
     const trends = ${JSON.stringify(trends)};
@@ -239,6 +262,7 @@ function mockApiScript() {
         headers: { "Content-Type": "application/json" },
       });
       if (url.pathname === "/api/meals") return json({ meals });
+      if (url.pathname === "/api/chat/history") return json({ messages });
       if (url.pathname === "/api/history/trends") {
         return json({
           from: trends[0].date,
@@ -362,11 +386,13 @@ function inspectionScript() {
       const node = document.querySelector(selector);
       if (!node) return null;
       const rect = node.getBoundingClientRect();
-      return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height };
+      return { node, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height };
     };
     const overlaps = (a, b) => Boolean(a && b && a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top);
+    const contains = (a, b) => Boolean(a && b && b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom);
     const bottomBar = rectOf(".screen-bottom-bar, .sp-meal-edit-footer");
     const focusedControl = rectOf(".sp-chat-textarea, .sp-meal-edit-save, .sp-onboarding-primary");
+    const fixedBarOverlap = overlaps(bottomBar, focusedControl) && !contains(bottomBar, focusedControl) ? "FAIL" : "PASS";
     return {
       bodyTextLength,
       viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -374,7 +400,7 @@ function inspectionScript() {
       clientWidth: doc.clientWidth,
       horizontalOverflow: horizontalOverflow ? "FAIL" : "PASS",
       clipping: bodyTextLength > 20 ? "PASS" : "FAIL",
-      fixedBarOverlap: overlaps(bottomBar, focusedControl) ? "FAIL" : "PASS",
+      fixedBarOverlap,
       bottomOcclusion: getComputedStyle(doc).getPropertyValue("--app-bottom-occlusion") !== "" ? "PASS" : "FAIL",
       keyboardSafeLayout: document.activeElement?.classList?.contains("sp-chat-textarea") ? "PASS" : "NOT_APPLICABLE",
     };

@@ -1439,6 +1439,16 @@ textarea {
   white-space: nowrap;
 }
 
+.sp-chat-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 .sp-chat-separator {
   display: inline-block;
   width: 1px;
@@ -1456,6 +1466,10 @@ textarea {
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sp-chat-metric-meals {
+  flex: 0 0 auto;
 }
 
 .sp-chat-scroll {
@@ -1731,7 +1745,7 @@ textarea {
 
 .sp-chat-input-well {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
+  grid-template-columns: minmax(0, 1fr) 44px;
   align-items: center;
   gap: 8px;
   min-height: 44px;
@@ -1836,6 +1850,17 @@ textarea {
   border-color: #f4f7ed;
   background: #f4f7ed;
   color: #0a0b0d;
+}
+
+.sp-chat-send-stop {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border-color: #f7f8f2;
+  background: #f7f8f2;
+  color: #050607;
+  box-shadow: 0 0 0 1px rgba(247, 248, 242, 0.18);
 }
 
 .sp-chat-send.sp-chat-send-stop:disabled {

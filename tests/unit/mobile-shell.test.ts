@@ -22,7 +22,9 @@ const sources = {
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
   chatPanel: await readSource("../../client/src/components/ChatPanel.tsx"),
   chatInput: await readSource("../../client/src/components/ChatInput.tsx"),
+  sportIcons: await readSource("../../client/src/components/SportIcons.tsx"),
   summaryDetailScreen: await readSource("../../client/src/components/SummaryDetailScreen.tsx"),
+  phase45MobileEvidence: await readSource("../../scripts/phase45-mobile-evidence.mjs"),
 };
 
 function countMatches(source: string, pattern: RegExp) {
@@ -176,9 +178,12 @@ describe("mobile shell source contract", () => {
     assert.doesNotMatch(sources.chatPanel, /today log/);
     assert.doesNotMatch(sources.chatPanel, /sp-chat-today-log/);
     assert.match(sources.chatPanel, /formatMealCountSummary/);
+    assert.match(sources.chatPanel, /formatMealCountCompact/);
     assert.match(sources.chatPanel, /今日已紀錄 \$\{mealCount\} 餐/);
+    assert.match(sources.chatPanel, /\$\{mealCount\} 餐/);
     assert.match(sources.chatPanel, /\{consumedCalories\}\/\{targetCalories\} kcal/);
-    assert.match(sources.chatPanel, /\{todayMealCountSummary\}/);
+    assert.match(sources.chatPanel, /\{todayMealCountCompact\}/);
+    assert.match(sources.chatPanel, /sp-chat-meta/);
     assert.match(sources.chatPanel, /sp-chat-separator/);
     assert.match(sources.chatPanel, /getMeals\(\{ refreshReason: "meal_mutation" \}\)/);
     assert.match(sources.chatPanel, /\bscreen-bottom-bar\b/);
@@ -315,6 +320,23 @@ describe("mobile shell source contract", () => {
     assert.match(sources.chatPanel, /stopDisabled=\{stopping \|\| !activeTurnId\}/);
     assert.match(sources.chatInput, /SportStopIcon/);
     assert.match(sources.chatInput, /className="sp-chat-send sp-chat-send-stop"/);
+    assert.match(sources.chatInput, /<SportStopIcon size=\{20\} stroke=\{2\} \/>/);
+    assert.match(sources.sportIcons, /<rect height="18" rx="3" width="18" x="3" y="3" fill="currentColor" stroke="none" \/>/);
+    assert.match(cssBlock(".sp-chat-input-well"), /grid-template-columns:\s*minmax\(0,\s*1fr\) 44px/);
+    assert.match(cssBlock(".sp-chat-send-stop"), /width:\s*44px/);
+    assert.match(cssBlock(".sp-chat-send-stop"), /height:\s*44px/);
+    assert.match(cssBlock(".sp-chat-send-stop"), /background:\s*#f7f8f2/);
+    assert.match(cssBlock(".sp-chat-send-stop"), /color:\s*#050607/);
+  });
+
+  it("keeps Phase 45 Chat-focused evidence on the Chat surface", () => {
+    const mockApi = functionBody(sources.phase45MobileEvidence, "mockApiScript");
+    const messagesFixture = mockApi.indexOf("const messages = [");
+    const historyMock = mockApi.indexOf('if (url.pathname === "/api/chat/history") return json({ messages });');
+
+    assert.notEqual(messagesFixture, -1, "Phase 45 evidence script should define a local messages fixture");
+    assert.notEqual(historyMock, -1, "Phase 45 evidence script should mock Chat history");
+    assert.ok(messagesFixture < historyMock, "Chat history mock should not reference an out-of-scope messages fixture");
   });
 
   it("keeps Summary header fixed and content in a safe scroller", () => {

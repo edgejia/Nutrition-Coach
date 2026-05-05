@@ -121,7 +121,7 @@ export function ChatInput({
             data-stopping={stopping}
             aria-label="停止生成"
           >
-            <SportStopIcon size={18} stroke={2} />
+            <SportStopIcon size={20} stroke={2} />
           </button>
         ) : (
           <button

@@ -82,7 +82,7 @@ export function SportSendIcon(props: SportIconProps) {
 export function SportStopIcon(props: SportIconProps) {
   return (
     <SportIconBase {...props}>
-      <rect height="9" rx="1.8" width="9" x="7.5" y="7.5" fill="currentColor" stroke="none" />
+      <rect height="18" rx="3" width="18" x="3" y="3" fill="currentColor" stroke="none" />
     </SportIconBase>
   );
 }

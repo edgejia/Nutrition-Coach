@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { getMeals, sendMessageStream, loadHistory, stopChatTurn } from "../api.js";
 import { formatLocalDate } from "../lib/time.js";
+import { createClientId } from "../lib/clientId.js";
 import {
   type FollowMode,
   type LiveUpdateSnapshot,
@@ -31,6 +32,10 @@ function getNowMs() {
 
 function formatMealCountSummary(mealCount: number) {
   return `今日已紀錄 ${mealCount} 餐`;
+}
+
+function formatMealCountCompact(mealCount: number) {
+  return `${mealCount} 餐`;
 }
 
 function shouldShowPhase40IncompleteReceiptMock() {
@@ -131,6 +136,7 @@ export function ChatPanel() {
   const targetCalories = Math.round(dailyTargets?.calories ?? 0).toLocaleString("en-US");
   const todayMealCount = dailySummary?.mealCount ?? todayMeals.length;
   const todayMealCountSummary = formatMealCountSummary(todayMealCount);
+  const todayMealCountCompact = formatMealCountCompact(todayMealCount);
   const showJumpToLatest = shouldShowJumpToLatest({
     mode: followMode,
     hasMessages: messages.length > 0,
@@ -457,7 +463,7 @@ export function ChatPanel() {
     if (opts?.appendUserBubble !== false) {
       const imagePreviewUrl = image ? URL.createObjectURL(image) : undefined;
       addMessage({
-        id: crypto.randomUUID(),
+        id: createClientId("usr"),
         role: "user" as const,
         content: text || "",
         imagePreviewUrl,
@@ -465,7 +471,7 @@ export function ChatPanel() {
       });
     }
 
-    const bubbleId = crypto.randomUUID();
+    const bubbleId = createClientId("ast");
     const abortController = new AbortController();
     activeAbortControllerRef.current = abortController;
     activeTurnIdRef.current = null;
@@ -826,10 +832,11 @@ export function ChatPanel() {
           </div>
           <div className="sp-chat-heading">
             <h2 className="sp-chat-title">對話</h2>
-            <span className="sp-chat-separator" aria-hidden="true" />
-            <span className="sp-chat-metric">{consumedCalories}/{targetCalories} kcal</span>
-            <span className="sp-chat-separator" aria-hidden="true" />
-            <span className="sp-chat-metric">{todayMealCountSummary}</span>
+            <div className="sp-chat-meta" aria-label={`${consumedCalories}/${targetCalories} kcal，${todayMealCountSummary}`}>
+              <span className="sp-chat-metric">{consumedCalories}/{targetCalories} kcal</span>
+              <span className="sp-chat-separator" aria-hidden="true" />
+              <span className="sp-chat-metric sp-chat-metric-meals">{todayMealCountCompact}</span>
+            </div>
           </div>
           <div className="sp-chat-header-slot" aria-hidden="true" />
         </div>
