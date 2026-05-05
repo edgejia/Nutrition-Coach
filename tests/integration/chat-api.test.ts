@@ -887,6 +887,58 @@ describe("Chat API", () => {
     });
   });
 
+  it("POST /api/chat JSON response returns grouped loggedMeal.itemCount", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_grouped_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+              { food_name: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄雞腿、白飯、青菜。" });
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿、白飯和青菜");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      loggedMeal?: {
+        mealId?: string;
+        dateKey?: string;
+        loggedAt?: string;
+        foodName?: string;
+        itemCount?: number;
+        calories?: number;
+        protein?: number;
+        carbs?: number;
+        fat?: number;
+      };
+    };
+    assert.match(body.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.match(body.loggedMeal?.dateKey ?? "", /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(body.loggedMeal?.loggedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(body.loggedMeal?.foodName, "雞腿、白飯、青菜");
+    assert.equal(body.loggedMeal?.itemCount, 3);
+    assert.equal(body.loggedMeal?.calories, 580);
+    assert.equal(body.loggedMeal?.protein, 24);
+    assert.equal(body.loggedMeal?.carbs, 70);
+    assert.equal(body.loggedMeal?.fat, 13.5);
+  });
+
   it("POST /api/chat without SSE accept header still returns JSON", async () => {
     mockLLM.queueChatResponse({ content: "純文字回覆" });
 

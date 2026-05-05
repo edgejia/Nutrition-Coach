@@ -202,6 +202,13 @@ function createGroupedLogFoodToolCall(): ToolCall {
             carbs: 12,
             fat: 4,
           },
+          {
+            food_name: "水煮蛋",
+            calories: 80,
+            protein: 7,
+            carbs: 1,
+            fat: 5,
+          },
         ],
       }),
     },
@@ -1510,19 +1517,22 @@ describe("chat-streaming", () => {
       const donePayload = JSON.parse(doneMatch[1]) as {
         didLogMeal?: boolean;
         dailySummary?: { mealCount?: number; totalCalories?: number; date?: string };
+        loggedMeal?: { itemCount?: number; foodName?: string };
       };
       assert.equal(donePayload.didLogMeal, true, "grouped log_food must still mark didLogMeal after partial success");
       assert.equal(donePayload.dailySummary?.mealCount, 1);
-      assert.equal(donePayload.dailySummary?.totalCalories, 215);
+      assert.equal(donePayload.dailySummary?.totalCalories, 295);
       assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
+      assert.equal(donePayload.loggedMeal?.foodName, "蘋果、優格、水煮蛋");
+      assert.equal(donePayload.loggedMeal?.itemCount, 3);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
         headers: { cookie: sessionCookieHeader },
       });
-      const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
+      const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string; itemCount?: number }> };
       assert.deepEqual(
-        mealsJson.meals.map((meal) => meal.foodName),
-        ["蘋果、優格"],
+        mealsJson.meals.map((meal) => ({ foodName: meal.foodName, itemCount: meal.itemCount })),
+        [{ foodName: "蘋果、優格、水煮蛋", itemCount: 3 }],
         "grouped log_food should persist one transaction row for the turn",
       );
 

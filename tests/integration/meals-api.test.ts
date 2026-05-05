@@ -169,6 +169,41 @@ describe("Meals API", () => {
     assert.deepEqual(body.meals.map((meal: { foodName: string }) => meal.foodName), ["早餐", "晚餐"]);
   });
 
+  it("GET /api/meals preserves grouped itemCount from meal history service rows", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const groupedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+      ],
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/meals",
+      headers: { cookie: deviceCookieHeader },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { meals: Array<{ id: string; foodName: string; itemCount?: number }> };
+    assert.deepEqual(body.meals, [
+      {
+        id: groupedMeal.id,
+        foodName: "雞腿、白飯、青菜",
+        itemCount: 3,
+        calories: 580,
+        protein: 30,
+        carbs: 70,
+        fat: 13.5,
+        imageAssetId: null,
+        imageUrl: null,
+        loggedAt: groupedMeal.loggedAt,
+      },
+    ]);
+  });
+
   it("DELETE /api/meals/:id removes the meal for the owner and returns 404 for another device", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{

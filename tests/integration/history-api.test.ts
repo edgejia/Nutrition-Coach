@@ -151,6 +151,7 @@ describe("History API", () => {
       items: [
         { foodName: "鮭魚", calories: 280, protein: 30, carbs: 0, fat: 17 },
         { foodName: "白飯", calories: 260, protein: 5, carbs: 58, fat: 1 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
     await services.foodLoggingService.logFood(deviceId, {
@@ -190,6 +191,7 @@ describe("History API", () => {
       items: [
         { foodName: "雞胸", calories: 240, protein: 42, carbs: 0, fat: 6 },
         { foodName: "地瓜", calories: 180, protein: 3, carbs: 41, fat: 0 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
     const nearbyMeal = await services.foodLoggingService.logFood(deviceId, {
@@ -264,9 +266,9 @@ describe("History API", () => {
       id: assetMeal.id,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
-      display: { title: "雞胸、地瓜" },
-      itemCount: 2,
-      nutrition: { calories: 420, protein: 45, carbs: 41, fat: 6 },
+      display: { title: "雞胸、地瓜、青菜" },
+      itemCount: 3,
+      nutrition: { calories: 460, protein: 47, carbs: 49, fat: 8 },
       items: [
         {
           name: "雞胸",
@@ -277,6 +279,11 @@ describe("History API", () => {
           name: "地瓜",
           position: 1,
           nutrition: { calories: 180, protein: 3, carbs: 41, fat: 0 },
+        },
+        {
+          name: "青菜",
+          position: 2,
+          nutrition: { calories: 40, protein: 2, carbs: 8, fat: 2 },
         },
       ],
       asset: { imageAssetId: "asset-1", imageUrl: "/api/assets/asset-1" },
@@ -438,10 +445,10 @@ describe("History API", () => {
     assert.equal(body.date, "2026-03-25");
     assert.deepEqual(body.summary, {
       date: "2026-03-25",
-      totalCalories: 660,
-      totalProtein: 41,
-      totalCarbs: 72,
-      totalFat: 22,
+      totalCalories: 700,
+      totalProtein: 43,
+      totalCarbs: 80,
+      totalFat: 24,
       mealCount: 2,
     });
     assert.deepEqual(
@@ -452,9 +459,9 @@ describe("History API", () => {
       id: seeded.assetMeal.id,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
-      display: { title: "鮭魚、白飯" },
-      itemCount: 2,
-      nutrition: { calories: 540, protein: 35, carbs: 58, fat: 18 },
+      display: { title: "鮭魚、白飯、青菜" },
+      itemCount: 3,
+      nutrition: { calories: 580, protein: 37, carbs: 66, fat: 20 },
       items: [
         {
           name: "鮭魚",
@@ -465,6 +472,11 @@ describe("History API", () => {
           name: "白飯",
           position: 1,
           nutrition: { calories: 260, protein: 5, carbs: 58, fat: 1 },
+        },
+        {
+          name: "青菜",
+          position: 2,
+          nutrition: { calories: 40, protein: 2, carbs: 8, fat: 2 },
         },
       ],
       asset: { imageAssetId: "asset-2", imageUrl: "/api/assets/asset-2" },
