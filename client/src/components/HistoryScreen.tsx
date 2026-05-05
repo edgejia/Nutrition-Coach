@@ -14,6 +14,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, HistoryTrendResponse, MealEditPayload, MealEntry } from "../types.js";
 import { formatMealRowTime, getMealMacroSummary } from "./HomeScreen.js";
+import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
@@ -261,6 +262,20 @@ function TimelineRows({
               onMealOpen(meal);
             }}
           >
+            <span className="sp-history-meal-media">
+              {meal.imageUrl ? (
+                <PersistedAssetImage
+                  src={meal.imageUrl}
+                  alt={`${meal.foodName} 縮圖`}
+                  imgClassName="sp-history-meal-image"
+                  fallbackClassName="sp-history-meal-fallback"
+                />
+              ) : (
+                <span role="img" aria-label={`${meal.foodName} 無照片`} className="sp-history-meal-fallback">
+                  無照片
+                </span>
+              )}
+            </span>
             <span className="sp-history-meal-copy">
               <span className="sp-history-meal-meta">
                 {formatMealRowTime(meal.loggedAt)}

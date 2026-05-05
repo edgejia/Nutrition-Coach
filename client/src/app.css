@@ -3580,9 +3580,47 @@ textarea {
   background: var(--sp-surface-2);
 }
 
+.sp-history-meal-media {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: var(--sp-r-sm);
+  background: var(--sp-surface-2);
+}
+
+.sp-history-meal-image,
+.sp-history-meal-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: calc(var(--sp-r-sm) - 1px);
+}
+
+.sp-history-meal-image {
+  display: block;
+  object-fit: cover;
+}
+
+.sp-history-meal-fallback {
+  display: grid;
+  place-items: center;
+  color: var(--sp-ink-2);
+  background: var(--sp-surface-3);
+  padding: 2px;
+  font-family: var(--sp-font-zh);
+  font-size: 7px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
 .sp-history-meal-copy {
   display: block;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .sp-history-meal-name {
