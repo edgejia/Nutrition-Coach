@@ -731,7 +731,10 @@ export async function updateMeal(mealId: string, input: UpdateMealInput): Promis
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) throw new Error("Failed to update meal");
+  if (!res.ok) {
+    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    throw new Error(errorMessage ?? "Failed to update meal");
+  }
   const body = await res.json() as UpdateMealResponse;
   return {
     ...body,

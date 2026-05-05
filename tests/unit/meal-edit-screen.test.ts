@@ -90,10 +90,16 @@ describe("Meal Edit source contract", () => {
     assert.match(source, /payload\.itemCount\s*>\s*1/);
     assert.match(source, escapedPattern("GROUPED"));
     assert.match(source, escapedPattern("這筆是組合餐點"));
-    assert.match(source, escapedPattern("包含 3 項：雞腿、白飯、青菜"));
+    assert.match(source, /包含 \{payload\.itemCount\} 項：\{payload\.foodName\}/);
+    assert.match(source, escapedPattern("避免把多項餐點合併成一項"));
     assert.match(source, escapedPattern("到對話修正"));
+    assert.match(source, escapedPattern("MEAL_REQUIRES_GROUPED_UPDATE"));
+    assert.match(source, escapedPattern("這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。"));
+    assert.match(source, escapedPattern("closeSecondaryScreen"));
+    assert.match(source, escapedPattern('setActiveScreen("chat")'));
 
-    const groupedBranch = source.match(/payload\.itemCount\s*>\s*1[\s\S]+?(?=return \()/)?.[0] ?? "";
+    const groupedBranch = source.match(/if \(payload\.itemCount\s*>\s*1\) \{[\s\S]+?sp-meal-edit-grouped-primary[\s\S]+?\n\s*\);\n\s*\}/)?.[0] ?? "";
+    assert.match(groupedBranch, escapedPattern("sp-meal-edit-grouped-lock"));
     assert.doesNotMatch(groupedBranch, escapedPattern("儲存"));
     assert.doesNotMatch(groupedBranch, /<input\b/);
     assert.doesNotMatch(groupedBranch, /sp-meal-edit-macro-field/);

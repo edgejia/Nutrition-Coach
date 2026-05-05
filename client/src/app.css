@@ -2486,6 +2486,64 @@ textarea {
   line-height: 1.5;
 }
 
+.sp-meal-edit-grouped-scroll {
+  padding-bottom: calc(24px + var(--app-bottom-occlusion, 0px) + env(safe-area-inset-bottom));
+}
+
+.sp-meal-edit-grouped-lock {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--sp-line);
+  background: var(--sp-surface);
+}
+
+.sp-meal-edit-grouped-label {
+  color: var(--sp-lime);
+  font-family: var(--sp-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sp-meal-edit-grouped-lock h2 {
+  margin: 0;
+  color: var(--sp-ink);
+  font-family: var(--sp-font-zh);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.sp-meal-edit-grouped-lock p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sp-meal-edit-grouped-primary {
+  min-height: 44px;
+  border: 1px solid var(--sp-lime);
+  border-radius: var(--sp-r-pill);
+  background: var(--sp-lime);
+  color: #0a0b0d;
+  padding: 0 24px;
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sp-meal-edit-grouped-primary:focus-visible {
+  outline: 2px solid var(--sp-lime);
+  outline-offset: 2px;
+}
+
 .sp-meal-edit-footer {
   position: absolute;
   right: 0;
