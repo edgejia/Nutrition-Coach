@@ -36,6 +36,8 @@ type HistoryMeal = {
     imageAssetId: string | null;
     imageUrl: string | null;
   };
+  imageAssetId: string | null;
+  imageUrl: string | null;
   revision: {
     currentRevisionNumber: number;
   };
@@ -276,6 +278,8 @@ describe("History API", () => {
         },
       ],
       asset: { imageAssetId: "asset-1", imageUrl: "/api/assets/asset-1" },
+      imageAssetId: "asset-1",
+      imageUrl: "/api/assets/asset-1",
       revision: { currentRevisionNumber: 1 },
     });
 
@@ -294,6 +298,8 @@ describe("History API", () => {
         },
       ],
       asset: { imageAssetId: null, imageUrl: null },
+      imageAssetId: null,
+      imageUrl: null,
       revision: { currentRevisionNumber: 2 },
     });
 
@@ -458,6 +464,8 @@ describe("History API", () => {
         },
       ],
       asset: { imageAssetId: "asset-2", imageUrl: "/api/assets/asset-2" },
+      imageAssetId: "asset-2",
+      imageUrl: "/api/assets/asset-2",
       revision: { currentRevisionNumber: 1 },
     });
     assertNoUnsafeHistoryFields(body);
