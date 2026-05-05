@@ -197,4 +197,26 @@ describe("harness-foundation", () => {
 
     assert.doesNotMatch(source, /foodName.*find|calories.*find|protein.*find|loggedAt.*find/);
   });
+
+  test("grouped-meal-canonical scenario is registered as a grouped logging proof", () => {
+    const source = readFileSync("tests/harness/scenarios/grouped-meal-canonical.ts", "utf-8");
+
+    for (const marker of [
+      'name: "grouped-meal-canonical"',
+      "STEP_NAMES",
+      "image_grouped_log",
+      "text_single_log",
+      "chat_grouped_edit",
+      "direct_edit_block",
+      "verify_history",
+      "replyCopy",
+      "securityNotes",
+      "createScenarioApp",
+      "StreamingLLMProvider",
+    ]) {
+      assert.match(source, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
+
+    assert.doesNotMatch(source, /OpenAIProvider|OPENAI_API_KEY|process\.env\.OPENAI/);
+  });
 });

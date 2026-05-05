@@ -22,11 +22,53 @@ type StepName = (typeof STEP_NAMES)[number];
 
 interface MealDto {
   id: string;
-  foodName: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
+  foodName?: string;
+  display?: { title?: string };
+  itemCount: number;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  nutrition?: {
+    calories?: number;
+    protein?: number;
+    carbs?: number;
+    fat?: number;
+  };
+}
+
+interface LoggedMealDto {
+  mealId?: string;
+  dateKey?: string;
+  foodName?: string;
+  itemCount?: number;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+}
+
+interface ChatDonePayload {
+  didLogMeal?: boolean;
+  didMutateMeal?: boolean;
+  loggedMeal?: LoggedMealDto;
+  affectedDate?: string;
+}
+
+interface ChatMessageDto {
+  role: string;
+  content: string;
+  loggedMeal?: LoggedMealDto;
+  toolName?: string | null;
+}
+
+interface ChatHistoryResponse {
+  messages: ChatMessageDto[];
+}
+
+interface HistoryDayResponse {
+  date: string;
+  meals: MealDto[];
 }
 
 function pass(name: StepName, actual?: unknown): ScenarioStepResult {
@@ -74,7 +116,7 @@ async function postChatStream(
   address: string,
   cookieHeader: string,
   form: FormData,
-): Promise<{ status: number; events: Array<{ event: string; data: string }>; donePayload?: any }> {
+): Promise<{ status: number; events: Array<{ event: string; data: string }>; donePayload?: ChatDonePayload; replyText: string }> {
   const res = await fetch(`${address}/api/chat`, {
     method: "POST",
     headers: {
@@ -85,22 +127,33 @@ async function postChatStream(
   });
 
   if (!res.body) {
-    return { status: res.status, events: [] };
+    return { status: res.status, events: [], replyText: "" };
   }
 
   const raw = await readStreamUntilEvent(res.body.getReader(), "done", 80);
   const events = parseSSEEvents(raw);
   const doneEvent = events.find((event) => event.event === "done");
-  let donePayload: any;
+  let donePayload: ChatDonePayload | undefined;
   if (doneEvent) {
     try {
-      donePayload = JSON.parse(doneEvent.data);
+      donePayload = JSON.parse(doneEvent.data) as ChatDonePayload;
     } catch {
       donePayload = undefined;
     }
   }
 
-  return { status: res.status, events, donePayload };
+  const replyText = events
+    .filter((event) => event.event === "chunk")
+    .map((event) => {
+      try {
+        return (JSON.parse(event.data) as { token?: string }).token ?? "";
+      } catch {
+        return "";
+      }
+    })
+    .join("");
+
+  return { status: res.status, events, donePayload, replyText };
 }
 
 async function getMeals(address: string, cookieHeader: string): Promise<MealDto[]> {
@@ -112,6 +165,55 @@ async function getMeals(address: string, cookieHeader: string): Promise<MealDto[
   }
   const body = await res.json() as { meals: MealDto[] };
   return body.meals;
+}
+
+async function getChatHistory(address: string, cookieHeader: string): Promise<ChatHistoryResponse> {
+  const res = await fetch(`${address}/api/chat/history?limit=20`, {
+    headers: { cookie: cookieHeader },
+  });
+  if (res.status !== 200) {
+    throw new Error(`GET /api/chat/history failed with ${res.status}`);
+  }
+  return await res.json() as ChatHistoryResponse;
+}
+
+async function getHistoryDay(address: string, cookieHeader: string, dateKey: string): Promise<HistoryDayResponse> {
+  const res = await fetch(`${address}/api/history/days/${dateKey}`, {
+    headers: { cookie: cookieHeader },
+  });
+  if (res.status !== 200) {
+    throw new Error(`GET /api/history/days/${dateKey} failed with ${res.status}`);
+  }
+  return await res.json() as HistoryDayResponse;
+}
+
+function findMealByName(meals: MealDto[], foodName: string): MealDto | undefined {
+  return meals.find((meal) => (meal.foodName ?? meal.display?.title) === foodName);
+}
+
+function failIf(
+  condition: boolean,
+  steps: ScenarioStepResult[],
+  name: StepName,
+  error: string,
+  actual?: unknown,
+): boolean {
+  if (!condition) return false;
+  steps.push(fail(name, error, actual));
+  return true;
+}
+
+function replyHasRequiredReceiptShape(replyText: string): boolean {
+  return (
+    replyText.length <= 120 &&
+    replyText.includes("已記錄") &&
+    replyText.includes("kcal") &&
+    replyText.includes("蛋白質")
+  );
+}
+
+function containsInternalToolName(text: string): boolean {
+  return /\b(?:log_food|update_meal|find_meals|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity)\b/.test(text);
 }
 
 const groupedMealCanonicalScenario: VerificationScenario = {
@@ -165,14 +267,50 @@ const groupedMealCanonicalScenario: VerificationScenario = {
         steps.push(fail("image_grouped_log", "Expected grouped image log to finish with didLogMeal true", imageGroupedLog));
         return failResult(steps, "image_grouped_log", artifacts);
       }
-      const groupedMeal = (await getMeals(fixture.address, fixture.cookieHeader)).find((meal) =>
-        meal.foodName.includes("雞腿"),
-      );
-      if (!groupedMeal) {
-        steps.push(fail("image_grouped_log", "Grouped meal was not persisted", await getMeals(fixture.address, fixture.cookieHeader)));
+      if (
+        failIf(
+          imageGroupedLog.donePayload.loggedMeal?.foodName !== "雞腿、白飯、青菜" ||
+            imageGroupedLog.donePayload.loggedMeal?.itemCount !== 3,
+          steps,
+          "image_grouped_log",
+          "Expected grouped loggedMeal to expose full name and itemCount 3",
+          imageGroupedLog.donePayload.loggedMeal,
+        )
+      ) {
         return failResult(steps, "image_grouped_log", artifacts);
       }
-      steps.push(pass("image_grouped_log", { mealId: groupedMeal.id, foodName: groupedMeal.foodName }));
+      if (
+        failIf(
+          !replyHasRequiredReceiptShape(imageGroupedLog.replyText) ||
+            containsInternalToolName(imageGroupedLog.replyText),
+          steps,
+          "image_grouped_log",
+          "Expected compact successful image reply with receipt fields and no internal names",
+          { replyText: imageGroupedLog.replyText, length: imageGroupedLog.replyText.length },
+        )
+      ) {
+        return failResult(steps, "image_grouped_log", artifacts);
+      }
+      const todayAfterImage = await getMeals(fixture.address, fixture.cookieHeader);
+      const groupedMeal = findMealByName(todayAfterImage, "雞腿、白飯、青菜");
+      artifacts.todayAfterImageGroupedLog = todayAfterImage;
+      if (!groupedMeal) {
+        steps.push(fail("image_grouped_log", "Grouped meal was not persisted with full display name", todayAfterImage));
+        return failResult(steps, "image_grouped_log", artifacts);
+      }
+      if (groupedMeal.itemCount !== 3 || todayAfterImage.length !== 1) {
+        steps.push(fail("image_grouped_log", "Expected one grouped transaction with itemCount 3 in Today", {
+          todayAfterImage,
+          expected: { transactionCount: 1, itemCount: 3 },
+        }));
+        return failResult(steps, "image_grouped_log", artifacts);
+      }
+      steps.push(pass("image_grouped_log", {
+        mealId: groupedMeal.id,
+        foodName: groupedMeal.foodName,
+        itemCount: 3,
+        replyLength: imageGroupedLog.replyText.length,
+      }));
 
       llmProvider.queueRoundResponse({
         toolCalls: [{
@@ -203,7 +341,41 @@ const groupedMealCanonicalScenario: VerificationScenario = {
         steps.push(fail("text_single_log", "Expected text single log to finish with didLogMeal true", textSingleLog));
         return failResult(steps, "text_single_log", artifacts);
       }
-      steps.push(pass("text_single_log", { donePayload: textSingleLog.donePayload }));
+      if (
+        failIf(
+          textSingleLog.donePayload.loggedMeal?.foodName !== "蘋果" ||
+            textSingleLog.donePayload.loggedMeal?.itemCount !== 1,
+          steps,
+          "text_single_log",
+          "Expected single-shape text log to normalize to itemCount 1",
+          textSingleLog.donePayload.loggedMeal,
+        )
+      ) {
+        return failResult(steps, "text_single_log", artifacts);
+      }
+      if (
+        failIf(
+          !replyHasRequiredReceiptShape(textSingleLog.replyText) ||
+            containsInternalToolName(textSingleLog.replyText),
+          steps,
+          "text_single_log",
+          "Expected compact successful text reply with receipt fields and no internal names",
+          { replyText: textSingleLog.replyText, length: textSingleLog.replyText.length },
+        )
+      ) {
+        return failResult(steps, "text_single_log", artifacts);
+      }
+      const todayAfterText = await getMeals(fixture.address, fixture.cookieHeader);
+      artifacts.todayAfterTextSingleLog = todayAfterText;
+      const singleMeal = findMealByName(todayAfterText, "蘋果");
+      if (!singleMeal || singleMeal.itemCount !== 1 || todayAfterText.length !== 2) {
+        steps.push(fail("text_single_log", "Expected a second single-item transaction with itemCount 1 in Today", {
+          todayAfterText,
+          expected: { transactionCount: 2, singleItemCount: 1 },
+        }));
+        return failResult(steps, "text_single_log", artifacts);
+      }
+      steps.push(pass("text_single_log", { donePayload: textSingleLog.donePayload, itemCount: 1 }));
 
       llmProvider.queueRoundResponse({
         toolCalls: [{
@@ -241,7 +413,26 @@ const groupedMealCanonicalScenario: VerificationScenario = {
         steps.push(fail("chat_grouped_edit", "Expected grouped chat edit to mutate the meal", chatGroupedEdit));
         return failResult(steps, "chat_grouped_edit", artifacts);
       }
-      steps.push(pass("chat_grouped_edit", { donePayload: chatGroupedEdit.donePayload }));
+      if (
+        failIf(
+          chatGroupedEdit.donePayload.loggedMeal?.mealId !== groupedMeal.id ||
+            chatGroupedEdit.donePayload.loggedMeal.foodName !== "雞腿、白飯、青菜" ||
+            chatGroupedEdit.donePayload.loggedMeal.itemCount !== 3 ||
+            chatGroupedEdit.donePayload.loggedMeal.protein !== 22,
+          steps,
+          "chat_grouped_edit",
+          "Expected chat numeric grouped edit to preserve grouped identity and itemCount 3",
+          chatGroupedEdit.donePayload.loggedMeal,
+        )
+      ) {
+        return failResult(steps, "chat_grouped_edit", artifacts);
+      }
+      steps.push(pass("chat_grouped_edit", {
+        mealId: groupedMeal.id,
+        foodName: "雞腿、白飯、青菜",
+        itemCount: 3,
+        protein: 22,
+      }));
 
       const directEditRes = await fetch(`${fixture.address}/api/meals/${groupedMeal.id}`, {
         method: "PATCH",
@@ -267,16 +458,62 @@ const groupedMealCanonicalScenario: VerificationScenario = {
       }
       steps.push(pass("direct_edit_block", directEditBlock));
 
-      const historyRes = await fetch(`${fixture.address}/api/chat/history?limit=20`, {
-        headers: { cookie: fixture.cookieHeader },
-      });
-      const historySnapshot = await historyRes.json();
+      const historySnapshot = await getChatHistory(fixture.address, fixture.cookieHeader);
       artifacts.historySnapshot = historySnapshot;
-      if (historyRes.status !== 200) {
-        steps.push(fail("verify_history", `Expected history 200, got ${historyRes.status}`, historySnapshot));
+      const dateKey = imageGroupedLog.donePayload.loggedMeal?.dateKey;
+      if (!dateKey) {
+        steps.push(fail("verify_history", "Expected grouped loggedMeal dateKey for History/Day proof", imageGroupedLog.donePayload.loggedMeal));
         return failResult(steps, "verify_history", artifacts);
       }
-      steps.push(pass("verify_history", { status: historyRes.status }));
+      const historyDaySnapshot = await getHistoryDay(fixture.address, fixture.cookieHeader, dateKey);
+      artifacts.historyDaySnapshot = historyDaySnapshot;
+
+      const groupedHistoryMessage = historySnapshot.messages.find((message) =>
+        message.loggedMeal?.foodName === "雞腿、白飯、青菜" &&
+        message.loggedMeal.itemCount === 3,
+      );
+      const groupedCorrectionMessage = historySnapshot.messages.find((message) =>
+        message.content.includes("已更新") &&
+        message.loggedMeal?.foodName === "雞腿、白飯、青菜" &&
+        message.loggedMeal.itemCount === 3 &&
+        message.loggedMeal.protein === 22,
+      );
+      const historyDayMeal = findMealByName(historyDaySnapshot.meals, "雞腿、白飯、青菜");
+
+      if (!groupedHistoryMessage || !groupedCorrectionMessage || historyDayMeal?.itemCount !== 3) {
+        steps.push(fail("verify_history", "Expected full grouped name and itemCount 3 in chat history, correction snapshot, and History/Day", {
+          groupedHistoryMessage,
+          groupedCorrectionMessage,
+          historyDayMeal,
+        }));
+        return failResult(steps, "verify_history", artifacts);
+      }
+      steps.push(pass("verify_history", {
+        chatHistoryFoodName: groupedHistoryMessage.loggedMeal?.foodName,
+        correctionFoodName: groupedCorrectionMessage.loggedMeal?.foodName,
+        historyDayFoodName: historyDayMeal.foodName,
+        itemCount: 3,
+      }));
+
+      artifacts.replyCopy = {
+        image: {
+          text: imageGroupedLog.replyText,
+          length: imageGroupedLog.replyText.length,
+          includes: ["已記錄", "kcal", "蛋白質"],
+          noInternalToolNames: !containsInternalToolName(imageGroupedLog.replyText),
+        },
+        text: {
+          text: textSingleLog.replyText,
+          length: textSingleLog.replyText.length,
+          includes: ["已記錄", "kcal", "蛋白質"],
+          noInternalToolNames: !containsInternalToolName(textSingleLog.replyText),
+        },
+      };
+      artifacts.securityNotes = {
+        auth: "Scenario uses createScenarioApp() cookieHeader for protected route requests and no raw deviceId header.",
+        directEditBlock: "Grouped direct PATCH returned 409 MEAL_REQUIRES_GROUPED_UPDATE before single-shape mutation.",
+        internalToolLeakage: "Successful user-visible replies were checked for log_food, update_meal, find_meals, protein_sources, usedConservativeAssumption, quantityUncertaintyReason, and missing_quantity.",
+      };
 
       const missingArtifactKeys = [
         "imageGroupedLog",
@@ -284,6 +521,8 @@ const groupedMealCanonicalScenario: VerificationScenario = {
         "chatGroupedEdit",
         "directEditBlock",
         "historySnapshot",
+        "replyCopy",
+        "securityNotes",
       ].filter((key) => !(key in artifacts));
       if (missingArtifactKeys.length > 0) {
         steps.push(fail("verify_artifacts", `Missing artifact keys: ${missingArtifactKeys.join(", ")}`, artifacts));
