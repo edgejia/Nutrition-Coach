@@ -2,7 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -781,7 +781,7 @@ describe("Chat API", () => {
     });
   });
 
-  it("GET /api/chat/history keeps didLogMeal=true for persisted meal-logging replies", async () => {
+  it("POST /api/chat image logging persists chat_meal_receipts for /api/chat/history", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
@@ -796,11 +796,31 @@ describe("Chat API", () => {
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
-    await fetch(`${address}/api/chat`, {
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "apple.png");
+    const chatRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
       body: form,
     });
+    assert.equal(chatRes.status, 200);
+    const chatBody = await chatRes.json() as {
+      loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
+    };
+    assert.match(chatBody.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.ok(chatBody.loggedMeal?.imageAssetId);
+    assert.equal(chatBody.loggedMeal?.imageUrl, `/api/assets/${chatBody.loggedMeal.imageAssetId}`);
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const receiptRows = sqlite
+        .prepare("SELECT meal_transaction_id AS mealTransactionId, meal_revision_id AS mealRevisionId FROM chat_meal_receipts")
+        .all() as Array<{ mealTransactionId: string; mealRevisionId: string }>;
+      assert.equal(receiptRows.length, 1);
+      assert.equal(receiptRows[0]!.mealTransactionId, chatBody.loggedMeal?.mealId);
+      assert.match(receiptRows[0]!.mealRevisionId, /^[0-9a-f-]{36}$/);
+    } finally {
+      sqlite.close();
+    }
 
     const historyRes = await app.inject({
       method: "GET",
@@ -819,8 +839,8 @@ describe("Chat API", () => {
       mealId: assistantMessage.loggedMeal.mealId,
       dateKey: assistantMessage.loggedMeal.dateKey,
       loggedAt: assistantMessage.loggedMeal.loggedAt,
-      imageAssetId: null,
-      imageUrl: null,
+      imageAssetId: chatBody.loggedMeal.imageAssetId,
+      imageUrl: chatBody.loggedMeal.imageUrl,
       foodName: "蘋果",
       calories: 95,
       protein: 0,
@@ -964,7 +984,7 @@ describe("Chat API", () => {
     assert.match(assistantMsgs[0]!.content, /這次無法完成請求/);
   });
 
-  it("SSE path: done payload has didLogMeal:true and exactly one assistant message when LLM fails after log_food", async () => {
+  it("SSE path: fallback after image log persists receipt identity before done", async () => {
     // D-04 SSE branch: log_food persists meal, then final reply generation throws.
     // Invariant: done has didLogMeal:true and history has exactly one assistant message.
     mockLLM.queueChatResponse({
@@ -973,14 +993,24 @@ describe("Chat API", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "燕麥粥", calories: 150, protein: 5, carbs: 27, fat: 2.5 }),
+          arguments: JSON.stringify({
+            food_name: "燕麥粥",
+            calories: 150,
+            protein: 5,
+            carbs: 27,
+            fat: 2.5,
+            protein_sources: [
+              { name: "燕麥", protein: 5, is_primary: true, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
     mockLLM.queueChatError(new Error("stream generation failed"));
 
     const form = new FormData();
-    form.append("message", "我吃了燕麥粥");
+    form.append("message", "這是燕麥粥");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "oatmeal.png");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -1004,9 +1034,13 @@ describe("Chat API", () => {
 
       const donePayload = JSON.parse(doneEvent.data) as {
         didLogMeal: boolean;
+        loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
         dailySummary?: { mealCount: number; totalCalories: number; date?: string };
       };
       assert.equal(donePayload.didLogMeal, true, "meal was persisted before LLM failure");
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.ok(donePayload.loggedMeal?.imageAssetId);
+      assert.equal(donePayload.loggedMeal?.imageUrl, `/api/assets/${donePayload.loggedMeal.imageAssetId}`);
       assert.equal(donePayload.dailySummary?.mealCount, 1);
       assert.equal(donePayload.dailySummary?.totalCalories, 150);
       assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
@@ -1022,28 +1056,46 @@ describe("Chat API", () => {
     assert.equal(historyRes.status, 200);
 
     const historyBody = await historyRes.json() as {
-      messages: Array<{ role: string; content: string }>;
+      messages: Array<{
+        role: string;
+        content: string;
+        loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
+      }>;
     };
     const assistantMsgs = historyBody.messages.filter((message) => message.role === "assistant");
     assert.equal(assistantMsgs.length, 1);
     assert.match(assistantMsgs[0]?.content ?? "", /已完成記錄，但回覆生成失敗/);
+    assert.match(assistantMsgs[0]?.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.ok(assistantMsgs[0]?.loggedMeal?.imageAssetId);
   });
 
-  it("JSON path: exactly one assistant message in history when orchestrator throws after log_food (D-04 JSON branch)", async () => {
+  it("JSON path: fallback after image log persists receipt identity and cleans upload", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_json_fail",
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "地瓜", calories: 180, protein: 2, carbs: 41, fat: 0.2 }),
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
         },
       }],
     });
     mockLLM.queueChatError(new Error("json generation failed"));
 
     const form = new FormData();
-    form.append("message", "我吃了地瓜");
+    form.append("message", "這是雞腿便當");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
@@ -1052,10 +1104,30 @@ describe("Chat API", () => {
     });
 
     assert.equal(res.status, 200);
-    const body = await res.json() as { didLogMeal: boolean; dailySummary?: { mealCount: number; date?: string } };
+    const body = await res.json() as {
+      didLogMeal: boolean;
+      loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
+      dailySummary?: { mealCount: number; date?: string };
+    };
     assert.equal(body.didLogMeal, true);
+    assert.match(body.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.ok(body.loggedMeal?.imageAssetId);
+    assert.equal(body.loggedMeal?.imageUrl, `/api/assets/${body.loggedMeal.imageAssetId}`);
     assert.equal(body.dailySummary?.mealCount, 1);
     assert.match(body.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
+    assert.deepEqual(await readdir(uploadsDir).catch(() => []), [], "staged uploads must be cleaned after fallback");
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const receiptRows = sqlite
+        .prepare("SELECT meal_transaction_id AS mealTransactionId, meal_revision_id AS mealRevisionId FROM chat_meal_receipts")
+        .all() as Array<{ mealTransactionId: string; mealRevisionId: string }>;
+      assert.equal(receiptRows.length, 1);
+      assert.equal(receiptRows[0]!.mealTransactionId, body.loggedMeal?.mealId);
+      assert.match(receiptRows[0]!.mealRevisionId, /^[0-9a-f-]{36}$/);
+    } finally {
+      sqlite.close();
+    }
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
       headers: { cookie: sessionCookieHeader },
@@ -1063,11 +1135,18 @@ describe("Chat API", () => {
     assert.equal(historyRes.status, 200);
 
     const historyBody = await historyRes.json() as {
-      messages: Array<{ role: string; content: string }>;
+      messages: Array<{
+        role: string;
+        content: string;
+        loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
+      }>;
     };
     const assistantMsgs = historyBody.messages.filter((message) => message.role === "assistant");
     assert.equal(assistantMsgs.length, 1);
     assert.match(assistantMsgs[0]?.content ?? "", /已完成記錄，但回覆生成失敗/);
+    assert.equal(assistantMsgs[0]?.loggedMeal?.mealId, body.loggedMeal?.mealId);
+    assert.equal(assistantMsgs[0]?.loggedMeal?.imageAssetId, body.loggedMeal?.imageAssetId);
+    assert.equal(assistantMsgs[0]?.loggedMeal?.imageUrl, body.loggedMeal?.imageUrl);
   });
 
   it("D-03: daily_summary SSE push arrives on /api/sse AFTER done event is emitted on chat stream", async () => {

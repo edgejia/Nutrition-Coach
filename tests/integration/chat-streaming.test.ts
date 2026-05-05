@@ -419,6 +419,7 @@ describe("chat-streaming", () => {
 
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "lunch.png");
 
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -449,6 +450,8 @@ describe("chat-streaming", () => {
           mealId?: string;
           dateKey?: string;
           loggedAt?: string;
+          imageAssetId?: string | null;
+          imageUrl?: string | null;
           foodName?: string;
           calories?: unknown;
           protein?: unknown;
@@ -462,6 +465,8 @@ describe("chat-streaming", () => {
       assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
       assert.match(donePayload.loggedMeal?.dateKey ?? "", /^\d{4}-\d{2}-\d{2}$/);
       assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+      assert.ok(donePayload.loggedMeal?.imageAssetId);
+      assert.equal(donePayload.loggedMeal?.imageUrl, `/api/assets/${donePayload.loggedMeal.imageAssetId}`);
       assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
       assert.equal(typeof donePayload.loggedMeal?.calories, "number");
       assert.equal(typeof donePayload.loggedMeal?.protein, "number");
@@ -472,9 +477,18 @@ describe("chat-streaming", () => {
         headers: { cookie: sessionCookieHeader },
       });
       assert.equal(historyRes.status, 200);
-      const historyJson = await historyRes.json();
+      const historyJson = await historyRes.json() as {
+        messages: Array<{
+          role: string;
+          content: string;
+          loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
+        }>;
+      };
       assert.equal(historyJson.messages.at(-1)?.role, "assistant");
       assert.equal(historyJson.messages.at(-1)?.content, "測試回覆");
+      assert.equal(historyJson.messages.at(-1)?.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
+      assert.equal(historyJson.messages.at(-1)?.loggedMeal?.imageAssetId, donePayload.loggedMeal?.imageAssetId);
+      assert.equal(historyJson.messages.at(-1)?.loggedMeal?.imageUrl, donePayload.loggedMeal?.imageUrl);
     } finally {
       if (timeout) clearTimeout(timeout);
       if (app.server.listening) {
@@ -489,6 +503,7 @@ describe("chat-streaming", () => {
 
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "lunch.png");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -540,13 +555,15 @@ describe("chat-streaming", () => {
         didLogMeal?: boolean;
         didMutateMeal?: boolean;
         dailySummary?: unknown;
-        loggedMeal?: { foodName?: string };
+        loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
       };
       assert.equal(stoppedPayload.stopped, true);
       assert.equal(stoppedPayload.tokensStreamed, 1);
       assert.equal(stoppedPayload.didLogMeal, true);
       assert.equal(stoppedPayload.didMutateMeal, true);
       assert.ok(stoppedPayload.dailySummary);
+      assert.match(stoppedPayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.ok(stoppedPayload.loggedMeal?.imageAssetId);
       assert.equal(stoppedPayload.loggedMeal?.foodName, "雞腿便當");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -554,12 +571,19 @@ describe("chat-streaming", () => {
       });
       assert.equal(historyRes.status, 200);
       const historyJson = await historyRes.json() as {
-        messages: Array<{ role: string; content: string; status?: string; loggedMeal?: { foodName?: string } }>;
+        messages: Array<{
+          role: string;
+          content: string;
+          status?: string;
+          loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
+        }>;
       };
       const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMessages.length, 1, "stopped stream must persist one assistant row");
       assert.equal(assistantMessages[0]?.content, "已");
       assert.equal(assistantMessages[0]?.status, "stopped");
+      assert.equal(assistantMessages[0]?.loggedMeal?.mealId, stoppedPayload.loggedMeal?.mealId);
+      assert.equal(assistantMessages[0]?.loggedMeal?.imageAssetId, stoppedPayload.loggedMeal?.imageAssetId);
       assert.equal(assistantMessages[0]?.loggedMeal?.foodName, "雞腿便當");
     } finally {
       clearTimeout(timeout);
