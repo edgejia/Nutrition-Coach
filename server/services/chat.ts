@@ -16,8 +16,8 @@ import { formatLocalDate } from "../lib/time.js";
 type ChatMessageStatus = "complete" | "stopped" | "error";
 
 interface LoggedMealReceipt {
-  mealId: string;
-  dateKey: string;
+  mealId?: string;
+  dateKey?: string;
   loggedAt: string;
   imageAssetId: string | null;
   imageUrl: string | null;
@@ -67,6 +67,8 @@ export function createChatService(db: AppDatabase) {
     const receipts = await db
       .select({
         mealTransactionId: mealTransactions.id,
+        currentRevisionId: mealTransactions.currentRevisionId,
+        deletedAt: mealTransactions.deletedAt,
         mealRevisionId: mealRevisions.id,
         loggedAt: mealTransactions.loggedAt,
         imageAssetId: mealRevisions.imageAssetId,
@@ -107,9 +109,16 @@ export function createChatService(db: AppDatabase) {
       return undefined;
     }
 
+    const isCurrentActiveReceipt =
+      receipt.deletedAt === null && receipt.mealRevisionId === receipt.currentRevisionId;
+
     return {
-      mealId: receipt.mealTransactionId,
-      dateKey: formatLocalDate(new Date(receipt.loggedAt)),
+      ...(isCurrentActiveReceipt
+        ? {
+            mealId: receipt.mealTransactionId,
+            dateKey: formatLocalDate(new Date(receipt.loggedAt)),
+          }
+        : {}),
       loggedAt: receipt.loggedAt,
       imageAssetId: receipt.imageAssetId ?? null,
       imageUrl: receipt.imageAssetId ? buildAssetUrl(receipt.imageAssetId) : null,

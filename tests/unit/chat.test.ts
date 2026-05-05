@@ -160,6 +160,81 @@ describe("ChatService", () => {
     assert.equal(restoredAssistant?.loggedMeal?.calories, 640);
   });
 
+  it("keeps stale historical receipts display-only after a later meal update", async () => {
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      imagePath: "asset:original-lunch",
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    const assistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄雞腿便當。");
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: assistant.id,
+      toolMessageId: tool.id,
+      mealTransactionId: loggedMeal.id,
+      mealRevisionId: loggedMeal.mealRevisionId,
+    });
+
+    await foodLoggingService.updateMeal(deviceId, loggedMeal.id, {
+      items: [
+        { foodName: "雞腿便當半份", calories: 360, protein: 20, carbs: 45, fat: 10 },
+      ],
+      imagePath: "asset:corrected-lunch",
+    });
+
+    const history = await chatService.getHistory(deviceId, 50);
+    const restoredAssistant = history.find((message) => message.id === assistant.id);
+
+    assert.equal(restoredAssistant?.didLogMeal, true);
+    assert.ok(restoredAssistant?.loggedMeal);
+    assert.equal(restoredAssistant.loggedMeal.mealId, undefined);
+    assert.equal(restoredAssistant.loggedMeal.dateKey, undefined);
+    assert.equal(restoredAssistant.loggedMeal.foodName, "雞腿便當");
+    assert.equal(restoredAssistant.loggedMeal.calories, 640);
+    assert.equal(restoredAssistant.loggedMeal.imageAssetId, "original-lunch");
+    assert.equal(restoredAssistant.loggedMeal.imageUrl, "/api/assets/original-lunch");
+  });
+
+  it("keeps historical receipts display-only after the meal is deleted", async () => {
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      imagePath: "asset:deleted-receipt",
+      loggedAt: "2026-03-25T08:30:00.000Z",
+    });
+    const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    const assistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄鮭魚飯糰。");
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: assistant.id,
+      toolMessageId: tool.id,
+      mealTransactionId: loggedMeal.id,
+      mealRevisionId: loggedMeal.mealRevisionId,
+    });
+
+    await foodLoggingService.deleteMeal(deviceId, loggedMeal.id);
+
+    const history = await chatService.getHistory(deviceId, 50);
+    const restoredAssistant = history.find((message) => message.id === assistant.id);
+
+    assert.equal(restoredAssistant?.didLogMeal, true);
+    assert.ok(restoredAssistant?.loggedMeal);
+    assert.equal(restoredAssistant.loggedMeal.mealId, undefined);
+    assert.equal(restoredAssistant.loggedMeal.dateKey, undefined);
+    assert.equal(restoredAssistant.loggedMeal.foodName, "鮭魚飯糰");
+    assert.equal(restoredAssistant.loggedMeal.calories, 280);
+    assert.equal(restoredAssistant.loggedMeal.imageAssetId, "deleted-receipt");
+    assert.equal(restoredAssistant.loggedMeal.imageUrl, "/api/assets/deleted-receipt");
+  });
+
   it("projects loggedMeal receipt for persisted update_meal assistant replies", async () => {
     const loggedMeal = await foodLoggingService.logFood(deviceId, {
       foodName: "牛肉麵",
