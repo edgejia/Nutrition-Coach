@@ -213,6 +213,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.ok(result.loggedMeal, "loggedMeal must be returned");
     assert.ok(result.loggedMeal.mealId, "loggedMeal mealId must be returned");
     assert.ok(result.loggedMeal.mealRevisionId, "loggedMeal mealRevisionId must be returned");
+    assert.equal(result.loggedMeal.itemCount, 1);
     assert.equal(result.loggedMeal.foodName, "蘋果");
     assert.equal(result.loggedMeal.calories, 100);
     assert.equal(result.loggedMeal.protein, 0);
@@ -278,6 +279,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.dailySummary.mealCount, 1);
     assert.equal(result.dailySummary.totalProtein, 8);
     assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.itemCount, 2);
     assert.equal(result.loggedMeal.foodName, "蘋果、優格");
     assert.equal(result.loggedMeal.calories, 215);
     assert.equal(result.loggedMeal.protein, 8);
@@ -374,6 +376,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     });
 
     assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.itemCount, 4);
     assert.equal(result.loggedMeal.foodName, "高蛋白粉、肌酸 等4項");
     assert.equal(result.loggedMeal.calories, 390);
     assert.equal(result.loggedMeal.protein, 38);
@@ -383,6 +386,91 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       result.loggedMeal.countedSources.map((source) => source.name),
       ["高蛋白粉", "低糖豆漿"],
     );
+  });
+
+  it("adds transient missing_quantity metadata for text logs without quantity-bearing numbers", async () => {
+    const noQuantityCall: ToolCall = {
+      id: "call_no_quantity",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "雞腿便當",
+          calories: 640,
+          protein: 30,
+          carbs: 78,
+          fat: 20,
+          protein_sources: [
+            { name: "雞腿", protein: 24, is_primary: true, certainty: "uncertain" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(noQuantityCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.itemCount, 1);
+    assert.equal(result.loggedMeal.quantityUncertaintyReason, "missing_quantity");
+  });
+
+  it("omits transient missing_quantity metadata when quantity fields or item text include numbers", async () => {
+    const quantityFieldCall: ToolCall = {
+      id: "call_quantity_field",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "豆漿",
+          quantity_ml: 400,
+          calories: 180,
+          protein: 12,
+          carbs: 14,
+          fat: 8,
+          protein_sources: [
+            { name: "豆漿", protein: 12, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+    const quantityInTextCall: ToolCall = {
+      id: "call_quantity_text",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "飯糰 2 顆",
+              calories: 420,
+              protein: 10,
+              carbs: 72,
+              fat: 8,
+            },
+          ],
+          protein_sources: [
+            { name: "飯糰", protein: 10, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const quantityFieldResult = await executeTool(quantityFieldCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+    const quantityTextResult = await executeTool(quantityInTextCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.ok(quantityFieldResult.loggedMeal);
+    assert.equal(quantityFieldResult.loggedMeal.quantityUncertaintyReason, undefined);
+    assert.ok(quantityTextResult.loggedMeal);
+    assert.equal(quantityTextResult.loggedMeal.quantityUncertaintyReason, undefined);
   });
 
   it("Test 1c: mixed lunchbox persists trusted protein from protein_sources instead of raw proposal", async () => {
@@ -616,6 +704,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.mealMutationKind, "update");
     assert.equal(result.loggedMeal.mealId, created.id);
     assert.equal(result.loggedMeal.mealRevisionId, transaction!.currentRevisionId);
+    assert.equal(result.loggedMeal.itemCount, 1);
     assert.notEqual(result.loggedMeal.mealRevisionId, created.mealRevisionId);
     assert.equal(result.loggedMeal.dateKey, "2026-03-25");
     assert.equal(result.loggedMeal.loggedAt, "2026-03-25T04:30:00.000Z");
