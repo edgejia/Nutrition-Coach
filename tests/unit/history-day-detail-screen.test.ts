@@ -46,6 +46,14 @@ describe("History Day Detail source contract", () => {
     }
   });
 
+  it("keeps Day Detail meal thumbnails on the 48px meal.imageUrl source pattern", () => {
+    assert.match(
+      detailSource,
+      /<PersistedAssetImage[\s\S]*src=\{meal\.imageUrl\}[\s\S]*imgClassName="sp-history-detail-meal-image"[\s\S]*fallbackClassName="sp-history-detail-meal-image sp-history-detail-meal-fallback"/,
+    );
+    assert.match(detailSource, /alt=\{`\$\{meal\.foodName\} 縮圖`\}/);
+  });
+
   it("does not expose edit, delete, save, correction, or live-summary mutation controls", () => {
     for (const rejected of [
       "deleteMeal",

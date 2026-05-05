@@ -77,6 +77,39 @@ describe("History screen source contract", () => {
     }
   });
 
+  it("renders History timeline thumbnails from meal-level imageUrl inside the row target", () => {
+    for (const expected of [
+      'import { PersistedAssetImage } from "./PersistedAssetImage.js";',
+      "sp-history-meal-media",
+      "sp-history-meal-image",
+      "sp-history-meal-fallback",
+      "meal.imageUrl",
+      "無照片",
+      "imageAssetId: meal.imageAssetId",
+      "imageUrl: meal.imageUrl",
+      "loggedAt: meal.loggedAt",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(
+      source,
+      /<button[\s\S]*className="sp-history-meal-row"[\s\S]*<span className="sp-history-meal-media">[\s\S]*<PersistedAssetImage[\s\S]*src=\{meal\.imageUrl\}[\s\S]*imgClassName="sp-history-meal-image"[\s\S]*fallbackClassName="sp-history-meal-fallback"[\s\S]*<\/button>/,
+    );
+    assert.doesNotMatch(source, /<button[^>]*sp-history-meal-media|<a[^>]*sp-history-meal-media/);
+  });
+
+  it("keeps History timeline media and fallback slots at fixed 32px dimensions", () => {
+    assert.match(
+      cssSource,
+      /\.sp-history-meal-media\s*\{[\s\S]*?width:\s*32px;[\s\S]*?height:\s*32px;[\s\S]*?flex:\s*0 0 32px;[\s\S]*?\}/,
+    );
+
+    for (const expected of [".sp-history-meal-image", ".sp-history-meal-fallback"]) {
+      assert.match(cssSource, escapedPattern(expected));
+    }
+  });
+
   it("sorts timeline meals from morning to night and hides meal-period tags", () => {
     assert.match(source, /\[\.\.\.meals\]\.sort\(\s*\(\s*left,\s*right\s*\) => new Date\(left\.loggedAt\)\.getTime\(\) - new Date\(right\.loggedAt\)\.getTime\(\)/);
     assert.match(source, /sortedMeals\.map\(\(meal\) =>/);
