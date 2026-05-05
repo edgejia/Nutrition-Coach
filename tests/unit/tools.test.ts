@@ -9,6 +9,7 @@ import { createFoodLoggingService } from "../../server/services/food-logging.js"
 import { createSummaryService } from "../../server/services/summary.js";
 import {
   executeTool,
+  getToolDefinitions,
   toolRegistry,
   type ToolDeps,
 } from "../../server/orchestrator/tools.js";
@@ -49,6 +50,152 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     foodLoggingService = createFoodLoggingService(db);
     summaryService = createSummaryService(db);
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+  });
+
+  it("normalizes single-shape log_food calls through the canonical grouped path while preserving top-level protein_sources", async () => {
+    const calls: Array<{ method: "logFood" | "logGroupedMeal"; input: unknown }> = [];
+    const toolDefs = Object.fromEntries(
+      getToolDefinitions().map((definition) => [definition.function.name, definition.function.parameters]),
+    ) as Record<string, any>;
+
+    const result = await executeTool(logFoodCall, deviceId, {
+      foodLoggingService: {
+        async logFood(_deviceId: string, input: unknown) {
+          calls.push({ method: "logFood", input });
+          return {
+            id: "meal-single",
+            mealRevisionId: "rev-single",
+            foodName: "蘋果",
+            calories: 100,
+            protein: 0,
+            carbs: 20,
+            fat: 0.5,
+            imagePath: null,
+            loggedAt: new Date().toISOString(),
+          };
+        },
+        async logGroupedMeal(_deviceId: string, input: unknown) {
+          calls.push({ method: "logGroupedMeal", input });
+          return {
+            id: "meal-single",
+            mealRevisionId: "rev-single",
+            foodName: "蘋果",
+            calories: 100,
+            protein: 0,
+            carbs: 20,
+            fat: 0.5,
+            imagePath: null,
+            loggedAt: new Date().toISOString(),
+          };
+        },
+      } as any,
+      summaryService: {
+        async getDailySummary() {
+          return {
+            date: formatLocalDate(new Date()),
+            totalCalories: 100,
+            totalProtein: 0,
+            totalCarbs: 20,
+            totalFat: 0.5,
+            mealCount: 1,
+          };
+        },
+      } as any,
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.deepEqual(calls.map((call) => call.method), ["logGroupedMeal"]);
+    assert.deepEqual(calls[0]?.input, {
+      imagePath: undefined,
+      loggedAt: undefined,
+      items: [{
+        foodName: "蘋果",
+        calories: 100,
+        protein: 0,
+        carbs: 20,
+        fat: 0.5,
+      }],
+    });
+    assert.ok(toolDefs.log_food.properties.protein_sources, "protein_sources must stay top-level");
+    assert.ok(toolDefs.log_food.properties.items, "items[] must remain accepted");
+    assert.equal(toolDefs.log_food.properties.items.items.properties.protein_sources, undefined);
+  });
+
+  it("normalizes items[] log_food calls through the same canonical grouped path and ignores top-level aggregates", async () => {
+    const calls: Array<{ method: "logFood" | "logGroupedMeal"; input: any }> = [];
+    const groupedCall: ToolCall = {
+      id: "call_items_authoritative",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "should be ignored",
+          calories: 999,
+          protein: 999,
+          carbs: 999,
+          fat: 999,
+          items: [
+            {
+              food_name: "蛋餅",
+              calories: 320,
+              protein: 12,
+              carbs: 30,
+              fat: 16,
+            },
+            {
+              food_name: "豆漿",
+              calories: 180,
+              protein: 12,
+              carbs: 14,
+              fat: 8,
+            },
+          ],
+          protein_sources: [
+            { name: "蛋餅", protein: 12, is_primary: true, certainty: "clear" },
+            { name: "豆漿", protein: 12, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    await executeTool(groupedCall, deviceId, {
+      foodLoggingService: {
+        async logFood(_deviceId: string, input: unknown) {
+          calls.push({ method: "logFood", input });
+          throw new Error("single-shape shim must not be used for items[]");
+        },
+        async logGroupedMeal(_deviceId: string, input: any) {
+          calls.push({ method: "logGroupedMeal", input });
+          return {
+            id: "meal-grouped",
+            mealRevisionId: "rev-grouped",
+            foodName: "蛋餅、豆漿",
+            calories: 500,
+            protein: 24,
+            carbs: 44,
+            fat: 24,
+            imagePath: null,
+            loggedAt: new Date().toISOString(),
+          };
+        },
+      } as any,
+      summaryService: {
+        async getDailySummary() {
+          return {
+            date: formatLocalDate(new Date()),
+            totalCalories: 500,
+            totalProtein: 24,
+            totalCarbs: 44,
+            totalFat: 24,
+            mealCount: 1,
+          };
+        },
+      } as any,
+    });
+
+    assert.deepEqual(calls.map((call) => call.method), ["logGroupedMeal"]);
+    assert.deepEqual(calls[0]?.input.items.map((item: { foodName: string }) => item.foodName), ["蛋餅", "豆漿"]);
+    assert.equal(calls[0]?.input.items.reduce((sum: number, item: { calories: number }) => sum + item.calories, 0), 500);
   });
 
   it("Test 1: log_food persists meal and returns result/summary/dailySummary.date/loggedMeal", async () => {

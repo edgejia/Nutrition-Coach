@@ -204,4 +204,19 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /一句簡短繁體中文/);
     assert.match(prompt, /主要蛋白來源/);
   });
+
+  it("defines non-speculative grouped logging examples and allows items.length === 1", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+
+    assert.match(prompt, /咖哩飯/);
+    assert.match(prompt, /牛肉麵/);
+    assert.match(prompt, /炒飯/);
+    assert.match(prompt, /蛋餅 \+ 豆漿 \+ 茶葉蛋/);
+    assert.match(prompt, /items\.length === 1/);
+  });
 });
