@@ -83,6 +83,7 @@ describe("ChatService", () => {
       imageAssetId: "lunch-image",
       imageUrl: "/api/assets/lunch-image",
       foodName: "煎肉餅、漢堡排",
+      itemCount: 2,
       calories: 520,
       protein: 32,
       carbs: 8,
@@ -157,6 +158,7 @@ describe("ChatService", () => {
     assert.equal(restoredAssistant?.loggedMeal?.mealId, loggedMeal.id);
     assert.equal(restoredAssistant?.loggedMeal?.imageAssetId, "collision-target");
     assert.equal(restoredAssistant?.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(restoredAssistant?.loggedMeal?.itemCount, 1);
     assert.equal(restoredAssistant?.loggedMeal?.calories, 640);
   });
 
@@ -195,6 +197,7 @@ describe("ChatService", () => {
     assert.equal(restoredAssistant.loggedMeal.mealId, undefined);
     assert.equal(restoredAssistant.loggedMeal.dateKey, undefined);
     assert.equal(restoredAssistant.loggedMeal.foodName, "雞腿便當");
+    assert.equal(restoredAssistant.loggedMeal.itemCount, 1);
     assert.equal(restoredAssistant.loggedMeal.calories, 640);
     assert.equal(restoredAssistant.loggedMeal.imageAssetId, "original-lunch");
     assert.equal(restoredAssistant.loggedMeal.imageUrl, "/api/assets/original-lunch");
@@ -230,6 +233,7 @@ describe("ChatService", () => {
     assert.equal(restoredAssistant.loggedMeal.mealId, undefined);
     assert.equal(restoredAssistant.loggedMeal.dateKey, undefined);
     assert.equal(restoredAssistant.loggedMeal.foodName, "鮭魚飯糰");
+    assert.equal(restoredAssistant.loggedMeal.itemCount, 1);
     assert.equal(restoredAssistant.loggedMeal.calories, 280);
     assert.equal(restoredAssistant.loggedMeal.imageAssetId, "deleted-receipt");
     assert.equal(restoredAssistant.loggedMeal.imageUrl, "/api/assets/deleted-receipt");
@@ -272,6 +276,7 @@ describe("ChatService", () => {
       imageAssetId: null,
       imageUrl: null,
       foodName: "半碗牛肉麵",
+      itemCount: 1,
       calories: 360,
       protein: 20,
       carbs: 45,
@@ -320,6 +325,7 @@ describe("ChatService", () => {
       imageAssetId: "salmon-rice",
       imageUrl: "/api/assets/salmon-rice",
       foodName: "鮭魚飯糰",
+      itemCount: 1,
       calories: 280,
       protein: 14,
       carbs: 36,

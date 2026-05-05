@@ -12,7 +12,7 @@ import {
 import type { AppDatabase } from "../db/client.js";
 import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
-import { buildFullMealDisplayName } from "./meal-display.js";
+import { projectMealDisplay } from "./meal-display.js";
 
 type ChatMessageStatus = "complete" | "stopped" | "error";
 
@@ -23,6 +23,7 @@ interface LoggedMealReceipt {
   imageAssetId: string | null;
   imageUrl: string | null;
   foodName: string;
+  itemCount: number;
   calories: number;
   protein: number;
   carbs: number;
@@ -100,6 +101,7 @@ export function createChatService(db: AppDatabase) {
 
     const isCurrentActiveReceipt =
       receipt.deletedAt === null && receipt.mealRevisionId === receipt.currentRevisionId;
+    const display = projectMealDisplay(items);
 
     return {
       ...(isCurrentActiveReceipt
@@ -111,7 +113,8 @@ export function createChatService(db: AppDatabase) {
       loggedAt: receipt.loggedAt,
       imageAssetId: receipt.imageAssetId ?? null,
       imageUrl: receipt.imageAssetId ? buildAssetUrl(receipt.imageAssetId) : null,
-      foodName: buildFullMealDisplayName(items),
+      foodName: display.foodName,
+      itemCount: display.itemCount,
       calories: items.reduce((sum, item) => sum + item.calories, 0),
       protein: items.reduce((sum, item) => sum + item.protein, 0),
       carbs: items.reduce((sum, item) => sum + item.carbs, 0),

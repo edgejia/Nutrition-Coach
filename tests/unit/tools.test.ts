@@ -377,7 +377,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     assert.ok(result.loggedMeal);
     assert.equal(result.loggedMeal.itemCount, 4);
-    assert.equal(result.loggedMeal.foodName, "高蛋白粉、肌酸 等4項");
+    assert.equal(result.loggedMeal.foodName, "高蛋白粉、肌酸、燕麥片、低糖豆漿");
     assert.equal(result.loggedMeal.calories, 390);
     assert.equal(result.loggedMeal.protein, 38);
     assert.equal(result.loggedMeal.carbs, 34);

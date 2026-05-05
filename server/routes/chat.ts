@@ -253,7 +253,19 @@ function publishSummarySafe(
 function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
   if (!loggedMeal) return undefined;
 
-  const { mealId, dateKey, loggedAt, imageAssetId, imageUrl, foodName, calories, protein, carbs, fat } = loggedMeal;
+  const {
+    mealId,
+    dateKey,
+    loggedAt,
+    imageAssetId,
+    imageUrl,
+    foodName,
+    itemCount,
+    calories,
+    protein,
+    carbs,
+    fat,
+  } = loggedMeal;
   if (
     !foodName.trim() ||
     !Number.isFinite(calories) ||
@@ -271,6 +283,7 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     ...(typeof imageAssetId === "string" || imageAssetId === null ? { imageAssetId } : {}),
     ...(typeof imageUrl === "string" || imageUrl === null ? { imageUrl } : {}),
     foodName,
+    itemCount,
     calories,
     protein,
     carbs,

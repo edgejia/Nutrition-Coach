@@ -16,6 +16,7 @@ type HistoryMeal = {
   display: {
     title: string;
   };
+  itemCount: number;
   nutrition: {
     calories: number;
     protein: number;
@@ -218,6 +219,7 @@ describe("History search API", () => {
         dateKey: "2026-03-25",
         loggedAt: "2026-03-25T04:00:00.000Z",
         display: { title: "Chicken Salad" },
+        itemCount: 1,
         nutrition: { calories: 420, protein: 38, carbs: 18, fat: 21 },
         items: [
           {

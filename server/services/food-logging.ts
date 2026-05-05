@@ -1,12 +1,17 @@
 // server/services/food-logging.ts
+import { and, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
+import {
+  mealRevisionItems,
+  mealTransactions,
+} from "../db/schema.js";
 import {
   createMealTransactionsService,
   type CreateMealTransactionInput,
   type MealTransactionItemInput,
 } from "./meal-transactions.js";
 import { createMealHistoryService } from "./meal-history.js";
-import { buildFullMealDisplayName } from "./meal-display.js";
+import { projectMealDisplay } from "./meal-display.js";
 
 export interface FoodData {
   foodName: string;
@@ -23,6 +28,7 @@ export interface MealCompatibilityEntry {
   mealRevisionId: string;
   deviceId: string;
   foodName: string;
+  itemCount: number;
   calories: number;
   protein: number;
   carbs: number;
@@ -45,11 +51,14 @@ export function createFoodLoggingService(db: AppDatabase) {
     imagePath: string | null | undefined,
     items: MealTransactionItemInput[],
   ): MealCompatibilityEntry {
+    const display = projectMealDisplay(items);
+
     return {
       id: transactionId,
       mealRevisionId: revisionId,
       deviceId,
-      foodName: buildFullMealDisplayName(items),
+      foodName: display.foodName,
+      itemCount: display.itemCount,
       calories: items.reduce((sum, item) => sum + item.calories, 0),
       protein: items.reduce((sum, item) => sum + item.protein, 0),
       carbs: items.reduce((sum, item) => sum + item.carbs, 0),
@@ -107,6 +116,30 @@ export function createFoodLoggingService(db: AppDatabase) {
 
     async deleteMeal(deviceId: string, mealId: string) {
       return mealTransactionsService.softDeleteTransaction(deviceId, mealId);
+    },
+
+    async getMealItemCount(deviceId: string, mealId: string): Promise<number | null> {
+      const transaction = await db
+        .select({ currentRevisionId: mealTransactions.currentRevisionId })
+        .from(mealTransactions)
+        .where(and(
+          eq(mealTransactions.deviceId, deviceId),
+          eq(mealTransactions.id, mealId),
+          isNull(mealTransactions.deletedAt),
+        ))
+        .limit(1);
+
+      const currentRevisionId = transaction[0]?.currentRevisionId;
+      if (!currentRevisionId) {
+        return null;
+      }
+
+      const items = await db
+        .select({ position: mealRevisionItems.position })
+        .from(mealRevisionItems)
+        .where(eq(mealRevisionItems.revisionId, currentRevisionId));
+
+      return items.length;
     },
 
     async updateMeal(deviceId: string, mealId: string, input: GroupedMealData) {

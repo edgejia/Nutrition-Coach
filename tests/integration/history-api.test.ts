@@ -16,6 +16,7 @@ type HistoryMeal = {
   display: {
     title: string;
   };
+  itemCount: number;
   nutrition: {
     calories: number;
     protein: number;
@@ -264,6 +265,7 @@ describe("History API", () => {
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
       display: { title: "雞胸、地瓜" },
+      itemCount: 2,
       nutrition: { calories: 420, protein: 45, carbs: 41, fat: 6 },
       items: [
         {
@@ -289,6 +291,7 @@ describe("History API", () => {
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T08:00:00.000Z",
       display: { title: "修正雞腿便當" },
+      itemCount: 1,
       nutrition: { calories: 620, protein: 34, carbs: 70, fat: 22 },
       items: [
         {
@@ -450,6 +453,7 @@ describe("History API", () => {
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
       display: { title: "鮭魚、白飯" },
+      itemCount: 2,
       nutrition: { calories: 540, protein: 35, carbs: 58, fat: 18 },
       items: [
         {

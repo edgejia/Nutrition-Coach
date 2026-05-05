@@ -10,7 +10,7 @@ import { createMealTransactionsService, type MealTransactionItemInput } from "./
 import { createTurnStateService } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
 import { makeAssetRef } from "./assets.js";
-import { buildFullMealDisplayName } from "./meal-display.js";
+import { projectMealDisplay } from "./meal-display.js";
 
 const PENDING_SELECTION_KIND = "meal_target_selection";
 const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
@@ -18,6 +18,7 @@ const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
 export interface MealCorrectionCandidate {
   mealId: string;
   foodName: string;
+  itemCount: number;
   itemNames: string[];
   calories: number;
   protein: number;
@@ -335,11 +336,12 @@ export function createMealCorrectionService(db: AppDatabase) {
 
     return limitedHeaders.map((header) => {
       const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
-      const foodName = buildFullMealDisplayName(revisionItems, "未知餐點");
+      const display = projectMealDisplay(revisionItems, "未知餐點");
 
       return {
         mealId: header.id,
-        foodName,
+        foodName: display.foodName,
+        itemCount: display.itemCount,
         itemNames: revisionItems.map((item) => item.foodName),
         calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),
         protein: revisionItems.reduce((sum, item) => sum + item.protein, 0),
@@ -629,18 +631,18 @@ export function createMealCorrectionService(db: AppDatabase) {
         new Date(`${updated.affectedDateKey}T12:00:00`),
       );
 
-      const foodName = buildFullMealDisplayName(updated.items);
+      const display = projectMealDisplay(updated.items);
 
       return {
         updatedMeal: {
           id: updated.transactionId,
           mealRevisionId: updated.revisionId,
-          foodName,
+          foodName: display.foodName,
           calories: updated.items.reduce((sum, item) => sum + item.calories, 0),
           protein: updated.items.reduce((sum, item) => sum + item.protein, 0),
           carbs: updated.items.reduce((sum, item) => sum + item.carbs, 0),
           fat: updated.items.reduce((sum, item) => sum + item.fat, 0),
-          itemCount: updated.items.length,
+          itemCount: display.itemCount,
           imagePath: updated.imageAssetId ? makeAssetRef(updated.imageAssetId) : null,
           loggedAt: updated.loggedAt,
         },

@@ -840,11 +840,12 @@ describe("Chat API", () => {
     });
     assert.equal(chatRes.status, 200);
     const chatBody = await chatRes.json() as {
-      loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
+      loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null; itemCount?: number };
     };
     assert.match(chatBody.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
     assert.ok(chatBody.loggedMeal?.imageAssetId);
     assert.equal(chatBody.loggedMeal?.imageUrl, `/api/assets/${chatBody.loggedMeal.imageAssetId}`);
+    assert.equal(chatBody.loggedMeal?.itemCount, 1);
 
     const sqlite = new Database(dbPath, { readonly: true });
     try {
@@ -878,6 +879,7 @@ describe("Chat API", () => {
       imageAssetId: chatBody.loggedMeal.imageAssetId,
       imageUrl: chatBody.loggedMeal.imageUrl,
       foodName: "蘋果",
+      itemCount: 1,
       calories: 95,
       protein: 0,
       carbs: 25,

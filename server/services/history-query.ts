@@ -7,7 +7,7 @@ import {
 } from "../db/schema.js";
 import { formatLocalDate, getLocalDayBounds } from "../lib/time.js";
 import { buildAssetUrl } from "./assets.js";
-import { buildFullMealDisplayName } from "./meal-display.js";
+import { projectMealDisplay } from "./meal-display.js";
 import type { createSummaryService, DailySummary } from "./summary.js";
 
 const HISTORY_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -22,6 +22,7 @@ export interface HistoryMealDto {
   dateKey: string;
   loggedAt: string;
   display: { title: string };
+  itemCount: number;
   nutrition: { calories: number; protein: number; carbs: number; fat: number };
   items: Array<{
     name: string;
@@ -400,12 +401,14 @@ async function projectHistoryMeals(
     const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
     const imageAssetId = revision?.imageAssetId ?? null;
     const imageUrl = imageAssetId ? buildAssetUrl(imageAssetId) : null;
+    const display = projectMealDisplay(revisionItems);
 
     return {
       id: header.id,
       dateKey: formatLocalDate(new Date(header.loggedAt)),
       loggedAt: header.loggedAt,
-      display: { title: buildFullMealDisplayName(revisionItems) },
+      display: { title: display.foodName },
+      itemCount: display.itemCount,
       nutrition: {
         calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),
         protein: revisionItems.reduce((sum, item) => sum + item.protein, 0),

@@ -7,11 +7,12 @@ import {
 } from "../db/schema.js";
 import { getLocalDayBounds } from "../lib/time.js";
 import { makeAssetRef } from "./assets.js";
-import { buildFullMealDisplayName } from "./meal-display.js";
+import { projectMealDisplay } from "./meal-display.js";
 
 export interface MealHistoryEntry {
   id: string;
   foodName: string;
+  itemCount: number;
   calories: number;
   protein: number;
   carbs: number;
@@ -83,10 +84,12 @@ export function createMealHistoryService(db: AppDatabase) {
       return headers.map((header) => {
         const revision = revisionById.get(header.currentRevisionId);
         const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
+        const display = projectMealDisplay(revisionItems);
 
         return {
           id: header.id,
-          foodName: buildFullMealDisplayName(revisionItems),
+          foodName: display.foodName,
+          itemCount: display.itemCount,
           calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),
           protein: revisionItems.reduce((sum, item) => sum + item.protein, 0),
           carbs: revisionItems.reduce((sum, item) => sum + item.carbs, 0),
