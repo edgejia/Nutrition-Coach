@@ -34,6 +34,7 @@ const STEP_NAMES = [
   "verify_history_day",
   "verify_meal_edit_payload",
   "verify_asset_fetch",
+  "verify_asset_identity_boundary",
   "verify_upload_cleanup",
 ] as const;
 
@@ -240,6 +241,28 @@ function assertMealIdentity(meal: MealRecordDto | undefined, identity: LoggedMea
   return { ok: true, actual: meal };
 }
 
+function toCookieHeader(rawHeader: string | string[] | undefined) {
+  const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
+  return values.map((value) => value.split(";", 1)[0]).join("; ");
+}
+
+async function createFreshDevice(app: ScenarioContext["app"]): Promise<{ deviceId: string; cookieHeader: string }> {
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/device",
+    payload: { goal: "muscle_gain" },
+  });
+
+  if (res.statusCode !== 200 && res.statusCode !== 201) {
+    throw new Error(`createFreshDevice failed with ${res.statusCode}: ${res.body}`);
+  }
+
+  return {
+    deviceId: (res.json() as { deviceId: string }).deviceId,
+    cookieHeader: toCookieHeader(res.headers["set-cookie"]),
+  };
+}
+
 const scenario: VerificationScenario = {
   name: "meal-image-continuity",
 
@@ -427,6 +450,43 @@ const scenario: VerificationScenario = {
         return failResult(steps, "verify_asset_fetch", artifacts);
       }
       steps.push(pass("verify_asset_fetch", assetEvidence));
+
+      const foreignDevice = await createFreshDevice(fixture.app);
+      const anonymousAssetRes = await fetch(`${fixture.address}${identity.imageUrl}`);
+      const foreignAssetRes = await fetch(`${fixture.address}${identity.imageUrl}`, {
+        headers: { cookie: foreignDevice.cookieHeader },
+      });
+      const spoofedForeignAssetRes = await fetch(
+        `${fixture.address}${identity.imageUrl}?deviceId=${fixture.deviceId}`,
+        {
+          headers: {
+            cookie: foreignDevice.cookieHeader,
+            "x-device-id": fixture.deviceId,
+          },
+        },
+      );
+      const boundaryEvidence = {
+        assetUrl: identity.imageUrl,
+        ownerDeviceId: fixture.deviceId,
+        foreignDeviceId: foreignDevice.deviceId,
+        anonymousStatus: anonymousAssetRes.status,
+        foreignCookieStatus: foreignAssetRes.status,
+        spoofedForeignCookieStatus: spoofedForeignAssetRes.status,
+      };
+      artifacts.verify_asset_identity_boundary = boundaryEvidence;
+      if (
+        anonymousAssetRes.status !== 401 ||
+        foreignAssetRes.status !== 404 ||
+        spoofedForeignAssetRes.status !== 404
+      ) {
+        steps.push(fail(
+          "verify_asset_identity_boundary",
+          "Asset boundary must reject anonymous, foreign-cookie, and spoofed foreign-cookie reads",
+          boundaryEvidence,
+        ));
+        return failResult(steps, "verify_asset_identity_boundary", artifacts);
+      }
+      steps.push(pass("verify_asset_identity_boundary", boundaryEvidence));
 
       await waitForRouteFinally();
       const residualUploads = await readUploadsDir();

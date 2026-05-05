@@ -187,6 +187,7 @@ describe("harness-foundation", () => {
       "verify_today_records",
       "verify_history_day",
       "verify_meal_edit_payload",
+      "verify_asset_identity_boundary",
       "verify_upload_cleanup",
       "createScenarioApp",
       "StreamingLLMProvider",
