@@ -62,6 +62,10 @@ function observabilityEvents(logLines: string[], eventName: string) {
   return parseLogLines(logLines).filter((record) => record.event === eventName);
 }
 
+function assertNoSuccessfulLogInternalCopy(text: string) {
+  assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
+}
+
 function chatTurnCompletedMetadata(record: Record<string, unknown>) {
   return {
     event: record.event,
@@ -937,6 +941,53 @@ describe("Chat API", () => {
     assert.equal(body.loggedMeal?.protein, 24);
     assert.equal(body.loggedMeal?.carbs, 70);
     assert.equal(body.loggedMeal?.fat, 13.5);
+  });
+
+  it("POST /api/chat JSON successful missing quantity reply hides internal metadata and keeps grouped name", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_grouped_missing_quantity_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+              { food_name: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "已記錄雞腿、白飯、青菜，估約 580 kcal（區間 493-667），蛋白質 24 g。份量是主要誤差，可再補份量修正。log_food protein_sources usedConservativeAssumption quantityUncertaintyReason missing_quantity",
+    });
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿、白飯和青菜");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply: string;
+      loggedMeal?: { foodName?: string; itemCount?: number };
+    };
+    assert.match(body.reply, /份量是主要誤差/);
+    assert.match(body.reply, /可再補份量修正/);
+    assertNoSuccessfulLogInternalCopy(body.reply);
+    assert.equal(body.loggedMeal?.foodName, "雞腿、白飯、青菜");
+    assert.equal(body.loggedMeal?.itemCount, 3);
+    assertNoSuccessfulLogInternalCopy(JSON.stringify(body.loggedMeal));
   });
 
   it("POST /api/chat without SSE accept header still returns JSON", async () => {

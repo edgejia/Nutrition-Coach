@@ -314,6 +314,10 @@ function parseSSEEvents(body: string): Array<{ event: string; data: string }> {
     });
 }
 
+function assertNoSuccessfulLogInternalCopy(text: string) {
+  assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
+}
+
 describe("chat-streaming", () => {
   let app: FastifyInstance;
   let mockLLM: StreamingLLMProvider;
@@ -501,6 +505,78 @@ describe("chat-streaming", () => {
       if (app.server.listening) {
         await app.close();
       }
+    }
+  });
+
+  it("POST /api/chat SSE successful missing quantity reply hides internal metadata and keeps grouped name", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_grouped_missing_quantity_sse",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+              { food_name: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream([
+      "已記錄雞腿、白飯、青菜，估約 580 kcal（區間 493-667），蛋白質 24 g。",
+      "份量是主要誤差，可再補份量修正。",
+      "log_food protein_sources usedConservativeAssumption quantityUncertaintyReason missing_quantity",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿、白飯和青菜");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+
+      assert.match(chunkText, /份量是主要誤差/);
+      assert.match(chunkText, /可再補份量修正/);
+      assertNoSuccessfulLogInternalCopy(chunkText);
+
+      const doneEvent = events.find((event) => event.event === "done");
+      assert.ok(doneEvent);
+      const donePayload = JSON.parse(doneEvent.data) as {
+        loggedMeal?: { foodName?: string; itemCount?: number };
+      };
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿、白飯、青菜");
+      assert.equal(donePayload.loggedMeal?.itemCount, 3);
+      assertNoSuccessfulLogInternalCopy(JSON.stringify(donePayload.loggedMeal));
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
     }
   });
 
