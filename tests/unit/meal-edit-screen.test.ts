@@ -24,7 +24,11 @@ describe("Meal Edit source contract", () => {
       "AI 估算 · 點任一欄位調整",
       "修改會建立新 revision",
       "刪除這筆餐點？這會建立刪除 revision。",
-      "餐點照片",
+      "整餐照片",
+      "這張照片代表整餐，不是單一食物裁切。",
+      "尚未附上餐點照片",
+      "這筆餐點是文字記錄，仍可編輯名稱與營養數值。",
+      "圖片載入失敗，餐點資料仍可編輯。請稍後再試。",
       "取消",
       "儲存",
       "PersistedAssetImage",
@@ -67,5 +71,10 @@ describe("Meal Edit source contract", () => {
   it("rejects blank nutrition fields before numeric conversion", () => {
     assert.match(source, /rawValues\.some\(\(value\) => value\.trim\(\) === ""\)/);
     assert.match(source, /const \[calories, protein, carbs, fat\] = rawValues\.map\(Number\)/);
+  });
+
+  it("frames persisted images as whole-meal media and preserves image identity", () => {
+    assert.match(source, /alt=\{`\$\{payload\.foodName\} 整餐照片`\}/);
+    assert.match(source, /imageAssetId:\s*payload\.imageAssetId \?\? null/);
   });
 });
