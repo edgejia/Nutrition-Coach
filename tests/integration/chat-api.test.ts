@@ -887,6 +887,9 @@ describe("Chat API", () => {
       protein: 0,
       carbs: 25,
       fat: 0.3,
+      items: [
+        { name: "蘋果", position: 1, calories: 95, protein: 0, carbs: 25, fat: 0.3 },
+      ],
     });
   });
 
@@ -929,6 +932,14 @@ describe("Chat API", () => {
         protein?: number;
         carbs?: number;
         fat?: number;
+        items?: Array<{
+          name: string;
+          position: number;
+          calories: number;
+          protein: number;
+          carbs: number;
+          fat: number;
+        }>;
       };
     };
     assert.match(body.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
@@ -940,6 +951,11 @@ describe("Chat API", () => {
     assert.equal(body.loggedMeal?.protein, 24);
     assert.equal(body.loggedMeal?.carbs, 70);
     assert.equal(body.loggedMeal?.fat, 13.5);
+    assert.deepEqual(body.loggedMeal?.items, [
+      { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 12 },
+      { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
+      { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 1 },
+    ]);
   });
 
   it("POST /api/chat JSON successful missing quantity reply hides internal metadata and keeps grouped name", async () => {

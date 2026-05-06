@@ -281,6 +281,28 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     carbs,
     fat,
   } = loggedMeal;
+  const items = Array.isArray(loggedMeal.items)
+    ? loggedMeal.items
+        .filter((item) => (
+          item &&
+          typeof item.name === "string" &&
+          item.name.trim().length > 0 &&
+          Number.isFinite(item.position) &&
+          Number.isFinite(item.calories) &&
+          Number.isFinite(item.protein) &&
+          Number.isFinite(item.carbs) &&
+          Number.isFinite(item.fat)
+        ))
+        .sort((left, right) => left.position - right.position)
+        .map((item) => ({
+          name: item.name.trim(),
+          position: item.position,
+          calories: item.calories,
+          protein: item.protein,
+          carbs: item.carbs,
+          fat: item.fat,
+        }))
+    : undefined;
   if (
     !foodName.trim() ||
     !Number.isFinite(itemCount) ||
@@ -305,6 +327,7 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     protein,
     carbs,
     fat,
+    ...(items && items.length > 0 ? { items } : {}),
   };
 }
 
@@ -399,6 +422,7 @@ async function handleStreamingReply(
   dailySummary: unknown,
   receiptIdentity: ReceiptIdentity | undefined,
   affectedDate?: string,
+  partialMutationReply?: string,
   hooks?: OrchestratorHooks,
   stopControl?: StreamingStopControl,
 ): Promise<{
@@ -455,7 +479,9 @@ async function handleStreamingReply(
 
   if (hallucinationDetected) {
     hooks?.onFallback?.("hallucination_detected");
-    const retryMsg = "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
+    const retryMsg = didLogMeal && partialMutationReply
+      ? partialMutationReply
+      : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
     await finalizeAssistantReply(chatService, deviceId, retryMsg, receiptIdentity);
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
     return { fullReply: retryMsg, didLogMeal, dailySummary, tokensStreamed };
@@ -564,6 +590,7 @@ async function handleOrchestratorSSE(
         dailySummary,
         streamReceiptIdentity,
         streamAffectedDate,
+        streamLoggedMeal,
         hooks,
         stopControl,
       );

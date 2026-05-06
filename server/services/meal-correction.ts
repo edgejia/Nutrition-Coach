@@ -423,10 +423,16 @@ export function createMealCorrectionService(db: AppDatabase) {
 
   async function tryResolvePendingSelection(
     deviceId: string,
+    action: "update" | "delete",
     query: string,
   ): Promise<FindMealsResolvedResult | FindMealsClarificationResult | undefined> {
     const pending = await turnStateService.getState<PendingMealSelectionState>(deviceId, PENDING_SELECTION_KIND);
     if (!pending) {
+      return undefined;
+    }
+
+    if (pending.action !== action) {
+      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
       return undefined;
     }
 
@@ -467,7 +473,11 @@ export function createMealCorrectionService(db: AppDatabase) {
       };
     }
 
-    if (pending.candidates.length === 1) {
+    if (
+      pending.candidates.length === 1 &&
+      !hasLikelyFoodReference(query) &&
+      extractMealPeriod(query) === undefined
+    ) {
       return {
         status: "resolved",
         action: pending.action,
@@ -488,7 +498,7 @@ export function createMealCorrectionService(db: AppDatabase) {
       query: string,
       options?: FindMealsOptions,
     ): Promise<FindMealsResult> {
-      const pendingSelection = await tryResolvePendingSelection(deviceId, query);
+      const pendingSelection = await tryResolvePendingSelection(deviceId, action, query);
       if (pendingSelection) {
         return pendingSelection;
       }

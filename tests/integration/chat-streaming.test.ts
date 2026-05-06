@@ -570,10 +570,26 @@ describe("chat-streaming", () => {
       const doneEvent = events.find((event) => event.event === "done");
       assert.ok(doneEvent);
       const donePayload = JSON.parse(doneEvent.data) as {
-        loggedMeal?: { foodName?: string; itemCount?: number };
+        loggedMeal?: {
+          foodName?: string;
+          itemCount?: number;
+          items?: Array<{
+            name: string;
+            position: number;
+            calories: number;
+            protein: number;
+            carbs: number;
+            fat: number;
+          }>;
+        };
       };
       assert.equal(donePayload.loggedMeal?.foodName, "雞腿、白飯、青菜");
       assert.equal(donePayload.loggedMeal?.itemCount, 3);
+      assert.deepEqual(donePayload.loggedMeal?.items, [
+        { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
+        { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 1 },
+      ]);
       assertNoSuccessfulLogInternalCopy(JSON.stringify(donePayload.loggedMeal));
     } finally {
       clearTimeout(timeout);
@@ -1570,6 +1586,10 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat preserves loggedMeal history when streamed hallucination fallback follows log_food", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    mockLLM.queueChatStream([
+      "方式1 直接依照片估算記錄\n",
+      "方式2 請補充份量後再記錄",
+    ]);
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
 
@@ -1589,6 +1609,7 @@ describe("chat-streaming", () => {
       const text = await readStreamUntil(reader, "event: done");
 
       assert.match(text, /已記錄雞腿便當/);
+      assert.doesNotMatch(text, /無法辨識這次的請求/);
       const doneMatch = text.match(/event: done\s+data: (.+)/);
       assert.ok(doneMatch);
       const donePayload = JSON.parse(doneMatch[1]) as {

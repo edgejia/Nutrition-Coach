@@ -88,6 +88,10 @@ describe("ChatService", () => {
       protein: 32,
       carbs: 8,
       fat: 38,
+      items: [
+        { name: "煎肉餅", position: 1, calories: 420, protein: 24, carbs: 6, fat: 32 },
+        { name: "漢堡排", position: 2, calories: 100, protein: 8, carbs: 2, fat: 6 },
+      ],
     });
     assert.equal("countedSources" in assistant.loggedMeal, false);
     assert.equal("excludedSources" in assistant.loggedMeal, false);
@@ -281,6 +285,9 @@ describe("ChatService", () => {
       protein: 20,
       carbs: 45,
       fat: 10,
+      items: [
+        { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
+      ],
     });
     assert.equal("countedSources" in assistant.loggedMeal, false);
     assert.equal("excludedSources" in assistant.loggedMeal, false);
@@ -330,6 +337,9 @@ describe("ChatService", () => {
       protein: 14,
       carbs: 36,
       fat: 8,
+      items: [
+        { name: "鮭魚飯糰", position: 1, calories: 280, protein: 14, carbs: 36, fat: 8 },
+      ],
     });
   });
 

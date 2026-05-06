@@ -401,6 +401,57 @@ describe("meal correction service", () => {
     assert.equal(secondPass.fromPending, true);
   });
 
+  it("does not reuse a pending selection for a different mutation action", async () => {
+    const first = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 29,
+      carbs: 78,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
+    assert.equal(firstPass.status, "needs_clarification");
+
+    const staleAction = await mealCorrectionService.findMeals(deviceId, "update", "第二個");
+
+    assert.notEqual(staleAction.status, "resolved");
+    if (staleAction.status === "resolved") {
+      assert.notEqual(staleAction.resolvedMealId, first.id);
+    }
+  });
+
+  it("does not reuse a uniquely resolved pending target for a new named correction", async () => {
+    const target = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-04-19T12:00:00.000Z",
+    });
+
+    const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "剛剛的雞腿蛋白質降低");
+    assert.equal(firstPass.status, "resolved");
+    assert.equal(firstPass.resolvedMealId, target.id);
+
+    const staleTarget = await mealCorrectionService.findMeals(deviceId, "update", "把豆漿改成無糖");
+
+    assert.notEqual(staleTarget.status, "resolved");
+    if (staleTarget.status === "resolved") {
+      assert.notEqual(staleTarget.resolvedMealId, target.id);
+    }
+  });
+
   it("returns affectedDate for historical deletes and keeps it in sync with dailySummary.date", async () => {
     const meal = await foodLoggingService.logFood(deviceId, {
       foodName: "牛肉麵",
