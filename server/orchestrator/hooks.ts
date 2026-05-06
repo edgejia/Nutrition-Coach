@@ -53,6 +53,7 @@ export function createStructuredHooks(log: FastifyBaseLogger): OrchestratorHooks
       if (
         payload.tool === "log_food"
         && payload.success === false
+        && payload.executed === false
         && payload.failureReason === "validation"
       ) {
         log.warn(
