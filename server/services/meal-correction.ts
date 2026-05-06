@@ -173,6 +173,24 @@ function matchesCandidateLabel(candidate: MealCorrectionCandidate, normalizedQue
   return labels.some((label) => label.length > 0 && normalizedQuery.includes(label));
 }
 
+function extractTargetEvidenceText(query: string): string {
+  const changeVerb = query.match(/^(.*?)(?:改成|改為|改到|變成|換成|調成)/);
+  return changeVerb?.[1] ?? query;
+}
+
+function hasLikelyFoodReference(query: string): boolean {
+  const targetText = normalizeText(extractTargetEvidenceText(query))
+    .replace(/今天|昨日|昨天|前天|明天|上週|這週|本週|星期[一二三四五六日天]|週[一二三四五六日天]/g, "")
+    .replace(/早餐|早上|早飯|午餐|中午|晚餐|晚上|宵夜|點心|下午茶/g, "")
+    .replace(/剛剛|剛才|上一筆|上一餐|那筆|這筆|那餐|這餐|第[一二兩三四五六七八九0-9]+(?:個|筆|份|條)?/g, "")
+    .replace(/幫我|請|把|的|要|想|覺得|正常|平均|多少|哪一筆|哪餐/g, "")
+    .replace(/修改|修正|更新|調整|降低|提高|刪掉|刪除|移除|補充|套用/g, "")
+    .replace(/蛋白質|熱量|卡路里|碳水化合物|碳水|脂肪|卡|kcal|cal/g, "")
+    .replace(/[0-9０-９一二兩三四五六七八九十百千.]+(?:g|克|卡|顆|份|碗|盤|個)?/g, "");
+
+  return /(雞|鴨|豬|牛|羊|魚|蝦|蛋|飯|麵|面|菜|豆|奶|肉|便當|餅|粥|湯|沙拉|吐司|麥|滷|煮|炸|烤|炒|咖哩)/.test(targetText);
+}
+
 function distributePatchedTotal(
   items: MealTransactionItemInput[],
   field: NumericItemField,
@@ -241,7 +259,7 @@ function scoreCandidate(
   targetDateKey: string | undefined,
   targetMealPeriod: MealCorrectionCandidate["mealPeriod"] | undefined,
 ): number {
-  const normalizedQuery = normalizeText(query);
+  const normalizedQuery = normalizeText(extractTargetEvidenceText(query));
   let score = 0;
 
   if (targetDateKey) {
@@ -252,15 +270,14 @@ function scoreCandidate(
   }
 
   if (targetMealPeriod) {
-    if (candidate.mealPeriod !== targetMealPeriod) {
-      return -1;
+    if (candidate.mealPeriod === targetMealPeriod) {
+      score += 2;
     }
-    score += 2;
   }
 
   const matched = matchesCandidateLabel(candidate, normalizedQuery);
   if (matched) {
-    score += 3;
+    score += 5;
   }
 
   return score;
@@ -434,7 +451,7 @@ export function createMealCorrectionService(db: AppDatabase) {
       };
     }
 
-    const normalized = normalizeText(query);
+    const normalized = normalizeText(extractTargetEvidenceText(query));
     const matchingCandidates = pending.candidates.filter((candidate) => {
       const labels = [candidate.foodName, ...candidate.itemNames].map(normalizeText);
       return labels.some((label) => label.length > 0 && normalized.includes(label));
@@ -497,9 +514,9 @@ export function createMealCorrectionService(db: AppDatabase) {
 
       const targetDateKey = dateResolution.targetDateKey;
       const targetMealPeriod = extractMealPeriod(query);
-      const normalizedQuery = normalizeText(query);
+      const normalizedQuery = normalizeText(extractTargetEvidenceText(query));
 
-      const scored = candidates
+      let scored = candidates
         .map((candidate) => ({
           candidate,
           score: scoreCandidate(candidate, query, targetDateKey, targetMealPeriod),
@@ -512,6 +529,18 @@ export function createMealCorrectionService(db: AppDatabase) {
           }
           return right.candidate.loggedAt.localeCompare(left.candidate.loggedAt);
         });
+
+      const hasLabelMatch = scored.some((entry) => entry.labelMatched);
+      if (hasLabelMatch) {
+        scored = scored.filter((entry) => entry.labelMatched);
+      } else if (hasLikelyFoodReference(query)) {
+        return {
+          status: "needs_clarification",
+          action,
+          prompt: buildNotFoundPrompt(action),
+          candidates: [],
+        };
+      }
 
       if (hasRecentReference(query)) {
         const positiveMatches = scored.filter((entry) => entry.score > 0);
