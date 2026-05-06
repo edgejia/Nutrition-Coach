@@ -68,6 +68,14 @@ export interface ToolExecutionResult {
     carbs: number;
     fat: number;
     itemCount: number;
+    items?: Array<{
+      name: string;
+      position: number;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
     quantityUncertaintyReason?: "missing_quantity";
     countedSources: TrustedProteinSource[];
     excludedSources: ExcludedProteinSource[];
@@ -183,6 +191,14 @@ interface LogFoodSuccessResult {
     carbs: number;
     fat: number;
     itemCount: number;
+    items: Array<{
+      name: string;
+      position: number;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
     quantityUncertaintyReason?: QuantityUncertaintyReason;
     countedSources: TrustedProteinSource[];
     excludedSources: ExcludedProteinSource[];
@@ -487,28 +503,30 @@ export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): No
 function resolveProteinSourceInputs(
   args: LogFoodArgs,
 ): { proteinSources: ProteinSourceInput[]; usedExplicitProteinSources: boolean } {
+  const inferredSources = "items" in args
+    ? args.items.flatMap((item) => inferProteinSourcesFromItem(item))
+    : inferProteinSourcesFromItem(args);
+
   if (args.protein_sources && args.protein_sources.length > 0) {
+    const explicitSources = args.protein_sources.map((source) => ({
+      name: source.name.trim(),
+      protein: roundProtein(source.protein),
+      isPrimary: source.is_primary,
+      certainty: source.certainty,
+    }));
+    const inferredSupplements = inferredSources.filter((inferred) =>
+      !explicitSources.some((explicit) => namesLikelyMatch(explicit.name, inferred.name)),
+    );
+
     return {
       usedExplicitProteinSources: true,
-      proteinSources: args.protein_sources.map((source) => ({
-        name: source.name.trim(),
-        protein: roundProtein(source.protein),
-        isPrimary: source.is_primary,
-        certainty: source.certainty,
-      })),
-    };
-  }
-
-  if ("items" in args) {
-    return {
-      usedExplicitProteinSources: false,
-      proteinSources: args.items.flatMap((item) => inferProteinSourcesFromItem(item)),
+      proteinSources: [...explicitSources, ...inferredSupplements],
     };
   }
 
   return {
     usedExplicitProteinSources: false,
-    proteinSources: inferProteinSourcesFromItem(args),
+    proteinSources: inferredSources,
   };
 }
 
@@ -622,6 +640,25 @@ function buildNormalizedGroupedItems(
     foodName: item.foodName,
     calories: item.calories,
     protein: scaledProteins.get(item.index) ?? 0,
+    carbs: item.carbs,
+    fat: item.fat,
+  }));
+}
+
+function projectLoggedMealItems(
+  items: Array<{
+    foodName: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  }>,
+) {
+  return items.map((item, index) => ({
+    name: item.foodName,
+    position: index + 1,
+    calories: item.calories,
+    protein: item.protein,
     carbs: item.carbs,
     fat: item.fat,
   }));
@@ -817,6 +854,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
           carbs: loggedMeal.carbs,
           fat: loggedMeal.fat,
           itemCount: normalizedItems.length,
+          items: projectLoggedMealItems(normalizedItems),
           ...(normalized.quantityUncertaintyReason
             ? { quantityUncertaintyReason: normalized.quantityUncertaintyReason }
             : {}),
