@@ -855,15 +855,26 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
           const { streamGenerator, didLogMeal, dailySummary, affectedDate } = result;
+          const didMutateMeal = result.didMutateMeal ?? didLogMeal;
           let fullReply = "";
+          let hallucinationDetected = false;
           for await (const token of streamGenerator) {
             fullReply += token;
+            if (CHOICE_PROMPT_PATTERN.test(fullReply)) {
+              hallucinationDetected = true;
+              break;
+            }
           }
-          const normalizedReply = appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
+          const fallbackReply = didMutateMeal
+            ? (jsonLoggedMealFallback ?? PARTIAL_MUTATION_FALLBACK)
+            : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
+          const replyText = hallucinationDetected
+            ? fallbackReply
+            : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
           const { sanitized } = await finalizeAssistantReply(
             chatService,
             deviceId,
-            normalizedReply,
+            replyText,
             jsonReceiptIdentity,
           );
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
@@ -871,14 +882,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           publishSummarySafe(
             publisher,
             deviceId,
-            result.didMutateMeal ?? didLogMeal,
+            didMutateMeal,
             dailySummary,
             request.log,
           );
           logChatTurnCompleted(request.log, {
             source: "json",
             didLogMeal,
-            didMutateMeal: result.didMutateMeal ?? didLogMeal,
+            didMutateMeal,
             hadImage,
             latencyMs: Date.now() - chatTurnStartedAt,
           });

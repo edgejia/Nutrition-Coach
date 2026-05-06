@@ -970,6 +970,75 @@ describe("chat-streaming", () => {
     assert.equal(donePayload.loggedMeal, undefined);
   });
 
+  it("POST /api/chat JSON path replaces delete_meal choice prompt after mutation", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了雞腿便當");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    await readStreamUntil(seedRes.body.getReader(), "event: done");
+
+    const mealsBeforeRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsBeforeJson = await mealsBeforeRes.json() as { meals: Array<{ id: string }> };
+    const mealId = mealsBeforeJson.meals[0]?.id;
+    assert.ok(mealId);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("delete", "雞腿便當"),
+        createDeleteMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueChatStream([
+      "方式1 直接刪除這筆餐點\n",
+      "方式2 先不要刪除",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "刪除雞腿便當");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply: string;
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.loggedMeal, undefined);
+    assert.match(body.reply, /已完成餐點調整/);
+    assert.doesNotMatch(body.reply, /方式1|方式2|無法辨識/);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(historyRes.status, 200);
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+    const latestAssistant = assistantMessages.at(-1)?.content ?? "";
+    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識/);
+
+    const mealsAfterRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsAfterJson = await mealsAfterRes.json() as { meals: Array<{ id: string }> };
+    assert.equal(mealsAfterJson.meals.some((meal) => meal.id === mealId), false);
+  });
+
   it("POST /api/chat stream appends a concrete date when the model only says yesterday", async () => {
     mockLLM.queueRoundResponse({
       toolCalls: [{
