@@ -26,6 +26,10 @@ const NUTRITION_FIELDS: Array<{ key: NutritionKey; label: string; unit: "kcal" |
 
 const GROUPED_UPDATE_ERROR_COPY = "這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。";
 
+function formatMealItemMacro(value: number, unit: "kcal" | "g") {
+  return `${Math.round(value)} ${unit}`;
+}
+
 function createDraft(payload: MealEditPayload): DraftState {
   return {
     foodName: payload.foodName,
@@ -237,6 +241,21 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
               <p>
                 包含 {payload.itemCount} 項：{payload.foodName}。請到「對話」說明要改哪一項或要調整整餐，避免把多項餐點合併成一項。
               </p>
+              {payload.items && payload.items.length > 0 ? (
+                <div className="sp-meal-edit-grouped-items" aria-label={`${payload.foodName} 項目明細`}>
+                  {payload.items.map((item) => (
+                    <div key={`${item.position}-${item.name}`} className="sp-meal-edit-grouped-item">
+                      <div className="sp-meal-edit-grouped-item-name">{item.name}</div>
+                      <div className="sp-meal-edit-grouped-item-macros">
+                        <span>熱量 {formatMealItemMacro(item.calories, "kcal")}</span>
+                        <span>蛋白質 {formatMealItemMacro(item.protein, "g")}</span>
+                        <span>碳水 {formatMealItemMacro(item.carbs, "g")}</span>
+                        <span>脂肪 {formatMealItemMacro(item.fat, "g")}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <button type="button" className="sp-meal-edit-grouped-primary" onClick={goToChatCorrection}>
                 到對話修正
               </button>
