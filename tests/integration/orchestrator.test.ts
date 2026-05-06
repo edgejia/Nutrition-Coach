@@ -464,4 +464,69 @@ describe("Orchestrator", () => {
       assert.doesNotMatch(serialized, new RegExp(rawUserText));
     }
   });
+
+  it("OBS-01: structured log_food validation hook emits sanitized field diagnostics only", () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const log = {
+      info(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+      warn(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+    };
+    const hooks = createStructuredHooks(log as never);
+
+    hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: false,
+      failureReason: "validation",
+      fields: [
+        "food_name",
+        "calories",
+        "items.0.food_name",
+        "items.0.protein",
+        "protein_sources.0.name",
+        "quantity_g",
+        "protein",
+      ],
+      reason: "schema_validation",
+      summary: "<log_food args>",
+    });
+    hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: false,
+      failureReason: "guard",
+      fields: ["calories"],
+    });
+    hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: true,
+      failureReason: "execute",
+      fields: ["protein"],
+    });
+    hooks.onToolResult?.({
+      tool: "update_goals",
+      success: false,
+      executed: false,
+      failureReason: "validation",
+      fields: ["calories"],
+    });
+
+    const validationEvents = captured.filter((payload) => payload.event === "log_food_validation_failed");
+    assert.equal(validationEvents.length, 1);
+    assert.deepEqual(validationEvents[0], {
+      event: "log_food_validation_failed",
+      tool: "log_food",
+      failureReason: "validation",
+      fields: ["calories", "protein"],
+    });
+
+    const dedicatedPayload = JSON.stringify(validationEvents[0]);
+    assert.doesNotMatch(dedicatedPayload, /food_name|items\.0|protein_sources|quantity_g|schema_validation|<log_food args>/);
+    assert.doesNotMatch(dedicatedPayload, /reason|summary|executed|success/);
+  });
 });
