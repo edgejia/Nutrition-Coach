@@ -64,7 +64,6 @@ describe("Meal Edit source contract", () => {
       "更換照片",
       "上傳照片",
       "OCR",
-      "items.map",
     ]) {
       assert.doesNotMatch(source, escapedPattern(rejected));
     }
@@ -91,6 +90,14 @@ describe("Meal Edit source contract", () => {
     assert.match(source, escapedPattern("GROUPED"));
     assert.match(source, escapedPattern("這筆是組合餐點"));
     assert.match(source, /包含 \{payload\.itemCount\} 項：\{payload\.foodName\}/);
+    assert.match(source, /payload\.items/);
+    assert.match(source, escapedPattern("sp-meal-edit-grouped-items"));
+    assert.match(source, escapedPattern("sp-meal-edit-grouped-item-name"));
+    assert.match(source, escapedPattern("sp-meal-edit-grouped-item-macros"));
+    assert.match(source, escapedPattern("熱量"));
+    assert.match(source, escapedPattern("蛋白質"));
+    assert.match(source, escapedPattern("碳水"));
+    assert.match(source, escapedPattern("脂肪"));
     assert.match(source, escapedPattern("避免把多項餐點合併成一項"));
     assert.match(source, escapedPattern("到對話修正"));
     assert.match(source, escapedPattern("MEAL_REQUIRES_GROUPED_UPDATE"));
@@ -101,6 +108,7 @@ describe("Meal Edit source contract", () => {
 
     const groupedBranch = source.match(/if \(payload\.itemCount\s*>\s*1\) \{[\s\S]+?sp-meal-edit-grouped-primary[\s\S]+?\n\s*\);\n\s*\}/)?.[0] ?? "";
     assert.match(groupedBranch, escapedPattern("sp-meal-edit-grouped-lock"));
+    assert.match(groupedBranch, /payload\.items\.map/);
     assert.doesNotMatch(groupedBranch, escapedPattern("儲存"));
     assert.doesNotMatch(groupedBranch, /<input\b/);
     assert.doesNotMatch(groupedBranch, /sp-meal-edit-macro-field/);
