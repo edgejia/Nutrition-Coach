@@ -966,7 +966,7 @@ describe("Chat API", () => {
       }],
     });
     mockLLM.queueChatResponse({
-      content: "已記錄雞腿、白飯、青菜，估約 580 kcal（區間 493-667），蛋白質 24 g。份量是主要誤差，可再補份量修正。log_food protein_sources usedConservativeAssumption quantityUncertaintyReason missing_quantity",
+      content: "已記錄雞腿、白飯、青菜，約 580 kcal，可信蛋白 99 g。log_food protein_sources usedConservativeAssumption quantityUncertaintyReason missing_quantity",
     });
 
     const form = new FormData();
@@ -984,10 +984,144 @@ describe("Chat API", () => {
     };
     assert.match(body.reply, /份量是主要誤差/);
     assert.match(body.reply, /可再補份量修正/);
+    assert.match(body.reply, /估約 580 kcal（區間 493-667）/);
+    assert.match(body.reply, /蛋白質 24 g/);
+    assert.doesNotMatch(body.reply, /約 580 kcal，可信蛋白 99 g/);
     assertNoSuccessfulLogInternalCopy(body.reply);
     assert.equal(body.loggedMeal?.foodName, "雞腿、白飯、青菜");
     assert.equal(body.loggedMeal?.itemCount, 3);
     assertNoSuccessfulLogInternalCopy(JSON.stringify(body.loggedMeal));
+  });
+
+  it("POST /api/chat JSON successful soy log ignores model filler when receipt has no protein explanation trigger", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_soy_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "豆漿",
+            quantity_ml: 300,
+            calories: 120,
+            protein: 8,
+            carbs: 10,
+            fat: 4,
+            protein_sources: [
+              { name: "豆漿", protein: 8, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "已記錄豆漿，約 120 kcal、可信蛋白 8 g。豆漿為主要蛋白來源。",
+    });
+
+    const form = new FormData();
+    form.append("message", "一杯豆漿");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { reply: string; loggedMeal?: { protein?: number } };
+    assert.match(body.reply, /已記錄豆漿/);
+    assert.match(body.reply, /120 kcal/);
+    assert.match(body.reply, /蛋白質 8 g/);
+    assert.equal(body.loggedMeal?.protein, 8);
+    assert.doesNotMatch(body.reply, /豆漿為主要蛋白來源|可信蛋白/);
+  });
+
+  it("POST /api/chat JSON update_meal reply is projected from normalized updatedMeal and strips progress", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "seed_meal_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            quantity: 1,
+            unit: "碗",
+            protein_sources: [
+              { name: "牛肉", protein: 24, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已補記牛肉麵。" });
+
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了牛肉麵");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: seedForm,
+    });
+    assert.equal(seedRes.status, 200);
+    const seedBody = await seedRes.json() as { loggedMeal?: { mealId?: string } };
+    const mealId = seedBody.loggedMeal?.mealId;
+    assert.ok(mealId);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_update_json",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "update", query: "牛肉麵" }),
+          },
+        },
+        {
+          id: "update_meal_json",
+          type: "function",
+          function: {
+            name: "update_meal",
+            arguments: JSON.stringify({
+              meal_id: mealId,
+              food_name: "半碗牛肉麵",
+              calories: 360,
+              protein: 20,
+              carbs: 45,
+              fat: 10,
+            }),
+          },
+        },
+      ],
+    });
+    mockLLM.queueChatResponse({ content: "已更新蛋餅，330 kcal，可信蛋白 14 g。（5/5）" });
+
+    const updateForm = new FormData();
+    updateForm.append("message", "把牛肉麵改成半碗");
+    const updateRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: updateForm,
+    });
+
+    assert.equal(updateRes.status, 200);
+    const updateBody = await updateRes.json() as {
+      reply: string;
+      didMutateMeal?: boolean;
+      loggedMeal?: { foodName?: string; calories?: number; protein?: number; carbs?: number; fat?: number };
+    };
+    assert.equal(updateBody.didMutateMeal, true);
+    assert.match(updateBody.reply, /已更新半碗牛肉麵，360 kcal，蛋白質 20 g/);
+    assert.doesNotMatch(updateBody.reply, /蛋餅|330 kcal|14 g|5\/5|（5\/5）|可信蛋白/);
+    assert.equal(updateBody.loggedMeal?.foodName, "半碗牛肉麵");
+    assert.equal(updateBody.loggedMeal?.calories, 360);
+    assert.equal(updateBody.loggedMeal?.protein, 20);
+    assert.equal(updateBody.loggedMeal?.carbs, 45);
+    assert.equal(updateBody.loggedMeal?.fat, 10);
   });
 
   it("POST /api/chat without SSE accept header still returns JSON", async () => {

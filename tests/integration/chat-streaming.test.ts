@@ -531,8 +531,7 @@ describe("chat-streaming", () => {
       }],
     });
     mockLLM.queueChatStream([
-      "已記錄雞腿、白飯、青菜，估約 580 kcal（區間 493-667），蛋白質 24 g。",
-      "份量是主要誤差，可再補份量修正。",
+      "已記錄雞腿、白飯、青菜，約 580 kcal，可信蛋白 99 g。",
       "log_food protein_sources usedConservativeAssumption quantityUncertaintyReason missing_quantity",
     ]);
 
@@ -563,6 +562,9 @@ describe("chat-streaming", () => {
 
       assert.match(chunkText, /份量是主要誤差/);
       assert.match(chunkText, /可再補份量修正/);
+      assert.match(chunkText, /估約 580 kcal（區間 493-667）/);
+      assert.match(chunkText, /蛋白質 24 g/);
+      assert.doesNotMatch(chunkText, /約 580 kcal，可信蛋白 99 g/);
       assertNoSuccessfulLogInternalCopy(chunkText);
 
       const doneEvent = events.find((event) => event.event === "done");
@@ -573,6 +575,69 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.loggedMeal?.foodName, "雞腿、白飯、青菜");
       assert.equal(donePayload.loggedMeal?.itemCount, 3);
       assertNoSuccessfulLogInternalCopy(JSON.stringify(donePayload.loggedMeal));
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+    }
+  });
+
+  it("POST /api/chat SSE successful soy log ignores model filler when receipt has no protein explanation trigger", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_soy_sse",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "豆漿",
+            quantity_ml: 300,
+            calories: 120,
+            protein: 8,
+            carbs: 10,
+            fat: 4,
+            protein_sources: [
+              { name: "豆漿", protein: 8, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["已記錄豆漿，約 120 kcal、可信蛋白 8 g。豆漿為主要蛋白來源。"]);
+
+    const form = new FormData();
+    form.append("message", "一杯豆漿");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      const doneEvent = events.find((event) => event.event === "done");
+      assert.ok(doneEvent);
+      const donePayload = JSON.parse(doneEvent.data) as { loggedMeal?: { protein?: number } };
+
+      assert.match(chunkText, /已記錄豆漿/);
+      assert.match(chunkText, /120 kcal/);
+      assert.match(chunkText, /蛋白質 8 g/);
+      assert.equal(donePayload.loggedMeal?.protein, 8);
+      assert.doesNotMatch(chunkText, /豆漿為主要蛋白來源|可信蛋白/);
     } finally {
       clearTimeout(timeout);
       await reader?.cancel().catch(() => {});
@@ -779,7 +844,7 @@ describe("chat-streaming", () => {
         createUpdateMealToolCall(mealId),
       ],
     });
-    mockLLM.queueChatStream(["已更新 3/25 的牛肉麵"]);
+    mockLLM.queueChatStream(["已更新蛋餅，330 kcal，可信蛋白 14 g。（5/5）"]);
 
     const form = new FormData();
     form.append("message", "把 2026-03-25 晚餐牛肉麵改成半碗");
@@ -792,6 +857,12 @@ describe("chat-streaming", () => {
 
     assert.ok(res.body);
     const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const events = parseSSEEvents(text);
+    const chunkText = events
+      .filter((event) => event.event === "chunk")
+      .map((event) => JSON.parse(event.data) as { token: string })
+      .map((payload) => payload.token)
+      .join("");
     const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
     assert.ok(doneDataMatch);
     const donePayload = JSON.parse(doneDataMatch[1]) as {
@@ -821,6 +892,8 @@ describe("chat-streaming", () => {
     assert.equal(donePayload.loggedMeal?.protein, 20);
     assert.equal(donePayload.loggedMeal?.carbs, 45);
     assert.equal(donePayload.loggedMeal?.fat, 10);
+    assert.match(chunkText, /已更新半碗牛肉麵，360 kcal，蛋白質 20 g/);
+    assert.doesNotMatch(chunkText, /蛋餅|330 kcal|14 g|5\/5|（5\/5）|可信蛋白/);
   });
 
   it("POST /api/chat stream done keeps delete_meal confirmations non-editable", async () => {

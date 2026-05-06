@@ -723,7 +723,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(mockLLM.chatCalls.length, 0, "recovery path should not call the model again");
   });
 
-  it("handleMessage returns streamGenerator and defers assistant persistence when chatStream is available", async () => {
+  it("handleMessage projects successful text log replies from normalized loggedMeal instead of model stream", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
@@ -764,22 +764,20 @@ describe("Orchestrator - didLogMeal", () => {
 
     const result = await orchestrator.handleMessage(localDeviceId, "我吃了蘋果");
 
-    assert.ok("streamGenerator" in result);
+    assert.ok("reply" in result);
     assert.equal(result.didLogMeal, true);
     assert.ok(result.dailySummary);
-    assert.equal(streamingLLM.chatCalls.length, 2);
+    assert.equal(streamingLLM.chatCalls.length, 1);
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "蘋果",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /蛋白質 0 g/);
+    assert.doesNotMatch(result.reply, /已幫你記錄蘋果/);
 
     const historyBeforeStream = await localChatService.getHistory(localDeviceId, 10);
     assert.equal(historyBeforeStream.filter((message) => message.role === "assistant").length, 0);
-
-    const streamedTokens: string[] = [];
-    for await (const token of result.streamGenerator) {
-      streamedTokens.push(token);
-    }
-    assert.deepEqual(streamedTokens, ["已幫", "你記錄", "蘋果！"]);
-
-    const historyAfterStream = await localChatService.getHistory(localDeviceId, 10);
-    assert.equal(historyAfterStream.filter((message) => message.role === "assistant").length, 0);
   });
 
   it("handleMessage streams direct text replies when the provider exposes a round-level stream", async () => {
