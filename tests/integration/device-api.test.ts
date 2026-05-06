@@ -619,7 +619,10 @@ describe("Device API", () => {
       payload: { goal: "fat_loss" },
     });
     const cookieHeader = toCookieHeader(create);
-    const deviceId = (create.json() as { deviceId: string }).deviceId;
+    const { deviceId, dailyTargets: originalTargets } = create.json() as {
+      deviceId: string;
+      dailyTargets: { calories: number; protein: number; carbs: number; fat: number };
+    };
 
     const nonObject = await obs01App.inject({
       method: "PATCH",
@@ -683,6 +686,12 @@ describe("Device API", () => {
       url: "/api/device/goals",
       payload: { fat: 65 },
     });
+    const session = await obs01App.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: cookieHeader },
+      payload: {},
+    });
 
     await obs01App.close();
 
@@ -696,6 +705,8 @@ describe("Device API", () => {
     assert.equal(fatTooHigh.statusCode, 400);
     assert.equal(caloriesTooLow.statusCode, 400);
     assert.equal(unauthorized.statusCode, 401);
+    assert.equal(session.statusCode, 200);
+    assert.deepEqual(session.json().dailyTargets, originalTargets);
 
     const validationEvents = findLogEvents(logLines, "device_goals_validation_failed");
     assert.deepEqual(
@@ -720,7 +731,7 @@ describe("Device API", () => {
     }
     assert.equal(findLogEvents(logLines, "device_goals_updated_rest").length, 0);
     assertLogEventsExclude(
-      validationEvents.map((event) => pickEventMetadata(event, ["event", "fields", "codes"])),
+      validationEvents,
       [deviceId, cookieHeader, "151", "2010", "65", "-1", "8001", "401", "1001", "301", "499", "not-a-number"],
     );
   });
