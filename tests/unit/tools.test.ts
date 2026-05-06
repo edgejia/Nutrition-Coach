@@ -513,6 +513,68 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     );
   });
 
+  it("repairs generic drink labels from explicit soy-milk source text only", async () => {
+    const soyTextAnchoredCall: ToolCall = {
+      id: "call_generic_drink_soy_text",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "飲品",
+          quantity_ml: 300,
+          calories: 120,
+          protein: 8,
+          carbs: 10,
+          fat: 4,
+          protein_sources: [
+            { name: "植物性飲料", protein: 8, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+    const genericDrinkCall: ToolCall = {
+      id: "call_generic_drink_no_anchor",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "飲品",
+          quantity_ml: 300,
+          calories: 120,
+          protein: 8,
+          carbs: 10,
+          fat: 4,
+          protein_sources: [
+            { name: "植物性飲料", protein: 8, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const repairedResult = await executeTool(soyTextAnchoredCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    }, {
+      currentUserMessage: "一杯豆漿",
+    });
+
+    assert.ok(repairedResult.loggedMeal);
+    assert.equal(repairedResult.loggedMeal.foodName, "豆漿");
+    assert.equal(repairedResult.loggedMeal.protein, 8);
+    assert.deepEqual(repairedResult.loggedMeal.countedSources.map((source) => source.name), ["豆漿"]);
+    assert.doesNotMatch(repairedResult.result, /飲品|植物性飲料|無糖飲料/);
+
+    await assert.rejects(
+      executeTool(genericDrinkCall, deviceId, {
+        foodLoggingService,
+        summaryService,
+      }, {
+        currentUserMessage: "一杯飲料",
+      }),
+      /trusted protein basis required for this meal/,
+    );
+  });
+
   it("returns missing-quantity loggedMeal protein that matches persisted item protein", async () => {
     const ambiguousNoodleCall: ToolCall = {
       id: "call_missing_quantity_noodle",
@@ -819,7 +881,9 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(outcome.failureReason, "validation");
     const parsed = JSON.parse(outcome.result);
     assert.equal(parsed.failureReason, "validation");
+    assert.equal(parsed.reason, "schema_validation");
     assert.ok(Array.isArray(parsed.fields), "validation fields list must be present");
+    assert.deepEqual(outcome.logSummary, "<log_food args>");
 
     // No meal should have been persisted because execute was never reached.
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());

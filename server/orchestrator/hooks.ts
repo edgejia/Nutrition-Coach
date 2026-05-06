@@ -13,6 +13,8 @@ export interface ToolResultPayload {
   success: boolean;
   executed: boolean;      // false = validation failed before execution
   failureReason?: string; // redacted error summary; must NOT contain deviceId
+  reason?: string;        // controlled diagnostic reason, e.g. schema_validation
+  fields?: string[];      // redacted validation field paths only
   summary?: string;       // e.g. "成功" or "熱量 450kcal"
   updatedFields?: string[];
   publishedEvents?: string[];

@@ -83,11 +83,20 @@ export interface ToolExecutionResult {
   };
 }
 
+export interface FatalToolDiagnostic {
+  failureReason?: "validation" | "guard" | "execute";
+  reason?: string;
+  fields?: string[];
+}
+
 export class FatalToolError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  readonly diagnostic?: FatalToolDiagnostic;
+
+  constructor(message: string, options?: { cause?: unknown; diagnostic?: FatalToolDiagnostic }) {
     super(message);
     this.name = "FatalToolError";
     this.cause = options?.cause;
+    this.diagnostic = options?.diagnostic;
   }
 }
 
@@ -477,9 +486,38 @@ function shouldMarkMissingQuantity(items: LogFoodItemArgs[], sourceText?: string
   );
 }
 
+function sourceTextSoyMilkAnchor(sourceText?: string): string | undefined {
+  if (!sourceText) {
+    return undefined;
+  }
+  if (/豆漿|soy milk/i.test(sourceText)) {
+    return "豆漿";
+  }
+  return undefined;
+}
+
+function isGenericDrinkLabel(label: string): boolean {
+  return /^(?:飲品|飲料|植物性飲料|無糖飲料)$/i.test(label.trim());
+}
+
+function repairGenericDrinkItemsFromSourceText(
+  items: LogFoodItemArgs[],
+  sourceText?: string,
+): LogFoodItemArgs[] {
+  const anchor = sourceTextSoyMilkAnchor(sourceText);
+  if (!anchor || items.length !== 1) {
+    return items;
+  }
+  const [item] = items;
+  if (!item || !isGenericDrinkLabel(item.food_name) || item.protein <= 0) {
+    return items;
+  }
+  return [{ ...item, food_name: anchor }];
+}
+
 export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): NormalizedLogFoodArgs {
   // When items[] is present it is authoritative; top-level aggregate fields are compatibility noise.
-  const items = "items" in args
+  const rawItems = "items" in args
     ? args.items
     : [
         {
@@ -496,6 +534,7 @@ export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): No
           ...(args.serving_size !== undefined ? { serving_size: args.serving_size } : {}),
         },
       ];
+  const items = repairGenericDrinkItemsFromSourceText(rawItems, sourceText);
 
   return {
     items,
@@ -510,6 +549,7 @@ export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): No
 
 function resolveProteinSourceInputs(
   args: LogFoodArgs,
+  sourceText?: string,
 ): { proteinSources: ProteinSourceInput[]; usedExplicitProteinSources: boolean } {
   const inferredSources = "items" in args
     ? args.items.flatMap((item) => inferProteinSourcesFromItem(item))
@@ -529,6 +569,19 @@ function resolveProteinSourceInputs(
     return {
       usedExplicitProteinSources: true,
       proteinSources: [...explicitSources, ...inferredSupplements],
+    };
+  }
+
+  const sourceAnchor = sourceTextSoyMilkAnchor(sourceText);
+  if (sourceAnchor && totalProposedProtein(args) > 0) {
+    return {
+      usedExplicitProteinSources: false,
+      proteinSources: [{
+        name: sourceAnchor,
+        protein: totalProposedProtein(args),
+        isPrimary: true,
+        certainty: "clear",
+      }],
     };
   }
 
@@ -809,7 +862,10 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       : undefined;
 
     const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
-    const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(normalized);
+    const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(
+      normalized,
+      context.currentUserMessage,
+    );
     const normalizedProtein = normalizeTrustedProteinEstimate({
       mealName: normalized.items.map((item) => item.food_name.trim()).join("、"),
       proposedProtein: totalProposedProtein(normalized),
@@ -1331,7 +1387,20 @@ export async function executeTool(
     } catch {
       // result was not JSON; keep generic message
     }
-    throw new FatalToolError(failureMessage);
+    let diagnostic: FatalToolDiagnostic | undefined;
+    try {
+      const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
+      diagnostic = {
+        failureReason: outcome.failureReason,
+        ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
+        ...(Array.isArray(parsed.fields) && parsed.fields.every((field) => typeof field === "string")
+          ? { fields: parsed.fields as string[] }
+          : {}),
+      };
+    } catch {
+      diagnostic = outcome.failureReason ? { failureReason: outcome.failureReason } : undefined;
+    }
+    throw new FatalToolError(failureMessage, { diagnostic });
   }
 
   // Map contract-level success result back to ToolExecutionResult.

@@ -1050,6 +1050,59 @@ describe("Chat API", () => {
     assert.doesNotMatch(body.reply, /豆漿為主要蛋白來源|可信蛋白/);
   });
 
+  it("POST /api/chat JSON repairs generic drink tool args from source text 豆漿", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_generic_soy_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "飲品",
+            quantity_ml: 300,
+            calories: 120,
+            protein: 8,
+            carbs: 10,
+            fat: 4,
+            protein_sources: [
+              { name: "植物性飲料", protein: 8, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const form = new FormData();
+    form.append("message", "一杯豆漿");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply: string;
+      loggedMeal?: {
+        foodName?: string;
+        protein?: number;
+      };
+    };
+    assert.equal(body.loggedMeal?.foodName, "豆漿");
+    assert.equal(body.loggedMeal?.protein, 8);
+    assert.match(body.reply, /已記錄豆漿/);
+    assert.doesNotMatch(body.reply, /飲品|植物性飲料|無糖飲料/);
+
+    const mealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(mealsRes.status, 200);
+    const mealsBody = await mealsRes.json() as { meals: Array<{ foodName?: string; protein?: number }> };
+    assert.equal(mealsBody.meals.length, 1);
+    assert.equal(mealsBody.meals[0]?.foodName, "豆漿");
+    assert.equal(mealsBody.meals[0]?.protein, 8);
+  });
+
   it("POST /api/chat JSON update_meal reply is projected from normalized updatedMeal and strips progress", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -1671,6 +1724,71 @@ describe("Chat API", () => {
       );
     }
     assert.ok(parsedCount > 0, `Expected at least 1 parsed log line for image path, got ${parsedCount}. Total lines: ${logLines.length}`);
+  });
+
+  it("logs redacted field diagnostics for controlled log_food validation failures", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const rawMealText = "我吃了機密豆漿";
+    const logLLM = new MockLLMProvider();
+    logLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_invalid_log_food_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "",
+            calories: "not-a-number",
+            protein: 8,
+            carbs: 10,
+            fat: 4,
+          }),
+        },
+      }],
+    });
+
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: logLLM,
+      logger: { level: "info", stream: logStream },
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", rawMealText);
+      await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader, Accept: "text/event-stream" },
+        body: form,
+      });
+
+      const toolResults = observabilityEvents(logLines, "tool_result");
+      const failedLogFood = toolResults.find((record) =>
+        record.tool === "log_food" &&
+        record.success === false &&
+        record.executed === false,
+      );
+      assert.ok(failedLogFood, "expected failed log_food tool_result event");
+      assert.equal(failedLogFood.failureReason, "validation");
+      assert.equal(failedLogFood.reason, "schema_validation");
+      assert.ok(Array.isArray(failedLogFood.fields), "validation fields must be logged");
+      assert.ok((failedLogFood.fields as string[]).length > 0);
+
+      const serializedLogs = JSON.stringify(parseLogLines(logLines));
+      assert.ok(!serializedLogs.includes(rawMealText));
+      assert.ok(!serializedLogs.includes(logDeviceId));
+      assert.doesNotMatch(serializedLogs, /not-a-number|call_invalid_log_food_json|imagePath|uploads/);
+    } finally {
+      await logApp.close();
+    }
   });
 
   it("logs one redacted chat_turn_completed event for JSON text requests", async () => {
