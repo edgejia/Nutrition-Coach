@@ -692,7 +692,7 @@ describe("chat meal correction integration", () => {
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /已幫你刪除第二筆雞腿飯/);
+    assert.match(body.reply, /已完成餐點調整/);
     assert.equal(body.dailySummary?.mealCount, 1);
     assert.equal(body.dailySummary?.totalCalories, 620);
 

@@ -201,6 +201,14 @@ function buildUpdatedMealReply(loggedMeal: LoggedMealReceipt): string {
   return `已更新${datePrefix}${loggedMeal.foodName}，${calories} kcal，蛋白質 ${protein} g。`;
 }
 
+function buildMutationSuccessReply(affectedDate?: string): string {
+  const todayKey = formatLocalDate(currentAppDate());
+  if (affectedDate && affectedDate !== todayKey) {
+    return `已完成 ${formatReceiptDateLabel(affectedDate)} 餐點調整，請稍後確認該日攝取摘要。`;
+  }
+  return "已完成餐點調整，請稍後確認今日攝取摘要。";
+}
+
 function extractUserCorrectionTarget(userMessage: string): string {
   const targetSide = userMessage.match(/^(.*?)(?:改成|改為|改到|變成|換成|調成)/)?.[1] ?? userMessage;
   return targetSide
@@ -659,6 +667,18 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             opts?.hooks?.onLLMEnd?.(round + 1, true);
             return {
               reply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
+            };
+          }
+          if (didMutateMeal) {
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
+            return {
+              reply: buildMutationSuccessReply(resolvedAffectedDate),
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
