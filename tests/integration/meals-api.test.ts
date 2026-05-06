@@ -133,7 +133,6 @@ describe("Meals API", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已記錄早餐！" });
     await postChatMessage("我早餐吃了蛋餅");
 
     mockLLM.queueChatResponse({
@@ -155,7 +154,6 @@ describe("Meals API", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已記錄晚餐！" });
     await postChatMessage("我晚餐吃了雞腿飯");
 
     const res = await app.inject({

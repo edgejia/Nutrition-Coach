@@ -163,16 +163,12 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({
-      content: "已幫你把今天早餐那筆改成雞胸飯。",
-    });
-
     const { status, body } = await postChat("把今天早餐的雞腿飯改成雞胸飯 500 卡");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /已幫你把今天早餐那筆改成雞胸飯/);
+    assert.match(body.reply, /已更新雞胸飯，500 kcal，蛋白質 42 g/);
     assert.equal(body.dailySummary?.mealCount, 1);
     assert.equal(body.dailySummary?.totalCalories, 500);
 
@@ -442,16 +438,12 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({
-      content: "已幫你把那筆雞腿的蛋白質調整成約22g。",
-    });
-
     const { status, body } = await postChat("正常平均幾g就幾g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /22g/);
+    assert.match(body.reply, /22\s*g/);
 
     const meals = await getMeals();
     const updated = meals.find((meal) => meal.id === target.id);
@@ -498,16 +490,12 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({
-      content: "已幫你把那餐的蛋白質改成 22g。",
-    });
-
     const { status, body } = await postChat("把今天那餐雞胸肉白飯的蛋白質改成 22g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /22g/);
+    assert.match(body.reply, /22\s*g/);
 
     const meals = await getMeals();
     const updated = meals.find((meal) => meal.id === grouped.id);

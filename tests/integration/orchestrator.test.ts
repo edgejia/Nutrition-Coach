@@ -87,12 +87,10 @@ describe("Orchestrator", () => {
         },
       }],
     });
-    // Round 3: LLM responds with text
-    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
-
     const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assertReplyResult(result);
-    assert.equal(result.reply, "已幫你記錄蘋果！");
+    assert.match(result.reply, /已記錄蘋果/);
+    assert.match(result.reply, /蛋白質 0 g/);
     assert.equal(result.didLogMeal, true);
     assert.deepEqual(result.dailySummary, {
       totalCalories: 100,
@@ -102,7 +100,7 @@ describe("Orchestrator", () => {
       mealCount: 1,
       date: formatLocalDate(new Date()),
     });
-    assert.equal(mockLLM.chatCalls.length, 3);
+    assert.equal(mockLLM.chatCalls.length, 2);
     const secondRound = mockLLM.chatCalls[1].messages;
     assert.equal(secondRound[secondRound.length - 2].role, "assistant");
     assert.equal(secondRound[secondRound.length - 1].role, "tool");
