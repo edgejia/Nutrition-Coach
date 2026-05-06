@@ -29,8 +29,15 @@ const STEP_TEXT_LIMITS = {
   allergies: 300,
   advancedNotes: 500,
 } as const;
+const GOAL_TARGET_BOUNDS = {
+  calories: { min: 500, max: 8000 },
+  protein: { min: 0, max: 400 },
+  carbs: { min: 0, max: 1000 },
+  fat: { min: 0, max: 300 },
+} as const;
 
 type IntakeValidationStep = 1 | 2 | 3 | 4 | 5;
+type GoalTargetField = keyof typeof GOAL_TARGET_BOUNDS;
 type IntakeValidationField =
   | "goal"
   | "goalClarification"
@@ -471,14 +478,15 @@ export function registerDeviceRoutes(
       logDeviceGoalsValidationFailed(request.log, { fields: [], codes: ["invalid_body"] });
       return reply.code(400).send({ error: "Invalid request body" });
     }
-    const validKeys = ["calories", "protein", "carbs", "fat"];
-    const goals: Record<string, number> = {};
+    const validKeys = Object.keys(GOAL_TARGET_BOUNDS) as GoalTargetField[];
+    const goals: Partial<Record<GoalTargetField, number>> = {};
     for (const key of validKeys) {
       if (key in body) {
         const raw = body[key];
-        if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
+        const bounds = GOAL_TARGET_BOUNDS[key];
+        if (typeof raw !== "number" || !Number.isFinite(raw) || raw < bounds.min || raw > bounds.max) {
           logDeviceGoalsValidationFailed(request.log, { fields: [key], codes: ["invalid_field_value"] });
-          return reply.code(400).send({ error: `Invalid value for ${key}: must be a non-negative number` });
+          return reply.code(400).send({ error: `Invalid value for ${key}: outside supported target range` });
         }
         goals[key] = raw;
       }
