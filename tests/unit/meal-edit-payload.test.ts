@@ -4,8 +4,73 @@ import {
   buildHistoryMealEditPayload,
   buildReceiptMealEditPayload,
 } from "../../client/src/meal-edit-payload.js";
+import {
+  normalizeHistoryMeal,
+  normalizeLoggedMealReceipt,
+} from "../../client/src/api.js";
 
 describe("meal edit payload builders", () => {
+  it("normalizeHistoryMeal preserves valid grouped item detail from history DTOs", () => {
+    const meal = normalizeHistoryMeal({
+      id: "meal-items-history",
+      loggedAt: "2026-05-06T12:00:00.000+08:00",
+      display: { title: "雞腿、白飯、青菜" },
+      nutrition: { calories: 720, protein: 42, carbs: 88, fat: 24 },
+      itemCount: 3,
+      items: [
+        {
+          name: "青菜",
+          position: 2,
+          nutrition: { calories: 80, protein: 4, carbs: 10, fat: 2 },
+        },
+        {
+          name: "雞腿",
+          position: 0,
+          nutrition: { calories: 340, protein: 32, carbs: 2, fat: 18 },
+        },
+        {
+          name: "白飯",
+          position: 1,
+          nutrition: { calories: 300, protein: 6, carbs: 76, fat: 4 },
+        },
+        {
+          name: "壞資料",
+          position: 3,
+          nutrition: { calories: Number.NaN, protein: 1, carbs: 1, fat: 1 },
+        },
+      ],
+    } as any);
+
+    assert.deepEqual(meal.items, [
+      { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+      { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 4 },
+      { name: "青菜", position: 2, calories: 80, protein: 4, carbs: 10, fat: 2 },
+    ]);
+  });
+
+  it("normalizeLoggedMealReceipt preserves valid chat receipt grouped item detail", () => {
+    const receipt = normalizeLoggedMealReceipt({
+      mealId: "meal-items-receipt",
+      dateKey: "2026-05-06",
+      loggedAt: "2026-05-06T13:00:00.000+08:00",
+      foodName: "豆漿、茶葉蛋",
+      calories: 260,
+      protein: 18,
+      carbs: 18,
+      fat: 12,
+      itemCount: 2,
+      items: [
+        { name: "豆漿", position: 1, calories: 160, protein: 10, carbs: 14, fat: 6 },
+        { name: "茶葉蛋", position: 0, calories: 100, protein: 8, carbs: 4, fat: 6 },
+      ],
+    } as any);
+
+    assert.deepEqual(receipt.items, [
+      { name: "茶葉蛋", position: 0, calories: 100, protein: 8, carbs: 4, fat: 6 },
+      { name: "豆漿", position: 1, calories: 160, protein: 10, carbs: 14, fat: 6 },
+    ]);
+  });
+
   it("buildHistoryMealEditPayload preserves persisted image identity for History-origin edits", () => {
     const payload = buildHistoryMealEditPayload({
       id: "meal-1",
@@ -15,6 +80,11 @@ describe("meal edit payload builders", () => {
       carbs: 88,
       fat: 24,
       itemCount: 3,
+      items: [
+        { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+        { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 4 },
+        { name: "青菜", position: 2, calories: 80, protein: 4, carbs: 10, fat: 2 },
+      ],
       imageAssetId: "asset-history",
       imageUrl: "/api/assets/asset-history",
       loggedAt: "2026-05-06T12:00:00.000+08:00",
@@ -29,6 +99,11 @@ describe("meal edit payload builders", () => {
       carbs: 88,
       fat: 24,
       itemCount: 3,
+      items: [
+        { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+        { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 4 },
+        { name: "青菜", position: 2, calories: 80, protein: 4, carbs: 10, fat: 2 },
+      ],
       imageAssetId: "asset-history",
       imageUrl: "/api/assets/asset-history",
       loggedAt: "2026-05-06T12:00:00.000+08:00",
@@ -46,6 +121,10 @@ describe("meal edit payload builders", () => {
       carbs: 36,
       fat: 8,
       itemCount: 3,
+      items: [
+        { name: "鮭魚", position: 0, calories: 160, protein: 12, carbs: 0, fat: 8 },
+        { name: "飯糰", position: 1, calories: 120, protein: 2, carbs: 36, fat: 0 },
+      ],
       imageAssetId: "asset-chat",
       imageUrl: "/api/assets/asset-chat",
     } as any);
@@ -59,6 +138,10 @@ describe("meal edit payload builders", () => {
       carbs: 36,
       fat: 8,
       itemCount: 3,
+      items: [
+        { name: "鮭魚", position: 0, calories: 160, protein: 12, carbs: 0, fat: 8 },
+        { name: "飯糰", position: 1, calories: 120, protein: 2, carbs: 36, fat: 0 },
+      ],
       imageAssetId: "asset-chat",
       imageUrl: "/api/assets/asset-chat",
       loggedAt: "2026-05-06T13:00:00.000+08:00",
