@@ -730,6 +730,25 @@ describe("API Client", () => {
     await assert.rejects(() => api.updateGoals({ calories: 2000 }), { message: "UNAUTHORIZED" });
   });
 
+  it("updateGoals keeps PUT compatibility contract", async () => {
+    mockFetch(200, {
+      dailyTargets: {
+        calories: 2000,
+        protein: 120,
+        carbs: 220,
+        fat: 60,
+      },
+    });
+
+    await api.updateGoals({ calories: 2000, protein: 120 });
+
+    assert.equal(fetchCalls[0].url, "/api/device/goals");
+    assert.equal(fetchCalls[0].init.method, "PUT");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(fetchCalls[0].init.headers, { "Content-Type": "application/json" });
+    assert.deepEqual(JSON.parse(fetchCalls[0].init.body as string), { calories: 2000, protein: 120 });
+  });
+
   it("withAuthorizedAssetUrl removes legacy deviceId query params", () => {
     storage.set("deviceId", "device-123");
 
