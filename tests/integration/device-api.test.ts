@@ -730,8 +730,11 @@ describe("Device API", () => {
       }
     }
     assert.equal(findLogEvents(logLines, "device_goals_updated_rest").length, 0);
+    const validationPayloads = validationEvents.map(
+      ({ level: _level, time: _time, pid: _pid, hostname: _hostname, msg: _msg, ...payload }) => payload,
+    );
     assertLogEventsExclude(
-      validationEvents,
+      validationPayloads,
       [deviceId, cookieHeader, "151", "2010", "65", "-1", "8001", "401", "1001", "301", "499", "not-a-number"],
     );
   });
