@@ -648,6 +648,36 @@ describe("Device API", () => {
       headers: { cookie: cookieHeader },
       payload: { calories: -1 },
     });
+    const caloriesTooHigh = await obs01App.inject({
+      method: "PATCH",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { calories: 8001 },
+    });
+    const proteinTooHigh = await obs01App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { protein: 401 },
+    });
+    const carbsTooHigh = await obs01App.inject({
+      method: "PATCH",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { carbs: 1001 },
+    });
+    const fatTooHigh = await obs01App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { fat: 301 },
+    });
+    const caloriesTooLow = await obs01App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { calories: 499 },
+    });
     const unauthorized = await obs01App.inject({
       method: "PATCH",
       url: "/api/device/goals",
@@ -660,6 +690,11 @@ describe("Device API", () => {
     assert.equal(invalidField.statusCode, 400);
     assert.equal(emptyValidFields.statusCode, 400);
     assert.equal(negativeValue.statusCode, 400);
+    assert.equal(caloriesTooHigh.statusCode, 400);
+    assert.equal(proteinTooHigh.statusCode, 400);
+    assert.equal(carbsTooHigh.statusCode, 400);
+    assert.equal(fatTooHigh.statusCode, 400);
+    assert.equal(caloriesTooLow.statusCode, 400);
     assert.equal(unauthorized.statusCode, 401);
 
     const validationEvents = findLogEvents(logLines, "device_goals_validation_failed");
@@ -670,18 +705,23 @@ describe("Device API", () => {
         { event: "device_goals_validation_failed", fields: ["protein"], codes: ["invalid_field_value"] },
         { event: "device_goals_validation_failed", fields: [], codes: ["empty_valid_fields"] },
         { event: "device_goals_validation_failed", fields: ["calories"], codes: ["invalid_field_value"] },
+        { event: "device_goals_validation_failed", fields: ["calories"], codes: ["invalid_field_value"] },
+        { event: "device_goals_validation_failed", fields: ["protein"], codes: ["invalid_field_value"] },
+        { event: "device_goals_validation_failed", fields: ["carbs"], codes: ["invalid_field_value"] },
+        { event: "device_goals_validation_failed", fields: ["fat"], codes: ["invalid_field_value"] },
+        { event: "device_goals_validation_failed", fields: ["calories"], codes: ["invalid_field_value"] },
       ],
     );
 
     for (const event of validationEvents) {
-      for (const key of ["route", "method", "deviceId", "body", "value", "target"]) {
+      for (const key of ["route", "method", "deviceId", "body", "value", "target", "min", "max", "actual", "received"]) {
         assert.ok(!(key in event), `expected validation event to exclude metadata key ${key}`);
       }
     }
     assert.equal(findLogEvents(logLines, "device_goals_updated_rest").length, 0);
     assertLogEventsExclude(
       validationEvents.map((event) => pickEventMetadata(event, ["event", "fields", "codes"])),
-      [deviceId, cookieHeader, "151", "2010", "65", "-1", "not-a-number"],
+      [deviceId, cookieHeader, "151", "2010", "65", "-1", "8001", "401", "1001", "301", "499", "not-a-number"],
     );
   });
 });
