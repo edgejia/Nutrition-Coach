@@ -128,6 +128,19 @@ describe("Device API", () => {
     assert.equal(res.json().dailyTargets.protein, 150);
   });
 
+  it("PATCH /api/device/goals updates targets through the same guest-session contract", async () => {
+    const create = await createGuestDevice();
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/device/goals",
+      headers: { cookie: create.cookieHeader },
+      payload: { protein: 150 },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().dailyTargets.protein, 150);
+  });
+
   it("PUT /api/device/goals returns 401 without a guest session", async () => {
     const res = await app.inject({
       method: "PUT",
@@ -590,5 +603,85 @@ describe("Device API", () => {
     assert.equal(invalid.statusCode, 400);
     assert.equal(unauthorized.statusCode, 401);
     assert.equal(findLogEvents(logLines, "device_goals_updated_rest").length, 0);
+  });
+
+  it("OBS-01: logs goal validation failures with redacted fields and locked codes", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const obs01App = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    const create = await obs01App.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const cookieHeader = toCookieHeader(create);
+    const deviceId = (create.json() as { deviceId: string }).deviceId;
+
+    const nonObject = await obs01App.inject({
+      method: "PATCH",
+      url: "/api/device/goals",
+      headers: {
+        cookie: cookieHeader,
+        "content-type": "application/json",
+      },
+      body: "null",
+    });
+    const invalidField = await obs01App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { protein: "151" },
+    });
+    const emptyValidFields = await obs01App.inject({
+      method: "PATCH",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { timezone: "Asia/Taipei" },
+    });
+    const negativeValue = await obs01App.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: cookieHeader },
+      payload: { calories: -1 },
+    });
+    const unauthorized = await obs01App.inject({
+      method: "PATCH",
+      url: "/api/device/goals",
+      payload: { fat: 65 },
+    });
+
+    await obs01App.close();
+
+    assert.equal(nonObject.statusCode, 400);
+    assert.equal(invalidField.statusCode, 400);
+    assert.equal(emptyValidFields.statusCode, 400);
+    assert.equal(negativeValue.statusCode, 400);
+    assert.equal(unauthorized.statusCode, 401);
+
+    const validationEvents = findLogEvents(logLines, "device_goals_validation_failed");
+    assert.deepEqual(
+      validationEvents.map((event) => pickEventMetadata(event, ["event", "fields", "codes"])),
+      [
+        { event: "device_goals_validation_failed", fields: [], codes: ["invalid_body"] },
+        { event: "device_goals_validation_failed", fields: ["protein"], codes: ["invalid_field_value"] },
+        { event: "device_goals_validation_failed", fields: [], codes: ["empty_valid_fields"] },
+        { event: "device_goals_validation_failed", fields: ["calories"], codes: ["invalid_field_value"] },
+      ],
+    );
+
+    for (const event of validationEvents) {
+      for (const key of ["route", "method", "deviceId", "body", "value", "target"]) {
+        assert.ok(!(key in event), `expected validation event to exclude metadata key ${key}`);
+      }
+    }
+    assert.equal(findLogEvents(logLines, "device_goals_updated_rest").length, 0);
+    assertLogEventsExclude(
+      validationEvents.map((event) => pickEventMetadata(event, ["event", "fields", "codes"])),
+      [deviceId, cookieHeader, "151", "2010", "65", "-1", "not-a-number"],
+    );
   });
 });
