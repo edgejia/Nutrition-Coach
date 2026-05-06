@@ -260,6 +260,97 @@ describe("meal correction service", () => {
     assert.equal(result.updatedMeal.fat, 6);
   });
 
+  it("resolves a named grouped item instead of an unrelated meal-period-only candidate", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T09:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+    const unrelatedLunch = await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const itemOnly = await mealCorrectionService.findMeals(deviceId, "update", "滷蛋改成兩顆水煮蛋");
+    assert.equal(itemOnly.status, "resolved");
+    assert.equal(itemOnly.resolvedMealId, grouped.id);
+    assert.notEqual(itemOnly.resolvedMealId, unrelatedLunch.id);
+    await mealCorrectionService.clearPendingSelection(deviceId);
+
+    const withModelPeriodHint = await mealCorrectionService.findMeals(
+      deviceId,
+      "update",
+      "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
+    );
+    assert.equal(withModelPeriodHint.status, "resolved");
+    assert.equal(withModelPeriodHint.resolvedMealId, grouped.id);
+    assert.notEqual(withModelPeriodHint.resolvedMealId, unrelatedLunch.id);
+    assert.equal(withModelPeriodHint.candidate.foodName, "雞腿、白飯、滷蛋、青菜");
+  });
+
+  it("clarifies instead of resolving a period-only candidate when named food terms are unmatched", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把中午鴨腿便當改成 500 卡");
+
+    assert.equal(result.status, "needs_clarification");
+    assert.match(result.prompt, /補充日期、餐別或食物名稱|不能確定/);
+  });
+
+  it("still allows meal-period-only targeting when the query has no named food terms", async () => {
+    const lunch = await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "燕麥",
+      calories: 220,
+      protein: 10,
+      carbs: 35,
+      fat: 4,
+      loggedAt: "2026-04-19T00:00:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐那餐刪掉");
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, lunch.id);
+  });
+
+  it("rejects direct food_name patches for grouped meals", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 30, carbs: 0, fat: 5 },
+        { foodName: "白飯", calories: 180, protein: 4, carbs: 40, fat: 0.5 },
+      ],
+    });
+
+    await assert.rejects(
+      mealCorrectionService.updateMeal(deviceId, grouped.id, { patch: { foodName: "雞胸便當" } }),
+      /MEAL_NAME_PATCH_REQUIRES_SINGLE_ITEM/,
+    );
+  });
+
   it("returns affectedDate for historical updates and keeps it in sync with dailySummary.date", async () => {
     const original = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",
