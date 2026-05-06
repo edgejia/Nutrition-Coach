@@ -509,6 +509,15 @@ describe("Orchestrator", () => {
       fields: ["protein"],
     });
     hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: true,
+      failureReason: "validation",
+      fields: ["protein"],
+      reason: "execution_validation",
+      summary: "<execute failure>",
+    });
+    hooks.onToolResult?.({
       tool: "update_goals",
       success: false,
       executed: false,
