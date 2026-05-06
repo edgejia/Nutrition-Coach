@@ -1782,6 +1782,33 @@ describe("Chat API", () => {
       assert.ok(Array.isArray(failedLogFood.fields), "validation fields must be logged");
       assert.ok((failedLogFood.fields as string[]).length > 0);
 
+      const validationEvents = observabilityEvents(logLines, "log_food_validation_failed");
+      assert.equal(validationEvents.length, 1);
+      const validationEventMetadata = {
+        event: validationEvents[0]!.event,
+        tool: validationEvents[0]!.tool,
+        failureReason: validationEvents[0]!.failureReason,
+        fields: validationEvents[0]!.fields,
+      };
+      assert.deepEqual(validationEventMetadata, {
+        event: "log_food_validation_failed",
+        tool: "log_food",
+        failureReason: "validation",
+        fields: validationEvents[0]!.fields,
+      });
+      assert.ok(Array.isArray(validationEvents[0]!.fields));
+      assert.ok((validationEvents[0]!.fields as string[]).every((field) =>
+        ["calories", "protein", "carbs", "fat"].includes(field),
+      ));
+      assert.equal("reason" in validationEvents[0]!, false);
+      assert.equal("summary" in validationEvents[0]!, false);
+      assert.equal("executed" in validationEvents[0]!, false);
+      assert.equal("success" in validationEvents[0]!, false);
+
+      const dedicatedPayload = JSON.stringify(validationEventMetadata);
+      assert.doesNotMatch(dedicatedPayload, /food_name|items|protein_sources|quantity|quantity_g|quantity_ml/);
+      assert.doesNotMatch(dedicatedPayload, /not-a-number|call_invalid_log_food_json|imagePath|uploads/);
+
       const serializedLogs = JSON.stringify(parseLogLines(logLines));
       assert.ok(!serializedLogs.includes(rawMealText));
       assert.ok(!serializedLogs.includes(logDeviceId));
