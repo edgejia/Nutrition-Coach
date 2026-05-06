@@ -2233,6 +2233,11 @@ textarea {
   padding: 14px 18px calc(128px + var(--app-bottom-occlusion, 0px) + env(safe-area-inset-bottom));
 }
 
+.sp-meal-edit-scroll > * {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
 .sp-meal-edit-image-frame {
   position: relative;
   display: grid;
