@@ -256,7 +256,6 @@ const groupedMealCanonicalScenario: VerificationScenario = {
           },
         }],
       });
-      llmProvider.queueChatStream(["已記錄雞腿、白飯、青菜，估約 620 kcal，蛋白質 24 g。"]);
 
       const imageForm = new FormData();
       imageForm.append("message", "這是晚餐照片");
@@ -331,7 +330,6 @@ const groupedMealCanonicalScenario: VerificationScenario = {
           },
         }],
       });
-      llmProvider.queueChatStream(["已記錄蘋果，估約 95 kcal，蛋白質 0 g。"]);
 
       const textForm = new FormData();
       textForm.append("message", "我吃了蘋果");
@@ -356,10 +354,12 @@ const groupedMealCanonicalScenario: VerificationScenario = {
       if (
         failIf(
           !replyHasRequiredReceiptShape(textSingleLog.replyText) ||
-            containsInternalToolName(textSingleLog.replyText),
+            containsInternalToolName(textSingleLog.replyText) ||
+            !textSingleLog.replyText.includes("蘋果") ||
+            textSingleLog.replyText.includes("雞腿、白飯、青菜"),
           steps,
           "text_single_log",
-          "Expected compact successful text reply with receipt fields and no internal names",
+          "Expected compact fresh text reply for 蘋果 with no internal names or stale grouped receipt",
           { replyText: textSingleLog.replyText, length: textSingleLog.replyText.length },
         )
       ) {
@@ -375,7 +375,16 @@ const groupedMealCanonicalScenario: VerificationScenario = {
         }));
         return failResult(steps, "text_single_log", artifacts);
       }
-      steps.push(pass("text_single_log", { donePayload: textSingleLog.donePayload, itemCount: 1 }));
+      artifacts.freshReplyIsolation = {
+        textSingleFoodName: textSingleLog.donePayload.loggedMeal?.foodName,
+        textSingleReply: textSingleLog.replyText,
+        excludesPreviousGroupedReceipt: !textSingleLog.replyText.includes("雞腿、白飯、青菜"),
+      };
+      steps.push(pass("text_single_log", {
+        donePayload: textSingleLog.donePayload,
+        itemCount: 1,
+        replyText: textSingleLog.replyText,
+      }));
 
       llmProvider.queueRoundResponse({
         toolCalls: [{
@@ -403,7 +412,6 @@ const groupedMealCanonicalScenario: VerificationScenario = {
           },
         }],
       });
-      llmProvider.queueChatStream(["已更新原本那筆雞腿、白飯、青菜，蛋白質 22 g。"]);
 
       const editForm = new FormData();
       editForm.append("message", "把剛剛那餐雞腿白飯蛋白質改成 22g");
