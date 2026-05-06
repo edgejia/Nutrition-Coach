@@ -248,11 +248,14 @@ describe("Orchestrator - didLogMeal", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
-
     const result = await orchestrator.handleMessage(deviceId, "我吃了雞腿便當");
     if (!("reply" in result)) throw new Error("expected reply result");
-    assert.equal(result.reply, "已幫你記錄蘋果！");
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "蘋果",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /蛋白質 0 g/);
     assert.equal(result.didLogMeal, true);
 
     const history = await chatService.getHistory(deviceId, 10);
@@ -326,7 +329,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.dailySummary?.date, "2026-03-25");
   });
 
-  it("handleMessage returns didLogMeal: true when log_food succeeded but final LLM round fails", async () => {
+  it("handleMessage returns didLogMeal: true with projected copy after log_food succeeds", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
@@ -348,14 +351,16 @@ describe("Orchestrator - didLogMeal", () => {
         },
       }],
     });
-    mockLLM.queueChatError(new Error("API timeout"));
-
     const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assert.equal(result.didLogMeal, true);
     if (!("reply" in result)) throw new Error("expected reply result");
-    assert.match(result.reply, /已完成記錄，但回覆生成失敗。/);
-    assert.match(result.reply, /蛋白質先按雞腿作為主要來源估算/);
-    assert.match(result.reply, /其他配菜不列入 headline/);
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "雞腿便當",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /蛋白質 24 g（以雞腿為主）/);
+    assert.doesNotMatch(result.reply, /已完成記錄，但回覆生成失敗|headline/);
   });
 
   it("handleMessage throws when log_food persists but summary recomputation fails afterward", async () => {
@@ -700,7 +705,7 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: false,
       allowsNextStep: false,
     });
-    assert.match(result.reply, /2026-03-25/);
+    assert.match(result.reply, /3\/25/);
   });
 
   it("recovers locally when the user replies 2 to a previously hallucinated choice prompt", async () => {

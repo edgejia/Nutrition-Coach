@@ -84,7 +84,8 @@ function sanitizeReply(text: string): string {
     .replace(/protein_sources/g, "蛋白質來源")
     .replace(/usedConservativeAssumption/g, "保守假設")
     .replace(/quantityUncertaintyReason/g, "份量不確定原因")
-    .replace(/missing_quantity/g, "缺少份量");
+    .replace(/missing_quantity/g, "缺少份量")
+    .replace(/[（(]\s*\d+\s*\/\s*\d+\s*[）)]/g, "");
 }
 
 function formatHistoricalDateLabel(dateKey: string, currentDate = currentAppDate()): string {

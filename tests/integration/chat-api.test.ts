@@ -796,8 +796,6 @@ describe("Chat API", () => {
         },
       }],
     });
-    mockLLM.queueChatError(new Error("API timeout"));
-
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
     const res = await fetch(`${address}/api/chat`, {
@@ -809,8 +807,9 @@ describe("Chat API", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.didLogMeal, true, "meal was persisted; didLogMeal must survive LLM failure");
-    assert.match(body.reply, /已完成記錄，但回覆生成失敗。/);
-    assert.match(body.reply, /蛋白質先按雞腿作為主要來源估算/);
+    assert.match(body.reply, /已記錄雞腿便當/);
+    assert.match(body.reply, /蛋白質 24 g（以雞腿為主）/);
+    assert.doesNotMatch(body.reply, /已完成記錄，但回覆生成失敗|headline/);
     assert.deepEqual(body.dailySummary, {
       totalCalories: 620,
       totalProtein: 24,
@@ -1057,8 +1056,6 @@ describe("Chat API", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已補記牛肉麵。" });
-
     const seedForm = new FormData();
     seedForm.append("message", "我吃了牛肉麵");
     const seedRes = await fetch(`${address}/api/chat`, {
@@ -1339,7 +1336,7 @@ describe("Chat API", () => {
     };
     const assistantMsgs = historyBody.messages.filter((message) => message.role === "assistant");
     assert.equal(assistantMsgs.length, 1);
-    assert.match(assistantMsgs[0]?.content ?? "", /已完成記錄，但回覆生成失敗/);
+    assert.match(assistantMsgs[0]?.content ?? "", /已記錄燕麥粥/);
     assert.match(assistantMsgs[0]?.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
     assert.ok(assistantMsgs[0]?.loggedMeal?.imageAssetId);
   });
@@ -1366,8 +1363,6 @@ describe("Chat API", () => {
         },
       }],
     });
-    mockLLM.queueChatError(new Error("json generation failed"));
-
     const form = new FormData();
     form.append("message", "這是雞腿便當");
     form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
@@ -1418,7 +1413,7 @@ describe("Chat API", () => {
     };
     const assistantMsgs = historyBody.messages.filter((message) => message.role === "assistant");
     assert.equal(assistantMsgs.length, 1);
-    assert.match(assistantMsgs[0]?.content ?? "", /已完成記錄，但回覆生成失敗/);
+    assert.match(assistantMsgs[0]?.content ?? "", /已記錄雞腿便當/);
     assert.equal(assistantMsgs[0]?.loggedMeal?.mealId, body.loggedMeal?.mealId);
     assert.equal(assistantMsgs[0]?.loggedMeal?.imageAssetId, body.loggedMeal?.imageAssetId);
     assert.equal(assistantMsgs[0]?.loggedMeal?.imageUrl, body.loggedMeal?.imageUrl);

@@ -496,7 +496,7 @@ describe("chat-streaming", () => {
         }>;
       };
       assert.equal(historyJson.messages.at(-1)?.role, "assistant");
-      assert.equal(historyJson.messages.at(-1)?.content, "測試回覆");
+      assert.match(historyJson.messages.at(-1)?.content ?? "", /已記錄雞腿便當/);
       assert.equal(historyJson.messages.at(-1)?.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
       assert.equal(historyJson.messages.at(-1)?.loggedMeal?.imageAssetId, donePayload.loggedMeal?.imageAssetId);
       assert.equal(historyJson.messages.at(-1)?.loggedMeal?.imageUrl, donePayload.loggedMeal?.imageUrl);
@@ -646,12 +646,10 @@ describe("chat-streaming", () => {
   });
 
   it("POST /api/chat/stop gracefully stops the active turn and persists stopped partial content", async () => {
-    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
     mockLLM.queueAbortableChatStream(["已", "完成", "記錄"]);
 
     const form = new FormData();
-    form.append("message", "我吃了雞腿便當");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), "lunch.png");
+    form.append("message", "請給我一些飲食建議");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -707,12 +705,10 @@ describe("chat-streaming", () => {
       };
       assert.equal(stoppedPayload.stopped, true);
       assert.equal(stoppedPayload.tokensStreamed, 1);
-      assert.equal(stoppedPayload.didLogMeal, true);
-      assert.equal(stoppedPayload.didMutateMeal, true);
-      assert.ok(stoppedPayload.dailySummary);
-      assert.match(stoppedPayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
-      assert.ok(stoppedPayload.loggedMeal?.imageAssetId);
-      assert.equal(stoppedPayload.loggedMeal?.foodName, "雞腿便當");
+      assert.equal(stoppedPayload.didLogMeal, false);
+      assert.equal(stoppedPayload.didMutateMeal, false);
+      assert.equal(stoppedPayload.dailySummary, undefined);
+      assert.equal(stoppedPayload.loggedMeal, undefined);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
@@ -730,9 +726,7 @@ describe("chat-streaming", () => {
       assert.equal(assistantMessages.length, 1, "stopped stream must persist one assistant row");
       assert.equal(assistantMessages[0]?.content, "已");
       assert.equal(assistantMessages[0]?.status, "stopped");
-      assert.equal(assistantMessages[0]?.loggedMeal?.mealId, stoppedPayload.loggedMeal?.mealId);
-      assert.equal(assistantMessages[0]?.loggedMeal?.imageAssetId, stoppedPayload.loggedMeal?.imageAssetId);
-      assert.equal(assistantMessages[0]?.loggedMeal?.foodName, "雞腿便當");
+      assert.equal(assistantMessages[0]?.loggedMeal, undefined);
     } finally {
       clearTimeout(timeout);
       await reader?.cancel().catch(() => {});
@@ -821,8 +815,6 @@ describe("chat-streaming", () => {
         },
       }],
     });
-    mockLLM.queueChatStream(["已補記"]);
-
     const seedForm = new FormData();
     seedForm.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
     const seedRes = await fetch(`${address}/api/chat`, {
@@ -892,14 +884,12 @@ describe("chat-streaming", () => {
     assert.equal(donePayload.loggedMeal?.protein, 20);
     assert.equal(donePayload.loggedMeal?.carbs, 45);
     assert.equal(donePayload.loggedMeal?.fat, 10);
-    assert.match(chunkText, /已更新半碗牛肉麵，360 kcal，蛋白質 20 g/);
+    assert.match(chunkText, /已更新(?:3\/25 )?半碗牛肉麵，360 kcal，蛋白質 20 g/);
     assert.doesNotMatch(chunkText, /蛋餅|330 kcal|14 g|5\/5|（5\/5）|可信蛋白/);
   });
 
   it("POST /api/chat stream done keeps delete_meal confirmations non-editable", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
-    mockLLM.queueChatStream(["已記錄雞腿便當"]);
-
     const seedForm = new FormData();
     seedForm.append("message", "我吃了雞腿便當");
     const seedRes = await fetch(`${address}/api/chat`, {
@@ -1484,8 +1474,6 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat D-09: when log_food succeeds but chatRound final-reply throws, meal is kept and partial-success fallback written to history", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
-    mockLLM.queueRoundError(new Error("LLM reply generation failed"));
-
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
 
@@ -1522,13 +1510,9 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
-      assert.match(
-        assistantMsgs[0]!.content,
-        /已完成記錄，但回覆生成失敗/,
-        "D-09 must use the partial-success fallback, not the generic route catch fallback",
-      );
-      assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
-      assert.match(assistantMsgs[0]!.content, /其他配菜不列入 headline/);
+      assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g（以雞腿為主）/);
+      assert.doesNotMatch(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗|headline/);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
         headers: { cookie: sessionCookieHeader },
@@ -1542,8 +1526,6 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat D-09: when streamed final reply throws after log_food, meal state is preserved", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
-    mockLLM.queueChatStreamError(["已"], new Error("stream interrupted after log_food"));
-
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
 
@@ -1579,8 +1561,8 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
-      assert.match(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
+      assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g（以雞腿為主）/);
     } finally {
       clearTimeout(timeout);
     }
@@ -1588,8 +1570,6 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat preserves loggedMeal history when streamed hallucination fallback follows log_food", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
-    mockLLM.queueChatStream(["若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算。"]);
-
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
 
@@ -1608,7 +1588,7 @@ describe("chat-streaming", () => {
       const reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
 
-      assert.match(text, /抱歉，無法辨識這次的請求/);
+      assert.match(text, /已記錄雞腿便當/);
       const doneMatch = text.match(/event: done\s+data: (.+)/);
       assert.ok(doneMatch);
       const donePayload = JSON.parse(doneMatch[1]) as {
@@ -1631,7 +1611,7 @@ describe("chat-streaming", () => {
       };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "hallucination fallback must persist exactly one assistant reply");
-      assert.match(assistantMsgs[0]!.content, /抱歉，無法辨識這次的請求/);
+      assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
       assert.equal(assistantMsgs[0]!.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
       assert.equal(assistantMsgs[0]!.loggedMeal?.foodName, "雞腿便當");
     } finally {
@@ -1641,8 +1621,6 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat grouped log_food keeps didLogMeal and dailySummary when the final reply fails", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createGroupedLogFoodToolCall()] });
-    mockLLM.queueRoundError(new Error("LLM grouped reply generation failed"));
-
     const form = new FormData();
     form.append("message", "我吃了蘋果和優格");
 
@@ -1691,7 +1669,8 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
-      assert.match(assistantMsgs[0]!.content, /蛋白質先按優格和水煮蛋作為主要來源估算/);
+      assert.match(assistantMsgs[0]!.content, /已記錄蘋果、優格、水煮蛋/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 15 g（優格和水煮蛋）/);
     } finally {
       clearTimeout(timeout);
     }

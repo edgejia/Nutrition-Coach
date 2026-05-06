@@ -88,6 +88,19 @@ function formatProteinGrams(protein: number): string {
   return Number.isInteger(protein) ? String(protein) : protein.toFixed(1).replace(/\.0$/, "");
 }
 
+function formatReceiptDateLabel(dateKey: string, currentDate = currentAppDate()): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) {
+    return dateKey;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return year === currentDate.getFullYear()
+    ? `${month}/${day}`
+    : `${year}/${month}/${day}`;
+}
+
 function buildTrustedProteinExplanation(loggedMeal: LoggedMealReceipt): string {
   const countedSourceNames = [...new Set(
     loggedMeal.countedSources
@@ -148,7 +161,7 @@ function getHighVarianceErrorSource(foodName: string): "湯底與份量" | "油�
 
 function buildImageLoggedReply(loggedMeal: LoggedMealReceipt): string {
   const todayKey = formatLocalDate(currentAppDate());
-  const datePrefix = loggedMeal.dateKey !== todayKey ? `${loggedMeal.dateKey} ` : "";
+  const datePrefix = loggedMeal.dateKey !== todayKey ? `${formatReceiptDateLabel(loggedMeal.dateKey)} ` : "";
   const calories = formatCalories(loggedMeal.calories);
   const protein = formatProteinGrams(loggedMeal.protein);
   const highVarianceErrorSource = getHighVarianceErrorSource(loggedMeal.foodName);
@@ -166,6 +179,14 @@ function buildImageLoggedReply(loggedMeal: LoggedMealReceipt): string {
   return uncertaintyErrorSource
     ? `${receipt}。${uncertaintyErrorSource}是主要誤差${nextStep}。`
     : `${receipt}。`;
+}
+
+function buildUpdatedMealReply(loggedMeal: LoggedMealReceipt): string {
+  const todayKey = formatLocalDate(currentAppDate());
+  const datePrefix = loggedMeal.dateKey !== todayKey ? `${formatReceiptDateLabel(loggedMeal.dateKey)} ` : "";
+  const calories = formatCalories(loggedMeal.calories);
+  const protein = formatProteinGrams(loggedMeal.protein);
+  return `已更新${datePrefix}${loggedMeal.foodName}，${calories} kcal，蛋白質 ${protein} g。`;
 }
 
 export function buildPartialSuccessLoggedReply(loggedMeal: LoggedMealReceipt): string {
@@ -539,6 +560,32 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           }
           if (didLogMeal && loggedMeal && isImageOnlyMessage(userMessage, imageBase64)) {
             const reply = buildImageLoggedReply(loggedMeal);
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
+            return {
+              reply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
+            };
+          }
+          if (didLogMeal && loggedMeal) {
+            const reply = buildImageLoggedReply(loggedMeal);
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
+            return {
+              reply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
+            };
+          }
+          if (didMutateMeal && loggedMeal) {
+            const reply = buildUpdatedMealReply(loggedMeal);
             opts?.hooks?.onLLMEnd?.(round + 1, true);
             return {
               reply,
