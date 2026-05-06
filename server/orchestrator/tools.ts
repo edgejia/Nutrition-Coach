@@ -239,6 +239,14 @@ interface UpdateGoalsResult {
 }
 
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
+const quantityToolProperties = {
+  quantity: { type: "number" },
+  quantity_g: { type: "number" },
+  quantity_ml: { type: "number" },
+  amount: { type: "string" },
+  unit: { type: "string" },
+  serving_size: { type: "string" },
+} as const;
 const historicalDateTextSchema = z.string().min(1, "date_text must be non-empty").optional();
 const historicalMealPeriodSchema = z.enum(["breakfast", "lunch", "dinner", "late_night"]).optional();
 const proteinSourceSchema = z
@@ -436,13 +444,16 @@ function hasQuantityLikeNumberInText(text: string): boolean {
   return /(?:\d|[０-９]|[一二三四五六七八九十兩半])\s*(?:g|克|公斤|kg|ml|毫升|杯|碗|份|顆|片|根|條|個|包|盒|匙|湯匙|茶匙|碗|盤|瓶|罐|塊|枚|串|球|卷|張|把)?/i.test(text);
 }
 
-function shouldMarkMissingQuantity(items: LogFoodItemArgs[]): boolean {
+function shouldMarkMissingQuantity(items: LogFoodItemArgs[], sourceText?: string): boolean {
+  if (sourceText && hasQuantityLikeNumberInText(sourceText)) {
+    return false;
+  }
   return items.every(
     (item) => !hasQuantityBearingField(item) && !hasQuantityLikeNumberInText(item.food_name),
   );
 }
 
-export function normalizeLogFoodArgs(args: LogFoodArgs): NormalizedLogFoodArgs {
+export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): NormalizedLogFoodArgs {
   // When items[] is present it is authoritative; top-level aggregate fields are compatibility noise.
   const items = "items" in args
     ? args.items
@@ -467,7 +478,7 @@ export function normalizeLogFoodArgs(args: LogFoodArgs): NormalizedLogFoodArgs {
     ...(args.date_text !== undefined ? { date_text: args.date_text } : {}),
     ...(args.meal_period !== undefined ? { meal_period: args.meal_period } : {}),
     ...(args.protein_sources !== undefined ? { protein_sources: args.protein_sources } : {}),
-    ...(shouldMarkMissingQuantity(items)
+    ...(shouldMarkMissingQuantity(items, sourceText)
       ? { quantityUncertaintyReason: "missing_quantity" as const }
       : {}),
   };
@@ -649,6 +660,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       protein: { type: "number" },
       carbs: { type: "number" },
       fat: { type: "number" },
+      ...quantityToolProperties,
       protein_sources: {
         type: "array",
         description: "Required. List visually identifiable protein-bearing ingredients; mark uncertain when estimated from an image.",
@@ -683,6 +695,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
             protein: { type: "number" },
             carbs: { type: "number" },
             fat: { type: "number" },
+            ...quantityToolProperties,
           },
           required: ["food_name", "calories", "protein", "carbs", "fat"],
         },
@@ -750,7 +763,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         })
       : undefined;
 
-    const normalized = normalizeLogFoodArgs(args);
+    const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
     const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(normalized);
     const normalizedProtein = normalizeTrustedProteinEstimate({
       mealName: normalized.items.map((item) => item.food_name.trim()).join("、"),

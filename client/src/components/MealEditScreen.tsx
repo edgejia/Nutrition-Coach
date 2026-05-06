@@ -190,7 +190,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setActiveScreen("chat");
   };
 
-  if (!payload || !draft) {
+  if (!payload) {
     return (
       <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
         <SportScreen className="sp-meal-edit-screen">
@@ -240,6 +240,30 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
               <button type="button" className="sp-meal-edit-grouped-primary" onClick={goToChatCorrection}>
                 到對話修正
               </button>
+            </SportCard>
+          </main>
+        </SportScreen>
+      </div>
+    );
+  }
+
+  if (!draft) {
+    return (
+      <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
+        <SportScreen className="sp-meal-edit-screen">
+          <header className="sp-meal-edit-header">
+            <SportIconButton aria-label="返回" className="sp-meal-edit-back" onClick={onBack}>
+              <SportChevronLeftIcon size={18} stroke={2} />
+            </SportIconButton>
+            <div className="sp-meal-edit-title">
+              <h1>編輯餐點</h1>
+              <div>REV · MEAL</div>
+            </div>
+            <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
+          </header>
+          <main className="screen-scroll-safe sp-meal-edit-scroll">
+            <SportCard className="sp-meal-edit-empty" variant="flat">
+              找不到要編輯的餐點。
             </SportCard>
           </main>
         </SportScreen>

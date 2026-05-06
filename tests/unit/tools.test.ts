@@ -119,6 +119,13 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.ok(toolDefs.log_food.properties.protein_sources, "protein_sources must stay top-level");
     assert.ok(toolDefs.log_food.properties.items, "items[] must remain accepted");
     assert.equal(toolDefs.log_food.properties.items.items.properties.protein_sources, undefined);
+    for (const quantityField of ["quantity", "quantity_g", "quantity_ml", "amount", "unit", "serving_size"]) {
+      assert.ok(toolDefs.log_food.properties[quantityField], `${quantityField} must be exposed for single-shape log_food`);
+      assert.ok(
+        toolDefs.log_food.properties.items.items.properties[quantityField],
+        `${quantityField} must be exposed for items[] log_food entries`,
+      );
+    }
   });
 
   it("normalizes items[] log_food calls through the same canonical grouped path and ignores top-level aggregates", async () => {
@@ -471,6 +478,36 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(quantityFieldResult.loggedMeal.quantityUncertaintyReason, undefined);
     assert.ok(quantityTextResult.loggedMeal);
     assert.equal(quantityTextResult.loggedMeal.quantityUncertaintyReason, undefined);
+  });
+
+  it("omits transient missing_quantity metadata when the source user text carries the quantity", async () => {
+    const normalizedNameCall: ToolCall = {
+      id: "call_user_text_quantity",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "白飯",
+          calories: 280,
+          protein: 5,
+          carbs: 62,
+          fat: 1,
+          protein_sources: [
+            { name: "白飯", protein: 5, is_primary: false, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(normalizedNameCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    }, {
+      currentUserMessage: "我吃了一碗飯",
+    });
+
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.quantityUncertaintyReason, undefined);
   });
 
   it("Test 1c: mixed lunchbox persists trusted protein from protein_sources instead of raw proposal", async () => {

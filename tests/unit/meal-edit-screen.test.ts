@@ -97,6 +97,7 @@ describe("Meal Edit source contract", () => {
     assert.match(source, escapedPattern("這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。"));
     assert.match(source, escapedPattern("closeSecondaryScreen"));
     assert.match(source, escapedPattern('setActiveScreen("chat")'));
+    assert.match(source, /if \(!payload\) \{[\s\S]+?if \(payload\.itemCount\s*>\s*1\) \{[\s\S]+?if \(!draft\) \{/);
 
     const groupedBranch = source.match(/if \(payload\.itemCount\s*>\s*1\) \{[\s\S]+?sp-meal-edit-grouped-primary[\s\S]+?\n\s*\);\n\s*\}/)?.[0] ?? "";
     assert.match(groupedBranch, escapedPattern("sp-meal-edit-grouped-lock"));
