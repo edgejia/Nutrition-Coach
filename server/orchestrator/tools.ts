@@ -572,19 +572,6 @@ function resolveProteinSourceInputs(
     };
   }
 
-  const sourceAnchor = sourceTextSoyMilkAnchor(sourceText);
-  if (sourceAnchor && totalProposedProtein(args) > 0) {
-    return {
-      usedExplicitProteinSources: false,
-      proteinSources: [{
-        name: sourceAnchor,
-        protein: totalProposedProtein(args),
-        isPrimary: true,
-        certainty: "clear",
-      }],
-    };
-  }
-
   return {
     usedExplicitProteinSources: false,
     proteinSources: inferredSources,

@@ -550,6 +550,21 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
         }),
       },
     };
+    const nonGenericSoyTextCall: ToolCall = {
+      id: "call_non_generic_soy_text",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "珍珠奶茶",
+          quantity_ml: 500,
+          calories: 420,
+          protein: 9,
+          carbs: 76,
+          fat: 10,
+        }),
+      },
+    };
 
     const repairedResult = await executeTool(soyTextAnchoredCall, deviceId, {
       foodLoggingService,
@@ -570,6 +585,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
         summaryService,
       }, {
         currentUserMessage: "一杯飲料",
+      }),
+      /trusted protein basis required for this meal/,
+    );
+    await assert.rejects(
+      executeTool(nonGenericSoyTextCall, deviceId, {
+        foodLoggingService,
+        summaryService,
+      }, {
+        currentUserMessage: "一杯豆漿珍珠奶茶",
       }),
       /trusted protein basis required for this meal/,
     );
