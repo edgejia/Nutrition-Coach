@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createMealCorrectionService } from "../../server/services/meal-correction.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
@@ -549,6 +550,69 @@ describe("Orchestrator - didLogMeal", () => {
     assert.match(result.reply, /蛋白質 28 g（以豬肉為主）/);
     assert.doesNotMatch(result.reply, /保守估算|headline/);
     assert.equal(mockLLM.chatCalls.length, 1, "image-only logging should not require a second LLM round");
+  });
+
+  it("projects correction clarification copy from user terms and full grouped candidate names", async () => {
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const localMealCorrectionService = createMealCorrectionService(db);
+    const localLLM = new MockLLMProvider();
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    await localFoodLoggingService.logGroupedMeal(localDeviceId, {
+      loggedAt: "2026-04-19T09:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+    await localFoodLoggingService.logGroupedMeal(localDeviceId, {
+      loggedAt: "2026-04-19T10:00:00.000Z",
+      items: [
+        { foodName: "排骨", calories: 300, protein: 26, carbs: 8, fat: 18 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+
+    orchestrator = createOrchestrator({
+      llmProvider: localLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      mealCorrectionService: localMealCorrectionService,
+      deviceService: localDeviceService,
+    });
+
+    localLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_ambiguous_grouped_item",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
+          }),
+        },
+      }],
+    });
+    localLLM.queueChatResponse({ content: "你是要修改中午雞腿便當嗎？" });
+
+    const result = await orchestrator.handleMessage(localDeviceId, "滷蛋改成兩顆水煮蛋");
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(result.didMutateMeal, false);
+    assert.match(result.reply, /滷蛋/);
+    assert.match(result.reply, /雞腿、白飯、滷蛋、青菜/);
+    assert.match(result.reply, /排骨、白飯、滷蛋、青菜/);
+    assert.doesNotMatch(result.reply, /中午雞腿便當/);
   });
 
   it("formats successful log replies compactly when missing_quantity metadata marks missing quantity", async () => {

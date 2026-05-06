@@ -276,4 +276,22 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /開場|coaching opening/);
     assert.doesNotMatch(prompt, /progress-lag|abnormal|每日目標差距|時間門檻/);
   });
+
+  it("requires historical correction queries to preserve grouped target and item terms", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+
+    assert.match(prompt, /find_meals\.query/);
+    assert.match(prompt, /雞腿、白飯、滷蛋、青菜/);
+    assert.match(prompt, /滷蛋/);
+    assert.match(prompt, /不要.*中午雞腿便當|不得.*中午雞腿便當/);
+    assert.match(prompt, /修改或刪除歷史餐點前，必須先呼叫 find_meals/);
+    assert.match(prompt, /find_meals 已解析出唯一目標.*update_meal 或 delete_meal/s);
+    assert.match(prompt, /餐點拆分與記錄規則/);
+    assert.match(prompt, /成功 log_food 回覆契約/);
+  });
 });
