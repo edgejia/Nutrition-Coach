@@ -654,9 +654,6 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({
-      content: "我找到多筆今天的雞腿飯，請直接回覆編號。",
-    });
 
     const firstTurn = await postChat("把今天午餐的雞腿飯刪掉");
     assert.equal(firstTurn.status, 200);
