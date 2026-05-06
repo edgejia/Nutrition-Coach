@@ -886,6 +886,14 @@ describe("chat-streaming", () => {
         protein?: number;
         carbs?: number;
         fat?: number;
+        items?: Array<{
+          name: string;
+          position: number;
+          calories: number;
+          protein: number;
+          carbs: number;
+          fat: number;
+        }>;
       };
     };
 
@@ -900,6 +908,9 @@ describe("chat-streaming", () => {
     assert.equal(donePayload.loggedMeal?.protein, 20);
     assert.equal(donePayload.loggedMeal?.carbs, 45);
     assert.equal(donePayload.loggedMeal?.fat, 10);
+    assert.deepEqual(donePayload.loggedMeal?.items, [
+      { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
+    ]);
     assert.match(chunkText, /已更新(?:3\/25 )?半碗牛肉麵，360 kcal，蛋白質 20 g/);
     assert.doesNotMatch(chunkText, /蛋餅|330 kcal|14 g|5\/5|（5\/5）|可信蛋白/);
   });
@@ -929,7 +940,10 @@ describe("chat-streaming", () => {
         createDeleteMealToolCall(mealId),
       ],
     });
-    mockLLM.queueChatStream(["已刪除這筆雞腿便當。"]);
+    mockLLM.queueChatStream([
+      "方式1 直接刪除這筆餐點\n",
+      "方式2 先不要刪除",
+    ]);
 
     const form = new FormData();
     form.append("message", "刪除雞腿便當");
@@ -942,7 +956,8 @@ describe("chat-streaming", () => {
 
     assert.ok(res.body);
     const text = await readStreamUntil(res.body.getReader(), "event: done");
-    assert.match(text, /已刪除這筆雞腿便當/);
+    assert.match(text, /餐點已更新，但回覆生成失敗|已完成餐點調整/);
+    assert.doesNotMatch(text, /無法辨識這次的請求/);
     const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
     assert.ok(doneDataMatch);
     const donePayload = JSON.parse(doneDataMatch[1]) as {

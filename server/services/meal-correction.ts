@@ -643,6 +643,14 @@ export function createMealCorrectionService(db: AppDatabase) {
         carbs: number;
         fat: number;
         itemCount: number;
+        items: Array<{
+          name: string;
+          position: number;
+          calories: number;
+          protein: number;
+          carbs: number;
+          fat: number;
+        }>;
         imagePath: string | null;
         loggedAt: string;
       };
@@ -682,6 +690,14 @@ export function createMealCorrectionService(db: AppDatabase) {
           carbs: updated.items.reduce((sum, item) => sum + item.carbs, 0),
           fat: updated.items.reduce((sum, item) => sum + item.fat, 0),
           itemCount: display.itemCount,
+          items: updated.items.map((item, index) => ({
+            name: item.foodName,
+            position: index + 1,
+            calories: item.calories,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+          })),
           imagePath: updated.imageAssetId ? makeAssetRef(updated.imageAssetId) : null,
           loggedAt: updated.loggedAt,
         },

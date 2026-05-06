@@ -419,6 +419,7 @@ async function handleStreamingReply(
   chatService: ReturnType<typeof createChatService>,
   deviceId: string,
   didLogMeal: boolean,
+  didMutateMeal: boolean,
   dailySummary: unknown,
   receiptIdentity: ReceiptIdentity | undefined,
   affectedDate?: string,
@@ -479,7 +480,7 @@ async function handleStreamingReply(
 
   if (hallucinationDetected) {
     hooks?.onFallback?.("hallucination_detected");
-    const retryMsg = didLogMeal && partialMutationReply
+    const retryMsg = didMutateMeal && partialMutationReply
       ? partialMutationReply
       : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
     await finalizeAssistantReply(chatService, deviceId, retryMsg, receiptIdentity);
@@ -587,10 +588,11 @@ async function handleOrchestratorSSE(
         deps.chatService,
         deviceId,
         didLogMeal,
+        streamDidMutateMeal,
         dailySummary,
         streamReceiptIdentity,
         streamAffectedDate,
-        streamLoggedMeal,
+        streamLoggedMeal ?? (streamDidMutateMeal ? PARTIAL_MUTATION_FALLBACK : undefined),
         hooks,
         stopControl,
       );

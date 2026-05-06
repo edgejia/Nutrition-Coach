@@ -1125,7 +1125,21 @@ describe("Chat API", () => {
     const updateBody = await updateRes.json() as {
       reply: string;
       didMutateMeal?: boolean;
-      loggedMeal?: { foodName?: string; calories?: number; protein?: number; carbs?: number; fat?: number };
+      loggedMeal?: {
+        foodName?: string;
+        calories?: number;
+        protein?: number;
+        carbs?: number;
+        fat?: number;
+        items?: Array<{
+          name: string;
+          position: number;
+          calories: number;
+          protein: number;
+          carbs: number;
+          fat: number;
+        }>;
+      };
     };
     assert.equal(updateBody.didMutateMeal, true);
     assert.match(updateBody.reply, /已更新半碗牛肉麵，360 kcal，蛋白質 20 g/);
@@ -1135,6 +1149,9 @@ describe("Chat API", () => {
     assert.equal(updateBody.loggedMeal?.protein, 20);
     assert.equal(updateBody.loggedMeal?.carbs, 45);
     assert.equal(updateBody.loggedMeal?.fat, 10);
+    assert.deepEqual(updateBody.loggedMeal?.items, [
+      { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
+    ]);
   });
 
   it("POST /api/chat without SSE accept header still returns JSON", async () => {

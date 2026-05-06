@@ -220,6 +220,14 @@ interface UpdateMealResult {
     carbs: number;
     fat: number;
     itemCount: number;
+    items: Array<{
+      name: string;
+      position: number;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
     imagePath: string | null;
     loggedAt: string;
   };
@@ -1372,6 +1380,7 @@ export async function executeTool(
         carbs: contractResult.updatedMeal.carbs,
         fat: contractResult.updatedMeal.fat,
         itemCount: contractResult.updatedMeal.itemCount,
+        items: contractResult.updatedMeal.items,
         countedSources: [],
         excludedSources: [],
         usedConservativeAssumption: false,
