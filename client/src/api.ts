@@ -9,6 +9,7 @@ import type {
   IntakeValidationIssue,
   LoggedMealReceipt,
   MealEntry,
+  MealItemDetail,
   Message,
   CoachCTAIntentId,
   CoachCTAOptionId,
@@ -48,6 +49,56 @@ function normalizeItemCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
 }
 
+function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const items = value
+    .map((item): MealItemDetail | null => {
+      if (!isRecord(item)) {
+        return null;
+      }
+
+      const nutrition = isRecord(item.nutrition) ? item.nutrition : item;
+      const name = typeof item.name === "string" ? item.name.trim() : "";
+      const position = item.position;
+      const calories = nutrition.calories;
+      const protein = nutrition.protein;
+      const carbs = nutrition.carbs;
+      const fat = nutrition.fat;
+
+      if (
+        !name ||
+        typeof position !== "number" ||
+        !Number.isFinite(position) ||
+        typeof calories !== "number" ||
+        !Number.isFinite(calories) ||
+        typeof protein !== "number" ||
+        !Number.isFinite(protein) ||
+        typeof carbs !== "number" ||
+        !Number.isFinite(carbs) ||
+        typeof fat !== "number" ||
+        !Number.isFinite(fat)
+      ) {
+        return null;
+      }
+
+      return {
+        name,
+        position: Math.floor(position),
+        calories,
+        protein,
+        carbs,
+        fat,
+      };
+    })
+    .filter((item): item is MealItemDetail => item !== null)
+    .sort((a, b) => a.position - b.position);
+
+  return items.length > 0 ? items : undefined;
+}
+
 function isIntakeValidationIssue(value: unknown): value is IntakeValidationIssue {
   return (
     isRecord(value) &&
@@ -81,6 +132,7 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
       (value.loggedAt === undefined || typeof value.loggedAt === "string") &&
       (value.itemCount === undefined ||
         (typeof value.itemCount === "number" && Number.isFinite(value.itemCount) && value.itemCount > 0)) &&
+      (value.items === undefined || Array.isArray(value.items)) &&
       (value.imageAssetId === undefined || value.imageAssetId === null || typeof value.imageAssetId === "string") &&
       (value.imageUrl === undefined || value.imageUrl === null || typeof value.imageUrl === "string")
     );
@@ -305,10 +357,13 @@ export function withAuthorizedAssetUrl(
   return nextQuery ? `${pathname}?${nextQuery}` : pathname;
 }
 
-function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMealReceipt {
+export function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMealReceipt {
+  const items = normalizeMealItems((receipt as { items?: unknown }).items);
+
   return {
     ...receipt,
     itemCount: normalizeItemCount(receipt.itemCount),
+    ...(items ? { items } : {}),
     ...(receipt.imageUrl === undefined
       ? {}
       : { imageUrl: withAuthorizedAssetUrl(receipt.imageUrl) ?? null }),
@@ -635,6 +690,10 @@ export async function getMeals(options?: { refreshReason?: "day_rollover" | "mea
     meals: body.meals.map((meal) => ({
       ...meal,
       itemCount: normalizeItemCount(meal.itemCount),
+      ...(() => {
+        const items = normalizeMealItems((meal as { items?: unknown }).items);
+        return items ? { items } : {};
+      })(),
       imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
     })),
   };
@@ -652,6 +711,10 @@ export async function getDaySnapshot(
     meals: body.meals.map((meal) => ({
       ...meal,
       itemCount: normalizeItemCount(meal.itemCount),
+      ...(() => {
+        const items = normalizeMealItems((meal as { items?: unknown }).items);
+        return items ? { items } : {};
+      })(),
       imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
     })),
   };
@@ -669,11 +732,14 @@ interface HistoryMealDto {
   carbs?: number;
   fat?: number;
   itemCount?: number;
+  items?: unknown;
   imageAssetId?: string | null;
   imageUrl?: string | null;
 }
 
-function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
+export function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
+  const items = normalizeMealItems(meal.items);
+
   return {
     id: meal.id,
     foodName: meal.display?.title ?? meal.foodName ?? "未命名餐點",
@@ -682,6 +748,7 @@ function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
     carbs: meal.nutrition?.carbs ?? meal.carbs ?? 0,
     fat: meal.nutrition?.fat ?? meal.fat ?? 0,
     itemCount: normalizeItemCount(meal.itemCount),
+    ...(items ? { items } : {}),
     imageAssetId: meal.asset?.imageAssetId ?? meal.imageAssetId ?? null,
     imageUrl: withAuthorizedAssetUrl(meal.asset?.imageUrl ?? meal.imageUrl ?? null) ?? null,
     loggedAt: meal.loggedAt,
