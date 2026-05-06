@@ -424,6 +424,167 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.loggedMeal.quantityUncertaintyReason, "missing_quantity");
   });
 
+  it("repairs explicit ingredient-style protein sources from anchor food labels", async () => {
+    const soyMilkCall: ToolCall = {
+      id: "call_soy_milk_repaired_source",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "豆漿",
+          quantity_ml: 300,
+          calories: 120,
+          protein: 8,
+          carbs: 10,
+          fat: 4,
+          protein_sources: [
+            { name: "黃豆", protein: 8, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(soyMilkCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "豆漿");
+    assert.equal(result.loggedMeal.protein, 8);
+    assert.deepEqual(result.loggedMeal.countedSources.map((source) => source.name), ["豆漿"]);
+    assert.deepEqual(result.loggedMeal.excludedSources.map((source) => source.name), ["黃豆"]);
+  });
+
+  it("uses anchor item-label inference with explicit untrusted sources but still fails unsupported protein", async () => {
+    const repairedAnchorCall: ToolCall = {
+      id: "call_anchor_with_untrusted_source",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "低糖豆漿",
+          quantity_ml: 400,
+          calories: 190,
+          protein: 14,
+          carbs: 15,
+          fat: 6,
+          protein_sources: [
+            { name: "大豆", protein: 14, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+    const unsupportedProteinCall: ToolCall = {
+      id: "call_unsupported_positive_protein",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "珍珠奶茶",
+          quantity_ml: 500,
+          calories: 420,
+          protein: 9,
+          carbs: 76,
+          fat: 10,
+          protein_sources: [
+            { name: "珍珠", protein: 9, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const repairedResult = await executeTool(repairedAnchorCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.ok(repairedResult.loggedMeal);
+    assert.equal(repairedResult.loggedMeal.protein, 14);
+    assert.deepEqual(repairedResult.loggedMeal.countedSources.map((source) => source.name), ["低糖豆漿"]);
+
+    await assert.rejects(
+      executeTool(unsupportedProteinCall, deviceId, {
+        foodLoggingService,
+        summaryService,
+      }),
+      /trusted protein basis required for this meal/,
+    );
+  });
+
+  it("returns missing-quantity loggedMeal protein that matches persisted item protein", async () => {
+    const ambiguousNoodleCall: ToolCall = {
+      id: "call_missing_quantity_noodle",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "麵",
+          calories: 450,
+          protein: 12,
+          carbs: 70,
+          fat: 10,
+          protein_sources: [
+            { name: "麵", protein: 12, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(ambiguousNoodleCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    }, {
+      currentUserMessage: "我剛吃麵",
+    });
+
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.quantityUncertaintyReason, "missing_quantity");
+    assert.equal(result.loggedMeal.protein, 0);
+
+    const items = await db
+      .select()
+      .from(mealRevisionItems)
+      .where(eq(mealRevisionItems.revisionId, result.loggedMeal.mealRevisionId));
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.protein, result.loggedMeal.protein);
+  });
+
+  it("returns normalized loggedMeal item details for downstream edit receipts", async () => {
+    const groupedCall: ToolCall = {
+      id: "call_logged_meal_items",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 15, quantity: 1 },
+            { food_name: "白飯", calories: 280, protein: 5, carbs: 62, fat: 1, quantity: 1 },
+            { food_name: "青菜", calories: 40, protein: 2, carbs: 8, fat: 0.5, quantity: 1 },
+          ],
+          protein_sources: [
+            { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+            { name: "白飯", protein: 5, is_primary: false, certainty: "clear" },
+            { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(groupedCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.ok(result.loggedMeal);
+    assert.deepEqual(result.loggedMeal.items, [
+      { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 15 },
+      { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 1 },
+      { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 0.5 },
+    ]);
+  });
+
   it("omits transient missing_quantity metadata when quantity fields or item text include numbers", async () => {
     const quantityFieldCall: ToolCall = {
       id: "call_quantity_field",
