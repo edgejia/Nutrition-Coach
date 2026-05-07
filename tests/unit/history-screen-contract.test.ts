@@ -105,7 +105,7 @@ describe("History screen source contract", () => {
     assert.match(source, /sortedMeals\.map\(\(meal\) =>/);
     assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\}/);
     assert.doesNotMatch(source, /getDisplayMealLabel\(meal\.loggedAt\)/);
-    assert.match(source, /\{meals\.length\}筆/);
+    assert.match(source, /\{cacheMiss \? "--" : meals\.length\}筆/);
     assert.doesNotMatch(source, /\{meals\.length\} entries/);
   });
 
@@ -142,8 +142,15 @@ describe("History screen source contract", () => {
     assert.match(source, /loadingTrends/);
     assert.match(
       source,
-      /loadingTrends && !trendsCache\.get\(weekStartKey\)|const hasCurrentWeekCache = Boolean\(trendsCache\.get\(weekStartKey\)\)/,
+      /loadingTrends && !hasCurrentWeekCache|loadingTrends && !trendsCache\.get\(weekStartKey\)|const hasCurrentWeekCache = Boolean\(trendsCache\.get\(weekStartKey\)\)/,
     );
+  });
+
+  it("wires cache-hit weekly revalidation to neutral pending treatment", () => {
+    assert.match(source, /const isWeekPending = loadingTrends && hasCurrentWeekCache/);
+    assert.match(source, /className=\{isWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}/);
+    assert.match(cssSource, /\.sp-history-pending::before\s*\{[\s\S]*?height:\s*1px;[\s\S]*?background:\s*var\(--sp-line-strong\)/);
+    assert.doesNotMatch(cssSource, /\.sp-history-pending[\s\S]*animation:/);
   });
 
   it("invalidates only the affected day and affected week after meal mutations", () => {

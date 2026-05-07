@@ -3442,6 +3442,30 @@ textarea {
   min-width: 0;
 }
 
+.sp-history-weekly {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sp-history-pending {
+  position: relative;
+}
+
+.sp-history-pending::before {
+  content: "";
+  display: block;
+  height: 1px;
+  margin-bottom: 8px;
+  background: var(--sp-line-strong);
+  opacity: 0.72;
+}
+
+.sp-history-value-placeholder {
+  color: var(--sp-ink-2);
+}
+
 .sp-history-week-day {
   display: flex;
   min-width: 0;

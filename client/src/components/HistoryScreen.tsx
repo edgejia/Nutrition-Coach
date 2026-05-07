@@ -154,13 +154,17 @@ function SelectedDayHero({
   selectedDay,
   snapshot,
   targetCalories,
+  pending,
+  cacheMiss,
 }: {
   selectedDateKey: string;
   selectedDay: HistoryWeekDay | undefined;
   snapshot: HistoryDaySnapshot | null;
   targetCalories: number | null;
+  pending: boolean;
+  cacheMiss: boolean;
 }) {
-  const pendingCalories = selectedDay?.calories === null;
+  const pendingCalories = cacheMiss || selectedDay?.calories === null;
   const consumedCalories = pendingCalories ? null : Math.max(0, Math.round(snapshot?.summary.totalCalories ?? 0));
   const meta = getHistorySportStatusMeta({
     status: selectedDay?.status ?? "empty",
@@ -177,12 +181,14 @@ function SelectedDayHero({
         : "目標同步中";
 
   return (
-    <SportCard className="sp-history-hero" variant="glow">
+    <SportCard className={pending ? "sp-history-hero sp-history-pending" : "sp-history-hero"} variant="glow">
       <div className="sp-history-hero-main">
         <div className="sp-history-hero-copy">
           <div className="sp-history-hero-date">{formatHistoryDate(selectedDateKey)}</div>
           <div className="sp-history-hero-calories">
-            {consumedCalories === null ? "--" : consumedCalories.toLocaleString("en-US")}
+            <span className={cacheMiss ? "sp-history-value-placeholder" : undefined}>
+              {consumedCalories === null ? "--" : consumedCalories.toLocaleString("en-US")}
+            </span>
           </div>
           <div className="sp-history-hero-target">
             {hasTarget ? `/ ${target.toLocaleString("en-US")} kcal` : "目標同步中"}
@@ -306,6 +312,8 @@ function TimelinePanel({
   snapshot,
   loadingDay,
   dayError,
+  pending,
+  cacheMiss,
   openDayDetail,
   openMealEdit,
 }: {
@@ -314,21 +322,25 @@ function TimelinePanel({
   snapshot: HistoryDaySnapshot | null;
   loadingDay: boolean;
   dayError: string | null;
+  pending: boolean;
+  cacheMiss: boolean;
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
   openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
 }) {
   const meals = snapshot?.meals ?? [];
+  const showPendingBoundary = cacheMiss && !dayError;
+  const pendingCopy = cacheMiss ? "同步這天紀錄中..." : "載入這天餐點中...";
 
   return (
-    <section>
+    <section className={pending ? "sp-history-pending" : undefined}>
       <div className="sp-history-section-header">
         <h2>當日餐點</h2>
-        <span>{meals.length}筆</span>
+        <span>{cacheMiss ? "--" : meals.length}筆</span>
       </div>
 
-      {loadingDay ? (
+      {showPendingBoundary ? (
         <SportCard className="sp-history-state-card" variant="flat">
-          載入這天餐點中...
+          {pendingCopy}
         </SportCard>
       ) : null}
       {dayError ? (
@@ -336,13 +348,13 @@ function TimelinePanel({
           {dayError}
         </SportCard>
       ) : null}
-      {!loadingDay && !dayError && meals.length === 0 ? (
+      {!loadingDay && !dayError && snapshot !== null && meals.length === 0 ? (
         <SportCard className="sp-history-empty" variant="flat">
           <h3>這天還沒有餐點</h3>
           <p>選擇其他日期，或到「對話」記錄今天吃了什麼。</p>
         </SportCard>
       ) : null}
-      {!loadingDay && !dayError && meals.length > 0 ? (
+      {!dayError && snapshot !== null && meals.length > 0 ? (
         <TimelineRows
           meals={meals}
           selectedDateKey={selectedDateKey}
@@ -365,7 +377,7 @@ export function HistoryScreen() {
   const [weekStartKey, setWeekStartKey] = useState(() => getMondayWeekStart(todayKey));
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
   const [trendsCache, setTrendsCache] = useState<Map<string, HistoryTrendResponse>>(() => new Map());
-  const [selectedSnapshot, setSelectedSnapshot] = useState<HistoryDaySnapshot | null>(null);
+  const [dayCache, setDayCache] = useState<Map<string, HistoryDaySnapshot>>(() => new Map());
   const [trendError, setTrendError] = useState<string | null>(null);
   const [dayError, setDayError] = useState<string | null>(null);
   const [loadingTrends, setLoadingTrends] = useState(false);
@@ -375,6 +387,10 @@ export function HistoryScreen() {
   const targetCalories = dailyTargets?.calories ?? null;
   const currentTrends = trendsCache.get(weekStartKey) ?? null;
   const hasCurrentWeekCache = currentTrends !== null;
+  const selectedSnapshot = dayCache.get(selectedDateKey) ?? null;
+  const isWeekPending = loadingTrends && hasCurrentWeekCache;
+  const isSelectedDayPending = loadingDay && selectedSnapshot !== null;
+  const isSelectedDayCacheMiss = selectedSnapshot === null;
   const weekDays = buildHistoryWeek({
     weekStartKey,
     selectedDateKey,
@@ -423,19 +439,29 @@ export function HistoryScreen() {
 
   const loadSelectedDay = useCallback(
     (cancelledRef?: { current: boolean }) => {
+      const requestDateKey = selectedDateKey;
       setLoadingDay(true);
       setDayError(null);
-      setSelectedSnapshot(null);
-      return getHistoryDaySnapshot(selectedDateKey)
+      return getHistoryDaySnapshot(requestDateKey)
         .then((response) => {
-          if (!cancelledRef?.current) setSelectedSnapshot(response);
+          if (!cancelledRef?.current) {
+            setDayCache((cache) => {
+              const next = new Map(cache);
+              next.set(requestDateKey, response);
+              return next;
+            });
+          }
         })
         .catch((error: unknown) => {
           if (error instanceof Error && error.message === "UNAUTHORIZED") {
             void recoverGuestSession();
           }
           if (!cancelledRef?.current) {
-            setSelectedSnapshot(null);
+            setDayCache((cache) => {
+              const next = new Map(cache);
+              next.delete(requestDateKey);
+              return next;
+            });
             setDayError(historyErrorMessage(error));
           }
         })
@@ -463,16 +489,38 @@ export function HistoryScreen() {
   }, [loadSelectedDay]);
 
   useEffect(() => {
-    if (!lastMealMutation || lastMealMutation.affectedDate !== selectedDateKey) {
+    if (!lastMealMutation) {
+      return;
+    }
+
+    const affectedDate = lastMealMutation.affectedDate;
+    const affectedWeekStartKey = getMondayWeekStart(affectedDate);
+    setDayCache((cache) => {
+      const next = new Map(cache);
+      next.delete(affectedDate);
+      return next;
+    });
+    setTrendsCache((cache) => {
+      const next = new Map(cache);
+      next.delete(affectedWeekStartKey);
+      return next;
+    });
+
+    const shouldRefreshDay = affectedDate === selectedDateKey;
+    const shouldRefreshWeek = affectedWeekStartKey === weekStartKey;
+    if (!shouldRefreshDay && !shouldRefreshWeek) {
       return;
     }
 
     const cancelledRef = { current: false };
-    void Promise.all([loadSelectedDay(cancelledRef), loadTrends(cancelledRef)]);
+    void Promise.all([
+      shouldRefreshDay ? loadSelectedDay(cancelledRef) : Promise.resolve(),
+      shouldRefreshWeek ? loadTrends(cancelledRef) : Promise.resolve(),
+    ]);
     return () => {
       cancelledRef.current = true;
     };
-  }, [lastMealMutation, loadSelectedDay, loadTrends, selectedDateKey]);
+  }, [lastMealMutation, loadSelectedDay, loadTrends, selectedDateKey, weekStartKey]);
 
   function moveWeek(delta: -1 | 1) {
     const nextStart = shiftHistoryWeek(weekStartKey, delta);
@@ -514,19 +562,23 @@ export function HistoryScreen() {
             </SportCard>
           ) : null}
 
-          <HistoryWeekStrip
-            days={weekDays}
-            targetCalories={targetCalories}
-            onSelect={(dateKey) => {
-              setSelectedDateKey(dateKey);
-            }}
-          />
-          <HistoryStatGrid stats={weekStats} />
+          <div className={isWeekPending ? "sp-history-weekly sp-history-pending" : "sp-history-weekly"}>
+            <HistoryWeekStrip
+              days={weekDays}
+              targetCalories={targetCalories}
+              onSelect={(dateKey) => {
+                setSelectedDateKey(dateKey);
+              }}
+            />
+            <HistoryStatGrid stats={weekStats} />
+          </div>
           <SelectedDayHero
             selectedDateKey={selectedDateKey}
             selectedDay={selectedWeekDay}
             snapshot={selectedSnapshot}
             targetCalories={targetCalories}
+            pending={isSelectedDayPending}
+            cacheMiss={isSelectedDayCacheMiss}
           />
           <TimelinePanel
             selectedDateKey={selectedDateKey}
@@ -534,6 +586,8 @@ export function HistoryScreen() {
             snapshot={selectedSnapshot}
             loadingDay={loadingDay}
             dayError={dayError}
+            pending={isSelectedDayPending}
+            cacheMiss={isSelectedDayCacheMiss}
             openDayDetail={openDayDetail}
             openMealEdit={openMealEdit}
           />
