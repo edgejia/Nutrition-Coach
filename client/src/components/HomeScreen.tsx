@@ -134,7 +134,10 @@ function prefersReducedMotion() {
 function useCountUpNumber(targetValue: number, options: { durationMs?: number; animate?: boolean } = {}) {
   const previousValueRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
+  const activeAnimationTargetRef = useRef<number | null>(null);
   const [displayValue, setDisplayValue] = useState(targetValue);
+  const durationMs = options.durationMs ?? 450;
+  const animate = options.animate === true;
 
   useEffect(() => {
     if (frameRef.current !== null) {
@@ -143,17 +146,21 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
     }
 
     const previousValue = previousValueRef.current;
-    if (options.animate !== true || prefersReducedMotion() === true || previousValue === null) {
+    if (animate !== true || prefersReducedMotion() === true || previousValue === null) {
+      activeAnimationTargetRef.current = null;
       previousValueRef.current = targetValue;
       setDisplayValue(targetValue);
       return;
     }
 
-    const durationMs = options.durationMs ?? 450;
     const startValue = previousValue;
     let startTime: number | null = null;
+    activeAnimationTargetRef.current = targetValue;
 
     const step = (timestamp: number) => {
+      if (activeAnimationTargetRef.current !== targetValue) {
+        return;
+      }
       startTime ??= timestamp;
       const progress = Math.min(1, (timestamp - startTime) / durationMs);
       setDisplayValue(Math.round(startValue + (targetValue - startValue) * progress));
@@ -164,6 +171,7 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
       }
 
       frameRef.current = null;
+      activeAnimationTargetRef.current = null;
       previousValueRef.current = targetValue;
       setDisplayValue(targetValue);
     };
@@ -175,8 +183,11 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
         cancelAnimationFrame(frameRef.current);
         frameRef.current = null;
       }
+      if (activeAnimationTargetRef.current === targetValue) {
+        activeAnimationTargetRef.current = null;
+      }
     };
-  }, [options.animate, options.durationMs, targetValue]);
+  }, [durationMs, targetValue]);
 
   return displayValue;
 }

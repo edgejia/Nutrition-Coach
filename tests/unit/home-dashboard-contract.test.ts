@@ -198,6 +198,8 @@ describe("Home dashboard display contracts", () => {
     if (countUpHelperMatches.length > 0) {
       assert.equal(countUpHelperMatches.length, 3);
       assert.match(homeSource, /function useCountUpNumber|const useCountUpNumber/);
+      assert.match(homeSource, /activeAnimationTargetRef/);
+      assert.match(homeSource, /\}, \[durationMs, targetValue\]\)/);
       assert.match(homeSource, /useCountUpNumber\([^)]*display\.consumed[^)]*shouldAnimateConsumedChange/);
       assert.match(homeSource, /useCountUpNumber\([^)]*display\.percent[^)]*shouldAnimateConsumedChange/);
     } else {
