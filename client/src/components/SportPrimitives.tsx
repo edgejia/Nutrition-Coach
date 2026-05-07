@@ -139,8 +139,6 @@ export function SportRing({
     <div className={cx("relative inline-grid place-items-center", className)} style={{ width: size, height: size }}>
       <svg aria-hidden="true" height={size} viewBox={`0 0 ${size} ${size}`} width={size}>
         <circle
-          /* className="sp-ring-progress" */
-          className={cx("sp-ring-progress")}
           cx={center}
           cy={center}
           fill="none"
@@ -149,6 +147,7 @@ export function SportRing({
           strokeWidth={stroke}
         />
         <circle
+          className={cx("sp-ring-progress")}
           cx={center}
           cy={center}
           fill="none"

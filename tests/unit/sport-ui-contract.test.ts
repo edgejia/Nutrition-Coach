@@ -137,7 +137,14 @@ describe("sport UI source contract", () => {
   });
 
   it("defines primitive motion transitions with reduced-motion override", () => {
-    assert.match(sources.sportPrimitives, /className=\{cx\("sp-ring-progress"/);
+    const ringCircles = sources.sportPrimitives.match(/<circle[\s\S]*?\/>/g) ?? [];
+    const foregroundProgressCircle = ringCircles.find(
+      (circle) => circle.includes('className={cx("sp-ring-progress")}') && circle.includes("strokeDashoffset={dashOffset}"),
+    );
+
+    assert.ok(foregroundProgressCircle, "SportRing foreground progress circle must own the transition class");
+    assert.match(foregroundProgressCircle, /strokeDasharray=\{circumference\}/);
+    assert.match(foregroundProgressCircle, /strokeLinecap="round"/);
     assert.match(sources.appCss, /\.sp-bar-fill\s*\{[\s\S]*transition: width 360ms ease/);
     assert.match(sources.appCss, /\.sp-ring-progress\s*\{[\s\S]*transition: stroke-dashoffset 360ms ease/);
     assert.match(sources.appCss, /@media \(prefers-reduced-motion: reduce\)/);
