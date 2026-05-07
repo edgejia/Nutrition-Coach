@@ -54,6 +54,10 @@ function formatMetric(value: number): string {
   return Math.max(0, Math.round(value)).toLocaleString("en-US");
 }
 
+function formatHistoryStatValue(value: number | null): string {
+  return value === null ? "--" : formatMetric(value);
+}
+
 function getBarColor(tone: HistorySportBarTone): string {
   if (tone === "amber") return "var(--sp-amber)";
   if (tone === "lime") return "var(--sp-lime)";
@@ -82,7 +86,10 @@ function HistoryWeekStrip({
     <div className="sp-history-week-strip" aria-label="週紀錄">
       {days.map((day) => {
         const meta = getHistorySportStatusMeta({ status: day.status, targetCalories });
-        const fillHeight = day.waterLevel > 0 ? Math.max(4, Math.round(Math.min(1, day.waterLevel) * 76)) : 0;
+        const fillHeight =
+          day.calorieRatio === null || day.calories === null || day.waterLevel <= 0
+            ? 0
+            : Math.max(4, Math.round(Math.min(1, day.waterLevel) * 76));
         const showFill = fillHeight > 0 && !day.isFuture && day.status !== "targetMissing";
 
         return (
@@ -120,9 +127,13 @@ function HistoryWeekStrip({
 
 function HistoryStatGrid({ stats }: { stats: ReturnType<typeof buildHistoryWeekStats> }) {
   const items = [
-    { label: "平均熱量", value: formatMetric(stats.averageCalories), sublabel: "kcal/day" },
-    { label: "達標天數", value: `${stats.inRangeDays}/${stats.loggedDays}`, sublabel: "days" },
-    { label: "紀錄餐數", value: formatMetric(stats.mealCount), sublabel: "entries" },
+    { label: "平均熱量", value: formatHistoryStatValue(stats.averageCalories), sublabel: "kcal/day" },
+    {
+      label: "達標天數",
+      value: stats.inRangeDays === null || stats.loggedDays === null ? "--" : `${stats.inRangeDays}/${stats.loggedDays}`,
+      sublabel: "days",
+    },
+    { label: "紀錄餐數", value: formatHistoryStatValue(stats.mealCount), sublabel: "entries" },
   ];
 
   return (
@@ -149,24 +160,30 @@ function SelectedDayHero({
   snapshot: HistoryDaySnapshot | null;
   targetCalories: number | null;
 }) {
-  const consumedCalories = Math.max(0, Math.round(snapshot?.summary.totalCalories ?? 0));
+  const pendingCalories = selectedDay?.calories === null;
+  const consumedCalories = pendingCalories ? null : Math.max(0, Math.round(snapshot?.summary.totalCalories ?? 0));
   const meta = getHistorySportStatusMeta({
     status: selectedDay?.status ?? "empty",
     targetCalories,
   });
   const hasTarget = Number(targetCalories) > 0;
   const target = Math.max(0, Math.round(targetCalories ?? 0));
-  const delta = consumedCalories - target;
-  const deltaLabel = hasTarget
-    ? `${delta >= 0 ? "+" : ""}${delta.toLocaleString("en-US")}`
-    : "目標同步中";
+  const delta = consumedCalories === null ? null : consumedCalories - target;
+  const deltaLabel =
+    delta === null
+      ? "--"
+      : hasTarget
+        ? `${delta >= 0 ? "+" : ""}${delta.toLocaleString("en-US")}`
+        : "目標同步中";
 
   return (
     <SportCard className="sp-history-hero" variant="glow">
       <div className="sp-history-hero-main">
         <div className="sp-history-hero-copy">
           <div className="sp-history-hero-date">{formatHistoryDate(selectedDateKey)}</div>
-          <div className="sp-history-hero-calories">{consumedCalories.toLocaleString("en-US")}</div>
+          <div className="sp-history-hero-calories">
+            {consumedCalories === null ? "--" : consumedCalories.toLocaleString("en-US")}
+          </div>
           <div className="sp-history-hero-target">
             {hasTarget ? `/ ${target.toLocaleString("en-US")} kcal` : "目標同步中"}
           </div>
