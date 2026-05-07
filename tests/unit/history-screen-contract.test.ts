@@ -122,12 +122,40 @@ describe("History screen source contract", () => {
     }
   });
 
-  it("clears stale selected-day snapshots before loading a newly selected date", () => {
-    assert.match(source, /setLoadingDay\(true\);\s+setDayError\(null\);\s+setSelectedSnapshot\(null\);\s+return getHistoryDaySnapshot\(selectedDateKey\)/);
+  it("keeps selected-day snapshots stable during routine revalidation", () => {
+    for (const expected of [
+      "trendsCache",
+      "setTrendsCache",
+      "trendsCache.get(weekStartKey)",
+      "dayCache",
+      "setDayCache",
+      "dayCache.get(selectedDateKey)",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.doesNotMatch(source, /trends\?\.daily|trends\?\.averages/);
+    assert.doesNotMatch(source, /setSelectedSnapshot\(null\);\s+return getHistoryDaySnapshot\(selectedDateKey\)/);
   });
 
-  it("does not flash weekly loading copy during background trend refreshes", () => {
-    assert.match(source, /loadingTrends && !trends \? \(/);
+  it("reserves weekly loading copy for true first load only", () => {
+    assert.match(source, /loadingTrends/);
+    assert.match(
+      source,
+      /loadingTrends && !trendsCache\.get\(weekStartKey\)|const hasCurrentWeekCache = Boolean\(trendsCache\.get\(weekStartKey\)\)/,
+    );
+  });
+
+  it("invalidates only the affected day and affected week after meal mutations", () => {
+    assert.match(source, /lastMealMutation\.affectedDate/);
+    assert.match(source, /const affectedDate = lastMealMutation\.affectedDate|lastMealMutation\.affectedDate/);
+    assert.match(source, /dayCache/);
+    assert.match(source, /\.delete\(affectedDate\)/);
+    assert.match(source, /trendsCache/);
+    assert.match(
+      source,
+      /\.delete\(getMondayWeekStart\(affectedDate\)\)|const affectedWeekStartKey = getMondayWeekStart\(affectedDate\)/,
+    );
   });
 
   it("keeps History free of demo globals, demo labels, and inline mutation controls", () => {
