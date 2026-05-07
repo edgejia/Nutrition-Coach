@@ -1,5 +1,6 @@
 import type { MealEditPayload, Message } from "../types.js";
 import type { KeyboardEvent } from "react";
+import { buildReceiptMealEditPayload } from "../meal-edit-payload.js";
 import { AssistantMarkdown } from "./AssistantMarkdown.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportBoltIcon, SportChevronRightIcon } from "./SportIcons.js";
@@ -23,33 +24,7 @@ function isCompleteLoggedMealReceipt(message: Message) {
 }
 
 export function getCompleteReceiptEditPayload(message: Message): MealEditPayload | null {
-  const loggedMeal = message.loggedMeal;
-
-  if (
-    !loggedMeal ||
-    !loggedMeal.mealId ||
-    !loggedMeal.dateKey ||
-    loggedMeal.foodName.trim().length === 0 ||
-    !Number.isFinite(loggedMeal.calories) ||
-    !Number.isFinite(loggedMeal.protein) ||
-    !Number.isFinite(loggedMeal.carbs) ||
-    !Number.isFinite(loggedMeal.fat)
-  ) {
-    return null;
-  }
-
-  return {
-    mealId: loggedMeal.mealId,
-    dateKey: loggedMeal.dateKey,
-    foodName: loggedMeal.foodName,
-    calories: loggedMeal.calories,
-    protein: loggedMeal.protein,
-    carbs: loggedMeal.carbs,
-    fat: loggedMeal.fat,
-    imageAssetId: loggedMeal.imageAssetId ?? null,
-    imageUrl: loggedMeal.imageUrl ?? null,
-    loggedAt: loggedMeal.loggedAt,
-  };
+  return buildReceiptMealEditPayload(message.loggedMeal);
 }
 
 export function getUserMessagePresentation(message: Message) {
@@ -110,12 +85,25 @@ function ReceiptCard(props: {
     <div className="sp-message-row sp-message-row-assistant">
       <SportReceipt
         className={`sp-receipt-card${canEdit ? " sp-receipt-button" : ""}`}
+        aria-label={canEdit ? `編輯 ${loggedMeal.foodName}` : undefined}
         onClick={canEdit ? handleOpenReceipt : undefined}
         onKeyDown={canEdit ? handleReceiptKeyDown : undefined}
         role={canEdit ? "button" : undefined}
         tabIndex={canEdit ? 0 : undefined}
       >
-        <div className="sp-receipt-head">
+        <div
+          className={`sp-receipt-head${loggedMeal.imageUrl ? " sp-receipt-head-with-thumbnail" : ""}`}
+        >
+          {loggedMeal.imageUrl ? (
+            <div className="sp-receipt-thumbnail-frame">
+              <PersistedAssetImage
+                src={loggedMeal.imageUrl}
+                alt={`${loggedMeal.foodName} 整餐照片`}
+                imgClassName="sp-receipt-thumbnail"
+                fallbackClassName="sp-receipt-thumbnail sp-receipt-thumbnail-fallback"
+              />
+            </div>
+          ) : null}
           <div className="sp-receipt-title">
             <div className="sp-receipt-label">logged</div>
             <div className="sp-receipt-food">{loggedMeal.foodName}</div>

@@ -93,6 +93,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
         return {
           id: meal.id,
           foodName: meal.foodName,
+          itemCount: meal.itemCount ?? 1,
           calories: meal.calories,
           protein: meal.protein,
           carbs: meal.carbs,
@@ -127,6 +128,17 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     let affectedDateKey: string;
     let updatedMeal: Awaited<ReturnType<typeof foodLoggingService.updateMeal>>;
     try {
+      const itemCount = await foodLoggingService.getMealItemCount(deviceId, id);
+      if (itemCount === null) {
+        return reply.code(404).send({ error: "Meal not found" });
+      }
+      if (itemCount > 1) {
+        return reply.code(409).send({
+          error: "MEAL_REQUIRES_GROUPED_UPDATE",
+          message: "Grouped meals must be corrected through chat.",
+        });
+      }
+
       if (update.imageAssetId) {
         const ownedAsset = await assetService.getOwnedAsset(deviceId, update.imageAssetId);
         if (!ownedAsset) {
@@ -169,6 +181,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       meal: {
         id: updatedMeal.id,
         foodName: updatedMeal.foodName,
+        itemCount: updatedMeal.itemCount ?? 1,
         calories: updatedMeal.calories,
         protein: updatedMeal.protein,
         carbs: updatedMeal.carbs,

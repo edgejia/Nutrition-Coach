@@ -93,6 +93,14 @@ describe("Meals API", () => {
     });
   }
 
+  function assertNoRawImageStorageFields(value: unknown) {
+    const serialized = JSON.stringify(value);
+    assert.ok(!serialized.includes("storageKey"), "route DTO must not expose asset storage keys");
+    assert.ok(!serialized.includes("uploadsDir"), "route DTO must not expose upload directory names");
+    assert.ok(!serialized.includes("/uploads/"), "route DTO must not expose staged upload paths");
+    assert.ok(!serialized.includes("asset:"), "route DTO must not expose raw asset refs as URLs");
+  }
+
   async function readOptionalSSEChunk(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     timeoutMs: number,
@@ -125,7 +133,6 @@ describe("Meals API", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已記錄早餐！" });
     await postChatMessage("我早餐吃了蛋餅");
 
     mockLLM.queueChatResponse({
@@ -147,7 +154,6 @@ describe("Meals API", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已記錄晚餐！" });
     await postChatMessage("我晚餐吃了雞腿飯");
 
     const res = await app.inject({
@@ -159,6 +165,41 @@ describe("Meals API", () => {
     assert.equal(res.statusCode, 200);
     const body = res.json();
     assert.deepEqual(body.meals.map((meal: { foodName: string }) => meal.foodName), ["早餐", "晚餐"]);
+  });
+
+  it("GET /api/meals preserves grouped itemCount from meal history service rows", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const groupedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+      ],
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/meals",
+      headers: { cookie: deviceCookieHeader },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { meals: Array<{ id: string; foodName: string; itemCount?: number }> };
+    assert.deepEqual(body.meals, [
+      {
+        id: groupedMeal.id,
+        foodName: "雞腿、白飯、青菜",
+        itemCount: 3,
+        calories: 580,
+        protein: 30,
+        carbs: 70,
+        fat: 13.5,
+        imageAssetId: null,
+        imageUrl: null,
+        loggedAt: groupedMeal.loggedAt,
+      },
+    ]);
   });
 
   it("DELETE /api/meals/:id removes the meal for the owner and returns 404 for another device", async () => {
@@ -257,6 +298,37 @@ describe("Meals API", () => {
     assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
   });
 
+  it("PATCH /api/meals/:id returns 409 MEAL_REQUIRES_GROUPED_UPDATE for grouped direct edits", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${meal.id}`,
+      headers: { cookie: deviceCookieHeader },
+      payload: {
+        foodName: "雞腿飯",
+        calories: 540,
+        protein: 28,
+        carbs: 62,
+        fat: 12.5,
+        imageAssetId: null,
+      },
+    });
+
+    assert.equal(updateRes.statusCode, 409);
+    assert.deepEqual(updateRes.json(), {
+      error: "MEAL_REQUIRES_GROUPED_UPDATE",
+      message: "Grouped meals must be corrected through chat.",
+    });
+  });
+
   it("PATCH /api/meals/:id returns 404 for another device", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
@@ -345,6 +417,158 @@ describe("Meals API", () => {
       assert.equal(updateRes.statusCode, 400);
       assert.deepEqual(updateRes.json(), { error: "Invalid meal image asset" });
     }
+  });
+
+  it("projects the same meal.id imageAssetId and /api/assets URL across meal route DTOs", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const dateKey = formatLocalDate(new Date());
+    const imageAsset = await createOwnedAsset(deviceId, "continuity.png");
+    const imageMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "照片便當",
+      calories: 640,
+      protein: 32,
+      carbs: 78,
+      fat: 21,
+      imagePath: `asset:${imageAsset.id}`,
+    });
+    const textMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "文字點心",
+      calories: 120,
+      protein: 6,
+      carbs: 14,
+      fat: 4,
+    });
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${imageMeal.id}`,
+      headers: { cookie: deviceCookieHeader },
+      payload: {
+        foodName: "照片便當更新",
+        calories: 660,
+        protein: 34,
+        carbs: 80,
+        fat: 22,
+        imageAssetId: imageAsset.id,
+      },
+    });
+    assert.equal(updateRes.statusCode, 200);
+    const updated = updateRes.json() as {
+      meal: {
+        id: string;
+        imageAssetId: string | null;
+        imageUrl: string | null;
+      };
+    };
+    assert.equal(updated.meal.id, imageMeal.id);
+    assert.equal(updated.meal.imageAssetId, imageAsset.id);
+    assert.equal(updated.meal.imageUrl, `/api/assets/${imageAsset.id}`);
+    assertNoRawImageStorageFields(updated);
+
+    const todayRes = await app.inject({
+      method: "GET",
+      url: "/api/meals",
+      headers: { cookie: deviceCookieHeader },
+    });
+    assert.equal(todayRes.statusCode, 200);
+    const todayBody = todayRes.json() as {
+      meals: Array<{ id: string; imageAssetId: string | null; imageUrl: string | null }>;
+    };
+    const todayImageMeal = todayBody.meals.find((meal) => meal.id === imageMeal.id);
+    assert.ok(todayImageMeal, "expected today's records to include the image-backed meal.id");
+    assert.equal(todayImageMeal.imageAssetId, imageAsset.id);
+    assert.equal(todayImageMeal.imageUrl, `/api/assets/${imageAsset.id}`);
+    const todayTextMeal = todayBody.meals.find((meal) => meal.id === textMeal.id);
+    assert.ok(todayTextMeal, "expected today's records to include the text-only meal.id");
+    assert.equal(todayTextMeal.imageAssetId, null);
+    assert.equal(todayTextMeal.imageUrl, null);
+    assertNoRawImageStorageFields(todayBody);
+
+    const historyRes = await app.inject({
+      method: "GET",
+      url: `/api/history/days/${dateKey}`,
+      headers: { cookie: deviceCookieHeader },
+    });
+    assert.equal(historyRes.statusCode, 200);
+    const historyBody = historyRes.json() as {
+      meals: Array<{
+        id: string;
+        imageAssetId: string | null;
+        imageUrl: string | null;
+        asset: { imageAssetId: string | null; imageUrl: string | null };
+      }>;
+    };
+    const historyImageMeal = historyBody.meals.find((meal) => meal.id === imageMeal.id);
+    assert.ok(historyImageMeal, "expected history day to include the image-backed meal.id");
+    assert.equal(historyImageMeal.imageAssetId, imageAsset.id);
+    assert.equal(historyImageMeal.imageUrl, `/api/assets/${imageAsset.id}`);
+    assert.deepEqual(historyImageMeal.asset, {
+      imageAssetId: imageAsset.id,
+      imageUrl: `/api/assets/${imageAsset.id}`,
+    });
+    const historyTextMeal = historyBody.meals.find((meal) => meal.id === textMeal.id);
+    assert.ok(historyTextMeal, "expected history day to include the text-only meal.id");
+    assert.equal(historyTextMeal.imageAssetId, null);
+    assert.equal(historyTextMeal.imageUrl, null);
+    assert.deepEqual(historyTextMeal.asset, { imageAssetId: null, imageUrl: null });
+    assertNoRawImageStorageFields(historyBody);
+
+    const snapshotRes = await app.inject({
+      method: "GET",
+      url: `/api/day-snapshot?date=${dateKey}`,
+      headers: { cookie: deviceCookieHeader },
+    });
+    assert.equal(snapshotRes.statusCode, 200);
+    const snapshotBody = snapshotRes.json() as {
+      meals: Array<{ id: string; imageAssetId: string | null; imageUrl: string | null }>;
+    };
+    const snapshotImageMeal = snapshotBody.meals.find((meal) => meal.id === imageMeal.id);
+    assert.ok(snapshotImageMeal, "expected day snapshot to include the image-backed meal.id");
+    assert.equal(snapshotImageMeal.imageAssetId, imageAsset.id);
+    assert.equal(snapshotImageMeal.imageUrl, `/api/assets/${imageAsset.id}`);
+    const snapshotTextMeal = snapshotBody.meals.find((meal) => meal.id === textMeal.id);
+    assert.ok(snapshotTextMeal, "expected day snapshot to include the text-only meal.id");
+    assert.equal(snapshotTextMeal.imageAssetId, null);
+    assert.equal(snapshotTextMeal.imageUrl, null);
+    assertNoRawImageStorageFields(snapshotBody);
+  });
+
+  it("rejects foreign guest-session image reads and meal image attachment", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const ownerAsset = await createOwnedAsset(deviceId, "owner-image.png");
+    const foreignRead = await app.inject({
+      method: "GET",
+      url: `/api/assets/${ownerAsset.id}`,
+      headers: { cookie: otherCookieHeader },
+    });
+    assert.equal(foreignRead.statusCode, 404);
+    assert.deepEqual(foreignRead.json(), { error: "Asset not found" });
+
+    const foreignAsset = await createOwnedAsset(otherDeviceId, "foreign-owner-image.png");
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${meal.id}`,
+      headers: { cookie: deviceCookieHeader },
+      payload: {
+        foodName: "雞胸肉沙拉半份",
+        calories: 260,
+        protein: 20,
+        carbs: 8,
+        fat: 12,
+        imageAssetId: foreignAsset.id,
+      },
+    });
+    assert.equal(updateRes.statusCode, 400);
+    assert.deepEqual(updateRes.json(), { error: "Invalid meal image asset" });
   });
 
   it("DELETE /api/meals/:id recomputes the deleted transaction's affected local day", async () => {

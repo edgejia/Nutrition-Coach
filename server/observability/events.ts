@@ -7,6 +7,7 @@ export type RedactedObservabilityEventName =
   | "home_cta_intent_selected"
   | "home_cta_option_sent"
   | "chat_turn_completed"
+  | "device_goals_validation_failed"
   | "device_goals_updated_rest"
   | "sse_connection_state";
 
@@ -29,13 +30,17 @@ const INTAKE_FIELDS = [
   "advancedNotes",
 ] as const;
 const GOAL_UPDATE_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
+const GOAL_VALIDATION_CODES = ["invalid_body", "invalid_field_value", "empty_valid_fields"] as const;
 
 const INTAKE_FIELD_SET = new Set<string>(INTAKE_FIELDS);
 const GOAL_UPDATE_FIELD_SET = new Set<string>(GOAL_UPDATE_FIELDS);
+const GOAL_VALIDATION_CODE_SET = new Set<string>(GOAL_VALIDATION_CODES);
 const VALID_IDENTIFIER = /^[a-z0-9_-]{1,64}$/;
 const VALID_CODE = /^[A-Z0-9_]{1,64}$/;
+const VALID_GOAL_VALIDATION_CODE = /^[a-z0-9_]{1,64}$/;
 
 export type IntakeObservabilityField = (typeof INTAKE_FIELDS)[number];
+export type GoalUpdateField = (typeof GOAL_UPDATE_FIELDS)[number];
 
 export interface OnboardingSubmitStartedEvent {
   event: "onboarding_submit_started";
@@ -73,11 +78,19 @@ export interface ChatTurnCompletedEvent {
   didMutateMeal: boolean;
   hadImage: boolean;
   latencyMs: number;
+  stopped?: boolean;
+  tokensStreamed?: number;
 }
 
 export interface DeviceGoalsUpdatedRestEvent {
   event: "device_goals_updated_rest";
   updatedFields: string[];
+}
+
+export interface DeviceGoalsValidationFailedEvent {
+  event: "device_goals_validation_failed";
+  fields: GoalUpdateField[];
+  codes: string[];
 }
 
 export interface SseConnectionStateEvent {
@@ -92,6 +105,7 @@ export type RedactedObservabilityEvent =
   | HomeCtaIntentSelectedEvent
   | HomeCtaOptionSentEvent
   | ChatTurnCompletedEvent
+  | DeviceGoalsValidationFailedEvent
   | DeviceGoalsUpdatedRestEvent
   | SseConnectionStateEvent;
 
@@ -119,6 +133,16 @@ function sanitizeCodes(codes: readonly string[]): string[] {
 
 function sanitizeUpdatedFields(fields: readonly string[]): string[] {
   return uniqueSorted(fields.filter((field) => GOAL_UPDATE_FIELD_SET.has(field)));
+}
+
+function sanitizeGoalUpdateFields(fields: readonly string[]): GoalUpdateField[] {
+  return uniqueSorted(fields.filter((field) => GOAL_UPDATE_FIELD_SET.has(field))) as GoalUpdateField[];
+}
+
+function sanitizeGoalValidationCodes(codes: readonly string[]): string[] {
+  return uniqueSorted(
+    codes.filter((code) => VALID_GOAL_VALIDATION_CODE.test(code) && GOAL_VALIDATION_CODE_SET.has(code)),
+  );
 }
 
 function isIdentifier(value: unknown): value is string {
@@ -223,6 +247,8 @@ export function buildChatTurnCompletedEvent(params: {
   didMutateMeal: boolean;
   hadImage: boolean;
   latencyMs: number;
+  stopped?: boolean;
+  tokensStreamed?: number;
 }): ChatTurnCompletedEvent {
   return {
     event: "chat_turn_completed",
@@ -231,6 +257,10 @@ export function buildChatTurnCompletedEvent(params: {
     didMutateMeal: params.didMutateMeal,
     hadImage: params.hadImage,
     latencyMs: Math.max(0, Math.round(params.latencyMs)),
+    ...(params.stopped !== undefined ? { stopped: params.stopped } : {}),
+    ...(params.tokensStreamed !== undefined
+      ? { tokensStreamed: Math.max(0, Math.round(params.tokensStreamed)) }
+      : {}),
   };
 }
 
@@ -239,6 +269,24 @@ export function logChatTurnCompleted(
   params: Parameters<typeof buildChatTurnCompletedEvent>[0],
 ) {
   logRedactedEvent(log, buildChatTurnCompletedEvent(params), "Chat turn completed");
+}
+
+export function buildDeviceGoalsValidationFailedEvent(params: {
+  fields: readonly string[];
+  codes: readonly string[];
+}): DeviceGoalsValidationFailedEvent {
+  return {
+    event: "device_goals_validation_failed",
+    fields: sanitizeGoalUpdateFields(params.fields),
+    codes: sanitizeGoalValidationCodes(params.codes),
+  };
+}
+
+export function logDeviceGoalsValidationFailed(
+  log: FastifyBaseLogger,
+  params: Parameters<typeof buildDeviceGoalsValidationFailedEvent>[0],
+) {
+  logRedactedEvent(log, buildDeviceGoalsValidationFailedEvent(params), "Device goals validation failed");
 }
 
 export function buildDeviceGoalsUpdatedRestEvent(params: {

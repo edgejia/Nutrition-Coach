@@ -13,6 +13,8 @@ export interface MealEditPayload {
   protein: number;
   carbs: number;
   fat: number;
+  itemCount: number;
+  items?: MealItemDetail[];
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt?: string;
@@ -48,12 +50,23 @@ export interface DailySummary {
   mealCount: number;
 }
 
+export interface MealItemDetail {
+  name: string;
+  position: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 export interface LoggedMealReceipt {
   foodName: string;
   calories: number;
   protein: number;
   carbs: number;
   fat: number;
+  itemCount: number;
+  items?: MealItemDetail[];
   mealId?: string;
   dateKey?: string;
   loggedAt?: string;
@@ -68,6 +81,8 @@ export interface MealEntry {
   protein: number;
   carbs: number;
   fat: number;
+  itemCount: number;
+  items?: MealItemDetail[];
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt: string;
@@ -138,6 +153,7 @@ export interface Message {
   imageUrl?: string | null;
   imagePreviewUrl?: string;
   createdAt: string;
+  status?: "complete" | "stopped" | "error";
   didLogMeal?: boolean;
   loggedMeal?: LoggedMealReceipt;
 }
@@ -238,4 +254,5 @@ export interface ProvisionalBubble {
   statusLabel: string;
   content: string;
   isStreaming: boolean;
+  status?: "complete" | "stopped" | "error";
 }

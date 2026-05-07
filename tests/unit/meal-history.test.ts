@@ -44,6 +44,7 @@ describe("MealHistoryService", () => {
       meals.map((meal) => ({
         id: meal.id,
         foodName: meal.foodName,
+        itemCount: meal.itemCount,
         calories: meal.calories,
         protein: meal.protein,
         carbs: meal.carbs,
@@ -54,6 +55,7 @@ describe("MealHistoryService", () => {
         {
           id: first.id,
           foodName: "蘋果",
+          itemCount: 1,
           calories: 95,
           protein: 0.5,
           carbs: 25,
@@ -63,6 +65,7 @@ describe("MealHistoryService", () => {
         {
           id: second.id,
           foodName: "雞胸肉",
+          itemCount: 1,
           calories: 165,
           protein: 31,
           carbs: 0,
@@ -115,7 +118,8 @@ describe("MealHistoryService", () => {
     assert.equal(meals[0]!.foodName, "黑咖啡");
     assert.deepEqual(meals[1], {
       id: grouped.id,
-      foodName: "蛋餅、豆漿 等3項",
+      foodName: "蛋餅、豆漿、香蕉",
+      itemCount: 3,
       calories: 590,
       protein: 25,
       carbs: 67,

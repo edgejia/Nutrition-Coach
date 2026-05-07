@@ -11,57 +11,98 @@ import { HistoryDayDetailScreen } from "./HistoryDayDetailScreen.js";
 import { HistoryScreen } from "./HistoryScreen.js";
 import { MealEditScreen } from "./MealEditScreen.js";
 
+type ShellStyle = {
+  setProperty: (name: string, value: string) => void;
+  removeProperty: (name: string) => void;
+};
+
+type ShellRoot = {
+  clientHeight: number;
+  style: ShellStyle;
+};
+
+type ShellEventTarget = {
+  addEventListener: (type: string, listener: () => void, options?: AddEventListenerOptions) => void;
+  removeEventListener: (type: string, listener: () => void) => void;
+};
+
+type ShellVisualViewport = ShellEventTarget & {
+  height: number;
+  offsetTop: number;
+};
+
+type ShellWindow = ShellEventTarget & {
+  innerHeight: number;
+  visualViewport?: ShellVisualViewport | null;
+  requestAnimationFrame: (callback: FrameRequestCallback) => number;
+  cancelAnimationFrame: (handle: number) => void;
+  scrollTo?: (x: number, y: number) => void;
+};
+
+type ShellDocument = {
+  documentElement: ShellRoot;
+};
+
+export function installVisualViewportShellVars({
+  window: shellWindow,
+  document: shellDocument,
+}: {
+  window: ShellWindow;
+  document: ShellDocument;
+}) {
+  const root = shellDocument.documentElement;
+  const viewport = shellWindow.visualViewport;
+  let frameId: number | null = null;
+
+  const syncViewportVars = () => {
+    frameId = null;
+    const visualHeight = viewport?.height ?? shellWindow.innerHeight;
+    const visualOffsetTop = viewport?.offsetTop ?? 0;
+
+    root.style.setProperty("--app-visual-viewport-top", `${Math.max(0, Math.round(visualOffsetTop))}px`);
+    root.style.setProperty("--app-visual-viewport-height", `${Math.round(visualHeight)}px`);
+    root.style.setProperty("--app-bottom-occlusion", "0px");
+  };
+
+  const scheduleSync = () => {
+    if (frameId !== null) {
+      return;
+    }
+
+    frameId = shellWindow.requestAnimationFrame(syncViewportVars);
+  };
+
+  syncViewportVars();
+  shellWindow.addEventListener("resize", scheduleSync, { passive: true });
+  shellWindow.addEventListener("orientationchange", scheduleSync);
+  shellWindow.addEventListener("focusin", scheduleSync);
+  shellWindow.addEventListener("focusout", scheduleSync);
+  viewport?.addEventListener("resize", scheduleSync, { passive: true });
+  viewport?.addEventListener("scroll", scheduleSync, { passive: true });
+
+  return () => {
+    if (frameId !== null) {
+      shellWindow.cancelAnimationFrame(frameId);
+    }
+    shellWindow.removeEventListener("resize", scheduleSync);
+    shellWindow.removeEventListener("orientationchange", scheduleSync);
+    shellWindow.removeEventListener("focusin", scheduleSync);
+    shellWindow.removeEventListener("focusout", scheduleSync);
+    viewport?.removeEventListener("resize", scheduleSync);
+    viewport?.removeEventListener("scroll", scheduleSync);
+    root.style.removeProperty("--app-visual-viewport-top");
+    root.style.removeProperty("--app-visual-viewport-height");
+    root.style.removeProperty("--app-bottom-occlusion");
+  };
+}
+
 function useVisualViewportShellVars() {
   useLayoutEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") {
       return;
     }
 
-    const root = document.documentElement;
-    const viewport = window.visualViewport;
-    let frameId: number | null = null;
-
-    const syncViewportVars = () => {
-      frameId = null;
-      const layoutHeight = Math.max(window.innerHeight, root.clientHeight);
-      const visualHeight = viewport?.height ?? window.innerHeight;
-      const visualOffsetTop = viewport?.offsetTop ?? 0;
-      const visibleBottom = visualOffsetTop + visualHeight;
-      const bottomOcclusion = Math.max(0, layoutHeight - visibleBottom);
-
-      root.style.setProperty("--app-visual-viewport-height", `${Math.round(visualHeight)}px`);
-      root.style.setProperty("--app-bottom-occlusion", `${Math.round(bottomOcclusion)}px`);
-    };
-
-    const scheduleSync = () => {
-      if (frameId !== null) {
-        return;
-      }
-
-      frameId = window.requestAnimationFrame(syncViewportVars);
-    };
-
-    syncViewportVars();
-    window.addEventListener("resize", scheduleSync, { passive: true });
-    window.addEventListener("orientationchange", scheduleSync);
-    window.addEventListener("focusin", scheduleSync);
-    window.addEventListener("focusout", scheduleSync);
-    viewport?.addEventListener("resize", scheduleSync, { passive: true });
-    viewport?.addEventListener("scroll", scheduleSync, { passive: true });
-
-    return () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-      window.removeEventListener("resize", scheduleSync);
-      window.removeEventListener("orientationchange", scheduleSync);
-      window.removeEventListener("focusin", scheduleSync);
-      window.removeEventListener("focusout", scheduleSync);
-      viewport?.removeEventListener("resize", scheduleSync);
-      viewport?.removeEventListener("scroll", scheduleSync);
-      root.style.removeProperty("--app-visual-viewport-height");
-      root.style.removeProperty("--app-bottom-occlusion");
-    };
+    return installVisualViewportShellVars({ window, document });
   }, []);
 }
 

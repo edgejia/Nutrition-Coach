@@ -60,14 +60,14 @@ describe("Day snapshot API", () => {
       fat: 4,
       loggedAt: "2026-03-24T16:30:00.000Z",
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午餐便當",
-      calories: 640,
-      protein: 32,
-      carbs: 78,
-      fat: 21,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: "asset:asset-1",
       loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 320, protein: 26, carbs: 0, fat: 18 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 1 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
+      ],
     });
     await services.foodLoggingService.logFood(deviceId, {
       foodName: "隔天早餐",
@@ -102,6 +102,7 @@ describe("Day snapshot API", () => {
         protein: number;
         carbs: number;
         fat: number;
+        itemCount?: number;
         imageAssetId: string | null;
         imageUrl: string | null;
         loggedAt: string;
@@ -113,7 +114,7 @@ describe("Day snapshot API", () => {
       date: "2026-03-25",
       totalCalories: 760,
       totalProtein: 38,
-      totalCarbs: 92,
+      totalCarbs: 84,
       totalFat: 25,
       mealCount: 2,
     });
@@ -127,16 +128,18 @@ describe("Day snapshot API", () => {
         protein: 6,
         carbs: 14,
         fat: 4,
+        itemCount: 1,
         imageAssetId: null,
         imageUrl: null,
         loggedAt: "2026-03-24T16:30:00.000Z",
       },
       {
-        foodName: "午餐便當",
+        foodName: "雞腿、白飯、青菜",
         calories: 640,
         protein: 32,
-        carbs: 78,
+        carbs: 70,
         fat: 21,
+        itemCount: 3,
         imageAssetId: "asset-1",
         imageUrl: "/api/assets/asset-1",
         loggedAt: "2026-03-25T04:00:00.000Z",

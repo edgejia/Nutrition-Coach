@@ -8,6 +8,15 @@ const indexHtmlPath = resolve(clientRoot, "index.html");
 const faviconPath = resolve(clientRoot, "public/favicon.svg");
 
 describe("Client shell", () => {
+  it("asks mobile browsers to resize layout content around virtual keyboards", () => {
+    const indexHtml = readFileSync(indexHtmlPath, "utf8");
+
+    assert.match(
+      indexHtml,
+      /<meta\s+name="viewport"\s+content="[^"]*\binteractive-widget=resizes-content\b[^"]*"\s*\/?>/,
+    );
+  });
+
   it("declares an explicit favicon asset", () => {
     const indexHtml = readFileSync(indexHtmlPath, "utf8");
 

@@ -1,9 +1,10 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { createDeviceService, Goal, IntakeFields } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import {
+  logDeviceGoalsValidationFailed,
   logDeviceGoalsUpdatedRest,
   logOnboardingSubmitStarted,
   logOnboardingSubmitSucceeded,
@@ -28,8 +29,15 @@ const STEP_TEXT_LIMITS = {
   allergies: 300,
   advancedNotes: 500,
 } as const;
+const GOAL_TARGET_BOUNDS = {
+  calories: { min: 500, max: 8000 },
+  protein: { min: 0, max: 400 },
+  carbs: { min: 0, max: 1000 },
+  fat: { min: 0, max: 300 },
+} as const;
 
 type IntakeValidationStep = 1 | 2 | 3 | 4 | 5;
+type GoalTargetField = keyof typeof GOAL_TARGET_BOUNDS;
 type IntakeValidationField =
   | "goal"
   | "goalClarification"
@@ -452,7 +460,7 @@ export function registerDeviceRoutes(
     return reply.code(204).send();
   });
 
-  app.put("/api/device/goals", async (request, reply) => {
+  const updateGoalsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
     const session = await resolveGuestSession(request, { deviceService, guestSessionService });
     if (!session.ok) {
       if (session.clearCookies) {
@@ -467,24 +475,32 @@ export function registerDeviceRoutes(
 
     const body = request.body;
     if (!isRecord(body)) {
+      logDeviceGoalsValidationFailed(request.log, { fields: [], codes: ["invalid_body"] });
       return reply.code(400).send({ error: "Invalid request body" });
     }
-    const validKeys = ["calories", "protein", "carbs", "fat"];
-    const goals: Record<string, number> = {};
+    const validKeys = Object.keys(GOAL_TARGET_BOUNDS) as GoalTargetField[];
+    const goals: Partial<Record<GoalTargetField, number>> = {};
     for (const key of validKeys) {
       if (key in body) {
         const raw = body[key];
-        if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
-          return reply.code(400).send({ error: `Invalid value for ${key}: must be a non-negative number` });
+        const bounds = GOAL_TARGET_BOUNDS[key];
+        if (typeof raw !== "number" || !Number.isFinite(raw) || raw < bounds.min || raw > bounds.max) {
+          logDeviceGoalsValidationFailed(request.log, { fields: [key], codes: ["invalid_field_value"] });
+          return reply.code(400).send({ error: `Invalid value for ${key}: outside supported target range` });
         }
         goals[key] = raw;
       }
     }
     if (Object.keys(goals).length === 0) {
+      logDeviceGoalsValidationFailed(request.log, { fields: [], codes: ["empty_valid_fields"] });
       return reply.code(400).send({ error: "Request must include at least one valid goal field (calories, protein, carbs, fat)" });
     }
     const dailyTargets = await deviceService.updateGoals(deviceId, goals);
     logDeviceGoalsUpdatedRest(request.log, { updatedFields: Object.keys(goals) });
     return { dailyTargets };
-  });
+  };
+
+  // PATCH is the canonical partial-update entrypoint; PUT is a compatibility alias. Both routes intentionally share identical behavior.
+  app.patch("/api/device/goals", updateGoalsHandler);
+  app.put("/api/device/goals", updateGoalsHandler);
 }

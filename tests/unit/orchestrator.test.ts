@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createMealCorrectionService } from "../../server/services/meal-correction.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
@@ -12,6 +13,47 @@ import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
 
 function assertString(value: unknown): asserts value is string {
   assert.equal(typeof value, "string");
+}
+
+function codePointLength(value: string) {
+  return [...value].length;
+}
+
+function assertSuccessfulLogReplyShape(
+  reply: string,
+  opts: {
+    fullFoodName: string;
+    expectsUncertainty: boolean;
+    allowsNextStep?: boolean;
+  },
+) {
+  assert.doesNotMatch(reply, /\n/, "successful log replies must not contain newlines");
+  assert.doesNotMatch(reply, /[\u{1F300}-\u{1FAFF}]/u, "successful log replies must not contain emoji");
+  assert.doesNotMatch(reply, /^#/m, "successful log replies must not contain markdown headings");
+  assert.doesNotMatch(reply, /(?:^|\n)\s*[-*•]\s|[|].*[|]/, "successful log replies must not contain bullets or tables");
+  assert.match(reply, /已記錄/);
+  assert.match(reply, new RegExp(opts.fullFoodName));
+  assert.match(reply, /kcal/);
+  assert.match(reply, /蛋白質\s*\d+(?:\.\d+)?\s*g/);
+  assert.ok(codePointLength(reply) <= 120, "successful log replies must be <= 120 JavaScript code points");
+
+  const nextStepClauses = reply
+    .split("。")
+    .filter((clause) => /(下次|建議|可以再|若你|如果|調整)/.test(clause));
+  assert.ok(nextStepClauses.length <= 1, "successful log replies may include at most one next-step clause");
+  if (opts.allowsNextStep === false) {
+    assert.equal(nextStepClauses.length, 0, "successful log replies without deterministic precision trigger should not include a next step");
+  }
+
+  if (opts.expectsUncertainty === true) {
+    assert.match(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
+    assert.match(reply, /(份量|油脂與飯量|湯底與份量).*主要誤差/);
+  } else {
+    assert.doesNotMatch(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
+    assert.doesNotMatch(reply, /(份量|油脂與飯量|湯底與份量).*主要誤差/);
+  }
+
+  assert.doesNotMatch(reply, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
 }
 
 class StreamingLLMProvider implements LLMProvider {
@@ -207,11 +249,14 @@ describe("Orchestrator - didLogMeal", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
-
     const result = await orchestrator.handleMessage(deviceId, "我吃了雞腿便當");
     if (!("reply" in result)) throw new Error("expected reply result");
-    assert.equal(result.reply, "已幫你記錄蘋果！");
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "蘋果",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /蛋白質 0 g/);
     assert.equal(result.didLogMeal, true);
 
     const history = await chatService.getHistory(deviceId, 10);
@@ -285,7 +330,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.dailySummary?.date, "2026-03-25");
   });
 
-  it("handleMessage returns didLogMeal: true when log_food succeeded but final LLM round fails", async () => {
+  it("handleMessage returns didLogMeal: true with projected copy after log_food succeeds", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
@@ -307,14 +352,16 @@ describe("Orchestrator - didLogMeal", () => {
         },
       }],
     });
-    mockLLM.queueChatError(new Error("API timeout"));
-
     const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assert.equal(result.didLogMeal, true);
     if (!("reply" in result)) throw new Error("expected reply result");
-    assert.match(result.reply, /已完成記錄，但回覆生成失敗。/);
-    assert.match(result.reply, /蛋白質先按雞腿作為主要來源估算/);
-    assert.match(result.reply, /其他配菜不列入 headline/);
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "雞腿便當",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /蛋白質 24 g（以雞腿為主）/);
+    assert.doesNotMatch(result.reply, /已完成記錄，但回覆生成失敗|headline/);
   });
 
   it("handleMessage throws when log_food persists but summary recomputation fails afterward", async () => {
@@ -495,10 +542,234 @@ describe("Orchestrator - didLogMeal", () => {
 
     if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(result.didLogMeal, true);
-    assert.match(result.reply, /已先依照片做保守估算並完成記錄：豬肉燒烤飯盒，約 680 kcal。/);
-    assert.match(result.reply, /蛋白質先按豬肉作為主要來源估算/);
-    assert.match(result.reply, /其他配菜不列入 headline/);
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "豬肉燒烤飯盒",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /蛋白質 28 g（以豬肉為主）/);
+    assert.doesNotMatch(result.reply, /保守估算|headline/);
     assert.equal(mockLLM.chatCalls.length, 1, "image-only logging should not require a second LLM round");
+  });
+
+  it("projects correction clarification copy from user terms and full grouped candidate names", async () => {
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const localMealCorrectionService = createMealCorrectionService(db);
+    const localLLM = new MockLLMProvider();
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    await localFoodLoggingService.logGroupedMeal(localDeviceId, {
+      loggedAt: "2026-04-19T09:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+    await localFoodLoggingService.logGroupedMeal(localDeviceId, {
+      loggedAt: "2026-04-19T10:00:00.000Z",
+      items: [
+        { foodName: "排骨", calories: 300, protein: 26, carbs: 8, fat: 18 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+
+    orchestrator = createOrchestrator({
+      llmProvider: localLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      mealCorrectionService: localMealCorrectionService,
+      deviceService: localDeviceService,
+    });
+
+    localLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_ambiguous_grouped_item",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
+          }),
+        },
+      }],
+    });
+    localLLM.queueChatResponse({ content: "你是要修改中午雞腿便當嗎？" });
+
+    const result = await orchestrator.handleMessage(localDeviceId, "滷蛋改成兩顆水煮蛋");
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(result.didMutateMeal, false);
+    assert.match(result.reply, /滷蛋/);
+    assert.match(result.reply, /雞腿、白飯、滷蛋、青菜/);
+    assert.match(result.reply, /排骨、白飯、滷蛋、青菜/);
+    assert.doesNotMatch(result.reply, /中午雞腿便當/);
+  });
+
+  it("formats successful log replies compactly when missing_quantity metadata marks missing quantity", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_grouped_image",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+              { food_name: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "(圖片)",
+      "data:image/png;base64,abc123",
+      "asset:grouped-image",
+    );
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(result.loggedMeal?.quantityUncertaintyReason, "missing_quantity");
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "雞腿、白飯、青菜",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /可再補份量修正/);
+    assert.doesNotMatch(result.reply, /保守估算/);
+  });
+
+  it("omits uncertainty and next steps for clear quantified image logs", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_quantified_image",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞胸肉 120g", calories: 198, protein: 37, carbs: 0, fat: 4, quantity_g: 120 },
+            ],
+            protein_sources: [
+              { name: "雞胸肉", protein: 37, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "(圖片)",
+      "data:image/png;base64,abc123",
+      "asset:clear-image",
+    );
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "雞胸肉 120g",
+      expectsUncertainty: false,
+      allowsNextStep: false,
+    });
+    assert.doesNotMatch(result.reply, /可再補份量修正/);
+  });
+
+  it("includes uncertainty for high-variance image categories without adding a precision next step", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_high_variance_image",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 650,
+            protein: 31,
+            carbs: 82,
+            fat: 20,
+            quantity: 1,
+            unit: "碗",
+            protein_sources: [
+              { name: "牛肉", protein: 31, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "(圖片)",
+      "data:image/png;base64,abc123",
+      "asset:noodle-image",
+    );
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "牛肉麵",
+      expectsUncertainty: true,
+      allowsNextStep: false,
+    });
+    assert.match(result.reply, /湯底與份量.*主要誤差/);
+    assert.doesNotMatch(result.reply, /可再補份量修正/);
+  });
+
+  it("adds a concrete date for historical successful image logs", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_historical_image",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "鮭魚飯",
+            calories: 520,
+            protein: 34,
+            carbs: 58,
+            fat: 16,
+            quantity: 1,
+            unit: "份",
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+            protein_sources: [
+              { name: "鮭魚", protein: 34, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "(圖片)",
+      "data:image/png;base64,abc123",
+      "asset:historical-image",
+    );
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "鮭魚飯",
+      expectsUncertainty: false,
+      allowsNextStep: false,
+    });
+    assert.match(result.reply, /3\/25/);
   });
 
   it("recovers locally when the user replies 2 to a previously hallucinated choice prompt", async () => {
@@ -521,7 +792,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(mockLLM.chatCalls.length, 0, "recovery path should not call the model again");
   });
 
-  it("handleMessage returns streamGenerator and defers assistant persistence when chatStream is available", async () => {
+  it("handleMessage projects successful text log replies from normalized loggedMeal instead of model stream", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
@@ -562,22 +833,20 @@ describe("Orchestrator - didLogMeal", () => {
 
     const result = await orchestrator.handleMessage(localDeviceId, "我吃了蘋果");
 
-    assert.ok("streamGenerator" in result);
+    assert.ok("reply" in result);
     assert.equal(result.didLogMeal, true);
     assert.ok(result.dailySummary);
-    assert.equal(streamingLLM.chatCalls.length, 2);
+    assert.equal(streamingLLM.chatCalls.length, 1);
+    assertSuccessfulLogReplyShape(result.reply, {
+      fullFoodName: "蘋果",
+      expectsUncertainty: true,
+      allowsNextStep: true,
+    });
+    assert.match(result.reply, /蛋白質 0 g/);
+    assert.doesNotMatch(result.reply, /已幫你記錄蘋果/);
 
     const historyBeforeStream = await localChatService.getHistory(localDeviceId, 10);
     assert.equal(historyBeforeStream.filter((message) => message.role === "assistant").length, 0);
-
-    const streamedTokens: string[] = [];
-    for await (const token of result.streamGenerator) {
-      streamedTokens.push(token);
-    }
-    assert.deepEqual(streamedTokens, ["已幫", "你記錄", "蘋果！"]);
-
-    const historyAfterStream = await localChatService.getHistory(localDeviceId, 10);
-    assert.equal(historyAfterStream.filter((message) => message.role === "assistant").length, 0);
   });
 
   it("handleMessage streams direct text replies when the provider exposes a round-level stream", async () => {

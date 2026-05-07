@@ -163,16 +163,12 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({
-      content: "已幫你把今天早餐那筆改成雞胸飯。",
-    });
-
     const { status, body } = await postChat("把今天早餐的雞腿飯改成雞胸飯 500 卡");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /已幫你把今天早餐那筆改成雞胸飯/);
+    assert.match(body.reply, /已更新雞胸飯，500 kcal，蛋白質 42 g/);
     assert.equal(body.dailySummary?.mealCount, 1);
     assert.equal(body.dailySummary?.totalCalories, 500);
 
@@ -442,16 +438,12 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({
-      content: "已幫你把那筆雞腿的蛋白質調整成約22g。",
-    });
-
     const { status, body } = await postChat("正常平均幾g就幾g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /22g/);
+    assert.match(body.reply, /22\s*g/);
 
     const meals = await getMeals();
     const updated = meals.find((meal) => meal.id === target.id);
@@ -462,7 +454,7 @@ describe("chat meal correction integration", () => {
     assert.equal(updated?.fat, 9);
   });
 
-  it("applies grouped meal whole-meal nutrient patches without requiring full items[] replacement", async () => {
+  it("applies grouped meal whole-meal nutrient patches proportionally without requiring full items[] replacement", async () => {
     const grouped = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
       items: [
@@ -498,24 +490,137 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({
-      content: "已幫你把那餐的蛋白質改成 22g。",
-    });
-
     const { status, body } = await postChat("把今天那餐雞胸肉白飯的蛋白質改成 22g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /22g/);
+    assert.match(body.reply, /22\s*g/);
 
     const meals = await getMeals();
     const updated = meals.find((meal) => meal.id === grouped.id);
-    assert.equal(updated?.foodName, "雞胸肉、白飯 等3項");
+    assert.equal(updated?.foodName, "雞胸肉、白飯、花椰菜");
     assert.equal(updated?.calories, 450);
     assert.equal(updated?.protein, 22);
     assert.equal(updated?.carbs, 48);
     assert.equal(updated?.fat, 6);
+  });
+
+  it("updates the grouped target instead of an unrelated lunch candidate when the model adds a period hint", async () => {
+    const grouped = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T09:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+    const unrelatedLunch = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_grouped_bento_target",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "replace_grouped_bento_item",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: grouped.id,
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+              { food_name: "兩顆水煮蛋", calories: 150, protein: 13, carbs: 1, fat: 10 },
+              { food_name: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const { status, body } = await postChat("滷蛋改成兩顆水煮蛋");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.reply, /雞腿、白飯、兩顆水煮蛋、青菜/);
+
+    const meals = await getMeals();
+    const updatedGrouped = meals.find((meal) => meal.id === grouped.id);
+    const untouchedLunch = meals.find((meal) => meal.id === unrelatedLunch.id);
+    assert.equal(updatedGrouped?.foodName, "雞腿、白飯、兩顆水煮蛋、青菜");
+    assert.equal(updatedGrouped?.calories, 770);
+    assert.equal(untouchedLunch?.foodName, "蛋餅");
+    assert.equal(untouchedLunch?.calories, 330);
+  });
+
+  it("returns grouped-term clarification copy before any follow-up mutation is attempted", async () => {
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T09:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T10:00:00.000Z",
+      items: [
+        { foodName: "排骨", calories: 300, protein: 26, carbs: 8, fat: 18 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_ambiguous_grouped_item",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "你是要修改中午雞腿便當嗎？" });
+
+    const { status, body } = await postChat("滷蛋改成兩顆水煮蛋");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.match(body.reply, /滷蛋/);
+    assert.match(body.reply, /雞腿、白飯、滷蛋、青菜/);
+    assert.match(body.reply, /排骨、白飯、滷蛋、青菜/);
+    assert.doesNotMatch(body.reply, /中午雞腿便當/);
+
+    const meals = await getMeals();
+    assert.equal(meals.length, 2);
+    assert.ok(meals.every((meal) => meal.foodName.includes("滷蛋")));
   });
 
   it("consumes the pending selection on the next chat turn and deletes the chosen meal", async () => {
@@ -548,9 +653,6 @@ describe("chat meal correction integration", () => {
           }),
         },
       }],
-    });
-    mockLLM.queueChatResponse({
-      content: "我找到多筆今天的雞腿飯，請直接回覆編號。",
     });
 
     const firstTurn = await postChat("把今天午餐的雞腿飯刪掉");
@@ -590,7 +692,7 @@ describe("chat meal correction integration", () => {
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /已幫你刪除第二筆雞腿飯/);
+    assert.match(body.reply, /已完成餐點調整/);
     assert.equal(body.dailySummary?.mealCount, 1);
     assert.equal(body.dailySummary?.totalCalories, 620);
 

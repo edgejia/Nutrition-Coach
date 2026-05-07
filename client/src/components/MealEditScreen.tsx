@@ -4,7 +4,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { DailySummary, MealEditPayload } from "../types.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportCameraIcon, SportChevronLeftIcon } from "./SportIcons.js";
+import { SportChevronLeftIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
 type DraftState = {
@@ -23,6 +23,12 @@ const NUTRITION_FIELDS: Array<{ key: NutritionKey; label: string; unit: "kcal" |
   { key: "carbs", label: "碳水", unit: "g" },
   { key: "fat", label: "脂肪", unit: "g" },
 ];
+
+const GROUPED_UPDATE_ERROR_COPY = "這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。";
+
+function formatMealItemMacro(value: number, unit: "kcal" | "g") {
+  return `${Math.round(value)} ${unit}`;
+}
 
 function createDraft(payload: MealEditPayload): DraftState {
   return {
@@ -55,24 +61,64 @@ function parseDraft(draft: DraftState) {
   return { foodName, calories, protein, carbs, fat };
 }
 
+function MealEditImageFrame({ payload }: { payload: MealEditPayload }) {
+  return (
+    <section className="sp-meal-edit-image-frame">
+      {payload.imageUrl ? (
+        <>
+          <div className="sp-meal-edit-image-copy">
+            <span>整餐照片</span>
+            <p>這張照片代表整餐，不是單一食物裁切。</p>
+          </div>
+          <div className="sp-meal-edit-image-media">
+            <PersistedAssetImage
+              src={payload.imageUrl}
+              alt={`${payload.foodName} 整餐照片`}
+              imgClassName="sp-meal-edit-image"
+              fallbackClassName="sp-meal-edit-image-fallback"
+              fallbackStyle={{
+                background: "var(--sp-surface-2)",
+                color: "var(--sp-ink-2)",
+              }}
+            />
+            <p className="sp-meal-edit-image-error-copy">
+              圖片載入失敗，餐點資料仍可編輯。請稍後再試。
+            </p>
+          </div>
+        </>
+      ) : (
+        <div className="sp-meal-edit-image-placeholder">
+          <span>尚未附上餐點照片</span>
+          <p>這筆餐點是文字記錄，仍可編輯名稱與營養數值。</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function MealEditScreen({ onBack }: { onBack: () => void }) {
   const secondaryScreen = useStore((s) => s.secondaryScreen);
+  const setActiveScreen = useStore((s) => s.setActiveScreen);
+  const closeSecondaryScreen = useStore((s) => s.closeSecondaryScreen);
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setMeals = useStore((s) => s.setMeals);
+  const redactChatReceiptIdentity = useStore((s) => s.redactChatReceiptIdentity);
   const recordMealMutation = useStore((s) => s.recordMealMutation);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const payload = secondaryScreen?.screen === "mealEdit" ? secondaryScreen.payload : undefined;
   const origin = secondaryScreen?.screen === "mealEdit" ? secondaryScreen.origin : undefined;
-  const [draft, setDraft] = useState<DraftState | null>(() => (payload ? createDraft(payload) : null));
+  const isGroupedPayload = Boolean(payload && payload.itemCount > 1);
+  const [draft, setDraft] = useState<DraftState | null>(() => (payload && !isGroupedPayload ? createDraft(payload) : null));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraft(payload ? createDraft(payload) : null);
+    setDraft(payload && payload.itemCount <= 1 ? createDraft(payload) : null);
     setError(null);
   }, [payload]);
 
-  async function refreshAfterMealMutation(affectedDate: string, dailySummary: DailySummary) {
+  async function refreshAfterMealMutation(mealId: string, affectedDate: string, dailySummary: DailySummary) {
+    redactChatReceiptIdentity(mealId);
     recordMealMutation(affectedDate);
     if (dailySummary.date !== formatLocalDate(new Date())) {
       return;
@@ -84,7 +130,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
   }
 
   async function handleSave() {
-    if (!payload || !draft) {
+    if (!payload || payload.itemCount > 1 || !draft) {
       return;
     }
 
@@ -101,11 +147,13 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
         ...parsedDraft,
         imageAssetId: payload.imageAssetId ?? null,
       });
-      await refreshAfterMealMutation(response.affectedDate, response.dailySummary);
+      await refreshAfterMealMutation(payload.mealId, response.affectedDate, response.dailySummary);
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         void recoverGuestSession();
+      } else if (err instanceof Error && err.message === "MEAL_REQUIRES_GROUPED_UPDATE") {
+        setError(GROUPED_UPDATE_ERROR_COPY);
       } else {
         setError("餐點暫時無法儲存，請稍後再試。");
       }
@@ -127,7 +175,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setError(null);
     try {
       const { affectedDate, dailySummary } = await deleteMeal(payload.mealId);
-      await refreshAfterMealMutation(affectedDate, dailySummary);
+      await refreshAfterMealMutation(payload.mealId, affectedDate, dailySummary);
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
@@ -141,8 +189,84 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
   }
 
   const backLabel = origin === "chat" ? "返回對話" : origin === "history" ? "返回歷史" : "返回";
+  const goToChatCorrection = () => {
+    closeSecondaryScreen();
+    setActiveScreen("chat");
+  };
 
-  if (!payload || !draft) {
+  if (!payload) {
+    return (
+      <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
+        <SportScreen className="sp-meal-edit-screen">
+          <header className="sp-meal-edit-header">
+            <SportIconButton aria-label="返回" className="sp-meal-edit-back" onClick={onBack}>
+              <SportChevronLeftIcon size={18} stroke={2} />
+            </SportIconButton>
+            <div className="sp-meal-edit-title">
+              <h1>編輯餐點</h1>
+              <div>REV · MEAL</div>
+            </div>
+            <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
+          </header>
+          <main className="screen-scroll-safe sp-meal-edit-scroll">
+            <SportCard className="sp-meal-edit-empty" variant="flat">
+              找不到要編輯的餐點。
+            </SportCard>
+          </main>
+        </SportScreen>
+      </div>
+    );
+  }
+
+  if (payload.itemCount > 1) {
+    return (
+      <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
+        <SportScreen className="sp-meal-edit-screen">
+          <header className="sp-meal-edit-header">
+            <SportIconButton aria-label={backLabel} className="sp-meal-edit-back" onClick={onBack}>
+              <SportChevronLeftIcon size={18} stroke={2} />
+            </SportIconButton>
+            <div className="sp-meal-edit-title">
+              <h1>編輯餐點</h1>
+              <div>REV · AI ESTIMATE</div>
+            </div>
+            <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
+          </header>
+
+          <main className="screen-scroll-safe sp-meal-edit-scroll sp-meal-edit-grouped-scroll">
+            <MealEditImageFrame payload={payload} />
+            <SportCard className="sp-meal-edit-grouped-lock">
+              <div className="sp-meal-edit-grouped-label">GROUPED</div>
+              <h2>這筆是組合餐點</h2>
+              <p>
+                包含 {payload.itemCount} 項：{payload.foodName}。請到「對話」說明要改哪一項或要調整整餐，避免把多項餐點合併成一項。
+              </p>
+              {payload.items && payload.items.length > 0 ? (
+                <div className="sp-meal-edit-grouped-items" aria-label={`${payload.foodName} 項目明細`}>
+                  {payload.items.map((item) => (
+                    <div key={`${item.position}-${item.name}`} className="sp-meal-edit-grouped-item">
+                      <div className="sp-meal-edit-grouped-item-name">{item.name}</div>
+                      <div className="sp-meal-edit-grouped-item-macros">
+                        <span>熱量 {formatMealItemMacro(item.calories, "kcal")}</span>
+                        <span>蛋白質 {formatMealItemMacro(item.protein, "g")}</span>
+                        <span>碳水 {formatMealItemMacro(item.carbs, "g")}</span>
+                        <span>脂肪 {formatMealItemMacro(item.fat, "g")}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <button type="button" className="sp-meal-edit-grouped-primary" onClick={goToChatCorrection}>
+                到對話修正
+              </button>
+            </SportCard>
+          </main>
+        </SportScreen>
+      </div>
+    );
+  }
+
+  if (!draft) {
     return (
       <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
         <SportScreen className="sp-meal-edit-screen">
@@ -181,25 +305,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
         </header>
 
         <main className="screen-scroll-safe sp-meal-edit-scroll">
-          <section className="sp-meal-edit-image-frame">
-            {payload.imageUrl ? (
-              <PersistedAssetImage
-                src={payload.imageUrl}
-                alt={`${payload.foodName} 照片`}
-                imgClassName="sp-meal-edit-image"
-                fallbackClassName="sp-meal-edit-image-fallback"
-                fallbackStyle={{
-                  background: "var(--sp-surface-2)",
-                  color: "var(--sp-ink-2)",
-                }}
-              />
-            ) : (
-              <div className="sp-meal-edit-image-placeholder" aria-hidden="true">
-                <SportCameraIcon size={28} stroke={1.6} />
-                <span>餐點照片</span>
-              </div>
-            )}
-          </section>
+          <MealEditImageFrame payload={payload} />
 
           <SportCard className="sp-meal-edit-form">
             <div className="sp-meal-edit-form-head">

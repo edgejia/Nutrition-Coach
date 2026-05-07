@@ -270,7 +270,6 @@ const scenario: VerificationScenario = {
             },
           }],
         });
-        llm.queueRoundError(new Error("LLM reply generation failed"));
       },
       async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
@@ -298,11 +297,11 @@ const scenario: VerificationScenario = {
           };
         }
         if (assistantMsgs.length !== 1) return { ok: false, error: `D-10: expected 1 assistant msg, got ${assistantMsgs.length}`, evidence };
-        if (!/已完成記錄，但回覆生成失敗。/.test(fallbackContent)) {
-          return { ok: false, error: "D-09: expected partial-success fallback wording", evidence };
+        if (!/已記錄測試餐點C/.test(fallbackContent)) {
+          return { ok: false, error: "D-09: expected projected successful log wording", evidence };
         }
-        if (!/蛋白質先按雞腿作為主要來源估算/.test(fallbackContent)) {
-          return { ok: false, error: "D-09: expected trusted-protein explanation in partial-success fallback", evidence };
+        if (!/蛋白質 0 g/.test(fallbackContent)) {
+          return { ok: false, error: "D-09: expected normalized projected protein in successful log wording", evidence };
         }
         if (!mealKept) return { ok: false, error: "D-09: meal must be kept when log_food succeeded before reply failed", evidence };
 

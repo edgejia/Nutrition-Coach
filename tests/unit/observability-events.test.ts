@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildChatTurnCompletedEvent,
+  buildDeviceGoalsValidationFailedEvent,
   buildDeviceGoalsUpdatedRestEvent,
   buildHomeCtaIntentSelectedEvent,
   buildHomeCtaOptionSentEvent,
@@ -20,6 +21,7 @@ const LOCKED_EVENT_NAMES: RedactedObservabilityEventName[] = [
   "home_cta_intent_selected",
   "home_cta_option_sent",
   "chat_turn_completed",
+  "device_goals_validation_failed",
   "device_goals_updated_rest",
   "sse_connection_state",
 ];
@@ -48,6 +50,11 @@ const FORBIDDEN_STRINGS = [
   "device_abc123",
   "1800",
   "130",
+  "raw body text",
+  "route",
+  "method",
+  '"body"',
+  '"value"',
 ];
 
 function assertLockedPayload(payload: { event: RedactedObservabilityEventName } & object) {
@@ -83,6 +90,7 @@ describe("redacted observability event builders", () => {
         hadImage: true,
         latencyMs: 42,
       }),
+      buildDeviceGoalsValidationFailedEvent({ fields: ["protein"], codes: ["invalid_field_value"] }),
       buildDeviceGoalsUpdatedRestEvent({ updatedFields: ["protein", "calories"] }),
       buildSseConnectionStateEvent({ state: "opened" }),
     ];
@@ -108,12 +116,46 @@ describe("redacted observability event builders", () => {
         hadImage: true,
         latencyMs: 42,
       }),
+      buildDeviceGoalsValidationFailedEvent({
+        fields: ["calories", "protein", "deviceId", "target"],
+        codes: ["invalid_body", "invalid_field_value", "empty_valid_fields", "raw body text"],
+      }),
       buildDeviceGoalsUpdatedRestEvent({ updatedFields: ["calories", "protein"] }),
     ];
 
     for (const payload of payloads) {
       assertLockedPayload(payload);
     }
+  });
+
+  it("builds device goals validation failures with locked fields and codes only", () => {
+    assert.deepEqual(
+      buildDeviceGoalsValidationFailedEvent({ fields: ["protein"], codes: ["invalid_field_value"] }),
+      {
+        event: "device_goals_validation_failed",
+        fields: ["protein"],
+        codes: ["invalid_field_value"],
+      },
+    );
+    assert.deepEqual(
+      buildDeviceGoalsValidationFailedEvent({
+        fields: ["protein", "water", "deviceId", "calories", "fat", "carbs"],
+        codes: [
+          "invalid_body",
+          "invalid_field_value",
+          "empty_valid_fields",
+          "route",
+          "method",
+          "INVALID_BODY",
+          "invalid-field-value",
+        ],
+      }),
+      {
+        event: "device_goals_validation_failed",
+        fields: ["calories", "carbs", "fat", "protein"],
+        codes: ["empty_valid_fields", "invalid_body", "invalid_field_value"],
+      },
+    );
   });
 
   it("covers all SSE connection states", () => {

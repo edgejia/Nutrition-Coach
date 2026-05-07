@@ -70,6 +70,7 @@ describe("MealTransactionsService", () => {
     assert.equal(refs.length, 1);
 
     assert.equal(result.transactionId, transactions[0]!.id);
+    assert.equal(result.revisionId, revisions[0]!.id);
     assert.equal(transactions[0]!.deviceId, deviceId);
     assert.equal(transactions[0]!.loggedAt, "2026-03-25T04:30:00.000Z");
     assert.equal(transactions[0]!.currentRevisionId, revisions[0]!.id);
@@ -257,5 +258,49 @@ describe("MealTransactionsService", () => {
     assert.equal(transaction!.currentRevisionId, tombstone!.id);
     assert.equal(tombstoneItems.length, 0);
     assert.equal(refs.length, 1);
+  });
+
+  it("returns the new current revision identity when updating a transaction", async () => {
+    const created = await mealTransactionsService.createTransaction(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        {
+          foodName: "蘋果",
+          calories: 95,
+          protein: 0.5,
+          carbs: 25,
+          fat: 0.3,
+        },
+      ],
+    });
+
+    const updated = await mealTransactionsService.updateTransaction(deviceId, created.transactionId, {
+      items: [
+        {
+          foodName: "蘋果半顆",
+          calories: 48,
+          protein: 0.2,
+          carbs: 12,
+          fat: 0.1,
+        },
+      ],
+    });
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, created.transactionId))
+    )[0];
+    const revisions = await db
+      .select()
+      .from(mealRevisions)
+      .where(eq(mealRevisions.transactionId, created.transactionId));
+
+    assert.ok(transaction);
+    assert.equal(revisions.length, 2);
+    assert.equal(updated.transactionId, created.transactionId);
+    assert.equal(updated.revisionId, transaction!.currentRevisionId);
+    assert.notEqual(updated.revisionId, created.revisionId);
   });
 });

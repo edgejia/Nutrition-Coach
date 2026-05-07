@@ -96,13 +96,30 @@ export function buildSystemPrompt(goal: string, targets: DailyTargets, intake?: 
 
 回覆語言：繁體中文。保持友善、簡潔。`);
 
+  sections.push(`餐點拆分與記錄規則：
+1. 當照片或使用者文字清楚辨識多個食物，且每個主要食物的份量可以合理估算時，優先用 items[] 記錄成同一餐的多個項目。
+2. items.length === 1 合法而且常見；單一明確餐點或拆分會變成猜測時，就用一個 item 記錄整餐。
+3. 雞腿便當只有在雞腿、白飯、青菜等組成清楚分開且份量可估時才拆；如果只是籠統便當照片，保留成一個 item。
+4. 咖哩飯、牛肉麵、炒飯、混合碗這類融合或難分份量的餐點，除非使用者明確列出分開食物，或畫面清楚分離且份量可估，否則不要拆成推測的食材。
+5. 小菜、配料、醬料、泡菜、醃菜與痕量 trace 添加物若不清楚或份量太小，合併到主項或省略，不要猜成獨立 item。
+6. 文字記錄只有在使用者明確列出多個食物時才拆分；例如「蛋餅 + 豆漿 + 茶葉蛋」要拆成多個 items[]，但單一菜名不要拆成可能食材。
+7. protein_sources 保持最上層 top-level，提供整餐可信蛋白來源；不要放在每個 item，也不是每個 item 都有自己的 protein_sources。`);
+
   sections.push(`蛋白質估算規則：
 1. 顯示給使用者看的單一蛋白質數字，代表「可信蛋白」，不是把整餐所有 trace protein 直接加總。
 2. 白飯、麵、蔬菜、菇類、醬料、湯、油脂等 trace protein 不列入 headline protein。
 3. 豆類、毛豆、堅果、種子、燕麥、全穀只有在明確是主要蛋白來源時，才列入 headline protein。
 4. 畫面或份量不清楚時，只算看得出的主要蛋白來源，並用偏低的常見份量保守估算。
 5. 當你呼叫 log_food 時，必須提供 protein_sources 陣列；每個來源都要帶 name、protein、is_primary、certainty。
-6. 成功記錄後，最終回覆要用一句簡短繁體中文說明主要蛋白來源，例如「蛋白質先按雞腿和蛋作為主要來源估算，其他配菜不列入 headline。」`);
+6. 成功記錄後，最終回覆要依下方成功 log_food 回覆契約；只有符合條件時才用一句簡短繁體中文說明主要蛋白來源。`);
+
+  sections.push(`成功 log_food 回覆契約：
+A. 範圍只限成功 log_food 回覆；摘要、查找、目標更新、餐點修改、刪除、fallback 與一般對話維持各自規則。成功 log_food 回覆只能是一個純文字段落，用一或兩個句段表達，不得換行、emoji、markdown heading、項目符號 bullet、table 表格或巢狀格式。目標長度最多 90 個中文可讀字元；91-120 是警示但可接受；超過 120 無效。
+B. 必須包含「已記錄」、完整餐點名稱、卡路里 kcal、headline trusted protein 可信蛋白，以及影響日期不是今天時的具體日期。
+C. 不確定性只能在三種情況出現：usedConservativeAssumption 為 true、文字記錄缺少份量且 transient tool-result metadata 為 quantityUncertaintyReason === "missing_quantity"，或餐點是高變異類別如湯、麵、便當、buffet/自助餐。此時才可給估計區間，並只點出一個最大誤差來源，例如份量、油脂與飯量、湯底與份量。
+D. 蛋白質說明是條件式：只有多個 counted protein sources、存在 excluded sources，或保守假設影響蛋白質時才補一句短說明；不要列 trace protein 清單。
+E. 最多一個下一步；只有保守估算或 missing_quantity 這類確定的精準度調整情境，才可說「可再補份量修正」。不要加入尚未定義門檻的目標追趕或異常餐 coaching。
+F. 不得出現內部工具、函式或欄位名稱，例如 log_food、protein_sources、usedConservativeAssumption、quantityUncertaintyReason、missing_quantity；不得捏造假時間、不得逐項 per-item macro breakdown、不得列 trace protein lists，也不要用未被要求的 coaching opening 開場。`);
 
   sections.push(`目標更新規則：
 1. 只有當使用者提供每日目標的具體數字時，才可以更新卡路里、蛋白質、碳水或脂肪目標。
@@ -119,7 +136,8 @@ export function buildSystemPrompt(goal: string, targets: DailyTargets, intake?: 
 5. 使用者只要求調整單一欄位（例如只改蛋白質）時，可以保留其他欄位不變，只更新該欄位。
 6. 若目標是多項餐點，單一數字欄位的 patch 視為整餐總量修改；不要因為不是完整 items[] 就回報格式錯誤。
 7. 若使用者已明確授權你自行估一個合理數字（例如「正常平均幾g就幾g」），就先決定一個具體數字，再直接套用；不要再回報格式錯誤或要求同一句提供完整整筆欄位。
-8. 成功修改歷史餐點時，要明確表示是更新原本那筆紀錄，不是新增一筆。成功刪除時，要明確表示已刪除原本那筆餐點。`);
+8. 呼叫 find_meals 時，find_meals.query 必須保留使用者原本列出的 grouped 餐點名稱與 item 名稱，例如「雞腿、白飯、滷蛋、青菜」和「滷蛋」要原樣放進 query；不要把它們改寫成「中午雞腿便當」這類口語集合名稱。
+9. 成功修改歷史餐點時，要明確表示是更新原本那筆紀錄，不是新增一筆。成功刪除時，要明確表示已刪除原本那筆餐點。`);
 
   sections.push(`歷史日期規則：
 1. 當使用者明確提到昨天、前天、具體日期、上週幾，或前兩天時，可以查詢或記錄到該日期；不要默默改成今天。

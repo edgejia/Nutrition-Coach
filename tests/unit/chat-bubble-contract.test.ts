@@ -106,24 +106,15 @@ describe("chat bubble source contract", () => {
   it("complete receipts open Meal Edit and incomplete receipts stay read-only", async () => {
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const payloadBuilder = await readSource("client/src/meal-edit-payload.ts");
 
     assert.match(bubble, /getCompleteReceiptEditPayload/);
-    for (const field of [
-      "mealId",
-      "dateKey",
-      "foodName",
-      "calories",
-      "protein",
-      "carbs",
-      "fat",
-    ]) {
-      assert.match(bubble, new RegExp(`loggedMeal\\.${field}`));
-    }
+    assert.match(bubble, /buildReceiptMealEditPayload\(message\.loggedMeal\)/);
 
     assert.match(bubble, /MealEditPayload/);
     assert.match(bubble, /onOpenMealEdit\?\.\(editPayload\)/);
     assert.match(bubble, /SportChevronRightIcon/);
-    assert.match(bubble, /Number\.isFinite/);
+    assert.match(payloadBuilder, /Number\.isFinite/);
     assert.match(chatPanel, /PHASE40_INCOMPLETE_RECEIPT_FLAG/);
     assert.match(chatPanel, /phase40IncompleteReceipt/);
     assert.match(chatPanel, /createPhase40IncompleteReceiptMock/);
@@ -131,6 +122,28 @@ describe("chat bubble source contract", () => {
     assert.match(chatPanel, /content: ""/);
     assert.doesNotMatch(chatPanel, /缺少可編輯/);
     assert.doesNotMatch(chatPanel, /Incomplete receipt mock/);
+  });
+
+  it("renders logged meal receipt thumbnails through the shared persisted asset primitive", async () => {
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const css = await readSource("client/src/app.css");
+
+    assert.match(bubble, /<PersistedAssetImage/);
+    assert.match(bubble, /src=\{loggedMeal\.imageUrl\}/);
+    assert.match(bubble, /alt=\{`\$\{loggedMeal\.foodName\} 整餐照片`\}/);
+    assert.match(bubble, /imgClassName="sp-receipt-thumbnail"/);
+    assert.match(
+      bubble,
+      /fallbackClassName="sp-receipt-thumbnail sp-receipt-thumbnail-fallback"/,
+    );
+    assert.match(bubble, /className="sp-receipt-thumbnail-frame"/);
+    assert.match(bubble, /aria-label=\{canEdit \? `編輯 \$\{loggedMeal\.foodName\}` : undefined\}/);
+
+    assert.match(css, /\.sp-receipt-thumbnail-frame/);
+    assert.match(css, /width:\s*56px/);
+    assert.match(css, /height:\s*56px/);
+    assert.match(css, /\.sp-receipt-thumbnail/);
+    assert.match(css, /\.sp-receipt-thumbnail-fallback/);
   });
 
   it("delete mutation confirmations stay assistant text only without receipt affordances", async () => {
@@ -146,6 +159,7 @@ describe("chat bubble source contract", () => {
   it("passes Meal Edit callbacks from ChatPanel with chat origin", async () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const payloadBuilder = await readSource("client/src/meal-edit-payload.ts");
 
     assert.match(chatPanel, /onOpenMealEdit=\{\(payload\) => openMealEdit\(payload, "chat"\)\}/);
     assert.doesNotMatch(chatPanel, /sp-chat-today-log/);
@@ -161,7 +175,7 @@ describe("chat bubble source contract", () => {
       "imageUrl",
       "loggedAt",
     ]) {
-      assert.match(bubble, new RegExp(`${field}:`));
+      assert.match(payloadBuilder, new RegExp(`${field}:`));
     }
   });
 
@@ -185,5 +199,7 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(bubble, /find\([^)]*foodName/);
     assert.doesNotMatch(bubble, /find\([^)]*calories/);
     assert.doesNotMatch(bubble, /foodName[^;\n]+calories/);
+    assert.doesNotMatch(bubble, /<img/);
+    assert.doesNotMatch(bubble, /backgroundImage/);
   });
 });

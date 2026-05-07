@@ -9,6 +9,7 @@ import type {
   IntakeValidationIssue,
   LoggedMealReceipt,
   MealEntry,
+  MealItemDetail,
   Message,
   CoachCTAIntentId,
   CoachCTAOptionId,
@@ -44,6 +45,60 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function normalizeItemCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+}
+
+function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const items = value
+    .map((item): MealItemDetail | null => {
+      if (!isRecord(item)) {
+        return null;
+      }
+
+      const nutrition = isRecord(item.nutrition) ? item.nutrition : item;
+      const name = typeof item.name === "string" ? item.name.trim() : "";
+      const position = item.position;
+      const calories = nutrition.calories;
+      const protein = nutrition.protein;
+      const carbs = nutrition.carbs;
+      const fat = nutrition.fat;
+
+      if (
+        !name ||
+        typeof position !== "number" ||
+        !Number.isFinite(position) ||
+        typeof calories !== "number" ||
+        !Number.isFinite(calories) ||
+        typeof protein !== "number" ||
+        !Number.isFinite(protein) ||
+        typeof carbs !== "number" ||
+        !Number.isFinite(carbs) ||
+        typeof fat !== "number" ||
+        !Number.isFinite(fat)
+      ) {
+        return null;
+      }
+
+      return {
+        name,
+        position: Math.floor(position),
+        calories,
+        protein,
+        carbs,
+        fat,
+      };
+    })
+    .filter((item): item is MealItemDetail => item !== null)
+    .sort((a, b) => a.position - b.position);
+
+  return items.length > 0 ? items : undefined;
+}
+
 function isIntakeValidationIssue(value: unknown): value is IntakeValidationIssue {
   return (
     isRecord(value) &&
@@ -75,12 +130,46 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
       (value.mealId === undefined || typeof value.mealId === "string") &&
       (value.dateKey === undefined || typeof value.dateKey === "string") &&
       (value.loggedAt === undefined || typeof value.loggedAt === "string") &&
+      (value.itemCount === undefined ||
+        (typeof value.itemCount === "number" && Number.isFinite(value.itemCount) && value.itemCount > 0)) &&
+      (value.items === undefined || Array.isArray(value.items)) &&
       (value.imageAssetId === undefined || value.imageAssetId === null || typeof value.imageAssetId === "string") &&
       (value.imageUrl === undefined || value.imageUrl === null || typeof value.imageUrl === "string")
     );
   }
 
   return false;
+}
+
+function isDailySummary(value: unknown): value is DailySummary {
+  return (
+    isRecord(value) &&
+    typeof value.date === "string" &&
+    typeof value.totalCalories === "number" &&
+    Number.isFinite(value.totalCalories) &&
+    typeof value.totalProtein === "number" &&
+    Number.isFinite(value.totalProtein) &&
+    typeof value.totalCarbs === "number" &&
+    Number.isFinite(value.totalCarbs) &&
+    typeof value.totalFat === "number" &&
+    Number.isFinite(value.totalFat) &&
+    typeof value.mealCount === "number" &&
+    Number.isFinite(value.mealCount)
+  );
+}
+
+function isDailyTargets(value: unknown): value is DailyTargets {
+  return (
+    isRecord(value) &&
+    typeof value.calories === "number" &&
+    Number.isFinite(value.calories) &&
+    typeof value.protein === "number" &&
+    Number.isFinite(value.protein) &&
+    typeof value.carbs === "number" &&
+    Number.isFinite(value.carbs) &&
+    typeof value.fat === "number" &&
+    Number.isFinite(value.fat)
+  );
 }
 
 async function readJsonSafe(res: Response): Promise<unknown> {
@@ -268,6 +357,30 @@ export function withAuthorizedAssetUrl(
   return nextQuery ? `${pathname}?${nextQuery}` : pathname;
 }
 
+export function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMealReceipt {
+  const items = normalizeMealItems((receipt as { items?: unknown }).items);
+
+  return {
+    ...receipt,
+    itemCount: normalizeItemCount(receipt.itemCount),
+    ...(items ? { items } : {}),
+    ...(receipt.imageUrl === undefined
+      ? {}
+      : { imageUrl: withAuthorizedAssetUrl(receipt.imageUrl) ?? null }),
+  };
+}
+
+function normalizeChatReply<T extends { loggedMeal?: LoggedMealReceipt }>(reply: T): T {
+  if (!reply.loggedMeal) {
+    return reply;
+  }
+
+  return {
+    ...reply,
+    loggedMeal: normalizeLoggedMealReceipt(reply.loggedMeal),
+  };
+}
+
 export async function registerDevice(goal: string): Promise<{ deviceId: string; dailyTargets: DailyTargets }> {
   const res = await fetch("/api/device", {
     method: "POST",
@@ -362,7 +475,8 @@ export async function sendMessage(message: string, image?: File): Promise<ChatRe
     const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
     throw new Error(errorMessage ?? "Failed to send message");
   }
-  return res.json();
+  const body = await res.json() as ChatReply;
+  return normalizeChatReply(body);
 }
 
 export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> {
@@ -374,11 +488,15 @@ export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> 
     messages: body.messages.map((message) => ({
       ...message,
       imageUrl: withAuthorizedAssetUrl(message.imageUrl),
+      loggedMeal: message.loggedMeal
+        ? normalizeLoggedMealReceipt(message.loggedMeal)
+        : message.loggedMeal,
     })),
   };
 }
 
 export interface StreamCallbacks {
+  onTurnStart?: (turnId: string) => void;
   onStatus: (label: string) => void;
   onToken: (token: string) => void;
   onDone: (data: {
@@ -389,16 +507,36 @@ export interface StreamCallbacks {
     dailyTargets?: DailyTargets;
     affectedDate?: string;
   }) => void;
+  onStopped?: (data: {
+    stopped: true;
+    turnId?: string;
+    tokensStreamed: number;
+    didLogMeal?: boolean;
+    didMutateMeal?: boolean;
+    loggedMeal?: LoggedMealReceipt;
+    dailySummary?: DailySummary;
+    dailyTargets?: DailyTargets;
+    affectedDate?: string;
+  }) => void;
   onError: (message: string) => void;
+}
+
+export interface SendMessageStreamOptions {
+  signal?: AbortSignal;
+  turnId?: string;
 }
 
 export async function sendMessageStream(
   message: string,
   callbacks: StreamCallbacks,
   image?: File,
+  options?: SendMessageStreamOptions,
 ): Promise<void> {
   const form = new FormData();
   form.append("message", message);
+  if (options?.turnId) {
+    form.append("turnId", options.turnId);
+  }
   if (image) {
     form.append("image", await prepareImageForUpload(image));
   }
@@ -408,6 +546,7 @@ export async function sendMessageStream(
     credentials: "same-origin",
     headers: { Accept: "text/event-stream" },
     body: form,
+    signal: options?.signal,
   });
 
   if (res.status === 401) throw new Error("UNAUTHORIZED");
@@ -424,6 +563,15 @@ export async function sendMessageStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let sawTerminalEvent = false;
+  let activeTurnId: string | null = null;
+
+  function maybeEmitTurnStart(turnId: unknown) {
+    if (typeof turnId !== "string" || turnId.trim().length === 0 || turnId === activeTurnId) {
+      return;
+    }
+    activeTurnId = turnId;
+    callbacks.onTurnStart?.(turnId);
+  }
 
   while (true) {
     const { done, value } = await reader.read();
@@ -461,17 +609,41 @@ export async function sendMessageStream(
         const parsed = JSON.parse(data) as Record<string, unknown>;
 
         if (eventType === "status") {
+          maybeEmitTurnStart(parsed.turnId);
           callbacks.onStatus((parsed.label as string) ?? "");
+        } else if (eventType === "start") {
+          maybeEmitTurnStart(parsed.turnId);
         } else if (eventType === "chunk") {
           callbacks.onToken((parsed.token as string) ?? "");
         } else if (eventType === "done") {
+          maybeEmitTurnStart(parsed.turnId);
           sawTerminalEvent = true;
           callbacks.onDone({
             didLogMeal: Boolean(parsed.didLogMeal),
             ...(parsed.didMutateMeal !== undefined ? { didMutateMeal: Boolean(parsed.didMutateMeal) } : {}),
-            ...(isLoggedMealReceipt(parsed.loggedMeal) ? { loggedMeal: parsed.loggedMeal } : {}),
-            ...(parsed.dailySummary ? { dailySummary: parsed.dailySummary as DailySummary } : {}),
-            ...(parsed.dailyTargets ? { dailyTargets: parsed.dailyTargets as DailyTargets } : {}),
+            ...(isLoggedMealReceipt(parsed.loggedMeal)
+              ? { loggedMeal: normalizeLoggedMealReceipt(parsed.loggedMeal) }
+              : {}),
+            ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
+            ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
+            ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
+          });
+        } else if (eventType === "stopped") {
+          maybeEmitTurnStart(parsed.turnId);
+          sawTerminalEvent = true;
+          callbacks.onStopped?.({
+            stopped: true,
+            ...(typeof parsed.turnId === "string" ? { turnId: parsed.turnId } : {}),
+            tokensStreamed: typeof parsed.tokensStreamed === "number" && Number.isFinite(parsed.tokensStreamed)
+              ? parsed.tokensStreamed
+              : 0,
+            ...(parsed.didLogMeal !== undefined ? { didLogMeal: Boolean(parsed.didLogMeal) } : {}),
+            ...(parsed.didMutateMeal !== undefined ? { didMutateMeal: Boolean(parsed.didMutateMeal) } : {}),
+            ...(isLoggedMealReceipt(parsed.loggedMeal)
+              ? { loggedMeal: normalizeLoggedMealReceipt(parsed.loggedMeal) }
+              : {}),
+            ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
+            ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
           });
         } else if (eventType === "error") {
@@ -489,6 +661,21 @@ export async function sendMessageStream(
   }
 }
 
+export async function stopChatTurn(options: { turnId: string }): Promise<{ stopped: boolean; turnId: string }> {
+  const res = await fetch("/api/chat/stop", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ turnId: options.turnId }),
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) {
+    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    throw new Error(errorMessage ?? "Failed to stop chat turn");
+  }
+  return res.json() as Promise<{ stopped: boolean; turnId: string }>;
+}
+
 export async function getMeals(options?: { refreshReason?: "day_rollover" | "meal_mutation" }): Promise<{ meals: MealEntry[] }> {
   const headers: Record<string, string> = {};
   if (options?.refreshReason) {
@@ -502,6 +689,11 @@ export async function getMeals(options?: { refreshReason?: "day_rollover" | "mea
   return {
     meals: body.meals.map((meal) => ({
       ...meal,
+      itemCount: normalizeItemCount(meal.itemCount),
+      ...(() => {
+        const items = normalizeMealItems((meal as { items?: unknown }).items);
+        return items ? { items } : {};
+      })(),
       imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
     })),
   };
@@ -518,6 +710,11 @@ export async function getDaySnapshot(
     ...body,
     meals: body.meals.map((meal) => ({
       ...meal,
+      itemCount: normalizeItemCount(meal.itemCount),
+      ...(() => {
+        const items = normalizeMealItems((meal as { items?: unknown }).items);
+        return items ? { items } : {};
+      })(),
       imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
     })),
   };
@@ -534,11 +731,15 @@ interface HistoryMealDto {
   protein?: number;
   carbs?: number;
   fat?: number;
+  itemCount?: number;
+  items?: unknown;
   imageAssetId?: string | null;
   imageUrl?: string | null;
 }
 
-function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
+export function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
+  const items = normalizeMealItems(meal.items);
+
   return {
     id: meal.id,
     foodName: meal.display?.title ?? meal.foodName ?? "未命名餐點",
@@ -546,6 +747,8 @@ function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
     protein: meal.nutrition?.protein ?? meal.protein ?? 0,
     carbs: meal.nutrition?.carbs ?? meal.carbs ?? 0,
     fat: meal.nutrition?.fat ?? meal.fat ?? 0,
+    itemCount: normalizeItemCount(meal.itemCount),
+    ...(items ? { items } : {}),
     imageAssetId: meal.asset?.imageAssetId ?? meal.imageAssetId ?? null,
     imageUrl: withAuthorizedAssetUrl(meal.asset?.imageUrl ?? meal.imageUrl ?? null) ?? null,
     loggedAt: meal.loggedAt,
@@ -595,12 +798,16 @@ export async function updateMeal(mealId: string, input: UpdateMealInput): Promis
     body: JSON.stringify(input),
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) throw new Error("Failed to update meal");
+  if (!res.ok) {
+    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    throw new Error(errorMessage ?? "Failed to update meal");
+  }
   const body = await res.json() as UpdateMealResponse;
   return {
     ...body,
     meal: {
       ...body.meal,
+      itemCount: normalizeItemCount(body.meal.itemCount),
       imageUrl: withAuthorizedAssetUrl(body.meal.imageUrl) ?? null,
     },
   };

@@ -36,6 +36,20 @@
       "when": 1777266938000,
       "tag": "0004_history_query_hot_path_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1777923000000,
+      "tag": "0005_chat_message_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1777996719981,
+      "tag": "0006_colossal_selene",
+      "breakpoints": true
     }
   ]
 }

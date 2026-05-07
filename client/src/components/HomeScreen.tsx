@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
+import { createClientId } from "../lib/clientId.js";
 import { formatLocalDate } from "../lib/time.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
+import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportProgressBar, SportRing, SportScreen } from "./SportPrimitives.js";
 import type {
@@ -121,6 +123,75 @@ export function getHomeMacroDisplays(
   ];
 }
 
+function prefersReducedMotion() {
+  return (
+    typeof window !== "undefined" &&
+    typeof matchMedia === "function" &&
+    matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function useCountUpNumber(targetValue: number, options: { durationMs?: number; animate?: boolean } = {}) {
+  const previousValueRef = useRef<number | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const activeAnimationTargetRef = useRef<number | null>(null);
+  const [displayValue, setDisplayValue] = useState(targetValue);
+  const durationMs = options.durationMs ?? 450;
+  const animate = options.animate === true;
+
+  useEffect(() => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+
+    const previousValue = previousValueRef.current;
+    if (animate !== true || prefersReducedMotion() === true || previousValue === null) {
+      activeAnimationTargetRef.current = null;
+      previousValueRef.current = targetValue;
+      setDisplayValue(targetValue);
+      return;
+    }
+
+    const startValue = previousValue;
+    let startTime: number | null = null;
+    activeAnimationTargetRef.current = targetValue;
+
+    const step = (timestamp: number) => {
+      if (activeAnimationTargetRef.current !== targetValue) {
+        return;
+      }
+      startTime ??= timestamp;
+      const progress = Math.min(1, (timestamp - startTime) / durationMs);
+      setDisplayValue(Math.round(startValue + (targetValue - startValue) * progress));
+
+      if (progress < 1) {
+        frameRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      frameRef.current = null;
+      activeAnimationTargetRef.current = null;
+      previousValueRef.current = targetValue;
+      setDisplayValue(targetValue);
+    };
+
+    frameRef.current = requestAnimationFrame(step);
+
+    return () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      if (activeAnimationTargetRef.current === targetValue) {
+        activeAnimationTargetRef.current = null;
+      }
+    };
+  }, [durationMs, targetValue]);
+
+  return displayValue;
+}
+
 export function getMealMacroSummary(meal: Pick<MealEntry, "protein" | "carbs" | "fat">): string {
   return `P ${Math.max(0, Math.round(meal.protein ?? 0))} · C ${Math.max(0, Math.round(meal.carbs ?? 0))} · F ${Math.max(0, Math.round(meal.fat ?? 0))}`;
 }
@@ -152,7 +223,7 @@ export function stageHomeTaskOptionPrompt(
   prompt: string,
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void,
   setActiveScreen: (screen: ActiveScreen) => void,
-  createId: () => string = () => crypto.randomUUID(),
+  createId: () => string = () => createClientId("draft"),
 ) {
   setPendingHomeChatDraft({ id: createId(), text: prompt, status: "staged" });
   setActiveScreen("chat");
@@ -163,7 +234,7 @@ export function sendHomeCtaTaskOption(
   intent: CoachCTAIntent,
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void,
   setActiveScreen: (screen: ActiveScreen) => void,
-  createId: () => string = () => crypto.randomUUID(),
+  createId: () => string = () => createClientId("cta"),
 ) {
   void recordHomeCtaOptionSent(intent.id, option.id);
   stageHomeTaskOptionPrompt(option.prompt, setPendingHomeChatDraft, setActiveScreen, createId);
@@ -218,6 +289,15 @@ function CalorieHero({
 }) {
   const display = getHomeCalorieDisplay(dailySummary, dailyTargets);
   const macros = getHomeMacroDisplays(dailySummary, dailyTargets);
+  const previousConsumedRef = useRef<number | null>(null);
+  const shouldAnimateConsumedChange =
+    previousConsumedRef.current !== null && previousConsumedRef.current !== display.consumed;
+  const animatedConsumed = useCountUpNumber(display.consumed, { durationMs: 450, animate: shouldAnimateConsumedChange });
+  const animatedPercent = useCountUpNumber(display.percent, { durationMs: 450, animate: shouldAnimateConsumedChange });
+
+  useEffect(() => {
+    previousConsumedRef.current = display.consumed;
+  }, [display.consumed]);
 
   return (
     <>
@@ -229,7 +309,7 @@ function CalorieHero({
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
               <span className="sp-display" style={{ fontSize: 72, color: "var(--sp-ink)" }}>
-                {display.consumed.toLocaleString("en-US")}
+                {animatedConsumed.toLocaleString("en-US")}
               </span>
               <span className="sp-num" style={{ fontSize: 13, color: "var(--sp-ink-3)" }}>
                 / {display.target.toLocaleString("en-US")}
@@ -253,7 +333,7 @@ function CalorieHero({
             accentTick
             label={
               <span className="home-sport-ring-label">
-                <strong className="sp-display">{display.percent}</strong>
+                <strong className="sp-display">{animatedPercent}</strong>
                 <span className="sp-label">完成率</span>
               </span>
             }
@@ -303,11 +383,25 @@ function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChat
         <div className="home-sport-meal-list">
           {meals.map((meal) => (
             <article key={meal.id} className="home-sport-meal-row">
-              <div className="home-sport-meal-badge">{getMealBadge(meal.loggedAt)}</div>
+              <div className="home-sport-meal-media">
+                {meal.imageUrl ? (
+                  <PersistedAssetImage
+                    src={meal.imageUrl}
+                    alt={`${meal.foodName} 縮圖`}
+                    imgClassName="home-sport-meal-image"
+                    fallbackClassName="home-sport-meal-fallback"
+                  />
+                ) : (
+                  <div role="img" aria-label={`${meal.foodName} 無照片`} className="home-sport-meal-fallback">
+                    無照片
+                  </div>
+                )}
+              </div>
               <div className="home-sport-meal-main">
                 <div className="home-sport-meal-meta">
                   <span>{formatMealRowTime(meal.loggedAt)}</span>
                   <span>{getDisplayMealLabel(meal.loggedAt)}</span>
+                  <span>{getMealBadge(meal.loggedAt)}</span>
                 </div>
                 <div className="home-sport-meal-title">{meal.foodName}</div>
                 <div className="home-sport-meal-macros">{getMealMacroSummary(meal)}</div>

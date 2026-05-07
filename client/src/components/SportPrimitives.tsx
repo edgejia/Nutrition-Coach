@@ -147,6 +147,7 @@ export function SportRing({
           strokeWidth={stroke}
         />
         <circle
+          className={cx("sp-ring-progress")}
           cx={center}
           cy={center}
           fill="none"

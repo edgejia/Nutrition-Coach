@@ -70,7 +70,7 @@ Run this checklist from the public domain before marking the beta ready. Public 
 1. Open the public domain and send a same-origin text chat request. Confirm the page, SSE stream, and API calls all stay on the same domain.
 2. Send one image-backed request. Confirm the image is accepted and the response/history references the stored asset.
 3. Refresh the page. Confirm the conversation and meal state persist after reload.
-4. Call `GET /api/assets/:id` for the uploaded image using the same `X-Device-Id`. Confirm the request succeeds with the expected image response.
+4. Call `GET /api/assets/:id` for the uploaded image using the same browser session cookies. Confirm the request succeeds with the expected image response.
 5. Re-open chat and the summary surface on a phone-sized viewport. Confirm the same-origin shell still works and the persisted image remains visible in both chat history and the meal list on the real deployed domain.
 
 ## Deployment Notes

@@ -55,6 +55,10 @@ function makeFailResult(scenarioName: string): ScenarioResult {
       },
       uploadPath: "/absolute/path/to/server/uploads/image.jpg",
       mealsSnapshot: [{ id: 1, deviceId: "secret-device-id-xyz", food_name: "apple" }],
+      assetBoundary: {
+        ownerDeviceId: "owner-device-id-123",
+        foreignDeviceId: "foreign-device-id-456",
+      },
       queryUrl: "http://127.0.0.1:54321/api/meals?deviceId=secret-device-id-xyz&limit=10",
     },
     consoleSummary: `FAIL ${scenarioName} verify-meal-persisted`,
@@ -82,7 +86,7 @@ describe("verification-artifacts", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test("writeScenarioArtifacts creates summary.json, steps.json, and snapshots.json for a passing run", async () => {
+  test("writeScenarioArtifacts creates summary.json, steps.json, snapshots.json, and scenario-result.json for a passing run", async () => {
     const result = makePassResult("text-log");
     await writeScenarioArtifacts("text-log", result);
 
@@ -91,6 +95,7 @@ describe("verification-artifacts", () => {
     assert.ok(fs.existsSync(path.join(latestDir, "summary.json")), "summary.json missing");
     assert.ok(fs.existsSync(path.join(latestDir, "steps.json")), "steps.json missing");
     assert.ok(fs.existsSync(path.join(latestDir, "snapshots.json")), "snapshots.json missing");
+    assert.ok(fs.existsSync(path.join(latestDir, "scenario-result.json")), "scenario-result.json missing");
   });
 
   test("summary.json contains ok, failedStep, consoleSummary, and step count", async () => {
@@ -183,6 +188,47 @@ describe("verification-artifacts", () => {
 
     // mealsSnapshot contains a deviceId field with the secret value
     assert.doesNotMatch(raw, /secret-device-id-xyz/, "all occurrences of deviceId value must be redacted");
+  });
+
+  test("camelCase device id evidence keys are redacted across all artifact files", async () => {
+    const result = makeFailResult("redact-camel-device-ids");
+    result.steps[0]!.actual = {
+      ownerDeviceId: "owner-device-id-123",
+      foreignDeviceId: "foreign-device-id-456",
+    };
+    await writeScenarioArtifacts("redact-camel-device-ids", result);
+
+    const latestDir = path.join(tmpDir, "redact-camel-device-ids", "latest");
+    for (const fileName of ["steps.json", "snapshots.json", "scenario-result.json"]) {
+      const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
+      assert.doesNotMatch(raw, /owner-device-id-123/, `${fileName} must redact ownerDeviceId`);
+      assert.doesNotMatch(raw, /foreign-device-id-456/, `${fileName} must redact foreignDeviceId`);
+      assert.match(raw, /\[REDACTED\]/, `${fileName} should include redaction placeholders`);
+    }
+  });
+
+  test("snake case and kebab case device id evidence keys are redacted across all artifact files", async () => {
+    const result = makeFailResult("redact-delimited-device-ids");
+    result.steps[0]!.actual = {
+      device_id: "snake-device-id-123",
+      owner_device_id: "owner-snake-device-id-456",
+      "foreign-device-id": "foreign-kebab-device-id-789",
+    };
+    result.artifacts.delimitedEvidence = {
+      device_id: "snake-device-id-123",
+      owner_device_id: "owner-snake-device-id-456",
+      "foreign-device-id": "foreign-kebab-device-id-789",
+    };
+    await writeScenarioArtifacts("redact-delimited-device-ids", result);
+
+    const latestDir = path.join(tmpDir, "redact-delimited-device-ids", "latest");
+    for (const fileName of ["steps.json", "snapshots.json", "scenario-result.json"]) {
+      const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
+      assert.doesNotMatch(raw, /snake-device-id-123/, `${fileName} must redact device_id`);
+      assert.doesNotMatch(raw, /owner-snake-device-id-456/, `${fileName} must redact owner_device_id`);
+      assert.doesNotMatch(raw, /foreign-kebab-device-id-789/, `${fileName} must redact foreign-device-id`);
+      assert.match(raw, /\[REDACTED\]/, `${fileName} should include redaction placeholders`);
+    }
   });
 
   test("failed scenario produces ok=false and populated failedStep in summary.json", async () => {

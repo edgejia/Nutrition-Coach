@@ -16,6 +16,7 @@ type HistoryMeal = {
   display: {
     title: string;
   };
+  itemCount: number;
   nutrition: {
     calories: number;
     protein: number;
@@ -36,6 +37,8 @@ type HistoryMeal = {
     imageAssetId: string | null;
     imageUrl: string | null;
   };
+  imageAssetId: string | null;
+  imageUrl: string | null;
   revision: {
     currentRevisionNumber: number;
   };
@@ -216,6 +219,7 @@ describe("History search API", () => {
         dateKey: "2026-03-25",
         loggedAt: "2026-03-25T04:00:00.000Z",
         display: { title: "Chicken Salad" },
+        itemCount: 1,
         nutrition: { calories: 420, protein: 38, carbs: 18, fat: 21 },
         items: [
           {
@@ -225,6 +229,8 @@ describe("History search API", () => {
           },
         ],
         asset: { imageAssetId: null, imageUrl: null },
+        imageAssetId: null,
+        imageUrl: null,
         revision: { currentRevisionNumber: 1 },
       },
     });
@@ -313,6 +319,8 @@ describe("History search API", () => {
       imageAssetId: "asset-search",
       imageUrl: "/api/assets/asset-search",
     });
+    assert.equal(body.results[0]?.meal.imageAssetId, "asset-search");
+    assert.equal(body.results[0]?.meal.imageUrl, "/api/assets/asset-search");
     assertNoUnsafeHistoryFields(body);
   });
 

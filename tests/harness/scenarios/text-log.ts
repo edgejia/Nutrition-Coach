@@ -129,9 +129,6 @@ const textLogScenario: VerificationScenario = {
         },
       ],
     });
-    // Round 2: final streaming reply
-    provider.queueChatStream(["已幫你", "記錄蘋果！"]);
-
     const fixture = await createScenarioApp({ llmProvider: provider });
 
     try {
@@ -397,10 +394,10 @@ const textLogScenario: VerificationScenario = {
           return failResult(scenarioName, steps, "verify_history", artifacts);
         }
 
-        if (lastMessage.content !== "已幫你記錄蘋果！") {
+        if (!/已記錄蘋果/.test(lastMessage.content) || !/蛋白質 0 g/.test(lastMessage.content)) {
           const stepResult = fail(
             "verify_history",
-            `Expected last assistant content "已幫你記錄蘋果！", got "${lastMessage.content}"`,
+            `Expected projected successful log receipt, got "${lastMessage.content}"`,
             { lastMessage },
           );
           steps.push(stepResult);

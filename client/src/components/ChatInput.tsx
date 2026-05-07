@@ -1,16 +1,29 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { SportCameraIcon, SportCloseIcon, SportSendIcon } from "./SportIcons.js";
+import { SportCameraIcon, SportCloseIcon, SportSendIcon, SportStopIcon } from "./SportIcons.js";
 
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
   onBeforeSend?: (payload: { hasImage: boolean; hasText: boolean }) => void;
+  onStop?: () => void;
   disabled: boolean;
+  streaming?: boolean;
+  stopDisabled?: boolean;
+  stopping?: boolean;
 }
 
-export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  onBeforeSend,
+  onStop,
+  disabled,
+  streaming = false,
+  stopDisabled = false,
+  stopping = false,
+}: ChatInputProps) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
   const canSend = Boolean(text.trim() || image);
 
   function submitMessage() {
@@ -32,7 +45,18 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    if (e.nativeEvent.isComposing) return;
+    if (isComposingRef.current) return;
+    if (e.key !== "Enter") return;
+    if (e.shiftKey) return;
+
+    if (!e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      submitMessage();
+      return;
+    }
+
+    if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
       submitMessage();
     }
@@ -76,20 +100,41 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            isComposingRef.current = false;
+          }}
           placeholder="描述你吃了什麼…"
-          disabled={disabled}
           rows={1}
           className="sp-chat-textarea"
         />
-        <button
-          type="submit"
-          disabled={disabled || !canSend}
-          className="sp-chat-send"
-          data-ready={canSend}
-          aria-label="送出"
-        >
-          <SportSendIcon size={18} stroke={2} />
-        </button>
+        {streaming ? (
+          <button
+            type="button"
+            onClick={onStop}
+            disabled={stopDisabled}
+            className="sp-chat-send sp-chat-send-stop"
+            data-ready="true"
+            data-streaming="true"
+            data-stopping={stopping}
+            aria-label="停止生成"
+          >
+            <SportStopIcon size={20} stroke={2} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={submitMessage}
+            disabled={disabled || !canSend}
+            className="sp-chat-send"
+            data-ready={canSend}
+            aria-label="送出"
+          >
+            <SportSendIcon size={18} stroke={2} />
+          </button>
+        )}
       </div>
     </form>
   );

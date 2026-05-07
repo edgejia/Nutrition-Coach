@@ -25,11 +25,14 @@ describe("History Day Detail source contract", () => {
       "sp-history-detail-header",
       "sp-history-detail-calories",
       "sp-history-detail-meal",
+      "sp-history-detail-meal-image",
       "sp-history-detail-summary-copy",
       "sp-history-detail-progress",
       "sp-history-detail-note",
       "sp-history-detail-empty",
       "sp-history-detail-error",
+      "PersistedAssetImage",
+      "src={meal.imageUrl}",
       "isToday",
       "setHighlightedMealId",
       "targetMealId",
@@ -38,5 +41,10 @@ describe("History Day Detail source contract", () => {
     ]) {
       assert.match(dayDetail, escapedPattern(expected));
     }
+
+    assert.match(
+      dayDetail,
+      /<PersistedAssetImage[\s\S]*src=\{meal\.imageUrl\}[\s\S]*imgClassName="sp-history-detail-meal-image"[\s\S]*fallbackClassName="sp-history-detail-meal-image sp-history-detail-meal-fallback"/,
+    );
   });
 });

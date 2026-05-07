@@ -27,15 +27,38 @@ describe("Chat bubble source contract", () => {
       "sp-stream-caret",
       "sp-message-row-user",
       "sp-receipt",
+      "sp-receipt-thumbnail-frame",
+      "sp-receipt-thumbnail",
+      "sp-receipt-thumbnail-fallback",
       "loggedMeal",
       "onOpenMealEdit",
       "SportBoltIcon",
       "SportChevronRightIcon",
       "PersistedAssetImage",
+      "整餐照片",
+      "編輯",
     ]) {
       assert.match(messageBubble, new RegExp(expected));
     }
 
     assert.match(chatPanel, /openMealEdit\(payload, \"chat\"\)/);
+  });
+
+  it("keeps receipt thumbnails inside ReceiptCard without direct image fallbacks", async () => {
+    const messageBubble = await readSource("../../client/src/components/MessageBubble.tsx");
+    const receiptCard = messageBubble.slice(
+      messageBubble.indexOf("function ReceiptCard"),
+      messageBubble.indexOf("function AssistantTextBubble"),
+    );
+
+    assert.match(receiptCard, /loggedMeal\.imageUrl/);
+    assert.match(receiptCard, /PersistedAssetImage/);
+    assert.match(receiptCard, /src=\{loggedMeal\.imageUrl\}/);
+    assert.match(receiptCard, /alt=\{`\$\{loggedMeal\.foodName\} 整餐照片`\}/);
+    assert.match(messageBubble, /buildReceiptMealEditPayload\(message\.loggedMeal\)/);
+    assert.match(receiptCard, /aria-label=\{canEdit \? `編輯 \$\{loggedMeal\.foodName\}` : undefined\}/);
+    assert.doesNotMatch(receiptCard, /<img/);
+    assert.doesNotMatch(receiptCard, /backgroundImage/);
+    assert.doesNotMatch(receiptCard, /dangerouslySetInnerHTML/);
   });
 });

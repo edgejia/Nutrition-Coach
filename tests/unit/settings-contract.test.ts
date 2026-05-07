@@ -28,7 +28,8 @@ describe("Settings source contract", () => {
     assert.match(source, /訪客模式/);
     assert.match(source, /使用中/);
     assert.match(source, /JC/);
-    assert.match(source, /訪客 · 瀏覽器保存 · 12 天/);
+    assert.match(source, /訪客 · 這個瀏覽器/);
+    assert.doesNotMatch(source, /瀏覽器保存 · 12 天/);
     assert.match(source, /每日目標/);
     assert.match(source, /偏好設定/);
     assert.match(source, /偏好/);
@@ -37,6 +38,8 @@ describe("Settings source contract", () => {
     assert.match(source, /資料管理/);
     assert.match(source, /資料/);
     assert.match(source, /尚未開放/);
+    assert.match(source, /aria-disabled="true"/);
+    assert.match(source, /cursor: "default"/);
     assert.match(source, /營養教練/);
     assert.match(source, /sport/);
     assert.match(source, /儲存中…/);
@@ -64,6 +67,7 @@ describe("Settings source contract", () => {
     assert.doesNotMatch(source, /updateReminder/);
     assert.doesNotMatch(source, /updateTimezone/);
     assert.doesNotMatch(source, /updateLanguage/);
+    assert.doesNotMatch(source, /cursor: muted \? "default" : "pointer"/);
     assert.doesNotMatch(source, /wipe/i);
     assert.doesNotMatch(source, /deviceId\}/);
     assert.doesNotMatch(source, /deviceId:/);

@@ -59,21 +59,44 @@ describe("History screen source contract", () => {
 
   it("opens Meal Edit from meal rows with complete History-origin payload", () => {
     for (const expected of [
+      "buildHistoryMealEditPayload",
       "openMealEdit",
       "event.stopPropagation()",
-      "mealId: meal.id",
-      "dateKey: selectedDateKey",
-      "foodName: meal.foodName",
-      "calories: meal.calories",
-      "protein: meal.protein",
-      "carbs: meal.carbs",
-      "fat: meal.fat",
-      "imageAssetId: meal.imageAssetId",
-      "imageUrl: meal.imageUrl",
-      "loggedAt: meal.loggedAt",
+      "buildHistoryMealEditPayload(meal, selectedDateKey)",
       '"history"',
     ]) {
       assert.match(source, escapedPattern(expected));
+    }
+  });
+
+  it("renders History timeline thumbnails from meal-level imageUrl inside the row target", () => {
+    for (const expected of [
+      'import { PersistedAssetImage } from "./PersistedAssetImage.js";',
+      "sp-history-meal-media",
+      "sp-history-meal-image",
+      "sp-history-meal-fallback",
+      "meal.imageUrl",
+      "無照片",
+      "buildHistoryMealEditPayload(meal, selectedDateKey)",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(
+      source,
+      /<button[\s\S]*className="sp-history-meal-row"[\s\S]*<span className="sp-history-meal-media">[\s\S]*<PersistedAssetImage[\s\S]*src=\{meal\.imageUrl\}[\s\S]*imgClassName="sp-history-meal-image"[\s\S]*fallbackClassName="sp-history-meal-fallback"[\s\S]*<\/button>/,
+    );
+    assert.doesNotMatch(source, /<button[^>]*sp-history-meal-media|<a[^>]*sp-history-meal-media/);
+  });
+
+  it("keeps History timeline media and fallback slots at fixed 32px dimensions", () => {
+    assert.match(
+      cssSource,
+      /\.sp-history-meal-media\s*\{[\s\S]*?width:\s*32px;[\s\S]*?height:\s*32px;[\s\S]*?flex:\s*0 0 32px;[\s\S]*?\}/,
+    );
+
+    for (const expected of [".sp-history-meal-image", ".sp-history-meal-fallback"]) {
+      assert.match(cssSource, escapedPattern(expected));
     }
   });
 
@@ -82,7 +105,7 @@ describe("History screen source contract", () => {
     assert.match(source, /sortedMeals\.map\(\(meal\) =>/);
     assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\}/);
     assert.doesNotMatch(source, /getDisplayMealLabel\(meal\.loggedAt\)/);
-    assert.match(source, /\{meals\.length\}筆/);
+    assert.match(source, /\{displayMealCount === null \? "--" : displayMealCount\}筆/);
     assert.doesNotMatch(source, /\{meals\.length\} entries/);
   });
 
@@ -99,12 +122,62 @@ describe("History screen source contract", () => {
     }
   });
 
-  it("clears stale selected-day snapshots before loading a newly selected date", () => {
-    assert.match(source, /setLoadingDay\(true\);\s+setDayError\(null\);\s+setSelectedSnapshot\(null\);\s+return getHistoryDaySnapshot\(selectedDateKey\)/);
+  it("keeps selected-day snapshots stable during routine revalidation", () => {
+    for (const expected of [
+      "trendsCache",
+      "setTrendsCache",
+      "trendsCache.get(weekStartKey)",
+      "dayCache",
+      "setDayCache",
+      "dayCache.get(selectedDateKey)",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.doesNotMatch(source, /trends\?\.daily|trends\?\.averages/);
+    assert.doesNotMatch(source, /setSelectedSnapshot\(null\);\s+return getHistoryDaySnapshot\(selectedDateKey\)/);
   });
 
-  it("does not flash weekly loading copy during background trend refreshes", () => {
-    assert.match(source, /loadingTrends && !trends \? \(/);
+  it("reserves weekly loading copy for true first load only", () => {
+    assert.match(source, /loadingTrends/);
+    assert.match(
+      source,
+      /loadingTrends && !hasCurrentWeekCache|loadingTrends && !trendsCache\.get\(weekStartKey\)|const hasCurrentWeekCache = Boolean\(trendsCache\.get\(weekStartKey\)\)/,
+    );
+  });
+
+  it("wires cache-hit weekly revalidation to neutral pending treatment", () => {
+    assert.match(source, /const isWeekPending = loadingTrends && hasCurrentWeekCache/);
+    assert.match(source, /className=\{isWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}/);
+    assert.match(cssSource, /\.sp-history-pending::before\s*\{[\s\S]*?height:\s*1px;[\s\S]*?background:\s*var\(--sp-line-strong\)/);
+    assert.doesNotMatch(cssSource, /\.sp-history-pending[\s\S]*animation:/);
+  });
+
+  it("invalidates only the affected day and affected week after meal mutations", () => {
+    assert.match(source, /lastMealMutation\.affectedDate/);
+    assert.match(source, /const affectedDate = lastMealMutation\.affectedDate|lastMealMutation\.affectedDate/);
+    assert.match(source, /dayCache/);
+    assert.match(source, /affectedDate !== selectedDateKey[\s\S]*?\.delete\(affectedDate\)/);
+    assert.match(source, /trendsCache/);
+    assert.match(
+      source,
+      /affectedWeekStartKey !== weekStartKey[\s\S]*?\.delete\(affectedWeekStartKey\)/,
+    );
+  });
+
+  it("preserves visible selected-day display from same-date week cache during day revalidation", () => {
+    assert.match(source, /const selectedWeekDay = weekDays\.find\(\(day\) => day\.dateKey === selectedDateKey\)/);
+    assert.match(
+      source,
+      /const hasSelectedWeekDayDisplay =[\s\S]*selectedWeekDay\?\.status !== "pending"[\s\S]*selectedWeekDay\?\.calories !== null[\s\S]*selectedWeekDay\?\.mealCount !== null/,
+    );
+    assert.match(source, /const hasSelectedDayDisplay = selectedSnapshot !== null \|\| hasSelectedWeekDayDisplay/);
+    assert.match(source, /const isSelectedDayCacheMiss = !hasSelectedDayDisplay/);
+    assert.match(source, /const displayCalories = snapshot\?\.summary\.totalCalories \?\? selectedDayCalories/);
+    assert.match(source, /const displayMealCount = cacheMiss \? null : \(snapshot\?\.meals\.length \?\? selectedDayMealCount\)/);
+    assert.match(source, /<span>\{displayMealCount === null \? "--" : displayMealCount\}筆<\/span>/);
+    assert.match(source, /meals=\{meals\}/);
+    assert.doesNotMatch(source, /snapshot === null \? previous|previousSnapshot|previousDate/);
   });
 
   it("keeps History free of demo globals, demo labels, and inline mutation controls", () => {

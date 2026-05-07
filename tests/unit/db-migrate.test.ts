@@ -68,6 +68,34 @@ async function seedLegacySchema(dbPath: string) {
   }
 }
 
+async function seedSchemaThrough0004(dbPath: string) {
+  const sqlite = new Database(dbPath);
+
+  try {
+    sqlite.pragma("journal_mode = WAL");
+    sqlite.pragma("foreign_keys = ON");
+    for (const fileName of [
+      "0000_brainy_rocket_racer.sql",
+      "0001_sleepy_vivisector.sql",
+      "0002_meal_transaction_v2_foundation.sql",
+      "0003_aspiring_masque.sql",
+      "0004_history_query_hot_path_indexes.sql",
+    ]) {
+      sqlite.exec(await readMigrationSql(fileName));
+    }
+    sqlite.exec(`CREATE TABLE "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )`);
+    sqlite
+      .prepare('INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)')
+      .run("0004-test-hash", 1777266938000);
+  } finally {
+    sqlite.close();
+  }
+}
+
 function getCanonicalTableNames(sqlite: Database.Database) {
   return sqlite
     .prepare(
@@ -78,6 +106,28 @@ function getCanonicalTableNames(sqlite: Database.Database) {
        ORDER BY name`,
     )
     .all();
+}
+
+function getChatMessageStatusColumns(sqlite: Database.Database) {
+  return sqlite.prepare("PRAGMA table_info(chat_messages)").all().filter((column) => {
+    return typeof column === "object" && column !== null && "name" in column && column.name === "status";
+  });
+}
+
+function seedDevice(sqlite: Database.Database, deviceId = "device-1") {
+  sqlite
+    .prepare(
+      `INSERT INTO devices (
+        id,
+        goal,
+        daily_calories,
+        daily_protein,
+        daily_carbs,
+        daily_fat,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(deviceId, "fat_loss", 1800, 120, 180, 60, "2026-04-19T00:00:00.000Z");
 }
 
 afterEach(async () => {
@@ -322,5 +372,116 @@ describe("database migration contract", () => {
       () => createDb(":memory:", { allowInMemoryBootstrap: false }),
       /Database schema missing/,
     );
+  });
+
+  it("adds chat_messages.status with the complete default and allowed-value CHECK", async () => {
+    const dbPath = await makeTempDbPath();
+
+    await runMigrations(dbPath);
+
+    const sqlite = new Database(dbPath);
+    try {
+      sqlite.pragma("foreign_keys = ON");
+
+      const [statusColumn] = getChatMessageStatusColumns(sqlite);
+      assert.deepEqual(statusColumn, {
+        cid: 7,
+        name: "status",
+        type: "TEXT",
+        notnull: 1,
+        dflt_value: "'complete'",
+        pk: 0,
+      });
+
+      seedDevice(sqlite);
+      sqlite
+        .prepare(
+          `INSERT INTO chat_messages (
+            id,
+            device_id,
+            role,
+            content,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run("chat-1", "device-1", "assistant", "Logged.", "2026-04-19T08:29:00.000Z");
+
+      assert.deepEqual(
+        sqlite.prepare("SELECT status FROM chat_messages WHERE id = ?").get("chat-1"),
+        { status: "complete" },
+      );
+
+      assert.throws(() => {
+        sqlite
+          .prepare(
+            `INSERT INTO chat_messages (
+              id,
+              device_id,
+              role,
+              content,
+              created_at,
+              status
+            ) VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            "chat-2",
+            "device-1",
+            "assistant",
+            "Bad status.",
+            "2026-04-19T08:30:00.000Z",
+            "cancelled",
+          );
+      }, /CHECK constraint failed/);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("treats a partial local chat_messages.status migration as already applied", async () => {
+    const dbPath = await makeTempDbPath();
+
+    await seedSchemaThrough0004(dbPath);
+
+    const sqlite = new Database(dbPath);
+    try {
+      sqlite.exec(
+        "ALTER TABLE chat_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete','stopped','error'));",
+      );
+      seedDevice(sqlite);
+      sqlite
+        .prepare(
+          `INSERT INTO chat_messages (
+            id,
+            device_id,
+            role,
+            content,
+            created_at,
+            status
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "chat-stopped",
+          "device-1",
+          "assistant",
+          "Partial answer",
+          "2026-04-19T08:31:00.000Z",
+          "stopped",
+        );
+    } finally {
+      sqlite.close();
+    }
+
+    await runMigrations(dbPath);
+
+    const migrated = new Database(dbPath);
+    try {
+      assert.equal(getChatMessageStatusColumns(migrated).length, 1);
+      assert.deepEqual(
+        migrated.prepare("SELECT status FROM chat_messages WHERE id = ?").get("chat-stopped"),
+        { status: "stopped" },
+      );
+    } finally {
+      migrated.close();
+    }
   });
 });

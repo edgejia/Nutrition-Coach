@@ -49,6 +49,32 @@ describe("history week helpers", () => {
     assert.equal(days[6]?.isFuture, true);
   });
 
+  it("builds pending week days without fake nutrition values", () => {
+    const days = buildHistoryWeek({
+      weekStartKey: "2026-05-04",
+      selectedDateKey: "2026-05-06",
+      todayKey: "2026-05-06",
+      trends: [],
+      targets: { calories: 2000, protein: 100, carbs: 250, fat: 70 },
+      pending: true,
+    });
+
+    assert.equal(days.length, 7);
+    for (const day of days) {
+      assert.equal(day.status, "pending");
+      assert.equal(day.calories, null);
+      assert.equal(day.mealCount, null);
+      assert.equal(day.calorieRatio, null);
+      assert.equal(day.waterLevel, 0);
+    }
+
+    const selectedDay = days.find((day) => day.dateKey === "2026-05-06");
+    assert.ok(selectedDay);
+    assert.equal(selectedDay.dateKey, "2026-05-06");
+    assert.equal(selectedDay.isSelected, true);
+    assert.equal(selectedDay.isToday, true);
+  });
+
   it("classifies calorie ratios with the locked 90%-110% target range", () => {
     assert.equal(getHistoryCalorieStatus({ calories: 1300, mealCount: 3, targetCalories: 2000 }).status, "low");
     assert.equal(
@@ -141,6 +167,28 @@ describe("history week helpers", () => {
         mealCount: 0,
       },
     );
+  });
+
+  it("builds pending weekly stats with neutral placeholders", () => {
+    const days = buildHistoryWeek({
+      weekStartKey: "2026-05-04",
+      selectedDateKey: "2026-05-06",
+      todayKey: "2026-05-06",
+      trends: [],
+      targets: { calories: 2000, protein: 100, carbs: 250, fat: 70 },
+      pending: true,
+    });
+
+    assert.deepEqual(buildHistoryWeekStats({ days, averageCalories: null, pending: true }), {
+      averageCalories: null,
+      inRangeDays: null,
+      loggedDays: null,
+      mealCount: null,
+    });
+
+    const meta = getHistorySportStatusMeta({ status: "pending", targetCalories: 2000 });
+    assert.equal(meta.barTone, "muted");
+    assert.equal(meta.badge, null);
   });
 
   it("maps Phase 41 sport calorie statuses to badge copy and bar tones", () => {
