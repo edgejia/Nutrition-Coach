@@ -488,13 +488,9 @@ textarea {
   background: var(--sp-surface-3);
 }
 
-.sp-bar-fill {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--sp-r-pill);
-  background: var(--sp-lime);
-  transform-origin: left center;
-}
+.sp-bar-fill { position: absolute; inset: 0; border-radius: var(--sp-r-pill); background: var(--sp-lime); transform-origin: left center; transition: width 360ms ease; }
+
+.sp-ring-progress { transition: stroke-dashoffset 360ms ease; }
 
 .sp-bar-fill-warn {
   background: var(--sp-red);
@@ -507,6 +503,8 @@ textarea {
 .sp-bar-fill-cyan {
   background: var(--sp-cyan);
 }
+
+@media (prefers-reduced-motion: reduce) { .sp-bar-fill, .sp-ring-progress { transition-duration: 1ms; } }
 
 .sp-coach-cta {
   display: flex;
