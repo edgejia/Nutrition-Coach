@@ -261,6 +261,18 @@ function phase49MockScript() {
         meals: []
       }
     };
+    const homeMeals = daySnapshots["2026-05-06"].meals.map((meal) => ({
+      id: meal.id,
+      foodName: meal.display.title,
+      calories: meal.nutrition.calories,
+      protein: meal.nutrition.protein,
+      carbs: meal.nutrition.carbs,
+      fat: meal.nutrition.fat,
+      itemCount: meal.itemCount,
+      imageAssetId: meal.asset.imageAssetId,
+      imageUrl: meal.asset.imageUrl,
+      loggedAt: meal.loggedAt
+    }));
     const originalFetch = window.fetch.bind(window);
     const jsonResponse = (body, init = {}) => new Response(JSON.stringify(body), {
       status: init.status ?? 200,
@@ -292,7 +304,7 @@ function phase49MockScript() {
         throw new Error("forbidden /api/chat or OPENAI_API_KEY access");
       }
       if (url.pathname === "/api/meals") {
-        return Promise.resolve(jsonResponse({ meals: daySnapshots["2026-05-06"].meals }));
+        return Promise.resolve(jsonResponse({ meals: homeMeals }));
       }
       if (url.pathname === "/api/device/session") {
         return Promise.resolve(jsonResponse({
@@ -414,6 +426,10 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
       if (stateCase === "homeValueChange" || stateCase === "homePostChange") {
         await send("Runtime.evaluate", { expression: "window.__phase49ApplyHomeChange?.()" });
         await delay(stateCase === "homePostChange" ? 900 : 80);
+        await send("Runtime.evaluate", {
+          expression: `document.querySelector('.home-sport-meal-section')?.scrollIntoView({ block: 'center' })`,
+        });
+        await delay(120);
       } else {
         await send("Runtime.evaluate", {
           expression: `(() => {
@@ -450,14 +466,36 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
         expression: `(() => {
           const textOf = (selector) => document.querySelector(selector)?.textContent?.trim() ?? "";
           const bodyText = document.body.innerText.trim();
-          const boxes = [...document.querySelectorAll('.sp-card, .sp-history-week-day, .home-sport-hero, .sp-history-hero, nav, [class*="bottom"]')]
+          const rectOf = (node) => {
+            const rect = node.getBoundingClientRect();
+            return { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+          };
+          const boxes = [...document.querySelectorAll('.sp-card, .sp-history-week-day, .home-sport-hero, .sp-history-hero, .home-sport-meal-row, nav, [class*="bottom"]')]
             .map((node) => {
-              const rect = node.getBoundingClientRect();
-              return { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+              return rectOf(node);
             })
             .filter((rect) => rect.width > 0 && rect.height > 0);
+          const homeMealRows = [...document.querySelectorAll('.home-sport-meal-row')];
+          const homeMealTexts = homeMealRows.map((node) => node.innerText.trim());
+          const homeMealKcalTexts = homeMealRows.map((node) => node.querySelector('.home-sport-meal-calories')?.innerText?.trim() ?? "");
+          const invalidHomeMealTexts = homeMealKcalTexts.filter((text) => {
+            const normalized = text.replace(/\\s+/g, " ");
+            const calories = Number((normalized.match(/([0-9][0-9,]*)\\s*kcal/i)?.[1] ?? "").replace(/,/g, ""));
+            return /NaN|undefined|null/i.test(normalized) || !/\\d[\\d,]*\\s*kcal/i.test(normalized) || !Number.isFinite(calories);
+          });
+          const controlRects = [...document.querySelectorAll('.screen-bottom-bar, .sp-tabbar, [class*="fab"], [class*="bottom"]')]
+            .map(rectOf)
+            .filter((rect) => rect.width > 0 && rect.height > 0);
+          const rowRects = homeMealRows.map(rectOf).filter((rect) => rect.width > 0 && rect.height > 0);
+          const intersects = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+          const homeRowControlOverlapCount = rowRects.filter((row) => controlRects.some((control) => intersects(row, control))).length;
+          const homeScrollRect = document.querySelector('.home-sport-scroll')?.getBoundingClientRect();
+          const clippedHomeRowCount = homeScrollRect
+            ? rowRects.filter((row) => row.bottom > homeScrollRect.bottom + 1 || row.top < homeScrollRect.top - 1).length
+            : 0;
           const viewportHeight = window.innerHeight;
-          const hasOverlapRisk = boxes.some((rect) => rect.bottom > viewportHeight + 1 || rect.right > window.innerWidth + 1);
+          const hasViewportOverflow = boxes.some((rect) => rect.bottom > viewportHeight + 1 || rect.right > window.innerWidth + 1);
+          const hasOverlapRisk = hasViewportOverflow || homeRowControlOverlapCount > 0 || clippedHomeRowCount > 0;
           const historyWeekStartText = textOf('.sp-history-header-copy');
           const homeConsumedText = textOf('.home-sport-calorie-copy .sp-display');
           const homePercentText = textOf('.home-sport-ring-label strong');
@@ -470,6 +508,12 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
             historyNodeCount: document.querySelectorAll('.sp-history-screen, .sp-history-week-day, .sp-history-hero').length,
             homeNodeCount: document.querySelectorAll('.home-sport-screen, .home-sport-hero, .home-sport-ring').length,
             hasOverlapRisk,
+            hasViewportOverflow,
+            homeMealTexts,
+            homeMealKcalTexts,
+            invalidHomeMealTexts,
+            homeRowControlOverlapCount,
+            clippedHomeRowCount,
             stateCase: ${JSON.stringify(stateCase)},
             historyWeekStartText,
             historyPendingKind,
@@ -488,10 +532,19 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
         throw new Error("Phase 49 visual evidence failed: no Sport shell selector or token-backed class found.");
       }
       if (value.hasOverlapRisk === true) {
-        throw new Error("Phase 49 visual evidence failed: overlap risk detected.");
+        throw new Error(`Phase 49 visual evidence failed: overlap risk detected for ${stateCase} (viewport=${value.hasViewportOverflow}, homeRowOverlap=${value.homeRowControlOverlapCount}, homeRowClipped=${value.clippedHomeRowCount}).`);
       }
       if (stateCase.startsWith("home") && value.homeNodeCount < 1) {
         throw new Error(`Phase 49 visual evidence failed: Home selectors missing for ${stateCase}.`);
+      }
+      if (stateCase.startsWith("home") && value.invalidHomeMealTexts.length > 0) {
+        throw new Error(`Phase 49 visual evidence failed: invalid Home meal nutrition text: ${value.invalidHomeMealTexts.join(" | ")}`);
+      }
+      if (stateCase.startsWith("home") && /NaN|undefined|null\\s*KCAL/i.test(value.homeMealTexts.join(" "))) {
+        throw new Error("Phase 49 visual evidence failed: invalid Home meal text reached the screenshot.");
+      }
+      if (stateCase.startsWith("home") && (value.homeRowControlOverlapCount > 0 || value.clippedHomeRowCount > 0)) {
+        throw new Error(`Phase 49 visual evidence failed: Home meal row overlap/clipping detected (overlap=${value.homeRowControlOverlapCount}, clipped=${value.clippedHomeRowCount}).`);
       }
       if (!stateCase.startsWith("home") && value.historyNodeCount < 1) {
         throw new Error(`Phase 49 visual evidence failed: History selectors missing for ${stateCase}.`);
@@ -567,6 +620,12 @@ async function main() {
           historyNodeCount: inspection.historyNodeCount,
           homeNodeCount: inspection.homeNodeCount,
           hasOverlapRisk: inspection.hasOverlapRisk,
+          hasViewportOverflow: inspection.hasViewportOverflow,
+          homeMealTexts: inspection.homeMealTexts,
+          homeMealKcalTexts: inspection.homeMealKcalTexts,
+          invalidHomeMealTexts: inspection.invalidHomeMealTexts,
+          homeRowControlOverlapCount: inspection.homeRowControlOverlapCount,
+          clippedHomeRowCount: inspection.clippedHomeRowCount,
           stateCase: inspection.stateCase,
           historyWeekStartText: inspection.historyWeekStartText,
           historyPendingKind: inspection.historyPendingKind,
