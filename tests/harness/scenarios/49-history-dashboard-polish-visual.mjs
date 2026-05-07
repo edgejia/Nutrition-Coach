@@ -195,6 +195,24 @@ function cdpSession(wsUrl) {
 
 function phase49MockScript() {
   return `(() => {
+    const fixedNow = new Date("2026-05-06T10:00:00+08:00");
+    const NativeDate = Date;
+    class Phase49Date extends NativeDate {
+      constructor(...args) {
+        super(...(args.length === 0 ? [fixedNow.getTime()] : args));
+      }
+      static now() {
+        return fixedNow.getTime();
+      }
+      static parse(value) {
+        return NativeDate.parse(value);
+      }
+      static UTC(...args) {
+        return NativeDate.UTC(...args);
+      }
+    }
+    Object.setPrototypeOf(Phase49Date, NativeDate);
+    window.Date = Phase49Date;
     const deviceId = "phase49-visual-device";
     const targets = { calories: 2000, protein: 100, carbs: 250, fat: 70 };
     const startSummary = {
@@ -257,10 +275,12 @@ function phase49MockScript() {
       startSummary,
       changedSummary,
       cacheMissRequests: 0,
-      dailySummary: { totalCalories: startSummary.totalCalories }
+      dailySummary: { totalCalories: startSummary.totalCalories },
+      interactions: []
     };
     window.__phase49ApplyHomeChange = () => {
       window.__phase49VisualState.dailySummary.totalCalories = changedSummary.totalCalories;
+      window.__phase49VisualState.interactions.push("home:daily-summary-change");
       window.dispatchEvent(new CustomEvent("phase49:daily-summary", { detail: changedSummary }));
     };
     window.fetch = (input, init) => {
@@ -273,6 +293,14 @@ function phase49MockScript() {
       }
       if (url.pathname === "/api/meals") {
         return Promise.resolve(jsonResponse({ meals: daySnapshots["2026-05-06"].meals }));
+      }
+      if (url.pathname === "/api/device/session") {
+        return Promise.resolve(jsonResponse({
+          deviceId,
+          goal: "fat_loss",
+          dailyTargets: targets,
+          establishedBy: "legacy_migration"
+        }));
       }
       if (url.pathname === "/api/history/trends") {
         const from = url.searchParams.get("from");
@@ -391,7 +419,10 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
           expression: `(() => {
             const controls = [...document.querySelectorAll('button, [role="button"]')];
             const historyControl = controls.find((node) => /歷史/.test(node.innerText || node.getAttribute("aria-label") || ""));
-            historyControl?.click();
+            if (historyControl) {
+              window.__phase49VisualState?.interactions?.push("bottom-nav:history");
+              historyControl.click();
+            }
           })()`,
         });
         await delay(500);
@@ -401,7 +432,13 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
               const buttons = [...document.querySelectorAll('button')];
               const previous = buttons.find((node) => node.getAttribute("aria-label") === "查看上一週");
               const next = buttons.find((node) => node.getAttribute("aria-label") === "查看下一週");
-              (previous || next)?.click();
+              const weekControl = previous || next;
+              if (weekControl) {
+                window.__phase49VisualState?.interactions?.push(
+                  previous ? "week-control:previous" : "week-control:next"
+                );
+                weekControl.click();
+              }
             })()`,
           });
           await delay(stateCase === "weekTransition" ? 1000 : 160);
@@ -425,6 +462,7 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
           const homeConsumedText = textOf('.home-sport-calorie-copy .sp-display');
           const homePercentText = textOf('.home-sport-ring-label strong');
           const historyPendingKind = window.__phase49VisualState?.cacheMissRequests > 0 ? "cache-miss" : "cache-hit";
+          const interactions = window.__phase49VisualState?.interactions ?? [];
           return {
             bodyTextLength: bodyText.length,
             sportNodeCount: document.querySelectorAll('[class*="sp-"], .home-sport-screen, .sp-history-screen').length,
@@ -436,7 +474,8 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
             historyWeekStartText,
             historyPendingKind,
             homeConsumedText,
-            homePercentText
+            homePercentText,
+            interactions
           };
         })()`,
       });
@@ -450,6 +489,21 @@ async function inspectAndCapture({ browser, url, output, width, height, stateCas
       }
       if (value.hasOverlapRisk === true) {
         throw new Error("Phase 49 visual evidence failed: overlap risk detected.");
+      }
+      if (stateCase.startsWith("home") && value.homeNodeCount < 1) {
+        throw new Error(`Phase 49 visual evidence failed: Home selectors missing for ${stateCase}.`);
+      }
+      if (!stateCase.startsWith("home") && value.historyNodeCount < 1) {
+        throw new Error(`Phase 49 visual evidence failed: History selectors missing for ${stateCase}.`);
+      }
+      if (!stateCase.startsWith("home") && !value.interactions.includes("bottom-nav:history")) {
+        throw new Error(`Phase 49 visual evidence failed: bottom-nav History interaction missing for ${stateCase}.`);
+      }
+      if ((stateCase === "cacheMissPending" || stateCase === "weekTransition") && !value.interactions.some((item) => item.startsWith("week-control:"))) {
+        throw new Error(`Phase 49 visual evidence failed: week-control interaction missing for ${stateCase}.`);
+      }
+      if (stateCase.startsWith("home") && !value.interactions.includes("home:daily-summary-change")) {
+        throw new Error(`Phase 49 visual evidence failed: Home daily-summary state change missing for ${stateCase}.`);
       }
 
       const { data } = await send("Page.captureScreenshot", {
@@ -518,6 +572,7 @@ async function main() {
           historyPendingKind: inspection.historyPendingKind,
           homeConsumedText: inspection.homeConsumedText,
           homePercentText: inspection.homePercentText,
+          interactions: inspection.interactions,
         },
       });
     }
