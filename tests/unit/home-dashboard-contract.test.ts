@@ -190,4 +190,40 @@ describe("Home dashboard display contracts", () => {
     assert.doesNotMatch(homeSource, /<button[^>]+home-sport-meal-row/);
     assert.doesNotMatch(homeSource, /SportPlusIcon/);
   });
+
+  it("scopes count-up animation to consumed calories and ring percent", async () => {
+    const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
+    const countUpHelperMatches = homeSource.match(/useCountUpNumber/g) ?? [];
+
+    if (countUpHelperMatches.length > 0) {
+      assert.equal(countUpHelperMatches.length, 3);
+      assert.match(homeSource, /function useCountUpNumber|const useCountUpNumber/);
+      assert.match(homeSource, /useCountUpNumber\([^)]*display\.consumed[^)]*shouldAnimateConsumedChange/);
+      assert.match(homeSource, /useCountUpNumber\([^)]*display\.percent[^)]*shouldAnimateConsumedChange/);
+    } else {
+      assert.match(homeSource, /requestAnimationFrame/);
+      assert.match(homeSource, /cancelAnimationFrame/);
+      assert.match(homeSource, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
+      assert.match(homeSource, /previousConsumedRef/);
+      assert.match(homeSource, /shouldAnimateConsumedChange/);
+      assert.match(
+        homeSource,
+        /previousConsumedRef\.current !== null && previousConsumedRef\.current !== display\.consumed/,
+      );
+      assert.doesNotMatch(
+        homeSource,
+        /previousPercentRef\.current !== null && previousPercentRef\.current !== display\.percent/,
+        "target-only percent changes snap through the consumed-change gate",
+      );
+      assert.match(homeSource, /display\.consumed[\s\S]*shouldAnimateConsumedChange/);
+      assert.match(homeSource, /display\.percent[\s\S]*shouldAnimateConsumedChange/);
+    }
+
+    assert.doesNotMatch(homeSource, /sessionStorage/);
+    assert.doesNotMatch(homeSource, /macroAnimation/);
+    assert.doesNotMatch(homeSource, /animatedMacro/);
+    assert.doesNotMatch(homeSource, /coachFade/);
+    assert.doesNotMatch(homeSource, /CoachAdviceCard[\s\S]{0,160}transition/);
+    assert.doesNotMatch(homeSource, /targetAnimation/);
+  });
 });

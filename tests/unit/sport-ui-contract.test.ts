@@ -136,6 +136,21 @@ describe("sport UI source contract", () => {
     assert.doesNotMatch(sources.sportPrimitives, /window\./);
   });
 
+  it("defines primitive motion transitions with reduced-motion override", () => {
+    assert.match(sources.sportPrimitives, /className=\{cx\("sp-ring-progress"/);
+    assert.match(sources.appCss, /\.sp-bar-fill\s*\{[\s\S]*transition: width 360ms ease/);
+    assert.match(sources.appCss, /\.sp-ring-progress\s*\{[\s\S]*transition: stroke-dashoffset 360ms ease/);
+    assert.match(sources.appCss, /@media \(prefers-reduced-motion: reduce\)/);
+
+    const reducedMotionBlock = sources.appCss.match(
+      /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\.sp-bar-fill[\s\S]*?\.sp-ring-progress[\s\S]*?\}/,
+    )?.[0] ?? "";
+
+    assert.match(reducedMotionBlock, escapedPattern(".sp-bar-fill"));
+    assert.match(reducedMotionBlock, escapedPattern(".sp-ring-progress"));
+    assert.match(reducedMotionBlock, escapedPattern("transition-duration: 1ms"));
+  });
+
   it("exports typed sport icons without demo globals or public SVG imports", () => {
     assert.match(sources.sportIcons, /export interface SportIconProps/);
     assert.match(sources.sportIcons, /viewBox="0 0 24 24"/);
