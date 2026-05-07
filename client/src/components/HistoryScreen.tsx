@@ -364,7 +364,7 @@ export function HistoryScreen() {
   const todayKey = useMemo(() => formatLocalDate(new Date()), []);
   const [weekStartKey, setWeekStartKey] = useState(() => getMondayWeekStart(todayKey));
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
-  const [trends, setTrends] = useState<HistoryTrendResponse | null>(null);
+  const [trendsCache, setTrendsCache] = useState<Map<string, HistoryTrendResponse>>(() => new Map());
   const [selectedSnapshot, setSelectedSnapshot] = useState<HistoryDaySnapshot | null>(null);
   const [trendError, setTrendError] = useState<string | null>(null);
   const [dayError, setDayError] = useState<string | null>(null);
@@ -373,28 +373,40 @@ export function HistoryScreen() {
 
   const weekEndKey = addLocalDays(weekStartKey, 6);
   const targetCalories = dailyTargets?.calories ?? null;
+  const currentTrends = trendsCache.get(weekStartKey) ?? null;
+  const hasCurrentWeekCache = currentTrends !== null;
   const weekDays = buildHistoryWeek({
     weekStartKey,
     selectedDateKey,
     todayKey,
-    trends: trends?.daily ?? [],
+    trends: currentTrends?.daily ?? [],
     targets: dailyTargets,
+    pending: !hasCurrentWeekCache,
   });
   const selectedWeekDay = weekDays.find((day) => day.dateKey === selectedDateKey);
   const weekStats = buildHistoryWeekStats({
     days: weekDays,
-    averageCalories: trends?.averages.calories ?? null,
+    averageCalories: currentTrends?.averages.calories ?? null,
+    pending: !hasCurrentWeekCache,
   });
   const nextWeekStartKey = shiftHistoryWeek(weekStartKey, 1);
   const nextWeekIsFuture = nextWeekStartKey > todayKey;
 
   const loadTrends = useCallback(
     (cancelledRef?: { current: boolean }) => {
+      const requestWeekStartKey = weekStartKey;
+      const requestWeekEndKey = weekEndKey;
       setLoadingTrends(true);
       setTrendError(null);
-      return getHistoryTrends(weekStartKey, weekEndKey)
+      return getHistoryTrends(requestWeekStartKey, requestWeekEndKey)
         .then((response) => {
-          if (!cancelledRef?.current) setTrends(response);
+          if (!cancelledRef?.current) {
+            setTrendsCache((cache) => {
+              const next = new Map(cache);
+              next.set(requestWeekStartKey, response);
+              return next;
+            });
+          }
         })
         .catch((error: unknown) => {
           if (error instanceof Error && error.message === "UNAUTHORIZED") {
@@ -491,7 +503,7 @@ export function HistoryScreen() {
         </header>
 
         <main className="screen-scroll-safe sp-history-scroll">
-          {loadingTrends && !trends ? (
+          {loadingTrends && !hasCurrentWeekCache ? (
             <SportCard className="sp-history-state-card" variant="flat">
               載入這週紀錄中...
             </SportCard>
