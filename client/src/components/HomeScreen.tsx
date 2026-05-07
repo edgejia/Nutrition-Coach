@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
@@ -123,6 +123,64 @@ export function getHomeMacroDisplays(
   ];
 }
 
+function prefersReducedMotion() {
+  return (
+    typeof window !== "undefined" &&
+    typeof matchMedia === "function" &&
+    matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function useCountUpNumber(targetValue: number, options: { durationMs?: number; animate?: boolean } = {}) {
+  const previousValueRef = useRef<number | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const [displayValue, setDisplayValue] = useState(targetValue);
+
+  useEffect(() => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+
+    const previousValue = previousValueRef.current;
+    if (options.animate !== true || prefersReducedMotion() === true || previousValue === null) {
+      previousValueRef.current = targetValue;
+      setDisplayValue(targetValue);
+      return;
+    }
+
+    const durationMs = options.durationMs ?? 450;
+    const startValue = previousValue;
+    let startTime: number | null = null;
+
+    const step = (timestamp: number) => {
+      startTime ??= timestamp;
+      const progress = Math.min(1, (timestamp - startTime) / durationMs);
+      setDisplayValue(Math.round(startValue + (targetValue - startValue) * progress));
+
+      if (progress < 1) {
+        frameRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      frameRef.current = null;
+      previousValueRef.current = targetValue;
+      setDisplayValue(targetValue);
+    };
+
+    frameRef.current = requestAnimationFrame(step);
+
+    return () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+    };
+  }, [options.animate, options.durationMs, targetValue]);
+
+  return displayValue;
+}
+
 export function getMealMacroSummary(meal: Pick<MealEntry, "protein" | "carbs" | "fat">): string {
   return `P ${Math.max(0, Math.round(meal.protein ?? 0))} · C ${Math.max(0, Math.round(meal.carbs ?? 0))} · F ${Math.max(0, Math.round(meal.fat ?? 0))}`;
 }
@@ -220,6 +278,15 @@ function CalorieHero({
 }) {
   const display = getHomeCalorieDisplay(dailySummary, dailyTargets);
   const macros = getHomeMacroDisplays(dailySummary, dailyTargets);
+  const previousConsumedRef = useRef<number | null>(null);
+  const shouldAnimateConsumedChange =
+    previousConsumedRef.current !== null && previousConsumedRef.current !== display.consumed;
+  const animatedConsumed = useCountUpNumber(display.consumed, { durationMs: 450, animate: shouldAnimateConsumedChange });
+  const animatedPercent = useCountUpNumber(display.percent, { durationMs: 450, animate: shouldAnimateConsumedChange });
+
+  useEffect(() => {
+    previousConsumedRef.current = display.consumed;
+  }, [display.consumed]);
 
   return (
     <>
@@ -231,7 +298,7 @@ function CalorieHero({
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
               <span className="sp-display" style={{ fontSize: 72, color: "var(--sp-ink)" }}>
-                {display.consumed.toLocaleString("en-US")}
+                {animatedConsumed.toLocaleString("en-US")}
               </span>
               <span className="sp-num" style={{ fontSize: 13, color: "var(--sp-ink-3)" }}>
                 / {display.target.toLocaleString("en-US")}
@@ -255,7 +322,7 @@ function CalorieHero({
             accentTick
             label={
               <span className="home-sport-ring-label">
-                <strong className="sp-display">{display.percent}</strong>
+                <strong className="sp-display">{animatedPercent}</strong>
                 <span className="sp-label">完成率</span>
               </span>
             }
