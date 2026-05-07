@@ -8,7 +8,8 @@ export type HistoryCalorieStatus =
   | "slightlyLow"
   | "inRange"
   | "over"
-  | "highOver";
+  | "highOver"
+  | "pending";
 
 export interface HistoryWeekTrend {
   date: string;
@@ -23,8 +24,8 @@ export interface HistoryWeekDay {
   dateKey: string;
   weekday: "一" | "二" | "三" | "四" | "五" | "六" | "日";
   dayNumber: number;
-  calories: number;
-  mealCount: number;
+  calories: number | null;
+  mealCount: number | null;
   status: HistoryCalorieStatus;
   calorieRatio: number | null;
   waterLevel: number;
@@ -44,10 +45,10 @@ export interface HistoryCalorieStatusResult {
 }
 
 export interface HistoryWeekStats {
-  averageCalories: number;
-  inRangeDays: number;
-  loggedDays: number;
-  mealCount: number;
+  averageCalories: number | null;
+  inRangeDays: number | null;
+  loggedDays: number | null;
+  mealCount: number | null;
 }
 
 export type HistorySportBarTone = "muted" | "amber" | "lime" | "red";
@@ -151,12 +152,35 @@ export function buildHistoryWeek(input: {
   todayKey: string;
   trends: HistoryWeekTrend[];
   targets?: DailyTargets | null;
+  pending?: boolean;
 }): HistoryWeekDay[] {
   const trendsByDate = new Map(input.trends.map((trend) => [trend.date, trend]));
 
   return WEEKDAY_LABELS.map((weekday, index) => {
     const dateKey = addDays(input.weekStartKey, index);
     const date = parseDateKey(dateKey);
+    const sharedDayState = {
+      dateKey,
+      weekday,
+      dayNumber: date.getDate(),
+      isSelected: dateKey === input.selectedDateKey,
+      isToday: dateKey === input.todayKey,
+      isFuture: dateKey > input.todayKey,
+    };
+
+    if (input.pending === true) {
+      return {
+        ...sharedDayState,
+        calories: null,
+        mealCount: null,
+        status: "pending",
+        calorieRatio: null,
+        waterLevel: 0,
+        hasTarget: Boolean(input.targets?.calories),
+        isOverTolerance: false,
+      };
+    }
+
     const trend = trendsByDate.get(dateKey);
     const calories = trend?.calories ?? 0;
     const mealCount = trend?.mealCount ?? 0;
@@ -167,9 +191,7 @@ export function buildHistoryWeek(input: {
     });
 
     return {
-      dateKey,
-      weekday,
-      dayNumber: date.getDate(),
+      ...sharedDayState,
       calories,
       mealCount,
       status: calorieStatus.status,
@@ -177,9 +199,6 @@ export function buildHistoryWeek(input: {
       waterLevel: calorieStatus.waterLevel,
       hasTarget: calorieStatus.hasTarget,
       isOverTolerance: calorieStatus.isOverTolerance,
-      isSelected: dateKey === input.selectedDateKey,
-      isToday: dateKey === input.todayKey,
-      isFuture: dateKey > input.todayKey,
     };
   });
 }
@@ -187,12 +206,22 @@ export function buildHistoryWeek(input: {
 export function buildHistoryWeekStats(input: {
   days: HistoryWeekDay[];
   averageCalories?: number | null;
+  pending?: boolean;
 }): HistoryWeekStats {
+  if (input.pending === true || (input.days.length > 0 && input.days.every((day) => day.status === "pending"))) {
+    return {
+      averageCalories: null,
+      inRangeDays: null,
+      loggedDays: null,
+      mealCount: null,
+    };
+  }
+
   return {
     averageCalories: Math.max(0, Math.round(input.averageCalories ?? 0)),
-    inRangeDays: input.days.filter((day) => day.status === "inRange" && day.mealCount > 0).length,
-    loggedDays: input.days.filter((day) => day.mealCount > 0 && !day.isFuture).length,
-    mealCount: input.days.reduce((total, day) => total + (day.isFuture ? 0 : day.mealCount), 0),
+    inRangeDays: input.days.filter((day) => day.status === "inRange" && (day.mealCount ?? 0) > 0).length,
+    loggedDays: input.days.filter((day) => (day.mealCount ?? 0) > 0 && !day.isFuture).length,
+    mealCount: input.days.reduce((total, day) => total + (day.isFuture ? 0 : (day.mealCount ?? 0)), 0),
   };
 }
 
@@ -203,6 +232,12 @@ export function getHistorySportStatusMeta(input: {
   const hasTarget = Number(input.targetCalories) > 0;
 
   switch (input.status) {
+    case "pending":
+      return {
+        badge: null,
+        barTone: "muted",
+        chipVariant: "neutral",
+      };
     case "empty":
       return {
         badge: hasTarget ? null : "目標同步中",
