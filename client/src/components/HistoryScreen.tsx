@@ -164,8 +164,10 @@ function SelectedDayHero({
   pending: boolean;
   cacheMiss: boolean;
 }) {
-  const pendingCalories = cacheMiss || selectedDay?.calories === null;
-  const consumedCalories = pendingCalories ? null : Math.max(0, Math.round(snapshot?.summary.totalCalories ?? 0));
+  const selectedDayCalories = selectedDay?.calories ?? null;
+  const displayCalories = snapshot?.summary.totalCalories ?? selectedDayCalories;
+  const pendingCalories = cacheMiss || displayCalories === null;
+  const consumedCalories = pendingCalories ? null : Math.max(0, Math.round(displayCalories));
   const meta = getHistorySportStatusMeta({
     status: selectedDay?.status ?? "empty",
     targetCalories,
@@ -309,6 +311,7 @@ function TimelineRows({
 function TimelinePanel({
   selectedDateKey,
   todayKey,
+  selectedDay,
   snapshot,
   loadingDay,
   dayError,
@@ -319,6 +322,7 @@ function TimelinePanel({
 }: {
   selectedDateKey: string;
   todayKey: string;
+  selectedDay: HistoryWeekDay | undefined;
   snapshot: HistoryDaySnapshot | null;
   loadingDay: boolean;
   dayError: string | null;
@@ -328,6 +332,8 @@ function TimelinePanel({
   openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
 }) {
   const meals = snapshot?.meals ?? [];
+  const selectedDayMealCount = selectedDay?.mealCount ?? null;
+  const displayMealCount = cacheMiss ? null : (snapshot?.meals.length ?? selectedDayMealCount);
   const showPendingBoundary = cacheMiss && !dayError;
   const pendingCopy = cacheMiss ? "同步這天紀錄中..." : "載入這天餐點中...";
 
@@ -335,7 +341,7 @@ function TimelinePanel({
     <section className={pending ? "sp-history-pending" : undefined}>
       <div className="sp-history-section-header">
         <h2>當日餐點</h2>
-        <span>{cacheMiss ? "--" : meals.length}筆</span>
+        <span>{displayMealCount === null ? "--" : displayMealCount}筆</span>
       </div>
 
       {showPendingBoundary ? (
@@ -348,7 +354,7 @@ function TimelinePanel({
           {dayError}
         </SportCard>
       ) : null}
-      {!loadingDay && !dayError && snapshot !== null && meals.length === 0 ? (
+      {!dayError && displayMealCount === 0 && meals.length === 0 ? (
         <SportCard className="sp-history-empty" variant="flat">
           <h3>這天還沒有餐點</h3>
           <p>選擇其他日期，或到「對話」記錄今天吃了什麼。</p>
@@ -389,8 +395,6 @@ export function HistoryScreen() {
   const hasCurrentWeekCache = currentTrends !== null;
   const selectedSnapshot = dayCache.get(selectedDateKey) ?? null;
   const isWeekPending = loadingTrends && hasCurrentWeekCache;
-  const isSelectedDayPending = loadingDay && selectedSnapshot !== null;
-  const isSelectedDayCacheMiss = selectedSnapshot === null;
   const weekDays = buildHistoryWeek({
     weekStartKey,
     selectedDateKey,
@@ -400,6 +404,11 @@ export function HistoryScreen() {
     pending: !hasCurrentWeekCache,
   });
   const selectedWeekDay = weekDays.find((day) => day.dateKey === selectedDateKey);
+  const hasSelectedWeekDayDisplay =
+    selectedWeekDay?.status !== "pending" && selectedWeekDay?.calories !== null && selectedWeekDay?.mealCount !== null;
+  const hasSelectedDayDisplay = selectedSnapshot !== null || hasSelectedWeekDayDisplay;
+  const isSelectedDayPending = loadingDay && hasSelectedDayDisplay;
+  const isSelectedDayCacheMiss = !hasSelectedDayDisplay;
   const weekStats = buildHistoryWeekStats({
     days: weekDays,
     averageCalories: currentTrends?.averages.calories ?? null,
@@ -497,12 +506,16 @@ export function HistoryScreen() {
     const affectedWeekStartKey = getMondayWeekStart(affectedDate);
     setDayCache((cache) => {
       const next = new Map(cache);
-      next.delete(affectedDate);
+      if (affectedDate !== selectedDateKey) {
+        next.delete(affectedDate);
+      }
       return next;
     });
     setTrendsCache((cache) => {
       const next = new Map(cache);
-      next.delete(affectedWeekStartKey);
+      if (affectedWeekStartKey !== weekStartKey) {
+        next.delete(affectedWeekStartKey);
+      }
       return next;
     });
 
@@ -583,6 +596,7 @@ export function HistoryScreen() {
           <TimelinePanel
             selectedDateKey={selectedDateKey}
             todayKey={todayKey}
+            selectedDay={selectedWeekDay}
             snapshot={selectedSnapshot}
             loadingDay={loadingDay}
             dayError={dayError}

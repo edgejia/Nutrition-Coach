@@ -105,7 +105,7 @@ describe("History screen source contract", () => {
     assert.match(source, /sortedMeals\.map\(\(meal\) =>/);
     assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\}/);
     assert.doesNotMatch(source, /getDisplayMealLabel\(meal\.loggedAt\)/);
-    assert.match(source, /\{cacheMiss \? "--" : meals\.length\}筆/);
+    assert.match(source, /\{displayMealCount === null \? "--" : displayMealCount\}筆/);
     assert.doesNotMatch(source, /\{meals\.length\} entries/);
   });
 
@@ -157,12 +157,27 @@ describe("History screen source contract", () => {
     assert.match(source, /lastMealMutation\.affectedDate/);
     assert.match(source, /const affectedDate = lastMealMutation\.affectedDate|lastMealMutation\.affectedDate/);
     assert.match(source, /dayCache/);
-    assert.match(source, /\.delete\(affectedDate\)/);
+    assert.match(source, /affectedDate !== selectedDateKey[\s\S]*?\.delete\(affectedDate\)/);
     assert.match(source, /trendsCache/);
     assert.match(
       source,
-      /\.delete\(getMondayWeekStart\(affectedDate\)\)|const affectedWeekStartKey = getMondayWeekStart\(affectedDate\)/,
+      /affectedWeekStartKey !== weekStartKey[\s\S]*?\.delete\(affectedWeekStartKey\)/,
     );
+  });
+
+  it("preserves visible selected-day display from same-date week cache during day revalidation", () => {
+    assert.match(source, /const selectedWeekDay = weekDays\.find\(\(day\) => day\.dateKey === selectedDateKey\)/);
+    assert.match(
+      source,
+      /const hasSelectedWeekDayDisplay =[\s\S]*selectedWeekDay\?\.status !== "pending"[\s\S]*selectedWeekDay\?\.calories !== null[\s\S]*selectedWeekDay\?\.mealCount !== null/,
+    );
+    assert.match(source, /const hasSelectedDayDisplay = selectedSnapshot !== null \|\| hasSelectedWeekDayDisplay/);
+    assert.match(source, /const isSelectedDayCacheMiss = !hasSelectedDayDisplay/);
+    assert.match(source, /const displayCalories = snapshot\?\.summary\.totalCalories \?\? selectedDayCalories/);
+    assert.match(source, /const displayMealCount = cacheMiss \? null : \(snapshot\?\.meals\.length \?\? selectedDayMealCount\)/);
+    assert.match(source, /<span>\{displayMealCount === null \? "--" : displayMealCount\}筆<\/span>/);
+    assert.match(source, /meals=\{meals\}/);
+    assert.doesNotMatch(source, /snapshot === null \? previous|previousSnapshot|previousDate/);
   });
 
   it("keeps History free of demo globals, demo labels, and inline mutation controls", () => {
