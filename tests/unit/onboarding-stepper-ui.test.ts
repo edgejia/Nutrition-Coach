@@ -58,10 +58,20 @@ describe("onboarding stepper UI", () => {
       onFieldEdit: () => undefined,
     }));
 
-    assert.match(html, /你的目標是什麼/);
+    assert.match(html, /你的主要/);
+    assert.match(html, /目標是什麼/);
     assert.match(html, /請選擇有效的目標/);
-    assert.match(html, /減脂 · FAT LOSS/);
-    assert.match(html, /增肌 · MUSCLE GAIN/);
+    assert.match(html, /第 01 步 \/ 共 06 步/);
+    assert.match(html, /sp-screen/);
+    assert.match(html, /sp-header/);
+    assert.doesNotMatch(html, /aria-label="返回"/);
+    assert.match(html, /sp-ob-brand/);
+    assert.doesNotMatch(html, /sk-/);
+    assert.match(html, /減脂/);
+    assert.match(html, /增肌/);
+    assert.match(html, /維持/);
+    assert.doesNotMatch(html, /ChatInput/);
+    assert.doesNotMatch(html, /ChatEntryBar/);
     assert.doesNotMatch(html, /連線失敗/);
     assert.doesNotMatch(html, /重試/);
   });
@@ -99,11 +109,13 @@ describe("onboarding stepper UI", () => {
       onFieldEdit: () => undefined,
     }));
 
-    assert.match(html, /基本身體數據/);
-    assert.match(html, /value="9"/);
-    assert.match(html, /value="165"/);
-    assert.match(html, /value="58"/);
-    assert.match(html, /年齡需介於 10-120/);
+    assert.match(html, /身體資料/);
+    assert.match(html, /第 03 步 \/ 共 06 步/);
+    assert.match(html, /aria-valuenow="9"/);
+    assert.match(html, />12</);
+    assert.match(html, />165</);
+    assert.match(html, />58</);
+    assert.match(html, /sp-num-wheel/);
     assert.doesNotMatch(html, /連線失敗/);
     assert.doesNotMatch(html, /重試/);
   });
@@ -119,5 +131,8 @@ describe("onboarding stepper UI", () => {
 
     assert.match(html, /連線失敗/);
     assert.match(html, /重試/);
+    assert.match(html, /第 06 步 \/ 共 06 步/);
+    assert.match(html, /sp-onboarding/);
+    assert.doesNotMatch(html, /sk-/);
   });
 });

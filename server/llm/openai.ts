@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { LLMProvider, ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, ToolCall } from "./types.js";
+import type { LLMProvider, ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, ToolCall, LLMCallOptions } from "./types.js";
 import { config } from "../config.js";
 
 export class OpenAIProvider implements LLMProvider {
@@ -11,12 +11,15 @@ export class OpenAIProvider implements LLMProvider {
     this.model = config.orchestratorModel;
   }
 
-  async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: messages as OpenAI.ChatCompletionMessageParam[],
-      ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
-    });
+  async chat(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions): Promise<LLMResponse> {
+    const response = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        messages: messages as OpenAI.ChatCompletionMessageParam[],
+        ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
+      },
+      { signal: opts?.signal },
+    );
 
     if (!response.choices.length) {
       throw new Error("OpenAI returned no choices");
@@ -36,13 +39,16 @@ export class OpenAIProvider implements LLMProvider {
     };
   }
 
-  async chatRound(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMRoundResult> {
-    const stream = await this.client.chat.completions.create({
-      model: this.model,
-      messages: messages as OpenAI.ChatCompletionMessageParam[],
-      ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
-      stream: true,
-    });
+  async chatRound(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions): Promise<LLMRoundResult> {
+    const stream = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        messages: messages as OpenAI.ChatCompletionMessageParam[],
+        ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
+        stream: true,
+      },
+      { signal: opts?.signal },
+    );
     const iterator = stream[Symbol.asyncIterator]();
     const bufferedTokens: string[] = [];
     const toolCalls = new Map<number, ToolCall>();
@@ -90,12 +96,15 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
-  async *chatStream(messages: ChatMessage[], _tools: ToolDefinition[]): AsyncGenerator<string> {
-    const stream = await this.client.chat.completions.create({
-      model: this.model,
-      messages: messages as OpenAI.ChatCompletionMessageParam[],
-      stream: true,
-    });
+  async *chatStream(messages: ChatMessage[], _tools: ToolDefinition[], opts?: LLMCallOptions): AsyncGenerator<string> {
+    const stream = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        messages: messages as OpenAI.ChatCompletionMessageParam[],
+        stream: true,
+      },
+      { signal: opts?.signal },
+    );
 
     for await (const chunk of stream) {
       const token = chunk.choices[0]?.delta?.content;

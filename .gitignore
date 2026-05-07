@@ -1,13 +1,16 @@
 .worktrees/
-.claude/settings.local.json
-.claude/worktrees/
+.codex/
+.claude/
 .superpowers/
 node_modules/
 dist/
 output/
 data/*
 !data/.gitkeep
+server/uploads/
 tests/harness/artifacts/*/latest/
+tests/harness/artifacts/*/latest-*/
+tests/harness/artifacts/*/comparison-*/
 tests/harness/tmp/
 .planning/phases/
 .planning/research/
@@ -20,6 +23,8 @@ tests/harness/tmp/
 .planning/ui-reviews/
 docs/superpowers/
 .env
+.env.*
+!.env.example
 *.db
 *.db-shm
 *.db-wal

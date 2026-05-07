@@ -204,4 +204,94 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /一句簡短繁體中文/);
     assert.match(prompt, /主要蛋白來源/);
   });
+
+  it("defines non-speculative grouped logging examples and allows items.length === 1", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+
+    assert.match(prompt, /清楚辨識多個食物/);
+    assert.match(prompt, /份量可以合理估算/);
+    assert.match(prompt, /雞腿便當/);
+    assert.match(prompt, /咖哩飯/);
+    assert.match(prompt, /牛肉麵/);
+    assert.match(prompt, /炒飯/);
+    assert.match(prompt, /混合碗|綜合碗/);
+    assert.match(prompt, /不要拆成/);
+    assert.match(prompt, /小菜/);
+    assert.match(prompt, /配料/);
+    assert.match(prompt, /醬料/);
+    assert.match(prompt, /泡菜|醃菜/);
+    assert.match(prompt, /痕量|trace/);
+    assert.match(prompt, /合併|省略/);
+    assert.match(prompt, /文字記錄/);
+    assert.match(prompt, /明確列出多個食物/);
+    assert.match(prompt, /蛋餅 \+ 豆漿 \+ 茶葉蛋/);
+    assert.match(prompt, /items\.length === 1/);
+    assert.match(prompt, /protein_sources/);
+    assert.match(prompt, /最上層|top-level/);
+    assert.match(prompt, /不要放在每個 item|不是每個 item/);
+    assert.match(prompt, /若目標是多項餐點，單一數字欄位的 patch 視為整餐總量修改/);
+    assert.doesNotMatch(prompt, /progress-lag|abnormal|每日目標差距|時間門檻/);
+  });
+
+  it("defines the successful log_food reply contract with A-F boundaries", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+
+    assert.match(prompt, /成功 log_food 回覆契約/);
+    assert.match(prompt, /一或兩個句段|一到兩個句段/);
+    assert.match(prompt, /不得換行|不要換行/);
+    assert.match(prompt, /emoji/);
+    assert.match(prompt, /markdown heading|標題/);
+    assert.match(prompt, /bullet|項目符號/);
+    assert.match(prompt, /table|表格/);
+    assert.match(prompt, /90/);
+    assert.match(prompt, /91-120/);
+    assert.match(prompt, /120/);
+    assert.match(prompt, /已記錄/);
+    assert.match(prompt, /完整餐點名稱/);
+    assert.match(prompt, /卡路里|calories/);
+    assert.match(prompt, /可信蛋白|headline trusted protein/);
+    assert.match(prompt, /非今天|不是今天/);
+    assert.match(prompt, /quantityUncertaintyReason === "missing_quantity"/);
+    assert.match(prompt, /保守|usedConservativeAssumption/);
+    assert.match(prompt, /高變異|湯|便當|自助餐|buffet/);
+    assert.match(prompt, /蛋白質說明.*條件|條件.*蛋白質說明/s);
+    assert.match(prompt, /最多一個下一步/);
+    assert.match(prompt, /不得出現/);
+    assert.match(prompt, /log_food/);
+    assert.match(prompt, /protein_sources/);
+    assert.match(prompt, /usedConservativeAssumption/);
+    assert.match(prompt, /假時間|捏造假的時刻/);
+    assert.match(prompt, /逐項|per-item/);
+    assert.match(prompt, /trace protein|trace/);
+    assert.match(prompt, /開場|coaching opening/);
+    assert.doesNotMatch(prompt, /progress-lag|abnormal|每日目標差距|時間門檻/);
+  });
+
+  it("requires historical correction queries to preserve grouped target and item terms", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+
+    assert.match(prompt, /find_meals\.query/);
+    assert.match(prompt, /雞腿、白飯、滷蛋、青菜/);
+    assert.match(prompt, /滷蛋/);
+    assert.match(prompt, /不要.*中午雞腿便當|不得.*中午雞腿便當/);
+    assert.match(prompt, /修改或刪除歷史餐點前，必須先呼叫 find_meals/);
+    assert.match(prompt, /find_meals 已解析出唯一目標.*update_meal 或 delete_meal/s);
+    assert.match(prompt, /餐點拆分與記錄規則/);
+    assert.match(prompt, /成功 log_food 回覆契約/);
+  });
 });

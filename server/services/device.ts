@@ -6,6 +6,7 @@ import type { AppDatabase } from "../db/client.js";
 const GOAL_DEFAULTS = {
   fat_loss: { calories: 1500, protein: 120, carbs: 150, fat: 50 },
   muscle_gain: { calories: 2500, protein: 180, carbs: 300, fat: 70 },
+  maintain: { calories: 2000, protein: 150, carbs: 220, fat: 60 },
 } as const;
 
 export interface DailyTargets {

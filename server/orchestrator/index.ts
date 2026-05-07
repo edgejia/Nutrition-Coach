@@ -16,6 +16,7 @@ import {
 } from "./tools.js";
 import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
 import type { OrchestratorHooks } from "./hooks.js";
+import { currentAppDate, formatLocalDate } from "../lib/time.js";
 
 interface OrchestratorDeps {
   llmProvider: LLMProvider;
@@ -42,6 +43,7 @@ export type OrchestratorResult =
       dailyTargets?: DailyTargets;
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
+      loggedMealToolMessageId?: string;
     }
   | {
       streamGenerator: AsyncGenerator<string>;
@@ -51,9 +53,22 @@ export type OrchestratorResult =
       dailyTargets?: DailyTargets;
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
+      loggedMealToolMessageId?: string;
     };
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
+
+interface CorrectionClarificationCandidate {
+  foodName: string;
+  loggedAt: string;
+  dateKey: string;
+}
+
+interface CorrectionToolResult {
+  status: "resolved" | "needs_clarification" | "not_found";
+  action: "update" | "delete";
+  candidates?: CorrectionClarificationCandidate[];
+}
 
 function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined): DailySummary {
   if (!dailySummary) {
@@ -81,6 +96,23 @@ function joinProteinSourceNames(names: string[]): string {
   return `${names[0]}、${names[1]}等主要來源`;
 }
 
+function formatProteinGrams(protein: number): string {
+  return Number.isInteger(protein) ? String(protein) : protein.toFixed(1).replace(/\.0$/, "");
+}
+
+function formatReceiptDateLabel(dateKey: string, currentDate = currentAppDate()): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) {
+    return dateKey;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return year === currentDate.getFullYear()
+    ? `${month}/${day}`
+    : `${year}/${month}/${day}`;
+}
+
 function buildTrustedProteinExplanation(loggedMeal: LoggedMealReceipt): string {
   const countedSourceNames = [...new Set(
     loggedMeal.countedSources
@@ -104,8 +136,130 @@ function buildTrustedProteinExplanation(loggedMeal: LoggedMealReceipt): string {
   return `蛋白質先按${sourceLabel}作為主要來源估算。`;
 }
 
+function getUniqueCountedProteinNames(loggedMeal: LoggedMealReceipt): string[] {
+  return [...new Set(
+    loggedMeal.countedSources
+      .map((source) => source.name.trim())
+      .filter(Boolean),
+  )];
+}
+
+function buildCompactProteinSuffix(loggedMeal: LoggedMealReceipt): string {
+  const countedSourceNames = getUniqueCountedProteinNames(loggedMeal);
+  if (loggedMeal.usedConservativeAssumption) {
+    return "（先抓低）";
+  }
+  if (countedSourceNames.length > 1) {
+    return `（${joinProteinSourceNames(countedSourceNames.slice(0, 3))}）`;
+  }
+  if (loggedMeal.excludedSources.length > 0 && countedSourceNames.length === 1) {
+    return `（以${countedSourceNames[0]}為主）`;
+  }
+  return "";
+}
+
+function getHighVarianceErrorSource(foodName: string): "湯底與份量" | "油脂與飯量" | "份量" | undefined {
+  if (/(湯|麵|noodle|soup)/i.test(foodName)) {
+    return "湯底與份量";
+  }
+  if (/(便當|飯盒|lunchbox|bento)/i.test(foodName)) {
+    return "油脂與飯量";
+  }
+  if (/(buffet|自助餐)/i.test(foodName)) {
+    return "份量";
+  }
+  return undefined;
+}
+
 function buildImageLoggedReply(loggedMeal: LoggedMealReceipt): string {
-  return `已先依照片做保守估算並完成記錄：${loggedMeal.foodName}，約 ${formatCalories(loggedMeal.calories)} kcal。${buildTrustedProteinExplanation(loggedMeal)} 若你想更精準，我可以再依份量幫你調整。`;
+  const todayKey = formatLocalDate(currentAppDate());
+  const datePrefix = loggedMeal.dateKey !== todayKey ? `${formatReceiptDateLabel(loggedMeal.dateKey)} ` : "";
+  const calories = formatCalories(loggedMeal.calories);
+  const protein = formatProteinGrams(loggedMeal.protein);
+  const highVarianceErrorSource = getHighVarianceErrorSource(loggedMeal.foodName);
+  const uncertaintyErrorSource = highVarianceErrorSource
+    ?? (loggedMeal.usedConservativeAssumption || loggedMeal.quantityUncertaintyReason === "missing_quantity"
+      ? "份量"
+      : undefined);
+  const proteinSuffix = buildCompactProteinSuffix(loggedMeal);
+  const receipt = uncertaintyErrorSource
+    ? `已記錄${datePrefix}${loggedMeal.foodName}，估約 ${calories} kcal（區間 ${Math.floor(loggedMeal.calories * 0.85)}-${Math.ceil(loggedMeal.calories * 1.15)}），蛋白質 ${protein} g${proteinSuffix}`
+    : `已記錄${datePrefix}${loggedMeal.foodName}，${calories} kcal，蛋白質 ${protein} g${proteinSuffix}`;
+  const nextStep = loggedMeal.usedConservativeAssumption || loggedMeal.quantityUncertaintyReason === "missing_quantity"
+    ? "，可再補份量修正"
+    : "";
+  return uncertaintyErrorSource
+    ? `${receipt}。${uncertaintyErrorSource}是主要誤差${nextStep}。`
+    : `${receipt}。`;
+}
+
+function buildUpdatedMealReply(loggedMeal: LoggedMealReceipt): string {
+  const todayKey = formatLocalDate(currentAppDate());
+  const datePrefix = loggedMeal.dateKey !== todayKey ? `${formatReceiptDateLabel(loggedMeal.dateKey)} ` : "";
+  const calories = formatCalories(loggedMeal.calories);
+  const protein = formatProteinGrams(loggedMeal.protein);
+  return `已更新${datePrefix}${loggedMeal.foodName}，${calories} kcal，蛋白質 ${protein} g。`;
+}
+
+function buildMutationSuccessReply(affectedDate?: string): string {
+  const todayKey = formatLocalDate(currentAppDate());
+  if (affectedDate && affectedDate !== todayKey) {
+    return `已完成 ${formatReceiptDateLabel(affectedDate)} 餐點調整，請稍後確認該日攝取摘要。`;
+  }
+  return "已完成餐點調整，請稍後確認今日攝取摘要。";
+}
+
+function extractUserCorrectionTarget(userMessage: string): string {
+  const targetSide = userMessage.match(/^(.*?)(?:改成|改為|改到|變成|換成|調成)/)?.[1] ?? userMessage;
+  return targetSide
+    .replace(/^(?:請|麻煩|幫我)?把?/, "")
+    .replace(/(?:的)?$/, "")
+    .trim();
+}
+
+function formatCorrectionCandidate(candidate: CorrectionClarificationCandidate, index: number): string {
+  const local = new Date(candidate.loggedAt);
+  const hour = `${local.getHours()}`.padStart(2, "0");
+  const minute = `${local.getMinutes()}`.padStart(2, "0");
+  return `${index + 1}. ${candidate.dateKey} ${hour}:${minute} ${candidate.foodName}`;
+}
+
+function buildCorrectionClarificationReply(result: CorrectionToolResult, userMessage: string): string | undefined {
+  if (result.status === "resolved") {
+    return undefined;
+  }
+
+  const verb = result.action === "update" ? "修改" : "刪除";
+  const userTarget = extractUserCorrectionTarget(userMessage);
+  const targetLabel = userTarget ? `「${userTarget}」` : "這筆餐點";
+  const candidates = result.candidates ?? [];
+
+  if (result.status === "needs_clarification" && candidates.length > 0) {
+    const lines = candidates.map((candidate, index) => formatCorrectionCandidate(candidate, index));
+    return `我找到多筆可能要${verb}的${targetLabel}，請直接回覆編號：\n${lines.join("\n")}`;
+  }
+
+  return `我還不能確定你要${verb}哪一筆${targetLabel}，請補充日期、餐別或食物名稱。`;
+}
+
+function parseCorrectionToolResult(toolName: string, result: string): CorrectionToolResult | undefined {
+  if (toolName !== "find_meals") {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(result) as CorrectionToolResult;
+    if (
+      (parsed.status === "resolved" || parsed.status === "needs_clarification" || parsed.status === "not_found")
+      && (parsed.action === "update" || parsed.action === "delete")
+    ) {
+      return parsed;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
 }
 
 export function buildPartialSuccessLoggedReply(loggedMeal: LoggedMealReceipt): string {
@@ -147,7 +301,7 @@ async function* ensureGoalReceiptStream(
 
 function detectHallucinatedChoiceFollowUp(
   userMessage: string,
-  recentMessages: Array<{ role: string; content: string; didLogMeal?: boolean }>
+  recentMessages: Array<{ role: string; content: unknown; didLogMeal?: boolean }>
 ): string | undefined {
   const trimmedMessage = userMessage.trim();
   if (!CHOICE_CONFIRM_MESSAGES.has(trimmedMessage)) {
@@ -155,11 +309,17 @@ function detectHallucinatedChoiceFollowUp(
   }
 
   const lastAssistant = [...recentMessages].reverse().find((message) => message.role === "assistant");
+  const lastAssistantContent = typeof lastAssistant?.content === "string" ? lastAssistant.content : "";
   if (!lastAssistant?.didLogMeal) {
-    return undefined;
+    const hasRecentMealMutationSummary =
+      lastAssistantContent.includes("[系統已完成餐點記錄]") ||
+      lastAssistantContent.includes("[系統已完成餐點修改]");
+    if (!hasRecentMealMutationSummary) {
+      return undefined;
+    }
   }
 
-  if (!CHOICE_PROMPT_PATTERN.test(lastAssistant.content)) {
+  if (!CHOICE_PROMPT_PATTERN.test(lastAssistantContent)) {
     return undefined;
   }
 
@@ -170,6 +330,7 @@ export interface HandleMessageOpts {
   onStatus?: (label: string) => void;
   hooks?: OrchestratorHooks;  // injected per-call; per-request reqId binding via createStructuredHooks
   onUserMessageSaved?: () => void;
+  signal?: AbortSignal;
 }
 
 export function createOrchestrator(deps: OrchestratorDeps) {
@@ -189,9 +350,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Load history BEFORE saving current user message to avoid duplication
       const history = await loadHistory(chatService, deviceId, 10);
-      const recentMessages = await chatService.getHistory(deviceId, 3);
-      const hallucinatedChoiceRecovery = detectHallucinatedChoiceFollowUp(userMessage, recentMessages);
-      const previousAssistantMessage = [...recentMessages]
+      const displayHistory = await chatService.getHistory(deviceId, 3);
+      const hallucinatedChoiceRecovery = detectHallucinatedChoiceFollowUp(userMessage, history);
+      const previousAssistantMessage = [...displayHistory]
         .reverse()
         .find((message) => message.role === "assistant")?.content;
 
@@ -252,6 +413,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let loggedMeal:
         | LoggedMealReceipt
         | undefined;
+      let loggedMealToolMessageId: string | undefined;
+      let correctionClarificationReply: string | undefined;
 
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
@@ -260,7 +423,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         let response;
         try {
           if (typeof llmProvider.chatRound === "function") {
-            const roundResult = await llmProvider.chatRound(messages, toolDefinitions);
+            const roundResult = await llmProvider.chatRound(messages, toolDefinitions, {
+              signal: opts?.signal,
+            });
             if (roundResult.kind === "stream") {
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
@@ -274,6 +439,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
                 loggedMeal,
+                loggedMealToolMessageId,
               };
             }
             response = roundResult.response;
@@ -282,7 +448,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
                 streamGenerator: ensureGoalReceiptStream(
-                  llmProvider.chatStream(messages, []),
+                  llmProvider.chatStream(messages, [], { signal: opts?.signal }),
                   successfulGoalReceipt,
                 ),
                 didLogMeal,
@@ -291,10 +457,11 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
                 loggedMeal,
+                loggedMealToolMessageId,
               };
             }
 
-            response = await llmProvider.chat(messages, toolDefinitions);
+            response = await llmProvider.chat(messages, toolDefinitions, { signal: opts?.signal });
           }
         } catch (err) {
           opts?.hooks?.onFallback?.(didMutateMeal ? "partial_success" : "llm_error");
@@ -307,6 +474,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               dailyTargets: successfulGoalTargets,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
+              loggedMealToolMessageId,
             };
           }
           if (didMutateMeal) {
@@ -320,6 +488,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               dailySummary: requireDailySummaryForLoggedMeal(logMealSummary),
               affectedDate: resolvedAffectedDate,
               loggedMeal,
+              loggedMealToolMessageId,
             };
           }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
@@ -330,6 +499,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             dailySummary: logMealSummary,
             affectedDate: resolvedAffectedDate,
             loggedMeal,
+            loggedMealToolMessageId,
           };
         }
 
@@ -343,6 +513,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             dailyTargets: successfulGoalTargets,
             affectedDate: resolvedAffectedDate,
             loggedMeal,
+            loggedMealToolMessageId,
           };
         }
 
@@ -413,10 +584,17 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (mealMutationKind === "update" || mealMutationKind === "delete") {
                 didMutateMeal = true;
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
+                if (mealMutationKind === "update") {
+                  loggedMeal = toolLoggedMeal;
+                }
               }
               if (toolCall.function.name === "update_goals") {
                 successfulGoalReceipt = result;
                 successfulGoalTargets = dailyTargets;
+              }
+              const correctionResult = parseCorrectionToolResult(toolCall.function.name, result);
+              if (correctionResult) {
+                correctionClarificationReply = buildCorrectionClarificationReply(correctionResult, userMessage);
               }
               opts?.hooks?.onToolResult?.({
                 tool: toolCall.function.name,
@@ -426,13 +604,23 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 updatedFields,
                 publishedEvents,
               });
-              await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
+              const toolMessage = await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
+              if (toolLoggedMeal) {
+                loggedMealToolMessageId = toolMessage.id;
+              }
               toolResults.push({ toolCall, result });
             } catch (err) {
               const errorStr = err instanceof Error ? err.message : "Tool execution failed";
               if (isFatalToolError(err)) {
                 // Validation failed before execution — emit executed:false BEFORE propagating
-                opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: false, executed: false, failureReason: errorStr });
+                opts?.hooks?.onToolResult?.({
+                  tool: toolCall.function.name,
+                  success: false,
+                  executed: false,
+                  failureReason: err.diagnostic?.failureReason ?? errorStr,
+                  reason: err.diagnostic?.reason,
+                  fields: err.diagnostic?.fields,
+                });
                 if (successfulGoalReceipt) {
                   return {
                     reply: successfulGoalReceipt,
@@ -442,6 +630,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     dailyTargets: successfulGoalTargets,
                     affectedDate: resolvedAffectedDate,
                     loggedMeal,
+                    loggedMealToolMessageId,
                   };
                 }
                 throw err;
@@ -464,6 +653,57 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               dailySummary: logMealSummary,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
+              loggedMealToolMessageId,
+            };
+          }
+          if (didLogMeal && loggedMeal) {
+            const reply = buildImageLoggedReply(loggedMeal);
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
+            return {
+              reply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
+            };
+          }
+          if (didMutateMeal && loggedMeal) {
+            const reply = buildUpdatedMealReply(loggedMeal);
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
+            return {
+              reply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
+            };
+          }
+          if (didMutateMeal) {
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
+            return {
+              reply: buildMutationSuccessReply(resolvedAffectedDate),
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
+            };
+          }
+          if (correctionClarificationReply) {
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
+            return {
+              reply: correctionClarificationReply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
             };
           }
           shouldStreamFinalReply = true;
@@ -483,6 +723,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           dailyTargets: successfulGoalTargets,
           affectedDate: resolvedAffectedDate,
           loggedMeal,
+          loggedMealToolMessageId,
         };
       }
       return {
@@ -492,6 +733,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         dailySummary: logMealSummary,
         affectedDate: resolvedAffectedDate,
         loggedMeal,
+        loggedMealToolMessageId,
       };
     },
   };

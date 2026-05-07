@@ -1,25 +1,40 @@
 # Nutrition Coach
 
-AI 驅動的飲食紀錄與熱量追蹤應用。透過對話方式記錄餐點，LLM 自動分析營養成分，即時更新每日進度。
+AI 驅動的飲食紀錄與熱量追蹤應用。使用者透過文字或圖片描述吃了什麼，LLM 估算營養、完成記錄，並用 SSE 即時回饋處理狀態與最終回覆。
 
 文件導覽請見 [docs/README.md](docs/README.md)。
 Codex project-specific workflow notes are summarized in [docs/codex.md](docs/codex.md)。
 
 ## 目前進度
 
-`v1.4` 已於 `2026-04-21` 出貨並封存，目前沒有 active milestone。產品現在已具備：
+`v1.8 UI refactor` 已於 `2026-04-30` 出貨並封存，目前沒有 active milestone。v1.8 以 `chatgpt/` Claude Design mock 為基準，完成 Home / Chat / History 三個 bottom-tab 核心頁面，以及 Settings、Day Detail、Meal Edit 二級畫面。
+
+產品現在已具備：
 
 - 文字與圖片餐點記錄，含 final-round SSE 串流與明確狀態文字
+- 米白紙感、黑色線稿、手寫字體、暖橘 accent 的 sketch-style frontend
+- Home dashboard：今日剩餘熱量、macro progress、今日餐點摘要與 Settings 入口
+- Chat-only logging：Chat 是唯一記錄入口，支援文字、圖片、問答、修改舊餐點，以及 bubble 內 progressive feedback
+- History week strip：週條、selected-day timeline、calorie water level 與 read-only Day Detail snapshot
+- Meal Edit：透過現有 canonical meal revision semantics 儲存、刪除與刷新 affected day
 - 歷史日期摘要瀏覽、read-only historical snapshot，以及 mutation 後的 `affectedDate` transport
 - trusted-protein normalization 與保守估算說明文案
 - cookie-backed guest-session browser auth、same-browser resume、tamper fail-closed 與 explicit rebuild recovery
+- history meals / search / trends API foundation，含 cursor pagination、current active revisions、SQLite query-plan coverage
+- deterministic insight eval harness foundation，含 reusable fixtures、redacted trace artifacts、groundedness / safety assertions
+- v1.8 milestone audit passed `28/28`，`yarn release:check` passed on `2026-04-30`
 - deployed-domain beta / production smoke 已完成
+
 ## 功能
 
 - **對話式記錄**：用自然語言描述你吃了什麼，支援文字與圖片上傳
 - **AI 營養分析**：LLM 自動估算卡路里、蛋白質、碳水、脂肪，並以 trusted-protein 規則避免 trace protein 灌高 headline 蛋白質
-- **即時儀表板**：SSE 推播，餐點記錄後即時更新進度條
+- **Home dashboard**：今日剩餘熱量、calorie ring、macro progress、今日餐點與 coach CTA
+- **Chat-only logging**：所有新增記錄、問題、修正意圖都從 Chat 進入，logged meal bubble 不提供 inline edit/delete 按鈕
+- **即時回饋**：SSE 推播與 chat bubble progressive feedback，餐點記錄後即時更新進度
 - **歷史日體驗**：支援查看昨天、前天或明確 past date 的 summary / meals，且 historical mutation 不會污染今天的 live dashboard
+- **History timeline**：週條以 calorie water level 表示每日熱量比例，selected day 下方用 timeline 呈現餐點
+- **Meal Edit**：從 current-day review surface 編輯或刪除既有餐點，沿用 canonical meal revision contract
 - **目標設定**：設定每日營養目標，追蹤達成率
 - **訪客工作階段**：無需帳號，使用 cookie-backed guest session 維持同瀏覽器 continuity 與 recovery flow
 
@@ -83,7 +98,13 @@ yarn start
 beta / production 會由同一個 Fastify 進程同時提供 API 與 `dist/client`。
 部署時請使用持久化主機與掛載磁碟，並維持 `TZ=Asia/Taipei`、`DB_PATH`、`ASSETS_DIR`、`UPLOADS_STAGING_DIR`、`CLIENT_DIST_DIR` 的一致設定。public beta smoke 應在 real deployed domain 上執行，不以 localhost build smoke 取代。詳細的 Railway baseline 請見 [`docs/deploy/railway-beta.md`](docs/deploy/railway-beta.md)。
 
-目前 release promotion 順序固定為 `feature/* -> staging -> main`，正式 promote 前請先跑 `yarn release:check`。
+## Git / release workflow
+
+- `main` 是 Railway production branch；不要直接在 `main` 上做 active development。
+- `staging` 是 Railway testing branch，只用於 deploy verification 與 smoke checks。
+- 新 milestone / feature work 從乾淨的 `feature/*` 分支開始；目前 milestone branch 慣例是 `feature/rNN-vX-Y-dev`，出貨後可 rename 成 `feature/rNN-vX-Y-shipped`。v1.8 的 shipped branch 是 `feature/r13-v1-8-shipped`，下一個 feature / milestone 建議從 `staging` 開 `feature/r14-...`。
+- Release promotion 順序固定為 `feature/* -> staging -> main`。
+- merge 或 promote 到 `staging` / `main` 前必須先跑 `yarn release:check`。
 
 ## 測試
 
@@ -103,6 +124,7 @@ yarn release:check
 # deterministic harness
 yarn verify:harness -- protein-trust
 yarn verify:harness -- guest-session-hardening
+yarn verify:harness -- insight-eval
 ```
 
 ## 專案結構
@@ -110,7 +132,7 @@ yarn verify:harness -- guest-session-hardening
 ```
 ├── client/            # React 前端與 Vite 設定
 │   └── src/
-│       ├── components/  # UI 元件（Dashboard, ChatPanel, Onboarding 等）
+│       ├── components/  # UI 元件（Home, Chat, History, Meal Edit, Onboarding 等）
 │       ├── store.ts     # Zustand 狀態管理
 │       ├── api.ts       # API client
 │       └── sse.ts       # SSE 即時更新

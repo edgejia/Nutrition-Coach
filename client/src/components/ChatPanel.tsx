@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
-import { sendMessageStream, loadHistory } from "../api.js";
+import { getMeals, sendMessageStream, loadHistory, stopChatTurn } from "../api.js";
+import { formatLocalDate } from "../lib/time.js";
+import { createClientId } from "../lib/clientId.js";
 import {
   type FollowMode,
   type LiveUpdateSnapshot,
@@ -14,15 +16,72 @@ import {
 } from "../lib/chat-scroll.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
-import { DashboardMiniBar } from "./DashboardMiniBar.js";
-import type { PendingHomeChatDraft } from "../types.js";
+import { SportChevronLeftIcon } from "./SportIcons.js";
+import type { Message, PendingHomeChatDraft } from "../types.js";
 
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
 const ENTRY_SETTLE_WINDOW_MS = 240;
 const UPLOAD_SETTLE_WINDOW_MS = 320;
+const STOP_FALLBACK_TIMEOUT_MS = 1000;
+const PHASE40_INCOMPLETE_RECEIPT_FLAG = "phase40IncompleteReceipt";
+const PHASE40_INCOMPLETE_RECEIPT_ID = "phase40-incomplete-receipt-mock";
 
 function getNowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function formatMealCountSummary(mealCount: number) {
+  return `今日已紀錄 ${mealCount} 餐`;
+}
+
+function formatMealCountCompact(mealCount: number) {
+  return `${mealCount} 餐`;
+}
+
+function shouldShowPhase40IncompleteReceiptMock() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const isLocalDevHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  if (!isLocalDevHost) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return (
+    params.get(PHASE40_INCOMPLETE_RECEIPT_FLAG) === "1" ||
+    window.localStorage.getItem(PHASE40_INCOMPLETE_RECEIPT_FLAG) === "1"
+  );
+}
+
+function createPhase40IncompleteReceiptMock(): Message {
+  return {
+    id: PHASE40_INCOMPLETE_RECEIPT_ID,
+    role: "assistant",
+    content: "",
+    createdAt: new Date().toISOString(),
+    loggedMeal: {
+      foodName: "鮭魚飯糰",
+      calories: 780,
+      protein: 38,
+      carbs: 82,
+      fat: 24,
+      itemCount: 1,
+    },
+  };
+}
+
+function addPhase40IncompleteReceiptMockIfNeeded(existingMessages: Message[], addMessage: (message: Message) => void) {
+  if (!shouldShowPhase40IncompleteReceiptMock()) {
+    return;
+  }
+
+  if (existingMessages.some((message) => message.id === PHASE40_INCOMPLETE_RECEIPT_ID)) {
+    return;
+  }
+
+  addMessage(createPhase40IncompleteReceiptMock());
 }
 
 export function ChatPanel() {
@@ -32,16 +91,22 @@ export function ChatPanel() {
   const addMessage = useStore((s) => s.addMessage);
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setDailyTargets = useStore((s) => s.setDailyTargets);
+  const setMeals = useStore((s) => s.setMeals);
+  const dailySummary = useStore((s) => s.dailySummary);
+  const dailyTargets = useStore((s) => s.dailyTargets);
   const sending = useStore((s) => s.sending);
   const setSending = useStore((s) => s.setSending);
   const provisionalBubble = useStore((s) => s.provisionalBubble);
   const setProvisionalBubble = useStore((s) => s.setProvisionalBubble);
   const commitProvisionalBubble = useStore((s) => s.commitProvisionalBubble);
+  const commitStoppedProvisionalBubble = useStore((s) => s.commitStoppedProvisionalBubble);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
+  const meals = useStore((s) => s.meals);
+  const openMealEdit = useStore((s) => s.openMealEdit);
   const contentRef = useRef<HTMLDivElement>(null);
   const attemptedDraftIdsRef = useRef<Set<string>>(new Set());
   const hadMessagesOnEntryRef = useRef(messages.length > 0);
@@ -57,9 +122,22 @@ export function ChatPanel() {
   const followModeRef = useRef<FollowMode>("attached");
   const scrollFrameRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const activeTurnIdRef = useRef<string | null>(null);
+  const stopFallbackTimeoutRef = useRef<number | null>(null);
+  const stoppingRef = useRef(false);
   const [followMode, setFollowMode] = useState<FollowMode>("attached");
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
 
   const isChatLocked = sending;
+  const todayKey = formatLocalDate(new Date());
+  const todayMeals = meals.filter((meal) => formatLocalDate(new Date(meal.loggedAt)) === todayKey);
+  const consumedCalories = Math.round(dailySummary?.totalCalories ?? 0).toLocaleString("en-US");
+  const targetCalories = Math.round(dailyTargets?.calories ?? 0).toLocaleString("en-US");
+  const todayMealCount = dailySummary?.mealCount ?? todayMeals.length;
+  const todayMealCountSummary = formatMealCountSummary(todayMealCount);
+  const todayMealCountCompact = formatMealCountCompact(todayMealCount);
   const showJumpToLatest = shouldShowJumpToLatest({
     mode: followMode,
     hasMessages: messages.length > 0,
@@ -131,6 +209,54 @@ export function ChatPanel() {
       window.clearTimeout(uploadSettleTimeoutRef.current);
       uploadSettleTimeoutRef.current = null;
     }
+  }
+
+  function clearStopFallbackTimeout() {
+    if (stopFallbackTimeoutRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(stopFallbackTimeoutRef.current);
+      stopFallbackTimeoutRef.current = null;
+    }
+  }
+
+  function setStoppingMode(nextStopping: boolean) {
+    stoppingRef.current = nextStopping;
+    setStopping(nextStopping);
+  }
+
+  function clearActiveStreamAfterTerminal() {
+    clearStopFallbackTimeout();
+    activeAbortControllerRef.current = null;
+    activeTurnIdRef.current = null;
+    setActiveTurnId(null);
+    setStoppingMode(false);
+  }
+
+  function cleanupActiveStream() {
+    clearStopFallbackTimeout();
+    activeAbortControllerRef.current?.abort();
+    activeAbortControllerRef.current = null;
+    activeTurnIdRef.current = null;
+    setActiveTurnId(null);
+    setStoppingMode(false);
+  }
+
+  function armStopFallback() {
+    clearStopFallbackTimeout();
+    if (typeof window === "undefined") {
+      activeAbortControllerRef.current?.abort();
+      activeAbortControllerRef.current = null;
+      activeTurnIdRef.current = null;
+      setActiveTurnId(null);
+      setStoppingMode(false);
+      return;
+    }
+    stopFallbackTimeoutRef.current = window.setTimeout(() => {
+      activeAbortControllerRef.current?.abort();
+      activeAbortControllerRef.current = null;
+      activeTurnIdRef.current = null;
+      setActiveTurnId(null);
+      setStoppingMode(false);
+    }, STOP_FALLBACK_TIMEOUT_MS);
   }
 
   function disarmEntrySettleWindow() {
@@ -294,6 +420,32 @@ export function ChatPanel() {
     scheduleLatestAlignment();
   }
 
+  async function refreshTodayMeals() {
+    try {
+      const { meals } = await getMeals({ refreshReason: "meal_mutation" });
+      setMeals(meals);
+    } catch (err) {
+      if (err instanceof Error && err.message === "UNAUTHORIZED") {
+        void recoverGuestSession();
+      }
+    }
+  }
+
+  function handleStopStreaming() {
+    if (!sending || stoppingRef.current) return;
+    const turnId = activeTurnIdRef.current;
+    if (!turnId) return;
+
+    setStoppingMode(true);
+    useStore.getState().setProvisionalStatus("正在停止...");
+    armStopFallback();
+    void stopChatTurn({ turnId }).catch((err) => {
+      if (err instanceof Error && err.message === "UNAUTHORIZED") {
+        void recoverGuestSession();
+      }
+    });
+  }
+
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
     const activeDeviceId = useStore.getState().deviceId;
     if (!activeDeviceId) return;
@@ -312,7 +464,7 @@ export function ChatPanel() {
     if (opts?.appendUserBubble !== false) {
       const imagePreviewUrl = image ? URL.createObjectURL(image) : undefined;
       addMessage({
-        id: crypto.randomUUID(),
+        id: createClientId("usr"),
         role: "user" as const,
         content: text || "",
         imagePreviewUrl,
@@ -320,7 +472,12 @@ export function ChatPanel() {
       });
     }
 
-    const bubbleId = crypto.randomUUID();
+    const bubbleId = createClientId("ast");
+    const abortController = new AbortController();
+    activeAbortControllerRef.current = abortController;
+    activeTurnIdRef.current = null;
+    setActiveTurnId(null);
+    setStoppingMode(false);
     setProvisionalBubble({ id: bubbleId, statusLabel: "思考中...", content: "", isStreaming: true });
     setSending(true);
 
@@ -328,13 +485,17 @@ export function ChatPanel() {
       await sendMessageStream(
         text,
         {
+          onTurnStart: (turnId) => {
+            activeTurnIdRef.current = turnId;
+            setActiveTurnId(turnId);
+          },
           onStatus: (label) => {
             useStore.getState().setProvisionalStatus(label);
           },
           onToken: (token) => {
             useStore.getState().appendProvisionalToken(token);
           },
-          onDone: ({ didLogMeal, didMutateMeal, dailySummary, dailyTargets }) => {
+          onDone: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -345,11 +506,50 @@ export function ChatPanel() {
             if ((didLogMeal || didMutateMeal) && dailySummary) {
               setDailySummary(dailySummary);
             }
-            commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary });
+            if (didLogMeal || didMutateMeal) {
+              void refreshTodayMeals();
+            }
+            commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary, loggedMeal });
             setSending(false);
+            clearActiveStreamAfterTerminal();
+          },
+          onStopped: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets }) => {
+            if (useStore.getState().deviceId !== activeDeviceId) return;
+            if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
+              clearPendingHomeChatDraft();
+            }
+            if (dailyTargets) {
+              setDailyTargets(dailyTargets);
+            }
+            if ((didLogMeal || didMutateMeal) && dailySummary) {
+              setDailySummary(dailySummary);
+            }
+            if (didLogMeal || didMutateMeal) {
+              void refreshTodayMeals();
+            }
+            commitStoppedProvisionalBubble({
+              didLogMeal: didLogMeal || didMutateMeal,
+              dailySummary,
+              dailyTargets,
+              loggedMeal,
+            });
+            setSending(false);
+            clearActiveStreamAfterTerminal();
           },
           onError: (errorMessage) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
+            if (stoppingRef.current) {
+              commitStoppedProvisionalBubble({ didLogMeal: false });
+              if (opts?.draftId) {
+                const currentDraft = useStore.getState().pendingHomeChatDraft;
+                if (currentDraft && currentDraft.id === opts.draftId) {
+                  setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+                }
+              }
+              setSending(false);
+              clearActiveStreamAfterTerminal();
+              return;
+            }
             useStore.getState().setProvisionalBubble({
               id: bubbleId,
               statusLabel: "",
@@ -364,9 +564,11 @@ export function ChatPanel() {
               }
             }
             setSending(false);
+            clearActiveStreamAfterTerminal();
           },
         },
         image,
+        { signal: abortController.signal },
       );
     } catch (err) {
       if (useStore.getState().deviceId !== activeDeviceId) return;
@@ -374,13 +576,30 @@ export function ChatPanel() {
         if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
           clearPendingHomeChatDraft();
         }
+        setProvisionalBubble(null);
+        setSending(false);
         void recoverGuestSession();
         return;
       }
+      if (stoppingRef.current) {
+        commitStoppedProvisionalBubble({ didLogMeal: false });
+        if (opts?.draftId) {
+          const currentDraft = useStore.getState().pendingHomeChatDraft;
+          if (currentDraft && currentDraft.id === opts.draftId) {
+            setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+          }
+        }
+        setSending(false);
+        clearActiveStreamAfterTerminal();
+        return;
+      }
+      const errorMessage = err instanceof Error && err.message
+        ? err.message
+        : "抱歉，發生錯誤，請再試一次。";
       useStore.getState().setProvisionalBubble({
         id: bubbleId,
         statusLabel: "",
-        content: "抱歉，發生錯誤，請再試一次。",
+        content: errorMessage,
         isStreaming: false,
       });
       commitProvisionalBubble({ didLogMeal: false });
@@ -391,6 +610,7 @@ export function ChatPanel() {
         }
       }
       setSending(false);
+      clearActiveStreamAfterTerminal();
     }
   }
 
@@ -420,6 +640,7 @@ export function ChatPanel() {
           },
         });
         setMessages(messages);
+        addPhase40IncompleteReceiptMockIfNeeded(messages, addMessage);
         const draft = useStore.getState().pendingHomeChatDraft;
         if (draft && draft.status === "staged" && !attemptedDraftIdsRef.current.has(draft.id)) {
           await sendPendingDraft(draft);
@@ -439,7 +660,7 @@ export function ChatPanel() {
     return () => {
       cancelled = true;
     };
-  }, [deviceId, setMessages, recoverGuestSession, setPendingHomeChatDraft]);
+  }, [addMessage, deviceId, setMessages, recoverGuestSession, setPendingHomeChatDraft]);
 
   // Keep the latest edge visible for initial load and local chat updates while attached.
   useLayoutEffect(() => {
@@ -504,6 +725,7 @@ export function ChatPanel() {
       cancelScheduledScroll();
       disarmEntrySettleWindow();
       disarmUploadSettleWindow();
+      cleanupActiveStream();
     },
     [],
   );
@@ -595,43 +817,31 @@ export function ChatPanel() {
   }
 
   return (
-    <div className="screen-shell">
-      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
-        <button
-          type="button"
-          onClick={handleBackToHome}
-          disabled={isChatLocked}
-          className="mb-3 flex items-center gap-2 text-xs font-semibold disabled:opacity-40"
-          style={{ color: "var(--text-2)" }}
-        >
-          <span
-            className="flex h-6 w-6 items-center justify-center rounded-lg text-xs"
-            style={{
-              background: "var(--bg-raised)",
-              border: "1px solid var(--border-med)",
-            }}
-          >
-            ‹
-          </span>
-          返回主頁
-        </button>
-        <h2
-          className="mb-1 leading-none"
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            fontWeight: 800,
-            color: "var(--text)",
-            letterSpacing: "-0.025em",
-          }}
-        >
-          教練對話
-        </h2>
-        <p className="mb-2.5 text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
-          同一個輸入框同時處理提問與記錄。AI 回覆會直接連回今日攝取狀態。
-        </p>
-        <DashboardMiniBar />
-      </div>
+    <div className="screen-shell sp-chat-shell">
+      <header className="screen-bar sp-chat-header">
+        <div className="sp-chat-header-row">
+          <div className="sp-chat-header-slot">
+            <button
+              type="button"
+              onClick={handleBackToHome}
+              disabled={isChatLocked}
+              className="sp-iconbtn sp-chat-back"
+              aria-label="返回主頁"
+            >
+              <SportChevronLeftIcon size={18} stroke={2} />
+            </button>
+          </div>
+          <div className="sp-chat-heading">
+            <h2 className="sp-chat-title">對話</h2>
+            <div className="sp-chat-meta" aria-label={`${consumedCalories}/${targetCalories} kcal，${todayMealCountSummary}`}>
+              <span className="sp-chat-metric">{consumedCalories}/{targetCalories} kcal</span>
+              <span className="sp-chat-separator" aria-hidden="true" />
+              <span className="sp-chat-metric sp-chat-metric-meals">{todayMealCountCompact}</span>
+            </div>
+          </div>
+          <div className="sp-chat-header-slot" aria-hidden="true" />
+        </div>
+      </header>
       {pendingHomeChatDraft?.status === "failed" && (
         <div
           className="screen-bar px-4 py-3 text-sm"
@@ -652,14 +862,14 @@ export function ChatPanel() {
       )}
 
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollContainerRef} className="screen-scroll-with-input h-full p-4">
-          <div ref={contentRef} className="space-y-3 pb-4">
+        <div ref={scrollContainerRef} className="screen-scroll-with-input sp-chat-scroll">
+          <div ref={contentRef} className="sp-chat-stack">
             {messages.map((m) => (
               <MessageBubble
                 key={m.id}
                 message={m}
-                onOpenSummary={m.didLogMeal ? () => setActiveScreen("summary") : undefined}
                 onImageSettle={handleMessageImageSettle}
+                onOpenMealEdit={(payload) => openMealEdit(payload, "chat")}
               />
             ))}
             {provisionalBubble && (
@@ -673,6 +883,7 @@ export function ChatPanel() {
                 }}
                 isProvisional={true}
                 isStatusLabel={provisionalBubble.statusLabel.length > 0}
+                onOpenMealEdit={(payload) => openMealEdit(payload, "chat")}
               />
             )}
           </div>
@@ -687,12 +898,7 @@ export function ChatPanel() {
                 force: true,
               });
             }}
-            className="absolute bottom-3 left-1/2 z-10 flex min-h-11 -translate-x-1/2 items-center justify-center rounded-full px-4 text-[12px] font-extrabold text-white transition-all duration-150"
-            style={{
-              background: "var(--orange)",
-              boxShadow: "0 4px 16px rgba(232,104,42,0.3)",
-              lineHeight: 1.4,
-            }}
+            className="sp-chat-jump"
             aria-label="回到最新訊息"
           >
             回到最新
@@ -700,8 +906,16 @@ export function ChatPanel() {
         )}
       </div>
 
-      <div className="screen-bottom-bar px-3" style={{ borderTop: "1px solid var(--border)", background: "var(--bg)" }}>
-        <ChatInput onSend={handleSend} onBeforeSend={handleBeforeSend} disabled={sending} />
+      <div className="screen-bottom-bar sp-chat-composer-bar">
+        <ChatInput
+          onSend={handleSend}
+          onBeforeSend={handleBeforeSend}
+          onStop={handleStopStreaming}
+          disabled={sending}
+          streaming={sending}
+          stopDisabled={stopping || !activeTurnId}
+          stopping={stopping}
+        />
       </div>
     </div>
   );

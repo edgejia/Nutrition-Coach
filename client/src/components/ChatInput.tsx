@@ -1,15 +1,29 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { SportCameraIcon, SportCloseIcon, SportSendIcon, SportStopIcon } from "./SportIcons.js";
 
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
   onBeforeSend?: (payload: { hasImage: boolean; hasText: boolean }) => void;
+  onStop?: () => void;
   disabled: boolean;
+  streaming?: boolean;
+  stopDisabled?: boolean;
+  stopping?: boolean;
 }
 
-export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  onBeforeSend,
+  onStop,
+  disabled,
+  streaming = false,
+  stopDisabled = false,
+  stopping = false,
+}: ChatInputProps) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
   const canSend = Boolean(text.trim() || image);
 
   function submitMessage() {
@@ -31,14 +45,25 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    if (e.nativeEvent.isComposing) return;
+    if (isComposingRef.current) return;
+    if (e.key !== "Enter") return;
+    if (e.shiftKey) return;
+
+    if (!e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      submitMessage();
+      return;
+    }
+
+    if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
       submitMessage();
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-end gap-2.5 py-2">
+    <form onSubmit={handleSubmit} className="sp-chat-input">
       <input
         ref={fileRef}
         type="file"
@@ -50,28 +75,24 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
         type="button"
         onClick={() => fileRef.current?.click()}
         disabled={disabled}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg disabled:opacity-50"
-        style={{
-          background: "var(--bg-raised)",
-          border: "1px solid var(--border-med)",
-          color: "var(--text-2)",
-        }}
+        className="sp-chat-camera"
+        aria-label="附加照片"
       >
-        📷
+        <SportCameraIcon size={20} stroke={1.8} />
       </button>
-      <div className="flex flex-1 flex-col">
+      <div className="sp-chat-input-well">
         {image && (
-          <span className="mb-1 text-xs" style={{ color: "var(--text-3)" }}>
-            {image.name}{" "}
+          <span className="sp-chat-image-chip">
+            <span>{image.name}</span>
             <button
               type="button"
               onClick={() => {
                 setImage(null);
                 if (fileRef.current) fileRef.current.value = "";
               }}
-              style={{ color: "var(--red)" }}
+              aria-label="移除照片"
             >
-              ×
+              <SportCloseIcon size={14} stroke={2} />
             </button>
           </span>
         )}
@@ -79,32 +100,42 @@ export function ChatInput({ onSend, onBeforeSend, disabled }: ChatInputProps) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="描述餐點、提問，或上傳照片..."
-          disabled={disabled}
-          rows={1}
-          className="w-full resize-none rounded-xl px-3 py-2.5 text-sm focus:outline-none disabled:opacity-50"
-          style={{
-            background: "var(--bg-raised)",
-            border: "1px solid var(--border-med)",
-            color: "var(--text)",
-            fontFamily: "var(--font-body)",
+          onCompositionStart={() => {
+            isComposingRef.current = true;
           }}
+          onCompositionEnd={() => {
+            isComposingRef.current = false;
+          }}
+          placeholder="描述你吃了什麼…"
+          rows={1}
+          className="sp-chat-textarea"
         />
+        {streaming ? (
+          <button
+            type="button"
+            onClick={onStop}
+            disabled={stopDisabled}
+            className="sp-chat-send sp-chat-send-stop"
+            data-ready="true"
+            data-streaming="true"
+            data-stopping={stopping}
+            aria-label="停止生成"
+          >
+            <SportStopIcon size={20} stroke={2} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={submitMessage}
+            disabled={disabled || !canSend}
+            className="sp-chat-send"
+            data-ready={canSend}
+            aria-label="送出"
+          >
+            <SportSendIcon size={18} stroke={2} />
+          </button>
+        )}
       </div>
-      <button
-        type="submit"
-        disabled={disabled || !canSend}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg font-bold disabled:opacity-50"
-        style={{
-          background: canSend ? "var(--orange)" : "var(--bg-raised)",
-          border: canSend ? "none" : "1px solid var(--border-med)",
-          color: canSend ? "white" : "var(--text-3)",
-          boxShadow: canSend ? "0 4px 16px rgba(232,104,42,0.3)" : "none",
-          transition: "all 0.15s",
-        }}
-      >
-        ↑
-      </button>
     </form>
   );
 }

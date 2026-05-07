@@ -1,8 +1,42 @@
 // server/services/chat.ts
 import { eq, and, asc, desc, sql } from "drizzle-orm";
-import { assetReferences, assets, chatMessages } from "../db/schema.js";
+import {
+  assetReferences,
+  assets,
+  chatMealReceipts,
+  chatMessages,
+  mealRevisions,
+  mealRevisionItems,
+  mealTransactions,
+} from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
-import { parseAssetRef } from "./assets.js";
+import { buildAssetUrl, parseAssetRef } from "./assets.js";
+import { formatLocalDate } from "../lib/time.js";
+import { projectMealDisplay } from "./meal-display.js";
+
+type ChatMessageStatus = "complete" | "stopped" | "error";
+
+interface LoggedMealReceipt {
+  mealId?: string;
+  dateKey?: string;
+  loggedAt: string;
+  imageAssetId: string | null;
+  imageUrl: string | null;
+  foodName: string;
+  itemCount: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  items?: Array<{
+    name: string;
+    position: number;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  }>;
+}
 
 function formatToolSummary(toolName: string, content: string): string {
   if (toolName === "log_food") {
@@ -24,12 +58,118 @@ function formatToolSummary(toolName: string, content: string): string {
 }
 
 export function createChatService(db: AppDatabase) {
+  async function getMealReceiptForAssistantMessage(
+    deviceId: string,
+    assistantMessageId: string,
+  ): Promise<LoggedMealReceipt | undefined> {
+    const receipts = await db
+      .select({
+        mealTransactionId: mealTransactions.id,
+        currentRevisionId: mealTransactions.currentRevisionId,
+        deletedAt: mealTransactions.deletedAt,
+        mealRevisionId: mealRevisions.id,
+        loggedAt: mealTransactions.loggedAt,
+        imageAssetId: mealRevisions.imageAssetId,
+      })
+      .from(chatMealReceipts)
+      .innerJoin(chatMessages, eq(chatMessages.id, chatMealReceipts.assistantMessageId))
+      .innerJoin(mealTransactions, eq(mealTransactions.id, chatMealReceipts.mealTransactionId))
+      .innerJoin(mealRevisions, eq(mealRevisions.id, chatMealReceipts.mealRevisionId))
+      .where(
+        and(
+          eq(chatMealReceipts.deviceId, deviceId),
+          eq(chatMealReceipts.assistantMessageId, assistantMessageId),
+          eq(chatMessages.deviceId, deviceId),
+          eq(mealTransactions.deviceId, deviceId),
+          eq(mealRevisions.transactionId, mealTransactions.id),
+        ),
+      )
+      .limit(1);
+
+    const receipt = receipts[0];
+    if (!receipt) {
+      return undefined;
+    }
+
+    const items = await db
+      .select({
+        foodName: mealRevisionItems.foodName,
+        position: mealRevisionItems.position,
+        calories: mealRevisionItems.calories,
+        protein: mealRevisionItems.protein,
+        carbs: mealRevisionItems.carbs,
+        fat: mealRevisionItems.fat,
+      })
+      .from(mealRevisionItems)
+      .where(eq(mealRevisionItems.revisionId, receipt.mealRevisionId))
+      .orderBy(asc(mealRevisionItems.position));
+
+    if (items.length === 0) {
+      return undefined;
+    }
+
+    const isCurrentActiveReceipt =
+      receipt.deletedAt === null && receipt.mealRevisionId === receipt.currentRevisionId;
+    const display = projectMealDisplay(items);
+
+    return {
+      ...(isCurrentActiveReceipt
+        ? {
+            mealId: receipt.mealTransactionId,
+            dateKey: formatLocalDate(new Date(receipt.loggedAt)),
+          }
+        : {}),
+      loggedAt: receipt.loggedAt,
+      imageAssetId: receipt.imageAssetId ?? null,
+      imageUrl: receipt.imageAssetId ? buildAssetUrl(receipt.imageAssetId) : null,
+      foodName: display.foodName,
+      itemCount: display.itemCount,
+      calories: items.reduce((sum, item) => sum + item.calories, 0),
+      protein: items.reduce((sum, item) => sum + item.protein, 0),
+      carbs: items.reduce((sum, item) => sum + item.carbs, 0),
+      fat: items.reduce((sum, item) => sum + item.fat, 0),
+      items: items.map((item) => ({
+        name: item.foodName,
+        position: item.position + 1,
+        calories: item.calories,
+        protein: item.protein,
+        carbs: item.carbs,
+        fat: item.fat,
+      })),
+    };
+  }
+
   return {
+    async saveMealReceiptReference(input: {
+      deviceId: string;
+      assistantMessageId: string;
+      toolMessageId?: string;
+      mealTransactionId: string;
+      mealRevisionId: string;
+    }) {
+      const createdAt = new Date().toISOString();
+      const id = crypto.randomUUID();
+
+      await db.insert(chatMealReceipts).values({
+        id,
+        deviceId: input.deviceId,
+        assistantMessageId: input.assistantMessageId,
+        toolMessageId: input.toolMessageId ?? null,
+        mealTransactionId: input.mealTransactionId,
+        mealRevisionId: input.mealRevisionId,
+        createdAt,
+      });
+
+      return { id, createdAt };
+    },
+
+    getMealReceiptForAssistantMessage,
+
     async saveMessage(
       deviceId: string,
       role: string,
       content: string,
-      opts?: { toolName?: string; imagePath?: string }
+      opts?: { toolName?: string; imagePath?: string; status?: ChatMessageStatus }
     ) {
       const id = crypto.randomUUID();
       const createdAt = new Date().toISOString();
@@ -66,6 +206,7 @@ export function createChatService(db: AppDatabase) {
           toolName: opts?.toolName ?? null,
           imagePath: opts?.imagePath ?? null,
           createdAt,
+          status: opts?.status ?? "complete",
         }).run();
 
         if (imageAssetId) {
@@ -87,7 +228,7 @@ export function createChatService(db: AppDatabase) {
     },
 
     async getHistory(deviceId: string, limit: number) {
-      // Fetch all roles (including tool) to compute the didLogMeal projection,
+      // Fetch all roles (including tool) to preserve the existing history window,
       // then filter to user+assistant before returning. Fetch limit*4 to ensure
       // we have enough rows after tool messages are dropped.
       const rows = await db
@@ -106,16 +247,13 @@ export function createChatService(db: AppDatabase) {
         toolName: string | null;
         imagePath: string | null;
         createdAt: string;
+        status: string;
         didLogMeal?: boolean;
+        loggedMeal?: LoggedMealReceipt;
       }> = [];
-
-      let pendingDidLogMeal = false;
 
       for (const row of chronological) {
         if (row.role === "tool") {
-          if (row.toolName === "log_food") {
-            pendingDidLogMeal = true;
-          }
           continue;
         }
 
@@ -124,13 +262,16 @@ export function createChatService(db: AppDatabase) {
         }
 
         if (row.role === "assistant") {
-          projected.push({ ...row, didLogMeal: pendingDidLogMeal || undefined });
-          pendingDidLogMeal = false;
+          const loggedMeal = await getMealReceiptForAssistantMessage(deviceId, row.id);
+          projected.push({
+            ...row,
+            didLogMeal: loggedMeal ? true : undefined,
+            ...(loggedMeal ? { loggedMeal } : {}),
+          });
           continue;
         }
 
         projected.push(row);
-        pendingDidLogMeal = false;
       }
 
       return projected.slice(-limit);

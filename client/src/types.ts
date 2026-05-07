@@ -1,4 +1,30 @@
-export type ActiveScreen = "home" | "summary" | "chat" | "onboarding";
+export type PrimaryTab = "home" | "chat" | "history";
+export type SecondaryScreen = "settings" | "dayDetail" | "mealEdit";
+export interface DayDetailPayload {
+  dateKey: string;
+  targetMealId?: string;
+  label?: "today-live" | "history-snapshot";
+}
+export interface MealEditPayload {
+  mealId: string;
+  dateKey: string;
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  itemCount: number;
+  items?: MealItemDetail[];
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
+  loggedAt?: string;
+}
+export type SecondaryScreenState =
+  | { screen: "dayDetail"; origin: PrimaryTab; payload?: DayDetailPayload }
+  | { screen: "settings"; origin: PrimaryTab }
+  | { screen: "mealEdit"; origin: PrimaryTab; payload: MealEditPayload }
+  | null;
+export type ActiveScreen = PrimaryTab | "onboarding";
 
 export interface DailyTargets {
   calories: number;
@@ -24,6 +50,30 @@ export interface DailySummary {
   mealCount: number;
 }
 
+export interface MealItemDetail {
+  name: string;
+  position: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
+export interface LoggedMealReceipt {
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  itemCount: number;
+  items?: MealItemDetail[];
+  mealId?: string;
+  dateKey?: string;
+  loggedAt?: string;
+  imageAssetId?: string | null;
+  imageUrl?: string | null;
+}
+
 export interface MealEntry {
   id: string;
   foodName: string;
@@ -31,9 +81,67 @@ export interface MealEntry {
   protein: number;
   carbs: number;
   fat: number;
+  itemCount: number;
+  items?: MealItemDetail[];
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt: string;
+}
+
+export interface UpdateMealInput {
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  imageAssetId?: string | null;
+}
+
+export interface UpdateMealResponse {
+  affectedDate: string;
+  dailySummary: DailySummary;
+  meal: MealEntry;
+}
+
+export interface MealMutationNotice {
+  affectedDate: string;
+  nonce: number;
+}
+
+export interface HistoryTrendBucket {
+  date: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  mealCount: number;
+}
+
+export interface HistoryTrendResponse {
+  from: string;
+  to: string;
+  completeness: "empty" | "sparse" | "complete";
+  daily: HistoryTrendBucket[];
+  totals: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    mealCount: number;
+  };
+  averages: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    mealsPerDay: number;
+  };
+}
+
+export interface HistoryDaySnapshot {
+  date: string;
+  summary: DailySummary;
+  meals: MealEntry[];
 }
 
 export interface Message {
@@ -45,7 +153,9 @@ export interface Message {
   imageUrl?: string | null;
   imagePreviewUrl?: string;
   createdAt: string;
+  status?: "complete" | "stopped" | "error";
   didLogMeal?: boolean;
+  loggedMeal?: LoggedMealReceipt;
 }
 
 export interface PendingHomeChatDraft {
@@ -59,6 +169,7 @@ export interface ChatReply {
   reply: string;
   didLogMeal?: boolean;
   didMutateMeal?: boolean;
+  loggedMeal?: LoggedMealReceipt;
   dailySummary?: DailySummary;
   dailyTargets?: DailyTargets;
   affectedDate?: string;
@@ -118,7 +229,7 @@ export interface IntakeValidationIssue {
 }
 
 export interface IntakeData {
-  goal: "fat_loss" | "muscle_gain";
+  goal: "fat_loss" | "muscle_gain" | "maintain";
   sex: "male" | "female";
   age: number;
   heightCm: number;
@@ -143,4 +254,5 @@ export interface ProvisionalBubble {
   statusLabel: string;
   content: string;
   isStreaming: boolean;
+  status?: "complete" | "stopped" | "error";
 }

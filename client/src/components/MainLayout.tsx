@@ -1,12 +1,100 @@
-import { useCallback, useEffect, useLayoutEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect, type ReactNode } from "react";
 import { useStore } from "../store.js";
 import { getMeals } from "../api.js";
 import { connectSSE, disconnectSSE } from "../sse.js";
 import { useDailyRollover } from "../useDailyRollover.js";
+import { BottomTabBar } from "./BottomTabBar.js";
 import { HomeScreen } from "./HomeScreen.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { GoalSettings } from "./GoalSettings.js";
-import { SummaryDetailScreen } from "./SummaryDetailScreen.js";
+import { HistoryDayDetailScreen } from "./HistoryDayDetailScreen.js";
+import { HistoryScreen } from "./HistoryScreen.js";
+import { MealEditScreen } from "./MealEditScreen.js";
+
+type ShellStyle = {
+  setProperty: (name: string, value: string) => void;
+  removeProperty: (name: string) => void;
+};
+
+type ShellRoot = {
+  clientHeight: number;
+  style: ShellStyle;
+};
+
+type ShellEventTarget = {
+  addEventListener: (type: string, listener: () => void, options?: AddEventListenerOptions) => void;
+  removeEventListener: (type: string, listener: () => void) => void;
+};
+
+type ShellVisualViewport = ShellEventTarget & {
+  height: number;
+  offsetTop: number;
+};
+
+type ShellWindow = ShellEventTarget & {
+  innerHeight: number;
+  visualViewport?: ShellVisualViewport | null;
+  requestAnimationFrame: (callback: FrameRequestCallback) => number;
+  cancelAnimationFrame: (handle: number) => void;
+  scrollTo?: (x: number, y: number) => void;
+};
+
+type ShellDocument = {
+  documentElement: ShellRoot;
+};
+
+export function installVisualViewportShellVars({
+  window: shellWindow,
+  document: shellDocument,
+}: {
+  window: ShellWindow;
+  document: ShellDocument;
+}) {
+  const root = shellDocument.documentElement;
+  const viewport = shellWindow.visualViewport;
+  let frameId: number | null = null;
+
+  const syncViewportVars = () => {
+    frameId = null;
+    const visualHeight = viewport?.height ?? shellWindow.innerHeight;
+    const visualOffsetTop = viewport?.offsetTop ?? 0;
+
+    root.style.setProperty("--app-visual-viewport-top", `${Math.max(0, Math.round(visualOffsetTop))}px`);
+    root.style.setProperty("--app-visual-viewport-height", `${Math.round(visualHeight)}px`);
+    root.style.setProperty("--app-bottom-occlusion", "0px");
+  };
+
+  const scheduleSync = () => {
+    if (frameId !== null) {
+      return;
+    }
+
+    frameId = shellWindow.requestAnimationFrame(syncViewportVars);
+  };
+
+  syncViewportVars();
+  shellWindow.addEventListener("resize", scheduleSync, { passive: true });
+  shellWindow.addEventListener("orientationchange", scheduleSync);
+  shellWindow.addEventListener("focusin", scheduleSync);
+  shellWindow.addEventListener("focusout", scheduleSync);
+  viewport?.addEventListener("resize", scheduleSync, { passive: true });
+  viewport?.addEventListener("scroll", scheduleSync, { passive: true });
+
+  return () => {
+    if (frameId !== null) {
+      shellWindow.cancelAnimationFrame(frameId);
+    }
+    shellWindow.removeEventListener("resize", scheduleSync);
+    shellWindow.removeEventListener("orientationchange", scheduleSync);
+    shellWindow.removeEventListener("focusin", scheduleSync);
+    shellWindow.removeEventListener("focusout", scheduleSync);
+    viewport?.removeEventListener("resize", scheduleSync);
+    viewport?.removeEventListener("scroll", scheduleSync);
+    root.style.removeProperty("--app-visual-viewport-top");
+    root.style.removeProperty("--app-visual-viewport-height");
+    root.style.removeProperty("--app-bottom-occlusion");
+  };
+}
 
 function useVisualViewportShellVars() {
   useLayoutEffect(() => {
@@ -14,52 +102,14 @@ function useVisualViewportShellVars() {
       return;
     }
 
-    const root = document.documentElement;
-    const viewport = window.visualViewport;
-    let frameId: number | null = null;
-
-    const syncViewportVars = () => {
-      frameId = null;
-      const layoutHeight = Math.max(window.innerHeight, root.clientHeight);
-      const visualHeight = viewport?.height ?? window.innerHeight;
-      const visualOffsetTop = viewport?.offsetTop ?? 0;
-      const visibleBottom = visualOffsetTop + visualHeight;
-      const bottomOcclusion = Math.max(0, layoutHeight - visibleBottom);
-
-      root.style.setProperty("--app-visual-viewport-height", `${Math.round(visualHeight)}px`);
-      root.style.setProperty("--app-bottom-occlusion", `${Math.round(bottomOcclusion)}px`);
-    };
-
-    const scheduleSync = () => {
-      if (frameId !== null) {
-        return;
-      }
-
-      frameId = window.requestAnimationFrame(syncViewportVars);
-    };
-
-    syncViewportVars();
-    window.addEventListener("resize", scheduleSync, { passive: true });
-    window.addEventListener("orientationchange", scheduleSync);
-    window.addEventListener("focusin", scheduleSync);
-    window.addEventListener("focusout", scheduleSync);
-    viewport?.addEventListener("resize", scheduleSync, { passive: true });
-    viewport?.addEventListener("scroll", scheduleSync, { passive: true });
-
-    return () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-      window.removeEventListener("resize", scheduleSync);
-      window.removeEventListener("orientationchange", scheduleSync);
-      window.removeEventListener("focusin", scheduleSync);
-      window.removeEventListener("focusout", scheduleSync);
-      viewport?.removeEventListener("resize", scheduleSync);
-      viewport?.removeEventListener("scroll", scheduleSync);
-      root.style.removeProperty("--app-visual-viewport-height");
-      root.style.removeProperty("--app-bottom-occlusion");
-    };
+    return installVisualViewportShellVars({ window, document });
   }, []);
+}
+
+export function SportAppShell({ children }: { children: ReactNode }) {
+  useVisualViewportShellVars();
+
+  return <div className="app-viewport sp-app-canvas relative flex flex-col">{children}</div>;
 }
 
 export function MainLayout() {
@@ -70,10 +120,8 @@ export function MainLayout() {
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setRolloverRefreshHandler = useStore((s) => s.setRolloverRefreshHandler);
   const activeScreen = useStore((s) => s.activeScreen);
-  const showSettings = useStore((s) => s.showSettings);
-  const setShowSettings = useStore((s) => s.setShowSettings);
-
-  useVisualViewportShellVars();
+  const secondaryScreen = useStore((s) => s.secondaryScreen);
+  const closeSecondaryScreen = useStore((s) => s.closeSecondaryScreen);
 
   const refreshForRollover = useCallback(async () => {
     if (!deviceId) return;
@@ -93,6 +141,17 @@ export function MainLayout() {
 
   useEffect(() => {
     if (!deviceId) return;
+    getMeals()
+      .then(({ meals }) => setMeals(meals))
+      .catch((err) => {
+        if (err instanceof Error && err.message === "UNAUTHORIZED") {
+          void recoverGuestSession();
+        }
+      });
+  }, [deviceId, setMeals, recoverGuestSession]);
+
+  useEffect(() => {
+    if (!deviceId) return;
     // Goal updates flow through the existing `setDailyTargets` store action so
     // Dashboard / Settings / HomeHeader re-render via existing selectors —
     // no new UI affordance (D-25, D-26).
@@ -108,11 +167,18 @@ export function MainLayout() {
   useDailyRollover(refreshForRollover);
 
   return (
-    <div className="app-viewport flex flex-col" style={{ background: "var(--bg)" }}>
+    <SportAppShell>
       {activeScreen === "home" && <HomeScreen />}
-      {activeScreen === "summary" && <SummaryDetailScreen />}
       {activeScreen === "chat" && <ChatPanel />}
-      {showSettings && <GoalSettings onClose={() => setShowSettings(false)} />}
-    </div>
+      {activeScreen === "history" && <HistoryScreen />}
+      {activeScreen !== "chat" && <BottomTabBar />}
+      {secondaryScreen?.screen === "settings" && (
+        <div className="absolute inset-0 z-50 flex flex-col bg-[var(--sp-bg)]">
+          <GoalSettings onClose={closeSecondaryScreen} />
+        </div>
+      )}
+      {secondaryScreen?.screen === "dayDetail" && <HistoryDayDetailScreen onBack={closeSecondaryScreen} />}
+      {secondaryScreen?.screen === "mealEdit" && <MealEditScreen onBack={closeSecondaryScreen} />}
+    </SportAppShell>
   );
 }

@@ -47,6 +47,7 @@ export const chatMessages = sqliteTable("chat_messages", {
   toolName: text("tool_name"),
   imagePath: text("image_path"),
   createdAt: text("created_at").notNull(),
+  status: text("status").notNull().default("complete"),
 });
 
 export const assets = sqliteTable("assets", {
@@ -99,6 +100,36 @@ export const mealRevisions = sqliteTable(
   },
   (table) => [
     uniqueIndex("meal_rev_transaction_number_uq").on(table.transactionId, table.revisionNumber),
+  ],
+);
+
+export const chatMealReceipts = sqliteTable(
+  "chat_meal_receipts",
+  {
+    id: text("id").primaryKey(),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    assistantMessageId: text("assistant_message_id")
+      .notNull()
+      .references(() => chatMessages.id),
+    toolMessageId: text("tool_message_id").references(() => chatMessages.id),
+    mealTransactionId: text("meal_transaction_id")
+      .notNull()
+      .references(() => mealTransactions.id),
+    mealRevisionId: text("meal_revision_id")
+      .notNull()
+      .references(() => mealRevisions.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("chat_meal_receipts_assistant_message_uq").on(table.assistantMessageId),
+    index("chat_meal_receipts_device_assistant_idx").on(table.deviceId, table.assistantMessageId),
+    index("chat_meal_receipts_device_meal_idx").on(
+      table.deviceId,
+      table.mealTransactionId,
+      table.mealRevisionId,
+    ),
   ],
 );
 

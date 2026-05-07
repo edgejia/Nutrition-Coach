@@ -22,11 +22,13 @@ interface LLMTargetResponse {
 const CALORIE_BOUNDS: Record<Goal, { min: number; max: number }> = {
   fat_loss: { min: 1200, max: 4000 },
   muscle_gain: { min: 1500, max: 5000 },
+  maintain: { min: 1200, max: 5000 },
 };
 
 const FALLBACK_EXPLANATIONS: Record<Goal, string> = {
   fat_loss: "先用預設目標，之後可再微調。",
   muscle_gain: "先用預設目標，之後可再微調。",
+  maintain: "先用預設目標，之後可再微調。",
 };
 
 function buildIntakePayload(intake: IntakeFields): Record<string, unknown> {

@@ -87,12 +87,10 @@ describe("Orchestrator", () => {
         },
       }],
     });
-    // Round 3: LLM responds with text
-    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
-
     const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assertReplyResult(result);
-    assert.equal(result.reply, "已幫你記錄蘋果！");
+    assert.match(result.reply, /已記錄蘋果/);
+    assert.match(result.reply, /蛋白質 0 g/);
     assert.equal(result.didLogMeal, true);
     assert.deepEqual(result.dailySummary, {
       totalCalories: 100,
@@ -102,7 +100,7 @@ describe("Orchestrator", () => {
       mealCount: 1,
       date: formatLocalDate(new Date()),
     });
-    assert.equal(mockLLM.chatCalls.length, 3);
+    assert.equal(mockLLM.chatCalls.length, 2);
     const secondRound = mockLLM.chatCalls[1].messages;
     assert.equal(secondRound[secondRound.length - 2].role, "assistant");
     assert.equal(secondRound[secondRound.length - 1].role, "tool");
@@ -151,8 +149,11 @@ describe("Orchestrator", () => {
       "asset:meal-image"
     );
     assertReplyResult(result);
-    assert.match(result.reply, /已先依照片做保守估算並完成記錄：雞肉沙拉，約 180 kcal。/);
-    assert.match(result.reply, /蛋白質先按雞肉作為主要來源估算/);
+    assert.match(result.reply, /已記錄雞肉沙拉/);
+    assert.match(result.reply, /估約 180 kcal（區間 153-207）/);
+    assert.match(result.reply, /蛋白質 8 g（以雞肉為主）/);
+    assert.match(result.reply, /份量是主要誤差，可再補份量修正/);
+    assert.doesNotMatch(result.reply, /保守估算|headline|log_food|protein_sources|usedConservativeAssumption/);
     assert.equal(result.didLogMeal, true);
 
     const firstRoundUserMessage = mockLLM.chatCalls[0].messages.find((message) => Array.isArray(message.content));
@@ -462,5 +463,79 @@ describe("Orchestrator", () => {
       assert.doesNotMatch(serialized, new RegExp(deviceId));
       assert.doesNotMatch(serialized, new RegExp(rawUserText));
     }
+  });
+
+  it("OBS-01: structured log_food validation hook emits sanitized field diagnostics only", () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const log = {
+      info(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+      warn(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+    };
+    const hooks = createStructuredHooks(log as never);
+
+    hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: false,
+      failureReason: "validation",
+      fields: [
+        "food_name",
+        "calories",
+        "items.0.food_name",
+        "items.0.protein",
+        "protein_sources.0.name",
+        "quantity_g",
+        "protein",
+      ],
+      reason: "schema_validation",
+      summary: "<log_food args>",
+    });
+    hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: false,
+      failureReason: "guard",
+      fields: ["calories"],
+    });
+    hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: true,
+      failureReason: "execute",
+      fields: ["protein"],
+    });
+    hooks.onToolResult?.({
+      tool: "log_food",
+      success: false,
+      executed: true,
+      failureReason: "validation",
+      fields: ["protein"],
+      reason: "execution_validation",
+      summary: "<execute failure>",
+    });
+    hooks.onToolResult?.({
+      tool: "update_goals",
+      success: false,
+      executed: false,
+      failureReason: "validation",
+      fields: ["calories"],
+    });
+
+    const validationEvents = captured.filter((payload) => payload.event === "log_food_validation_failed");
+    assert.equal(validationEvents.length, 1);
+    assert.deepEqual(validationEvents[0], {
+      event: "log_food_validation_failed",
+      tool: "log_food",
+      failureReason: "validation",
+      fields: ["calories", "protein"],
+    });
+
+    const dedicatedPayload = JSON.stringify(validationEvents[0]);
+    assert.doesNotMatch(dedicatedPayload, /food_name|items\.0|protein_sources|quantity_g|schema_validation|<log_food args>/);
+    assert.doesNotMatch(dedicatedPayload, /reason|summary|executed|success/);
   });
 });

@@ -4,10 +4,17 @@ import type {
   ActiveScreen,
   DailyTargets,
   DailySummary,
+  DayDetailPayload,
+  MealEditPayload,
   MealEntry,
+  MealMutationNotice,
   Message,
+  LoggedMealReceipt,
   PendingHomeChatDraft,
+  PrimaryTab,
   ProvisionalBubble,
+  SecondaryScreen,
+  SecondaryScreenState,
 } from "./types.js";
 import { formatLocalDate } from "./lib/time.js";
 
@@ -25,6 +32,18 @@ function readStoredJson<T>(key: string): T | null {
 type RolloverRefreshHandler = () => void | Promise<void>;
 let rolloverRefreshHandler: RolloverRefreshHandler | null = null;
 type GuestSessionStatus = "unknown" | "establishing" | "ready" | "recovery_required";
+type CommitProvisionalBubbleExtra = {
+  didLogMeal?: boolean;
+  loggedMeal?: LoggedMealReceipt;
+  dailySummary?: DailySummary;
+  dailyTargets?: DailyTargets;
+  status?: Message["status"];
+};
+
+function getStoppedMessageContent(content: string) {
+  const trimmedContent = content.trim();
+  return trimmedContent.length > 0 ? `${trimmedContent}\n\n已停止` : "已停止，沒有產生新的回覆。";
+}
 
 interface AppState {
   deviceId: string | null;
@@ -38,12 +57,20 @@ interface AppState {
   coachAdvice: string | null;
   meals: MealEntry[];
   pendingHomeChatDraft: PendingHomeChatDraft | null;
+  lastMealMutation: MealMutationNotice | null;
   showSettings: boolean;
+  secondaryScreen: SecondaryScreenState;
   sending: boolean;
   setActiveScreen: (screen: ActiveScreen) => void;
+  openSecondaryScreen: (screen: Exclude<SecondaryScreen, "mealEdit">, origin?: PrimaryTab) => void;
+  openDayDetail: (payload: DayDetailPayload, origin?: PrimaryTab) => void;
+  openMealEdit: (payload: MealEditPayload, origin?: PrimaryTab) => void;
+  closeSecondaryScreen: () => void;
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
   removeMeal: (mealId: string) => void;
+  redactChatReceiptIdentity: (mealId: string) => void;
+  recordMealMutation: (affectedDate: string) => void;
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void;
   clearPendingHomeChatDraft: () => void;
   setShowSettings: (showSettings: boolean) => void;
@@ -64,7 +91,8 @@ interface AppState {
   setProvisionalBubble: (bubble: ProvisionalBubble | null) => void;
   appendProvisionalToken: (token: string) => void;
   setProvisionalStatus: (label: string) => void;
-  commitProvisionalBubble: (extra: { didLogMeal?: boolean; dailySummary?: DailySummary }) => void;
+  commitProvisionalBubble: (extra: CommitProvisionalBubbleExtra) => void;
+  commitStoppedProvisionalBubble: (extra: CommitProvisionalBubbleExtra) => void;
   clearDevice: () => void;
 }
 
@@ -80,14 +108,58 @@ export const useStore = create<AppState>((set, get) => ({
   coachAdvice: null,
   meals: [],
   pendingHomeChatDraft: null,
+  lastMealMutation: null,
   showSettings: false,
+  secondaryScreen: null,
   sending: false,
   provisionalBubble: null,
 
   setActiveScreen: (activeScreen) => set({ activeScreen }),
+  openSecondaryScreen: (screen, origin) =>
+    set((state) => ({
+      secondaryScreen: {
+        screen,
+        origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
+      },
+    })),
+  openDayDetail: (payload, origin) =>
+    set((state) => ({
+      secondaryScreen: {
+        screen: "dayDetail",
+        origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
+        payload,
+      },
+    })),
+  openMealEdit: (payload, origin) =>
+    set((state) => ({
+      secondaryScreen: {
+        screen: "mealEdit",
+        origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
+        payload,
+      },
+    })),
+  closeSecondaryScreen: () => set({ secondaryScreen: null }),
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
   setMeals: (meals) => set({ meals }),
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
+  redactChatReceiptIdentity: (mealId) =>
+    set((state) => ({
+      messages: state.messages.map((message) => {
+        if (message.loggedMeal?.mealId !== mealId) {
+          return message;
+        }
+
+        const { mealId: _mealId, dateKey: _dateKey, ...displayOnlyReceipt } = message.loggedMeal;
+        return { ...message, loggedMeal: displayOnlyReceipt };
+      }),
+    })),
+  recordMealMutation: (affectedDate) =>
+    set((state) => ({
+      lastMealMutation: {
+        affectedDate,
+        nonce: (state.lastMealMutation?.nonce ?? 0) + 1,
+      },
+    })),
   setPendingHomeChatDraft: (pendingHomeChatDraft) => set({ pendingHomeChatDraft }),
   clearPendingHomeChatDraft: () => set({ pendingHomeChatDraft: null }),
   setShowSettings: (showSettings) => set({ showSettings }),
@@ -104,6 +176,7 @@ export const useStore = create<AppState>((set, get) => ({
       guestSessionRecoveryAttempted: false,
       dailyTargets,
       showSettings: false,
+      secondaryScreen: null,
     });
   },
   bootstrapGuestSession: async () => {
@@ -250,13 +323,43 @@ export const useStore = create<AppState>((set, get) => ({
         role: "assistant",
         content: state.provisionalBubble.content,
         createdAt: new Date().toISOString(),
+        ...(extra.status ? { status: extra.status } : {}),
         didLogMeal: extra.didLogMeal,
+        ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
       };
 
       return { messages: [...state.messages, finalMessage], provisionalBubble: null };
     });
     if (extra.dailySummary) {
       get().setDailySummary(extra.dailySummary);
+    }
+    if (extra.dailyTargets) {
+      get().setDailyTargets(extra.dailyTargets);
+    }
+  },
+  commitStoppedProvisionalBubble: (extra) => {
+    set((state) => {
+      if (!state.provisionalBubble) {
+        return {};
+      }
+
+      const finalMessage: Message = {
+        id: state.provisionalBubble.id,
+        role: "assistant",
+        content: getStoppedMessageContent(state.provisionalBubble.content),
+        createdAt: new Date().toISOString(),
+        status: "stopped",
+        didLogMeal: extra.didLogMeal ?? Boolean(extra.loggedMeal),
+        ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
+      };
+
+      return { messages: [...state.messages, finalMessage], provisionalBubble: null };
+    });
+    if (extra.dailySummary) {
+      get().setDailySummary(extra.dailySummary);
+    }
+    if (extra.dailyTargets) {
+      get().setDailyTargets(extra.dailyTargets);
     }
   },
   clearDevice: () => {
@@ -275,7 +378,9 @@ export const useStore = create<AppState>((set, get) => ({
       coachAdvice: null,
       meals: [],
       pendingHomeChatDraft: null,
+      lastMealMutation: null,
       showSettings: false,
+      secondaryScreen: null,
       sending: false,
       provisionalBubble: null,
     });

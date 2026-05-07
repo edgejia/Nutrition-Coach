@@ -10,6 +10,7 @@ import { createMealTransactionsService, type MealTransactionItemInput } from "./
 import { createTurnStateService } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
 import { makeAssetRef } from "./assets.js";
+import { projectMealDisplay } from "./meal-display.js";
 
 const PENDING_SELECTION_KIND = "meal_target_selection";
 const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
@@ -17,6 +18,7 @@ const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
 export interface MealCorrectionCandidate {
   mealId: string;
   foodName: string;
+  itemCount: number;
   itemNames: string[];
   calories: number;
   protein: number;
@@ -171,6 +173,24 @@ function matchesCandidateLabel(candidate: MealCorrectionCandidate, normalizedQue
   return labels.some((label) => label.length > 0 && normalizedQuery.includes(label));
 }
 
+function extractTargetEvidenceText(query: string): string {
+  const changeVerb = query.match(/^(.*?)(?:改成|改為|改到|變成|換成|調成)/);
+  return changeVerb?.[1] ?? query;
+}
+
+function hasLikelyFoodReference(query: string): boolean {
+  const targetText = normalizeText(extractTargetEvidenceText(query))
+    .replace(/今天|昨日|昨天|前天|明天|上週|這週|本週|星期[一二三四五六日天]|週[一二三四五六日天]/g, "")
+    .replace(/早餐|早上|早飯|午餐|中午|晚餐|晚上|宵夜|點心|下午茶/g, "")
+    .replace(/剛剛|剛才|上一筆|上一餐|那筆|這筆|那餐|這餐|第[一二兩三四五六七八九0-9]+(?:個|筆|份|條)?/g, "")
+    .replace(/幫我|請|把|的|要|想|覺得|正常|平均|多少|哪一筆|哪餐/g, "")
+    .replace(/修改|修正|更新|調整|降低|提高|刪掉|刪除|移除|補充|套用/g, "")
+    .replace(/蛋白質|熱量|卡路里|碳水化合物|碳水|脂肪|卡|kcal|cal/g, "")
+    .replace(/[0-9０-９一二兩三四五六七八九十百千.]+(?:g|克|卡|顆|份|碗|盤|個)?/g, "");
+
+  return /(雞|鴨|豬|牛|羊|魚|蝦|蛋|飯|麵|面|菜|豆|奶|肉|便當|餅|粥|湯|沙拉|吐司|麥|滷|煮|炸|烤|炒|咖哩)/.test(targetText);
+}
+
 function distributePatchedTotal(
   items: MealTransactionItemInput[],
   field: NumericItemField,
@@ -239,7 +259,7 @@ function scoreCandidate(
   targetDateKey: string | undefined,
   targetMealPeriod: MealCorrectionCandidate["mealPeriod"] | undefined,
 ): number {
-  const normalizedQuery = normalizeText(query);
+  const normalizedQuery = normalizeText(extractTargetEvidenceText(query));
   let score = 0;
 
   if (targetDateKey) {
@@ -250,15 +270,14 @@ function scoreCandidate(
   }
 
   if (targetMealPeriod) {
-    if (candidate.mealPeriod !== targetMealPeriod) {
-      return -1;
+    if (candidate.mealPeriod === targetMealPeriod) {
+      score += 2;
     }
-    score += 2;
   }
 
   const matched = matchesCandidateLabel(candidate, normalizedQuery);
   if (matched) {
-    score += 3;
+    score += 5;
   }
 
   return score;
@@ -334,16 +353,12 @@ export function createMealCorrectionService(db: AppDatabase) {
 
     return limitedHeaders.map((header) => {
       const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
-      const foodName =
-        revisionItems.length <= 1
-          ? revisionItems[0]?.foodName ?? "未知餐點"
-          : revisionItems.length === 2
-            ? `${revisionItems[0]!.foodName}、${revisionItems[1]!.foodName}`
-            : `${revisionItems[0]!.foodName}、${revisionItems[1]!.foodName} 等${revisionItems.length}項`;
+      const display = projectMealDisplay(revisionItems, "未知餐點");
 
       return {
         mealId: header.id,
-        foodName,
+        foodName: display.foodName,
+        itemCount: display.itemCount,
         itemNames: revisionItems.map((item) => item.foodName),
         calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),
         protein: revisionItems.reduce((sum, item) => sum + item.protein, 0),
@@ -408,10 +423,16 @@ export function createMealCorrectionService(db: AppDatabase) {
 
   async function tryResolvePendingSelection(
     deviceId: string,
+    action: "update" | "delete",
     query: string,
   ): Promise<FindMealsResolvedResult | FindMealsClarificationResult | undefined> {
     const pending = await turnStateService.getState<PendingMealSelectionState>(deviceId, PENDING_SELECTION_KIND);
     if (!pending) {
+      return undefined;
+    }
+
+    if (pending.action !== action) {
+      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
       return undefined;
     }
 
@@ -436,7 +457,7 @@ export function createMealCorrectionService(db: AppDatabase) {
       };
     }
 
-    const normalized = normalizeText(query);
+    const normalized = normalizeText(extractTargetEvidenceText(query));
     const matchingCandidates = pending.candidates.filter((candidate) => {
       const labels = [candidate.foodName, ...candidate.itemNames].map(normalizeText);
       return labels.some((label) => label.length > 0 && normalized.includes(label));
@@ -452,7 +473,11 @@ export function createMealCorrectionService(db: AppDatabase) {
       };
     }
 
-    if (pending.candidates.length === 1) {
+    if (
+      pending.candidates.length === 1 &&
+      !hasLikelyFoodReference(query) &&
+      extractMealPeriod(query) === undefined
+    ) {
       return {
         status: "resolved",
         action: pending.action,
@@ -473,7 +498,7 @@ export function createMealCorrectionService(db: AppDatabase) {
       query: string,
       options?: FindMealsOptions,
     ): Promise<FindMealsResult> {
-      const pendingSelection = await tryResolvePendingSelection(deviceId, query);
+      const pendingSelection = await tryResolvePendingSelection(deviceId, action, query);
       if (pendingSelection) {
         return pendingSelection;
       }
@@ -499,9 +524,9 @@ export function createMealCorrectionService(db: AppDatabase) {
 
       const targetDateKey = dateResolution.targetDateKey;
       const targetMealPeriod = extractMealPeriod(query);
-      const normalizedQuery = normalizeText(query);
+      const normalizedQuery = normalizeText(extractTargetEvidenceText(query));
 
-      const scored = candidates
+      let scored = candidates
         .map((candidate) => ({
           candidate,
           score: scoreCandidate(candidate, query, targetDateKey, targetMealPeriod),
@@ -514,6 +539,18 @@ export function createMealCorrectionService(db: AppDatabase) {
           }
           return right.candidate.loggedAt.localeCompare(left.candidate.loggedAt);
         });
+
+      const hasLabelMatch = scored.some((entry) => entry.labelMatched);
+      if (hasLabelMatch) {
+        scored = scored.filter((entry) => entry.labelMatched);
+      } else if (hasLikelyFoodReference(query)) {
+        return {
+          status: "needs_clarification",
+          action,
+          prompt: buildNotFoundPrompt(action),
+          candidates: [],
+        };
+      }
 
       if (hasRecentReference(query)) {
         const positiveMatches = scored.filter((entry) => entry.score > 0);
@@ -599,11 +636,21 @@ export function createMealCorrectionService(db: AppDatabase) {
     ): Promise<{
       updatedMeal: {
         id: string;
+        mealRevisionId: string;
         foodName: string;
         calories: number;
         protein: number;
         carbs: number;
         fat: number;
+        itemCount: number;
+        items: Array<{
+          name: string;
+          position: number;
+          calories: number;
+          protein: number;
+          carbs: number;
+          fat: number;
+        }>;
         imagePath: string | null;
         loggedAt: string;
       };
@@ -631,21 +678,26 @@ export function createMealCorrectionService(db: AppDatabase) {
         new Date(`${updated.affectedDateKey}T12:00:00`),
       );
 
-      const foodName =
-        updated.items.length <= 1
-          ? updated.items[0]!.foodName
-          : updated.items.length === 2
-            ? `${updated.items[0]!.foodName}、${updated.items[1]!.foodName}`
-            : `${updated.items[0]!.foodName}、${updated.items[1]!.foodName} 等${updated.items.length}項`;
+      const display = projectMealDisplay(updated.items);
 
       return {
         updatedMeal: {
           id: updated.transactionId,
-          foodName,
+          mealRevisionId: updated.revisionId,
+          foodName: display.foodName,
           calories: updated.items.reduce((sum, item) => sum + item.calories, 0),
           protein: updated.items.reduce((sum, item) => sum + item.protein, 0),
           carbs: updated.items.reduce((sum, item) => sum + item.carbs, 0),
           fat: updated.items.reduce((sum, item) => sum + item.fat, 0),
+          itemCount: display.itemCount,
+          items: updated.items.map((item, index) => ({
+            name: item.foodName,
+            position: index + 1,
+            calories: item.calories,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+          })),
           imagePath: updated.imageAssetId ? makeAssetRef(updated.imageAssetId) : null,
           loggedAt: updated.loggedAt,
         },

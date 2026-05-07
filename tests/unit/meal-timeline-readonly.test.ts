@@ -15,6 +15,7 @@ describe("MealTimeline read-only mode", () => {
           protein: 42,
           carbs: 48,
           fat: 18,
+          itemCount: 1,
           loggedAt: "2026-03-25T04:30:00.000Z",
         },
       ],

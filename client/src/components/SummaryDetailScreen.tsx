@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteMeal, getDaySnapshot } from "../api.js";
+import { deleteMeal, getDaySnapshot, getMeals } from "../api.js";
 import {
   browseSummaryCalendarMonth,
   closeSummaryCalendar,
@@ -10,16 +10,14 @@ import {
   selectSummaryCalendarDate,
   type SummaryCalendarDisclosureState,
 } from "../lib/summary-calendar-disclosure.js";
-import {
-  buildCalendarWeeks,
-  getInitialSummaryDateKey,
-  isHistoricalSummaryDate,
-} from "../lib/summary-calendar.js";
+import { buildCalendarWeeks, getInitialSummaryDateKey, isHistoricalSummaryDate } from "../lib/summary-calendar.js";
+import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { DailySummary, DailyTargets } from "../types.js";
-import { Dashboard } from "./Dashboard.js";
-import { MealTimeline } from "./MealTimeline.js";
+import { PersistedAssetImage } from "./PersistedAssetImage.js";
+import { SportCard, SportChip, SportIconButton, SportProgressBar, SportScreen } from "./SportPrimitives.js";
+import { SportChevronLeftIcon } from "./SportIcons.js";
 
 const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -59,6 +57,75 @@ function formatSummaryMonthLabel(monthKey: string) {
   });
 }
 
+function getChipVariant(variant: ReturnType<typeof getHistorySportStatusMeta>["chipVariant"]) {
+  if (variant === "good") return "good";
+  if (variant === "warn" || variant === "danger") return "warn";
+  return "default";
+}
+
+function getProgressVariant(barTone: ReturnType<typeof getHistorySportStatusMeta>["barTone"]) {
+  if (barTone === "amber") return "amber";
+  if (barTone === "red") return "warn";
+  return "default";
+}
+
+function formatSummaryTime(loggedAt: string) {
+  return new Intl.DateTimeFormat("zh-TW", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(loggedAt));
+}
+
+function formatMacroLine(calories: number, protein: number, carbs: number, fat: number) {
+  return `${Math.round(calories).toLocaleString("en-US")} kcal · P${Math.round(protein)} · C${Math.round(carbs)} · F${Math.round(fat)}`;
+}
+
+function SummaryDetailMealRow({
+  meal,
+  isReadOnly,
+  onDelete,
+  deletingMealId,
+}: {
+  meal: Awaited<ReturnType<typeof getDaySnapshot>>["meals"][number];
+  isReadOnly: boolean;
+  onDelete: (mealId: string) => void | Promise<void>;
+  deletingMealId: string | null;
+}) {
+  return (
+    <article className="sp-summary-meal">
+      <div className="sp-summary-meal-main">
+        <PersistedAssetImage
+          src={meal.imageUrl}
+          alt={`${meal.foodName} 縮圖`}
+          imgClassName="sp-summary-meal-image"
+          fallbackClassName="sp-summary-meal-image sp-summary-meal-fallback"
+          fallbackStyle={{
+            background: "var(--sp-surface-2)",
+            borderColor: "var(--sp-line)",
+            color: "var(--sp-ink-2)",
+          }}
+        />
+        <div className="sp-summary-meal-copy">
+          <h3>{meal.foodName}</h3>
+          <div className="sp-summary-meal-time">{formatSummaryTime(meal.loggedAt)}</div>
+          <div className="sp-summary-meal-macro-line">{formatMacroLine(meal.calories, meal.protein, meal.carbs, meal.fat)}</div>
+        </div>
+      </div>
+      {!isReadOnly && (
+        <button
+          type="button"
+          onClick={() => onDelete(meal.id)}
+          disabled={deletingMealId === meal.id}
+          className="sp-summary-delete-btn"
+        >
+          刪除
+        </button>
+      )}
+    </article>
+  );
+}
+
 export function SummaryDetailScreenPresentation(props: SummaryDetailScreenPresentationProps) {
   const {
     todayKey,
@@ -87,15 +154,22 @@ export function SummaryDetailScreenPresentation(props: SummaryDetailScreenPresen
       ? liveSummary
       : snapshot?.summary ?? null;
   const displayedMeals = snapshot?.meals ?? [];
-  const calRemaining =
-    targets && displayedSummary
-      ? Math.max(0, Math.round(targets.calories - displayedSummary.totalCalories))
-      : null;
-  const selectedDateLabel = formatSummaryDateLabel(selectedDateKey);
-  const calendarWeeks = buildCalendarWeeks({ visibleMonthKey, selectedDateKey, todayKey });
+  const calRemaining = targets && displayedSummary ? Math.max(0, Math.round(targets.calories - displayedSummary.totalCalories)) : null;
   const statusLabel = getSummaryCalendarStatusLabel(isReadOnly);
   const toggleLabel = getSummaryCalendarToggleLabel(isCalendarOpen);
   const readOnlyHint = getSummaryCalendarReadOnlyHint(isReadOnly);
+  const targetCalories = targets?.calories ?? null;
+  const selectedDateLabel = formatSummaryDateLabel(selectedDateKey);
+  const calendarWeeks = buildCalendarWeeks({ visibleMonthKey, selectedDateKey, todayKey });
+  const calorieStatus = getHistoryCalorieStatus({
+    calories: Math.max(0, Math.round(displayedSummary?.totalCalories ?? 0)),
+    mealCount: displayedSummary?.mealCount ?? displayedMeals.length,
+    targetCalories,
+  });
+  const statusMeta = getHistorySportStatusMeta({
+    status: calorieStatus.status,
+    targetCalories,
+  });
   const statusCopy = displayedSummary
     ? isReadOnly
       ? `已記錄 ${displayedSummary.mealCount} 餐，總熱量 ${Math.round(displayedSummary.totalCalories)} kcal。`
@@ -115,269 +189,195 @@ export function SummaryDetailScreenPresentation(props: SummaryDetailScreenPresen
 
   return (
     <div className="screen-shell">
-      <div className="screen-bar px-5 pb-3 pt-4" style={{ borderBottom: "1px solid var(--border)" }}>
-        <button
-          type="button"
-          onClick={onBack}
-          disabled={sending}
-          className="mb-3 flex items-center gap-2 text-xs font-semibold disabled:opacity-40"
-          style={{ color: "var(--text-2)" }}
-        >
-          <span
-            className="flex h-6 w-6 items-center justify-center rounded-lg text-xs"
-            style={{
-              background: "var(--bg-raised)",
-              border: "1px solid var(--border-med)",
-            }}
-          >
-            ‹
-          </span>
-          返回主頁
-        </button>
-        <h2
-          className="mb-1"
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 28,
-            fontWeight: 800,
-            color: "var(--text)",
-            letterSpacing: "-0.025em",
-          }}
-        >
-          當日摘要
-        </h2>
-        <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: "var(--text-2)" }}>
-          <span
-            className="rounded-full px-2.5 py-1 font-semibold"
-            style={{
-              background: isReadOnly ? "var(--bg-teal)" : "var(--bg-raised)",
-              border: `1px solid ${isReadOnly ? "var(--teal-border)" : "var(--border-med)"}`,
-              color: isReadOnly ? "var(--teal-text)" : "var(--text-2)",
-            }}
-          >
-            {statusLabel}
-          </span>
-          <span>{selectedDateLabel}</span>
+      <SportScreen className="sp-summary-screen">
+        <div className="screen-bar px-5 pb-3 pt-4">
+          <header className="sp-summary-header">
+            <SportIconButton onClick={onBack} disabled={sending} className="sp-summary-back" aria-label="返回主頁">
+              <SportChevronLeftIcon size={18} stroke={2} />
+              <span>返回主頁</span>
+            </SportIconButton>
+            <div className="sp-summary-header-copy">
+              <h1>當日摘要</h1>
+              <div>{statusLabel}</div>
+            </div>
+          </header>
         </div>
-      </div>
 
-      <main className="screen-scroll-safe space-y-3 p-4">
-        <section
-          className="rounded-2xl p-3.5"
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border-med)",
-          }}
-        >
+        <main className="screen-scroll-safe sp-summary-scroll">
+        <SportCard className="sp-summary-calendar" variant="flat">
           <button
             type="button"
+            className="sp-summary-calendar-trigger"
             onClick={onToggleCalendar}
-            className="flex min-h-11 w-full items-start justify-between gap-3 text-left"
             aria-controls="summary-calendar-panel"
             aria-expanded={isCalendarOpen}
           >
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2 text-xs font-bold" style={{ color: "var(--text-2)" }}>
-                <span>選擇日期</span>
-                <span
-                  className="rounded-full px-2.5 py-1 font-semibold"
-                  style={{
-                    background: isReadOnly ? "var(--bg-teal)" : "var(--bg-raised)",
-                    border: `1px solid ${isReadOnly ? "var(--teal-border)" : "var(--border-med)"}`,
-                    color: isReadOnly ? "var(--teal-text)" : "var(--text-2)",
-                  }}
-                >
-                  {statusLabel}
-                </span>
-              </div>
-              <div
-                className="mt-2 text-[20px] font-extrabold"
-                style={{
-                  color: "var(--text)",
-                  fontFamily: "var(--font-display)",
-                  lineHeight: 1.25,
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                {selectedDateLabel}
-              </div>
-              {readOnlyHint && (
-                <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
-                  {readOnlyHint}
-                </p>
-              )}
+            <div className="sp-summary-calendar-status">
+              <span>選擇日期</span>
+              <span>{statusLabel}</span>
             </div>
-            <span
-              className="ml-2 flex shrink-0 items-center gap-1 text-xs font-extrabold"
-              style={{ color: "var(--text-2)" }}
-            >
-              <span>{toggleLabel}</span>
-              <span
-                aria-hidden="true"
-                className={`transition-transform duration-150 motion-reduce:transition-none ${isCalendarOpen ? "rotate-180" : ""}`}
-              >
-                ⌄
-              </span>
+            <div className="sp-summary-calendar-title">
+              {selectedDateLabel}
+            </div>
+            {readOnlyHint ? <p className="sp-summary-calendar-hint">{readOnlyHint}</p> : null}
+            <span aria-hidden="true" className={`sp-summary-calendar-chevron ${isCalendarOpen ? "is-open" : ""}`}>
+              {toggleLabel}
             </span>
           </button>
 
-          {isCalendarOpen && (
-            <div id="summary-calendar-panel" className="mt-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => onBrowseMonth(-1)}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold"
-                  style={{
-                    background: "var(--bg-raised)",
-                    border: "1px solid var(--border-med)",
-                    color: "var(--text)",
-                  }}
-                  aria-label="查看上個月"
-                >
+          {isCalendarOpen ? (
+            <div id="summary-calendar-panel" className="sp-summary-calendar-panel">
+              <div className="sp-summary-calendar-month">
+                <button type="button" onClick={() => onBrowseMonth(-1)} className="sp-summary-calendar-month-btn" aria-label="查看上個月">
                   ‹
                 </button>
-                <div
-                  className="text-sm font-bold"
-                  style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}
-                >
-                  {formatSummaryMonthLabel(visibleMonthKey)}
-                </div>
+                <div>{formatSummaryMonthLabel(visibleMonthKey)}</div>
                 <button
                   type="button"
                   onClick={() => onBrowseMonth(1)}
                   disabled={visibleMonthKey >= todayMonthKey}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold disabled:opacity-40"
-                  style={{
-                    background: "var(--bg-raised)",
-                    border: "1px solid var(--border-med)",
-                    color: "var(--text)",
-                  }}
+                  className="sp-summary-calendar-month-btn"
                   aria-label="查看下個月"
                 >
                   ›
                 </button>
               </div>
 
-              <div
-                className="mb-2 grid grid-cols-7 gap-1.5 text-center text-[11px] font-bold"
-                style={{ color: "var(--text-3)" }}
-              >
+              <div className="sp-summary-calendar-weekday">
                 {WEEKDAY_LABELS.map((label) => (
                   <div key={label}>{label}</div>
                 ))}
               </div>
 
-              <div className="space-y-1.5">
-                {calendarWeeks.map((week) => (
-                  <div key={week[0]!.dateKey} className="grid grid-cols-7 gap-1.5">
-                    {week.map((day) => (
-                      <button
-                        key={day.dateKey}
-                        type="button"
-                        onClick={() => onSelectDate(day.dateKey)}
-                        disabled={day.isFuture}
-                        className="flex h-10 items-center justify-center rounded-xl text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-35"
-                        style={{
-                          background: day.isSelected ? "var(--orange)" : "var(--bg-raised)",
-                          border: day.isToday
-                            ? "1px solid rgba(232,104,42,0.45)"
-                            : "1px solid var(--border-med)",
-                          color: day.isSelected ? "#fff" : day.isCurrentMonth ? "var(--text)" : "var(--text-3)",
-                        }}
-                        aria-label={`選擇 ${formatSummaryDateLabel(day.dateKey)}`}
-                      >
-                        {day.dayNumber}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
+              {calendarWeeks.map((week) => (
+                <div key={week[0]!.dateKey} className="sp-summary-calendar-week">
+                  {week.map((day) => (
+                    <button
+                      key={day.dateKey}
+                      type="button"
+                      onClick={() => onSelectDate(day.dateKey)}
+                      disabled={day.isFuture}
+                      className="sp-summary-calendar-day"
+                      data-selected={day.isSelected ? "true" : "false"}
+                      data-today={day.isToday ? "true" : "false"}
+                      aria-label={`選擇 ${formatSummaryDateLabel(day.dateKey)}`}
+                    >
+                      {day.dayNumber}
+                    </button>
+                  ))}
+                </div>
+              ))}
             </div>
-          )}
+          ) : null}
+        </SportCard>
+
+        <section className="sp-summary-state-grid">
+          <SportCard className="sp-summary-state-card" variant="flat">
+            <div className="sp-summary-state-card-title">當日狀態</div>
+            <p className="sp-summary-copy">
+              {statusCopy}
+              {displayedSummary ? <br /> : null}
+              {displayedSummary
+                ? isReadOnly
+                  ? "這個畫面不會跟著今天的即時資料跳動。"
+                  : "回到今天時會接回即時更新。"
+                : null}
+            </p>
+          </SportCard>
+          <SportCard className="sp-summary-state-card" variant="flat">
+            <div className="sp-summary-state-card-title">當日備註</div>
+            <p className="sp-summary-copy">{noteCopy}</p>
+          </SportCard>
         </section>
 
-        <div className="grid grid-cols-2 gap-2.5">
-          <div
-            className="rounded-2xl p-3.5"
-            style={{
-              background: "var(--bg-card)",
-              border: "1px solid var(--border-med)",
-            }}
-          >
-            <div className="mb-1.5 text-xs font-bold" style={{ color: "var(--text)" }}>
-              當日狀態
+        <SportCard className="sp-history-detail-summary sp-summary-overview" variant="glow">
+          <div className="sp-history-detail-summary-main">
+            <div className="sp-history-detail-summary-copy">
+              <div className="sp-history-detail-kicker">{isReadOnly ? "歷史快照" : "今天 · 即時"}</div>
+              <div className="sp-history-detail-calories">
+                {Math.round(displayedSummary?.totalCalories ?? 0).toLocaleString("en-US")}
+              </div>
+              <p>
+                {targetCalories
+                  ? `${Math.round(displayedSummary?.totalCalories ?? 0).toLocaleString("en-US")} / ${Math.round(targets?.calories ?? 0).toLocaleString("en-US")} kcal`
+                  : "目標同步中，暫不顯示水位"}
+              </p>
             </div>
-            <div className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
-              {statusCopy}
-              {displayedSummary && (
-                <>
-                  <br />
-                  {isReadOnly ? "這個畫面不會跟著今天的即時資料跳動。" : "回到今天時會接回即時更新。"}
-                </>
-              )}
+            <div className="sp-history-detail-summary-status">
+              {statusMeta.badge ? <SportChip variant={getChipVariant(statusMeta.chipVariant)} zh>{statusMeta.badge}</SportChip> : null}
             </div>
           </div>
-          <div
-            className="rounded-2xl p-3.5"
-            style={{
-              background: "var(--bg-card)",
-              border: "1px solid var(--border-med)",
-            }}
-          >
-            <div className="mb-1.5 text-xs font-bold" style={{ color: "var(--text)" }}>
-              當日備註
+          <SportProgressBar
+            className="sp-history-detail-progress"
+            value={calorieStatus.waterLevel}
+            variant={getProgressVariant(statusMeta.barTone)}
+          />
+          <div className="sp-history-detail-macros">
+            <div>
+              <span>protein</span>
+              <strong>
+                P {Math.round(displayedSummary?.totalProtein ?? 0).toLocaleString("en-US")}/{Math.round(targets?.protein ?? 0).toLocaleString("en-US")}
+              </strong>
             </div>
-            <div className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
-              {noteCopy}
+            <div>
+              <span>carbs</span>
+              <strong>
+                C {Math.round(displayedSummary?.totalCarbs ?? 0).toLocaleString("en-US")}/{Math.round(targets?.carbs ?? 0).toLocaleString("en-US")}
+              </strong>
+            </div>
+            <div>
+              <span>fat</span>
+              <strong>
+                F {Math.round(displayedSummary?.totalFat ?? 0).toLocaleString("en-US")}/{Math.round(targets?.fat ?? 0).toLocaleString("en-US")}
+              </strong>
             </div>
           </div>
-        </div>
+          <p className="sp-history-detail-note">
+            {isReadOnly
+              ? "這是當日營養快照；點選歷史中的餐點可修改內容。"
+              : "今天的資料會隨記錄更新；此頁仍維持只讀檢視。"}
+          </p>
+        </SportCard>
 
-        <Dashboard
-          summary={displayedSummary}
-          targets={targets}
-          ariaLabel={`查看 ${selectedDateLabel} 的營養詳情`}
-        />
-
-        <div>
-          <div
-            className="mb-2 px-1 text-base font-bold"
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 18,
-              fontWeight: 800,
-              color: "var(--text)",
-              letterSpacing: "-0.015em",
-            }}
-          >
-            當日餐點
+        <section>
+          <div className="sp-summary-section-header">
+            <h2>當日餐點</h2>
+            <span>{displayedMeals.length}筆</span>
           </div>
+
           {loading ? (
-            <p className="text-sm" style={{ color: "var(--text-2)" }}>
-              載入餐點中...
-            </p>
-          ) : error ? (
-            <p
-              className="rounded-2xl p-4 text-sm"
-              style={{
-                background: "var(--bg-card)",
-                border: "1px solid var(--border-med)",
-                color: "var(--red)",
-              }}
-            >
+            <SportCard className="sp-history-detail-empty" variant="flat">
+              載入這天餐點中...
+            </SportCard>
+          ) : null}
+          {error ? (
+            <SportCard className="sp-history-detail-error" variant="flat">
               {error}
-            </p>
-          ) : (
-            <MealTimeline
-              meals={displayedMeals}
-              deletingMealId={deletingMealId}
-              isReadOnly={isReadOnly}
-              onDelete={onDeleteMeal}
-            />
-          )}
-        </div>
-      </main>
+            </SportCard>
+          ) : null}
+          {!loading && !error && displayedMeals.length === 0 ? (
+            <SportCard className="sp-history-detail-empty" variant="flat">
+              {isReadOnly
+                ? "這一天還沒有餐點紀錄。可以切回今天查看即時紀錄，或改看其他日期。"
+                : "今天還沒有餐點紀錄。"}
+            </SportCard>
+          ) : null}
+          {!loading && !error && displayedMeals.length > 0 ? (
+            <div className="sp-summary-meal-list">
+              {displayedMeals.map((meal) => (
+                <SummaryDetailMealRow
+                  key={meal.id}
+                  meal={meal}
+                  isReadOnly={isReadOnly}
+                  onDelete={onDeleteMeal}
+                  deletingMealId={deletingMealId}
+                />
+              ))}
+            </div>
+          ) : null}
+        </section>
+        </main>
+      </SportScreen>
     </div>
   );
 }
@@ -385,9 +385,13 @@ export function SummaryDetailScreenPresentation(props: SummaryDetailScreenPresen
 export function SummaryDetailScreen() {
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
+  const setDailySummary = useStore((s) => s.setDailySummary);
+  const setMeals = useStore((s) => s.setMeals);
+  const recordMealMutation = useStore((s) => s.recordMealMutation);
   const liveSummary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
   const sending = useStore((s) => s.sending);
+  const lastMealMutation = useStore((s) => s.lastMealMutation);
   const todayKey = formatLocalDate(new Date());
   const [selectedDateKey, setSelectedDateKey] = useState(() =>
     getInitialSummaryDateKey(formatLocalDate(new Date())),
@@ -437,6 +441,44 @@ export function SummaryDetailScreen() {
     };
   }, [selectedDateKey, recoverGuestSession]);
 
+  useEffect(() => {
+    if (!lastMealMutation || lastMealMutation.affectedDate !== selectedDateKey) {
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    getDaySnapshot(selectedDateKey)
+      .then((nextSnapshot) => {
+        if (!cancelled) {
+          setSnapshot(nextSnapshot);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (err instanceof Error && err.message === "UNAUTHORIZED") {
+          void recoverGuestSession();
+          return;
+        }
+
+        setError("這一天的摘要暫時載入失敗。請重新整理，或切回今天後再試一次。");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lastMealMutation?.affectedDate, lastMealMutation?.nonce, selectedDateKey, recoverGuestSession]);
+
   function getDisclosureState(): SummaryCalendarDisclosureState {
     return {
       todayKey,
@@ -465,7 +507,13 @@ export function SummaryDetailScreen() {
     );
 
     try {
-      await deleteMeal(mealId);
+      const { affectedDate, dailySummary } = await deleteMeal(mealId);
+      recordMealMutation(affectedDate);
+      if (dailySummary.date === todayKey) {
+        setDailySummary(dailySummary);
+        const { meals } = await getMeals({ refreshReason: "meal_mutation" });
+        setMeals(meals);
+      }
       const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
       setSnapshot(refreshedSnapshot);
     } catch (err) {
@@ -482,11 +530,7 @@ export function SummaryDetailScreen() {
 
   function handleToggleCalendar() {
     const currentState = getDisclosureState();
-    applyDisclosureState(
-      currentState.isCalendarOpen
-        ? closeSummaryCalendar(currentState)
-        : openSummaryCalendar(currentState),
-    );
+    applyDisclosureState(currentState.isCalendarOpen ? closeSummaryCalendar(currentState) : openSummaryCalendar(currentState));
   }
 
   function handleBrowseMonth(delta: -1 | 1) {

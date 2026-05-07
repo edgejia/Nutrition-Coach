@@ -13,6 +13,8 @@ export interface ToolResultPayload {
   success: boolean;
   executed: boolean;      // false = validation failed before execution
   failureReason?: string; // redacted error summary; must NOT contain deviceId
+  reason?: string;        // controlled diagnostic reason, e.g. schema_validation
+  fields?: string[];      // redacted validation field paths only
   summary?: string;       // e.g. "成功" or "熱量 450kcal"
   updatedFields?: string[];
   publishedEvents?: string[];
@@ -23,6 +25,13 @@ export type FallbackReason =
   | "llm_error"
   | "partial_success"
   | "hallucination_detected"; // fires from handleStreamingReply in chat.ts route helper, not the orchestrator
+
+const LOG_FOOD_VALIDATION_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
+const LOG_FOOD_VALIDATION_FIELD_SET = new Set<string>(LOG_FOOD_VALIDATION_FIELDS);
+
+function sanitizeLogFoodValidationFields(fields: readonly string[]): string[] {
+  return [...new Set(fields.filter((field) => LOG_FOOD_VALIDATION_FIELD_SET.has(field)))].sort();
+}
 
 export function createStructuredHooks(log: FastifyBaseLogger): OrchestratorHooks {
   return {
@@ -40,6 +49,22 @@ export function createStructuredHooks(log: FastifyBaseLogger): OrchestratorHooks
         log.info({ event: "tool_result", ...payload }, "Tool result");
       } else {
         log.warn({ event: "tool_result", ...payload }, "Tool result (failed)");
+      }
+      if (
+        payload.tool === "log_food"
+        && payload.success === false
+        && payload.executed === false
+        && payload.failureReason === "validation"
+      ) {
+        log.warn(
+          {
+            event: "log_food_validation_failed",
+            tool: "log_food",
+            failureReason: "validation",
+            fields: sanitizeLogFoodValidationFields(payload.fields ?? []),
+          },
+          "Log food validation failed",
+        );
       }
       if (payload.tool === "update_goals" && payload.success === true) {
         log.info(

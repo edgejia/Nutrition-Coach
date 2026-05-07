@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaIntentSelected } from "../api.js";
+import { SportBoltIcon } from "./SportIcons.js";
 import type {
   CoachCTA,
   CoachCTAIntent,
@@ -60,7 +61,7 @@ export function getAdvicePresentation(
   if (summary.mealCount === 0) {
     return {
       state: "empty" as const,
-      message: "還沒有今天的紀錄，拍張照或打字告訴我你吃了什麼吧！",
+      message: "先用對話記下第一餐。今天還沒有紀錄。到「對話」描述你吃了什麼。",
     };
   }
 
@@ -93,8 +94,8 @@ export function CoachCTAControls({
   }
 
   return (
-    <div className="mt-3 flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div className="sp-coach-cta-controls">
+      <div className="sp-coach-cta-intents">
         {intents.map((intent) => {
           const selected = intent.id === selectedIntentId;
           const optionsId = `coach-cta-options-${intent.id}`;
@@ -105,15 +106,10 @@ export function CoachCTAControls({
               aria-pressed={selected}
               aria-expanded={selected}
               aria-controls={optionsId}
+              data-selected={selected}
               disabled={disabled}
               onClick={() => onIntentSelect(intent.id)}
-              className="min-h-11 rounded-xl px-4 py-2 text-sm font-bold leading-tight disabled:opacity-40"
-              style={{
-                background: selected ? "var(--orange)" : "var(--bg-raised)",
-                border: selected ? "1px solid transparent" : "1px solid var(--border-med)",
-                color: selected ? "white" : "var(--text-2)",
-                boxShadow: selected ? "0 4px 16px rgba(232,104,42,0.3)" : "none",
-              }}
+              className="sp-coach-cta-intent"
             >
               {intent.label}
             </button>
@@ -122,19 +118,14 @@ export function CoachCTAControls({
       </div>
 
       {selectedIntent && (
-        <div id={`coach-cta-options-${selectedIntent.id}`} className="flex flex-col gap-2">
+        <div id={`coach-cta-options-${selectedIntent.id}`} className="sp-coach-cta-options">
           {selectedIntent.options.map((option) => (
             <button
               key={option.id}
               type="button"
               disabled={disabled}
               onClick={() => onTaskOptionClick(option, selectedIntent)}
-              className="min-h-11 rounded-xl px-4 py-2 text-left text-sm leading-relaxed disabled:opacity-40"
-              style={{
-                background: "rgba(109,191,163,0.08)",
-                border: "1px solid var(--teal-border)",
-                color: "var(--text)",
-              }}
+              className="sp-coach-cta-option"
             >
               {option.label}
             </button>
@@ -173,78 +164,57 @@ export function CoachAdviceCard({
 
   if (presentation.state === "loading") {
     return (
-      <div
-        className="animate-pulse rounded-2xl p-4"
-        style={{ background: "var(--bg-teal)", border: "1px solid var(--teal-border)" }}
-      >
-        <div className="mb-2 h-5 w-3/4 rounded" style={{ background: "rgba(109,191,163,0.15)" }} />
-        <div className="h-4 w-full rounded" style={{ background: "rgba(109,191,163,0.1)" }} />
-        <div className="mt-1 h-4 w-2/3 rounded" style={{ background: "rgba(109,191,163,0.1)" }} />
+      <div className="sp-coach-cta sp-coach-cta-loading" aria-busy="true">
+        <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-label" />
+        <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-headline" />
+        <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-body" />
       </div>
     );
   }
 
   if (presentation.state === "empty") {
     return (
-      <div
-        className="rounded-2xl p-4"
-        style={{ background: "var(--bg-teal)", border: "1px solid var(--teal-border)" }}
-      >
-        <p className="text-sm leading-relaxed" style={{ color: "var(--teal-text)" }}>
+      <section className="sp-coach-cta" aria-label="Coach live">
+        <div className="sp-coach-cta-label">
+          <SportBoltIcon size={14} stroke={2} />
+          <span>教練建議 · 即時</span>
+        </div>
+        <p className="sp-coach-cta-headline">
           {presentation.message}
         </p>
         {ctaBlock}
-      </div>
+      </section>
     );
   }
 
   return (
-    <div
-      className="rounded-2xl p-4"
-      style={{
-        background: "var(--bg-teal)",
-        border: "1px solid var(--teal-border)",
-      }}
-    >
+    <section className="sp-coach-cta" aria-label="Coach live">
+      <div className="sp-coach-cta-label">
+        <SportBoltIcon size={14} stroke={2} />
+        <span>教練建議 · 即時</span>
+      </div>
       {advice && (
         <>
-          <p
-            className="mb-2 leading-snug"
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 20,
-              fontWeight: 800,
-              color: "var(--text)",
-              letterSpacing: "-0.015em",
-            }}
-          >
+          <p className="sp-coach-cta-headline">
             {presentation.headline}
           </p>
           {presentation.body && (
-            <p className="mb-3 text-sm leading-relaxed" style={{ color: "var(--teal-text)" }}>
+            <p className="sp-coach-cta-body">
               {presentation.body}
             </p>
           )}
         </>
       )}
       {presentation.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="sp-coach-cta-tags">
           {presentation.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-full px-2.5 py-1 text-xs font-semibold"
-              style={{
-                background: "rgba(109,191,163,0.08)",
-                border: "1px solid rgba(109,191,163,0.2)",
-                color: "var(--teal-text)",
-              }}
-            >
+            <span key={tag} className="sp-coach-cta-tag">
               {tag}
             </span>
           ))}
         </div>
       )}
       {ctaBlock}
-    </div>
+    </section>
   );
 }

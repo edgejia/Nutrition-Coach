@@ -12,6 +12,7 @@ import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
 import { buildPartialSuccessLoggedReply } from "../orchestrator/index.js";
+import type { ToolExecutionResult } from "../orchestrator/tools.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
@@ -34,18 +35,57 @@ interface Deps {
 }
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
-const SENSITIVE_IDENTIFIERS = ["log_food", "get_daily_summary"];
+const SENSITIVE_IDENTIFIERS = [
+  "log_food",
+  "get_daily_summary",
+  "protein_sources",
+  "usedConservativeAssumption",
+  "quantityUncertaintyReason",
+  "missing_quantity",
+];
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
+type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
+type ReceiptIdentity = {
+  mealTransactionId: string;
+  mealRevisionId: string;
+  toolMessageId?: string;
+};
+interface ActiveChatTurn {
+  controller: AbortController;
+  stopRequested: boolean;
+  completed: boolean;
+}
+
+interface StreamingStopControl {
+  turnId: string;
+  signal: AbortSignal;
+  isStopped(): boolean;
+}
+
+const activeChatTurns = new Map<string, ActiveChatTurn>();
+
+function activeChatTurnKey(deviceId: string, turnId: string) {
+  return `${deviceId}:${turnId}`;
+}
+
+function writeStatus(stream: PassThrough, label: string, turnId?: string) {
+  stream.write(`event: status\ndata: ${JSON.stringify({ label, ...(turnId ? { turnId } : {}) })}\n\n`);
+}
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
 function sanitizeReply(text: string): string {
   return text
     .replace(/log_food/g, "完成記錄")
-    .replace(/get_daily_summary/g, "查詢今日攝取");
+    .replace(/get_daily_summary/g, "查詢今日攝取")
+    .replace(/protein_sources/g, "蛋白質來源")
+    .replace(/usedConservativeAssumption/g, "保守假設")
+    .replace(/quantityUncertaintyReason/g, "份量不確定原因")
+    .replace(/missing_quantity/g, "缺少份量")
+    .replace(/[（(]\s*\d+\s*\/\s*\d+\s*[）)]/g, "");
 }
 
 function formatHistoricalDateLabel(dateKey: string, currentDate = currentAppDate()): string {
@@ -75,10 +115,26 @@ async function finalizeAssistantReply(
   chatService: ReturnType<typeof createChatService>,
   deviceId: string,
   rawReply: string,
-): Promise<string> {
+  receiptIdentity?: ReceiptIdentity,
+  opts?: { status?: "complete" | "stopped" | "error" },
+): Promise<{ sanitized: string; assistantMessageId: string }> {
   const sanitized = sanitizeReply(rawReply);
-  await chatService.saveMessage(deviceId, "assistant", sanitized);
-  return sanitized;
+  const assistantMessage = await chatService.saveMessage(
+    deviceId,
+    "assistant",
+    sanitized,
+    opts?.status ? { status: opts.status } : undefined,
+  );
+  if (receiptIdentity) {
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: assistantMessage.id,
+      toolMessageId: receiptIdentity.toolMessageId,
+      mealTransactionId: receiptIdentity.mealTransactionId,
+      mealRevisionId: receiptIdentity.mealRevisionId,
+    });
+  }
+  return { sanitized, assistantMessageId: assistantMessage.id };
 }
 
 function createStreamingSanitizer() {
@@ -87,15 +143,18 @@ function createStreamingSanitizer() {
   return {
     push(token: string): string {
       tail += token;
-      const overlapLength = SENSITIVE_IDENTIFIERS.reduce((maxOverlap, identifier) => {
-        for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
-          if (tail.endsWith(identifier.slice(0, prefixLength))) {
-            return Math.max(maxOverlap, prefixLength);
+      const endsWithCompleteIdentifier = SENSITIVE_IDENTIFIERS.some((identifier) => tail.endsWith(identifier));
+      const overlapLength = endsWithCompleteIdentifier
+        ? 0
+        : SENSITIVE_IDENTIFIERS.reduce((maxOverlap, identifier) => {
+          for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
+            if (tail.endsWith(identifier.slice(0, prefixLength))) {
+              return Math.max(maxOverlap, prefixLength);
+            }
           }
-        }
 
-        return maxOverlap;
-      }, 0);
+          return maxOverlap;
+        }, 0);
 
       if (tail.length <= overlapLength) {
         return "";
@@ -127,6 +186,12 @@ async function parseMultipartRequest(
   let image:
     | { dataUri: string; path: string; mimeType: string; originalFilename?: string }
     | undefined;
+  const savedImagePaths: string[] = [];
+
+  async function reject(error: string, code: number) {
+    await Promise.all(savedImagePaths.map((imagePath) => cleanupUploadSafe(imagePath, request.log)));
+    return { error, code };
+  }
 
   const contentType = request.headers["content-type"] ?? "";
   if (!contentType.includes("multipart/form-data")) {
@@ -139,16 +204,20 @@ async function parseMultipartRequest(
       message = part.value as string;
     } else if (part.type === "file" && part.fieldname === "image") {
       if (!ALLOWED_TYPES.includes(part.mimetype)) {
-        return { error: "Invalid image type. Allowed: jpeg, png, webp", code: 400 };
+        return reject("Invalid image type. Allowed: jpeg, png, webp", 400);
+      }
+      if (image) {
+        return reject("Only one image upload is allowed", 400);
       }
       const buffer = await part.toBuffer();
       if (buffer.length > 5 * 1024 * 1024) {
-        return { error: "Image too large. Max 5MB.", code: 400 };
+        return reject("Image too large. Max 5MB.", 400);
       }
       const filename = `${crypto.randomUUID()}.${part.mimetype.split("/")[1]}`;
       await mkdir(uploadsDir, { recursive: true });
       const storedPath = join(uploadsDir, filename);
       await writeFile(storedPath, buffer);
+      savedImagePaths.push(storedPath);
       image = {
         dataUri: `data:${part.mimetype};base64,${buffer.toString("base64")}`,
         path: storedPath,
@@ -194,6 +263,85 @@ function publishSummarySafe(
       "Summary publish failed (non-fatal)",
     );
   }
+}
+
+function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
+  if (!loggedMeal) return undefined;
+
+  const {
+    mealId,
+    dateKey,
+    loggedAt,
+    imageAssetId,
+    imageUrl,
+    foodName,
+    itemCount,
+    calories,
+    protein,
+    carbs,
+    fat,
+  } = loggedMeal;
+  const items = Array.isArray(loggedMeal.items)
+    ? loggedMeal.items
+        .filter((item) => (
+          item &&
+          typeof item.name === "string" &&
+          item.name.trim().length > 0 &&
+          Number.isFinite(item.position) &&
+          Number.isFinite(item.calories) &&
+          Number.isFinite(item.protein) &&
+          Number.isFinite(item.carbs) &&
+          Number.isFinite(item.fat)
+        ))
+        .sort((left, right) => left.position - right.position)
+        .map((item) => ({
+          name: item.name.trim(),
+          position: item.position,
+          calories: item.calories,
+          protein: item.protein,
+          carbs: item.carbs,
+          fat: item.fat,
+        }))
+    : undefined;
+  if (
+    !foodName.trim() ||
+    !Number.isFinite(itemCount) ||
+    itemCount <= 0 ||
+    !Number.isFinite(calories) ||
+    !Number.isFinite(protein) ||
+    !Number.isFinite(carbs) ||
+    !Number.isFinite(fat)
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(typeof mealId === "string" ? { mealId } : {}),
+    ...(typeof dateKey === "string" ? { dateKey } : {}),
+    ...(typeof loggedAt === "string" ? { loggedAt } : {}),
+    ...(typeof imageAssetId === "string" || imageAssetId === null ? { imageAssetId } : {}),
+    ...(typeof imageUrl === "string" || imageUrl === null ? { imageUrl } : {}),
+    foodName,
+    itemCount,
+    calories,
+    protein,
+    carbs,
+    fat,
+    ...(items && items.length > 0 ? { items } : {}),
+  };
+}
+
+function buildReceiptIdentity(
+  loggedMeal: LoggedMealReceipt | undefined,
+  toolMessageId: string | undefined,
+): ReceiptIdentity | undefined {
+  if (!loggedMeal) return undefined;
+
+  return {
+    mealTransactionId: loggedMeal.mealId,
+    mealRevisionId: loggedMeal.mealRevisionId,
+    ...(toolMessageId ? { toolMessageId } : {}),
+  };
 }
 
 async function cleanupUploadSafe(imagePath: string | undefined, log: FastifyBaseLogger): Promise<void> {
@@ -271,41 +419,73 @@ async function handleStreamingReply(
   chatService: ReturnType<typeof createChatService>,
   deviceId: string,
   didLogMeal: boolean,
+  didMutateMeal: boolean,
   dailySummary: unknown,
+  receiptIdentity: ReceiptIdentity | undefined,
   affectedDate?: string,
+  partialMutationReply?: string,
   hooks?: OrchestratorHooks,
-): Promise<{ fullReply: string; didLogMeal: boolean; dailySummary?: unknown }> {
+  stopControl?: StreamingStopControl,
+): Promise<{
+  fullReply: string;
+  didLogMeal: boolean;
+  dailySummary?: unknown;
+  stopped?: boolean;
+  tokensStreamed: number;
+}> {
   const sanitizer = createStreamingSanitizer();
   let fullReply = "";
+  let tokensStreamed = 0;
   let hallucAccum = "";
   const heldTokens: string[] = [];
   let holdingChoicePrompt = false;
   let hallucinationDetected = false;
 
-  for await (const token of streamGenerator) {
-    hallucAccum += token;
-    if (CHOICE_PROMPT_PATTERN.test(hallucAccum)) {
-      hallucinationDetected = true;
-      break;
+  try {
+    for await (const token of streamGenerator) {
+      tokensStreamed += 1;
+      hallucAccum += token;
+      if (CHOICE_PROMPT_PATTERN.test(hallucAccum)) {
+        hallucinationDetected = true;
+        break;
+      }
+      if (holdingChoicePrompt || /方式\s*[12]/.test(hallucAccum)) {
+        holdingChoicePrompt = true;
+        heldTokens.push(token);
+        continue;
+      }
+      fullReply += token;
+      const sanitizedChunk = sanitizer.push(token);
+      if (sanitizedChunk) {
+        stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+      }
     }
-    if (holdingChoicePrompt || /方式\s*[12]/.test(hallucAccum)) {
-      holdingChoicePrompt = true;
-      heldTokens.push(token);
-      continue;
+  } catch (error) {
+    if (!stopControl?.isStopped() && !stopControl?.signal.aborted) {
+      throw error;
     }
-    fullReply += token;
-    const sanitizedChunk = sanitizer.push(token);
-    if (sanitizedChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
-    }
+  }
+
+  if (stopControl?.isStopped() || stopControl?.signal.aborted) {
+    const stoppedReply = sanitizeReply(fullReply) || "（已停止）";
+    await finalizeAssistantReply(chatService, deviceId, stoppedReply, receiptIdentity, { status: "stopped" });
+    return {
+      fullReply: stoppedReply,
+      didLogMeal,
+      dailySummary,
+      stopped: true,
+      tokensStreamed,
+    };
   }
 
   if (hallucinationDetected) {
     hooks?.onFallback?.("hallucination_detected");
-    const retryMsg = "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
-    await finalizeAssistantReply(chatService, deviceId, retryMsg);
+    const retryMsg = didMutateMeal && partialMutationReply
+      ? partialMutationReply
+      : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
+    await finalizeAssistantReply(chatService, deviceId, retryMsg, receiptIdentity);
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
-    return { fullReply: retryMsg, didLogMeal, dailySummary };
+    return { fullReply: retryMsg, didLogMeal, dailySummary, tokensStreamed };
   }
 
   for (const heldToken of heldTokens) {
@@ -328,8 +508,8 @@ async function handleStreamingReply(
   if (finalChunk) {
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
   }
-  await finalizeAssistantReply(chatService, deviceId, fullReply);
-  return { fullReply, didLogMeal, dailySummary };
+  await finalizeAssistantReply(chatService, deviceId, fullReply, receiptIdentity);
+  return { fullReply, didLogMeal, dailySummary, tokensStreamed };
 }
 
 async function handleOrchestratorSSE(
@@ -346,6 +526,7 @@ async function handleOrchestratorSSE(
   image: { dataUri: string; path: string; mimeType: string; originalFilename?: string } | undefined,
   startedAt: number,
   hooks?: OrchestratorHooks,
+  stopControl?: StreamingStopControl,
 ): Promise<void> {
   let durableAssetId: string | undefined;
   let durableAssetRef: string | undefined;
@@ -356,10 +537,13 @@ async function handleOrchestratorSSE(
   let streamDailyTargets: unknown;
   let streamAffectedDate: string | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
+  let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
+  let streamReceiptIdentity: ReceiptIdentity | undefined;
 
   try {
+    writeStatus(stream, "思考中...", stopControl?.turnId);
     if (image) {
-      stream.write(`event: status\ndata: ${JSON.stringify({ label: "分析圖片中..." })}\n\n`);
+      writeStatus(stream, "分析圖片中...", stopControl?.turnId);
     }
 
     const durableAsset = await createDurableAssetIfNeeded(
@@ -377,12 +561,13 @@ async function handleOrchestratorSSE(
       durableAssetRef,
       {
         onStatus: (label: string) => {
-          stream.write(`event: status\ndata: ${JSON.stringify({ label })}\n\n`);
+          writeStatus(stream, label, stopControl?.turnId);
         },
         onUserMessageSaved: () => {
           userMessagePersisted = true;
         },
         hooks,
+        signal: stopControl?.signal,
       }
     );
 
@@ -394,6 +579,8 @@ async function handleOrchestratorSSE(
       streamDailyTargets = result.dailyTargets;
       streamAffectedDate = affectedDate;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
+      streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
+      streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -401,16 +588,47 @@ async function handleOrchestratorSSE(
         deps.chatService,
         deviceId,
         didLogMeal,
+        streamDidMutateMeal,
         dailySummary,
+        streamReceiptIdentity,
         streamAffectedDate,
+        streamLoggedMeal ?? (streamDidMutateMeal ? PARTIAL_MUTATION_FALLBACK : undefined),
         hooks,
+        stopControl,
       );
       streamDidLogMeal = streamResult.didLogMeal;
       streamDailySummary = streamResult.dailySummary;
 
+      if (streamResult.stopped) {
+        const stoppedData = {
+          stopped: true,
+          turnId: stopControl?.turnId,
+          tokensStreamed: streamResult.tokensStreamed,
+          didLogMeal: streamDidLogMeal,
+          didMutateMeal: streamDidMutateMeal,
+          ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
+          ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
+          ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
+          ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
+        };
+        stream.write(`event: stopped\ndata: ${JSON.stringify(stoppedData)}\n\n`);
+        logChatTurnCompleted(deps.log, {
+          source: "sse",
+          didLogMeal: streamDidLogMeal,
+          didMutateMeal: streamDidMutateMeal,
+          hadImage: Boolean(image),
+          latencyMs: Date.now() - startedAt,
+          stopped: true,
+          tokensStreamed: streamResult.tokensStreamed,
+        });
+        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
+        return;
+      }
+
       const doneData = {
         didLogMeal: streamDidLogMeal,
         didMutateMeal: streamDidMutateMeal,
+        ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
@@ -432,12 +650,20 @@ async function handleOrchestratorSSE(
       streamDailyTargets = dailyTargets;
       streamAffectedDate = affectedDate;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
+      streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
+      streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
       const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
-      const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, normalizedReply);
+      const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
+        deps.chatService,
+        deviceId,
+        normalizedReply,
+        streamReceiptIdentity,
+      );
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
         didLogMeal,
         didMutateMeal: streamDidMutateMeal,
+        ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(dailySummary ? { dailySummary } : {}),
         ...(dailyTargets ? { dailyTargets } : {}),
         ...(affectedDate ? { affectedDate } : {}),
@@ -459,11 +685,21 @@ async function handleOrchestratorSSE(
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
     try {
-      if (!userMessagePersisted && durableAssetRef) {
-        await deps.chatService.saveMessage(deviceId, "user", message, { imagePath: durableAssetRef });
+      if (!userMessagePersisted) {
+        await deps.chatService.saveMessage(
+          deviceId,
+          "user",
+          message,
+          durableAssetRef ? { imagePath: durableAssetRef } : undefined,
+        );
         userMessagePersisted = true;
       }
-      const sanitizedFallback = await finalizeAssistantReply(deps.chatService, deviceId, fallback);
+      const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
+        deps.chatService,
+        deviceId,
+        fallback,
+        streamReceiptIdentity,
+      );
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
     } catch {
       // If history persistence also fails, still close the stream with done.
@@ -472,6 +708,7 @@ async function handleOrchestratorSSE(
     const doneData = {
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
+      ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
@@ -483,6 +720,7 @@ async function handleOrchestratorSSE(
       didMutateMeal: streamDidMutateMeal,
       hadImage: Boolean(image),
       latencyMs: Date.now() - startedAt,
+      ...(stopControl?.isStopped() ? { stopped: true } : {}),
     });
     publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
   } finally {
@@ -509,6 +747,37 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     uploadsDir: injectedUploadsDir,
   } = deps;
 
+  app.post("/api/chat/stop", async (request, reply) => {
+    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
+    if (!session.ok) {
+      if (session.clearCookies) {
+        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+      }
+      return reply.code(401).send({ error: session.error });
+    }
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
+    }
+
+    const body = request.body as { turnId?: unknown } | undefined;
+    const turnId = body?.turnId;
+    if (typeof turnId !== "string" || !turnId.trim()) {
+      return reply.code(400).send({ error: "turnId is required" });
+    }
+
+    const activeTurn = activeChatTurns.get(activeChatTurnKey(session.deviceId, turnId));
+    if (!activeTurn) {
+      return reply.code(404).send({ error: "Active turn not found" });
+    }
+
+    activeTurn.stopRequested = true;
+    if (!activeTurn.controller.signal.aborted) {
+      activeTurn.controller.abort();
+    }
+
+    return { stopped: true, turnId };
+  });
+
   app.post("/api/chat", async (request, reply) => {
     const session = await resolveGuestSession(request, { deviceService, guestSessionService });
     if (!session.ok) {
@@ -526,6 +795,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const parseResult = await parseMultipartRequest(request, resolvedUploadsDir);
 
     if ("error" in parseResult) {
+      request.log.warn({ event: "chat_multipart_rejected", reason: parseResult.error }, "Chat multipart request rejected");
       return reply.code(parseResult.code).send({ error: parseResult.error });
     }
 
@@ -547,6 +817,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonDailyTargets: unknown;
       let jsonAffectedDate: string | undefined;
       let jsonLoggedMealFallback: string | undefined;
+      let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
+      let jsonReceiptIdentity: ReceiptIdentity | undefined;
 
       try {
         const durableAsset = await createDurableAssetIfNeeded(assetService, deviceId, image);
@@ -573,6 +845,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonLoggedMealFallback = result.loggedMeal
           ? buildPartialSuccessLoggedReply(result.loggedMeal)
           : undefined;
+        jsonLoggedMealReceipt = projectLoggedMealReceipt(result.loggedMeal);
+        jsonReceiptIdentity = buildReceiptIdentity(result.loggedMeal, result.loggedMealToolMessageId);
 
         if (result.didLogMeal && !result.dailySummary) {
           throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
@@ -581,25 +855,41 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
           const { streamGenerator, didLogMeal, dailySummary, affectedDate } = result;
+          const didMutateMeal = result.didMutateMeal ?? didLogMeal;
           let fullReply = "";
+          let hallucinationDetected = false;
           for await (const token of streamGenerator) {
             fullReply += token;
+            if (CHOICE_PROMPT_PATTERN.test(fullReply)) {
+              hallucinationDetected = true;
+              break;
+            }
           }
-          const normalizedReply = appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
-          const sanitized = await finalizeAssistantReply(chatService, deviceId, normalizedReply);
+          const fallbackReply = didMutateMeal
+            ? (jsonLoggedMealFallback ?? PARTIAL_MUTATION_FALLBACK)
+            : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
+          const replyText = hallucinationDetected
+            ? fallbackReply
+            : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
+          const { sanitized } = await finalizeAssistantReply(
+            chatService,
+            deviceId,
+            replyText,
+            jsonReceiptIdentity,
+          );
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
           // C1: try/catch ensures publish failure never changes the HTTP response or status code.
           publishSummarySafe(
             publisher,
             deviceId,
-            result.didMutateMeal ?? didLogMeal,
+            didMutateMeal,
             dailySummary,
             request.log,
           );
           logChatTurnCompleted(request.log, {
             source: "json",
             didLogMeal,
-            didMutateMeal: result.didMutateMeal ?? didLogMeal,
+            didMutateMeal,
             hadImage,
             latencyMs: Date.now() - chatTurnStartedAt,
           });
@@ -607,6 +897,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             reply: sanitized,
             didLogMeal,
             ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
+            ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
             ...(dailySummary ? { dailySummary } : {}),
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
             ...(affectedDate ? { affectedDate } : {}),
@@ -615,7 +906,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
         const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate } = result;
         const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
-        const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, normalizedReply);
+        const { sanitized: sanitizedJson } = await finalizeAssistantReply(
+          chatService,
+          deviceId,
+          normalizedReply,
+          jsonReceiptIdentity,
+        );
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, request.log);
@@ -630,6 +926,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           reply: sanitizedJson,
           didLogMeal,
           ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
+          ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(dailySummary ? { dailySummary } : {}),
           ...(dailyTargets ? { dailyTargets } : {}),
           ...(affectedDate ? { affectedDate } : {}),
@@ -640,11 +937,21 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           : jsonDidMutateMeal
             ? PARTIAL_MUTATION_FALLBACK
             : UNIFIED_FALLBACK;
-        if (!userMessagePersisted && durableAssetRef) {
-          await chatService.saveMessage(deviceId, "user", message, { imagePath: durableAssetRef });
+        if (!userMessagePersisted) {
+          await chatService.saveMessage(
+            deviceId,
+            "user",
+            message,
+            durableAssetRef ? { imagePath: durableAssetRef } : undefined,
+          );
           userMessagePersisted = true;
         }
-        const sanitizedJson = await finalizeAssistantReply(chatService, deviceId, fallback);
+        const { sanitized: sanitizedJson } = await finalizeAssistantReply(
+          chatService,
+          deviceId,
+          fallback,
+          jsonReceiptIdentity,
+        );
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, request.log);
@@ -659,6 +966,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           reply: sanitizedJson,
           didLogMeal: jsonDidLogMeal,
           ...(jsonDidMutateMeal ? { didMutateMeal: true } : {}),
+          ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}),
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
           ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),
@@ -679,6 +987,20 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     // SSE path: open stream BEFORE awaiting orchestrator so status labels are
     // visible during the real waiting period (D-03, D-04, D-05).
     const stream = new PassThrough();
+    const turnId = crypto.randomUUID();
+    const turnKey = activeChatTurnKey(deviceId, turnId);
+    const activeTurn: ActiveChatTurn = {
+      controller: new AbortController(),
+      stopRequested: false,
+      completed: false,
+    };
+    activeChatTurns.set(turnKey, activeTurn);
+
+    request.raw.on("close", () => {
+      if (!activeTurn.completed && !activeTurn.stopRequested && !activeTurn.controller.signal.aborted) {
+        activeTurn.controller.abort();
+      }
+    });
 
     reply
       .code(200)
@@ -698,7 +1020,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         image,
         chatTurnStartedAt,
         hooks,
-      );
+        {
+          turnId,
+          signal: activeTurn.controller.signal,
+          isStopped: () => activeTurn.stopRequested,
+        },
+      ).finally(() => {
+        activeTurn.completed = true;
+        activeChatTurns.delete(turnKey);
+      });
     });
 
     return reply;

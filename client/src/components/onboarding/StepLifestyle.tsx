@@ -47,107 +47,95 @@ export function StepLifestyle({ onNext, onBack, initialData, errors, onFieldEdit
   }
 
   return (
-    <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
-      <div className="mb-3 text-xs font-bold tracking-widest uppercase" style={{ color: "var(--orange)", letterSpacing: "0.2em" }}>
-        STEP 4 / 6
+    <div className="sp-onboarding-step">
+      <div className="sp-onboarding-copy">
+        <h2>
+          生活與訓練習慣
+        </h2>
+        <p>
+          這會影響你的每日消耗量估算。
+        </p>
       </div>
-      <h2 className="mb-2 text-2xl font-bold" style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>
-        生活與訓練習慣
-      </h2>
-      <p className="mb-6 text-sm" style={{ color: "var(--text-2)" }}>
-        這會影響你的每日消耗量估算。
-      </p>
 
-      {/* Activity Level */}
-      <div className="mb-5">
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>日常活動量</label>
-        <div className="flex flex-wrap gap-2">
+      <div className="sp-onboarding-field-group">
+        <label className="sp-onboarding-field-label">日常活動量</label>
+        <div className="sp-onboarding-option-grid">
           {ACTIVITY_OPTIONS.map((opt) => (
             <button
               key={opt.value}
+              type="button"
               onClick={() => {
                 setActivity(opt.value);
                 onFieldEdit?.("activityLevel");
               }}
               aria-pressed={activity === opt.value}
-              className="rounded-lg px-4 py-2 text-sm"
-              style={{
-                background: activity === opt.value ? "var(--orange)" : "var(--bg-raised)",
-                color: activity === opt.value ? "#000" : "var(--text)",
-                border: `1px solid ${activity === opt.value ? "var(--orange)" : "var(--border)"}`,
-              }}
             >
               {opt.label}
             </button>
           ))}
         </div>
         {errors?.activityLevel ? (
-          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+          <p className="sp-onboarding-error" role="alert">
             {errors.activityLevel}
           </p>
         ) : null}
       </div>
 
-      {/* Training Frequency */}
-      <div className="mb-5">
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>訓練頻率</label>
-        <div className="flex flex-wrap gap-2">
+      <div className="sp-onboarding-field-group">
+        <label className="sp-onboarding-field-label">訓練頻率</label>
+        <div className="sp-onboarding-option-grid sp-onboarding-option-grid-compact">
           {TRAINING_OPTIONS.map((opt) => (
             <button
               key={opt.value}
+              type="button"
               onClick={() => {
                 setTraining(opt.value);
                 onFieldEdit?.("trainingFrequency");
               }}
               aria-pressed={training === opt.value}
-              className="rounded-lg px-4 py-2 text-sm"
-              style={{
-                background: training === opt.value ? "var(--orange)" : "var(--bg-raised)",
-                color: training === opt.value ? "#000" : "var(--text)",
-                border: `1px solid ${training === opt.value ? "var(--orange)" : "var(--border)"}`,
-              }}
             >
               {opt.label}
             </button>
           ))}
         </div>
         {errors?.trainingFrequency ? (
-          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+          <p className="sp-onboarding-error" role="alert">
             {errors.trainingFrequency}
           </p>
         ) : null}
       </div>
 
-      {/* Allergies */}
-      <div className="mb-6">
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-2)" }}>過敏/飲食限制（選填）</label>
-        <input
-          type="text"
-          value={allergies}
-          onChange={(e) => {
-            setAllergies(e.target.value);
-            onFieldEdit?.("allergies");
-          }}
-          placeholder="例如：花生、乳糖不耐、素食..."
-          className="w-full rounded-lg px-4 py-3 text-sm"
-          style={{ background: "var(--bg-raised)", color: "var(--text)", border: "1px solid var(--border)" }}
-        />
+      <div className="sp-onboarding-field-group">
+        <label className="sp-onboarding-field-label" htmlFor="onboarding-allergies">過敏/飲食限制（選填）</label>
+        <div className="sp-onboarding-input-card">
+          <input
+            id="onboarding-allergies"
+            type="text"
+            value={allergies}
+            onChange={(e) => {
+              setAllergies(e.target.value);
+              onFieldEdit?.("allergies");
+            }}
+            placeholder="例如：花生、乳糖不耐、素食..."
+            className="sp-onboarding-input"
+          />
+        </div>
         {errors?.allergies ? (
-          <p className="mt-2 text-sm" style={{ color: "var(--orange)" }}>
+          <p className="sp-onboarding-error" role="alert">
             {errors.allergies}
           </p>
         ) : null}
       </div>
 
-      <div className="flex gap-3">
-        <button onClick={onBack} className="rounded-xl px-5 py-3 text-sm font-medium" style={{ color: "var(--text-2)", border: "1px solid var(--border)" }}>
+      <div className="sp-onboarding-actions">
+        <button type="button" className="sp-onboarding-secondary" onClick={onBack}>
           上一步
         </button>
         <button
+          type="button"
           onClick={handleNext}
           disabled={!canProceed}
-          className="flex-1 rounded-xl py-3 text-sm font-bold disabled:opacity-40"
-          style={{ background: "var(--orange)", color: "#000" }}
+          className="sp-onboarding-primary"
         >
           下一步
         </button>

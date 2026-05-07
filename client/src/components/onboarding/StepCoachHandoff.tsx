@@ -11,32 +11,35 @@ interface Props {
 export function StepCoachHandoff({ loading, transportError, result, onStart, onRetry }: Props) {
   if (loading) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-8" style={{ background: "var(--bg)" }}>
-        <div className="mb-4 text-4xl">🏋️</div>
-        <h2 className="mb-2 text-xl font-bold" style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>
-          教練正在分析你的資料…
-        </h2>
-        <p className="text-sm" style={{ color: "var(--text-2)" }}>
-          根據你提供的數據，量身打造營養計畫
-        </p>
+      <div className="sp-onboarding-step sp-onboarding-handoff">
+        <div className="sp-onboarding-result-card">
+          <div className="sp-onboarding-result-icon" aria-hidden="true">🏋️</div>
+          <h2>
+            教練正在分析你的資料…
+          </h2>
+          <p>
+            根據你提供的數據，量身打造營養計畫
+          </p>
+        </div>
       </div>
     );
   }
 
   if (transportError) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-8" style={{ background: "var(--bg)" }}>
-        <h2 className="mb-4 text-xl font-bold" style={{ color: "var(--text)" }}>
-          連線失敗
-        </h2>
-        <p className="mb-6 text-sm" style={{ color: "var(--text-2)" }}>{transportError}</p>
-        <button
-          onClick={onRetry}
-          className="rounded-xl px-8 py-3 text-sm font-bold"
-          style={{ background: "var(--orange)", color: "#000" }}
-        >
-          重試
-        </button>
+      <div className="sp-onboarding-step sp-onboarding-handoff">
+        <div className="sp-onboarding-result-card sp-onboarding-result-card-error" role="alert">
+          <div className="sp-onboarding-step-label">
+            第 06 步 / 共 06 步
+          </div>
+          <h2>
+            連線失敗
+          </h2>
+          <p>{transportError}</p>
+          <button type="button" className="sp-onboarding-primary" onClick={onRetry}>
+            重試
+          </button>
+        </div>
       </div>
     );
   }
@@ -46,54 +49,47 @@ export function StepCoachHandoff({ loading, transportError, result, onStart, onR
   const { dailyTargets, coachExplanation } = result;
 
   return (
-    <div className="flex min-h-screen flex-col justify-center p-8" style={{ background: "var(--bg)" }}>
-      <div className="mb-3 text-xs font-bold tracking-widest uppercase" style={{ color: "var(--orange)", letterSpacing: "0.2em" }}>
-        YOUR PLAN
+    <div className="sp-onboarding-step sp-onboarding-handoff">
+      <div className="sp-onboarding-copy">
+        <div className="sp-onboarding-kicker">你的計畫已準備好</div>
+        <h2>
+          每日目標
+        </h2>
       </div>
-      <h2 className="mb-6 text-2xl font-bold" style={{ color: "var(--text)", fontFamily: "var(--font-display)" }}>
-        你的專屬營養計畫
-      </h2>
 
-      {/* Targets Grid */}
-      <div className="mb-6 grid grid-cols-2 gap-3">
+      <div className="sp-onboarding-target-grid">
         {[
-          { label: "每日熱量", value: `${dailyTargets.calories}`, unit: "kcal", color: "var(--orange)" },
-          { label: "蛋白質", value: `${dailyTargets.protein}`, unit: "g", color: "var(--green)" },
-          { label: "碳水化合物", value: `${dailyTargets.carbs}`, unit: "g", color: "var(--blue)" },
-          { label: "脂肪", value: `${dailyTargets.fat}`, unit: "g", color: "var(--text-2)" },
-        ].map(({ label, value, unit, color }) => (
+          { label: "每日熱量", value: `${dailyTargets.calories}`, unit: "kcal" },
+          { label: "蛋白質", value: `${dailyTargets.protein}`, unit: "g" },
+          { label: "碳水化合物", value: `${dailyTargets.carbs}`, unit: "g" },
+          { label: "脂肪", value: `${dailyTargets.fat}`, unit: "g" },
+        ].map(({ label, value, unit }) => (
           <div
             key={label}
-            className="rounded-xl p-4"
-            style={{ background: "var(--bg-raised)", border: "1px solid var(--border)" }}
+            className="sp-onboarding-target-card"
           >
-            <div className="mb-1 text-xs" style={{ color: "var(--text-2)" }}>{label}</div>
-            <div className="text-2xl font-bold" style={{ color, fontFamily: "var(--font-display)" }}>
+            <div className="sp-onboarding-target-label">{label}</div>
+            <div className="sp-onboarding-target-value">
               {value}
-              <span className="ml-1 text-xs font-normal" style={{ color: "var(--text-2)" }}>{unit}</span>
+              <span>{unit}</span>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Coach Explanation */}
-      <div
-        className="mb-8 rounded-xl p-5"
-        style={{ background: "var(--bg-raised)", border: "1px solid var(--border)" }}
-      >
-        <div className="mb-2 text-xs font-medium uppercase tracking-wide" style={{ color: "var(--orange)" }}>
+      <div className="sp-onboarding-result-card">
+        <div className="sp-onboarding-kicker">
           教練說明
         </div>
-        <p className="text-sm leading-relaxed" style={{ color: "var(--text)" }}>
+        <p>
           {coachExplanation}
         </p>
       </div>
 
-      {/* CTA */}
       <button
+        type="button"
         onClick={onStart}
-        className="w-full rounded-xl py-4 text-base font-bold"
-        style={{ background: "var(--orange)", color: "#000" }}
+        className="sp-onboarding-primary"
       >
         開始記錄飲食
       </button>

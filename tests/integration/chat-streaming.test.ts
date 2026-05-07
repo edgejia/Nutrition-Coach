@@ -6,11 +6,16 @@ import { buildApp } from "../../server/app.js";
 import type { FastifyInstance } from "fastify";
 import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ToolCall, ToolDefinition } from "../../server/llm/types.js";
 
+type LLMCallOptions = { signal?: AbortSignal };
+type RoundQueueItem = LLMRoundResult | Error | ((opts?: LLMCallOptions) => LLMRoundResult);
+
 class StreamingLLMProvider implements LLMProvider {
   private chatQueue: Array<LLMResponse | Error> = [];
-  private roundQueue: Array<LLMRoundResult | Error> = [];
+  private roundQueue: Array<RoundQueueItem> = [];
   private callIndex = 0;
   public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
+  public lastSignal: AbortSignal | undefined;
+  public abortObserved: Promise<void> = Promise.resolve();
 
   queueChatResponse(response: LLMResponse) {
     this.chatQueue.push(response);
@@ -26,6 +31,20 @@ class StreamingLLMProvider implements LLMProvider {
 
   queueChatStreamError(tokens: string[], error: Error) {
     this.roundQueue.push({ kind: "stream", streamGenerator: streamTokensThenThrow(tokens, error) });
+  }
+
+  queueAbortableChatStream(tokens: string[]) {
+    let resolveAbort: () => void = () => {};
+    this.abortObserved = new Promise<void>((resolve) => {
+      resolveAbort = resolve;
+    });
+    this.roundQueue.push((opts?: LLMCallOptions) => {
+      this.lastSignal = opts?.signal;
+      return {
+        kind: "stream",
+        streamGenerator: streamTokensUntilAbort(tokens, opts?.signal, resolveAbort),
+      };
+    });
   }
 
   queueRoundResponse(response: LLMResponse) {
@@ -49,11 +68,18 @@ class StreamingLLMProvider implements LLMProvider {
     return { content: "Mock: 已記錄您的飲食！" };
   }
 
-  async chatRound(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMRoundResult> {
+  async chatRound(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    opts?: LLMCallOptions,
+  ): Promise<LLMRoundResult> {
     this.chatCalls.push({ messages, tools });
     const item = this.roundQueue.shift();
     if (item instanceof Error) {
       throw item;
+    }
+    if (typeof item === "function") {
+      return item(opts);
     }
     if (item) {
       return item;
@@ -73,6 +99,46 @@ async function* streamTokensThenThrow(tokens: string[], error: Error): AsyncGene
     yield token;
   }
   throw error;
+}
+
+async function* streamTokensUntilAbort(
+  tokens: string[],
+  signal: AbortSignal | undefined,
+  onAbort: () => void,
+): AsyncGenerator<string> {
+  const [firstToken, ...remainingTokens] = tokens;
+  if (firstToken) {
+    yield firstToken;
+  }
+
+  if (!signal) {
+    return;
+  }
+
+  if (!signal.aborted) {
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, 2_000);
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timeout);
+          onAbort();
+          resolve();
+        },
+        { once: true },
+      );
+    });
+  } else {
+    onAbort();
+  }
+
+  if (signal.aborted) {
+    return;
+  }
+
+  for (const token of remainingTokens) {
+    yield token;
+  }
 }
 
 function createLogFoodToolCall(): ToolCall {
@@ -136,6 +202,13 @@ function createGroupedLogFoodToolCall(): ToolCall {
             carbs: 12,
             fat: 4,
           },
+          {
+            food_name: "水煮蛋",
+            calories: 80,
+            protein: 7,
+            carbs: 1,
+            fat: 5,
+          },
         ],
       }),
     },
@@ -160,6 +233,46 @@ function createUpdateGoalsToolCall(): ToolCall {
     function: {
       name: "update_goals",
       arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+    },
+  };
+}
+
+function createFindMealsToolCall(action: "update" | "delete", query: string): ToolCall {
+  return {
+    id: `find_${action}`,
+    type: "function",
+    function: {
+      name: "find_meals",
+      arguments: JSON.stringify({ action, query }),
+    },
+  };
+}
+
+function createUpdateMealToolCall(mealId: string): ToolCall {
+  return {
+    id: "update_meal_1",
+    type: "function",
+    function: {
+      name: "update_meal",
+      arguments: JSON.stringify({
+        meal_id: mealId,
+        food_name: "半碗牛肉麵",
+        calories: 360,
+        protein: 20,
+        carbs: 45,
+        fat: 10,
+      }),
+    },
+  };
+}
+
+function createDeleteMealToolCall(mealId: string): ToolCall {
+  return {
+    id: "delete_meal_1",
+    type: "function",
+    function: {
+      name: "delete_meal",
+      arguments: JSON.stringify({ meal_id: mealId }),
     },
   };
 }
@@ -199,6 +312,10 @@ function parseSSEEvents(body: string): Array<{ event: string; data: string }> {
       const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length) ?? "";
       return { event, data };
     });
+}
+
+function assertNoSuccessfulLogInternalCopy(text: string) {
+  assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
 }
 
 describe("chat-streaming", () => {
@@ -260,6 +377,22 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat returns readable validation error for unsupported upload types", async () => {
+    const form = new FormData();
+    form.append("message", "這是什麼食物");
+    form.append("image", new Blob(["not-heic"], { type: "image/heic" }), "food.heic");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Invalid image type. Allowed: jpeg, png, webp" });
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
   it("POST /api/chat stream includes event: chunk", async () => {
     mockLLM.queueChatStream(["直接", "回覆"]);
 
@@ -291,12 +424,13 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat stream ends with event: done", async () => {
-    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+  it("POST /api/chat stream ends with event: done and structured loggedMeal", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
     mockLLM.queueChatStream(["測試", "回覆"]);
 
     const form = new FormData();
-    form.append("message", "我吃了蘋果");
+    form.append("message", "我吃了雞腿便當");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "lunch.png");
 
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -315,23 +449,304 @@ describe("chat-streaming", () => {
 
       const text = await readStreamUntil(reader, "event: done");
       assert.match(text, /event: done/);
+      assert.equal(parseSSEEvents(text).filter((event) => event.event === "done").length, 1);
 
       const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
       assert.ok(doneDataMatch);
-      assert.doesNotThrow(() => JSON.parse(doneDataMatch[1]));
+      const donePayload = JSON.parse(doneDataMatch[1]) as {
+        didLogMeal: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: unknown;
+        loggedMeal?: {
+          mealId?: string;
+          dateKey?: string;
+          loggedAt?: string;
+          imageAssetId?: string | null;
+          imageUrl?: string | null;
+          foodName?: string;
+          calories?: unknown;
+          protein?: unknown;
+          carbs?: unknown;
+          fat?: unknown;
+        };
+      };
+      assert.equal(donePayload.didLogMeal, true);
+      assert.equal(donePayload.didMutateMeal, true);
+      assert.ok(donePayload.dailySummary);
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.match(donePayload.loggedMeal?.dateKey ?? "", /^\d{4}-\d{2}-\d{2}$/);
+      assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+      assert.ok(donePayload.loggedMeal?.imageAssetId);
+      assert.equal(donePayload.loggedMeal?.imageUrl, `/api/assets/${donePayload.loggedMeal.imageAssetId}`);
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
+      assert.equal(typeof donePayload.loggedMeal?.calories, "number");
+      assert.equal(typeof donePayload.loggedMeal?.protein, "number");
+      assert.equal(typeof donePayload.loggedMeal?.carbs, "number");
+      assert.equal(typeof donePayload.loggedMeal?.fat, "number");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=5`, {
         headers: { cookie: sessionCookieHeader },
       });
       assert.equal(historyRes.status, 200);
-      const historyJson = await historyRes.json();
+      const historyJson = await historyRes.json() as {
+        messages: Array<{
+          role: string;
+          content: string;
+          loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
+        }>;
+      };
       assert.equal(historyJson.messages.at(-1)?.role, "assistant");
-      assert.equal(historyJson.messages.at(-1)?.content, "測試回覆");
+      assert.match(historyJson.messages.at(-1)?.content ?? "", /已記錄雞腿便當/);
+      assert.equal(historyJson.messages.at(-1)?.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
+      assert.equal(historyJson.messages.at(-1)?.loggedMeal?.imageAssetId, donePayload.loggedMeal?.imageAssetId);
+      assert.equal(historyJson.messages.at(-1)?.loggedMeal?.imageUrl, donePayload.loggedMeal?.imageUrl);
     } finally {
       if (timeout) clearTimeout(timeout);
       if (app.server.listening) {
         await app.close();
       }
+    }
+  });
+
+  it("POST /api/chat SSE successful missing quantity reply hides internal metadata and keeps grouped name", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_grouped_missing_quantity_sse",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+              { food_name: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream([
+      "已記錄雞腿、白飯、青菜，約 580 kcal，可信蛋白 99 g。",
+      "log_food protein_sources usedConservativeAssumption quantityUncertaintyReason missing_quantity",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿、白飯和青菜");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+
+      assert.match(chunkText, /份量是主要誤差/);
+      assert.match(chunkText, /可再補份量修正/);
+      assert.match(chunkText, /估約 580 kcal（區間 493-667）/);
+      assert.match(chunkText, /蛋白質 24 g/);
+      assert.doesNotMatch(chunkText, /約 580 kcal，可信蛋白 99 g/);
+      assertNoSuccessfulLogInternalCopy(chunkText);
+
+      const doneEvent = events.find((event) => event.event === "done");
+      assert.ok(doneEvent);
+      const donePayload = JSON.parse(doneEvent.data) as {
+        loggedMeal?: {
+          foodName?: string;
+          itemCount?: number;
+          items?: Array<{
+            name: string;
+            position: number;
+            calories: number;
+            protein: number;
+            carbs: number;
+            fat: number;
+          }>;
+        };
+      };
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿、白飯、青菜");
+      assert.equal(donePayload.loggedMeal?.itemCount, 3);
+      assert.deepEqual(donePayload.loggedMeal?.items, [
+        { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
+        { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 1 },
+      ]);
+      assertNoSuccessfulLogInternalCopy(JSON.stringify(donePayload.loggedMeal));
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+    }
+  });
+
+  it("POST /api/chat SSE successful soy log ignores model filler when receipt has no protein explanation trigger", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_soy_sse",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "豆漿",
+            quantity_ml: 300,
+            calories: 120,
+            protein: 8,
+            carbs: 10,
+            fat: 4,
+            protein_sources: [
+              { name: "豆漿", protein: 8, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["已記錄豆漿，約 120 kcal、可信蛋白 8 g。豆漿為主要蛋白來源。"]);
+
+    const form = new FormData();
+    form.append("message", "一杯豆漿");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      const doneEvent = events.find((event) => event.event === "done");
+      assert.ok(doneEvent);
+      const donePayload = JSON.parse(doneEvent.data) as { loggedMeal?: { protein?: number } };
+
+      assert.match(chunkText, /已記錄豆漿/);
+      assert.match(chunkText, /120 kcal/);
+      assert.match(chunkText, /蛋白質 8 g/);
+      assert.equal(donePayload.loggedMeal?.protein, 8);
+      assert.doesNotMatch(chunkText, /豆漿為主要蛋白來源|可信蛋白/);
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+    }
+  });
+
+  it("POST /api/chat/stop gracefully stops the active turn and persists stopped partial content", async () => {
+    mockLLM.queueAbortableChatStream(["已", "完成", "記錄"]);
+
+    const form = new FormData();
+    form.append("message", "請給我一些飲食建議");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const firstText = await readStreamUntil(reader, "event: chunk");
+      const firstEvents = parseSSEEvents(firstText);
+      const startPayload = firstEvents
+        .filter((event) => event.event === "status")
+        .map((event) => JSON.parse(event.data) as { turnId?: string })
+        .find((payload) => typeof payload.turnId === "string");
+      const turnId = startPayload?.turnId;
+
+      assert.ok(turnId, "stream must expose a turnId before stop");
+
+      const stopRes = await fetch(`${address}/api/chat/stop`, {
+        method: "POST",
+        headers: {
+          cookie: sessionCookieHeader,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ turnId }),
+      });
+      assert.equal(stopRes.status, 200);
+      assert.deepEqual(await stopRes.json(), { stopped: true, turnId });
+      await mockLLM.abortObserved;
+
+      const stoppedText = firstText + await readStreamUntil(reader, "event: stopped");
+      const events = parseSSEEvents(stoppedText);
+      const stoppedEvents = events.filter((event) => event.event === "stopped");
+      const doneEvents = events.filter((event) => event.event === "done");
+      assert.equal(stoppedEvents.length, 1);
+      assert.equal(doneEvents.length, 0, "stopped stream must not also emit done");
+      assert.equal(mockLLM.lastSignal?.aborted, true, "provider AbortSignal must be aborted");
+
+      const stoppedPayload = JSON.parse(stoppedEvents[0]!.data) as {
+        stopped?: boolean;
+        tokensStreamed?: number;
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: unknown;
+        loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
+      };
+      assert.equal(stoppedPayload.stopped, true);
+      assert.equal(stoppedPayload.tokensStreamed, 1);
+      assert.equal(stoppedPayload.didLogMeal, false);
+      assert.equal(stoppedPayload.didMutateMeal, false);
+      assert.equal(stoppedPayload.dailySummary, undefined);
+      assert.equal(stoppedPayload.loggedMeal, undefined);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as {
+        messages: Array<{
+          role: string;
+          content: string;
+          status?: string;
+          loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
+        }>;
+      };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1, "stopped stream must persist one assistant row");
+      assert.equal(assistantMessages[0]?.content, "已");
+      assert.equal(assistantMessages[0]?.status, "stopped");
+      assert.equal(assistantMessages[0]?.loggedMeal, undefined);
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
     }
   });
 
@@ -380,16 +795,366 @@ describe("chat-streaming", () => {
         didLogMeal: boolean;
         affectedDate?: string;
         dailySummary?: { date?: string };
+        loggedMeal?: { mealId?: string; dateKey?: string; loggedAt?: string; foodName?: string };
       };
 
       assert.equal(donePayload.didLogMeal, true);
       assert.equal(donePayload.affectedDate, "2026-03-25");
       assert.equal(donePayload.dailySummary?.date, "2026-03-25");
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.equal(donePayload.loggedMeal?.dateKey, "2026-03-25");
+      assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^2026-03-25T/);
+      assert.equal(donePayload.loggedMeal?.foodName, "牛肉麵");
     } finally {
       await reader?.cancel();
       controller.abort();
       clearTimeout(timeout);
     }
+  });
+
+  it("POST /api/chat stream done includes structured loggedMeal for update_meal mutations", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "seed_historical_meal",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+          }),
+        },
+      }],
+    });
+    const seedForm = new FormData();
+    seedForm.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    const seedText = await readStreamUntil(seedRes.body.getReader(), "event: done");
+    const seedDoneMatch = seedText.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(seedDoneMatch);
+    const seedDonePayload = JSON.parse(seedDoneMatch[1]) as { loggedMeal?: { mealId?: string } };
+    const mealId = seedDonePayload.loggedMeal?.mealId;
+    assert.ok(mealId);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("update", "2026-03-25 晚餐牛肉麵"),
+        createUpdateMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueChatStream(["已更新蛋餅，330 kcal，可信蛋白 14 g。（5/5）"]);
+
+    const form = new FormData();
+    form.append("message", "把 2026-03-25 晚餐牛肉麵改成半碗");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const events = parseSSEEvents(text);
+    const chunkText = events
+      .filter((event) => event.event === "chunk")
+      .map((event) => JSON.parse(event.data) as { token: string })
+      .map((payload) => payload.token)
+      .join("");
+    const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(doneDataMatch);
+    const donePayload = JSON.parse(doneDataMatch[1]) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      affectedDate?: string;
+      loggedMeal?: {
+        mealId?: string;
+        dateKey?: string;
+        loggedAt?: string;
+        foodName?: string;
+        calories?: number;
+        protein?: number;
+        carbs?: number;
+        fat?: number;
+        items?: Array<{
+          name: string;
+          position: number;
+          calories: number;
+          protein: number;
+          carbs: number;
+          fat: number;
+        }>;
+      };
+    };
+
+    assert.equal(donePayload.didLogMeal, false);
+    assert.equal(donePayload.didMutateMeal, true);
+    assert.equal(donePayload.affectedDate, "2026-03-25");
+    assert.equal(donePayload.loggedMeal?.mealId, mealId);
+    assert.equal(donePayload.loggedMeal?.dateKey, "2026-03-25");
+    assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^2026-03-25T/);
+    assert.equal(donePayload.loggedMeal?.foodName, "半碗牛肉麵");
+    assert.equal(donePayload.loggedMeal?.calories, 360);
+    assert.equal(donePayload.loggedMeal?.protein, 20);
+    assert.equal(donePayload.loggedMeal?.carbs, 45);
+    assert.equal(donePayload.loggedMeal?.fat, 10);
+    assert.deepEqual(donePayload.loggedMeal?.items, [
+      { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
+    ]);
+    assert.match(chunkText, /已更新(?:3\/25 )?半碗牛肉麵，360 kcal，蛋白質 20 g/);
+    assert.doesNotMatch(chunkText, /蛋餅|330 kcal|14 g|5\/5|（5\/5）|可信蛋白/);
+  });
+
+  it("POST /api/chat stream done keeps delete_meal confirmations non-editable", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了雞腿便當");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    await readStreamUntil(seedRes.body.getReader(), "event: done");
+
+    const mealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsJson = await mealsRes.json() as { meals: Array<{ id: string }> };
+    const mealId = mealsJson.meals[0]?.id;
+    assert.ok(mealId);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("delete", "雞腿便當"),
+        createDeleteMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueChatStream([
+      "方式1 直接刪除這筆餐點\n",
+      "方式2 先不要刪除",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "刪除雞腿便當");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    assert.match(text, /餐點已更新，但回覆生成失敗|已完成餐點調整/);
+    assert.doesNotMatch(text, /無法辨識這次的請求/);
+    const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(doneDataMatch);
+    const donePayload = JSON.parse(doneDataMatch[1]) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+    };
+    assert.equal(donePayload.didLogMeal, false);
+    assert.equal(donePayload.didMutateMeal, true);
+    assert.equal(donePayload.loggedMeal, undefined);
+  });
+
+  it("POST /api/chat JSON path replaces delete_meal choice prompt after mutation", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了雞腿便當");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    await readStreamUntil(seedRes.body.getReader(), "event: done");
+
+    const mealsBeforeRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsBeforeJson = await mealsBeforeRes.json() as { meals: Array<{ id: string }> };
+    const mealId = mealsBeforeJson.meals[0]?.id;
+    assert.ok(mealId);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("delete", "雞腿便當"),
+        createDeleteMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueChatStream([
+      "方式1 直接刪除這筆餐點\n",
+      "方式2 先不要刪除",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "刪除雞腿便當");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply: string;
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.loggedMeal, undefined);
+    assert.match(body.reply, /已完成餐點調整/);
+    assert.doesNotMatch(body.reply, /方式1|方式2|無法辨識/);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(historyRes.status, 200);
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+    const latestAssistant = assistantMessages.at(-1)?.content ?? "";
+    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識/);
+
+    const mealsAfterRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsAfterJson = await mealsAfterRes.json() as { meals: Array<{ id: string }> };
+    assert.equal(mealsAfterJson.meals.some((meal) => meal.id === mealId), false);
+  });
+
+  it("POST /api/chat stream bridges non-stream delete_meal replies through deterministic copy", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了雞腿便當");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    await readStreamUntil(seedRes.body.getReader(), "event: done");
+
+    const mealsBeforeRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsBeforeJson = await mealsBeforeRes.json() as { meals: Array<{ id: string }> };
+    const mealId = mealsBeforeJson.meals[0]?.id;
+    assert.ok(mealId);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("delete", "雞腿便當"),
+        createDeleteMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueRoundResponse({ content: "方式1 直接刪除這筆餐點\n方式2 先不要刪除" });
+
+    const form = new FormData();
+    form.append("message", "刪除雞腿便當");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    assert.match(text, /已完成餐點調整/);
+    assert.doesNotMatch(text, /方式1|方式2|無法辨識|回覆生成失敗/);
+    const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(doneDataMatch);
+    const donePayload = JSON.parse(doneDataMatch[1]) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+    };
+    assert.equal(donePayload.didLogMeal, false);
+    assert.equal(donePayload.didMutateMeal, true);
+    assert.equal(donePayload.loggedMeal, undefined);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    const latestAssistant = historyJson.messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
+    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識|回覆生成失敗/);
+  });
+
+  it("POST /api/chat JSON bridges non-stream delete_meal replies through deterministic copy", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了雞腿便當");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    await readStreamUntil(seedRes.body.getReader(), "event: done");
+
+    const mealsBeforeRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsBeforeJson = await mealsBeforeRes.json() as { meals: Array<{ id: string }> };
+    const mealId = mealsBeforeJson.meals[0]?.id;
+    assert.ok(mealId);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("delete", "雞腿便當"),
+        createDeleteMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueRoundResponse({ content: "抱歉，無法辨識這次的請求，可以再試一次嗎？" });
+
+    const form = new FormData();
+    form.append("message", "刪除雞腿便當");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply: string;
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.loggedMeal, undefined);
+    assert.match(body.reply, /已完成餐點調整/);
+    assert.doesNotMatch(body.reply, /方式1|方式2|無法辨識|回覆生成失敗/);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    const latestAssistant = historyJson.messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
+    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識|回覆生成失敗/);
   });
 
   it("POST /api/chat stream appends a concrete date when the model only says yesterday", async () => {
@@ -927,8 +1692,6 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat D-09: when log_food succeeds but chatRound final-reply throws, meal is kept and partial-success fallback written to history", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
-    mockLLM.queueRoundError(new Error("LLM reply generation failed"));
-
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
 
@@ -965,13 +1728,9 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
-      assert.match(
-        assistantMsgs[0]!.content,
-        /已完成記錄，但回覆生成失敗/,
-        "D-09 must use the partial-success fallback, not the generic route catch fallback",
-      );
-      assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
-      assert.match(assistantMsgs[0]!.content, /其他配菜不列入 headline/);
+      assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g（以雞腿為主）/);
+      assert.doesNotMatch(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗|headline/);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
         headers: { cookie: sessionCookieHeader },
@@ -985,8 +1744,6 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat D-09: when streamed final reply throws after log_food, meal state is preserved", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
-    mockLLM.queueChatStreamError(["已"], new Error("stream interrupted after log_food"));
-
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
 
@@ -1022,8 +1779,64 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
-      assert.match(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
+      assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g（以雞腿為主）/);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat preserves loggedMeal history when streamed hallucination fallback follows log_food", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    mockLLM.queueChatStream([
+      "方式1 直接依照片估算記錄\n",
+      "方式2 請補充份量後再記錄",
+    ]);
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /已記錄雞腿便當/);
+      assert.doesNotMatch(text, /無法辨識這次的請求/);
+      const doneMatch = text.match(/event: done\s+data: (.+)/);
+      assert.ok(doneMatch);
+      const donePayload = JSON.parse(doneMatch[1]) as {
+        didLogMeal?: boolean;
+        loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
+      };
+      assert.equal(donePayload.didLogMeal, true);
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as {
+        messages: Array<{
+          role: string;
+          content: string;
+          loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
+        }>;
+      };
+      const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
+      assert.equal(assistantMsgs.length, 1, "hallucination fallback must persist exactly one assistant reply");
+      assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
+      assert.equal(assistantMsgs[0]!.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
+      assert.equal(assistantMsgs[0]!.loggedMeal?.foodName, "雞腿便當");
     } finally {
       clearTimeout(timeout);
     }
@@ -1031,8 +1844,6 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat grouped log_food keeps didLogMeal and dailySummary when the final reply fails", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createGroupedLogFoodToolCall()] });
-    mockLLM.queueRoundError(new Error("LLM grouped reply generation failed"));
-
     const form = new FormData();
     form.append("message", "我吃了蘋果和優格");
 
@@ -1056,19 +1867,22 @@ describe("chat-streaming", () => {
       const donePayload = JSON.parse(doneMatch[1]) as {
         didLogMeal?: boolean;
         dailySummary?: { mealCount?: number; totalCalories?: number; date?: string };
+        loggedMeal?: { itemCount?: number; foodName?: string };
       };
       assert.equal(donePayload.didLogMeal, true, "grouped log_food must still mark didLogMeal after partial success");
       assert.equal(donePayload.dailySummary?.mealCount, 1);
-      assert.equal(donePayload.dailySummary?.totalCalories, 215);
+      assert.equal(donePayload.dailySummary?.totalCalories, 295);
       assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
+      assert.equal(donePayload.loggedMeal?.foodName, "蘋果、優格、水煮蛋");
+      assert.equal(donePayload.loggedMeal?.itemCount, 3);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
         headers: { cookie: sessionCookieHeader },
       });
-      const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
+      const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string; itemCount?: number }> };
       assert.deepEqual(
-        mealsJson.meals.map((meal) => meal.foodName),
-        ["蘋果、優格"],
+        mealsJson.meals.map((meal) => ({ foodName: meal.foodName, itemCount: meal.itemCount })),
+        [{ foodName: "蘋果、優格、水煮蛋", itemCount: 3 }],
         "grouped log_food should persist one transaction row for the turn",
       );
 
@@ -1078,7 +1892,8 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
-      assert.match(assistantMsgs[0]!.content, /蛋白質先按優格作為主要來源估算/);
+      assert.match(assistantMsgs[0]!.content, /已記錄蘋果、優格、水煮蛋/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 15 g（優格和水煮蛋）/);
     } finally {
       clearTimeout(timeout);
     }

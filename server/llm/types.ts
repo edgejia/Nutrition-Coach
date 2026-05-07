@@ -38,8 +38,12 @@ export type LLMRoundResult =
   | { kind: "response"; response: LLMResponse }
   | { kind: "stream"; streamGenerator: AsyncGenerator<string> };
 
+export interface LLMCallOptions {
+  signal?: AbortSignal;
+}
+
 export interface LLMProvider {
-  chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse>;
-  chatStream?(messages: ChatMessage[], tools: ToolDefinition[]): AsyncGenerator<string>;
-  chatRound?(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMRoundResult>;
+  chat(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions): Promise<LLMResponse>;
+  chatStream?(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions): AsyncGenerator<string>;
+  chatRound?(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions): Promise<LLMRoundResult>;
 }

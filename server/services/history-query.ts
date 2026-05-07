@@ -7,6 +7,7 @@ import {
 } from "../db/schema.js";
 import { formatLocalDate, getLocalDayBounds } from "../lib/time.js";
 import { buildAssetUrl } from "./assets.js";
+import { projectMealDisplay } from "./meal-display.js";
 import type { createSummaryService, DailySummary } from "./summary.js";
 
 const HISTORY_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -21,6 +22,7 @@ export interface HistoryMealDto {
   dateKey: string;
   loggedAt: string;
   display: { title: string };
+  itemCount: number;
   nutrition: { calories: number; protein: number; carbs: number; fat: number };
   items: Array<{
     name: string;
@@ -28,6 +30,8 @@ export interface HistoryMealDto {
     nutrition: { calories: number; protein: number; carbs: number; fat: number };
   }>;
   asset: { imageAssetId: string | null; imageUrl: string | null };
+  imageAssetId: string | null;
+  imageUrl: string | null;
   revision: { currentRevisionNumber: number };
 }
 
@@ -269,19 +273,6 @@ function decodeHistorySearchCursor(value: string): HistorySearchCursor {
   }
 }
 
-function buildGroupedFoodName(items: Array<{ foodName: string }>) {
-  if (items.length === 1) {
-    return items[0]!.foodName;
-  }
-
-  if (items.length === 2) {
-    return `${items[0]!.foodName}、${items[1]!.foodName}`;
-  }
-
-  const count = items.length;
-  return `${items[0]?.foodName ?? "餐點"}、${items[1]?.foodName ?? "項目"} 等${count}項`;
-}
-
 function createCursorSeekFilter(cursor: HistoryCursor) {
   return or(
     lt(mealTransactions.loggedAt, cursor.loggedAt),
@@ -409,12 +400,15 @@ async function projectHistoryMeals(
     const revision = revisionById.get(header.currentRevisionId);
     const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
     const imageAssetId = revision?.imageAssetId ?? null;
+    const imageUrl = imageAssetId ? buildAssetUrl(imageAssetId) : null;
+    const display = projectMealDisplay(revisionItems);
 
     return {
       id: header.id,
       dateKey: formatLocalDate(new Date(header.loggedAt)),
       loggedAt: header.loggedAt,
-      display: { title: buildGroupedFoodName(revisionItems) },
+      display: { title: display.foodName },
+      itemCount: display.itemCount,
       nutrition: {
         calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),
         protein: revisionItems.reduce((sum, item) => sum + item.protein, 0),
@@ -433,8 +427,10 @@ async function projectHistoryMeals(
       })),
       asset: {
         imageAssetId,
-        imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+        imageUrl,
       },
+      imageAssetId,
+      imageUrl,
       revision: { currentRevisionNumber: header.currentRevisionNumber },
     };
   });

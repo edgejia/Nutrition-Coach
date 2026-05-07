@@ -16,6 +16,7 @@ type HistoryMeal = {
   display: {
     title: string;
   };
+  itemCount: number;
   nutrition: {
     calories: number;
     protein: number;
@@ -36,6 +37,8 @@ type HistoryMeal = {
     imageAssetId: string | null;
     imageUrl: string | null;
   };
+  imageAssetId: string | null;
+  imageUrl: string | null;
   revision: {
     currentRevisionNumber: number;
   };
@@ -148,6 +151,7 @@ describe("History API", () => {
       items: [
         { foodName: "鮭魚", calories: 280, protein: 30, carbs: 0, fat: 17 },
         { foodName: "白飯", calories: 260, protein: 5, carbs: 58, fat: 1 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
     await services.foodLoggingService.logFood(deviceId, {
@@ -187,15 +191,16 @@ describe("History API", () => {
       items: [
         { foodName: "雞胸", calories: 240, protein: 42, carbs: 0, fat: 6 },
         { foodName: "地瓜", calories: 180, protein: 3, carbs: 41, fat: 0 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
-    const sameTimestampMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "同秒茶葉蛋",
+    const nearbyMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鄰近茶葉蛋",
       calories: 80,
       protein: 7,
       carbs: 1,
       fat: 5,
-      loggedAt: "2026-03-25T04:00:00.000Z",
+      loggedAt: "2026-03-25T03:59:00.000Z",
     });
     const updatedMeal = await services.foodLoggingService.logFood(deviceId, {
       foodName: "待修正便當",
@@ -249,8 +254,8 @@ describe("History API", () => {
     assert.equal(body.nextCursor, null);
     assert.deepEqual(
       body.meals.map((meal) => meal.id),
-      [updatedMeal.id, sameTimestampMeal.id, assetMeal.id, boundaryMeal.id],
-      "history meals should use descending loggedAt plus id ordering",
+      [updatedMeal.id, assetMeal.id, nearbyMeal.id, boundaryMeal.id],
+      "history meals should use descending loggedAt ordering",
     );
     assert.ok(!body.meals.some((meal) => meal.id === deletedMeal.id));
     assert.ok(!body.meals.some((meal) => meal.display.title === "外部裝置餐點"));
@@ -261,8 +266,9 @@ describe("History API", () => {
       id: assetMeal.id,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
-      display: { title: "雞胸、地瓜" },
-      nutrition: { calories: 420, protein: 45, carbs: 41, fat: 6 },
+      display: { title: "雞胸、地瓜、青菜" },
+      itemCount: 3,
+      nutrition: { calories: 460, protein: 47, carbs: 49, fat: 8 },
       items: [
         {
           name: "雞胸",
@@ -274,8 +280,15 @@ describe("History API", () => {
           position: 1,
           nutrition: { calories: 180, protein: 3, carbs: 41, fat: 0 },
         },
+        {
+          name: "青菜",
+          position: 2,
+          nutrition: { calories: 40, protein: 2, carbs: 8, fat: 2 },
+        },
       ],
       asset: { imageAssetId: "asset-1", imageUrl: "/api/assets/asset-1" },
+      imageAssetId: "asset-1",
+      imageUrl: "/api/assets/asset-1",
       revision: { currentRevisionNumber: 1 },
     });
 
@@ -285,6 +298,7 @@ describe("History API", () => {
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T08:00:00.000Z",
       display: { title: "修正雞腿便當" },
+      itemCount: 1,
       nutrition: { calories: 620, protein: 34, carbs: 70, fat: 22 },
       items: [
         {
@@ -294,6 +308,8 @@ describe("History API", () => {
         },
       ],
       asset: { imageAssetId: null, imageUrl: null },
+      imageAssetId: null,
+      imageUrl: null,
       revision: { currentRevisionNumber: 2 },
     });
 
@@ -429,10 +445,10 @@ describe("History API", () => {
     assert.equal(body.date, "2026-03-25");
     assert.deepEqual(body.summary, {
       date: "2026-03-25",
-      totalCalories: 660,
-      totalProtein: 41,
-      totalCarbs: 72,
-      totalFat: 22,
+      totalCalories: 700,
+      totalProtein: 43,
+      totalCarbs: 80,
+      totalFat: 24,
       mealCount: 2,
     });
     assert.deepEqual(
@@ -443,8 +459,9 @@ describe("History API", () => {
       id: seeded.assetMeal.id,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
-      display: { title: "鮭魚、白飯" },
-      nutrition: { calories: 540, protein: 35, carbs: 58, fat: 18 },
+      display: { title: "鮭魚、白飯、青菜" },
+      itemCount: 3,
+      nutrition: { calories: 580, protein: 37, carbs: 66, fat: 20 },
       items: [
         {
           name: "鮭魚",
@@ -456,8 +473,15 @@ describe("History API", () => {
           position: 1,
           nutrition: { calories: 260, protein: 5, carbs: 58, fat: 1 },
         },
+        {
+          name: "青菜",
+          position: 2,
+          nutrition: { calories: 40, protein: 2, carbs: 8, fat: 2 },
+        },
       ],
       asset: { imageAssetId: "asset-2", imageUrl: "/api/assets/asset-2" },
+      imageAssetId: "asset-2",
+      imageUrl: "/api/assets/asset-2",
       revision: { currentRevisionNumber: 1 },
     });
     assertNoUnsafeHistoryFields(body);

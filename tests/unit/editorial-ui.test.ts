@@ -111,7 +111,7 @@ describe("Editorial UI", () => {
 
     assert.deepEqual(presentation, {
       state: "empty",
-      message: "還沒有今天的紀錄，拍張照或打字告訴我你吃了什麼吧！",
+      message: "先用對話記下第一餐。今天還沒有紀錄。到「對話」描述你吃了什麼。",
     });
   });
 
@@ -189,6 +189,7 @@ describe("Editorial UI", () => {
       protein: 34.4,
       carbs: 55.2,
       fat: 19.1,
+      itemCount: 1,
       imageAssetId: "asset-1",
       imageUrl: "/api/assets/asset-1?deviceId=device-1",
       loggedAt: "2026-04-19T12:30:00.000Z",

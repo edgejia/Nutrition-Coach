@@ -5,7 +5,8 @@ import type { createSummaryService, DailySummary } from "../services/summary.js"
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
-import { currentAppDate } from "../lib/time.js";
+import { currentAppDate, formatLocalDate } from "../lib/time.js";
+import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
 import {
   buildHistoricalLoggedAt,
   resolveHistoricalDateIntent,
@@ -55,22 +56,47 @@ export interface ToolExecutionResult {
   affectedDate?: string;
   mealMutationKind?: "log" | "update" | "delete";
   loggedMeal?: {
+    mealId: string;
+    mealRevisionId: string;
+    dateKey: string;
+    loggedAt: string;
+    imageAssetId: string | null;
+    imageUrl: string | null;
     foodName: string;
     calories: number;
     protein: number;
     carbs: number;
     fat: number;
+    itemCount: number;
+    items?: Array<{
+      name: string;
+      position: number;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
+    quantityUncertaintyReason?: "missing_quantity";
     countedSources: TrustedProteinSource[];
     excludedSources: ExcludedProteinSource[];
     usedConservativeAssumption: boolean;
   };
 }
 
+export interface FatalToolDiagnostic {
+  failureReason?: "validation" | "guard" | "execute";
+  reason?: string;
+  fields?: string[];
+}
+
 export class FatalToolError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  readonly diagnostic?: FatalToolDiagnostic;
+
+  constructor(message: string, options?: { cause?: unknown; diagnostic?: FatalToolDiagnostic }) {
     super(message);
     this.name = "FatalToolError";
     this.cause = options?.cause;
+    this.diagnostic = options?.diagnostic;
   }
 }
 
@@ -122,7 +148,14 @@ interface LogFoodGroupedArgs extends HistoricalDateToolArgs {
   fat?: number;
 }
 
-type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
+export type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
+type QuantityUncertaintyReason = "missing_quantity";
+
+interface NormalizedLogFoodArgs extends HistoricalDateToolArgs {
+  items: LogFoodItemArgs[];
+  protein_sources?: ProteinSourceArgs[];
+  quantityUncertaintyReason?: QuantityUncertaintyReason;
+}
 
 interface FindMealsArgs {
   action: "update" | "delete";
@@ -155,11 +188,27 @@ interface LogFoodSuccessResult {
   dailySummary: DailySummary;
   affectedDate?: string;
   loggedMeal: {
+    mealId: string;
+    mealRevisionId: string;
+    dateKey: string;
+    loggedAt: string;
+    imageAssetId: string | null;
+    imageUrl: string | null;
     foodName: string;
     calories: number;
     protein: number;
     carbs: number;
     fat: number;
+    itemCount: number;
+    items: Array<{
+      name: string;
+      position: number;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
+    quantityUncertaintyReason?: QuantityUncertaintyReason;
     countedSources: TrustedProteinSource[];
     excludedSources: ExcludedProteinSource[];
     usedConservativeAssumption: boolean;
@@ -173,11 +222,21 @@ interface UpdateMealResult {
   affectedDate: string;
   updatedMeal: {
     id: string;
+    mealRevisionId: string;
     foodName: string;
     calories: number;
     protein: number;
     carbs: number;
     fat: number;
+    itemCount: number;
+    items: Array<{
+      name: string;
+      position: number;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
     imagePath: string | null;
     loggedAt: string;
   };
@@ -213,6 +272,14 @@ interface UpdateGoalsResult {
 }
 
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
+const quantityToolProperties = {
+  quantity: { type: "number" },
+  quantity_g: { type: "number" },
+  quantity_ml: { type: "number" },
+  amount: { type: "string" },
+  unit: { type: "string" },
+  serving_size: { type: "string" },
+} as const;
 const historicalDateTextSchema = z.string().min(1, "date_text must be non-empty").optional();
 const historicalMealPeriodSchema = z.enum(["breakfast", "lunch", "dinner", "late_night"]).optional();
 const proteinSourceSchema = z
@@ -398,31 +465,116 @@ function inferProteinSourcesFromItem(item: LogFoodItemArgs): ProteinSourceInput[
   }];
 }
 
+function hasQuantityBearingField(item: LogFoodItemArgs): boolean {
+  return item.quantity !== undefined
+    || item.quantity_g !== undefined
+    || item.quantity_ml !== undefined
+    || /\d|[０-９]/.test(item.amount ?? "")
+    || /\d|[０-９]/.test(item.serving_size ?? "");
+}
+
+function hasQuantityLikeNumberInText(text: string): boolean {
+  return /(?:\d|[０-９]|[一二三四五六七八九十兩半])\s*(?:g|克|公斤|kg|ml|毫升|杯|碗|份|顆|片|根|條|個|包|盒|匙|湯匙|茶匙|碗|盤|瓶|罐|塊|枚|串|球|卷|張|把)?/i.test(text);
+}
+
+function shouldMarkMissingQuantity(items: LogFoodItemArgs[], sourceText?: string): boolean {
+  if (sourceText && hasQuantityLikeNumberInText(sourceText)) {
+    return false;
+  }
+  return items.every(
+    (item) => !hasQuantityBearingField(item) && !hasQuantityLikeNumberInText(item.food_name),
+  );
+}
+
+function sourceTextSoyMilkAnchor(sourceText?: string): string | undefined {
+  if (!sourceText) {
+    return undefined;
+  }
+  if (/豆漿|soy milk/i.test(sourceText)) {
+    return "豆漿";
+  }
+  return undefined;
+}
+
+function isGenericDrinkLabel(label: string): boolean {
+  return /^(?:飲品|飲料|植物性飲料|無糖飲料)$/i.test(label.trim());
+}
+
+function repairGenericDrinkItemsFromSourceText(
+  items: LogFoodItemArgs[],
+  sourceText?: string,
+): LogFoodItemArgs[] {
+  const anchor = sourceTextSoyMilkAnchor(sourceText);
+  if (!anchor || items.length !== 1) {
+    return items;
+  }
+  const [item] = items;
+  if (!item || !isGenericDrinkLabel(item.food_name) || item.protein <= 0) {
+    return items;
+  }
+  return [{ ...item, food_name: anchor }];
+}
+
+export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): NormalizedLogFoodArgs {
+  // When items[] is present it is authoritative; top-level aggregate fields are compatibility noise.
+  const rawItems = "items" in args
+    ? args.items
+    : [
+        {
+          food_name: args.food_name,
+          calories: args.calories,
+          protein: args.protein,
+          carbs: args.carbs,
+          fat: args.fat,
+          ...(args.quantity !== undefined ? { quantity: args.quantity } : {}),
+          ...(args.quantity_g !== undefined ? { quantity_g: args.quantity_g } : {}),
+          ...(args.quantity_ml !== undefined ? { quantity_ml: args.quantity_ml } : {}),
+          ...(args.amount !== undefined ? { amount: args.amount } : {}),
+          ...(args.unit !== undefined ? { unit: args.unit } : {}),
+          ...(args.serving_size !== undefined ? { serving_size: args.serving_size } : {}),
+        },
+      ];
+  const items = repairGenericDrinkItemsFromSourceText(rawItems, sourceText);
+
+  return {
+    items,
+    ...(args.date_text !== undefined ? { date_text: args.date_text } : {}),
+    ...(args.meal_period !== undefined ? { meal_period: args.meal_period } : {}),
+    ...(args.protein_sources !== undefined ? { protein_sources: args.protein_sources } : {}),
+    ...(shouldMarkMissingQuantity(items, sourceText)
+      ? { quantityUncertaintyReason: "missing_quantity" as const }
+      : {}),
+  };
+}
+
 function resolveProteinSourceInputs(
   args: LogFoodArgs,
+  sourceText?: string,
 ): { proteinSources: ProteinSourceInput[]; usedExplicitProteinSources: boolean } {
+  const inferredSources = "items" in args
+    ? args.items.flatMap((item) => inferProteinSourcesFromItem(item))
+    : inferProteinSourcesFromItem(args);
+
   if (args.protein_sources && args.protein_sources.length > 0) {
+    const explicitSources = args.protein_sources.map((source) => ({
+      name: source.name.trim(),
+      protein: roundProtein(source.protein),
+      isPrimary: source.is_primary,
+      certainty: source.certainty,
+    }));
+    const inferredSupplements = inferredSources.filter((inferred) =>
+      !explicitSources.some((explicit) => namesLikelyMatch(explicit.name, inferred.name)),
+    );
+
     return {
       usedExplicitProteinSources: true,
-      proteinSources: args.protein_sources.map((source) => ({
-        name: source.name.trim(),
-        protein: roundProtein(source.protein),
-        isPrimary: source.is_primary,
-        certainty: source.certainty,
-      })),
-    };
-  }
-
-  if ("items" in args) {
-    return {
-      usedExplicitProteinSources: false,
-      proteinSources: args.items.flatMap((item) => inferProteinSourcesFromItem(item)),
+      proteinSources: [...explicitSources, ...inferredSupplements],
     };
   }
 
   return {
     usedExplicitProteinSources: false,
-    proteinSources: inferProteinSourcesFromItem(args),
+    proteinSources: inferredSources,
   };
 }
 
@@ -448,6 +600,18 @@ function shouldRejectTrustedProteinPersistence(
   const labels = "items" in args ? args.items.map((item) => item.food_name) : [args.food_name];
   const categories = labels.map((label) => classifyProteinSource(label));
   return !categories.every((category) => category === "trace");
+}
+
+function isMissingTrustedProteinBasisFailure(outcome: { failureReason?: string; result: string }) {
+  if (outcome.failureReason !== "execute") {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
+    return parsed.message === "trusted protein basis required for this meal";
+  } catch {
+    return false;
+  }
 }
 
 function scaleGroupedProteinValues(
@@ -529,6 +693,42 @@ function buildNormalizedGroupedItems(
   }));
 }
 
+function projectLoggedMealItems(
+  items: Array<{
+    foodName: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  }>,
+) {
+  return items.map((item, index) => ({
+    name: item.foodName,
+    position: index + 1,
+    calories: item.calories,
+    protein: item.protein,
+    carbs: item.carbs,
+    fat: item.fat,
+  }));
+}
+
+function projectMealIdentityFields(meal: {
+  id: string;
+  mealRevisionId: string;
+  loggedAt: string;
+  imagePath: string | null;
+}) {
+  const imageAssetId = parseAssetRef(meal.imagePath);
+  return {
+    mealId: meal.id,
+    mealRevisionId: meal.mealRevisionId,
+    dateKey: formatLocalDate(new Date(meal.loggedAt)),
+    loggedAt: meal.loggedAt,
+    imageAssetId,
+    imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Contracts. logSummary returns redacted shape (D-30); macros are part of
 // existing Phase 8 behavior for log_food (intentional, see plan).
@@ -545,8 +745,10 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       protein: { type: "number" },
       carbs: { type: "number" },
       fat: { type: "number" },
+      ...quantityToolProperties,
       protein_sources: {
         type: "array",
+        description: "Required. List visually identifiable protein-bearing ingredients; mark uncertain when estimated from an image.",
         items: {
           type: "object",
           additionalProperties: false,
@@ -578,12 +780,14 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
             protein: { type: "number" },
             carbs: { type: "number" },
             fat: { type: "number" },
+            ...quantityToolProperties,
           },
           required: ["food_name", "calories", "protein", "carbs", "fat"],
         },
       },
     },
     additionalProperties: false,
+    required: ["protein_sources"],
   },
   zodSchema: logFoodSchema,
   // No sourceFields per D-11: log_food calorie estimates need not appear in
@@ -644,38 +848,31 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         })
       : undefined;
 
-    const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(args);
+    const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
+    const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(
+      normalized,
+      context.currentUserMessage,
+    );
     const normalizedProtein = normalizeTrustedProteinEstimate({
-      mealName: "items" in args
-        ? args.items.map((item) => item.food_name.trim()).join("、")
-        : args.food_name.trim(),
-      proposedProtein: totalProposedProtein(args),
+      mealName: normalized.items.map((item) => item.food_name.trim()).join("、"),
+      proposedProtein: totalProposedProtein(normalized),
       proteinSources,
     });
 
-    if (shouldRejectTrustedProteinPersistence(args, normalizedProtein.countedSources.length)) {
+    if (shouldRejectTrustedProteinPersistence(normalized, normalizedProtein.countedSources.length)) {
       throw new FatalToolError("trusted protein basis required for this meal");
     }
 
-    const loggedMeal = "items" in args
-      ? await deps.foodLoggingService.logGroupedMeal(deviceId, {
+    const normalizedItems = buildNormalizedGroupedItems(
+      normalized,
+      normalizedProtein.countedSources,
+      normalizedProtein.trustedProtein,
+      usedExplicitProteinSources,
+    );
+    const loggedMeal = await deps.foodLoggingService.logGroupedMeal(deviceId, {
         imagePath: deps.imagePath,
         loggedAt,
-        items: buildNormalizedGroupedItems(
-          args,
-          normalizedProtein.countedSources,
-          normalizedProtein.trustedProtein,
-          usedExplicitProteinSources,
-        ),
-      })
-      : await deps.foodLoggingService.logFood(deviceId, {
-        foodName: args.food_name.trim(),
-        calories: args.calories,
-        protein: normalizedProtein.trustedProtein,
-        carbs: args.carbs,
-        fat: args.fat,
-        imagePath: deps.imagePath,
-        loggedAt,
+        items: normalizedItems,
       });
 
     // Phase 8/9 invariant: persist the meal BEFORE recomputing the daily
@@ -701,11 +898,17 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         dailySummary,
         affectedDate: dateIntent.isHistorical ? dateIntent.dateKey : undefined,
         loggedMeal: {
+          ...projectMealIdentityFields(loggedMeal),
           foodName: loggedMeal.foodName,
           calories: loggedMeal.calories,
           protein: loggedMeal.protein,
           carbs: loggedMeal.carbs,
           fat: loggedMeal.fat,
+          itemCount: normalizedItems.length,
+          items: projectLoggedMealItems(normalizedItems),
+          ...(normalized.quantityUncertaintyReason
+            ? { quantityUncertaintyReason: normalized.quantityUncertaintyReason }
+            : {}),
           countedSources: normalizedProtein.countedSources,
           excludedSources: normalizedProtein.excludedSources,
           usedConservativeAssumption: normalizedProtein.usedConservativeAssumption,
@@ -1121,6 +1324,20 @@ export async function executeTool(
 
   if (!outcome.success) {
     if (
+      toolCall.function.name === "log_food"
+      && deps.imagePath
+      && isMissingTrustedProteinBasisFailure(outcome)
+    ) {
+      return {
+        result: outcome.result,
+        summary: "failureReason: execute",
+        success: false,
+        executed: false,
+        failureReason: outcome.failureReason,
+      };
+    }
+
+    if (
       toolCall.function.name === "find_meals"
       || toolCall.function.name === "update_goals"
       || toolCall.function.name === "update_meal"
@@ -1157,7 +1374,20 @@ export async function executeTool(
     } catch {
       // result was not JSON; keep generic message
     }
-    throw new FatalToolError(failureMessage);
+    let diagnostic: FatalToolDiagnostic | undefined;
+    try {
+      const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
+      diagnostic = {
+        failureReason: outcome.failureReason,
+        ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
+        ...(Array.isArray(parsed.fields) && parsed.fields.every((field) => typeof field === "string")
+          ? { fields: parsed.fields as string[] }
+          : {}),
+      };
+    } catch {
+      diagnostic = outcome.failureReason ? { failureReason: outcome.failureReason } : undefined;
+    }
+    throw new FatalToolError(failureMessage, { diagnostic });
   }
 
   // Map contract-level success result back to ToolExecutionResult.
@@ -1198,6 +1428,19 @@ export async function executeTool(
       mealMutationKind: "update",
       dailySummary: contractResult.dailySummary,
       affectedDate: contractResult.affectedDate,
+      loggedMeal: {
+        ...projectMealIdentityFields(contractResult.updatedMeal),
+        foodName: contractResult.updatedMeal.foodName,
+        calories: contractResult.updatedMeal.calories,
+        protein: contractResult.updatedMeal.protein,
+        carbs: contractResult.updatedMeal.carbs,
+        fat: contractResult.updatedMeal.fat,
+        itemCount: contractResult.updatedMeal.itemCount,
+        items: contractResult.updatedMeal.items,
+        countedSources: [],
+        excludedSources: [],
+        usedConservativeAssumption: false,
+      },
     };
   }
 

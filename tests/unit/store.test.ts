@@ -14,6 +14,7 @@ globalThis.localStorage = {
 
 const { useStore } = await import("../../client/src/store.js");
 const { formatLocalDate } = await import("../../client/src/lib/time.js");
+const { buildReceiptMealEditPayload } = await import("../../client/src/meal-edit-payload.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
 
 async function loadFreshStore(suffix: string) {
@@ -28,6 +29,7 @@ const sampleMeals = [
     protein: 42,
     carbs: 48,
     fat: 18,
+    itemCount: 1,
     loggedAt: "2026-04-01T04:30:00.000Z",
   },
   {
@@ -37,6 +39,7 @@ const sampleMeals = [
     protein: 12,
     carbs: 20,
     fat: 6,
+    itemCount: 1,
     loggedAt: "2026-04-01T08:00:00.000Z",
   },
 ];
@@ -56,6 +59,7 @@ describe("AppStore", () => {
       coachAdvice: null,
       meals: [],
       pendingHomeChatDraft: null,
+      lastMealMutation: null,
       sending: false,
       provisionalBubble: null,
     });
@@ -213,12 +217,146 @@ describe("AppStore", () => {
   });
 
   it("tracks activeScreen changes and meal collection helpers", () => {
-    useStore.getState().setActiveScreen("summary");
+    useStore.getState().setActiveScreen("history");
     useStore.getState().setMeals(sampleMeals);
     useStore.getState().removeMeal("meal-1");
 
-    assert.equal(useStore.getState().activeScreen, "summary");
+    assert.equal(useStore.getState().activeScreen, "history");
     assert.deepEqual(useStore.getState().meals, [sampleMeals[1]]);
+  });
+
+  it("tracks secondary screen stack without clearing tab state", () => {
+    useStore.getState().setActiveScreen("chat");
+    useStore.getState().setPendingHomeChatDraft({ id: "draft-1", text: "晚餐吃了鮭魚", status: "staged" });
+    useStore.getState().openSecondaryScreen("settings");
+
+    assert.deepEqual(useStore.getState().secondaryScreen, { screen: "settings", origin: "chat" });
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-1");
+
+    useStore.getState().closeSecondaryScreen();
+    assert.equal(useStore.getState().secondaryScreen, null);
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-1");
+  });
+
+  it("opens Day Detail with payload without clearing pending chat draft", () => {
+    useStore.getState().setActiveScreen("history");
+    useStore.getState().setPendingHomeChatDraft({ id: "draft-2", text: "午餐吃了沙拉", status: "staged" });
+    useStore.getState().openDayDetail(
+      { dateKey: "2026-04-29", targetMealId: "meal-2", label: "history-snapshot" },
+      "history",
+    );
+
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "dayDetail",
+      origin: "history",
+      payload: { dateKey: "2026-04-29", targetMealId: "meal-2", label: "history-snapshot" },
+    });
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-2");
+
+    useStore.getState().closeSecondaryScreen();
+    assert.equal(useStore.getState().secondaryScreen, null);
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-2");
+  });
+
+  it("openMealEdit stores payload and preserves pending Home Chat draft", () => {
+    useStore.getState().setActiveScreen("chat");
+    useStore.getState().setPendingHomeChatDraft({ id: "draft-3", text: "晚餐要補蛋白", status: "staged" });
+
+    useStore.getState().openMealEdit(
+      {
+        mealId: "meal-1",
+        dateKey: "2026-04-30",
+        foodName: "雞胸肉沙拉",
+        calories: 420,
+        protein: 32,
+        carbs: 14,
+        fat: 22,
+        itemCount: 1,
+      },
+      "chat",
+    );
+
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "mealEdit",
+      origin: "chat",
+      payload: {
+        mealId: "meal-1",
+        dateKey: "2026-04-30",
+        foodName: "雞胸肉沙拉",
+        calories: 420,
+        protein: 32,
+        carbs: 14,
+        fat: 22,
+        itemCount: 1,
+      },
+    });
+    assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-3");
+  });
+
+  it("recordMealMutation tracks affected date with a monotonic nonce", () => {
+    useStore.getState().recordMealMutation("2026-04-30");
+    const first = useStore.getState().lastMealMutation;
+    useStore.getState().recordMealMutation("2026-04-30");
+    const second = useStore.getState().lastMealMutation;
+
+    assert.deepEqual(first, { affectedDate: "2026-04-30", nonce: 1 });
+    assert.deepEqual(second, { affectedDate: "2026-04-30", nonce: 2 });
+  });
+
+  it("redactChatReceiptIdentity makes matching chat receipts display-only without removing receipt content", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-1",
+        role: "assistant",
+        content: "已幫你記錄雞腿便當。",
+        createdAt: "2026-04-30T04:00:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-1",
+          dateKey: "2026-04-30",
+          loggedAt: "2026-04-30T04:00:00.000Z",
+          foodName: "雞腿便當",
+          calories: 640,
+          protein: 30,
+          carbs: 78,
+          fat: 20,
+          itemCount: 1,
+          imageAssetId: "asset-lunch",
+          imageUrl: "/api/assets/asset-lunch",
+        },
+      },
+      {
+        id: "assistant-2",
+        role: "assistant",
+        content: "已幫你記錄鮭魚飯糰。",
+        createdAt: "2026-04-30T08:00:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-2",
+          dateKey: "2026-04-30",
+          loggedAt: "2026-04-30T08:00:00.000Z",
+          foodName: "鮭魚飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+          itemCount: 1,
+          imageAssetId: "asset-salmon",
+          imageUrl: "/api/assets/asset-salmon",
+        },
+      },
+    ]);
+
+    useStore.getState().redactChatReceiptIdentity("meal-1");
+
+    const [redactedMessage, untouchedMessage] = useStore.getState().messages;
+    assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(redactedMessage?.loggedMeal?.imageAssetId, "asset-lunch");
+    assert.equal(buildReceiptMealEditPayload(redactedMessage?.loggedMeal), null);
+    assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-2");
+    assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-2");
   });
 
   it("stores and clears the pending home chat draft", () => {

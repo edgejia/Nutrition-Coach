@@ -1,5 +1,7 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -26,6 +28,14 @@ const { CoachAdviceCard, CoachCTAControls, recordAndSelectHomeCtaIntent } = awai
   "../../client/src/components/CoachAdviceCard.js"
 );
 const { useStore } = await import("../../client/src/store.js");
+function sourcePath(relativePath: string) {
+  return fileURLToPath(new URL(relativePath, import.meta.url));
+}
+
+async function readSource(relativePath: string) {
+  return readFile(sourcePath(relativePath), "utf8");
+}
+
 const fakeDialoguePattern = new RegExp(
   [
     `問我${"怎麼"}`,
@@ -75,7 +85,7 @@ describe("CoachCTAControls", () => {
     assert.match(html, /幫我估算今天還差多少蛋白質/);
   });
 
-  it("disables intent and option buttons while sending", () => {
+  it("disables intent and option buttons while sending", async () => {
     const html = renderToStaticMarkup(
       createElement(CoachCTAControls, {
         intents: COACH_CTA_INTENTS,
@@ -87,7 +97,67 @@ describe("CoachCTAControls", () => {
     );
 
     assert.match(html, /disabled=""/);
-    assert.match(html, /disabled:opacity-40/);
+    assert.match(await readSource("../../client/src/app.css"), /\.sp-coach-cta-option:disabled[\s\S]*opacity:\s*0\.4/);
+  });
+
+  it("renders the Phase 39 sport CTA markup while preserving the two-step flow", async () => {
+    const componentSource = await readSource("../../client/src/components/CoachAdviceCard.tsx");
+    const loadingCardHtml = renderToStaticMarkup(createElement(CoachAdviceCard, { advice: null, cta: COACH_CTA_INTENTS }));
+    const controlsHtml = renderToStaticMarkup(
+      createElement(CoachCTAControls, {
+        intents: COACH_CTA_INTENTS,
+        selectedIntentId: "protein",
+        onIntentSelect: () => undefined,
+        onTaskOptionClick: () => undefined,
+      }),
+    );
+
+    assert.match(componentSource, /教練建議 · 即時/);
+    assert.match(loadingCardHtml, /sp-coach-cta/);
+    assert.match(controlsHtml, /補蛋白質/);
+    assert.match(controlsHtml, /sp-coach-cta-intent/);
+    assert.match(controlsHtml, /sp-coach-cta-option/);
+    assert.match(controlsHtml, /data-selected="true"/);
+    assert.match(controlsHtml, /推薦三個便利商店高蛋白選擇/);
+  });
+
+  it("keeps the sport CTA source contracts and blocked Home logging boundaries", async () => {
+    const componentSource = await readSource("../../client/src/components/CoachAdviceCard.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
+
+    assert.match(componentSource, /SportBoltIcon/);
+    assert.match(componentSource, /sp-coach-cta/);
+    assert.match(componentSource, /sp-coach-cta-intent/);
+    assert.match(componentSource, /sp-coach-cta-option/);
+    assert.match(componentSource, /recordAndSelectHomeCtaIntent/);
+    assert.doesNotMatch(componentSource, /SketchButton/);
+    assert.doesNotMatch(componentSource, /SketchPill/);
+    assert.doesNotMatch(componentSource, /openSecondaryScreen\("mealEdit"/);
+    assert.doesNotMatch(componentSource, /ChatEntryBar/);
+    assert.match(cssSource, /\.sp-coach-cta\s*\{[\s\S]*display:\s*flex;[\s\S]*flex:\s*0 0 auto;[\s\S]*flex-direction:\s*column/);
+    assert.match(cssSource, /\.sp-coach-cta\s*\{[\s\S]*background:\s*var\(--sp-surface\)/);
+    assert.match(cssSource, /\.sp-coach-cta\s*\{[\s\S]*border:\s*1px solid var\(--sp-lime-line\)/);
+    assert.match(cssSource, /\.sp-coach-cta-label\s*\{[\s\S]*color:\s*var\(--sp-lime\)/);
+    assert.doesNotMatch(cssSource, /\.sp-coach-cta\s*\{[^}]*background:\s*var\(--sp-lime\)/);
+    assert.match(cssSource, /\.sp-coach-cta-option:disabled[\s\S]*opacity:\s*0\.4/);
+
+    for (const selector of [
+      ".sp-coach-cta",
+      ".sp-coach-cta-label",
+      ".sp-coach-cta-headline",
+      ".sp-coach-cta-body",
+      ".sp-coach-cta-tags",
+      ".sp-coach-cta-tag",
+      ".sp-coach-cta-controls",
+      ".sp-coach-cta-intents",
+      ".sp-coach-cta-intent",
+      '.sp-coach-cta-intent[data-selected="true"]',
+      ".sp-coach-cta-options",
+      ".sp-coach-cta-option",
+      ".sp-coach-cta-option:disabled",
+    ]) {
+      assert.match(cssSource, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
   });
 
   it("does not render CTA controls in loading coach card state", () => {

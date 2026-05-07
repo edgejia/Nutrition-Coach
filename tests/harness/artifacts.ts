@@ -9,7 +9,7 @@
  *   - `x-device-id` header values  → "[REDACTED]"
  *   - `deviceId=<value>` URL query params  → "deviceId=[REDACTED]"
  *   - Paths containing `/uploads/`  → "[REDACTED_PATH]"
- *   - Object keys named `deviceId` or `x-device-id`  → "[REDACTED]"
+ *   - Object keys containing `deviceId` in camelCase, snake_case, or kebab-case  → "[REDACTED]"
  */
 
 import fs from "node:fs";
@@ -71,14 +71,18 @@ function redactString(s: string): string {
 function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(obj)) {
-    const lowerKey = key.toLowerCase();
-    if (lowerKey === "x-device-id" || lowerKey === "deviceid") {
+    if (shouldRedactKey(key)) {
       result[key] = REDACTED;
     } else {
       result[key] = redact(val);
     }
   }
   return result;
+}
+
+function shouldRedactKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return normalized.includes("deviceid");
 }
 
 // ---------------------------------------------------------------------------
@@ -117,9 +121,10 @@ function buildSummary(scenarioName: string, result: ScenarioResult): SummaryArti
  * Write structured, redacted JSON artifacts for a completed scenario run.
  *
  * Files written:
- *   - `summary.json`   — ok, failedStep, consoleSummary, step counts
- *   - `steps.json`     — ordered step evidence (names, ok, actual/expected/error)
- *   - `snapshots.json` — arbitrary artifact blobs from `result.artifacts`
+ *   - `summary.json`         — ok, failedStep, consoleSummary, step counts
+ *   - `steps.json`           — ordered step evidence (names, ok, actual/expected/error)
+ *   - `snapshots.json`       — arbitrary artifact blobs from `result.artifacts`
+ *   - `scenario-result.json` — redacted full scenario result for phase evidence indexes
  *
  * The `latest/` directory is replaced on every run so callers always find
  * the most recent evidence without managing timestamped directories.
@@ -157,6 +162,13 @@ export async function writeScenarioArtifacts(
   fs.writeFileSync(
     path.join(dir, "snapshots.json"),
     JSON.stringify(snapshots, null, 2),
+    "utf-8",
+  );
+
+  const scenarioResult = redact(result);
+  fs.writeFileSync(
+    path.join(dir, "scenario-result.json"),
+    JSON.stringify(scenarioResult, null, 2),
     "utf-8",
   );
 }

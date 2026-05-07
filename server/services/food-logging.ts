@@ -1,11 +1,17 @@
 // server/services/food-logging.ts
+import { and, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
+import {
+  mealRevisionItems,
+  mealTransactions,
+} from "../db/schema.js";
 import {
   createMealTransactionsService,
   type CreateMealTransactionInput,
   type MealTransactionItemInput,
 } from "./meal-transactions.js";
 import { createMealHistoryService } from "./meal-history.js";
+import { projectMealDisplay } from "./meal-display.js";
 
 export interface FoodData {
   foodName: string;
@@ -19,8 +25,10 @@ export interface FoodData {
 
 export interface MealCompatibilityEntry {
   id: string;
+  mealRevisionId: string;
   deviceId: string;
   foodName: string;
+  itemCount: number;
   calories: number;
   protein: number;
   carbs: number;
@@ -35,29 +43,22 @@ export function createFoodLoggingService(db: AppDatabase) {
   const mealTransactionsService = createMealTransactionsService(db);
   const mealHistoryService = createMealHistoryService(db);
 
-  function buildGroupedFoodName(items: MealTransactionItemInput[]) {
-    if (items.length === 1) {
-      return items[0]!.foodName;
-    }
-
-    if (items.length === 2) {
-      return `${items[0]!.foodName}、${items[1]!.foodName}`;
-    }
-
-    return `${items[0]!.foodName}、${items[1]!.foodName} 等${items.length}項`;
-  }
-
   function projectCompatibilityEntry(
     deviceId: string,
     transactionId: string,
+    revisionId: string,
     loggedAt: string,
     imagePath: string | null | undefined,
     items: MealTransactionItemInput[],
   ): MealCompatibilityEntry {
+    const display = projectMealDisplay(items);
+
     return {
       id: transactionId,
+      mealRevisionId: revisionId,
       deviceId,
-      foodName: buildGroupedFoodName(items),
+      foodName: display.foodName,
+      itemCount: display.itemCount,
       calories: items.reduce((sum, item) => sum + item.calories, 0),
       protein: items.reduce((sum, item) => sum + item.protein, 0),
       carbs: items.reduce((sum, item) => sum + item.carbs, 0),
@@ -86,6 +87,7 @@ export function createFoodLoggingService(db: AppDatabase) {
       return projectCompatibilityEntry(
         deviceId,
         created.transactionId,
+        created.revisionId,
         created.loggedAt,
         created.imagePath,
         created.items,
@@ -97,6 +99,7 @@ export function createFoodLoggingService(db: AppDatabase) {
       return projectCompatibilityEntry(
         deviceId,
         created.transactionId,
+        created.revisionId,
         created.loggedAt,
         created.imagePath,
         created.items,
@@ -115,11 +118,36 @@ export function createFoodLoggingService(db: AppDatabase) {
       return mealTransactionsService.softDeleteTransaction(deviceId, mealId);
     },
 
+    async getMealItemCount(deviceId: string, mealId: string): Promise<number | null> {
+      const transaction = await db
+        .select({ currentRevisionId: mealTransactions.currentRevisionId })
+        .from(mealTransactions)
+        .where(and(
+          eq(mealTransactions.deviceId, deviceId),
+          eq(mealTransactions.id, mealId),
+          isNull(mealTransactions.deletedAt),
+        ))
+        .limit(1);
+
+      const currentRevisionId = transaction[0]?.currentRevisionId;
+      if (!currentRevisionId) {
+        return null;
+      }
+
+      const items = await db
+        .select({ position: mealRevisionItems.position })
+        .from(mealRevisionItems)
+        .where(eq(mealRevisionItems.revisionId, currentRevisionId));
+
+      return items.length;
+    },
+
     async updateMeal(deviceId: string, mealId: string, input: GroupedMealData) {
       const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, input);
       return projectCompatibilityEntry(
         deviceId,
         updated.transactionId,
+        updated.revisionId,
         updated.loggedAt,
         updated.imageAssetId ? `asset:${updated.imageAssetId}` : null,
         updated.items,
