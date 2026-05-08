@@ -87,9 +87,21 @@ const STEP_NAMES = [
   "verify_history",
   "verify_meals",
   "verify_summary",
+  "verify_llm_trace",
 ] as const;
 
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function expectRecord(value: unknown, name: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error(`Expected ${name} to be an object`);
+  }
+  return value;
+}
 
 // ---------------------------------------------------------------------------
 // Scenario implementation
@@ -105,6 +117,7 @@ const textLogScenario: VerificationScenario = {
     const scenarioName = "text-log";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
+    let llmTrace: Record<string, unknown> | undefined;
 
     // Create our own app fixture with a controlled LLM provider.
     const { createScenarioApp } = await import("../app-fixture.js");
@@ -559,6 +572,84 @@ const textLogScenario: VerificationScenario = {
         );
         steps.push(stepResult);
         return failResult(scenarioName, steps, "verify_summary", artifacts);
+      }
+
+      // ------------------------------------------------------------------
+      // Step 8: verify_llm_trace — successful logging trace contract
+      // ------------------------------------------------------------------
+      try {
+        const trace = expectRecord(llmTrace, "llmTrace");
+        const summary = expectRecord(trace.summary, "llmTrace.summary");
+        const finalReply = expectRecord(summary.finalReply, "llmTrace.summary.finalReply");
+        const timeline = trace.timeline;
+
+        if (trace.scenario !== "text-log") {
+          const stepResult = fail(
+            "verify_llm_trace",
+            `Expected llmTrace.scenario === "text-log", got ${String(trace.scenario)}`,
+            { trace },
+          );
+          steps.push(stepResult);
+          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+        }
+
+        if (trace.status !== "pass") {
+          const stepResult = fail(
+            "verify_llm_trace",
+            `Expected llmTrace.status === "pass", got ${String(trace.status)}`,
+            { trace },
+          );
+          steps.push(stepResult);
+          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+        }
+
+        if (
+          typeof summary.roundCount !== "number"
+          || summary.roundCount < 1
+          || typeof summary.toolCount !== "number"
+          || summary.toolCount < 1
+          || summary.fallbackCount !== 0
+          || typeof summary.latencyMs !== "number"
+          || summary.latencyMs < 0
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace summary counts or latency did not match successful logging expectations", {
+            summary,
+          });
+          steps.push(stepResult);
+          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+        }
+
+        if (
+          finalReply.source !== "orchestrator_projected_reply"
+          || finalReply.shape !== "plain_text"
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace final reply metadata did not match projected plain-text receipt", {
+            finalReply,
+          });
+          steps.push(stepResult);
+          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+        }
+
+        if (
+          !Array.isArray(timeline)
+          || !timeline.some((event) => isRecord(event) && event.type === "tool_received" && event.tool === "log_food")
+          || !timeline.some((event) => isRecord(event) && event.type === "tool_result" && event.tool === "log_food")
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace timeline did not include log_food tool receipt and result", {
+            timeline,
+          });
+          steps.push(stepResult);
+          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+        }
+
+        steps.push(pass("verify_llm_trace", { summary, timelineLength: timeline.length }));
+      } catch (err) {
+        const stepResult = fail(
+          "verify_llm_trace",
+          err instanceof Error ? err.message : String(err),
+        );
+        steps.push(stepResult);
+        return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
       }
 
       // ------------------------------------------------------------------
