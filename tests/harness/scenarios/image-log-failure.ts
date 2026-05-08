@@ -101,11 +101,17 @@ function verifyFallbackTraceContract(
   const evidence = trace ?? null;
 
   if (!trace) return { ok: false, error: "expected sub-A llm trace", evidence };
+  if (trace.schemaVersion !== "llm-trace.v1") return { ok: false, error: "expected llm-trace.v1 schema version", evidence };
   if (trace.scenario !== "image-log-failure") return { ok: false, error: "expected image-log-failure trace scenario", evidence };
   if (!trace.timeline.some((event) => event.type === "orchestrator_fallback" && event.reason === "llm_error")) {
     return { ok: false, error: "expected llm_error orchestrator_fallback trace event", evidence };
   }
+  if (trace.summary.roundCount !== 1) return { ok: false, error: "expected one LLM round before fallback diagnosis", evidence };
+  if (trace.summary.toolCount !== 0) return { ok: false, error: "expected no tools before sub-A analysis fallback", evidence };
   if (trace.summary.fallbackCount < 1) return { ok: false, error: "expected fallbackCount >= 1", evidence };
+  if (typeof trace.summary.latencyMs !== "number" || trace.summary.latencyMs < 0) {
+    return { ok: false, error: "expected non-negative latencyMs", evidence };
+  }
   if (trace.summary.finalReply.source !== "fallback_reply") return { ok: false, error: "expected fallback_reply final reply source", evidence };
   if (trace.summary.finalReply.shape !== "fallback_text") return { ok: false, error: "expected fallback_text final reply shape", evidence };
 
@@ -255,12 +261,18 @@ const scenario: VerificationScenario = {
       { label: "upload path", value: "/uploads/" },
       { label: "raw device ID", value: "device_" },
       { label: "meal text", value: subAUserMealText },
+      { label: "cookies/session values", value: "guest_session" },
+      { label: "authorization/API keys", value: "authorization" },
+      { label: "authorization/API keys", value: "api_key" },
+      { label: "prompt/messages", value: "messages" },
+      { label: "raw tool args/results", value: "toolArguments" },
+      { label: "raw tool args/results", value: "toolResult" },
     ]);
     if (!subATraceCheck.ok) {
-      allSteps.push(stepFail("sub_a_trace_assert", subATraceCheck.error ?? "trace assertion failed", subATraceCheck.evidence));
-      return buildResult(false, "sub_a_trace_assert", allSteps, allArtifacts);
+      allSteps.push(stepFail("verify_llm_trace", subATraceCheck.error ?? "trace assertion failed", subATraceCheck.evidence));
+      return buildResult(false, "verify_llm_trace", allSteps, allArtifacts);
     }
-    allSteps.push(stepOk("sub_a_trace_assert", subATraceCheck.evidence));
+    allSteps.push(stepOk("verify_llm_trace", subATraceCheck.evidence));
 
     // ------------------------------------------------------------------
     // Sub-scenario B: invalid log_food JSON is classified as FatalToolError.
