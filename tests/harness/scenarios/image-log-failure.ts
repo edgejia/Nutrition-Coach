@@ -13,6 +13,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import type { LlmTraceArtifact } from "../../../server/orchestrator/llm-trace.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -86,6 +87,21 @@ function parseDonePayload(rawSSE: string): { didLogMeal?: boolean; dailySummary?
 
 function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boolean {
   return typeof summary?.date === "string" && DATE_KEY_PATTERN.test(summary.date);
+}
+
+function verifyFallbackTraceContract(trace: LlmTraceArtifact | undefined): { ok: boolean; error?: string; evidence: unknown } {
+  const evidence = trace ?? null;
+
+  if (!trace) return { ok: false, error: "expected sub-A llm trace", evidence };
+  if (trace.scenario !== "image-log-failure") return { ok: false, error: "expected image-log-failure trace scenario", evidence };
+  if (!trace.timeline.some((event) => event.type === "orchestrator_fallback" && event.reason === "llm_error")) {
+    return { ok: false, error: "expected llm_error orchestrator_fallback trace event", evidence };
+  }
+  if (trace.summary.fallbackCount < 1) return { ok: false, error: "expected fallbackCount >= 1", evidence };
+  if (trace.summary.finalReply.source !== "fallback_reply") return { ok: false, error: "expected fallback_reply final reply source", evidence };
+  if (trace.summary.finalReply.shape !== "fallback_text") return { ok: false, error: "expected fallback_text final reply shape", evidence };
+
+  return { ok: true, evidence };
 }
 
 async function runSubScenario(
@@ -198,6 +214,12 @@ const scenario: VerificationScenario = {
     allSteps.push(...subA.steps);
     Object.assign(allArtifacts, subA.artifacts);
     if (!subA.ok) return buildResult(false, subA.failedStep, allSteps, allArtifacts);
+    const subATraceCheck = verifyFallbackTraceContract(undefined);
+    if (!subATraceCheck.ok) {
+      allSteps.push(stepFail("sub_a_trace_assert", subATraceCheck.error ?? "trace assertion failed", subATraceCheck.evidence));
+      return buildResult(false, "sub_a_trace_assert", allSteps, allArtifacts);
+    }
+    allSteps.push(stepOk("sub_a_trace_assert", subATraceCheck.evidence));
 
     // ------------------------------------------------------------------
     // Sub-scenario B: invalid log_food JSON is classified as FatalToolError.
