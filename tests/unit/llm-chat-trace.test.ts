@@ -4,7 +4,11 @@ import {
   ACTIVE_SYSTEM_PROMPT_VERSION,
   SYSTEM_PROMPT_SECTION_IDS,
 } from "../../server/orchestrator/system-prompt.js";
-import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
+import {
+  createLlmTraceRecorder,
+  type LlmTraceFinalReplyShape,
+  type LlmTraceFinalReplySource,
+} from "../../server/orchestrator/llm-trace.js";
 
 describe("createLlmTraceRecorder", () => {
   it("records orchestrator timeline entries in call order", () => {
@@ -79,5 +83,119 @@ describe("createLlmTraceRecorder", () => {
 
     assert.equal(trace.summary.prompt.version, ACTIVE_SYSTEM_PROMPT_VERSION);
     assert.deepEqual(trace.summary.prompt.sectionIds, Object.values(SYSTEM_PROMPT_SECTION_IDS));
+  });
+
+  it("accepts all Phase 51 final reply source labels", () => {
+    const sources: LlmTraceFinalReplySource[] = [
+      "model_response",
+      "stream",
+      "orchestrator_projected_reply",
+      "fallback_reply",
+    ];
+
+    for (const source of sources) {
+      const recorder = createLlmTraceRecorder();
+
+      recorder.recordFinalReply({ source, shape: "plain_text" });
+
+      const trace = recorder.build({ scenario: `unit-${source}`, status: "pass" });
+      assert.equal(trace.summary.finalReply.source, source);
+    }
+  });
+
+  it("accepts all Phase 51 final reply shape labels", () => {
+    const shapes: LlmTraceFinalReplyShape[] = [
+      "plain_text",
+      "streamed_text",
+      "fallback_text",
+      "empty_or_missing",
+    ];
+
+    for (const shape of shapes) {
+      const recorder = createLlmTraceRecorder();
+
+      recorder.recordFinalReply({ source: "model_response", shape });
+
+      const trace = recorder.build({ scenario: `unit-${shape}`, status: "pass" });
+      assert.equal(trace.summary.finalReply.shape, shape);
+    }
+  });
+
+  it("excludes malicious or accidental raw payload values while keeping operational trace keys", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+    const unsafeToolPayload = {
+      tool: "log_food",
+      success: false,
+      executed: false,
+      failureReason: "validation secret-device-51 sk-test-secret",
+      reason: "raw prompt text",
+      fields: ["/uploads/raw-secret.jpg", "messages"],
+      updatedFields: ["provider payload"],
+      publishedEvents: ["guest_session=secret"],
+      rawMeal: "我吃了隱私測試餐點",
+      image: "data:image/png;base64,SECRETIMAGE",
+      authorization: "Bearer secret-token",
+      toolArguments: "raw tool arguments",
+      toolResponse: "raw tool results",
+    };
+    const unsafeFinalReply = {
+      source: "fallback_reply",
+      shape: "fallback_text",
+      text: "final assistant text",
+    };
+
+    hooks.onLLMStart?.(1);
+    hooks.onToolReceived?.("log_food", "我吃了隱私測試餐點 /uploads/raw-secret.jpg");
+    hooks.onToolResult?.(unsafeToolPayload);
+    hooks.onLLMEnd?.(1, true);
+    hooks.onFallback?.("llm_error");
+    recorder.recordFinalReply(unsafeFinalReply);
+    recorder.recordRouteCompletion({
+      transport: "sse",
+      didLogMeal: false,
+      didMutateMeal: false,
+      completed: true,
+      cookie: "guest_session=secret",
+      reply: "final assistant text",
+    });
+    recorder.recordMetrics({ latencyMs: 17, apiKey: "sk-test-secret" });
+
+    const traceJson = JSON.stringify(recorder.build({ scenario: "unit-trace", status: "pass" }));
+    const forbiddenValues = [
+      "secret-device-51",
+      "我吃了隱私測試餐點",
+      "/uploads/raw-secret.jpg",
+      "data:image/png;base64,SECRETIMAGE",
+      "sk-test-secret",
+      "guest_session=secret",
+      "Bearer secret-token",
+      "raw prompt text",
+      "messages",
+      "provider payload",
+      "raw tool arguments",
+      "raw tool results",
+      "final assistant text",
+    ];
+
+    for (const value of forbiddenValues) {
+      assert.equal(traceJson.includes(value), false, `trace should exclude ${value}`);
+    }
+
+    for (const key of [
+      "tool",
+      "success",
+      "executed",
+      "failureReason",
+      "roundCount",
+      "toolCount",
+      "fallbackCount",
+      "latencyMs",
+      "finalReply",
+      "source",
+      "shape",
+    ]) {
+      assert.equal(traceJson.includes(key), true, `trace should include ${key}`);
+    }
   });
 });
