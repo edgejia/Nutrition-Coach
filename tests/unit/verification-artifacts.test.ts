@@ -320,6 +320,8 @@ describe("verification-artifacts", () => {
       toolArguments: { food: "raw tool args should not persist" },
       finalAssistantContent: "assistant final answer should not persist",
     };
+    result.steps[1]!.error =
+      "Assertion failed with raw user meal text should not persist and assistant final answer should not persist";
     result.artifacts.forbiddenEvidence = {
       deviceId: "secret-device-id-xyz",
       userMealText: "raw user meal text should not persist",
@@ -330,6 +332,9 @@ describe("verification-artifacts", () => {
       messages: [{ role: "user", content: "raw prompt text should not persist" }],
       rawToolResult: { reply: "raw tool result should not persist" },
       assistantContent: "assistant final answer should not persist",
+      streamFrames: [{ event: "chunk", data: "raw user meal text should not persist" }],
+      historySnapshot: [{ role: "assistant", content: "assistant final answer should not persist" }],
+      fallbackContent: "assistant final answer should not persist",
     };
     result.llmTrace = {
       summary: {

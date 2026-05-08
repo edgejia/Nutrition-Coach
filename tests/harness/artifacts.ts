@@ -91,7 +91,7 @@ function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
 
 function shouldRedactKey(key: string): boolean {
   const normalized = normalizeKey(key);
-  return normalized.includes("deviceid");
+  return normalized.includes("deviceid") || normalized === "error";
 }
 
 function shouldOmitKey(key: string): boolean {
@@ -106,13 +106,18 @@ function normalizeKey(key: string): string {
 const OMITTED_KEYS = new Set([
   "apikey",
   "arguments",
+  "assistantmessage",
+  "assistantmessages",
   "authorization",
   "bearer",
+  "content",
   "cookie",
-  "finalanswer",
   "assistantcontent",
+  "fallbackcontent",
+  "finalanswer",
   "finalassistantcontent",
   "guestsession",
+  "historysnapshot",
   "imagebase64",
   "imagedata",
   "imagedatauri",
@@ -127,6 +132,9 @@ const OMITTED_KEYS = new Set([
   "rawtoolresult",
   "sessiontoken",
   "setcookie",
+  "ssetranscript",
+  "streamframes",
+  "token",
   "toolarguments",
   "toolresult",
   "uploadstagingpath",
@@ -197,13 +205,14 @@ export async function writeScenarioArtifacts(
     "utf-8",
   );
 
-  // steps.json — redact actual/expected values
+  // steps.json — redact all step evidence, including assertion strings that may
+  // embed model/user transcript excerpts.
   const steps = result.steps.map((s: ScenarioStepResult) => ({
     name: s.name,
     ok: s.ok,
     ...(s.actual !== undefined ? { actual: redact(s.actual) } : {}),
     ...(s.expected !== undefined ? { expected: redact(s.expected) } : {}),
-    ...(s.error !== undefined ? { error: s.error } : {}),
+    ...(s.error !== undefined ? { error: REDACTED } : {}),
   }));
   fs.writeFileSync(path.join(dir, "steps.json"), JSON.stringify(steps, null, 2), "utf-8");
 

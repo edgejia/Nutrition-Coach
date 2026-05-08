@@ -12,7 +12,11 @@ import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
 import { buildPartialSuccessLoggedReply } from "../orchestrator/index.js";
-import type { LlmTraceRecorder } from "../orchestrator/llm-trace.js";
+import type {
+  LlmTraceFinalReplyShape,
+  LlmTraceFinalReplySource,
+  LlmTraceRecorder,
+} from "../orchestrator/llm-trace.js";
 import type { ToolExecutionResult } from "../orchestrator/tools.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
@@ -65,6 +69,16 @@ interface StreamingStopControl {
   turnId: string;
   signal: AbortSignal;
   isStopped(): boolean;
+}
+
+interface StreamingReplyResult {
+  fullReply: string;
+  didLogMeal: boolean;
+  dailySummary?: unknown;
+  stopped?: boolean;
+  tokensStreamed: number;
+  finalReplySource: LlmTraceFinalReplySource;
+  finalReplyShape: LlmTraceFinalReplyShape;
 }
 
 const activeChatTurns = new Map<string, ActiveChatTurn>();
@@ -455,13 +469,7 @@ async function handleStreamingReply(
   partialMutationReply?: string,
   hooks?: OrchestratorHooks,
   stopControl?: StreamingStopControl,
-): Promise<{
-  fullReply: string;
-  didLogMeal: boolean;
-  dailySummary?: unknown;
-  stopped?: boolean;
-  tokensStreamed: number;
-}> {
+): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
   let fullReply = "";
   let tokensStreamed = 0;
@@ -504,6 +512,8 @@ async function handleStreamingReply(
       dailySummary,
       stopped: true,
       tokensStreamed,
+      finalReplySource: "stream",
+      finalReplyShape: stoppedReply.trim() ? "streamed_text" : "empty_or_missing",
     };
   }
 
@@ -514,7 +524,14 @@ async function handleStreamingReply(
       : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
     await finalizeAssistantReply(chatService, deviceId, retryMsg, receiptIdentity);
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
-    return { fullReply: retryMsg, didLogMeal, dailySummary, tokensStreamed };
+    return {
+      fullReply: retryMsg,
+      didLogMeal,
+      dailySummary,
+      tokensStreamed,
+      finalReplySource: "fallback_reply",
+      finalReplyShape: "fallback_text",
+    };
   }
 
   for (const heldToken of heldTokens) {
@@ -538,7 +555,14 @@ async function handleStreamingReply(
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
   }
   await finalizeAssistantReply(chatService, deviceId, fullReply, receiptIdentity);
-  return { fullReply, didLogMeal, dailySummary, tokensStreamed };
+  return {
+    fullReply,
+    didLogMeal,
+    dailySummary,
+    tokensStreamed,
+    finalReplySource: "stream",
+    finalReplyShape: fullReply.trim() ? "streamed_text" : "empty_or_missing",
+  };
 }
 
 async function handleOrchestratorSSE(
@@ -603,7 +627,6 @@ async function handleOrchestratorSSE(
 
     if ("streamGenerator" in result) {
       const { streamGenerator, didLogMeal, dailySummary, affectedDate, loggedMeal } = result;
-      recorder?.recordFinalReply({ source: "stream", shape: "streamed_text" });
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
@@ -629,6 +652,10 @@ async function handleOrchestratorSSE(
       );
       streamDidLogMeal = streamResult.didLogMeal;
       streamDailySummary = streamResult.dailySummary;
+      recorder?.recordFinalReply({
+        source: streamResult.finalReplySource,
+        shape: streamResult.finalReplyShape,
+      });
 
       if (streamResult.stopped) {
         const stoppedData = {
