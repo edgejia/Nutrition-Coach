@@ -415,8 +415,10 @@ describe("chat-streaming", () => {
         source: "stream",
         shape: "streamed_text",
       });
-      assert.equal(typeof trace.summary.latencyMs, "number");
-      assert.ok(trace.summary.latencyMs >= 0);
+      const latencyMs = trace.summary.latencyMs;
+      assert.ok(latencyMs !== undefined);
+      assert.equal(typeof latencyMs, "number");
+      assert.ok(latencyMs >= 0);
       assert.deepEqual(trace.timeline.at(-1), {
         type: "route_completion",
         transport: "sse",
@@ -495,8 +497,10 @@ describe("chat-streaming", () => {
         source: "fallback_reply",
         shape: "fallback_text",
       });
-      assert.equal(typeof trace.summary.latencyMs, "number");
-      assert.ok(trace.summary.latencyMs >= 0);
+      const latencyMs = trace.summary.latencyMs;
+      assert.ok(latencyMs !== undefined);
+      assert.equal(typeof latencyMs, "number");
+      assert.ok(latencyMs >= 0);
       assert.deepEqual(trace.timeline.at(-1), {
         type: "route_completion",
         transport: "sse",

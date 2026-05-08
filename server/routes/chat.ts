@@ -12,6 +12,7 @@ import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
 import { buildPartialSuccessLoggedReply } from "../orchestrator/index.js";
+import type { LlmTraceRecorder } from "../orchestrator/llm-trace.js";
 import type { ToolExecutionResult } from "../orchestrator/tools.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
@@ -32,6 +33,7 @@ interface Deps {
    * scenario-local temp directory in harness runs to prevent staged residue.
    */
   uploadsDir?: string;
+  llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
 }
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -73,6 +75,33 @@ function activeChatTurnKey(deviceId: string, turnId: string) {
 
 function writeStatus(stream: PassThrough, label: string, turnId?: string) {
   stream.write(`event: status\ndata: ${JSON.stringify({ label, ...(turnId ? { turnId } : {}) })}\n\n`);
+}
+
+function fanOutOrchestratorHooks(
+  ...hooks: Array<OrchestratorHooks | undefined>
+): OrchestratorHooks | undefined {
+  const activeHooks = hooks.filter((hook): hook is OrchestratorHooks => Boolean(hook));
+  if (activeHooks.length === 0) {
+    return undefined;
+  }
+
+  return {
+    onLLMStart(round) {
+      for (const hook of activeHooks) hook.onLLMStart?.(round);
+    },
+    onLLMEnd(round, hadToolCalls) {
+      for (const hook of activeHooks) hook.onLLMEnd?.(round, hadToolCalls);
+    },
+    onToolReceived(tool, argsRedacted) {
+      for (const hook of activeHooks) hook.onToolReceived?.(tool, argsRedacted);
+    },
+    onToolResult(payload) {
+      for (const hook of activeHooks) hook.onToolResult?.(payload);
+    },
+    onFallback(reason) {
+      for (const hook of activeHooks) hook.onFallback?.(reason);
+    },
+  };
 }
 
 // Last-gate filter: strip internal tool identifiers even when the model ignores
@@ -526,6 +555,7 @@ async function handleOrchestratorSSE(
   image: { dataUri: string; path: string; mimeType: string; originalFilename?: string } | undefined,
   startedAt: number,
   hooks?: OrchestratorHooks,
+  recorder?: LlmTraceRecorder,
   stopControl?: StreamingStopControl,
 ): Promise<void> {
   let durableAssetId: string | undefined;
@@ -573,6 +603,7 @@ async function handleOrchestratorSSE(
 
     if ("streamGenerator" in result) {
       const { streamGenerator, didLogMeal, dailySummary, affectedDate, loggedMeal } = result;
+      recorder?.recordFinalReply({ source: "stream", shape: "streamed_text" });
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
@@ -612,6 +643,13 @@ async function handleOrchestratorSSE(
           ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
         };
         stream.write(`event: stopped\ndata: ${JSON.stringify(stoppedData)}\n\n`);
+        recorder?.recordRouteCompletion({
+          transport: "sse",
+          didLogMeal: streamDidLogMeal,
+          didMutateMeal: streamDidMutateMeal,
+          completed: true,
+        });
+        recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
         logChatTurnCompleted(deps.log, {
           source: "sse",
           didLogMeal: streamDidLogMeal,
@@ -634,6 +672,13 @@ async function handleOrchestratorSSE(
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+      recorder?.recordRouteCompletion({
+        transport: "sse",
+        didLogMeal: streamDidLogMeal,
+        didMutateMeal: streamDidMutateMeal,
+        completed: true,
+      });
+      recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
       logChatTurnCompleted(deps.log, {
         source: "sse",
         didLogMeal: streamDidLogMeal,
@@ -644,6 +689,10 @@ async function handleOrchestratorSSE(
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
     } else {
       const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate, loggedMeal } = result;
+      recorder?.recordFinalReply({
+        source: result.finalReplySource ?? "model_response",
+        shape: result.finalReplyShape ?? "empty_or_missing",
+      });
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
@@ -669,6 +718,13 @@ async function handleOrchestratorSSE(
         ...(affectedDate ? { affectedDate } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+      recorder?.recordRouteCompletion({
+        transport: "sse",
+        didLogMeal,
+        didMutateMeal: streamDidMutateMeal,
+        completed: true,
+      });
+      recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
       logChatTurnCompleted(deps.log, {
         source: "sse",
         didLogMeal,
@@ -684,6 +740,7 @@ async function handleOrchestratorSSE(
       : streamDidMutateMeal
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
+    recorder?.recordFinalReply({ source: "fallback_reply", shape: "fallback_text" });
     try {
       if (!userMessagePersisted) {
         await deps.chatService.saveMessage(
@@ -714,6 +771,13 @@ async function handleOrchestratorSSE(
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
+    recorder?.recordRouteCompletion({
+      transport: "sse",
+      didLogMeal: streamDidLogMeal,
+      didMutateMeal: streamDidMutateMeal,
+      completed: true,
+    });
+    recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
     logChatTurnCompleted(deps.log, {
       source: "sse",
       didLogMeal: streamDidLogMeal,
@@ -745,6 +809,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     guestSessionService,
     publisher,
     uploadsDir: injectedUploadsDir,
+    llmTraceRecorderFactory,
   } = deps;
 
   app.post("/api/chat/stop", async (request, reply) => {
@@ -1009,7 +1074,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       .send(stream);
 
     const orchLog = request.log.child({ component: "orchestrator" });
-    const hooks = createStructuredHooks(orchLog);
+    const traceRecorder = llmTraceRecorderFactory?.();
+    const hooks = fanOutOrchestratorHooks(
+      createStructuredHooks(orchLog),
+      traceRecorder?.asOrchestratorHooks(),
+    );
 
     setImmediate(() => {
       void handleOrchestratorSSE(
@@ -1020,6 +1089,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         image,
         chatTurnStartedAt,
         hooks,
+        traceRecorder,
         {
           turnId,
           signal: activeTurn.controller.signal,
