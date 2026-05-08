@@ -101,6 +101,40 @@ export interface LlmTraceRecorder {
   build(input: BuildInput): LlmTraceArtifact;
 }
 
+const UNSAFE_TRACE_LABEL_FRAGMENTS = [
+  "authorization",
+  "bearer",
+  "cookie",
+  "data:image",
+  "device",
+  "guest_session",
+  "message",
+  "prompt",
+  "provider",
+  "raw",
+  "secret",
+  "sk-",
+  "token",
+  "upload",
+] as const;
+
+function isSafeTraceLabel(value: string): boolean {
+  const normalized = value.toLowerCase();
+
+  return (
+    /^[A-Za-z0-9_.:-]+$/.test(value)
+    && UNSAFE_TRACE_LABEL_FRAGMENTS.every((fragment) => !normalized.includes(fragment))
+  );
+}
+
+function sanitizeTraceLabel(value: string): string {
+  return isSafeTraceLabel(value) ? value : "redacted";
+}
+
+function sanitizeTraceLabels(values: string[]): string[] {
+  return [...new Set(values.map(sanitizeTraceLabel))];
+}
+
 function buildToolResultEvent(
   payload: ToolResultPayload,
   round?: number,
@@ -108,25 +142,25 @@ function buildToolResultEvent(
   const event: Extract<LlmTraceTimelineEvent, { type: "tool_result" }> = {
     type: "tool_result",
     round,
-    tool: payload.tool,
+    tool: sanitizeTraceLabel(payload.tool),
     success: payload.success,
     executed: payload.executed,
   };
 
   if (payload.failureReason !== undefined) {
-    event.failureReason = payload.failureReason;
+    event.failureReason = sanitizeTraceLabel(payload.failureReason);
   }
   if (payload.reason !== undefined) {
-    event.reason = payload.reason;
+    event.reason = sanitizeTraceLabel(payload.reason);
   }
   if (payload.fields !== undefined) {
-    event.fields = [...payload.fields];
+    event.fields = sanitizeTraceLabels(payload.fields);
   }
   if (payload.updatedFields !== undefined) {
-    event.updatedFields = [...payload.updatedFields];
+    event.updatedFields = sanitizeTraceLabels(payload.updatedFields);
   }
   if (payload.publishedEvents !== undefined) {
-    event.publishedEvents = [...payload.publishedEvents];
+    event.publishedEvents = sanitizeTraceLabels(payload.publishedEvents);
   }
 
   return event;
@@ -156,7 +190,7 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
           timeline.push({ type: "llm_round_end", round, hadToolCalls });
         },
         onToolReceived(tool) {
-          timeline.push({ type: "tool_received", round: currentRound, tool });
+          timeline.push({ type: "tool_received", round: currentRound, tool: sanitizeTraceLabel(tool) });
         },
         onToolResult(payload) {
           timeline.push(buildToolResultEvent(payload, currentRound));

@@ -140,9 +140,21 @@ describe("createLlmTraceRecorder", () => {
       toolResponse: "raw tool results",
     };
     const unsafeFinalReply = {
-      source: "fallback_reply",
-      shape: "fallback_text",
+      source: "fallback_reply" as const,
+      shape: "fallback_text" as const,
       text: "final assistant text",
+    };
+    const unsafeRouteCompletion = {
+      transport: "sse" as const,
+      didLogMeal: false,
+      didMutateMeal: false,
+      completed: true,
+      cookie: "guest_session=secret",
+      reply: "final assistant text",
+    };
+    const unsafeMetrics = {
+      latencyMs: 17,
+      apiKey: "sk-test-secret",
     };
 
     hooks.onLLMStart?.(1);
@@ -151,15 +163,8 @@ describe("createLlmTraceRecorder", () => {
     hooks.onLLMEnd?.(1, true);
     hooks.onFallback?.("llm_error");
     recorder.recordFinalReply(unsafeFinalReply);
-    recorder.recordRouteCompletion({
-      transport: "sse",
-      didLogMeal: false,
-      didMutateMeal: false,
-      completed: true,
-      cookie: "guest_session=secret",
-      reply: "final assistant text",
-    });
-    recorder.recordMetrics({ latencyMs: 17, apiKey: "sk-test-secret" });
+    recorder.recordRouteCompletion(unsafeRouteCompletion);
+    recorder.recordMetrics(unsafeMetrics);
 
     const traceJson = JSON.stringify(recorder.build({ scenario: "unit-trace", status: "pass" }));
     const forbiddenValues = [
