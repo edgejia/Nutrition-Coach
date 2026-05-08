@@ -65,6 +65,10 @@ function makeFailResult(scenarioName: string): ScenarioResult {
   };
 }
 
+function artifactFileNames(tmpDir: string, scenarioName: string): string[] {
+  return fs.readdirSync(path.join(tmpDir, scenarioName, "latest")).sort();
+}
+
 // ------------------------------------------------------------------ tests
 
 describe("verification-artifacts", () => {
@@ -96,6 +100,73 @@ describe("verification-artifacts", () => {
     assert.ok(fs.existsSync(path.join(latestDir, "steps.json")), "steps.json missing");
     assert.ok(fs.existsSync(path.join(latestDir, "snapshots.json")), "snapshots.json missing");
     assert.ok(fs.existsSync(path.join(latestDir, "scenario-result.json")), "scenario-result.json missing");
+  });
+
+  test("writeScenarioArtifacts does not write llm-trace.json when a scenario returns no trace", async () => {
+    const result = makePassResult("text-log-without-trace");
+    await writeScenarioArtifacts("text-log-without-trace", result);
+
+    assert.deepEqual(artifactFileNames(tmpDir, "text-log-without-trace"), [
+      "scenario-result.json",
+      "snapshots.json",
+      "steps.json",
+      "summary.json",
+    ]);
+  });
+
+  test("writeScenarioArtifacts writes fixed llm-trace.json when a scenario returns a trace", async () => {
+    const result = makePassResult("text-log-with-trace") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.llmTrace = {
+      summary: { roundCount: 1, toolCount: 1 },
+      timeline: [{ type: "tool_result", tool: "log_food", success: true }],
+    };
+
+    await writeScenarioArtifacts("text-log-with-trace", result);
+
+    assert.deepEqual(artifactFileNames(tmpDir, "text-log-with-trace"), [
+      "llm-trace.json",
+      "scenario-result.json",
+      "snapshots.json",
+      "steps.json",
+      "summary.json",
+    ]);
+  });
+
+  test("llm-trace.json contains only the redacted ScenarioResult llmTrace", async () => {
+    const result = makePassResult("text-log-trace-source") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.steps[0]!.actual = { stepOnly: "must not appear in llm trace" };
+    result.artifacts = {
+      llmTrace: { artifactTrace: "must not become llm-trace.json" },
+      trace: { rawTrace: "must not become llm-trace.json" },
+      snapshotOnly: "must not appear in llm trace",
+    };
+    result.llmTrace = {
+      summary: {
+        source: "shape survives",
+        deviceId: "secret-device-id-xyz",
+      },
+      timeline: [{ type: "tool_result", tool: "log_food", success: true }],
+    };
+
+    await writeScenarioArtifacts("text-log-trace-source", result);
+
+    const latestDir = path.join(tmpDir, "text-log-trace-source", "latest");
+    const traceRaw = fs.readFileSync(path.join(latestDir, "llm-trace.json"), "utf-8");
+    const trace = JSON.parse(traceRaw) as {
+      summary: { source: string; deviceId: string };
+      timeline: Array<{ type: string; tool: string; success: boolean }>;
+    };
+
+    assert.equal(trace.summary.source, "shape survives");
+    assert.equal(trace.summary.deviceId, "[REDACTED]");
+    assert.deepEqual(trace.timeline, [{ type: "tool_result", tool: "log_food", success: true }]);
+    assert.doesNotMatch(traceRaw, /must not appear in llm trace/);
+    assert.doesNotMatch(traceRaw, /must not become llm-trace\.json/);
+    assert.doesNotMatch(traceRaw, /secret-device-id-xyz/);
   });
 
   test("summary.json contains ok, failedStep, consoleSummary, and step count", async () => {
