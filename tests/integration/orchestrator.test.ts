@@ -64,6 +64,85 @@ describe("Orchestrator", () => {
     assert.equal(result.didLogMeal, false);
   });
 
+  it("classifies a normal non-stream model reply for route tracing", async () => {
+    mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
+    const result = await orchestrator.handleMessage(deviceId, "你好");
+    assertReplyResult(result);
+    assert.equal(result.finalReplySource, "model_response");
+    assert.equal(result.finalReplyShape, "plain_text");
+  });
+
+  it("classifies a successful log_food projected reply for route tracing", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "trace_log_food",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "蘋果",
+            calories: 100,
+            protein: 1,
+            carbs: 25,
+            fat: 0.5,
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    assertReplyResult(result);
+    assert.equal(result.finalReplySource, "orchestrator_projected_reply");
+    assert.equal(result.finalReplyShape, "plain_text");
+  });
+
+  it("classifies orchestrator fallback replies for route tracing", async () => {
+    mockLLM.queueChatError(new Error("provider down"));
+    const llmErrorResult = await orchestrator.handleMessage(deviceId, "你好");
+    assertReplyResult(llmErrorResult);
+    assert.equal(llmErrorResult.finalReplySource, "fallback_reply");
+    assert.equal(llmErrorResult.finalReplyShape, "fallback_text");
+
+    mockLLM.reset();
+    mockLLM.queueChatResponse({ content: "" });
+    const missingReplyResult = await orchestrator.handleMessage(deviceId, "你好");
+    assertReplyResult(missingReplyResult);
+    assert.equal(missingReplyResult.finalReplySource, "model_response");
+    assert.equal(missingReplyResult.finalReplyShape, "empty_or_missing");
+
+    mockLLM.reset();
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `trace_max_round_${i}`,
+          type: "function",
+          function: { name: "get_daily_summary", arguments: "{}" },
+        }],
+      });
+    }
+    const maxRoundResult = await orchestrator.handleMessage(deviceId, "test");
+    assertReplyResult(maxRoundResult);
+    assert.equal(maxRoundResult.finalReplySource, "fallback_reply");
+    assert.equal(maxRoundResult.finalReplyShape, "fallback_text");
+
+    mockLLM.reset();
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "trace_goal_success_reply_error",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    mockLLM.queueChatError(new Error("reply generation failed"));
+    const partialSuccessResult = await orchestrator.handleMessage(deviceId, "卡路里改成 1800，蛋白質 130 克");
+    assertReplyResult(partialSuccessResult);
+    assert.equal(partialSuccessResult.finalReplySource, "fallback_reply");
+    assert.equal(partialSuccessResult.finalReplyShape, "fallback_text");
+  });
+
   it("executes tool calls and returns final reply", async () => {
     // Round 1: LLM calls get_daily_summary (registry-known tool; pre-Phase-10
     // this round used the legacy lenient `analyze_food` unknown-tool path, but
