@@ -165,6 +165,14 @@ export async function writeScenarioArtifacts(
     "utf-8",
   );
 
+  if (result.llmTrace !== undefined) {
+    fs.writeFileSync(
+      path.join(dir, "llm-trace.json"),
+      JSON.stringify(redact(result.llmTrace), null, 2),
+      "utf-8",
+    );
+  }
+
   const scenarioResult = redact(result);
   fs.writeFileSync(
     path.join(dir, "scenario-result.json"),
