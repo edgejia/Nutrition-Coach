@@ -3,6 +3,7 @@ process.env.TZ = "Asia/Taipei";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../../server/app.js";
+import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { FastifyInstance } from "fastify";
 import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ToolCall, ToolDefinition } from "../../server/llm/types.js";
 
@@ -324,6 +325,7 @@ describe("chat-streaming", () => {
   let deviceId: string;
   let sessionCookieHeader: string;
   let address: string;
+  let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -332,7 +334,16 @@ describe("chat-streaming", () => {
 
   beforeEach(async () => {
     mockLLM = new StreamingLLMProvider();
-    app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
+    traceRecorders = [];
+    app = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: mockLLM,
+      llmTraceRecorderFactory: () => {
+        const recorder = createLlmTraceRecorder();
+        traceRecorders.push(recorder);
+        return recorder;
+      },
+    });
 
     const res = await app.inject({
       method: "POST",
@@ -374,6 +385,136 @@ describe("chat-streaming", () => {
       if (app.server.listening) {
         await app.close();
       }
+    }
+  });
+
+  it("POST /api/chat SSE stream records streamed final reply trace and still emits done", async () => {
+    mockLLM.queueChatStream(["直接", "回覆"]);
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      assert.match(text, /event: done/);
+      assert.equal(traceRecorders.length, 1);
+
+      const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
+      assert.deepEqual(trace.summary.finalReply, {
+        source: "stream",
+        shape: "streamed_text",
+      });
+      assert.equal(typeof trace.summary.latencyMs, "number");
+      assert.ok(trace.summary.latencyMs >= 0);
+      assert.deepEqual(trace.timeline.at(-1), {
+        type: "route_completion",
+        transport: "sse",
+        didLogMeal: false,
+        didMutateMeal: false,
+        completed: true,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE projected log_food reply records projected final reply trace", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      assert.match(text, /event: done/);
+
+      const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
+      assert.deepEqual(trace.summary.finalReply, {
+        source: "orchestrator_projected_reply",
+        shape: "plain_text",
+      });
+      assert.deepEqual(trace.timeline.at(-1), {
+        type: "route_completion",
+        transport: "sse",
+        didLogMeal: true,
+        didMutateMeal: true,
+        completed: true,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE route fallback records fallback trace and one assistant fallback", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [createLogFoodToolCallWithArguments("{bad json")],
+    });
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      assert.match(text, /event: done/);
+
+      const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
+      assert.deepEqual(trace.summary.finalReply, {
+        source: "fallback_reply",
+        shape: "fallback_text",
+      });
+      assert.equal(typeof trace.summary.latencyMs, "number");
+      assert.ok(trace.summary.latencyMs >= 0);
+      assert.deepEqual(trace.timeline.at(-1), {
+        type: "route_completion",
+        transport: "sse",
+        didLogMeal: false,
+        didMutateMeal: false,
+        completed: true,
+      });
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1);
+      assert.match(assistantMessages[0]!.content, /這次無法完成請求/);
+    } finally {
+      clearTimeout(timeout);
     }
   });
 
