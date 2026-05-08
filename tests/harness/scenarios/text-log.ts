@@ -97,6 +97,7 @@ const STEP_NAMES = [
 ] as const;
 
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const USER_INPUT_TEXT = "我吃了蘋果";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -124,6 +125,8 @@ const textLogScenario: VerificationScenario = {
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
     let llmTrace: Record<string, unknown> | undefined;
+    let finalAssistantContent: string | undefined;
+    let streamedReplyText = "";
 
     // Create our own app fixture with a controlled LLM provider.
     const { createScenarioApp } = await import("../app-fixture.js");
@@ -272,7 +275,7 @@ const textLogScenario: VerificationScenario = {
         const chatTimeout = setTimeout(() => chatController!.abort(), 5000);
 
         const form = new FormData();
-        form.append("message", "我吃了蘋果");
+        form.append("message", USER_INPUT_TEXT);
 
         chatRes = await fetch(`${fixture.address}/api/chat`, {
           method: "POST",
@@ -338,6 +341,17 @@ const textLogScenario: VerificationScenario = {
 
         streamFrames = parseSSEEvents(streamText);
         artifacts.streamFrames = streamFrames;
+        streamedReplyText = streamFrames
+          .filter((event) => event.event === "chunk")
+          .map((event) => {
+            try {
+              const parsed = JSON.parse(event.data) as { token?: unknown };
+              return typeof parsed.token === "string" ? parsed.token : "";
+            } catch {
+              return "";
+            }
+          })
+          .join("");
 
         const doneEvent = streamFrames.find((e) => e.event === "done");
         if (!doneEvent) {
@@ -412,6 +426,7 @@ const textLogScenario: VerificationScenario = {
         const lastMessage = messages[messages.length - 1];
 
         artifacts.historySnapshot = messages;
+        finalAssistantContent = lastMessage?.role === "assistant" ? lastMessage.content : undefined;
 
         if (lastMessage?.role !== "assistant") {
           const stepResult = fail(
@@ -597,8 +612,29 @@ const textLogScenario: VerificationScenario = {
         llmTrace = buildTrace("pass");
         const trace = expectRecord(llmTrace, "llmTrace");
         const summary = expectRecord(trace.summary, "llmTrace.summary");
+        const prompt = expectRecord(summary.prompt, "llmTrace.summary.prompt");
         const finalReply = expectRecord(summary.finalReply, "llmTrace.summary.finalReply");
         const timeline = trace.timeline;
+        const serializedTrace = JSON.stringify(trace);
+        const topLevelKeys = Object.keys(trace).sort();
+
+        if (topLevelKeys.join(",") !== "scenario,schemaVersion,status,summary,timeline") {
+          const stepResult = fail("verify_llm_trace", "Trace top-level keys did not match the llm-trace.v1 contract", {
+            topLevelKeys,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (trace.schemaVersion !== "llm-trace.v1") {
+          const stepResult = fail(
+            "verify_llm_trace",
+            `Expected llmTrace.schemaVersion === "llm-trace.v1", got ${String(trace.schemaVersion)}`,
+            { schemaVersion: trace.schemaVersion },
+          );
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
 
         if (trace.scenario !== "text-log") {
           const stepResult = fail(
@@ -637,6 +673,18 @@ const textLogScenario: VerificationScenario = {
         }
 
         if (
+          typeof prompt.version !== "string"
+          || !Array.isArray(prompt.sectionIds)
+          || prompt.sectionIds.length === 0
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace prompt metadata was missing version or section IDs", {
+            prompt,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (
           finalReply.source !== "orchestrator_projected_reply"
           || finalReply.shape !== "plain_text"
         ) {
@@ -647,19 +695,70 @@ const textLogScenario: VerificationScenario = {
           return failScenario("verify_llm_trace");
         }
 
-        if (
-          !Array.isArray(timeline)
-          || !timeline.some((event) => isRecord(event) && event.type === "tool_received" && event.tool === "log_food")
-          || !timeline.some((event) => isRecord(event) && event.type === "tool_result" && event.tool === "log_food")
-        ) {
-          const stepResult = fail("verify_llm_trace", "Trace timeline did not include log_food tool receipt and result", {
+        if (!Array.isArray(timeline)) {
+          const stepResult = fail("verify_llm_trace", "Trace timeline was not an array", {
             timeline,
           });
           steps.push(stepResult);
           return failScenario("verify_llm_trace");
         }
 
-        steps.push(pass("verify_llm_trace", { summary, timelineLength: timeline.length }));
+        const roundStartIndex = timeline.findIndex((event) => isRecord(event) && event.type === "llm_round_start");
+        const toolReceivedIndex = timeline.findIndex((event) => isRecord(event) && event.type === "tool_received" && event.tool === "log_food");
+        const toolResultIndex = timeline.findIndex((event) => {
+          return (
+            isRecord(event)
+            && event.type === "tool_result"
+            && event.tool === "log_food"
+            && event.success === true
+          );
+        });
+        const roundEndIndex = timeline.findIndex((event) => isRecord(event) && event.type === "llm_round_end");
+
+        if (
+          roundStartIndex < 0
+          || toolReceivedIndex < 0
+          || toolResultIndex < 0
+          || roundEndIndex < 0
+          || !(roundStartIndex < toolReceivedIndex && toolReceivedIndex < toolResultIndex && toolResultIndex < roundEndIndex)
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace timeline did not preserve llm/tool event ordering for log_food", {
+            eventIndexes: {
+              llm_round_start: roundStartIndex,
+              tool_received: toolReceivedIndex,
+              tool_result: toolResultIndex,
+              llm_round_end: roundEndIndex,
+            },
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        const forbiddenSnippets = [
+          USER_INPUT_TEXT,
+          streamedReplyText,
+          finalAssistantContent,
+          "/uploads/",
+          "data:image",
+          "historySnapshot",
+          "mealsSnapshot",
+          "streamFrames",
+          "token",
+        ].filter((snippet): snippet is string => typeof snippet === "string" && snippet.length > 0);
+        const leakedSnippet = forbiddenSnippets.find((snippet) => serializedTrace.includes(snippet));
+        if (leakedSnippet !== undefined) {
+          const stepResult = fail("verify_llm_trace", "Trace serialization leaked raw scenario evidence or content", {
+            leakedSnippetLength: leakedSnippet.length,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        steps.push(pass("verify_llm_trace", {
+          summary,
+          timelineLength: timeline.length,
+          forbiddenProbeCount: forbiddenSnippets.length,
+        }));
       } catch (err) {
         const stepResult = fail(
           "verify_llm_trace",
