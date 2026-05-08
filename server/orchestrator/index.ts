@@ -16,6 +16,10 @@ import {
 } from "./tools.js";
 import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
 import type { OrchestratorHooks } from "./hooks.js";
+import type {
+  LlmTraceFinalReplyShape,
+  LlmTraceFinalReplySource,
+} from "./llm-trace.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 
 interface OrchestratorDeps {
@@ -34,8 +38,13 @@ const IMAGE_PLACEHOLDER = "(圖片)";
 const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 
+interface FinalReplyTraceMetadata {
+  finalReplySource?: LlmTraceFinalReplySource;
+  finalReplyShape?: LlmTraceFinalReplyShape;
+}
+
 export type OrchestratorResult =
-  | {
+  | ({
       reply: string;
       didLogMeal: boolean;
       didMutateMeal?: boolean;
@@ -44,8 +53,8 @@ export type OrchestratorResult =
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
-    }
-  | {
+    } & FinalReplyTraceMetadata)
+  | ({
       streamGenerator: AsyncGenerator<string>;
       didLogMeal: boolean;
       didMutateMeal?: boolean;
@@ -54,7 +63,7 @@ export type OrchestratorResult =
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
-    };
+    } & FinalReplyTraceMetadata);
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
 
@@ -272,6 +281,14 @@ function ensureGoalReceipt(reply: string, receipt: string | undefined): string {
   return `${reply}\n\n${receipt}`;
 }
 
+function classifyPlainReplyShape(reply: string): LlmTraceFinalReplyShape {
+  return reply.trim().length > 0 ? "plain_text" : "empty_or_missing";
+}
+
+function classifyFallbackReplyShape(reply: string): LlmTraceFinalReplyShape {
+  return reply.trim().length > 0 ? "fallback_text" : "empty_or_missing";
+}
+
 async function* ensureGoalReceiptStream(
   stream: AsyncGenerator<string>,
   receipt: string | undefined,
@@ -361,7 +378,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       opts?.onUserMessageSaved?.();
       if (hallucinatedChoiceRecovery) {
         opts?.hooks?.onFallback?.("hallucination_detected");
-        return { reply: hallucinatedChoiceRecovery, didLogMeal: false };
+        return {
+          reply: hallucinatedChoiceRecovery,
+          didLogMeal: false,
+          finalReplySource: "fallback_reply",
+          finalReplyShape: classifyFallbackReplyShape(hallucinatedChoiceRecovery),
+        };
       }
       const systemMsg: ChatMessage = {
         role: "system",
@@ -475,6 +497,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              finalReplySource: "fallback_reply",
+              finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
             };
           }
           if (didMutateMeal) {
@@ -489,6 +513,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              finalReplySource: "fallback_reply",
+              finalReplyShape: classifyFallbackReplyShape(partialFallback),
             };
           }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
@@ -500,13 +526,16 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             affectedDate: resolvedAffectedDate,
             loggedMeal,
             loggedMealToolMessageId,
+            finalReplySource: "fallback_reply",
+            finalReplyShape: classifyFallbackReplyShape(errorMsg),
           };
         }
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
+          const reply = ensureGoalReceipt(response.content, successfulGoalReceipt);
           return {
-            reply: ensureGoalReceipt(response.content, successfulGoalReceipt),
+            reply,
             didLogMeal,
             didMutateMeal,
             dailySummary: logMealSummary,
@@ -514,6 +543,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             affectedDate: resolvedAffectedDate,
             loggedMeal,
             loggedMealToolMessageId,
+            finalReplySource: "model_response",
+            finalReplyShape: classifyPlainReplyShape(reply),
           };
         }
 
@@ -631,6 +662,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     affectedDate: resolvedAffectedDate,
                     loggedMeal,
                     loggedMealToolMessageId,
+                    finalReplySource: "fallback_reply",
+                    finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
                   };
                 }
                 throw err;
@@ -654,6 +687,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              finalReplySource: "orchestrator_projected_reply",
+              finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
           if (didLogMeal && loggedMeal) {
@@ -667,6 +702,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              finalReplySource: "orchestrator_projected_reply",
+              finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
           if (didMutateMeal && loggedMeal) {
@@ -680,18 +717,23 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              finalReplySource: "orchestrator_projected_reply",
+              finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
           if (didMutateMeal) {
+            const reply = buildMutationSuccessReply(resolvedAffectedDate);
             opts?.hooks?.onLLMEnd?.(round + 1, true);
             return {
-              reply: buildMutationSuccessReply(resolvedAffectedDate),
+              reply,
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              finalReplySource: "orchestrator_projected_reply",
+              finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
           if (correctionClarificationReply) {
@@ -704,6 +746,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              finalReplySource: "orchestrator_projected_reply",
+              finalReplyShape: classifyPlainReplyShape(correctionClarificationReply),
             };
           }
           shouldStreamFinalReply = true;
@@ -724,6 +768,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           affectedDate: resolvedAffectedDate,
           loggedMeal,
           loggedMealToolMessageId,
+          finalReplySource: "fallback_reply",
+          finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
         };
       }
       return {
@@ -734,6 +780,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         affectedDate: resolvedAffectedDate,
         loggedMeal,
         loggedMealToolMessageId,
+        finalReplySource: "fallback_reply",
+        finalReplyShape: classifyFallbackReplyShape(FALLBACK),
       };
     },
   };
