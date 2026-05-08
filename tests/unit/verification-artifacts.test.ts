@@ -69,6 +69,10 @@ function artifactFileNames(tmpDir: string, scenarioName: string): string[] {
   return fs.readdirSync(path.join(tmpDir, scenarioName, "latest")).sort();
 }
 
+function readArtifact(tmpDir: string, scenarioName: string, fileName: string): string {
+  return fs.readFileSync(path.join(tmpDir, scenarioName, "latest", fileName), "utf-8");
+}
+
 // ------------------------------------------------------------------ tests
 
 describe("verification-artifacts", () => {
@@ -300,6 +304,135 @@ describe("verification-artifacts", () => {
       assert.doesNotMatch(raw, /foreign-kebab-device-id-789/, `${fileName} must redact foreign-device-id`);
       assert.match(raw, /\[REDACTED\]/, `${fileName} should include redaction placeholders`);
     }
+  });
+
+  test("persisted artifacts redact TRACE-04 forbidden probe strings across trace and evidence files", async () => {
+    const result = makeFailResult("trace-redaction-forbidden-strings") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.steps[0]!.actual = {
+      rawUserMessage: "raw user meal text should not persist",
+      uploadStagingPath: "/var/folders/tmp/upload-staging/photo.png",
+      imageDataUri: "data:image/png;base64,abc123",
+      authorization: "Bearer step-secret-token",
+      cookie: "guestSession=step-session-secret",
+      providerPayload: { rawPrompt: "raw prompt text should not persist" },
+      toolArguments: { food: "raw tool args should not persist" },
+      finalAssistantContent: "assistant final answer should not persist",
+    };
+    result.artifacts.forbiddenEvidence = {
+      deviceId: "secret-device-id-xyz",
+      userMealText: "raw user meal text should not persist",
+      uploadPath: "/absolute/path/to/server/uploads/photo.jpg",
+      imageBase64: "abc123base64image",
+      apiKey: "sk-test-secret",
+      setCookie: "guestSession=artifact-session-secret",
+      messages: [{ role: "user", content: "raw prompt text should not persist" }],
+      rawToolResult: { reply: "raw tool result should not persist" },
+      assistantContent: "assistant final answer should not persist",
+    };
+    result.llmTrace = {
+      summary: {
+        prompt: { version: "system-prompt.test", sectionIds: ["role", "log-food-receipt"] },
+        finalReply: { source: "orchestrator_projected_reply", shape: "plain_text" },
+        rawPrompt: "raw prompt text should not persist",
+        OPENAI_API_KEY: "sk-test-secret",
+      },
+      timeline: [
+        {
+          tool: "log_food",
+          success: true,
+          executed: true,
+          source: "hook",
+          shape: "tool_result",
+          arguments: { food: "raw tool args should not persist" },
+          toolResult: { reply: "raw tool result should not persist" },
+        },
+      ],
+      finalAnswer: "assistant final answer should not persist",
+    };
+
+    await writeScenarioArtifacts("trace-redaction-forbidden-strings", result);
+
+    const forbiddenPatterns = [
+      /secret-device-id-xyz/,
+      /raw user meal text should not persist/,
+      /\/absolute\/path\/to\/server\/uploads/,
+      /\/upload-staging\/photo\.png/,
+      /data:image\/png;base64/,
+      /abc123base64image/,
+      /Bearer step-secret-token/,
+      /sk-test-secret/,
+      /guestSession=step-session-secret/,
+      /artifact-session-secret/,
+      /raw prompt text should not persist/,
+      /raw tool args should not persist/,
+      /raw tool result should not persist/,
+      /assistant final answer should not persist/,
+    ];
+
+    for (const fileName of ["llm-trace.json", "snapshots.json", "steps.json", "scenario-result.json"]) {
+      const raw = readArtifact(tmpDir, "trace-redaction-forbidden-strings", fileName);
+      for (const pattern of forbiddenPatterns) {
+        assert.doesNotMatch(raw, pattern, `${fileName} must redact ${pattern}`);
+      }
+    }
+  });
+
+  test("persisted llm-trace.json removes forbidden raw payload keys but preserves allowed trace metadata", async () => {
+    const result = makePassResult("trace-redaction-forbidden-keys") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.llmTrace = {
+      summary: {
+        prompt: { version: "system-prompt.test", sectionIds: ["role", "daily-targets"] },
+        finalReply: { source: "stream", shape: "streamed_text" },
+        promptText: "raw prompt text should not persist",
+        providerPayload: { secret: true },
+        api_key: "sk-test-secret",
+      },
+      timeline: [
+        {
+          tool: "log_food",
+          success: true,
+          executed: true,
+          source: "orchestrator",
+          shape: "tool_result",
+          rawArguments: { food: "raw tool args should not persist" },
+          rawToolResult: { reply: "raw tool result should not persist" },
+          finalAssistantContent: "assistant final answer should not persist",
+        },
+      ],
+      messages: [{ role: "user", content: "raw prompt text should not persist" }],
+      assistantContent: "assistant final answer should not persist",
+    };
+
+    await writeScenarioArtifacts("trace-redaction-forbidden-keys", result);
+
+    const raw = readArtifact(tmpDir, "trace-redaction-forbidden-keys", "llm-trace.json");
+    const trace = JSON.parse(raw) as {
+      summary: {
+        prompt: { version: string; sectionIds: string[] };
+        finalReply: { source: string; shape: string };
+      };
+      timeline: Array<{ tool: string; success: boolean; executed: boolean; source: string; shape: string }>;
+    };
+
+    assert.equal(trace.summary.prompt.version, "system-prompt.test");
+    assert.deepEqual(trace.summary.prompt.sectionIds, ["role", "daily-targets"]);
+    assert.equal(trace.summary.finalReply.source, "stream");
+    assert.equal(trace.summary.finalReply.shape, "streamed_text");
+    assert.deepEqual(trace.timeline[0], {
+      tool: "log_food",
+      success: true,
+      executed: true,
+      source: "orchestrator",
+      shape: "tool_result",
+    });
+    assert.doesNotMatch(
+      raw,
+      /apiKey|api_key|OPENAI_API_KEY|cookie|set-cookie|guestSession|sessionToken|bearer|messages|rawMessages|rawPrompt|promptText|providerPayload|rawProviderPayload|arguments|rawArguments|toolArguments|toolResult|rawToolResult|finalAnswer|assistantContent|finalAssistantContent/,
+    );
   });
 
   test("failed scenario produces ok=false and populated failedStep in summary.json", async () => {
