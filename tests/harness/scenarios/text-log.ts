@@ -16,6 +16,7 @@
 
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 // ---------------------------------------------------------------------------
@@ -67,16 +68,21 @@ function failResult(
   steps: ScenarioStepResult[],
   failedStepName: string,
   artifacts: Record<string, unknown>,
+  llmTrace?: Record<string, unknown>,
 ): ScenarioResult {
   const totalSteps = STEP_NAMES.length;
   const passedSteps = steps.filter((s) => s.ok).length;
-  return {
+  const result: ScenarioResult = {
     ok: false,
     failedStep: failedStepName,
     steps,
     artifacts,
     consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
   };
+  if (llmTrace !== undefined) {
+    result.llmTrace = llmTrace;
+  }
+  return result;
 }
 
 const STEP_NAMES = [
@@ -122,6 +128,13 @@ const textLogScenario: VerificationScenario = {
     // Create our own app fixture with a controlled LLM provider.
     const { createScenarioApp } = await import("../app-fixture.js");
     const provider = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    const buildTrace = (status: "pass" | "fail"): Record<string, unknown> => {
+      return recorder.build({ scenario: scenarioName, status }) as unknown as Record<string, unknown>;
+    };
+    const failScenario = (failedStepName: string): ScenarioResult => {
+      return failResult(scenarioName, steps, failedStepName, artifacts, buildTrace("fail"));
+    };
 
     // Round 1: log_food tool call
     provider.queueRoundResponse({
@@ -142,7 +155,10 @@ const textLogScenario: VerificationScenario = {
         },
       ],
     });
-    const fixture = await createScenarioApp({ llmProvider: provider });
+    const fixture = await createScenarioApp({
+      llmProvider: provider,
+      llmTraceRecorderFactory: () => recorder,
+    });
 
     try {
       // ------------------------------------------------------------------
@@ -155,13 +171,13 @@ const textLogScenario: VerificationScenario = {
         if (pingRes.status !== 200) {
           const stepResult = fail("bootstrap", `Expected 200 from /api/meals, got ${pingRes.status}`);
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "bootstrap", artifacts);
+          return failScenario("bootstrap");
         }
         steps.push(pass("bootstrap", { status: pingRes.status }));
       } catch (err) {
         const stepResult = fail("bootstrap", err instanceof Error ? err.message : String(err));
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "bootstrap", artifacts);
+        return failScenario("bootstrap");
       }
 
       // ------------------------------------------------------------------
@@ -191,14 +207,14 @@ const textLogScenario: VerificationScenario = {
             `Expected 200 from /api/sse, got ${sseRes.status}`,
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+          return failScenario("subscribe_summary");
         }
 
         if (!sseRes.body) {
           clearTimeout(sseTimeout);
           const stepResult = fail("subscribe_summary", "SSE response has no body");
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+          return failScenario("subscribe_summary");
         }
 
         sseReader = sseRes.body.getReader();
@@ -214,7 +230,7 @@ const textLogScenario: VerificationScenario = {
           clearTimeout(sseTimeout);
           const stepResult = fail("subscribe_summary", "Did not receive initial daily_summary event from /api/sse");
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+          return failScenario("subscribe_summary");
         }
 
         let initialSummary: DailySummary | undefined;
@@ -224,7 +240,7 @@ const textLogScenario: VerificationScenario = {
           clearTimeout(sseTimeout);
           const stepResult = fail("subscribe_summary", "Failed to parse initial daily_summary JSON");
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+          return failScenario("subscribe_summary");
         }
 
         artifacts.initialSummary = initialSummary;
@@ -242,7 +258,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+        return failScenario("subscribe_summary");
       }
 
       // ------------------------------------------------------------------
@@ -277,7 +293,7 @@ const textLogScenario: VerificationScenario = {
             { status: chatRes.status },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "post_chat", artifacts);
+          return failScenario("post_chat");
         }
 
         const contentType = chatRes.headers.get("content-type") ?? "";
@@ -288,7 +304,7 @@ const textLogScenario: VerificationScenario = {
             { contentType },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "post_chat", artifacts);
+          return failScenario("post_chat");
         }
 
         steps.push(pass("post_chat", { status: chatRes.status, contentType }));
@@ -301,7 +317,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "post_chat", artifacts);
+        return failScenario("post_chat");
       }
 
       // ------------------------------------------------------------------
@@ -314,7 +330,7 @@ const textLogScenario: VerificationScenario = {
         if (!chatRes.body) {
           const stepResult = fail("collect_stream", "Chat response has no body");
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         const streamReader = chatRes.body.getReader();
@@ -329,7 +345,7 @@ const textLogScenario: VerificationScenario = {
             frames: streamFrames,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         try {
@@ -342,7 +358,7 @@ const textLogScenario: VerificationScenario = {
             doneData: doneEvent.data,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         if (!donePayload.didLogMeal) {
@@ -350,7 +366,7 @@ const textLogScenario: VerificationScenario = {
             donePayload,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         const hasChunk = streamFrames.some((e) => e.event === "chunk");
@@ -359,7 +375,7 @@ const textLogScenario: VerificationScenario = {
             frames: streamFrames,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         artifacts.donePayload = donePayload;
@@ -370,7 +386,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "collect_stream", artifacts);
+        return failScenario("collect_stream");
       }
 
       // ------------------------------------------------------------------
@@ -388,7 +404,7 @@ const textLogScenario: VerificationScenario = {
             `Expected 200 from /api/chat/history, got ${historyRes.status}`,
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_history", artifacts);
+          return failScenario("verify_history");
         }
 
         const historyJson = await historyRes.json() as { messages: ChatMessage[] };
@@ -404,7 +420,7 @@ const textLogScenario: VerificationScenario = {
             { lastMessage },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_history", artifacts);
+          return failScenario("verify_history");
         }
 
         if (!/已記錄蘋果/.test(lastMessage.content) || !/蛋白質 0 g/.test(lastMessage.content)) {
@@ -414,7 +430,7 @@ const textLogScenario: VerificationScenario = {
             { lastMessage },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_history", artifacts);
+          return failScenario("verify_history");
         }
 
         steps.push(pass("verify_history", { lastMessage }));
@@ -424,7 +440,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "verify_history", artifacts);
+        return failScenario("verify_history");
       }
 
       // ------------------------------------------------------------------
@@ -441,7 +457,7 @@ const textLogScenario: VerificationScenario = {
             `Expected 200 from /api/meals, got ${mealsRes.status}`,
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_meals", artifacts);
+          return failScenario("verify_meals");
         }
 
         const mealsJson = await mealsRes.json() as { meals: MealRecord[] };
@@ -452,7 +468,7 @@ const textLogScenario: VerificationScenario = {
         if (meals.length === 0) {
           const stepResult = fail("verify_meals", "Expected at least one meal, got 0", { meals });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_meals", artifacts);
+          return failScenario("verify_meals");
         }
 
         const appleMeal = meals.find((m) => m.foodName === "蘋果");
@@ -463,7 +479,7 @@ const textLogScenario: VerificationScenario = {
             { meals },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_meals", artifacts);
+          return failScenario("verify_meals");
         }
 
         if (appleMeal.calories !== 95) {
@@ -473,7 +489,7 @@ const textLogScenario: VerificationScenario = {
             { appleMeal },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_meals", artifacts);
+          return failScenario("verify_meals");
         }
 
         steps.push(pass("verify_meals", { appleMeal }));
@@ -483,7 +499,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "verify_meals", artifacts);
+        return failScenario("verify_meals");
       }
 
       // ------------------------------------------------------------------
@@ -541,7 +557,7 @@ const textLogScenario: VerificationScenario = {
             { donePayload },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_summary", artifacts);
+          return failScenario("verify_summary");
         }
 
         if (summaryToVerify.mealCount !== 1) {
@@ -551,7 +567,7 @@ const textLogScenario: VerificationScenario = {
             { dailySummary: summaryToVerify },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_summary", artifacts);
+          return failScenario("verify_summary");
         }
 
         if (typeof summaryToVerify.date !== "string" || !DATE_KEY_PATTERN.test(summaryToVerify.date)) {
@@ -561,7 +577,7 @@ const textLogScenario: VerificationScenario = {
             { dailySummary: summaryToVerify },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_summary", artifacts);
+          return failScenario("verify_summary");
         }
 
         steps.push(pass("verify_summary", { dailySummary: summaryToVerify }));
@@ -571,13 +587,14 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "verify_summary", artifacts);
+        return failScenario("verify_summary");
       }
 
       // ------------------------------------------------------------------
       // Step 8: verify_llm_trace — successful logging trace contract
       // ------------------------------------------------------------------
       try {
+        llmTrace = buildTrace("pass");
         const trace = expectRecord(llmTrace, "llmTrace");
         const summary = expectRecord(trace.summary, "llmTrace.summary");
         const finalReply = expectRecord(summary.finalReply, "llmTrace.summary.finalReply");
@@ -590,7 +607,7 @@ const textLogScenario: VerificationScenario = {
             { trace },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+          return failScenario("verify_llm_trace");
         }
 
         if (trace.status !== "pass") {
@@ -600,7 +617,7 @@ const textLogScenario: VerificationScenario = {
             { trace },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+          return failScenario("verify_llm_trace");
         }
 
         if (
@@ -616,7 +633,7 @@ const textLogScenario: VerificationScenario = {
             summary,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+          return failScenario("verify_llm_trace");
         }
 
         if (
@@ -627,7 +644,7 @@ const textLogScenario: VerificationScenario = {
             finalReply,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+          return failScenario("verify_llm_trace");
         }
 
         if (
@@ -639,7 +656,7 @@ const textLogScenario: VerificationScenario = {
             timeline,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+          return failScenario("verify_llm_trace");
         }
 
         steps.push(pass("verify_llm_trace", { summary, timelineLength: timeline.length }));
@@ -649,7 +666,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "verify_llm_trace", artifacts);
+        return failScenario("verify_llm_trace");
       }
 
       // ------------------------------------------------------------------
@@ -660,6 +677,7 @@ const textLogScenario: VerificationScenario = {
         ok: true,
         steps,
         artifacts,
+        llmTrace,
         consoleSummary: `PASS ${scenarioName} ${passedCount}/${steps.length}`,
       };
     } finally {
