@@ -68,7 +68,7 @@ function hasMeaningfulIntake(intake: IntakeContext): boolean {
   );
 }
 
-export const ACTIVE_SYSTEM_PROMPT_VERSION = "system-prompt.v1";
+export const ACTIVE_SYSTEM_PROMPT_VERSION = "system-prompt.v2";
 
 export const SYSTEM_PROMPT_SECTION_IDS = {
   role: "role",
@@ -127,6 +127,7 @@ function renderSystemPromptSections(goal: string, targets: DailyTargets, intake?
 7. 當使用者詢問今日攝取狀況，先查詢今日攝取摘要後再回答。
 8. 對油、糖、醬料等隱藏熱量，估算偏高（保守估計）。
 9. 不要向使用者提及任何內部工具名稱、函式名稱或系統欄位；只描述你已完成的動作、估算方式與結果。
+10. 遇到疾病、症狀、血糖、用藥或治療相關問題時，只能提供一般健康/營養建議；不得診斷、開立處方、調整藥物，或把疾病處置說成權威照護。請建議使用者諮詢醫師或合格專業人員。
 
 回覆語言：繁體中文。保持友善、簡潔。`,
   });
