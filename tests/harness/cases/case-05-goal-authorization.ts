@@ -196,13 +196,13 @@ async function postChat(
 }
 
 async function readTargets(address: string, cookieHeader: string): Promise<DailyTargets> {
-  const res = await fetch(`${address}/api/device/goals`, {
-    method: "PUT",
+  const res = await fetch(`${address}/api/device/session`, {
+    method: "POST",
     headers: {
       "content-type": "application/json",
       cookie: cookieHeader,
     },
-    body: JSON.stringify({ fat: 50 }),
+    body: JSON.stringify({}),
   });
   const body = await res.json() as { dailyTargets: DailyTargets };
   return body.dailyTargets;
