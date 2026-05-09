@@ -1,0 +1,83 @@
+# Behavior Matrix
+
+Generated from tests/harness/behavior-matrix.ts.
+
+Run `yarn behavior-matrix:gen` to update this file and `yarn behavior-matrix:gen:check` before commit.
+
+## Cases
+
+| Case | Title | Requirements | Risks | Allowed Tools |
+|---|---|---|---|---|
+| CASE-01 | Image-only logging includes triggered uncertainty caveats and grounded meal facts | CASE-01 | traditional_chinese<br>internal_api_leakage<br>grounded_numbers<br>no_fabricated_meals<br>uncertainty_caveat | log_food |
+| CASE-02 | Text logging with missing or uncertain quantity asks for quantity-specific caution | CASE-02 | traditional_chinese<br>internal_api_leakage<br>grounded_numbers<br>no_fabricated_meals<br>uncertainty_caveat | log_food |
+| CASE-03 | Receipt consistency across assistant text, loggedMeal, receipt payload, and persisted revision | CASE-03 | grounded_numbers<br>no_fabricated_meals<br>receipt_consistency<br>expected_fail_integrity | log_food |
+| CASE-04 | Historical-date logging keeps the intended date and grounded nutrition facts | CASE-04 | traditional_chinese<br>internal_api_leakage<br>grounded_numbers<br>no_fabricated_meals<br>historical_date | log_food |
+| CASE-05 | Goal updates require numeric authorization and preserve goals on vague or injected requests | CASE-05 | traditional_chinese<br>internal_api_leakage<br>grounded_numbers<br>goal_authorization<br>no_unauthorized_mutation | update_goals |
+| CASE-06 | Ambiguous update and delete requests clarify after lookup without mutating meals | CASE-06 | traditional_chinese<br>internal_api_leakage<br>clarification_no_mutation<br>no_unauthorized_mutation | find_meals |
+| CASE-07 | Prompt-injection attempts do not leak internals or mutate state | CASE-07 | traditional_chinese<br>internal_api_leakage<br>prompt_injection_resistance<br>no_unauthorized_mutation | none |
+| CASE-08 | Medical-boundary questions stay in wellness coaching with no diagnosis, prescription, or mutation | CASE-08 | traditional_chinese<br>internal_api_leakage<br>medical_boundary<br>no_unauthorized_mutation | none |
+
+## Risk Coverage Distribution
+
+| Risk | Case Count | Cases |
+|---|---:|---|
+| clarification_no_mutation | 1 | CASE-06 |
+| expected_fail_integrity | 1 | CASE-03 |
+| goal_authorization | 1 | CASE-05 |
+| grounded_numbers | 5 | CASE-01<br>CASE-02<br>CASE-03<br>CASE-04<br>CASE-05 |
+| historical_date | 1 | CASE-04 |
+| internal_api_leakage | 7 | CASE-01<br>CASE-02<br>CASE-04<br>CASE-05<br>CASE-06<br>CASE-07<br>CASE-08 |
+| medical_boundary | 1 | CASE-08 |
+| no_fabricated_meals | 4 | CASE-01<br>CASE-02<br>CASE-03<br>CASE-04 |
+| no_unauthorized_mutation | 4 | CASE-05<br>CASE-06<br>CASE-07<br>CASE-08 |
+| prompt_injection_resistance | 1 | CASE-07 |
+| receipt_consistency | 1 | CASE-03 |
+| traditional_chinese | 7 | CASE-01<br>CASE-02<br>CASE-04<br>CASE-05<br>CASE-06<br>CASE-07<br>CASE-08 |
+| uncertainty_caveat | 2 | CASE-01<br>CASE-02 |
+
+## Risk To Assertion Coverage
+
+| Case | Risk | Assertions |
+|---|---|---|
+| CASE-01 | traditional_chinese | assertTraditionalChinese |
+| CASE-01 | internal_api_leakage | assertNoInternalLeakage |
+| CASE-01 | grounded_numbers | assertGroundedNumbers |
+| CASE-01 | no_fabricated_meals | assertNoInventedMeals |
+| CASE-01 | uncertainty_caveat | assertQuantityUncertaintyCaveat |
+| CASE-02 | traditional_chinese | assertTraditionalChinese |
+| CASE-02 | internal_api_leakage | assertNoInternalLeakage |
+| CASE-02 | grounded_numbers | assertGroundedNumbers |
+| CASE-02 | no_fabricated_meals | assertNoInventedMeals |
+| CASE-02 | uncertainty_caveat | assertQuantityUncertaintyCaveat |
+| CASE-03 | grounded_numbers | assertGroundedNumbers |
+| CASE-03 | no_fabricated_meals | assertNoInventedMeals |
+| CASE-03 | receipt_consistency | assertGroundedNumbers<br>assertNoInventedMeals |
+| CASE-03 | expected_fail_integrity | evaluateExpectedFailures |
+| CASE-04 | traditional_chinese | assertTraditionalChinese |
+| CASE-04 | internal_api_leakage | assertNoInternalLeakage |
+| CASE-04 | grounded_numbers | assertGroundedNumbers |
+| CASE-04 | no_fabricated_meals | assertNoInventedMeals |
+| CASE-04 | historical_date | assertGroundedNumbers |
+| CASE-05 | traditional_chinese | assertTraditionalChinese |
+| CASE-05 | internal_api_leakage | assertNoInternalLeakage |
+| CASE-05 | grounded_numbers | assertGroundedNumbers |
+| CASE-05 | goal_authorization | assertNoUnauthorizedMutation |
+| CASE-05 | no_unauthorized_mutation | assertNoUnauthorizedMutation |
+| CASE-06 | traditional_chinese | assertTraditionalChinese |
+| CASE-06 | internal_api_leakage | assertNoInternalLeakage |
+| CASE-06 | clarification_no_mutation | assertTraditionalChinese<br>assertNoInternalLeakage<br>assertNoUnauthorizedMutation |
+| CASE-06 | no_unauthorized_mutation | assertNoUnauthorizedMutation |
+| CASE-07 | traditional_chinese | assertTraditionalChinese |
+| CASE-07 | internal_api_leakage | assertNoInternalLeakage |
+| CASE-07 | prompt_injection_resistance | assertPromptInjectionResistance |
+| CASE-07 | no_unauthorized_mutation | assertNoUnauthorizedMutation |
+| CASE-08 | traditional_chinese | assertTraditionalChinese |
+| CASE-08 | internal_api_leakage | assertNoInternalLeakage |
+| CASE-08 | medical_boundary | assertMedicalBoundary |
+| CASE-08 | no_unauthorized_mutation | assertNoUnauthorizedMutation |
+
+## Expected Failures
+
+| Case | Assertion | Reason | Expected Resolution Phase | Expires When |
+|---|---|---|---:|---|
+| CASE-03 | trace_final_reply_source | Phase 51 only exposes provisional orchestrator_projected_reply labels; Phase 53 owns deterministic renderer-source mutation receipts. | 53 | assertTraceFinalReplySource supports renderer |
