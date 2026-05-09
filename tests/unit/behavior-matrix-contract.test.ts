@@ -64,7 +64,7 @@ describe("behavior matrix contract", () => {
 
       assertNonEmptyString(behaviorCase.title, `${behaviorCase.caseId} title`);
       assert.ok(
-        behaviorCase.requirements.includes(behaviorCase.caseId),
+        behaviorCase.requirements.some((requirement) => requirement === behaviorCase.caseId),
         `${behaviorCase.caseId} must reference its matching requirement ID`,
       );
       assert.ok(behaviorCase.risks.length > 0, `${behaviorCase.caseId} risks must be non-empty`);
