@@ -21,7 +21,16 @@ const EXPECTED_CASE_IDS = [
   "CASE-06",
   "CASE-07",
   "CASE-08",
+  "PHASE-53-MUTATION-RECEIPTS",
 ] as const satisfies readonly BehaviorCaseId[];
+
+const PHASE_53_REQUIREMENTS = [
+  "TRACE-03",
+  "RENDER-01",
+  "RENDER-03",
+  "RENDER-04",
+  "RENDER-05",
+] as const;
 
 const REQUIRED_RISKS = [
   "traditional_chinese",
@@ -67,10 +76,12 @@ describe("behavior matrix contract", () => {
       seen.add(behaviorCase.caseId);
 
       assertNonEmptyString(behaviorCase.title, `${behaviorCase.caseId} title`);
-      assert.ok(
-        behaviorCase.requirements.some((requirement) => requirement === behaviorCase.caseId),
-        `${behaviorCase.caseId} must reference its matching requirement ID`,
-      );
+      if (behaviorCase.caseId.startsWith("CASE-")) {
+        assert.ok(
+          behaviorCase.requirements.some((requirement) => requirement === behaviorCase.caseId),
+          `${behaviorCase.caseId} must reference its matching requirement ID`,
+        );
+      }
       assert.ok(behaviorCase.risks.length > 0, `${behaviorCase.caseId} risks must be non-empty`);
       assert.ok(behaviorCase.coverage.length > 0, `${behaviorCase.caseId} coverage must be non-empty`);
 
@@ -144,7 +155,9 @@ describe("behavior matrix contract", () => {
     for (const requiredAssertion of [
       "assertTraditionalChinese",
       "assertNoInternalLeakage",
+      "assertNoForbiddenReceiptCopy",
       "assertGroundedNumbers",
+      "assertSuccessfulMutationRendererSource",
       "assertNoInventedMeals",
       "assertQuantityUncertaintyCaveat",
       "assertPromptInjectionResistance",
@@ -153,6 +166,36 @@ describe("behavior matrix contract", () => {
       "evaluateExpectedFailures",
     ] as const satisfies readonly BehaviorAssertionName[]) {
       assert.ok(assertionNames.has(requiredAssertion), `missing assertion coverage ${requiredAssertion}`);
+    }
+  });
+
+  it("declares broad Phase 53 mutation receipt coverage", () => {
+    const phase53 = ALL_BEHAVIOR_CASES.find(
+      (behaviorCase) => behaviorCase.caseId === "PHASE-53-MUTATION-RECEIPTS",
+    );
+    assert.ok(phase53, "missing PHASE-53-MUTATION-RECEIPTS behavior case");
+    assert.equal(
+      phase53.title,
+      "Deterministic renderer-owned mutation receipts across log, update, delete, and goals",
+    );
+    assert.deepEqual(phase53.requirements, PHASE_53_REQUIREMENTS);
+    assert.deepEqual(phase53.risks, [
+      "receipt_consistency",
+      "internal_api_leakage",
+      "no_unauthorized_mutation",
+      "trace_final_reply_source",
+      "grounded_numbers",
+    ]);
+
+    const phase53Assertions = new Set(
+      phase53.coverage.flatMap((entry) => entry.assertions),
+    );
+    for (const assertionName of [
+      "assertSuccessfulMutationRendererSource",
+      "assertNoForbiddenReceiptCopy",
+      "assertGroundedNumbers",
+    ] as const) {
+      assert.ok(phase53Assertions.has(assertionName), `missing Phase 53 assertion ${assertionName}`);
     }
   });
 
