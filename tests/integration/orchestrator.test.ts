@@ -230,10 +230,9 @@ describe("Orchestrator", () => {
     );
     assertReplyResult(result);
     assert.match(result.reply, /已記錄雞肉沙拉/);
-    assert.match(result.reply, /估約 180 kcal（區間 153-207）/);
-    assert.match(result.reply, /蛋白質 8 g（以雞肉為主）/);
-    assert.match(result.reply, /份量是主要誤差，可再補份量修正/);
-    assert.doesNotMatch(result.reply, /保守估算|headline|log_food|protein_sources|usedConservativeAssumption/);
+    assert.match(result.reply, /180 kcal/);
+    assert.match(result.reply, /蛋白質 8 g。/);
+    assert.doesNotMatch(result.reply, /區間|主要誤差|可再補份量修正|保守估算|headline|log_food|protein_sources|usedConservativeAssumption/);
     assert.equal(result.didLogMeal, true);
 
     const firstRoundUserMessage = mockLLM.chatCalls[0].messages.find((message) => Array.isArray(message.content));

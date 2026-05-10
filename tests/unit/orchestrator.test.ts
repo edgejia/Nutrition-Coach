@@ -47,8 +47,8 @@ function assertSuccessfulLogReplyShape(
   }
 
   if (opts.expectsUncertainty === true) {
-    assert.match(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
-    assert.match(reply, /(份量|油脂與飯量|湯底與份量).*主要誤差/);
+    assert.doesNotMatch(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
+    assert.doesNotMatch(reply, /(份量|油脂與飯量|湯底與份量).*主要誤差/);
   } else {
     assert.doesNotMatch(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
     assert.doesNotMatch(reply, /(份量|油脂與飯量|湯底與份量).*主要誤差/);
@@ -371,7 +371,7 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: true,
       allowsNextStep: true,
     });
-    assert.match(result.reply, /蛋白質 24 g（以雞腿為主）/);
+    assert.match(result.reply, /蛋白質 24 g。/);
     assert.doesNotMatch(result.reply, /已完成記錄，但回覆生成失敗|headline/);
   });
 
@@ -548,7 +548,7 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: true,
       allowsNextStep: true,
     });
-    assert.match(result.reply, /蛋白質 28 g（以豬肉為主）/);
+    assert.match(result.reply, /蛋白質 28 g。/);
     assert.doesNotMatch(result.reply, /保守估算|headline/);
     assert.equal(mockLLM.chatCalls.length, 1, "image-only logging should not require a second LLM round");
   });
@@ -616,7 +616,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.doesNotMatch(result.reply, /中午雞腿便當/);
   });
 
-  it("formats successful log replies compactly when missing_quantity metadata marks missing quantity", async () => {
+  it("renders missing-quantity successful logs from committed facts without implementation copy", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_grouped_image",
@@ -653,7 +653,7 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: true,
       allowsNextStep: true,
     });
-    assert.match(result.reply, /可再補份量修正/);
+    assert.doesNotMatch(result.reply, /可再補份量修正/);
     assert.doesNotMatch(result.reply, /保守估算/);
   });
 
@@ -692,7 +692,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.doesNotMatch(result.reply, /可再補份量修正/);
   });
 
-  it("includes uncertainty for high-variance image categories without adding a precision next step", async () => {
+  it("renders high-variance image categories from committed facts without uncertainty prose", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_high_variance_image",
@@ -728,7 +728,7 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: true,
       allowsNextStep: false,
     });
-    assert.match(result.reply, /湯底與份量.*主要誤差/);
+    assert.doesNotMatch(result.reply, /湯底與份量.*主要誤差/);
     assert.doesNotMatch(result.reply, /可再補份量修正/);
   });
 

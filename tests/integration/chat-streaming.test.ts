@@ -705,10 +705,9 @@ describe("chat-streaming", () => {
         .map((payload) => payload.token)
         .join("");
 
-      assert.match(chunkText, /份量是主要誤差/);
-      assert.match(chunkText, /可再補份量修正/);
-      assert.match(chunkText, /估約 580 kcal（區間 493-667）/);
+      assert.match(chunkText, /580 kcal/);
       assert.match(chunkText, /蛋白質 24 g/);
+      assert.doesNotMatch(chunkText, /份量是主要誤差|可再補份量修正|區間/);
       assert.doesNotMatch(chunkText, /約 580 kcal，可信蛋白 99 g/);
       assertNoSuccessfulLogInternalCopy(chunkText);
 
@@ -1101,7 +1100,7 @@ describe("chat-streaming", () => {
 
     assert.ok(res.body);
     const text = await readStreamUntil(res.body.getReader(), "event: done");
-    assert.match(text, /餐點已更新，但回覆生成失敗|已完成餐點調整/);
+    assert.match(text, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(text, /無法辨識這次的請求/);
     const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
     assert.ok(doneDataMatch);
@@ -1164,7 +1163,7 @@ describe("chat-streaming", () => {
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
     assert.equal(body.loggedMeal, undefined);
-    assert.match(body.reply, /已完成餐點調整/);
+    assert.match(body.reply, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(body.reply, /方式1|方式2|無法辨識/);
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -1174,7 +1173,7 @@ describe("chat-streaming", () => {
     const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
     const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
     const latestAssistant = assistantMessages.at(-1)?.content ?? "";
-    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.match(latestAssistant, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識/);
 
     const mealsAfterRes = await fetch(`${address}/api/meals`, {
@@ -1222,7 +1221,7 @@ describe("chat-streaming", () => {
 
     assert.ok(res.body);
     const text = await readStreamUntil(res.body.getReader(), "event: done");
-    assert.match(text, /已完成餐點調整/);
+    assert.match(text, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(text, /方式1|方式2|無法辨識|回覆生成失敗/);
     const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
     assert.ok(doneDataMatch);
@@ -1240,7 +1239,7 @@ describe("chat-streaming", () => {
     });
     const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
     const latestAssistant = historyJson.messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
-    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.match(latestAssistant, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識|回覆生成失敗/);
   });
 
@@ -1290,7 +1289,7 @@ describe("chat-streaming", () => {
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
     assert.equal(body.loggedMeal, undefined);
-    assert.match(body.reply, /已完成餐點調整/);
+    assert.match(body.reply, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(body.reply, /方式1|方式2|無法辨識|回覆生成失敗/);
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -1298,7 +1297,7 @@ describe("chat-streaming", () => {
     });
     const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
     const latestAssistant = historyJson.messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
-    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.match(latestAssistant, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識|回覆生成失敗/);
   });
 
@@ -1887,7 +1886,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
       assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g（以雞腿為主）/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g。/);
       assert.doesNotMatch(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗|headline/);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
@@ -1938,7 +1937,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
       assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g（以雞腿為主）/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g。/);
     } finally {
       clearTimeout(timeout);
     }
@@ -2051,7 +2050,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
       assert.match(assistantMsgs[0]!.content, /已記錄蘋果、優格、水煮蛋/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質 15 g（優格和水煮蛋）/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 15 g。/);
     } finally {
       clearTimeout(timeout);
     }

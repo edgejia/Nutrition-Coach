@@ -808,7 +808,7 @@ describe("Chat API", () => {
     const body = await res.json();
     assert.equal(body.didLogMeal, true, "meal was persisted; didLogMeal must survive LLM failure");
     assert.match(body.reply, /已記錄雞腿便當/);
-    assert.match(body.reply, /蛋白質 24 g（以雞腿為主）/);
+    assert.match(body.reply, /蛋白質 24 g。/);
     assert.doesNotMatch(body.reply, /已完成記錄，但回覆生成失敗|headline/);
     assert.deepEqual(body.dailySummary, {
       totalCalories: 620,
@@ -997,10 +997,9 @@ describe("Chat API", () => {
       reply: string;
       loggedMeal?: { foodName?: string; itemCount?: number };
     };
-    assert.match(body.reply, /份量是主要誤差/);
-    assert.match(body.reply, /可再補份量修正/);
-    assert.match(body.reply, /估約 580 kcal（區間 493-667）/);
+    assert.match(body.reply, /580 kcal/);
     assert.match(body.reply, /蛋白質 24 g/);
+    assert.doesNotMatch(body.reply, /份量是主要誤差|可再補份量修正|區間/);
     assert.doesNotMatch(body.reply, /約 580 kcal，可信蛋白 99 g/);
     assertNoSuccessfulLogInternalCopy(body.reply);
     assert.equal(body.loggedMeal?.foodName, "雞腿、白飯、青菜");

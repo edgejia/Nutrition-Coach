@@ -22,7 +22,10 @@ import type {
 } from "./llm-trace.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import type { MutationEffects } from "./mutation-effects.js";
-import { renderMutationReceipt } from "./mutation-receipts.js";
+import {
+  assertNoForbiddenReceiptTerms,
+  renderMutationReceipt,
+} from "./mutation-receipts.js";
 
 interface OrchestratorDeps {
   llmProvider: LLMProvider;
@@ -549,7 +552,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
-          const reply = appendMutationReceiptText(response.content, mutationReceiptText);
+          const reply = response.content;
           return {
             reply,
             didLogMeal,
@@ -721,8 +724,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     affectedDate: resolvedAffectedDate,
                     loggedMeal,
                     loggedMealToolMessageId,
-                    finalReplySource: "fallback",
-                    finalReplyShape: classifyFallbackReplyShape(mutationReceiptText),
+                    finalReplySource: "renderer",
+                    finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
                   };
                 }
                 throw err;
@@ -734,6 +737,26 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           messages.push({ role: "assistant", content: null, tool_calls: response.toolCalls });
           for (const { toolCall, result } of toolResults) {
             messages.push({ role: "tool", content: result, tool_call_id: toolCall.id });
+          }
+          if (mutationEffects) {
+            const reply = renderMutationReceipt(mutationEffects);
+            const forbiddenTerms = assertNoForbiddenReceiptTerms(reply);
+            if (forbiddenTerms.length > 0) {
+              throw new Error(`Mutation receipt contains forbidden terms: ${forbiddenTerms.join(", ")}`);
+            }
+            opts?.hooks?.onLLMEnd?.(round + 1, true);
+            return {
+              reply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              dailyTargets: successfulGoalTargets,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
+              finalReplySource: "renderer",
+              finalReplyShape: classifyPlainReplyShape(reply),
+            };
           }
           if (didLogMeal && loggedMeal && isImageOnlyMessage(userMessage, imageBase64)) {
             const reply = buildImageLoggedReply(loggedMeal);
