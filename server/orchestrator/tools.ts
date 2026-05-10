@@ -26,6 +26,7 @@ import {
   type ProteinSourceInput,
   type TrustedProteinSource,
 } from "./protein-trust.js";
+import type { DeletedMealSnapshot } from "./mutation-effects.js";
 
 // ---------------------------------------------------------------------------
 // Public types preserved for the orchestrator (Phase 8/9 callers).
@@ -55,6 +56,7 @@ export interface ToolExecutionResult {
   dailySummary?: DailySummary;
   affectedDate?: string;
   mealMutationKind?: "log" | "update" | "delete";
+  deletedMeal?: DeletedMealSnapshot;
   loggedMeal?: {
     mealId: string;
     mealRevisionId: string;
@@ -246,6 +248,7 @@ interface DeleteMealResult {
   dailySummary: DailySummary;
   affectedDate: string;
   deletedMealId: string;
+  deletedMeal: DeletedMealSnapshot;
 }
 
 interface GetDailySummaryArgs {
@@ -1452,6 +1455,7 @@ export async function executeTool(
       mealMutationKind: "delete",
       dailySummary: contractResult.dailySummary,
       affectedDate: contractResult.affectedDate,
+      deletedMeal: contractResult.deletedMeal,
     };
   }
 

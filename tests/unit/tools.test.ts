@@ -1034,10 +1034,12 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.dailySummary?.date, "2026-03-25");
     assert.equal(result.dailySummary?.mealCount, 0);
     assert.equal(result.summary, "成功");
-    assert.equal(result.deletedMeal?.foodName, "牛肉麵");
-    assert.equal(result.deletedMeal?.dateKey, "2026-03-25");
-    assert.equal(result.deletedMeal?.mealId, created.id);
-    assert.doesNotMatch(JSON.stringify(result.deletedMeal), /deviceId|revision|delete_meal/);
+    assert.ok(result.deletedMeal);
+    const deletedMeal = result.deletedMeal;
+    assert.equal(deletedMeal.foodName, "牛肉麵");
+    assert.equal(deletedMeal.dateKey, "2026-03-25");
+    assert.equal(deletedMeal.mealId, created.id);
+    assert.doesNotMatch(JSON.stringify(deletedMeal), /deviceId|revision|delete_meal/);
   });
 
   it("returns affectedDate when log_food targets an explicit historical day", async () => {
