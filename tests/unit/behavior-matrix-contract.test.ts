@@ -147,6 +147,26 @@ describe("behavior matrix contract", () => {
     );
   });
 
+  it("uses the shared CASE-03 runtime renderer-source assertion without expected-fail plumbing", async () => {
+    const case03Source = await readFile("tests/harness/cases/case-03-receipt-consistency.ts", "utf8");
+
+    assert.match(
+      case03Source,
+      /assertSuccessfulMutationRendererSource/,
+      "CASE-03 runtime must call the shared renderer-source assertion",
+    );
+    assert.match(
+      case03Source,
+      /mutationKind:\s*"log"/,
+      "CASE-03 renderer-source assertion must identify the log mutation family",
+    );
+    assert.doesNotMatch(
+      case03Source,
+      /orchestrator_projected_reply|evaluateExpectedFailures|expectedFailures/,
+      "CASE-03 runtime must not keep stale expected-fail or legacy source plumbing",
+    );
+  });
+
   it("uses locked assertion names in coverage entries", () => {
     const assertionNames = new Set<BehaviorAssertionName>();
     for (const behaviorCase of BEHAVIOR_MATRIX_CASES) {
