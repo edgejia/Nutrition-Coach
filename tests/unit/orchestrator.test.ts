@@ -1,5 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
@@ -163,6 +164,16 @@ describe("orchestrator shared patterns", () => {
       true,
     );
     assert.equal(CHOICE_PROMPT_PATTERN.test("我會直接依照片估算並完成記錄。"), false);
+  });
+
+  it("builds committed MutationEffects for every successful mutation family", () => {
+    const source = readFileSync(new URL("../../server/orchestrator/index.ts", import.meta.url), "utf8");
+
+    assert.match(source, /let mutationEffects: MutationEffects \| undefined/);
+    for (const kind of ["log", "update", "delete", "goals"]) {
+      assert.match(source, new RegExp(`kind: "${kind}"`));
+    }
+    assert.doesNotMatch(source, /successfulGoalReceipt|ensureGoalReceipt/);
   });
 });
 
