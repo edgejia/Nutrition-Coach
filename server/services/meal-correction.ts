@@ -6,7 +6,11 @@ import {
 } from "../db/schema.js";
 import { resolveHistoricalDateIntent } from "../lib/historical-date.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
-import { createMealTransactionsService, type MealTransactionItemInput } from "./meal-transactions.js";
+import {
+  createMealTransactionsService,
+  type DeletedMealSnapshot,
+  type MealTransactionItemInput,
+} from "./meal-transactions.js";
 import { createTurnStateService } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
 import { makeAssetRef } from "./assets.js";
@@ -709,7 +713,12 @@ export function createMealCorrectionService(db: AppDatabase) {
     async deleteMeal(
       deviceId: string,
       mealId: string,
-    ): Promise<{ deletedMealId: string; affectedDate: string; dailySummary: DailySummary }> {
+    ): Promise<{
+      deletedMealId: string;
+      affectedDate: string;
+      dailySummary: DailySummary;
+      deletedMeal: DeletedMealSnapshot;
+    }> {
       const deleted = await mealTransactionsService.softDeleteTransaction(deviceId, mealId);
       const dailySummary = await summaryService.getDailySummary(
         deviceId,
@@ -717,9 +726,10 @@ export function createMealCorrectionService(db: AppDatabase) {
       );
 
       return {
-        deletedMealId: deleted.transactionId,
+        deletedMealId: deleted.deletedMeal.mealId,
         affectedDate: deleted.affectedDateKey,
         dailySummary,
+        deletedMeal: deleted.deletedMeal,
       };
     },
   };
