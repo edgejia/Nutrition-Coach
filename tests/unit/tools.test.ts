@@ -998,6 +998,48 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.loggedMeal.imageUrl, null);
   });
 
+  it("returns committed deleted meal facts from delete_meal", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-03-25T10:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+
+    const call: ToolCall = {
+      id: "call_delete",
+      type: "function",
+      function: {
+        name: "delete_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+        }),
+      },
+    };
+
+    const result = await executeTool(call, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState: {
+        resolvedMealIds: [created.id],
+      },
+    });
+
+    assert.equal(result.mealMutationKind, "delete");
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.equal(result.dailySummary?.date, "2026-03-25");
+    assert.equal(result.dailySummary?.mealCount, 0);
+    assert.equal(result.summary, "成功");
+    assert.equal(result.deletedMeal?.foodName, "牛肉麵");
+    assert.equal(result.deletedMeal?.dateKey, "2026-03-25");
+    assert.equal(result.deletedMeal?.mealId, created.id);
+    assert.doesNotMatch(JSON.stringify(result.deletedMeal), /deviceId|revision|delete_meal/);
+  });
+
   it("returns affectedDate when log_food targets an explicit historical day", async () => {
     const historicalCall: ToolCall = {
       id: "call_historical",
