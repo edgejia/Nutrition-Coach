@@ -7,12 +7,10 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import {
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
-  type BehaviorExpectedFailure,
   assertGroundedNumbers,
   assertNoInventedMeals,
-  evaluateExpectedFailures,
+  assertSuccessfulMutationRendererSource,
 } from "../behavior-assertions.js";
-import { ALL_BEHAVIOR_CASES } from "../behavior-matrix.js";
 import { parseSSEEvents } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { buildApp } from "../../../server/app.js";
@@ -28,10 +26,6 @@ import { formatLocalDate } from "../../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 
 type TraceFinalReplySource =
-  | "model_response"
-  | "stream"
-  | "orchestrator_projected_reply"
-  | "fallback_reply"
   | "renderer"
   | "model"
   | "fallback"
@@ -269,17 +263,6 @@ function assertPairwiseConsistency(
     : fail("receipt_consistency", "Receipt facts differ across committed surfaces", evidence);
 }
 
-function assertTraceFinalReplySource(
-  actual: TraceFinalReplySource,
-  expected: TraceFinalReplySource,
-  name = "trace_final_reply_source",
-): BehaviorAssertionResult {
-  const evidence = { actual, expected };
-  return actual === expected
-    ? pass(name, evidence)
-    : fail(name, `Expected trace final reply source ${expected}, got ${actual}`, evidence);
-}
-
 function assertTraceFinalReplyShape(
   actual: TraceFinalReplyShape,
   expected: TraceFinalReplyShape,
@@ -288,16 +271,6 @@ function assertTraceFinalReplyShape(
   return actual === expected
     ? pass("trace_final_reply_shape", evidence)
     : fail("trace_final_reply_shape", `Expected trace final reply shape ${expected}, got ${actual}`, evidence);
-}
-
-function case03ExpectedFailures(): BehaviorExpectedFailure[] {
-  const caseSpec = ALL_BEHAVIOR_CASES.find((entry) => entry.caseId === CASE_ID);
-  return (caseSpec?.expectedFailures ?? []).map((entry) => ({
-    assertionName: entry.assertionName,
-    reason: entry.reason,
-    expectedResolutionPhase: String(entry.expectedResolutionPhase),
-    expiresWhen: entry.expiresWhen,
-  }));
 }
 
 function toCookieHeader(rawHeader: string | string[] | undefined): string {
@@ -388,7 +361,6 @@ function buildExecutionErrorOutcome(error: unknown): BehaviorCaseOutcome {
     assertions: [
       fail("case_03_execution", error instanceof Error ? error.message : String(error)),
     ],
-    expectedFailures: case03ExpectedFailures(),
     evidence: {
       errorType: error instanceof Error ? error.name : typeof error,
     },
@@ -544,18 +516,19 @@ export async function runCase03ReceiptConsistency(): Promise<BehaviorCaseOutcome
             : [],
         }),
         assertTraceFinalReplyShape(traceFinalReplyShape, "plain_text"),
-        assertTraceFinalReplySource(traceFinalReplySource, "renderer"),
+        assertSuccessfulMutationRendererSource({
+          source: traceFinalReplySource,
+          mutationKind: "log",
+        }),
       ];
 
-      const expectedFailures = case03ExpectedFailures();
-      const evaluated = evaluateExpectedFailures({ assertions, expectedFailures });
+      const ok = assertions.every((assertion) => assertion.ok);
 
       return {
         caseId: CASE_ID,
-        status: evaluated.status,
-        ok: evaluated.ok,
-        assertions: evaluated.assertions,
-        expectedFailures: evaluated.expectedFailures,
+        status: ok ? "passed" : "failed",
+        ok,
+        assertions,
         evidence: {
           normalizedFacts: {
             classifiedAssistant: normalizedAssistantClassificationFacts,
@@ -564,7 +537,6 @@ export async function runCase03ReceiptConsistency(): Promise<BehaviorCaseOutcome
             persistence: persistedMealFacts,
             persistedRevision: persistedRevisionFacts,
           },
-          expectedFailureEvaluation: evaluated.evidence,
           traceSummary: {
             finalReply: trace.summary.finalReply,
             toolCount: trace.summary.toolCount,

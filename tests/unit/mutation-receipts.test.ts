@@ -127,6 +127,32 @@ describe("mutation receipt renderer", () => {
     assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
   });
 
+  it("keeps user-facing uncertainty caveats on renderer-owned log receipts", () => {
+    const text = renderMutationReceipt({
+      kind: "log",
+      affectedDate: "2026-05-10",
+      committedSummary,
+      committedTargets,
+      meal: {
+        mealId: "meal-log",
+        mealRevisionId: "rev-log",
+        dateKey: "2026-05-10",
+        loggedAt: "2026-05-10T04:30:00.000Z",
+        foodName: "雞肉沙拉",
+        calories: 420,
+        protein: 32,
+        carbs: 28,
+        fat: 18,
+        itemCount: 1,
+        quantityUncertaintyReason: "missing_quantity",
+      },
+    });
+
+    assert.equal(text, "已記錄5/10 雞肉沙拉，420 kcal，蛋白質 32 g。份量仍是主要估算來源，可再補份量修正。");
+    assert.match(text, /份量|估算/);
+    assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+  });
+
   it("renders update receipts from committed meal facts", () => {
     const text = renderMutationReceipt({
       kind: "update",

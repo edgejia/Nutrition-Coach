@@ -12,6 +12,8 @@ export interface CommittedMealFacts {
   carbs: number;
   fat: number;
   itemCount: number;
+  quantityUncertaintyReason?: "missing_quantity";
+  usedConservativeAssumption?: boolean;
 }
 
 export interface DeletedMealSnapshot {

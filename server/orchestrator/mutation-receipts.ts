@@ -57,11 +57,22 @@ function formatDatePrefix(dateKey: string): string {
     : `${formatReceiptDateLabel(dateKey)} `;
 }
 
+function logUncertaintySuffix(effects: MutationEffects): string {
+  if (
+    effects.kind === "log" &&
+    (effects.meal.quantityUncertaintyReason === "missing_quantity" ||
+      effects.meal.usedConservativeAssumption === true)
+  ) {
+    return "份量仍是主要估算來源，可再補份量修正。";
+  }
+  return "";
+}
+
 export function renderMutationReceipt(effects: MutationEffects): string {
   switch (effects.kind) {
     case "log": {
       const datePrefix = formatDatePrefix(effects.meal.dateKey || effects.affectedDate);
-      return `已記錄${datePrefix}${effects.meal.foodName}，${formatNumber(effects.meal.calories)} kcal，蛋白質 ${formatNumber(effects.meal.protein)} g。`;
+      return `已記錄${datePrefix}${effects.meal.foodName}，${formatNumber(effects.meal.calories)} kcal，蛋白質 ${formatNumber(effects.meal.protein)} g。${logUncertaintySuffix(effects)}`;
     }
     case "update": {
       const datePrefix = formatDatePrefix(effects.meal.dateKey || effects.affectedDate);
