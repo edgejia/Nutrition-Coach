@@ -54,7 +54,7 @@ describe("createLlmTraceRecorder", () => {
     hooks.onToolReceived?.("get_daily_summary", "{}");
     hooks.onToolResult?.({ tool: "get_daily_summary", success: true, executed: true });
     hooks.onLLMEnd?.(1, true);
-    recorder.recordFinalReply({ source: "model_response", shape: "plain_text" });
+    recorder.recordFinalReply({ source: "model", shape: "plain_text" });
     recorder.recordMetrics({ latencyMs: 42 });
 
     const trace = recorder.build({ scenario: "unit-trace", status: "pass" });
@@ -68,7 +68,7 @@ describe("createLlmTraceRecorder", () => {
     assert.equal(trace.summary.fallbackCount, 0);
     assert.equal(trace.summary.latencyMs, 42);
     assert.deepEqual(trace.summary.finalReply, {
-      source: "model_response",
+      source: "model",
       shape: "plain_text",
     });
     assert.equal("rounds" in trace, false);
@@ -83,14 +83,19 @@ describe("createLlmTraceRecorder", () => {
 
     assert.equal(trace.summary.prompt.version, ACTIVE_SYSTEM_PROMPT_VERSION);
     assert.deepEqual(trace.summary.prompt.sectionIds, Object.values(SYSTEM_PROMPT_SECTION_IDS));
+    assert.deepEqual(trace.summary.finalReply, {
+      source: "model",
+      shape: "empty_or_missing",
+    });
   });
 
-  it("accepts all Phase 51 final reply source labels", () => {
+  it("accepts exactly the Phase 53 final reply source labels", () => {
     const sources: LlmTraceFinalReplySource[] = [
-      "model_response",
-      "stream",
-      "orchestrator_projected_reply",
-      "fallback_reply",
+      "renderer",
+      "model",
+      "fallback",
+      "tool_receipt",
+      "mixed",
     ];
 
     for (const source of sources) {
@@ -114,7 +119,7 @@ describe("createLlmTraceRecorder", () => {
     for (const shape of shapes) {
       const recorder = createLlmTraceRecorder();
 
-      recorder.recordFinalReply({ source: "model_response", shape });
+      recorder.recordFinalReply({ source: "model", shape });
 
       const trace = recorder.build({ scenario: `unit-${shape}`, status: "pass" });
       assert.equal(trace.summary.finalReply.shape, shape);
@@ -140,7 +145,7 @@ describe("createLlmTraceRecorder", () => {
       toolResponse: "raw tool results",
     };
     const unsafeFinalReply = {
-      source: "fallback_reply" as const,
+      source: "fallback" as const,
       shape: "fallback_text" as const,
       text: "final assistant text",
     };
