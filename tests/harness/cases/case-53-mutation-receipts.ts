@@ -1,6 +1,7 @@
 import {
   assertGroundedNumbers,
   assertNoForbiddenReceiptCopy,
+  assertNoUnauthorizedMutation,
   assertSuccessfulMutationRendererSource,
   type BehaviorAssertionResult,
   type BehaviorCaseOutcome,
@@ -113,7 +114,7 @@ async function runLogSubflow(): Promise<SubflowResult> {
     };
     const evidence = {
       name: "log",
-      observedTools: collectObservedTools(llmProvider),
+      observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
       finalReplyLength: response.reply.length,
       committedFacts,
@@ -125,6 +126,7 @@ async function runLogSubflow(): Promise<SubflowResult> {
       assertions: [
         namedAssertion("phase_53_log_http_ok", response.status === 200, evidence),
         assertSuccessfulMutationRendererSource({ source: trace.summary.finalReply.source, mutationKind: "log" }),
+        assertNoUnauthorizedMutation({ allowedTools: ["log_food"], observedTools: collectTraceTools(trace) }),
         assertNoForbiddenReceiptCopy(response.reply),
         assertGroundedNumbers(response.reply, {
           sources: [{ source: "committed_log_facts", numbers: [520, 38] }],
@@ -185,7 +187,7 @@ async function runUpdateSubflow(): Promise<SubflowResult> {
     const updatedMeal = (await readMeals(fixture)).find((meal) => meal.id === seededMeal.id);
     const evidence = {
       name: "update",
-      observedTools: collectObservedTools(llmProvider),
+      observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
       finalReplyLength: response.reply.length,
       seededMeal,
@@ -201,6 +203,10 @@ async function runUpdateSubflow(): Promise<SubflowResult> {
       assertions: [
         namedAssertion("phase_53_update_http_ok", response.status === 200, evidence),
         assertSuccessfulMutationRendererSource({ source: trace.summary.finalReply.source, mutationKind: "update" }),
+        assertNoUnauthorizedMutation({
+          allowedTools: ["find_meals", "update_meal"],
+          observedTools: collectTraceTools(trace),
+        }),
         assertNoForbiddenReceiptCopy(response.reply),
         assertGroundedNumbers(response.reply, {
           sources: [{ source: "committed_update_facts", numbers: [500, 40] }],
@@ -271,7 +277,7 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
     };
     const evidence = {
       name: "delete",
-      observedTools: collectObservedTools(llmProvider),
+      observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
       finalReplyLength: response.reply.length,
       deletedMeal,
@@ -282,6 +288,10 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
       assertions: [
         namedAssertion("phase_53_delete_http_ok", response.status === 200, evidence),
         assertSuccessfulMutationRendererSource({ source: trace.summary.finalReply.source, mutationKind: "delete" }),
+        assertNoUnauthorizedMutation({
+          allowedTools: ["find_meals", "delete_meal"],
+          observedTools: collectTraceTools(trace),
+        }),
         assertNoForbiddenReceiptCopy(response.reply),
         namedAssertion(
           "phase_53_delete_committed_snapshot",
@@ -328,7 +338,7 @@ async function runGoalsSubflow(): Promise<SubflowResult> {
     const trace = recorder.build({ scenario: "behavior-matrix:phase-53-goals", status: "pass" });
     const evidence = {
       name: "goals",
-      observedTools: collectObservedTools(llmProvider),
+      observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
       finalReplyLength: response.reply.length,
       committedTargets: targets,
@@ -338,6 +348,7 @@ async function runGoalsSubflow(): Promise<SubflowResult> {
       assertions: [
         namedAssertion("phase_53_goals_http_ok", response.status === 200, evidence),
         assertSuccessfulMutationRendererSource({ source: trace.summary.finalReply.source, mutationKind: "goals" }),
+        assertNoUnauthorizedMutation({ allowedTools: ["update_goals"], observedTools: collectTraceTools(trace) }),
         assertNoForbiddenReceiptCopy(response.reply),
         assertGroundedNumbers(response.reply, {
           sources: [{ source: "committed_goal_targets", numbers: [1800, 130, 150, 50] }],
@@ -370,13 +381,19 @@ async function runNonMutationModelSubflow(): Promise<SubflowResult> {
   });
 
   try {
+    const beforeMeals = await readMeals(fixture);
+    const beforeTargets = await readTargets(fixture);
     const response = await postChat(fixture, "今天晚餐要怎麼安排？");
     const trace = recorder.build({ scenario: "behavior-matrix:phase-53-non-mutation", status: "pass" });
+    const afterMeals = await readMeals(fixture);
+    const afterTargets = await readTargets(fixture);
+    const persistedDiff = buildPersistedDiff(beforeMeals, afterMeals, beforeTargets, afterTargets);
     const evidence = {
       name: "non_mutation_model",
-      observedTools: collectObservedTools(llmProvider),
+      observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
       finalReplyLength: response.reply.length,
+      persistedDiff,
     };
 
     return {
@@ -387,9 +404,14 @@ async function runNonMutationModelSubflow(): Promise<SubflowResult> {
           trace.summary.finalReply.source === "model",
           evidence,
         ),
+        assertNoUnauthorizedMutation({
+          allowedTools: [],
+          observedTools: collectTraceTools(trace),
+          persistedDiff,
+        }),
         namedAssertion(
           "phase_53_non_mutation_no_tools",
-          collectObservedTools(llmProvider).length === 0,
+          collectTraceTools(trace).length === 0,
           evidence,
         ),
       ],
@@ -448,18 +470,22 @@ async function readTargets(fixture: ScenarioAppContext): Promise<DailyTargets> {
   return body.dailyTargets;
 }
 
-function collectObservedTools(llmProvider: StreamingLLMProvider): string[] {
-  const observed: string[] = [];
-  for (const call of llmProvider.chatCalls) {
-    for (const message of call.messages) {
-      if (!("tool_calls" in message) || !Array.isArray(message.tool_calls)) continue;
-      for (const toolCall of message.tool_calls) {
-        const name = toolCall?.function?.name;
-        if (typeof name === "string") observed.push(name);
-      }
-    }
-  }
-  return observed;
+function collectTraceTools(trace: ReturnType<ReturnType<typeof createLlmTraceRecorder>["build"]>): string[] {
+  return trace.timeline
+    .filter((event) => event.type === "tool_received")
+    .map((event) => event.tool);
+}
+
+function buildPersistedDiff(
+  beforeMeals: MealSnapshot[],
+  afterMeals: MealSnapshot[],
+  beforeTargets: DailyTargets,
+  afterTargets: DailyTargets,
+): Record<string, unknown> {
+  return {
+    mealsChanged: JSON.stringify(beforeMeals) !== JSON.stringify(afterMeals),
+    goalsChanged: JSON.stringify(beforeTargets) !== JSON.stringify(afterTargets),
+  };
 }
 
 function namedAssertion(
