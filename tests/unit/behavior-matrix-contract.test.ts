@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
+import {
+  assertNoForbiddenReceiptCopy,
+  assertSuccessfulMutationRendererSource,
+} from "../harness/behavior-assertions.js";
 import { ALL_BEHAVIOR_CASES } from "../harness/behavior-matrix.js";
 import type {
   BehaviorAssertionName,
@@ -149,6 +153,76 @@ describe("behavior matrix contract", () => {
       "evaluateExpectedFailures",
     ] as const satisfies readonly BehaviorAssertionName[]) {
       assert.ok(assertionNames.has(requiredAssertion), `missing assertion coverage ${requiredAssertion}`);
+    }
+  });
+
+  it("exports mutation receipt renderer-source and forbidden-copy assertions", async () => {
+    const exportedNames = await exportedBehaviorAssertionNames();
+
+    for (const requiredAssertion of [
+      "assertSuccessfulMutationRendererSource",
+      "assertNoForbiddenReceiptCopy",
+    ]) {
+      assert.ok(exportedNames.has(requiredAssertion), `missing behavior assertion export ${requiredAssertion}`);
+    }
+  });
+
+  it("rejects successful mutation receipts from model or mixed sources", () => {
+    assert.deepEqual(
+      assertSuccessfulMutationRendererSource({ source: "renderer", mutationKind: "log" }),
+      {
+        name: "mutation_receipt_renderer_source",
+        ok: true,
+        evidence: { source: "renderer", mutationKind: "log" },
+      },
+    );
+
+    for (const source of ["model", "mixed"] as const) {
+      const result = assertSuccessfulMutationRendererSource({ source, mutationKind: "update" });
+      assert.equal(result.name, "mutation_receipt_renderer_source");
+      assert.equal(result.ok, false);
+      assert.match(result.message ?? "", /renderer/);
+      assert.deepEqual(result.evidence, { source, mutationKind: "update" });
+    }
+  });
+
+  it("rejects forbidden mutation receipt copy including API-like wording", () => {
+    const cleanResult = assertNoForbiddenReceiptCopy("已記錄雞胸肉，320 kcal，蛋白質 35 g。");
+    assert.equal(cleanResult.name, "no_forbidden_receipt_copy");
+    assert.equal(cleanResult.ok, true);
+
+    for (const term of [
+      "headline",
+      "先抓低",
+      "log_food",
+      "update_meal",
+      "delete_meal",
+      "update_goals",
+      "revision",
+      "deviceId",
+      "mealMutationKind",
+      "dailySummary",
+      "dailyTargets",
+      "API",
+      "endpoint",
+      "route",
+      "payload",
+      "field",
+      "request",
+      "response",
+      "JSON",
+      "PATCH",
+      "POST",
+      "DELETE",
+      "/api",
+      "body",
+      "status code",
+    ]) {
+      const result = assertNoForbiddenReceiptCopy(`receipt leaked ${term}`);
+      assert.equal(result.name, "no_forbidden_receipt_copy");
+      assert.equal(result.ok, false, `expected forbidden term to fail: ${term}`);
+      assert.match(result.message ?? "", /forbidden/i);
+      assert.deepEqual(result.evidence, { matchedTerms: [term] });
     }
   });
 });
