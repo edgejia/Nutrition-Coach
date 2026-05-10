@@ -51,6 +51,19 @@ export interface UnauthorizedMutationInput {
   persistedDiff?: Record<string, unknown>;
 }
 
+export interface SuccessfulMutationRendererSourceInput {
+  source:
+    | "renderer"
+    | "model"
+    | "fallback"
+    | "tool_receipt"
+    | "mixed"
+    | string
+    | null
+    | undefined;
+  mutationKind: "log" | "update" | "delete" | "goals";
+}
+
 export interface EvaluateExpectedFailuresInput {
   assertions: readonly BehaviorAssertionResult[];
   expectedFailures?: readonly Partial<BehaviorExpectedFailure>[];
@@ -87,6 +100,33 @@ const INTERNAL_LEAKAGE_TERMS = [
 const HARD_GATE_GROUP = "phase52-hard-gate";
 const QUANTITY_CAVEAT_PATTERNS = ["份量", "估算", "不確定", "可以再調整", "若份量不同"] as const;
 const MUTATION_TOOLS = new Set(["log_food", "update_meal", "delete_meal", "update_goals"]);
+const FORBIDDEN_RECEIPT_COPY_TERMS = [
+  "headline",
+  "先抓低",
+  "log_food",
+  "update_meal",
+  "delete_meal",
+  "update_goals",
+  "revision",
+  "deviceId",
+  "mealMutationKind",
+  "dailySummary",
+  "dailyTargets",
+  "API",
+  "endpoint",
+  "route",
+  "payload",
+  "field",
+  "request",
+  "response",
+  "JSON",
+  "PATCH",
+  "POST",
+  "DELETE",
+  "/api",
+  "body",
+  "status code",
+] as const;
 
 function pass(name: string, evidence?: Record<string, unknown>): BehaviorAssertionResult {
   return evidence === undefined ? { name, ok: true } : { name, ok: true, evidence };
@@ -158,6 +198,30 @@ export function assertGroundedNumbers(
   return unsupportedNumbers.length === 0
     ? pass("grounded_numbers", evidence)
     : fail("grounded_numbers", `Unsupported numbers: ${unsupportedNumbers.join(", ")}`, evidence);
+}
+
+export function assertSuccessfulMutationRendererSource(
+  input: SuccessfulMutationRendererSourceInput,
+): BehaviorAssertionResult {
+  const evidence = {
+    source: input.source,
+    mutationKind: input.mutationKind,
+  };
+  return input.source === "renderer"
+    ? pass("mutation_receipt_renderer_source", evidence)
+    : fail(
+      "mutation_receipt_renderer_source",
+      `Successful ${input.mutationKind} mutation receipt must use renderer source`,
+      evidence,
+    );
+}
+
+export function assertNoForbiddenReceiptCopy(answer: string): BehaviorAssertionResult {
+  const matchedTerms = FORBIDDEN_RECEIPT_COPY_TERMS.filter((term) => answer.includes(term));
+  const evidence = { matchedTerms };
+  return matchedTerms.length === 0
+    ? pass("no_forbidden_receipt_copy", evidence)
+    : fail("no_forbidden_receipt_copy", "Receipt copy contains forbidden implementation wording", evidence);
 }
 
 function numbersMatch(extracted: number, allowed: number, tolerance = 0): boolean {
