@@ -224,6 +224,31 @@ describe("behavior matrix contract", () => {
     }
   });
 
+  it("wires Phase 53 mutation receipts into the executable behavior-matrix scenario", async () => {
+    const scenarioSource = await readFile("tests/harness/scenarios/behavior-matrix.ts", "utf8");
+
+    assert.match(
+      scenarioSource,
+      /runCase53MutationReceipts/,
+      "behavior-matrix scenario must import and register the Phase 53 runtime case",
+    );
+    assert.match(
+      scenarioSource,
+      /PHASE-53-MUTATION-RECEIPTS/,
+      "behavior-matrix scenario must include the Phase 53 case ID in execution order",
+    );
+    assert.match(
+      scenarioSource,
+      /CASE-08[\s\S]*PHASE-53-MUTATION-RECEIPTS/,
+      "Phase 53 runtime case must execute after CASE-08",
+    );
+    assert.doesNotMatch(
+      scenarioSource,
+      /acceptedStatuses:\s*\[[^\]]*"expected-fail"/,
+      "behavior-matrix scenario must not accept expected-fail after Phase 53",
+    );
+  });
+
   it("exports mutation receipt renderer-source and forbidden-copy assertions", async () => {
     const exportedNames = await exportedBehaviorAssertionNames();
 
