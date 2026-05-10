@@ -248,6 +248,14 @@ describe("MealTransactionsService", () => {
       transactionId: created.transactionId,
       loggedAt: "2026-03-25T11:00:00.000Z",
       affectedDateKey: "2026-03-25",
+      deletedMeal: {
+        mealId: created.transactionId,
+        dateKey: "2026-03-25",
+        loggedAt: "2026-03-25T11:00:00.000Z",
+        foodName: "雞胸肉",
+        calories: 320,
+        protein: 40,
+      },
     });
     assert.ok(transaction);
     assert.equal(transaction!.currentRevisionNumber, 2);
