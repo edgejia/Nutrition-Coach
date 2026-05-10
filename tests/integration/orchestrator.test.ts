@@ -68,7 +68,7 @@ describe("Orchestrator", () => {
     mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
     const result = await orchestrator.handleMessage(deviceId, "你好");
     assertReplyResult(result);
-    assert.equal(result.finalReplySource, "model_response");
+    assert.equal(result.finalReplySource, "model");
     assert.equal(result.finalReplyShape, "plain_text");
   });
 
@@ -92,7 +92,7 @@ describe("Orchestrator", () => {
 
     const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
     assertReplyResult(result);
-    assert.equal(result.finalReplySource, "orchestrator_projected_reply");
+    assert.equal(result.finalReplySource, "renderer");
     assert.equal(result.finalReplyShape, "plain_text");
   });
 
@@ -100,14 +100,14 @@ describe("Orchestrator", () => {
     mockLLM.queueChatError(new Error("provider down"));
     const llmErrorResult = await orchestrator.handleMessage(deviceId, "你好");
     assertReplyResult(llmErrorResult);
-    assert.equal(llmErrorResult.finalReplySource, "fallback_reply");
+    assert.equal(llmErrorResult.finalReplySource, "fallback");
     assert.equal(llmErrorResult.finalReplyShape, "fallback_text");
 
     mockLLM.reset();
     mockLLM.queueChatResponse({ content: "" });
     const missingReplyResult = await orchestrator.handleMessage(deviceId, "你好");
     assertReplyResult(missingReplyResult);
-    assert.equal(missingReplyResult.finalReplySource, "model_response");
+    assert.equal(missingReplyResult.finalReplySource, "model");
     assert.equal(missingReplyResult.finalReplyShape, "empty_or_missing");
 
     mockLLM.reset();
@@ -122,7 +122,7 @@ describe("Orchestrator", () => {
     }
     const maxRoundResult = await orchestrator.handleMessage(deviceId, "test");
     assertReplyResult(maxRoundResult);
-    assert.equal(maxRoundResult.finalReplySource, "fallback_reply");
+    assert.equal(maxRoundResult.finalReplySource, "fallback");
     assert.equal(maxRoundResult.finalReplyShape, "fallback_text");
 
     mockLLM.reset();
@@ -139,7 +139,7 @@ describe("Orchestrator", () => {
     mockLLM.queueChatError(new Error("reply generation failed"));
     const partialSuccessResult = await orchestrator.handleMessage(deviceId, "卡路里改成 1800，蛋白質 130 克");
     assertReplyResult(partialSuccessResult);
-    assert.equal(partialSuccessResult.finalReplySource, "fallback_reply");
+    assert.equal(partialSuccessResult.finalReplySource, "fallback");
     assert.equal(partialSuccessResult.finalReplyShape, "fallback_text");
   });
 

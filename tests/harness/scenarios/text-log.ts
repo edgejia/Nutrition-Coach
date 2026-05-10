@@ -685,7 +685,7 @@ const textLogScenario: VerificationScenario = {
         }
 
         if (
-          finalReply.source !== "orchestrator_projected_reply"
+          finalReply.source !== "renderer"
           || finalReply.shape !== "plain_text"
         ) {
           const stepResult = fail("verify_llm_trace", "Trace final reply metadata did not match projected plain-text receipt", {

@@ -412,7 +412,7 @@ describe("chat-streaming", () => {
 
       const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
       assert.deepEqual(trace.summary.finalReply, {
-        source: "stream",
+        source: "model",
         shape: "streamed_text",
       });
       const latencyMs = trace.summary.latencyMs;
@@ -454,7 +454,7 @@ describe("chat-streaming", () => {
 
       const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
       assert.deepEqual(trace.summary.finalReply, {
-        source: "orchestrator_projected_reply",
+        source: "renderer",
         shape: "plain_text",
       });
       assert.deepEqual(trace.timeline.at(-1), {
@@ -494,7 +494,7 @@ describe("chat-streaming", () => {
 
       const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
       assert.deepEqual(trace.summary.finalReply, {
-        source: "fallback_reply",
+        source: "fallback",
         shape: "fallback_text",
       });
       const latencyMs = trace.summary.latencyMs;
@@ -1673,7 +1673,7 @@ describe("chat-streaming", () => {
 
       const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
       assert.deepEqual(trace.summary.finalReply, {
-        source: "fallback_reply",
+        source: "fallback",
         shape: "fallback_text",
       });
       assert.deepEqual(trace.timeline.at(-1), {
