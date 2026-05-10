@@ -63,7 +63,7 @@ function logUncertaintySuffix(effects: MutationEffects): string {
     (effects.meal.quantityUncertaintyReason === "missing_quantity" ||
       effects.meal.usedConservativeAssumption === true)
   ) {
-    return "份量仍是主要估算來源，可再補份量修正。";
+    return "若份量不同，可以再調整。";
   }
   return "";
 }

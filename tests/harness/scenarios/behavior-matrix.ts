@@ -5,6 +5,7 @@ import type {
 } from "../scenario-types.js";
 import {
   type BehaviorCaseId,
+  type BehaviorMatrixCaseId,
   ALL_BEHAVIOR_CASES,
 } from "../behavior-matrix.js";
 import type {
@@ -20,8 +21,10 @@ import { runCase05GoalAuthorization } from "../cases/case-05-goal-authorization.
 import { runCase06UpdateDeleteClarification } from "../cases/case-06-update-delete-clarification.js";
 import { runCase07PromptInjection } from "../cases/case-07-prompt-injection.js";
 import { runCase08MedicalBoundary } from "../cases/case-08-medical-boundary.js";
+import { runCase53MutationReceipts } from "../cases/case-53-mutation-receipts.js";
 
 type BehaviorCaseRunner = () => Promise<BehaviorCaseOutcome>;
+type ExecutableBehaviorCaseId = BehaviorCaseId | "PHASE-53-MUTATION-RECEIPTS";
 
 const CASE_RUNNERS = {
   "CASE-01": runCase01ImageOnly,
@@ -32,7 +35,13 @@ const CASE_RUNNERS = {
   "CASE-06": runCase06UpdateDeleteClarification,
   "CASE-07": runCase07PromptInjection,
   "CASE-08": runCase08MedicalBoundary,
-} as const satisfies Record<BehaviorCaseId, BehaviorCaseRunner>;
+  "PHASE-53-MUTATION-RECEIPTS": runCase53MutationReceipts,
+} as const satisfies Record<ExecutableBehaviorCaseId, BehaviorCaseRunner>;
+
+const EXECUTABLE_BEHAVIOR_CASE_IDS: readonly ExecutableBehaviorCaseId[] = [
+  ...ALL_BEHAVIOR_CASES.map((entry) => entry.caseId),
+  "PHASE-53-MUTATION-RECEIPTS",
+];
 
 const OUTCOME_STATUSES = [
   "passed",
@@ -102,7 +111,7 @@ function registryErrors(): {
   missingRunnerIds: string[];
   extraRunnerIds: string[];
 } {
-  const matrixIds = new Set<string>(ALL_BEHAVIOR_CASES.map((entry) => entry.caseId));
+  const matrixIds = new Set<string>(EXECUTABLE_BEHAVIOR_CASE_IDS);
   const runnerIds = new Set(Object.keys(CASE_RUNNERS));
   return {
     missingRunnerIds: [...matrixIds].filter((caseId) => !runnerIds.has(caseId)),
@@ -111,7 +120,7 @@ function registryErrors(): {
 }
 
 function buildMetadataErrorOutcome(
-  caseId: BehaviorCaseId,
+  caseId: BehaviorMatrixCaseId,
   evidence: Record<string, unknown>,
 ): BehaviorCaseOutcome {
   return {
@@ -131,7 +140,7 @@ function buildMetadataErrorOutcome(
 }
 
 function normalizeOutcome(
-  expectedCaseId: BehaviorCaseId,
+  expectedCaseId: BehaviorMatrixCaseId,
   outcome: BehaviorCaseOutcome,
 ): BehaviorCaseOutcome {
   if (outcome.caseId !== expectedCaseId) {
@@ -155,7 +164,7 @@ function normalizeOutcome(
     };
   }
 
-  if (outcome.status === "expected-fail" && expectedCaseId !== "CASE-03") {
+  if (outcome.status === "expected-fail") {
     return {
       ...outcome,
       status: "metadata-error",
@@ -165,7 +174,7 @@ function normalizeOutcome(
         makeAssertion(
           "behavior_matrix_expected_fail_scope",
           false,
-          "Expected-fail status is limited to CASE-03 renderer/source metadata",
+          "Expected-fail status is not accepted after Phase 53",
           { caseId: expectedCaseId, status: outcome.status },
         ),
       ],
@@ -179,7 +188,7 @@ function normalizeOutcome(
   return outcome;
 }
 
-async function runCase(caseId: BehaviorCaseId): Promise<BehaviorCaseOutcome> {
+async function runCase(caseId: ExecutableBehaviorCaseId): Promise<BehaviorCaseOutcome> {
   const runner = CASE_RUNNERS[caseId];
   if (!runner) {
     return buildMetadataErrorOutcome(caseId, {
@@ -238,11 +247,11 @@ function stepFromOutcome(outcome: BehaviorCaseOutcome): ScenarioStepResult {
   const failedAssertion = outcome.assertions.find((assertion) => !assertion.ok);
   const step: ScenarioStepResult = {
     name: outcome.caseId,
-    ok: outcome.status === "passed" || outcome.status === "expected-fail",
+    ok: outcome.status === "passed",
     actual: artifactOutcome(outcome),
     expected: {
-      acceptedStatuses: ["passed", "expected-fail"],
-      blockingStatuses: ["failed", "metadata-error", "execution-error"],
+      acceptedStatuses: ["passed"],
+      blockingStatuses: ["expected-fail", "failed", "metadata-error", "execution-error"],
     },
   };
   if (failedAssertion?.message) {
@@ -253,14 +262,14 @@ function stepFromOutcome(outcome: BehaviorCaseOutcome): ScenarioStepResult {
 
 function consoleSummary(counts: Record<BehaviorCaseStatus, number>, ok: boolean): string {
   const result = ok ? "PASS" : "FAIL";
-  return `${result} behavior-matrix passed=${counts.passed} expected-fail=${counts["expected-fail"]} failed=${counts.failed} metadata-error=${counts["metadata-error"]} execution-error=${counts["execution-error"]}`;
+  return `${result} behavior-matrix passed=${counts.passed} failed=${counts.failed} metadata-error=${counts["metadata-error"]} execution-error=${counts["execution-error"]}`;
 }
 
 const behaviorMatrixScenario: VerificationScenario = {
   name: "behavior-matrix",
 
   async run(): Promise<ScenarioResult> {
-    const caseIds = ALL_BEHAVIOR_CASES.map((entry) => entry.caseId);
+    const caseIds = [...EXECUTABLE_BEHAVIOR_CASE_IDS];
     const errors = registryErrors();
     let outcomes: BehaviorCaseOutcome[];
 

@@ -148,7 +148,7 @@ describe("mutation receipt renderer", () => {
       },
     });
 
-    assert.equal(text, "已記錄5/10 雞肉沙拉，420 kcal，蛋白質 32 g。份量仍是主要估算來源，可再補份量修正。");
+    assert.equal(text, "已記錄5/10 雞肉沙拉，420 kcal，蛋白質 32 g。若份量不同，可以再調整。");
     assert.match(text, /份量|估算/);
     assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
   });
