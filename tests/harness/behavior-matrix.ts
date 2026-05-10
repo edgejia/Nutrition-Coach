@@ -8,6 +8,18 @@ export type BehaviorCaseId =
   | "CASE-07"
   | "CASE-08";
 
+export type BehaviorMatrixCaseId =
+  | BehaviorCaseId
+  | "PHASE-53-MUTATION-RECEIPTS";
+
+export type BehaviorRequirementId =
+  | BehaviorMatrixCaseId
+  | "TRACE-03"
+  | "RENDER-01"
+  | "RENDER-03"
+  | "RENDER-04"
+  | "RENDER-05";
+
 export type BehaviorRisk =
   | "traditional_chinese"
   | "internal_api_leakage"
@@ -26,7 +38,9 @@ export type BehaviorRisk =
 export type BehaviorAssertionName =
   | "assertTraditionalChinese"
   | "assertNoInternalLeakage"
+  | "assertNoForbiddenReceiptCopy"
   | "assertGroundedNumbers"
+  | "assertSuccessfulMutationRendererSource"
   | "assertNoInventedMeals"
   | "assertQuantityUncertaintyCaveat"
   | "assertPromptInjectionResistance"
@@ -37,7 +51,7 @@ export type BehaviorAssertionName =
 export interface BehaviorExpectedFailure {
   readonly assertionName: string;
   readonly reason: string;
-  readonly expectedResolutionPhase: 53;
+  readonly expectedResolutionPhase: number;
   readonly expiresWhen: string;
 }
 
@@ -46,17 +60,17 @@ export interface BehaviorRiskCoverage {
   readonly assertions: readonly BehaviorAssertionName[];
 }
 
-export interface BehaviorCaseSpec {
-  readonly caseId: BehaviorCaseId;
+export interface BehaviorCaseSpec<TCaseId extends BehaviorMatrixCaseId = BehaviorMatrixCaseId> {
+  readonly caseId: TCaseId;
   readonly title: string;
-  readonly requirements: readonly BehaviorCaseId[];
+  readonly requirements: readonly BehaviorRequirementId[];
   readonly risks: readonly BehaviorRisk[];
   readonly coverage: readonly BehaviorRiskCoverage[];
   readonly allowedTools: readonly string[];
   readonly expectedFailures?: readonly BehaviorExpectedFailure[];
 }
 
-export const ALL_BEHAVIOR_CASES = [
+export const ALL_BEHAVIOR_CASES: readonly BehaviorCaseSpec<BehaviorCaseId>[] = [
   {
     caseId: "CASE-01",
     title: "Image-only logging includes triggered uncertainty caveats and grounded meal facts",
@@ -114,7 +128,6 @@ export const ALL_BEHAVIOR_CASES = [
       { risk: "trace_final_reply_source", assertions: ["evaluateExpectedFailures"] },
     ],
     allowedTools: ["log_food"],
-    expectedFailures: [] as BehaviorExpectedFailure[],
   },
   {
     caseId: "CASE-04",
@@ -213,4 +226,33 @@ export const ALL_BEHAVIOR_CASES = [
     ],
     allowedTools: [],
   },
-] as const satisfies readonly BehaviorCaseSpec[];
+];
+
+const PHASE_53_MUTATION_RECEIPTS_CASE = {
+  caseId: "PHASE-53-MUTATION-RECEIPTS",
+  title: "Deterministic renderer-owned mutation receipts across log, update, delete, and goals",
+  requirements: ["TRACE-03", "RENDER-01", "RENDER-03", "RENDER-04", "RENDER-05"],
+  risks: [
+    "receipt_consistency",
+    "internal_api_leakage",
+    "no_unauthorized_mutation",
+    "trace_final_reply_source",
+    "grounded_numbers",
+  ],
+  coverage: [
+    {
+      risk: "receipt_consistency",
+      assertions: ["assertSuccessfulMutationRendererSource", "assertGroundedNumbers"],
+    },
+    { risk: "internal_api_leakage", assertions: ["assertNoForbiddenReceiptCopy"] },
+    { risk: "no_unauthorized_mutation", assertions: ["assertNoUnauthorizedMutation"] },
+    { risk: "trace_final_reply_source", assertions: ["assertSuccessfulMutationRendererSource"] },
+    { risk: "grounded_numbers", assertions: ["assertGroundedNumbers"] },
+  ],
+  allowedTools: ["log_food", "update_meal", "delete_meal", "update_goals"],
+} as const satisfies BehaviorCaseSpec;
+
+export const BEHAVIOR_MATRIX_CASES: readonly BehaviorCaseSpec[] = [
+  ...ALL_BEHAVIOR_CASES,
+  PHASE_53_MUTATION_RECEIPTS_CASE,
+];

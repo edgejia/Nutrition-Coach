@@ -5,10 +5,10 @@ import {
   assertNoForbiddenReceiptCopy,
   assertSuccessfulMutationRendererSource,
 } from "../harness/behavior-assertions.js";
-import { ALL_BEHAVIOR_CASES } from "../harness/behavior-matrix.js";
+import { ALL_BEHAVIOR_CASES, BEHAVIOR_MATRIX_CASES } from "../harness/behavior-matrix.js";
 import type {
   BehaviorAssertionName,
-  BehaviorCaseId,
+  BehaviorMatrixCaseId,
   BehaviorRisk,
 } from "../harness/behavior-matrix.js";
 
@@ -22,7 +22,7 @@ const EXPECTED_CASE_IDS = [
   "CASE-07",
   "CASE-08",
   "PHASE-53-MUTATION-RECEIPTS",
-] as const satisfies readonly BehaviorCaseId[];
+] as const satisfies readonly BehaviorMatrixCaseId[];
 
 const PHASE_53_REQUIREMENTS = [
   "TRACE-03",
@@ -66,12 +66,17 @@ describe("behavior matrix contract", () => {
   it("locks exact behavior cases, requirement IDs, and non-empty coverage", () => {
     assert.deepEqual(
       ALL_BEHAVIOR_CASES.map((behaviorCase) => behaviorCase.caseId),
+      EXPECTED_CASE_IDS.slice(0, 8),
+      "missing executable behavior case or case order drift",
+    );
+    assert.deepEqual(
+      BEHAVIOR_MATRIX_CASES.map((behaviorCase) => behaviorCase.caseId),
       EXPECTED_CASE_IDS,
-      "missing behavior case or case order drift",
+      "missing behavior matrix case or case order drift",
     );
 
-    const seen = new Set<BehaviorCaseId>();
-    for (const behaviorCase of ALL_BEHAVIOR_CASES) {
+    const seen = new Set<BehaviorMatrixCaseId>();
+    for (const behaviorCase of BEHAVIOR_MATRIX_CASES) {
       assert.ok(!seen.has(behaviorCase.caseId), `duplicate behavior case ${behaviorCase.caseId}`);
       seen.add(behaviorCase.caseId);
 
@@ -99,7 +104,7 @@ describe("behavior matrix contract", () => {
   });
 
   it("covers every Phase 52 risk at least once", () => {
-    const coveredRisks = new Set(ALL_BEHAVIOR_CASES.flatMap((behaviorCase) => behaviorCase.risks));
+    const coveredRisks = new Set(BEHAVIOR_MATRIX_CASES.flatMap((behaviorCase) => behaviorCase.risks));
     for (const risk of REQUIRED_RISKS) {
       assert.ok(coveredRisks.has(risk), `missing behavior risk ${risk}`);
     }
@@ -108,7 +113,7 @@ describe("behavior matrix contract", () => {
   it("references only exported behavior assertion functions or constants", async () => {
     const exportedNames = await exportedBehaviorAssertionNames();
 
-    for (const behaviorCase of ALL_BEHAVIOR_CASES) {
+    for (const behaviorCase of BEHAVIOR_MATRIX_CASES) {
       for (const entry of behaviorCase.coverage) {
         for (const assertionName of entry.assertions) {
           assert.ok(
@@ -144,7 +149,7 @@ describe("behavior matrix contract", () => {
 
   it("uses locked assertion names in coverage entries", () => {
     const assertionNames = new Set<BehaviorAssertionName>();
-    for (const behaviorCase of ALL_BEHAVIOR_CASES) {
+    for (const behaviorCase of BEHAVIOR_MATRIX_CASES) {
       for (const entry of behaviorCase.coverage) {
         for (const assertionName of entry.assertions) {
           assertionNames.add(assertionName);
@@ -170,7 +175,7 @@ describe("behavior matrix contract", () => {
   });
 
   it("declares broad Phase 53 mutation receipt coverage", () => {
-    const phase53 = ALL_BEHAVIOR_CASES.find(
+    const phase53 = BEHAVIOR_MATRIX_CASES.find(
       (behaviorCase) => behaviorCase.caseId === "PHASE-53-MUTATION-RECEIPTS",
     );
     assert.ok(phase53, "missing PHASE-53-MUTATION-RECEIPTS behavior case");

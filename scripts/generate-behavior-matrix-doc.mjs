@@ -2,7 +2,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import process from "node:process";
-import { ALL_BEHAVIOR_CASES } from "../tests/harness/behavior-matrix.ts";
+import { BEHAVIOR_MATRIX_CASES } from "../tests/harness/behavior-matrix.ts";
 
 const OUTPUT_PATH = "tests/harness/behavior-matrix.md";
 const SOURCE_PATH = "tests/harness/behavior-matrix.ts";
@@ -20,7 +20,7 @@ function tableRow(values) {
 
 function riskDistributionRows() {
   const counts = new Map();
-  for (const behaviorCase of ALL_BEHAVIOR_CASES) {
+  for (const behaviorCase of BEHAVIOR_MATRIX_CASES) {
     for (const risk of behaviorCase.risks) {
       counts.set(risk, (counts.get(risk) ?? 0) + 1);
     }
@@ -43,7 +43,7 @@ function renderMarkdown() {
     "|---|---|---|---|---|",
   ];
 
-  for (const behaviorCase of ALL_BEHAVIOR_CASES) {
+  for (const behaviorCase of BEHAVIOR_MATRIX_CASES) {
     lines.push(
       tableRow([
         behaviorCase.caseId,
@@ -64,7 +64,7 @@ function renderMarkdown() {
   );
 
   for (const [risk, count] of riskDistributionRows()) {
-    const cases = ALL_BEHAVIOR_CASES
+    const cases = BEHAVIOR_MATRIX_CASES
       .filter((behaviorCase) => behaviorCase.risks.includes(risk))
       .map((behaviorCase) => behaviorCase.caseId);
     lines.push(tableRow([risk, count, cases]));
@@ -78,7 +78,7 @@ function renderMarkdown() {
     "|---|---|---|",
   );
 
-  for (const behaviorCase of ALL_BEHAVIOR_CASES) {
+  for (const behaviorCase of BEHAVIOR_MATRIX_CASES) {
     for (const entry of behaviorCase.coverage) {
       lines.push(tableRow([behaviorCase.caseId, entry.risk, entry.assertions]));
     }
@@ -93,7 +93,7 @@ function renderMarkdown() {
   );
 
   let expectedFailureCount = 0;
-  for (const behaviorCase of ALL_BEHAVIOR_CASES) {
+  for (const behaviorCase of BEHAVIOR_MATRIX_CASES) {
     for (const expectedFailure of behaviorCase.expectedFailures ?? []) {
       expectedFailureCount += 1;
       lines.push(
