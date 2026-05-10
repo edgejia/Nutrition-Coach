@@ -112,7 +112,7 @@ function verifyFallbackTraceContract(
   if (typeof trace.summary.latencyMs !== "number" || trace.summary.latencyMs < 0) {
     return { ok: false, error: "expected non-negative latencyMs", evidence };
   }
-  if (trace.summary.finalReply.source !== "fallback_reply") return { ok: false, error: "expected fallback_reply final reply source", evidence };
+  if (trace.summary.finalReply.source !== "fallback") return { ok: false, error: "expected fallback final reply source", evidence };
   if (trace.summary.finalReply.shape !== "fallback_text") return { ok: false, error: "expected fallback_text final reply shape", evidence };
 
   const serialized = JSON.stringify(trace);

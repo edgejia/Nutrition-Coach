@@ -32,7 +32,11 @@ type TraceFinalReplySource =
   | "stream"
   | "orchestrator_projected_reply"
   | "fallback_reply"
-  | "renderer";
+  | "renderer"
+  | "model"
+  | "fallback"
+  | "tool_receipt"
+  | "mixed";
 
 type TraceFinalReplyShape =
   | "plain_text"
@@ -539,11 +543,6 @@ export async function runCase03ReceiptConsistency(): Promise<BehaviorCaseOutcome
             ? [normalizedAssistantClassificationFacts.foodName]
             : [],
         }),
-        assertTraceFinalReplySource(
-          traceFinalReplySource,
-          "orchestrator_projected_reply",
-          "trace_current_final_reply_source",
-        ),
         assertTraceFinalReplyShape(traceFinalReplyShape, "plain_text"),
         assertTraceFinalReplySource(traceFinalReplySource, "renderer"),
       ];

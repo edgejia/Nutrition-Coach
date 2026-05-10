@@ -29,17 +29,21 @@ export type LlmTraceTimelineEvent =
       completed: boolean;
     };
 
-// Phase 51 source mapping:
-// Normal non-stream model content -> model_response/plain_text
-// Provider stream generator / streamed model text -> stream/streamed_text
-// Successful log/update/delete projected reply -> orchestrator_projected_reply/plain_text
-// Orchestrator llm_error, partial_success, max-round fallback, and SSE route catch fallback -> fallback_reply/fallback_text
-// Empty or missing reply -> branch source model_response or fallback_reply with empty_or_missing
+// Phase 53 migration inputs:
+// orchestrator_projected_reply -> renderer
+// model_response -> model
+// stream -> model
+// fallback_reply -> fallback
+// tool_receipt is reserved for explicitly tool-owned receipt paths, not the
+// default label for renderer-owned mutation receipts.
+// mixed is a diagnostic final-reply source for combined ownership; it is not a
+// MutationEffects ownership field.
 export type LlmTraceFinalReplySource =
-  | "model_response"
-  | "stream"
-  | "orchestrator_projected_reply"
-  | "fallback_reply";
+  | "renderer"
+  | "model"
+  | "fallback"
+  | "tool_receipt"
+  | "mixed";
 
 export type LlmTraceFinalReplyShape =
   | "plain_text"
@@ -175,7 +179,7 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
   let currentRound: number | undefined;
   let latencyMs: number | undefined;
   let finalReply: LlmTraceFinalReply = {
-    source: "model_response",
+    source: "model",
     shape: "empty_or_missing",
   };
 

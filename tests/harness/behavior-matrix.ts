@@ -21,7 +21,7 @@ export type BehaviorRisk =
   | "prompt_injection_resistance"
   | "medical_boundary"
   | "no_unauthorized_mutation"
-  | "expected_fail_integrity";
+  | "trace_final_reply_source";
 
 export type BehaviorAssertionName =
   | "assertTraditionalChinese"
@@ -105,24 +105,16 @@ export const ALL_BEHAVIOR_CASES = [
       "grounded_numbers",
       "no_fabricated_meals",
       "receipt_consistency",
-      "expected_fail_integrity",
+      "trace_final_reply_source",
     ],
     coverage: [
       { risk: "grounded_numbers", assertions: ["assertGroundedNumbers"] },
       { risk: "no_fabricated_meals", assertions: ["assertNoInventedMeals"] },
       { risk: "receipt_consistency", assertions: ["assertGroundedNumbers", "assertNoInventedMeals"] },
-      { risk: "expected_fail_integrity", assertions: ["evaluateExpectedFailures"] },
+      { risk: "trace_final_reply_source", assertions: ["evaluateExpectedFailures"] },
     ],
     allowedTools: ["log_food"],
-    expectedFailures: [
-      {
-        assertionName: "trace_final_reply_source",
-        reason:
-          "Phase 51 only exposes provisional orchestrator_projected_reply labels; Phase 53 owns deterministic renderer-source mutation receipts.",
-        expectedResolutionPhase: 53,
-        expiresWhen: "assertTraceFinalReplySource supports renderer",
-      },
-    ],
+    expectedFailures: [] as BehaviorExpectedFailure[],
   },
   {
     caseId: "CASE-04",

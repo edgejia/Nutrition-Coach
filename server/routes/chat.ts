@@ -512,7 +512,7 @@ async function handleStreamingReply(
       dailySummary,
       stopped: true,
       tokensStreamed,
-      finalReplySource: "stream",
+      finalReplySource: "model",
       finalReplyShape: stoppedReply.trim() ? "streamed_text" : "empty_or_missing",
     };
   }
@@ -529,7 +529,7 @@ async function handleStreamingReply(
       didLogMeal,
       dailySummary,
       tokensStreamed,
-      finalReplySource: "fallback_reply",
+      finalReplySource: "fallback",
       finalReplyShape: "fallback_text",
     };
   }
@@ -560,7 +560,7 @@ async function handleStreamingReply(
     didLogMeal,
     dailySummary,
     tokensStreamed,
-    finalReplySource: "stream",
+    finalReplySource: "model",
     finalReplyShape: fullReply.trim() ? "streamed_text" : "empty_or_missing",
   };
 }
@@ -717,7 +717,7 @@ async function handleOrchestratorSSE(
     } else {
       const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate, loggedMeal } = result;
       recorder?.recordFinalReply({
-        source: result.finalReplySource ?? "model_response",
+        source: result.finalReplySource ?? "model",
         shape: result.finalReplyShape ?? "empty_or_missing",
       });
       streamDidLogMeal = didLogMeal;
@@ -767,7 +767,7 @@ async function handleOrchestratorSSE(
       : streamDidMutateMeal
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
-    recorder?.recordFinalReply({ source: "fallback_reply", shape: "fallback_text" });
+    recorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
     try {
       if (!userMessagePersisted) {
         await deps.chatService.saveMessage(

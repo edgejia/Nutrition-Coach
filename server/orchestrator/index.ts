@@ -381,7 +381,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         return {
           reply: hallucinatedChoiceRecovery,
           didLogMeal: false,
-          finalReplySource: "fallback_reply",
+          finalReplySource: "fallback",
           finalReplyShape: classifyFallbackReplyShape(hallucinatedChoiceRecovery),
         };
       }
@@ -497,7 +497,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
-              finalReplySource: "fallback_reply",
+              finalReplySource: "fallback",
               finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
             };
           }
@@ -513,7 +513,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
-              finalReplySource: "fallback_reply",
+              finalReplySource: "fallback",
               finalReplyShape: classifyFallbackReplyShape(partialFallback),
             };
           }
@@ -526,7 +526,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             affectedDate: resolvedAffectedDate,
             loggedMeal,
             loggedMealToolMessageId,
-            finalReplySource: "fallback_reply",
+            finalReplySource: "fallback",
             finalReplyShape: classifyFallbackReplyShape(errorMsg),
           };
         }
@@ -543,7 +543,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             affectedDate: resolvedAffectedDate,
             loggedMeal,
             loggedMealToolMessageId,
-            finalReplySource: "model_response",
+            finalReplySource: "model",
             finalReplyShape: classifyPlainReplyShape(reply),
           };
         }
@@ -662,7 +662,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     affectedDate: resolvedAffectedDate,
                     loggedMeal,
                     loggedMealToolMessageId,
-                    finalReplySource: "fallback_reply",
+                    finalReplySource: "fallback",
                     finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
                   };
                 }
@@ -687,7 +687,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
-              finalReplySource: "orchestrator_projected_reply",
+              finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
@@ -702,7 +702,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
-              finalReplySource: "orchestrator_projected_reply",
+              finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
@@ -717,7 +717,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
-              finalReplySource: "orchestrator_projected_reply",
+              finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
@@ -732,7 +732,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
-              finalReplySource: "orchestrator_projected_reply",
+              finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
@@ -746,7 +746,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
-              finalReplySource: "orchestrator_projected_reply",
+              finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(correctionClarificationReply),
             };
           }
@@ -768,7 +768,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           affectedDate: resolvedAffectedDate,
           loggedMeal,
           loggedMealToolMessageId,
-          finalReplySource: "fallback_reply",
+          finalReplySource: "fallback",
           finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
         };
       }
@@ -780,7 +780,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         affectedDate: resolvedAffectedDate,
         loggedMeal,
         loggedMealToolMessageId,
-        finalReplySource: "fallback_reply",
+        finalReplySource: "fallback",
         finalReplyShape: classifyFallbackReplyShape(FALLBACK),
       };
     },

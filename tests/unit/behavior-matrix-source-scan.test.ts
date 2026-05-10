@@ -28,8 +28,7 @@ describe("behavior matrix source scanner", () => {
       "BehaviorRisk",
       "BehaviorAssertionName",
       "CASE-08",
-      "expectedResolutionPhase: 53",
-      "assertTraceFinalReplySource supports renderer",
+      "trace_final_reply_source",
     ]) {
       assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `missing source token ${token}`);
     }

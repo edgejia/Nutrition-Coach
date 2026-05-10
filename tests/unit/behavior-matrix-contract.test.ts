@@ -32,7 +32,7 @@ const REQUIRED_RISKS = [
   "prompt_injection_resistance",
   "medical_boundary",
   "no_unauthorized_mutation",
-  "expected_fail_integrity",
+  "trace_final_reply_source",
 ] as const satisfies readonly BehaviorRisk[];
 
 async function exportedBehaviorAssertionNames() {
@@ -105,18 +105,15 @@ describe("behavior matrix contract", () => {
     }
   });
 
-  it("keeps CASE-03 renderer expected-fail metadata complete and non-stale", async () => {
+  it("keeps CASE-03 renderer source as a hard assertion once trace supports renderer", async () => {
     const case03 = ALL_BEHAVIOR_CASES.find((behaviorCase) => behaviorCase.caseId === "CASE-03");
     assert.ok(case03, "missing behavior case CASE-03");
 
     const expectedFailures = case03.expectedFailures ?? [];
-    assert.equal(expectedFailures.length, 1, "CASE-03 must have exactly one expected-fail entry");
-    assert.equal(expectedFailures[0].expectedResolutionPhase, 53);
-    assert.match(expectedFailures[0].assertionName, /\S/);
-    assert.match(expectedFailures[0].reason, /\S/);
-    assert.match(
-      expectedFailures[0].expiresWhen,
-      /assertTraceFinalReplySource supports renderer/,
+    assert.equal(expectedFailures.length, 0, "CASE-03 must not keep stale renderer expected-fail metadata");
+    assert.ok(
+      case03.risks.includes("trace_final_reply_source"),
+      "CASE-03 must keep trace source as an active risk",
     );
 
     const llmTraceSource = await readFile("server/orchestrator/llm-trace.ts", "utf8");
@@ -125,8 +122,8 @@ describe("behavior matrix contract", () => {
       /source:\s*"renderer"/.test(llmTraceSource);
     assert.equal(
       rendererSourceSignal,
-      false,
-      "CASE-03 renderer expected-fail metadata is stale because server/orchestrator/llm-trace.ts supports renderer",
+      true,
+      "server/orchestrator/llm-trace.ts must support renderer before CASE-03 becomes a hard assertion",
     );
   });
 
