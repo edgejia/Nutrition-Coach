@@ -21,6 +21,8 @@ import type {
   LlmTraceFinalReplySource,
 } from "./llm-trace.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
+import type { MutationEffects } from "./mutation-effects.js";
+import { renderMutationReceipt } from "./mutation-receipts.js";
 
 interface OrchestratorDeps {
   llmProvider: LLMProvider;
@@ -218,6 +220,19 @@ function buildMutationSuccessReply(affectedDate?: string): string {
   return "已完成餐點調整，請稍後確認今日攝取摘要。";
 }
 
+function getDeviceTargets(device: Awaited<ReturnType<ReturnType<typeof createDeviceService>["getDevice"]>>): DailyTargets {
+  if (!device) {
+    throw new Error("Device not found");
+  }
+
+  return {
+    calories: device.dailyCalories,
+    protein: device.dailyProtein,
+    carbs: device.dailyCarbs,
+    fat: device.dailyFat,
+  };
+}
+
 function extractUserCorrectionTarget(userMessage: string): string {
   const targetSide = userMessage.match(/^(.*?)(?:改成|改為|改到|變成|換成|調成)/)?.[1] ?? userMessage;
   return targetSide
@@ -275,7 +290,7 @@ export function buildPartialSuccessLoggedReply(loggedMeal: LoggedMealReceipt): s
   return `已完成記錄，但回覆生成失敗。${buildTrustedProteinExplanation(loggedMeal)} 請稍後確認今日攝取摘要。`;
 }
 
-function ensureGoalReceipt(reply: string, receipt: string | undefined): string {
+function appendMutationReceiptText(reply: string, receipt: string | undefined): string {
   if (!receipt) return reply;
   if (reply.includes(receipt)) return reply;
   return `${reply}\n\n${receipt}`;
@@ -289,7 +304,7 @@ function classifyFallbackReplyShape(reply: string): LlmTraceFinalReplyShape {
   return reply.trim().length > 0 ? "fallback_text" : "empty_or_missing";
 }
 
-async function* ensureGoalReceiptStream(
+async function* appendMutationReceiptStream(
   stream: AsyncGenerator<string>,
   receipt: string | undefined,
 ): AsyncGenerator<string> {
@@ -429,8 +444,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let didMutateMeal = false;
       let logMealSummary: DailySummary | undefined;
       let shouldStreamFinalReply = false;
-      let successfulGoalReceipt: string | undefined;
       let successfulGoalTargets: DailyTargets | undefined;
+      let mutationEffects: MutationEffects | undefined;
+      let mutationReceiptText: string | undefined;
       let resolvedAffectedDate: string | undefined;
       let loggedMeal:
         | LoggedMealReceipt
@@ -451,9 +467,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             if (roundResult.kind === "stream") {
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
-                streamGenerator: ensureGoalReceiptStream(
+                streamGenerator: appendMutationReceiptStream(
                   roundResult.streamGenerator,
-                  successfulGoalReceipt,
+                  mutationReceiptText,
                 ),
                 didLogMeal,
                 didMutateMeal,
@@ -469,9 +485,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             if (shouldStreamFinalReply && typeof llmProvider.chatStream === "function") {
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
-                streamGenerator: ensureGoalReceiptStream(
+                streamGenerator: appendMutationReceiptStream(
                   llmProvider.chatStream(messages, [], { signal: opts?.signal }),
-                  successfulGoalReceipt,
+                  mutationReceiptText,
                 ),
                 didLogMeal,
                 didMutateMeal,
@@ -487,9 +503,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           }
         } catch (err) {
           opts?.hooks?.onFallback?.(didMutateMeal ? "partial_success" : "llm_error");
-          if (successfulGoalReceipt) {
+          if (mutationReceiptText && mutationEffects?.kind === "goals") {
             return {
-              reply: successfulGoalReceipt,
+              reply: mutationReceiptText,
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
@@ -498,7 +514,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMeal,
               loggedMealToolMessageId,
               finalReplySource: "fallback",
-              finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
+              finalReplyShape: classifyFallbackReplyShape(mutationReceiptText),
             };
           }
           if (didMutateMeal) {
@@ -533,7 +549,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
-          const reply = ensureGoalReceipt(response.content, successfulGoalReceipt);
+          const reply = appendMutationReceiptText(response.content, mutationReceiptText);
           return {
             reply,
             didLogMeal,
@@ -575,6 +591,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 dailyTargets,
                 affectedDate,
                 mealMutationKind,
+                deletedMeal,
               } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
@@ -608,6 +625,16 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 didMutateMeal = true;
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
                 loggedMeal = toolLoggedMeal;
+                if (!toolLoggedMeal) {
+                  throw new Error("log_food succeeded without loggedMeal");
+                }
+                mutationEffects = {
+                  kind: "log",
+                  affectedDate: affectedDate ?? toolLoggedMeal.dateKey,
+                  committedSummary: logMealSummary,
+                  committedTargets: getDeviceTargets(device),
+                  meal: toolLoggedMeal,
+                };
               }
               if (toolCall.function.name === "get_daily_summary" && dailySummary) {
                 logMealSummary = dailySummary;
@@ -617,11 +644,43 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
                 if (mealMutationKind === "update") {
                   loggedMeal = toolLoggedMeal;
+                  if (!toolLoggedMeal) {
+                    throw new Error("update_meal succeeded without loggedMeal");
+                  }
+                  mutationEffects = {
+                    kind: "update",
+                    affectedDate: affectedDate ?? toolLoggedMeal.dateKey,
+                    committedSummary: logMealSummary,
+                    committedTargets: getDeviceTargets(device),
+                    meal: toolLoggedMeal,
+                  };
+                } else {
+                  if (!deletedMeal) {
+                    throw new Error("delete_meal succeeded without deletedMeal");
+                  }
+                  mutationEffects = {
+                    kind: "delete",
+                    affectedDate: affectedDate ?? deletedMeal.dateKey,
+                    committedSummary: logMealSummary,
+                    committedTargets: getDeviceTargets(device),
+                    deletedMeal,
+                  };
                 }
               }
               if (toolCall.function.name === "update_goals") {
-                successfulGoalReceipt = result;
                 successfulGoalTargets = dailyTargets;
+                if (!dailyTargets) {
+                  throw new Error("update_goals succeeded without dailyTargets");
+                }
+                mutationEffects = {
+                  kind: "goals",
+                  affectedDate: formatLocalDate(currentAppDate()),
+                  committedSummary: await deps.summaryService.getDailySummary(deviceId, currentAppDate()),
+                  committedTargets: dailyTargets,
+                  targets: dailyTargets,
+                  updatedFields: updatedFields as Array<keyof DailyTargets>,
+                };
+                mutationReceiptText = renderMutationReceipt(mutationEffects);
               }
               const correctionResult = parseCorrectionToolResult(toolCall.function.name, result);
               if (correctionResult) {
@@ -652,9 +711,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   reason: err.diagnostic?.reason,
                   fields: err.diagnostic?.fields,
                 });
-                if (successfulGoalReceipt) {
+                if (mutationReceiptText && mutationEffects?.kind === "goals") {
                   return {
-                    reply: successfulGoalReceipt,
+                    reply: mutationReceiptText,
                     didLogMeal,
                     didMutateMeal,
                     dailySummary: logMealSummary,
@@ -663,7 +722,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     loggedMeal,
                     loggedMealToolMessageId,
                     finalReplySource: "fallback",
-                    finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
+                    finalReplyShape: classifyFallbackReplyShape(mutationReceiptText),
                   };
                 }
                 throw err;
@@ -758,9 +817,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Fallback after MAX_ROUNDS
       opts?.hooks?.onFallback?.("max_rounds");
-      if (successfulGoalReceipt) {
+      if (mutationReceiptText && mutationEffects?.kind === "goals") {
         return {
-          reply: successfulGoalReceipt,
+          reply: mutationReceiptText,
           didLogMeal,
           didMutateMeal,
           dailySummary: logMealSummary,
@@ -769,7 +828,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           loggedMeal,
           loggedMealToolMessageId,
           finalReplySource: "fallback",
-          finalReplyShape: classifyFallbackReplyShape(successfulGoalReceipt),
+          finalReplyShape: classifyFallbackReplyShape(mutationReceiptText),
         };
       }
       return {
