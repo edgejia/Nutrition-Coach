@@ -18,10 +18,9 @@ import { formatLocalDate } from "../../server/lib/time.js";
 import type { ToolCall } from "../../server/llm/types.js";
 
 // Plan 10-02 Task 2: parity guarantees for log_food and get_daily_summary
-// after migration to the ToolContract registry. Tests 2 and 3 assert at the
-// runContract layer so the controlled `failureReason` (D-07) is observable;
-// the executeTool wrapper still throws FatalToolError to preserve Phase 8
-// orchestrator hook behavior, which Tests 1 and 4 also pin.
+// after migration to the ToolContract registry. Failure-path tests assert at
+// the runContract layer so controlled `failureReason` values remain observable
+// where invalid input should not persist.
 
 describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   let db: ReturnType<typeof createDb>;
@@ -829,7 +828,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(meals.length, 0);
   });
 
-  it("Test 2: log_food summary recomputation failure persists meal and returns controlled failureReason:execute", async () => {
+  it("Test 2: log_food summary recomputation failure still returns a committed meal receipt payload", async () => {
     const throwingSummary = {
       getDailySummary: async () => {
         throw new Error("summary computation failed");
@@ -850,29 +849,46 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       deps: { toolDeps, deviceId },
     });
 
-    assert.equal(outcome.success, false);
-    assert.equal(outcome.executed, false);
-    assert.equal(outcome.failureReason, "execute");
-    const parsed = JSON.parse(outcome.result);
-    assert.equal(parsed.failureReason, "execute");
-    assert.match(parsed.message, /summary computation failed/);
+    assert.equal(outcome.success, true);
+    assert.equal(outcome.executed, true);
+    assert.equal(outcome.result, "食物已成功記錄");
+    const contractResult = outcome.contractResult as {
+      status: string;
+      dailySummary: {
+        totalCalories: number;
+        totalProtein: number;
+        totalCarbs: number;
+        totalFat: number;
+        mealCount: number;
+        date: string;
+      };
+      loggedMeal: { foodName: string; protein: number };
+    };
+    assert.equal(contractResult.status, "logged");
+    assert.deepEqual(contractResult.dailySummary, {
+      totalCalories: 100,
+      totalProtein: 0,
+      totalCarbs: 20,
+      totalFat: 0.5,
+      mealCount: 1,
+      date: formatLocalDate(new Date()),
+    });
+    assert.equal(contractResult.loggedMeal.foodName, "蘋果");
+    assert.equal(contractResult.loggedMeal.protein, 0);
 
-    // Plan-mandated parity: meal must still be persisted before the recompute
-    // failure returns a controlled tool result (Phase 8/9 invariant).
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 1);
     assert.equal(meals[0].foodName, "蘋果");
     assert.equal(meals[0].protein, 0);
 
-    // The orchestrator-facing wrapper continues to surface this as
-    // FatalToolError so the existing executed:false hook path stays intact.
-    await assert.rejects(
-      executeTool(logFoodCall, deviceId, {
-        foodLoggingService,
-        summaryService: throwingSummary,
-      }),
-      /summary computation failed/,
-    );
+    const result = await executeTool(logFoodCall, deviceId, {
+      foodLoggingService,
+      summaryService: throwingSummary,
+    });
+    assert.equal(result.summary, "成功");
+    assert.equal(result.dailySummary?.mealCount, 2);
+    assert.equal(result.dailySummary?.totalCalories, 200);
+    assert.equal(result.loggedMeal?.foodName, "蘋果");
   });
 
   it("Test 3: invalid log_food args do not persist a meal and return executed:false", async () => {

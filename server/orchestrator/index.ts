@@ -299,6 +299,15 @@ function appendMutationReceiptText(reply: string, receipt: string | undefined): 
   return `${reply}\n\n${receipt}`;
 }
 
+function renderCheckedMutationReceipt(effects: MutationEffects): string {
+  const reply = renderMutationReceipt(effects);
+  const forbiddenTerms = assertNoForbiddenReceiptTerms(reply);
+  if (forbiddenTerms.length > 0) {
+    throw new Error(`Mutation receipt contains forbidden terms: ${forbiddenTerms.join(", ")}`);
+  }
+  return reply;
+}
+
 function classifyPlainReplyShape(reply: string): LlmTraceFinalReplyShape {
   return reply.trim().length > 0 ? "plain_text" : "empty_or_missing";
 }
@@ -506,7 +515,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           }
         } catch (err) {
           opts?.hooks?.onFallback?.(didMutateMeal ? "partial_success" : "llm_error");
-          if (mutationReceiptText && mutationEffects?.kind === "goals") {
+          if (mutationReceiptText && mutationEffects) {
             return {
               reply: mutationReceiptText,
               didLogMeal,
@@ -516,8 +525,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
-              finalReplySource: "fallback",
-              finalReplyShape: classifyFallbackReplyShape(mutationReceiptText),
+              finalReplySource: "renderer",
+              finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
             };
           }
           if (didMutateMeal) {
@@ -638,6 +647,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   committedTargets: getDeviceTargets(device),
                   meal: toolLoggedMeal,
                 };
+                mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
               }
               if (toolCall.function.name === "get_daily_summary" && dailySummary) {
                 logMealSummary = dailySummary;
@@ -657,6 +667,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     committedTargets: getDeviceTargets(device),
                     meal: toolLoggedMeal,
                   };
+                  mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
                 } else {
                   if (!deletedMeal) {
                     throw new Error("delete_meal succeeded without deletedMeal");
@@ -668,6 +679,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     committedTargets: getDeviceTargets(device),
                     deletedMeal,
                   };
+                  mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
                 }
               }
               if (toolCall.function.name === "update_goals") {
@@ -683,7 +695,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   targets: dailyTargets,
                   updatedFields: updatedFields as Array<keyof DailyTargets>,
                 };
-                mutationReceiptText = renderMutationReceipt(mutationEffects);
+                mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
               }
               const correctionResult = parseCorrectionToolResult(toolCall.function.name, result);
               if (correctionResult) {
@@ -714,7 +726,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   reason: err.diagnostic?.reason,
                   fields: err.diagnostic?.fields,
                 });
-                if (mutationReceiptText && mutationEffects?.kind === "goals") {
+                if (mutationReceiptText && mutationEffects) {
                   return {
                     reply: mutationReceiptText,
                     didLogMeal,
@@ -739,11 +751,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             messages.push({ role: "tool", content: result, tool_call_id: toolCall.id });
           }
           if (mutationEffects) {
-            const reply = renderMutationReceipt(mutationEffects);
-            const forbiddenTerms = assertNoForbiddenReceiptTerms(reply);
-            if (forbiddenTerms.length > 0) {
-              throw new Error(`Mutation receipt contains forbidden terms: ${forbiddenTerms.join(", ")}`);
-            }
+            const reply = mutationReceiptText ?? renderCheckedMutationReceipt(mutationEffects);
             opts?.hooks?.onLLMEnd?.(round + 1, true);
             return {
               reply,
@@ -840,7 +848,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Fallback after MAX_ROUNDS
       opts?.hooks?.onFallback?.("max_rounds");
-      if (mutationReceiptText && mutationEffects?.kind === "goals") {
+      if (mutationReceiptText && mutationEffects) {
         return {
           reply: mutationReceiptText,
           didLogMeal,
@@ -850,8 +858,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           affectedDate: resolvedAffectedDate,
           loggedMeal,
           loggedMealToolMessageId,
-          finalReplySource: "fallback",
-          finalReplyShape: classifyFallbackReplyShape(mutationReceiptText),
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
         };
       }
       return {

@@ -3,6 +3,7 @@ process.env.TZ = "Asia/Taipei";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../../server/app.js";
+import type { AppServices } from "../../server/app.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { FastifyInstance } from "fastify";
 import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ToolCall, ToolDefinition } from "../../server/llm/types.js";
@@ -325,6 +326,7 @@ describe("chat-streaming", () => {
   let deviceId: string;
   let sessionCookieHeader: string;
   let address: string;
+  let services: AppServices | undefined;
   let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
@@ -334,10 +336,14 @@ describe("chat-streaming", () => {
 
   beforeEach(async () => {
     mockLLM = new StreamingLLMProvider();
+    services = undefined;
     traceRecorders = [];
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: mockLLM,
+      onServicesReady: (readyServices) => {
+        services = readyServices;
+      },
       llmTraceRecorderFactory: () => {
         const recorder = createLlmTraceRecorder();
         traceRecorders.push(recorder);
@@ -1894,6 +1900,53 @@ describe("chat-streaming", () => {
       });
       const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
       assert.ok(mealsJson.meals.some((m) => m.foodName === "雞腿便當"), "meal must be kept even when final reply fails");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE returns a committed receipt when summary recomputation fails after log_food persistence", async () => {
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after persistence");
+    };
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /已記錄雞腿便當，620 kcal，蛋白質 24 g。若份量不同，可以再調整。/);
+      const doneMatch = text.match(/event: done\s+data: (.+)/);
+      assert.ok(doneMatch);
+      const donePayload = JSON.parse(doneMatch[1]) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: { mealId?: string; foodName?: string };
+        dailySummary?: { mealCount?: number; totalCalories?: number; totalProtein?: number; date?: string };
+      };
+      assert.equal(donePayload.didLogMeal, true);
+      assert.equal(donePayload.didMutateMeal, true);
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
+      assert.equal(donePayload.dailySummary?.mealCount, 1);
+      assert.equal(donePayload.dailySummary?.totalCalories, 620);
+      assert.equal(donePayload.dailySummary?.totalProtein, 24);
+      assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
+      assert.doesNotMatch(text, /無法辨識|回覆生成失敗|這次無法完成請求|headline/);
     } finally {
       clearTimeout(timeout);
     }

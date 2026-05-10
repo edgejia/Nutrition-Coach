@@ -584,6 +584,61 @@ describe("Chat API", () => {
     assert.equal(body.dailySummary?.totalCalories, 640);
   });
 
+  it("POST /api/chat JSON returns a committed receipt when summary recomputation fails after log_food persistence", async () => {
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after persistence");
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_fail_after_log",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply: string;
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: { mealId?: string; foodName?: string };
+      dailySummary?: { mealCount?: number; totalCalories?: number; totalProtein?: number; date?: string };
+    };
+    assert.equal(body.reply, "已記錄雞腿便當，620 kcal，蛋白質 24 g。若份量不同，可以再調整。");
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.equal(body.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(body.dailySummary?.mealCount, 1);
+    assert.equal(body.dailySummary?.totalCalories, 620);
+    assert.equal(body.dailySummary?.totalProtein, 24);
+    assert.match(body.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
+    assert.doesNotMatch(body.reply, /無法辨識|回覆生成失敗|這次無法完成請求|headline/);
+  });
+
   it("POST /api/chat returns affectedDate for historical logging without changing the summary payload shape", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
