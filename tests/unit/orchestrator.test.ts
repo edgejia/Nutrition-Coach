@@ -418,7 +418,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(history.filter((message) => message.role === "assistant").length, 0);
   });
 
-  it("returns the goal update receipt after MAX_ROUNDS when the mutation already succeeded", async () => {
+  it("returns a renderer-owned goal update receipt before any later model rounds", async () => {
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
     const localFoodLoggingService = createFoodLoggingService(db);
@@ -450,26 +450,16 @@ describe("Orchestrator - didLogMeal", () => {
         },
       }],
     });
-    localLLM.queueChatResponse({
-      toolCalls: [{
-        id: "summary_1",
-        type: "function",
-        function: { name: "get_daily_summary", arguments: "{}" },
-      }],
-    });
-    localLLM.queueChatResponse({
-      toolCalls: [{
-        id: "summary_2",
-        type: "function",
-        function: { name: "get_daily_summary", arguments: "{}" },
-      }],
-    });
+    localLLM.queueChatResponse({ content: "模型前綴：我已經幫你更新好了。" });
 
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
 
     assert.ok("reply" in result);
     assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
     assert.equal(result.didLogMeal, false);
+    assert.equal(localLLM.chatCalls.length, 1);
   });
 
   it("returns the goal update receipt when a later tool in the same batch fails fatally", async () => {
@@ -891,7 +881,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(streamingLLM.chatCalls.length, 1);
   });
 
-  it("appends a successful goal update receipt to streamed final replies", async () => {
+  it("returns a renderer goal receipt instead of streaming model prefix/suffix text", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
@@ -926,20 +916,17 @@ describe("Orchestrator - didLogMeal", () => {
     streamingLLM.queueChatStream(["已經", "更新好了"]);
 
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
-    assert.ok("streamGenerator" in result);
 
-    const streamedTokens: string[] = [];
-    for await (const token of result.streamGenerator) {
-      streamedTokens.push(token);
-    }
-
-    assert.equal(streamedTokens.join(""), "已經更新好了\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
     const device = await localDeviceService.getDevice(localDeviceId);
     assert.equal(device?.dailyCalories, 1800);
     assert.equal(device?.dailyProtein, 130);
   });
 
-  it("yields the goal update receipt when streamed final reply generation fails", async () => {
+  it("does not wait for a streamed final reply after a goal mutation succeeds", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
@@ -974,17 +961,13 @@ describe("Orchestrator - didLogMeal", () => {
     streamingLLM.queueChatStreamError(["處理中"], new Error("stream broke"));
 
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
-    assert.ok("streamGenerator" in result);
 
-    const streamedTokens: string[] = [];
-    for await (const token of result.streamGenerator) {
-      streamedTokens.push(token);
-    }
-
-    assert.equal(streamedTokens.join(""), "處理中\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
   });
 
-  it("appends a successful goal update receipt to legacy chatStream final replies", async () => {
+  it("does not enter legacy chatStream after a goal mutation succeeds", async () => {
     const streamingLLM = new ChatStreamOnlyProvider();
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
@@ -1019,13 +1002,9 @@ describe("Orchestrator - didLogMeal", () => {
     streamingLLM.queueChatStream(["已經", "更新好了"]);
 
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
-    assert.ok("streamGenerator" in result);
 
-    const streamedTokens: string[] = [];
-    for await (const token of result.streamGenerator) {
-      streamedTokens.push(token);
-    }
-
-    assert.equal(streamedTokens.join(""), "已經更新好了\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
   });
 });

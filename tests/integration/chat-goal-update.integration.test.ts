@@ -106,7 +106,7 @@ describe("chat goal update integration", () => {
     });
   });
 
-  it("appends the deterministic receipt when the final model reply omits it", async () => {
+  it("returns only the deterministic receipt when the final model reply tries to add prose", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "goal_success_omitted_receipt",
@@ -122,10 +122,8 @@ describe("chat goal update integration", () => {
     const { status, body } = await postChat("卡路里改成 1800，蛋白質 130 克");
 
     assert.equal(status, 200);
-    assert.match(body.reply, /已經幫你更新好了/);
-    assert.match(body.reply, /已更新每日目標：/);
-    assert.match(body.reply, /卡路里 1800 kcal/);
-    assert.match(body.reply, /蛋白質 130 g/);
+    assert.equal(body.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.doesNotMatch(body.reply, /已經幫你更新好了/);
     assert.deepEqual(body.dailyTargets, {
       calories: 1800,
       protein: 130,
@@ -140,7 +138,7 @@ describe("chat goal update integration", () => {
     });
   });
 
-  it("returns the deterministic receipt when final reply generation fails after mutation", async () => {
+  it("returns the deterministic receipt without calling final reply generation after mutation", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "goal_success_reply_error",
@@ -157,6 +155,7 @@ describe("chat goal update integration", () => {
 
     assert.equal(status, 200);
     assert.equal(body.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(mockLLM.chatCalls.length, 1);
     assert.deepEqual(body.dailyTargets, {
       calories: 1800,
       protein: 130,
@@ -221,7 +220,7 @@ describe("chat goal update integration", () => {
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
-    assert.match(body.reply, /已更新每日目標：/);
+    assert.equal(body.reply, "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 120 g\n• 碳水 130 g\n• 脂肪 45 g");
     assert.deepEqual(body.dailyTargets, {
       calories: 1400,
       protein: 120,

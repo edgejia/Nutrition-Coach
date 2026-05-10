@@ -139,8 +139,9 @@ describe("Orchestrator", () => {
     mockLLM.queueChatError(new Error("reply generation failed"));
     const partialSuccessResult = await orchestrator.handleMessage(deviceId, "卡路里改成 1800，蛋白質 130 克");
     assertReplyResult(partialSuccessResult);
-    assert.equal(partialSuccessResult.finalReplySource, "fallback");
-    assert.equal(partialSuccessResult.finalReplyShape, "fallback_text");
+    assert.equal(partialSuccessResult.finalReplySource, "renderer");
+    assert.equal(partialSuccessResult.finalReplyShape, "plain_text");
+    assert.equal(partialSuccessResult.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
   });
 
   it("executes tool calls and returns final reply", async () => {
@@ -389,7 +390,8 @@ describe("Orchestrator", () => {
 
     const result = await orchestrator.handleMessage(deviceId, "卡路里改 1800，是", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
-    assert.match(result.reply, /已更新每日目標/);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
 
     const device = await deviceService.getDevice(deviceId);
     assert.equal(device?.dailyCalories, 1800);
