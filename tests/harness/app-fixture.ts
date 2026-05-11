@@ -9,6 +9,7 @@
 import { StreamingLLMProvider } from "./streaming-llm.js";
 import type { AppServices } from "../../server/app.js";
 import type { LLMProvider } from "../../server/llm/types.js";
+import type { LlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { FastifyInstance } from "fastify";
 
 export interface ScenarioAppOptions {
@@ -22,6 +23,8 @@ export interface ScenarioAppOptions {
   uploadsDir?: string;
   /** Override the durable asset root used by the app during a scenario. */
   assetsDir?: string;
+  /** Optional trace recorder factory for scenarios that emit llm-trace.json. */
+  llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
 }
 
 export interface ScenarioAppContext {
@@ -72,6 +75,7 @@ export async function createScenarioApp(
     llmProvider,
     ...(opts.uploadsDir !== undefined ? { uploadsDir: opts.uploadsDir } : {}),
     ...(opts.assetsDir !== undefined ? { assetsDir: opts.assetsDir } : {}),
+    ...(opts.llmTraceRecorderFactory !== undefined ? { llmTraceRecorderFactory: opts.llmTraceRecorderFactory } : {}),
     onServicesReady: (readyServices: AppServices) => {
       services = {
         assetService: readyServices.assetService,

@@ -22,8 +22,8 @@ describe("Meal Edit source contract", () => {
       "SportChevronLeftIcon",
       "編輯餐點",
       "AI 估算 · 點任一欄位調整",
-      "修改會建立新 revision",
-      "刪除這筆餐點？這會建立刪除 revision。",
+      "修改後會保留原始紀錄。",
+      "刪除這筆餐點？系統會保留歷史紀錄。",
       "整餐照片",
       "這張照片代表整餐，不是單一食物裁切。",
       "尚未附上餐點照片",
@@ -87,7 +87,7 @@ describe("Meal Edit source contract", () => {
     assert.equal(groupedPayloadFixture.itemCount, 3);
 
     assert.match(source, /payload\.itemCount\s*>\s*1/);
-    assert.match(source, escapedPattern("GROUPED"));
+    assert.match(source, escapedPattern("組合餐點"));
     assert.match(source, escapedPattern("這筆是組合餐點"));
     assert.match(source, /包含 \{payload\.itemCount\} 項：\{payload\.foodName\}/);
     assert.match(source, /payload\.items/);
@@ -100,7 +100,7 @@ describe("Meal Edit source contract", () => {
     assert.match(source, escapedPattern("脂肪"));
     assert.match(source, escapedPattern("避免把多項餐點合併成一項"));
     assert.match(source, escapedPattern("到對話修正"));
-    assert.match(source, escapedPattern("MEAL_REQUIRES_GROUPED_UPDATE"));
+    assert.match(source, escapedPattern("MULTI_ITEM_UPDATE_ERROR_CODE"));
     assert.match(source, escapedPattern("這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。"));
     assert.match(source, escapedPattern("closeSecondaryScreen"));
     assert.match(source, escapedPattern('setActiveScreen("chat")'));

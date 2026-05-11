@@ -4,7 +4,7 @@
  * Sub-scenarios:
  *   A: Image analysis (chatRound round 1) throws -> fallback in history, didLogMeal false, no meal
  *   B: log_food tool throws (FatalToolError via invalid args) -> fallback in history, no meal
- *   C: log_food succeeds, final reply (chatRound round 2) throws -> meal kept, partial-success fallback in history
+ *   C: log_food succeeds -> meal kept, projected successful-log reply in history
  */
 
 import path from "node:path";
@@ -13,6 +13,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { createLlmTraceRecorder, type LlmTraceArtifact, type LlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,13 +48,18 @@ function buildResult(
   failedStep: string | undefined,
   steps: ScenarioStepResult[],
   artifacts: Record<string, unknown>,
+  llmTrace?: LlmTraceArtifact,
 ): ScenarioResult {
   const passed = steps.filter((s) => s.ok).length;
   const total = steps.length;
   const consoleSummary = ok
     ? `PASS image-log-failure ${passed}/${total}`
     : `FAIL image-log-failure ${failedStep ?? "unknown"}`;
-  return { ok, failedStep, steps, artifacts, consoleSummary };
+  const result: ScenarioResult = { ok, failedStep, steps, artifacts, consoleSummary };
+  if (llmTrace !== undefined) {
+    result.llmTrace = llmTrace as unknown as Record<string, unknown>;
+  }
+  return result;
 }
 
 async function fetchHistory(address: string, cookieHeader: string): Promise<Array<{ role: string; content: string }>> {
@@ -88,6 +94,44 @@ function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boo
   return typeof summary?.date === "string" && DATE_KEY_PATTERN.test(summary.date);
 }
 
+function verifyFallbackTraceContract(
+  trace: LlmTraceArtifact | undefined,
+  forbiddenProbes: Array<{ label: string; value: string | undefined }>,
+): { ok: boolean; error?: string; evidence: unknown } {
+  const evidence = trace ?? null;
+
+  if (!trace) return { ok: false, error: "expected sub-A llm trace", evidence };
+  if (trace.schemaVersion !== "llm-trace.v1") return { ok: false, error: "expected llm-trace.v1 schema version", evidence };
+  if (trace.scenario !== "image-log-failure") return { ok: false, error: "expected image-log-failure trace scenario", evidence };
+  if (!trace.timeline.some((event) => event.type === "orchestrator_fallback" && event.reason === "llm_error")) {
+    return { ok: false, error: "expected llm_error orchestrator_fallback trace event", evidence };
+  }
+  if (trace.summary.roundCount !== 1) return { ok: false, error: "expected one LLM round before fallback diagnosis", evidence };
+  if (trace.summary.toolCount !== 0) return { ok: false, error: "expected no tools before sub-A analysis fallback", evidence };
+  if (trace.summary.fallbackCount < 1) return { ok: false, error: "expected fallbackCount >= 1", evidence };
+  if (typeof trace.summary.latencyMs !== "number" || trace.summary.latencyMs < 0) {
+    return { ok: false, error: "expected non-negative latencyMs", evidence };
+  }
+  if (trace.summary.finalReply.source !== "fallback") return { ok: false, error: "expected fallback final reply source", evidence };
+  if (trace.summary.finalReply.shape !== "fallback_text") return { ok: false, error: "expected fallback_text final reply shape", evidence };
+
+  const serialized = JSON.stringify(trace);
+  for (const probe of forbiddenProbes) {
+    if (probe.value && serialized.includes(probe.value)) {
+      return { ok: false, error: `serialized trace contains ${probe.label}`, evidence };
+    }
+  }
+  if (/data:image|\/uploads\/|providerPayload|finalAssistantContent|toolArguments|toolResult/.test(serialized)) {
+    return {
+      ok: false,
+      error: "serialized trace contains forbidden provider payload, data:image, /uploads/, raw tool, or final reply content marker",
+      evidence,
+    };
+  }
+
+  return { ok: true, evidence };
+}
+
 async function runSubScenario(
   label: string,
   setupLLM: (llm: StreamingLLMProvider) => void,
@@ -97,7 +141,7 @@ async function runSubScenario(
     deviceId: string;
     cookieHeader: string;
   }) => Promise<{ ok: boolean; error?: string; evidence: unknown }>,
-  options: { message?: string } = {},
+  options: { message?: string; llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined } = {},
 ): Promise<{ steps: ScenarioStepResult[]; artifacts: Record<string, unknown>; ok: boolean; failedStep?: string }> {
   const steps: ScenarioStepResult[] = [];
   const artifacts: Record<string, unknown> = {};
@@ -107,7 +151,11 @@ async function runSubScenario(
 
   const uploadsDir = `${UPLOADS_DIR}-${label}`;
   await mkdir(uploadsDir, { recursive: true });
-  const scenarioCtx = await createScenarioApp({ llmProvider: llm, uploadsDir });
+  const scenarioCtx = await createScenarioApp({
+    llmProvider: llm,
+    uploadsDir,
+    ...(options.llmTraceRecorderFactory !== undefined ? { llmTraceRecorderFactory: options.llmTraceRecorderFactory } : {}),
+  });
 
   try {
     const form = new FormData();
@@ -167,6 +215,8 @@ const scenario: VerificationScenario = {
     // Sub-scenario A: chatRound round 1 throws (image analysis failure)
     // Expected: fallback in history, done.didLogMeal false, no meal.
     // ------------------------------------------------------------------
+    const subARecorder = createLlmTraceRecorder();
+    const subAUserMealText = "(圖片)";
     const subA = await runSubScenario(
       "sub_a_analysis_fail",
       (llm) => {
@@ -194,10 +244,35 @@ const scenario: VerificationScenario = {
 
         return { ok: true, evidence };
       },
+      {
+        message: subAUserMealText,
+        llmTraceRecorderFactory: () => subARecorder,
+      },
     );
     allSteps.push(...subA.steps);
     Object.assign(allArtifacts, subA.artifacts);
     if (!subA.ok) return buildResult(false, subA.failedStep, allSteps, allArtifacts);
+    const subALlmTrace = subARecorder.build({ scenario: "image-log-failure", status: "pass" });
+    const subATraceEvidence = subA.artifacts.sub_a_analysis_fail as { fallbackContent?: string } | undefined;
+    const subATraceCheck = verifyFallbackTraceContract(subALlmTrace, [
+      { label: "final reply content", value: subATraceEvidence?.fallbackContent },
+      { label: "provider payload", value: "Vision API timeout" },
+      { label: "raw image data/data URI", value: "data:image" },
+      { label: "upload path", value: "/uploads/" },
+      { label: "raw device ID", value: "device_" },
+      { label: "meal text", value: subAUserMealText },
+      { label: "cookies/session values", value: "guest_session" },
+      { label: "authorization/API keys", value: "authorization" },
+      { label: "authorization/API keys", value: "api_key" },
+      { label: "prompt/messages", value: "messages" },
+      { label: "raw tool args/results", value: "toolArguments" },
+      { label: "raw tool args/results", value: "toolResult" },
+    ]);
+    if (!subATraceCheck.ok) {
+      allSteps.push(stepFail("verify_llm_trace", subATraceCheck.error ?? "trace assertion failed", subATraceCheck.evidence));
+      return buildResult(false, "verify_llm_trace", allSteps, allArtifacts);
+    }
+    allSteps.push(stepOk("verify_llm_trace", subATraceCheck.evidence));
 
     // ------------------------------------------------------------------
     // Sub-scenario B: invalid log_food JSON is classified as FatalToolError.
@@ -243,9 +318,9 @@ const scenario: VerificationScenario = {
     if (!subB.ok) return buildResult(false, subB.failedStep, allSteps, allArtifacts);
 
     // ------------------------------------------------------------------
-    // Sub-scenario C: log_food succeeds, final reply (chatRound round 2) throws.
+    // Sub-scenario C: log_food succeeds and route returns projected successful-log wording.
     // The non-image-only message avoids the deterministic image-only shortcut.
-    // Expected: meal remains in DB, done.didLogMeal true, partial-success fallback.
+    // Expected: meal remains in DB and done.didLogMeal true.
     // ------------------------------------------------------------------
     const subC = await runSubScenario(
       "sub_c_reply_fail",
@@ -303,7 +378,7 @@ const scenario: VerificationScenario = {
         if (!/蛋白質 0 g/.test(fallbackContent)) {
           return { ok: false, error: "D-09: expected normalized projected protein in successful log wording", evidence };
         }
-        if (!mealKept) return { ok: false, error: "D-09: meal must be kept when log_food succeeded before reply failed", evidence };
+        if (!mealKept) return { ok: false, error: "D-09: meal must be kept when log_food succeeded", evidence };
 
         return { ok: true, evidence };
       },
@@ -313,7 +388,7 @@ const scenario: VerificationScenario = {
     Object.assign(allArtifacts, subC.artifacts);
     if (!subC.ok) return buildResult(false, subC.failedStep, allSteps, allArtifacts);
 
-    return buildResult(true, undefined, allSteps, allArtifacts);
+    return buildResult(true, undefined, allSteps, allArtifacts, subALlmTrace);
   },
 };
 

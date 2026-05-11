@@ -85,15 +85,15 @@ function MealDetailRow({
       </div>
       <div className="sp-history-detail-meal-macros">
         <div>
-          <span>protein</span>
+          <span>蛋白質</span>
           <strong>{macroUnit(meal.protein)}</strong>
         </div>
         <div>
-          <span>carbs</span>
+          <span>碳水</span>
           <strong>{macroUnit(meal.carbs)}</strong>
         </div>
         <div>
-          <span>fat</span>
+          <span>脂肪</span>
           <strong>{macroUnit(meal.fat)}</strong>
         </div>
       </div>
@@ -207,16 +207,16 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
             />
             <div className="sp-history-detail-macros">
               <div>
-                <span>protein</span>
-                <strong>P {macroPair(summary?.totalProtein ?? 0, dailyTargets?.protein)}</strong>
+                <span>蛋白質</span>
+                <strong>{macroPair(summary?.totalProtein ?? 0, dailyTargets?.protein)}</strong>
               </div>
               <div>
-                <span>carbs</span>
-                <strong>C {macroPair(summary?.totalCarbs ?? 0, dailyTargets?.carbs)}</strong>
+                <span>碳水</span>
+                <strong>{macroPair(summary?.totalCarbs ?? 0, dailyTargets?.carbs)}</strong>
               </div>
               <div>
-                <span>fat</span>
-                <strong>F {macroPair(summary?.totalFat ?? 0, dailyTargets?.fat)}</strong>
+                <span>脂肪</span>
+                <strong>{macroPair(summary?.totalFat ?? 0, dailyTargets?.fat)}</strong>
               </div>
             </div>
             <p className="sp-history-detail-note">

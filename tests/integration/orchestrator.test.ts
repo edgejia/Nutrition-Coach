@@ -64,6 +64,86 @@ describe("Orchestrator", () => {
     assert.equal(result.didLogMeal, false);
   });
 
+  it("classifies a normal non-stream model reply for route tracing", async () => {
+    mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
+    const result = await orchestrator.handleMessage(deviceId, "你好");
+    assertReplyResult(result);
+    assert.equal(result.finalReplySource, "model");
+    assert.equal(result.finalReplyShape, "plain_text");
+  });
+
+  it("classifies a successful log_food projected reply for route tracing", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "trace_log_food",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "蘋果",
+            calories: 100,
+            protein: 1,
+            carbs: 25,
+            fat: 0.5,
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+    assertReplyResult(result);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+  });
+
+  it("classifies orchestrator fallback replies for route tracing", async () => {
+    mockLLM.queueChatError(new Error("provider down"));
+    const llmErrorResult = await orchestrator.handleMessage(deviceId, "你好");
+    assertReplyResult(llmErrorResult);
+    assert.equal(llmErrorResult.finalReplySource, "fallback");
+    assert.equal(llmErrorResult.finalReplyShape, "fallback_text");
+
+    mockLLM.reset();
+    mockLLM.queueChatResponse({ content: "" });
+    const missingReplyResult = await orchestrator.handleMessage(deviceId, "你好");
+    assertReplyResult(missingReplyResult);
+    assert.equal(missingReplyResult.finalReplySource, "model");
+    assert.equal(missingReplyResult.finalReplyShape, "empty_or_missing");
+
+    mockLLM.reset();
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `trace_max_round_${i}`,
+          type: "function",
+          function: { name: "get_daily_summary", arguments: "{}" },
+        }],
+      });
+    }
+    const maxRoundResult = await orchestrator.handleMessage(deviceId, "test");
+    assertReplyResult(maxRoundResult);
+    assert.equal(maxRoundResult.finalReplySource, "fallback");
+    assert.equal(maxRoundResult.finalReplyShape, "fallback_text");
+
+    mockLLM.reset();
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "trace_goal_success_reply_error",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+    mockLLM.queueChatError(new Error("reply generation failed"));
+    const partialSuccessResult = await orchestrator.handleMessage(deviceId, "卡路里改成 1800，蛋白質 130 克");
+    assertReplyResult(partialSuccessResult);
+    assert.equal(partialSuccessResult.finalReplySource, "renderer");
+    assert.equal(partialSuccessResult.finalReplyShape, "plain_text");
+    assert.equal(partialSuccessResult.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+  });
+
   it("executes tool calls and returns final reply", async () => {
     // Round 1: LLM calls get_daily_summary (registry-known tool; pre-Phase-10
     // this round used the legacy lenient `analyze_food` unknown-tool path, but
@@ -150,10 +230,9 @@ describe("Orchestrator", () => {
     );
     assertReplyResult(result);
     assert.match(result.reply, /已記錄雞肉沙拉/);
-    assert.match(result.reply, /估約 180 kcal（區間 153-207）/);
-    assert.match(result.reply, /蛋白質 8 g（以雞肉為主）/);
-    assert.match(result.reply, /份量是主要誤差，可再補份量修正/);
-    assert.doesNotMatch(result.reply, /保守估算|headline|log_food|protein_sources|usedConservativeAssumption/);
+    assert.match(result.reply, /180 kcal/);
+    assert.match(result.reply, /蛋白質 8 g。/);
+    assert.doesNotMatch(result.reply, /區間|主要誤差|可再補份量修正|保守估算|headline|log_food|protein_sources|usedConservativeAssumption/);
     assert.equal(result.didLogMeal, true);
 
     const firstRoundUserMessage = mockLLM.chatCalls[0].messages.find((message) => Array.isArray(message.content));
@@ -310,7 +389,8 @@ describe("Orchestrator", () => {
 
     const result = await orchestrator.handleMessage(deviceId, "卡路里改 1800，是", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
-    assert.match(result.reply, /已更新每日目標/);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
 
     const device = await deviceService.getDevice(deviceId);
     assert.equal(device?.dailyCalories, 1800);

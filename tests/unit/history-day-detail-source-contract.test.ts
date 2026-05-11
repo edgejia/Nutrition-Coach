@@ -38,8 +38,26 @@ describe("History Day Detail source contract", () => {
       "targetMealId",
       "歷史快照",
       "今天 · 即時",
+      "<span>蛋白質</span>",
+      "<span>碳水</span>",
+      "<span>脂肪</span>",
+      "totalProtein",
+      "meal.protein",
+      "summary?.totalCarbs",
+      "summary?.totalFat",
     ]) {
       assert.match(dayDetail, escapedPattern(expected));
+    }
+
+    for (const rejected of [
+      "<span>protein</span>",
+      "<span>carbs</span>",
+      "<span>fat</span>",
+      "<strong>P {",
+      "<strong>C {",
+      "<strong>F {",
+    ]) {
+      assert.doesNotMatch(dayDetail, escapedPattern(rejected));
     }
 
     assert.match(

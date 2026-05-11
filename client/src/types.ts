@@ -247,6 +247,7 @@ export interface IntakeResult {
   deviceId: string;
   dailyTargets: DailyTargets;
   coachExplanation: string | null;
+  usedFallback: boolean;
 }
 
 export interface ProvisionalBubble {

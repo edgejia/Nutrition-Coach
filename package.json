@@ -17,7 +17,9 @@
     "verify:harness": "node scripts/run-node-with-tz.mjs --import tsx tests/harness/run.ts",
     "matrix:gen": "node --import tsx scripts/generate-capability-matrix-doc.mjs",
     "matrix:gen:check": "node --import tsx scripts/generate-capability-matrix-doc.mjs --check",
-    "matrix:check": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/capability-matrix-contract.test.ts tests/unit/capability-matrix-source-scan.test.ts && yarn matrix:gen:check"
+    "matrix:check": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/capability-matrix-contract.test.ts tests/unit/capability-matrix-source-scan.test.ts && yarn matrix:gen:check",
+    "behavior-matrix:gen": "node --import tsx scripts/generate-behavior-matrix-doc.mjs",
+    "behavior-matrix:gen:check": "node --import tsx scripts/generate-behavior-matrix-doc.mjs --check"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",

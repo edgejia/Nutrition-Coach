@@ -16,6 +16,7 @@
 
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 // ---------------------------------------------------------------------------
@@ -67,16 +68,21 @@ function failResult(
   steps: ScenarioStepResult[],
   failedStepName: string,
   artifacts: Record<string, unknown>,
+  llmTrace?: Record<string, unknown>,
 ): ScenarioResult {
   const totalSteps = STEP_NAMES.length;
   const passedSteps = steps.filter((s) => s.ok).length;
-  return {
+  const result: ScenarioResult = {
     ok: false,
     failedStep: failedStepName,
     steps,
     artifacts,
     consoleSummary: `FAIL ${scenarioName} ${failedStepName}`,
   };
+  if (llmTrace !== undefined) {
+    result.llmTrace = llmTrace;
+  }
+  return result;
 }
 
 const STEP_NAMES = [
@@ -87,9 +93,22 @@ const STEP_NAMES = [
   "verify_history",
   "verify_meals",
   "verify_summary",
+  "verify_llm_trace",
 ] as const;
 
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const USER_INPUT_TEXT = "我吃了蘋果";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function expectRecord(value: unknown, name: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error(`Expected ${name} to be an object`);
+  }
+  return value;
+}
 
 // ---------------------------------------------------------------------------
 // Scenario implementation
@@ -105,10 +124,20 @@ const textLogScenario: VerificationScenario = {
     const scenarioName = "text-log";
     const steps: ScenarioStepResult[] = [];
     const artifacts: Record<string, unknown> = {};
+    let llmTrace: Record<string, unknown> | undefined;
+    let finalAssistantContent: string | undefined;
+    let streamedReplyText = "";
 
     // Create our own app fixture with a controlled LLM provider.
     const { createScenarioApp } = await import("../app-fixture.js");
     const provider = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    const buildTrace = (status: "pass" | "fail"): Record<string, unknown> => {
+      return recorder.build({ scenario: scenarioName, status }) as unknown as Record<string, unknown>;
+    };
+    const failScenario = (failedStepName: string): ScenarioResult => {
+      return failResult(scenarioName, steps, failedStepName, artifacts, buildTrace("fail"));
+    };
 
     // Round 1: log_food tool call
     provider.queueRoundResponse({
@@ -129,7 +158,10 @@ const textLogScenario: VerificationScenario = {
         },
       ],
     });
-    const fixture = await createScenarioApp({ llmProvider: provider });
+    const fixture = await createScenarioApp({
+      llmProvider: provider,
+      llmTraceRecorderFactory: () => recorder,
+    });
 
     try {
       // ------------------------------------------------------------------
@@ -142,13 +174,13 @@ const textLogScenario: VerificationScenario = {
         if (pingRes.status !== 200) {
           const stepResult = fail("bootstrap", `Expected 200 from /api/meals, got ${pingRes.status}`);
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "bootstrap", artifacts);
+          return failScenario("bootstrap");
         }
         steps.push(pass("bootstrap", { status: pingRes.status }));
       } catch (err) {
         const stepResult = fail("bootstrap", err instanceof Error ? err.message : String(err));
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "bootstrap", artifacts);
+        return failScenario("bootstrap");
       }
 
       // ------------------------------------------------------------------
@@ -178,14 +210,14 @@ const textLogScenario: VerificationScenario = {
             `Expected 200 from /api/sse, got ${sseRes.status}`,
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+          return failScenario("subscribe_summary");
         }
 
         if (!sseRes.body) {
           clearTimeout(sseTimeout);
           const stepResult = fail("subscribe_summary", "SSE response has no body");
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+          return failScenario("subscribe_summary");
         }
 
         sseReader = sseRes.body.getReader();
@@ -201,7 +233,7 @@ const textLogScenario: VerificationScenario = {
           clearTimeout(sseTimeout);
           const stepResult = fail("subscribe_summary", "Did not receive initial daily_summary event from /api/sse");
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+          return failScenario("subscribe_summary");
         }
 
         let initialSummary: DailySummary | undefined;
@@ -211,7 +243,7 @@ const textLogScenario: VerificationScenario = {
           clearTimeout(sseTimeout);
           const stepResult = fail("subscribe_summary", "Failed to parse initial daily_summary JSON");
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+          return failScenario("subscribe_summary");
         }
 
         artifacts.initialSummary = initialSummary;
@@ -229,7 +261,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "subscribe_summary", artifacts);
+        return failScenario("subscribe_summary");
       }
 
       // ------------------------------------------------------------------
@@ -243,7 +275,7 @@ const textLogScenario: VerificationScenario = {
         const chatTimeout = setTimeout(() => chatController!.abort(), 5000);
 
         const form = new FormData();
-        form.append("message", "我吃了蘋果");
+        form.append("message", USER_INPUT_TEXT);
 
         chatRes = await fetch(`${fixture.address}/api/chat`, {
           method: "POST",
@@ -264,7 +296,7 @@ const textLogScenario: VerificationScenario = {
             { status: chatRes.status },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "post_chat", artifacts);
+          return failScenario("post_chat");
         }
 
         const contentType = chatRes.headers.get("content-type") ?? "";
@@ -275,7 +307,7 @@ const textLogScenario: VerificationScenario = {
             { contentType },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "post_chat", artifacts);
+          return failScenario("post_chat");
         }
 
         steps.push(pass("post_chat", { status: chatRes.status, contentType }));
@@ -288,7 +320,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "post_chat", artifacts);
+        return failScenario("post_chat");
       }
 
       // ------------------------------------------------------------------
@@ -301,7 +333,7 @@ const textLogScenario: VerificationScenario = {
         if (!chatRes.body) {
           const stepResult = fail("collect_stream", "Chat response has no body");
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         const streamReader = chatRes.body.getReader();
@@ -309,6 +341,17 @@ const textLogScenario: VerificationScenario = {
 
         streamFrames = parseSSEEvents(streamText);
         artifacts.streamFrames = streamFrames;
+        streamedReplyText = streamFrames
+          .filter((event) => event.event === "chunk")
+          .map((event) => {
+            try {
+              const parsed = JSON.parse(event.data) as { token?: unknown };
+              return typeof parsed.token === "string" ? parsed.token : "";
+            } catch {
+              return "";
+            }
+          })
+          .join("");
 
         const doneEvent = streamFrames.find((e) => e.event === "done");
         if (!doneEvent) {
@@ -316,7 +359,7 @@ const textLogScenario: VerificationScenario = {
             frames: streamFrames,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         try {
@@ -329,7 +372,7 @@ const textLogScenario: VerificationScenario = {
             doneData: doneEvent.data,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         if (!donePayload.didLogMeal) {
@@ -337,7 +380,7 @@ const textLogScenario: VerificationScenario = {
             donePayload,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         const hasChunk = streamFrames.some((e) => e.event === "chunk");
@@ -346,7 +389,7 @@ const textLogScenario: VerificationScenario = {
             frames: streamFrames,
           });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "collect_stream", artifacts);
+          return failScenario("collect_stream");
         }
 
         artifacts.donePayload = donePayload;
@@ -357,7 +400,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "collect_stream", artifacts);
+        return failScenario("collect_stream");
       }
 
       // ------------------------------------------------------------------
@@ -375,7 +418,7 @@ const textLogScenario: VerificationScenario = {
             `Expected 200 from /api/chat/history, got ${historyRes.status}`,
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_history", artifacts);
+          return failScenario("verify_history");
         }
 
         const historyJson = await historyRes.json() as { messages: ChatMessage[] };
@@ -383,6 +426,7 @@ const textLogScenario: VerificationScenario = {
         const lastMessage = messages[messages.length - 1];
 
         artifacts.historySnapshot = messages;
+        finalAssistantContent = lastMessage?.role === "assistant" ? lastMessage.content : undefined;
 
         if (lastMessage?.role !== "assistant") {
           const stepResult = fail(
@@ -391,7 +435,7 @@ const textLogScenario: VerificationScenario = {
             { lastMessage },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_history", artifacts);
+          return failScenario("verify_history");
         }
 
         if (!/已記錄蘋果/.test(lastMessage.content) || !/蛋白質 0 g/.test(lastMessage.content)) {
@@ -401,7 +445,7 @@ const textLogScenario: VerificationScenario = {
             { lastMessage },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_history", artifacts);
+          return failScenario("verify_history");
         }
 
         steps.push(pass("verify_history", { lastMessage }));
@@ -411,7 +455,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "verify_history", artifacts);
+        return failScenario("verify_history");
       }
 
       // ------------------------------------------------------------------
@@ -428,7 +472,7 @@ const textLogScenario: VerificationScenario = {
             `Expected 200 from /api/meals, got ${mealsRes.status}`,
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_meals", artifacts);
+          return failScenario("verify_meals");
         }
 
         const mealsJson = await mealsRes.json() as { meals: MealRecord[] };
@@ -439,7 +483,7 @@ const textLogScenario: VerificationScenario = {
         if (meals.length === 0) {
           const stepResult = fail("verify_meals", "Expected at least one meal, got 0", { meals });
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_meals", artifacts);
+          return failScenario("verify_meals");
         }
 
         const appleMeal = meals.find((m) => m.foodName === "蘋果");
@@ -450,7 +494,7 @@ const textLogScenario: VerificationScenario = {
             { meals },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_meals", artifacts);
+          return failScenario("verify_meals");
         }
 
         if (appleMeal.calories !== 95) {
@@ -460,7 +504,7 @@ const textLogScenario: VerificationScenario = {
             { appleMeal },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_meals", artifacts);
+          return failScenario("verify_meals");
         }
 
         steps.push(pass("verify_meals", { appleMeal }));
@@ -470,7 +514,7 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "verify_meals", artifacts);
+        return failScenario("verify_meals");
       }
 
       // ------------------------------------------------------------------
@@ -528,7 +572,7 @@ const textLogScenario: VerificationScenario = {
             { donePayload },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_summary", artifacts);
+          return failScenario("verify_summary");
         }
 
         if (summaryToVerify.mealCount !== 1) {
@@ -538,7 +582,7 @@ const textLogScenario: VerificationScenario = {
             { dailySummary: summaryToVerify },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_summary", artifacts);
+          return failScenario("verify_summary");
         }
 
         if (typeof summaryToVerify.date !== "string" || !DATE_KEY_PATTERN.test(summaryToVerify.date)) {
@@ -548,7 +592,7 @@ const textLogScenario: VerificationScenario = {
             { dailySummary: summaryToVerify },
           );
           steps.push(stepResult);
-          return failResult(scenarioName, steps, "verify_summary", artifacts);
+          return failScenario("verify_summary");
         }
 
         steps.push(pass("verify_summary", { dailySummary: summaryToVerify }));
@@ -558,7 +602,170 @@ const textLogScenario: VerificationScenario = {
           err instanceof Error ? err.message : String(err),
         );
         steps.push(stepResult);
-        return failResult(scenarioName, steps, "verify_summary", artifacts);
+        return failScenario("verify_summary");
+      }
+
+      // ------------------------------------------------------------------
+      // Step 8: verify_llm_trace — successful logging trace contract
+      // ------------------------------------------------------------------
+      try {
+        llmTrace = buildTrace("pass");
+        const trace = expectRecord(llmTrace, "llmTrace");
+        const summary = expectRecord(trace.summary, "llmTrace.summary");
+        const prompt = expectRecord(summary.prompt, "llmTrace.summary.prompt");
+        const finalReply = expectRecord(summary.finalReply, "llmTrace.summary.finalReply");
+        const timeline = trace.timeline;
+        const serializedTrace = JSON.stringify(trace);
+        const topLevelKeys = Object.keys(trace).sort();
+
+        if (topLevelKeys.join(",") !== "scenario,schemaVersion,status,summary,timeline") {
+          const stepResult = fail("verify_llm_trace", "Trace top-level keys did not match the llm-trace.v1 contract", {
+            topLevelKeys,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (trace.schemaVersion !== "llm-trace.v1") {
+          const stepResult = fail(
+            "verify_llm_trace",
+            `Expected llmTrace.schemaVersion === "llm-trace.v1", got ${String(trace.schemaVersion)}`,
+            { schemaVersion: trace.schemaVersion },
+          );
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (trace.scenario !== "text-log") {
+          const stepResult = fail(
+            "verify_llm_trace",
+            `Expected llmTrace.scenario === "text-log", got ${String(trace.scenario)}`,
+            { trace },
+          );
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (trace.status !== "pass") {
+          const stepResult = fail(
+            "verify_llm_trace",
+            `Expected llmTrace.status === "pass", got ${String(trace.status)}`,
+            { trace },
+          );
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (
+          typeof summary.roundCount !== "number"
+          || summary.roundCount < 1
+          || typeof summary.toolCount !== "number"
+          || summary.toolCount < 1
+          || summary.fallbackCount !== 0
+          || typeof summary.latencyMs !== "number"
+          || summary.latencyMs < 0
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace summary counts or latency did not match successful logging expectations", {
+            summary,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (
+          typeof prompt.version !== "string"
+          || !Array.isArray(prompt.sectionIds)
+          || prompt.sectionIds.length === 0
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace prompt metadata was missing version or section IDs", {
+            prompt,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (
+          finalReply.source !== "renderer"
+          || finalReply.shape !== "plain_text"
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace final reply metadata did not match projected plain-text receipt", {
+            finalReply,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (!Array.isArray(timeline)) {
+          const stepResult = fail("verify_llm_trace", "Trace timeline was not an array", {
+            timeline,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        const roundStartIndex = timeline.findIndex((event) => isRecord(event) && event.type === "llm_round_start");
+        const toolReceivedIndex = timeline.findIndex((event) => isRecord(event) && event.type === "tool_received" && event.tool === "log_food");
+        const toolResultIndex = timeline.findIndex((event) => {
+          return (
+            isRecord(event)
+            && event.type === "tool_result"
+            && event.tool === "log_food"
+            && event.success === true
+          );
+        });
+        const roundEndIndex = timeline.findIndex((event) => isRecord(event) && event.type === "llm_round_end");
+
+        if (
+          roundStartIndex < 0
+          || toolReceivedIndex < 0
+          || toolResultIndex < 0
+          || roundEndIndex < 0
+          || !(roundStartIndex < toolReceivedIndex && toolReceivedIndex < toolResultIndex && toolResultIndex < roundEndIndex)
+        ) {
+          const stepResult = fail("verify_llm_trace", "Trace timeline did not preserve llm/tool event ordering for log_food", {
+            eventIndexes: {
+              llm_round_start: roundStartIndex,
+              tool_received: toolReceivedIndex,
+              tool_result: toolResultIndex,
+              llm_round_end: roundEndIndex,
+            },
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        const forbiddenSnippets = [
+          USER_INPUT_TEXT,
+          streamedReplyText,
+          finalAssistantContent,
+          "/uploads/",
+          "data:image",
+          "historySnapshot",
+          "mealsSnapshot",
+          "streamFrames",
+          "token",
+        ].filter((snippet): snippet is string => typeof snippet === "string" && snippet.length > 0);
+        const leakedSnippet = forbiddenSnippets.find((snippet) => serializedTrace.includes(snippet));
+        if (leakedSnippet !== undefined) {
+          const stepResult = fail("verify_llm_trace", "Trace serialization leaked raw scenario evidence or content", {
+            leakedSnippetLength: leakedSnippet.length,
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        steps.push(pass("verify_llm_trace", {
+          summary,
+          timelineLength: timeline.length,
+          forbiddenProbeCount: forbiddenSnippets.length,
+        }));
+      } catch (err) {
+        const stepResult = fail(
+          "verify_llm_trace",
+          err instanceof Error ? err.message : String(err),
+        );
+        steps.push(stepResult);
+        return failScenario("verify_llm_trace");
       }
 
       // ------------------------------------------------------------------
@@ -569,6 +776,7 @@ const textLogScenario: VerificationScenario = {
         ok: true,
         steps,
         artifacts,
+        llmTrace,
         consoleSummary: `PASS ${scenarioName} ${passedCount}/${steps.length}`,
       };
     } finally {

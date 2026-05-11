@@ -1,5 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
@@ -46,8 +47,8 @@ function assertSuccessfulLogReplyShape(
   }
 
   if (opts.expectsUncertainty === true) {
-    assert.match(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
-    assert.match(reply, /(份量|油脂與飯量|湯底與份量).*主要誤差/);
+    assert.doesNotMatch(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
+    assert.doesNotMatch(reply, /(份量|油脂與飯量|湯底與份量).*主要誤差/);
   } else {
     assert.doesNotMatch(reply, /\d+\s*[-~－]\s*\d+\s*kcal|區間/);
     assert.doesNotMatch(reply, /(份量|油脂與飯量|湯底與份量).*主要誤差/);
@@ -164,6 +165,16 @@ describe("orchestrator shared patterns", () => {
     );
     assert.equal(CHOICE_PROMPT_PATTERN.test("我會直接依照片估算並完成記錄。"), false);
   });
+
+  it("builds committed MutationEffects for every successful mutation family", () => {
+    const source = readFileSync(new URL("../../server/orchestrator/index.ts", import.meta.url), "utf8");
+
+    assert.match(source, /let mutationEffects: MutationEffects \| undefined/);
+    for (const kind of ["log", "update", "delete", "goals"]) {
+      assert.match(source, new RegExp(`kind: "${kind}"`));
+    }
+    assert.doesNotMatch(source, /successfulGoalReceipt|ensureGoalReceipt/);
+  });
 });
 
 describe("Orchestrator - didLogMeal", () => {
@@ -172,6 +183,7 @@ describe("Orchestrator - didLogMeal", () => {
   let deviceId: string;
   let deviceService: ReturnType<typeof createDeviceService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  let mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   let chatService: ReturnType<typeof createChatService>;
   let shouldFailSummary = false;
 
@@ -179,6 +191,7 @@ describe("Orchestrator - didLogMeal", () => {
     const db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
+    mealCorrectionService = createMealCorrectionService(db);
     const summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
@@ -197,6 +210,7 @@ describe("Orchestrator - didLogMeal", () => {
         },
       },
       foodLoggingService,
+      mealCorrectionService,
       deviceService,
     });
 
@@ -360,11 +374,11 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: true,
       allowsNextStep: true,
     });
-    assert.match(result.reply, /蛋白質 24 g（以雞腿為主）/);
+    assert.match(result.reply, /蛋白質 24 g。/);
     assert.doesNotMatch(result.reply, /已完成記錄，但回覆生成失敗|headline/);
   });
 
-  it("handleMessage throws when log_food persists but summary recomputation fails afterward", async () => {
+  it("handleMessage returns a committed log receipt when summary recomputation fails after persistence", async () => {
     shouldFailSummary = true;
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -377,10 +391,17 @@ describe("Orchestrator - didLogMeal", () => {
       }],
     });
 
-    await assert.rejects(
-      orchestrator.handleMessage(deviceId, "我吃了蘋果"),
-      /summary recomputation failed/
-    );
+    const result = await orchestrator.handleMessage(deviceId, "我吃了蘋果");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, true);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.match(result.reply, /已記錄蘋果/);
+    assert.match(result.reply, /蛋白質 0 g。/);
+    assert.equal(result.dailySummary?.mealCount, 1);
+    assert.equal(result.dailySummary?.totalCalories, 100);
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 1);
@@ -407,7 +428,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(history.filter((message) => message.role === "assistant").length, 0);
   });
 
-  it("returns the goal update receipt after MAX_ROUNDS when the mutation already succeeded", async () => {
+  it("returns a renderer-owned goal update receipt before any later model rounds", async () => {
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
     const localFoodLoggingService = createFoodLoggingService(db);
@@ -439,26 +460,16 @@ describe("Orchestrator - didLogMeal", () => {
         },
       }],
     });
-    localLLM.queueChatResponse({
-      toolCalls: [{
-        id: "summary_1",
-        type: "function",
-        function: { name: "get_daily_summary", arguments: "{}" },
-      }],
-    });
-    localLLM.queueChatResponse({
-      toolCalls: [{
-        id: "summary_2",
-        type: "function",
-        function: { name: "get_daily_summary", arguments: "{}" },
-      }],
-    });
+    localLLM.queueChatResponse({ content: "模型前綴：我已經幫你更新好了。" });
 
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
 
     assert.ok("reply" in result);
     assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
     assert.equal(result.didLogMeal, false);
+    assert.equal(localLLM.chatCalls.length, 1);
   });
 
   it("returns the goal update receipt when a later tool in the same batch fails fatally", async () => {
@@ -510,6 +521,151 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(device?.dailyProtein, 130);
   });
 
+  it("returns the log receipt when a later tool in the same batch fails fatally", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "log_batch_success",
+          type: "function",
+          function: {
+            name: "log_food",
+            arguments: JSON.stringify({
+              food_name: "雞腿便當",
+              calories: 620,
+              protein: 30,
+              carbs: 70,
+              fat: 18,
+              protein_sources: [
+                { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+                { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+                { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+              ],
+            }),
+          },
+        },
+        {
+          id: "unknown_after_log",
+          type: "function",
+          function: { name: "unknown_tool", arguments: "{}" },
+        },
+      ],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "我吃了雞腿便當");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已記錄雞腿便當，620 kcal，蛋白質 24 g。若份量不同，可以再調整。");
+    assert.equal(result.didLogMeal, true);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(result.dailySummary?.mealCount, 1);
+    assert.equal(result.dailySummary?.totalProtein, 24);
+  });
+
+  it("returns the update receipt when a later tool in the same batch fails fatally", async () => {
+    const seeded = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_update_target",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "update", query: "雞腿便當" }),
+          },
+        },
+        {
+          id: "update_batch_success",
+          type: "function",
+          function: {
+            name: "update_meal",
+            arguments: JSON.stringify({
+              meal_id: seeded.id,
+              food_name: "半份雞腿便當",
+              calories: 360,
+              protein: 20,
+              carbs: 45,
+              fat: 10,
+            }),
+          },
+        },
+        {
+          id: "unknown_after_update",
+          type: "function",
+          function: { name: "unknown_tool", arguments: "{}" },
+        },
+      ],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "把雞腿便當改成半份雞腿便當，360 kcal，蛋白質 20 g，碳水 45 g，脂肪 10 g");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新半份雞腿便當，360 kcal，蛋白質 20 g。");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(result.loggedMeal?.mealId, seeded.id);
+    assert.equal(result.loggedMeal?.foodName, "半份雞腿便當");
+    assert.equal(result.dailySummary?.mealCount, 1);
+    assert.equal(result.dailySummary?.totalCalories, 360);
+    assert.equal(result.dailySummary?.totalProtein, 20);
+  });
+
+  it("returns the delete receipt when a later tool in the same batch fails fatally", async () => {
+    const seeded = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_delete_target",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "delete", query: "雞腿便當" }),
+          },
+        },
+        {
+          id: "delete_batch_success",
+          type: "function",
+          function: {
+            name: "delete_meal",
+            arguments: JSON.stringify({ meal_id: seeded.id }),
+          },
+        },
+        {
+          id: "unknown_after_delete",
+          type: "function",
+          function: { name: "unknown_tool", arguments: "{}" },
+        },
+      ],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已刪除雞腿便當，已從當日紀錄移除。");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.dailySummary?.mealCount, 0);
+    assert.equal(result.dailySummary?.totalCalories, 0);
+  });
+
   it("returns a deterministic logged reply for image-only uploads after log_food succeeds", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -547,7 +703,7 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: true,
       allowsNextStep: true,
     });
-    assert.match(result.reply, /蛋白質 28 g（以豬肉為主）/);
+    assert.match(result.reply, /蛋白質 28 g。/);
     assert.doesNotMatch(result.reply, /保守估算|headline/);
     assert.equal(mockLLM.chatCalls.length, 1, "image-only logging should not require a second LLM round");
   });
@@ -615,7 +771,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.doesNotMatch(result.reply, /中午雞腿便當/);
   });
 
-  it("formats successful log replies compactly when missing_quantity metadata marks missing quantity", async () => {
+  it("renders missing-quantity successful logs from committed facts without implementation copy", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_grouped_image",
@@ -652,7 +808,7 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: true,
       allowsNextStep: true,
     });
-    assert.match(result.reply, /可再補份量修正/);
+    assert.doesNotMatch(result.reply, /可再補份量修正/);
     assert.doesNotMatch(result.reply, /保守估算/);
   });
 
@@ -691,7 +847,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.doesNotMatch(result.reply, /可再補份量修正/);
   });
 
-  it("includes uncertainty for high-variance image categories without adding a precision next step", async () => {
+  it("renders high-variance image categories from committed facts without uncertainty prose", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_high_variance_image",
@@ -727,7 +883,7 @@ describe("Orchestrator - didLogMeal", () => {
       expectsUncertainty: true,
       allowsNextStep: false,
     });
-    assert.match(result.reply, /湯底與份量.*主要誤差/);
+    assert.doesNotMatch(result.reply, /湯底與份量.*主要誤差/);
     assert.doesNotMatch(result.reply, /可再補份量修正/);
   });
 
@@ -880,7 +1036,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(streamingLLM.chatCalls.length, 1);
   });
 
-  it("appends a successful goal update receipt to streamed final replies", async () => {
+  it("returns a renderer goal receipt instead of streaming model prefix/suffix text", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
@@ -915,20 +1071,17 @@ describe("Orchestrator - didLogMeal", () => {
     streamingLLM.queueChatStream(["已經", "更新好了"]);
 
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
-    assert.ok("streamGenerator" in result);
 
-    const streamedTokens: string[] = [];
-    for await (const token of result.streamGenerator) {
-      streamedTokens.push(token);
-    }
-
-    assert.equal(streamedTokens.join(""), "已經更新好了\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
     const device = await localDeviceService.getDevice(localDeviceId);
     assert.equal(device?.dailyCalories, 1800);
     assert.equal(device?.dailyProtein, 130);
   });
 
-  it("yields the goal update receipt when streamed final reply generation fails", async () => {
+  it("does not wait for a streamed final reply after a goal mutation succeeds", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
@@ -963,17 +1116,13 @@ describe("Orchestrator - didLogMeal", () => {
     streamingLLM.queueChatStreamError(["處理中"], new Error("stream broke"));
 
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
-    assert.ok("streamGenerator" in result);
 
-    const streamedTokens: string[] = [];
-    for await (const token of result.streamGenerator) {
-      streamedTokens.push(token);
-    }
-
-    assert.equal(streamedTokens.join(""), "處理中\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
   });
 
-  it("appends a successful goal update receipt to legacy chatStream final replies", async () => {
+  it("does not enter legacy chatStream after a goal mutation succeeds", async () => {
     const streamingLLM = new ChatStreamOnlyProvider();
     const db = createDb(":memory:");
     const localDeviceService = createDeviceService(db);
@@ -1008,13 +1157,9 @@ describe("Orchestrator - didLogMeal", () => {
     streamingLLM.queueChatStream(["已經", "更新好了"]);
 
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
-    assert.ok("streamGenerator" in result);
 
-    const streamedTokens: string[] = [];
-    for await (const token of result.streamGenerator) {
-      streamedTokens.push(token);
-    }
-
-    assert.equal(streamedTokens.join(""), "已經更新好了\n\n已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.finalReplySource, "renderer");
   });
 });

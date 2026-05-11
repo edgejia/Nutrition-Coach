@@ -3,6 +3,8 @@ process.env.TZ = "Asia/Taipei";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../../server/app.js";
+import type { AppServices } from "../../server/app.js";
+import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { FastifyInstance } from "fastify";
 import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ToolCall, ToolDefinition } from "../../server/llm/types.js";
 
@@ -324,6 +326,8 @@ describe("chat-streaming", () => {
   let deviceId: string;
   let sessionCookieHeader: string;
   let address: string;
+  let services: AppServices | undefined;
+  let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -332,7 +336,20 @@ describe("chat-streaming", () => {
 
   beforeEach(async () => {
     mockLLM = new StreamingLLMProvider();
-    app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
+    services = undefined;
+    traceRecorders = [];
+    app = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: mockLLM,
+      onServicesReady: (readyServices) => {
+        services = readyServices;
+      },
+      llmTraceRecorderFactory: () => {
+        const recorder = createLlmTraceRecorder();
+        traceRecorders.push(recorder);
+        return recorder;
+      },
+    });
 
     const res = await app.inject({
       method: "POST",
@@ -374,6 +391,140 @@ describe("chat-streaming", () => {
       if (app.server.listening) {
         await app.close();
       }
+    }
+  });
+
+  it("POST /api/chat SSE stream records streamed final reply trace and still emits done", async () => {
+    mockLLM.queueChatStream(["直接", "回覆"]);
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      assert.match(text, /event: done/);
+      assert.equal(traceRecorders.length, 1);
+
+      const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
+      assert.deepEqual(trace.summary.finalReply, {
+        source: "model",
+        shape: "streamed_text",
+      });
+      const latencyMs = trace.summary.latencyMs;
+      assert.ok(latencyMs !== undefined);
+      assert.equal(typeof latencyMs, "number");
+      assert.ok(latencyMs >= 0);
+      assert.deepEqual(trace.timeline.at(-1), {
+        type: "route_completion",
+        transport: "sse",
+        didLogMeal: false,
+        didMutateMeal: false,
+        completed: true,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE projected log_food reply records projected final reply trace", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      assert.match(text, /event: done/);
+
+      const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
+      assert.deepEqual(trace.summary.finalReply, {
+        source: "renderer",
+        shape: "plain_text",
+      });
+      assert.deepEqual(trace.timeline.at(-1), {
+        type: "route_completion",
+        transport: "sse",
+        didLogMeal: true,
+        didMutateMeal: true,
+        completed: true,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE route fallback records fallback trace and one assistant fallback", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [createLogFoodToolCallWithArguments("{bad json")],
+    });
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      assert.match(text, /event: done/);
+
+      const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
+      assert.deepEqual(trace.summary.finalReply, {
+        source: "fallback",
+        shape: "fallback_text",
+      });
+      const latencyMs = trace.summary.latencyMs;
+      assert.ok(latencyMs !== undefined);
+      assert.equal(typeof latencyMs, "number");
+      assert.ok(latencyMs >= 0);
+      assert.deepEqual(trace.timeline.at(-1), {
+        type: "route_completion",
+        transport: "sse",
+        didLogMeal: false,
+        didMutateMeal: false,
+        completed: true,
+      });
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1);
+      assert.match(assistantMessages[0]!.content, /這次無法完成請求/);
+    } finally {
+      clearTimeout(timeout);
     }
   });
 
@@ -560,10 +711,9 @@ describe("chat-streaming", () => {
         .map((payload) => payload.token)
         .join("");
 
-      assert.match(chunkText, /份量是主要誤差/);
-      assert.match(chunkText, /可再補份量修正/);
-      assert.match(chunkText, /估約 580 kcal（區間 493-667）/);
+      assert.match(chunkText, /580 kcal/);
       assert.match(chunkText, /蛋白質 24 g/);
+      assert.doesNotMatch(chunkText, /份量是主要誤差|可再補份量修正|區間/);
       assert.doesNotMatch(chunkText, /約 580 kcal，可信蛋白 99 g/);
       assertNoSuccessfulLogInternalCopy(chunkText);
 
@@ -956,7 +1106,7 @@ describe("chat-streaming", () => {
 
     assert.ok(res.body);
     const text = await readStreamUntil(res.body.getReader(), "event: done");
-    assert.match(text, /餐點已更新，但回覆生成失敗|已完成餐點調整/);
+    assert.match(text, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(text, /無法辨識這次的請求/);
     const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
     assert.ok(doneDataMatch);
@@ -1019,7 +1169,7 @@ describe("chat-streaming", () => {
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
     assert.equal(body.loggedMeal, undefined);
-    assert.match(body.reply, /已完成餐點調整/);
+    assert.match(body.reply, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(body.reply, /方式1|方式2|無法辨識/);
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -1029,7 +1179,7 @@ describe("chat-streaming", () => {
     const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
     const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
     const latestAssistant = assistantMessages.at(-1)?.content ?? "";
-    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.match(latestAssistant, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識/);
 
     const mealsAfterRes = await fetch(`${address}/api/meals`, {
@@ -1077,7 +1227,7 @@ describe("chat-streaming", () => {
 
     assert.ok(res.body);
     const text = await readStreamUntil(res.body.getReader(), "event: done");
-    assert.match(text, /已完成餐點調整/);
+    assert.match(text, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(text, /方式1|方式2|無法辨識|回覆生成失敗/);
     const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
     assert.ok(doneDataMatch);
@@ -1095,7 +1245,7 @@ describe("chat-streaming", () => {
     });
     const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
     const latestAssistant = historyJson.messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
-    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.match(latestAssistant, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識|回覆生成失敗/);
   });
 
@@ -1145,7 +1295,7 @@ describe("chat-streaming", () => {
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
     assert.equal(body.loggedMeal, undefined);
-    assert.match(body.reply, /已完成餐點調整/);
+    assert.match(body.reply, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(body.reply, /方式1|方式2|無法辨識|回覆生成失敗/);
 
     const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -1153,7 +1303,7 @@ describe("chat-streaming", () => {
     });
     const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
     const latestAssistant = historyJson.messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
-    assert.match(latestAssistant, /已完成餐點調整/);
+    assert.match(latestAssistant, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(latestAssistant, /方式1|方式2|無法辨識|回覆生成失敗/);
   });
 
@@ -1525,6 +1675,19 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "exactly one assistant reply expected");
       assert.match(assistantMsgs[0]!.content, /無法辨識這次的請求/);
+
+      const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
+      assert.deepEqual(trace.summary.finalReply, {
+        source: "fallback",
+        shape: "fallback_text",
+      });
+      assert.deepEqual(trace.timeline.at(-1), {
+        type: "route_completion",
+        transport: "sse",
+        didLogMeal: false,
+        didMutateMeal: false,
+        completed: true,
+      });
     } finally {
       clearTimeout(timeout);
     }
@@ -1729,7 +1892,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
       assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g（以雞腿為主）/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g。/);
       assert.doesNotMatch(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗|headline/);
 
       const mealsRes = await fetch(`${address}/api/meals`, {
@@ -1737,6 +1900,53 @@ describe("chat-streaming", () => {
       });
       const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
       assert.ok(mealsJson.meals.some((m) => m.foodName === "雞腿便當"), "meal must be kept even when final reply fails");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE returns a committed receipt when summary recomputation fails after log_food persistence", async () => {
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after persistence");
+    };
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+
+      assert.match(text, /已記錄雞腿便當，620 kcal，蛋白質 24 g。若份量不同，可以再調整。/);
+      const doneMatch = text.match(/event: done\s+data: (.+)/);
+      assert.ok(doneMatch);
+      const donePayload = JSON.parse(doneMatch[1]) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: { mealId?: string; foodName?: string };
+        dailySummary?: { mealCount?: number; totalCalories?: number; totalProtein?: number; date?: string };
+      };
+      assert.equal(donePayload.didLogMeal, true);
+      assert.equal(donePayload.didMutateMeal, true);
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
+      assert.equal(donePayload.dailySummary?.mealCount, 1);
+      assert.equal(donePayload.dailySummary?.totalCalories, 620);
+      assert.equal(donePayload.dailySummary?.totalProtein, 24);
+      assert.match(donePayload.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
+      assert.doesNotMatch(text, /無法辨識|回覆生成失敗|這次無法完成請求|headline/);
     } finally {
       clearTimeout(timeout);
     }
@@ -1780,7 +1990,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
       assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g（以雞腿為主）/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g。/);
     } finally {
       clearTimeout(timeout);
     }
@@ -1893,7 +2103,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
       assert.match(assistantMsgs[0]!.content, /已記錄蘋果、優格、水煮蛋/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質 15 g（優格和水煮蛋）/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質 15 g。/);
     } finally {
       clearTimeout(timeout);
     }

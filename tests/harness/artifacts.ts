@@ -8,8 +8,10 @@
  * Redaction rules (applied recursively to the full artifact graph):
  *   - `x-device-id` header values  → "[REDACTED]"
  *   - `deviceId=<value>` URL query params  → "deviceId=[REDACTED]"
- *   - Paths containing `/uploads/`  → "[REDACTED_PATH]"
+ *   - Paths containing `/uploads/` or upload staging directories  → "[REDACTED_PATH]"
+ *   - Image data URIs, bearer tokens, and OpenAI-style API keys  → "[REDACTED]"
  *   - Object keys containing `deviceId` in camelCase, snake_case, or kebab-case  → "[REDACTED]"
+ *   - Raw prompt/message/provider/tool/final-assistant payload keys are omitted
  */
 
 import fs from "node:fs";
@@ -60,18 +62,25 @@ export function redact(value: unknown): unknown {
 
 function redactString(s: string): string {
   // Redact any path referencing the uploads directory (absolute or relative)
-  if (/\/uploads\//.test(s)) {
+  if (/\/uploads\//.test(s) || /\/upload-staging\//i.test(s)) {
     return REDACTED_PATH;
+  }
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(s)) {
+    return REDACTED;
   }
   // Redact deviceId= query parameter values in URLs
   s = s.replace(/(deviceId=)[^&\s"']+/gi, `$1${REDACTED}`);
+  s = s.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, `Bearer ${REDACTED}`);
+  s = s.replace(/\bsk-[A-Za-z0-9_-]+/g, REDACTED);
   return s;
 }
 
 function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(obj)) {
-    if (shouldRedactKey(key)) {
+    if (shouldOmitKey(key)) {
+      continue;
+    } else if (shouldRedactKey(key)) {
       result[key] = REDACTED;
     } else {
       result[key] = redact(val);
@@ -81,9 +90,58 @@ function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
 }
 
 function shouldRedactKey(key: string): boolean {
-  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return normalized.includes("deviceid");
+  const normalized = normalizeKey(key);
+  return normalized.includes("deviceid") || normalized === "error";
 }
+
+function shouldOmitKey(key: string): boolean {
+  const normalized = normalizeKey(key);
+  return OMITTED_KEYS.has(normalized);
+}
+
+function normalizeKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const OMITTED_KEYS = new Set([
+  "apikey",
+  "arguments",
+  "assistantmessage",
+  "assistantmessages",
+  "authorization",
+  "bearer",
+  "content",
+  "cookie",
+  "assistantcontent",
+  "fallbackcontent",
+  "finalanswer",
+  "finalassistantcontent",
+  "guestsession",
+  "historysnapshot",
+  "imagebase64",
+  "imagedata",
+  "imagedatauri",
+  "messages",
+  "openaiapikey",
+  "providerpayload",
+  "prompttext",
+  "rawarguments",
+  "rawmessages",
+  "rawprompt",
+  "rawproviderpayload",
+  "rawtoolresult",
+  "sessiontoken",
+  "setcookie",
+  "ssetranscript",
+  "streamframes",
+  "token",
+  "toolarguments",
+  "toolresult",
+  "uploadstagingpath",
+  "usermealtext",
+  "rawusermessage",
+  "usermessage",
+]);
 
 // ---------------------------------------------------------------------------
 // Artifact writing
@@ -147,13 +205,14 @@ export async function writeScenarioArtifacts(
     "utf-8",
   );
 
-  // steps.json — redact actual/expected values
+  // steps.json — redact all step evidence, including assertion strings that may
+  // embed model/user transcript excerpts.
   const steps = result.steps.map((s: ScenarioStepResult) => ({
     name: s.name,
     ok: s.ok,
     ...(s.actual !== undefined ? { actual: redact(s.actual) } : {}),
     ...(s.expected !== undefined ? { expected: redact(s.expected) } : {}),
-    ...(s.error !== undefined ? { error: s.error } : {}),
+    ...(s.error !== undefined ? { error: REDACTED } : {}),
   }));
   fs.writeFileSync(path.join(dir, "steps.json"), JSON.stringify(steps, null, 2), "utf-8");
 
@@ -164,6 +223,14 @@ export async function writeScenarioArtifacts(
     JSON.stringify(snapshots, null, 2),
     "utf-8",
   );
+
+  if (result.llmTrace !== undefined) {
+    fs.writeFileSync(
+      path.join(dir, "llm-trace.json"),
+      JSON.stringify(redact(result.llmTrace), null, 2),
+      "utf-8",
+    );
+  }
 
   const scenarioResult = redact(result);
   fs.writeFileSync(

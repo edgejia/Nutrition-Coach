@@ -47,6 +47,7 @@ class FixedDate extends REAL_DATE {
 describe("meal correction service", () => {
   let db: ReturnType<typeof createDb>;
   let deviceId: string;
+  let foreignDeviceId: string;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
 
@@ -57,6 +58,7 @@ describe("meal correction service", () => {
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+    foreignDeviceId = (await deviceService.createDevice("muscle_gain")).deviceId;
   });
 
   afterEach(() => {
@@ -462,11 +464,24 @@ describe("meal correction service", () => {
       loggedAt: "2026-03-25T10:30:00.000Z",
     });
 
+    await assert.rejects(
+      () => mealCorrectionService.deleteMeal(foreignDeviceId, meal.id),
+      /MEAL_NOT_FOUND/,
+    );
+
     const result = await mealCorrectionService.deleteMeal(deviceId, meal.id);
 
     assert.equal(result.deletedMealId, meal.id);
     assert.equal(result.affectedDate, "2026-03-25");
     assert.equal(result.dailySummary.date, result.affectedDate);
     assert.equal(result.dailySummary.mealCount, 0);
+    assert.deepEqual(result.deletedMeal, {
+      mealId: meal.id,
+      dateKey: "2026-03-25",
+      loggedAt: "2026-03-25T10:30:00.000Z",
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+    });
   });
 });

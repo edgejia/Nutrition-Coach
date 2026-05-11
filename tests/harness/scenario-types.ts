@@ -45,6 +45,8 @@ export interface ScenarioResult {
   steps: ScenarioStepResult[];
   /** Arbitrary JSON evidence blobs (request headers, SSE transcript, DB snapshot, etc.) */
   artifacts: Record<string, unknown>;
+  /** Optional allowlisted LLM trace persisted as latest/llm-trace.json */
+  llmTrace?: Record<string, unknown>;
   /** Single-line console summary: "PASS text-log 7/7" or "FAIL image-log verify_meals" */
   consoleSummary: string;
 }

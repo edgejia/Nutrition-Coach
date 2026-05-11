@@ -32,9 +32,13 @@ describe("History Day Detail source contract", () => {
       "當日餐點",
       "這是當日營養快照；點選歷史中的餐點可修改內容。",
       "今天的資料會隨記錄更新；此頁仍維持只讀檢視。",
-      "protein",
-      "carbs",
-      "fat",
+      "<span>蛋白質</span>",
+      "<span>碳水</span>",
+      "<span>脂肪</span>",
+      "totalProtein",
+      "meal.protein",
+      "summary?.totalCarbs",
+      "summary?.totalFat",
       "PersistedAssetImage",
       "sp-history-detail-screen",
       "sp-history-detail-summary",
@@ -43,6 +47,17 @@ describe("History Day Detail source contract", () => {
       "目標同步中，暫不顯示水位",
     ]) {
       assert.match(detailSource, escapedPattern(expected));
+    }
+
+    for (const rejected of [
+      "<span>protein</span>",
+      "<span>carbs</span>",
+      "<span>fat</span>",
+      "<strong>P {",
+      "<strong>C {",
+      "<strong>F {",
+    ]) {
+      assert.doesNotMatch(detailSource, escapedPattern(rejected));
     }
   });
 

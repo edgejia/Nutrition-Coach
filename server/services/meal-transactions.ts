@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   assetReferences,
@@ -9,6 +9,7 @@ import {
 } from "../db/schema.js";
 import { parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
+import { projectMealDisplay } from "./meal-display.js";
 
 export interface MealTransactionItemInput {
   foodName: string;
@@ -36,6 +37,16 @@ export interface MealTransactionDeleteResult {
   transactionId: string;
   loggedAt: string;
   affectedDateKey: string;
+  deletedMeal: DeletedMealSnapshot;
+}
+
+export interface DeletedMealSnapshot {
+  mealId: string;
+  dateKey: string;
+  loggedAt: string;
+  foodName: string;
+  calories?: number;
+  protein?: number;
 }
 
 export interface MealTransactionUpdateInput {
@@ -122,6 +133,35 @@ export function createMealTransactionsService(db: AppDatabase) {
         `,
       )
       .get(deviceId, transactionId) as MealTransactionRow | undefined;
+  }
+
+  async function loadDeletedMealSnapshot(existing: MealTransactionRow): Promise<DeletedMealSnapshot> {
+    const items = await db
+      .select({
+        foodName: mealRevisionItems.foodName,
+        calories: mealRevisionItems.calories,
+        protein: mealRevisionItems.protein,
+      })
+      .from(mealRevisionItems)
+      .where(eq(mealRevisionItems.revisionId, existing.currentRevisionId))
+      .orderBy(asc(mealRevisionItems.position));
+    const dateKey = formatLocalDate(new Date(existing.loggedAt));
+    const display = projectMealDisplay(items, "未知餐點");
+    const calories = items.length > 0
+      ? items.reduce((sum, item) => sum + item.calories, 0)
+      : undefined;
+    const protein = items.length > 0
+      ? items.reduce((sum, item) => sum + item.protein, 0)
+      : undefined;
+
+    return {
+      mealId: existing.id,
+      dateKey,
+      loggedAt: existing.loggedAt,
+      foodName: display.foodName,
+      ...(calories === undefined ? {} : { calories }),
+      ...(protein === undefined ? {} : { protein }),
+    };
   }
 
   return {
@@ -227,6 +267,7 @@ export function createMealTransactionsService(db: AppDatabase) {
         throw new Error("MEAL_NOT_FOUND");
       }
 
+      const deletedMeal = await loadDeletedMealSnapshot(existing);
       const deletedAt = new Date().toISOString();
       const revisionNumber = existing.currentRevisionNumber + 1;
       const revisionId = `${existing.id}:r${revisionNumber}`;
@@ -256,7 +297,8 @@ export function createMealTransactionsService(db: AppDatabase) {
         return {
           transactionId: existing.id,
           loggedAt: existing.loggedAt,
-          affectedDateKey: formatLocalDate(new Date(existing.loggedAt)),
+          affectedDateKey: deletedMeal.dateKey,
+          deletedMeal,
         };
       });
     },
