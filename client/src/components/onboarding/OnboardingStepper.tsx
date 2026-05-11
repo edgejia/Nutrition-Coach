@@ -971,6 +971,7 @@ export function OnboardingStepperPresentation({
       value={bodyData}
       issues={issuesForStep(3)}
       onChange={(value) => {
+        if (value.sex !== bodyData.sex) onFieldEdit("sex");
         if (value.age !== bodyData.age) onFieldEdit("age");
         if (value.heightCm !== bodyData.heightCm) onFieldEdit("heightCm");
         if (value.weightKg !== bodyData.weightKg) onFieldEdit("weightKg");
@@ -992,6 +993,7 @@ export function OnboardingStepperPresentation({
       onChange={(value) => {
         if (value.activityLevel !== lifestyle.activityLevel) onFieldEdit("activityLevel");
         if (value.trainingFrequency !== lifestyle.trainingFrequency) onFieldEdit("trainingFrequency");
+        if (value.allergies !== lifestyle.allergies) onFieldEdit("allergies");
         setLifestyle(value);
       }}
       onNext={() => onLifestyleNext(lifestyle)}
