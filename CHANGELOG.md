@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.1 - 2026-05-12
+
+### Added
+
+- Active prompt version and stable section IDs for chat/logging LLM workflows.
+- Generalized redacted `llm-trace.json` artifacts for chat/logging harness runs, including prompt metadata, workflow sequence, final reply source/shape, latency, round count, and tool count.
+- Shared AI behavior assertions plus the 8-case `behavior-matrix` harness for high-risk logging, prompt-injection, medical-boundary, and receipt-consistency regressions.
+- Deterministic mutation receipt renderer backed by committed `MutationEffects` for successful log, update, delete, and goal changes.
+
+### Changed
+
+- Successful mutation fact replies are renderer-sourced instead of model-passthrough while ordinary non-mutation chat can remain model-generated.
+- Onboarding Step 6 now uses real result/loading/failure/fallback states instead of showing mock target numbers before a real result exists.
+- Chat receipts, Meal Edit, History, and Day Detail now use localized/product-facing copy for the scoped trust surfaces.
+- Behavior-matrix evidence remains separate from `yarn release:check`; release promotion still depends on local release gates plus real Railway staging and production smoke.
+
+### Verified
+
+- v2.1 milestone audit passed `28/28` requirements.
+- Phase 50-54 review reports are clean after the Phase 54 warning fix.
+- Phase 50 and Phase 54 security reports closed all documented threats with `threats_open: 0`.
+- `yarn release:check` passed before staging/main promotion.
+- Railway production deployment `3377daaf-820d-4954-9085-8c822ba43d28` passed production text chat, image-backed meal logging, protected asset fetch, refresh persistence, and 390px mobile smoke.
+
 ## v2.0 - 2026-05-07
 
 ### Added

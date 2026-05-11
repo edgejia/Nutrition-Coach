@@ -7,7 +7,7 @@ Codex project-specific workflow notes are summarized in [docs/codex.md](docs/cod
 
 ## 目前進度
 
-`v2.0 Logging & Mobile Quality Foundation` 已於 `2026-05-07` 出貨並封存，目前沒有 active milestone。v2.0 在 v1.9 Sport UI 基礎上完成 mobile logging 穩定性、meal image continuity、grouped meal semantics、validation observability、History / Dashboard polish，以及 staging / production Railway smoke。
+`v2.1 AI Trust Infrastructure & Logging Reliability` 已於 `2026-05-12` 出貨並封存，目前沒有 active milestone。v2.1 在 v2.0 logging/mobile foundation 上完成 prompt identity、redacted LLM trace、AI behavior regression matrix、deterministic mutation receipts、focused product-trust copy cleanup，以及 staging / production Railway smoke。
 
 產品現在已具備：
 
@@ -22,14 +22,18 @@ Codex project-specific workflow notes are summarized in [docs/codex.md](docs/cod
 - cookie-backed guest-session browser auth、same-browser resume、tamper fail-closed 與 explicit rebuild recovery
 - history meals / search / trends API foundation，含 cursor pagination、current active revisions、SQLite query-plan coverage
 - validation observability：controlled validation failures 會輸出 redacted structured diagnostics，不洩漏 user text、prompt、image path、device ID 或 numeric target values
-- deterministic harness foundation，含 reusable fixtures、redacted trace artifacts、grouped meal canonical proof、image continuity proof
-- v2.0 milestone audit passed `26/26`，`yarn release:check` passed before staging/main promotion
+- deterministic harness foundation，含 reusable fixtures、redacted `llm-trace.json` artifacts、behavior matrix、grouped meal canonical proof、image continuity proof
+- successful log/update/delete/goal mutation facts 由 committed mutation effects deterministic renderer 產生，避免 model passthrough 寫出不可信 receipt facts
+- Onboarding Step 6、Chat receipt、Meal Edit、History / Day Detail 已移除最直接的 mock/internal-language trust issues
+- v2.1 milestone audit passed `28/28`，`yarn release:check` passed before staging/main promotion
 - staging / production deployed-domain smoke 已完成
 
 ## 功能
 
 - **對話式記錄**：用自然語言描述你吃了什麼，支援文字與圖片上傳
 - **AI 營養分析**：LLM 自動估算卡路里、蛋白質、碳水、脂肪，並以 trusted-protein 規則避免 trace protein 灌高 headline 蛋白質
+- **AI trust evidence**：chat/logging harness 可輸出 redacted `llm-trace.json`，記錄 prompt metadata、round/tool/fallback sequence、final reply source/shape、latency 與 counts
+- **Deterministic receipts**：成功的新增、更新、刪除與目標更新 receipt facts 由 committed mutation effects renderer 產生
 - **Home dashboard**：今日剩餘熱量、calorie ring、macro progress、今日餐點與 coach CTA
 - **Chat-only logging**：所有新增記錄、問題、修正意圖都從 Chat 進入，grouped meal correction 以 Chat handoff 處理
 - **即時回饋**：SSE 推播與 chat bubble progressive feedback，餐點記錄後即時更新進度
@@ -128,6 +132,7 @@ yarn verify:harness -- guest-session-hardening
 yarn verify:harness -- insight-eval
 yarn verify:harness -- grouped-meal-canonical
 yarn verify:harness -- meal-image-continuity
+yarn verify:harness -- behavior-matrix
 ```
 
 ## 專案結構
