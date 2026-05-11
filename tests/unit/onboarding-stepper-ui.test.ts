@@ -24,6 +24,44 @@ globalThis.localStorage = {
 const { OnboardingStepperPresentation } = await import("../../client/src/components/onboarding/OnboardingStepper.js");
 const { StepCoachHandoff } = await import("../../client/src/components/onboarding/StepCoachHandoff.js");
 
+function renderStepSix(props: {
+  loading?: boolean;
+  transportError?: string | null;
+  result?: {
+    deviceId: string;
+    dailyTargets: { calories: number; protein: number; carbs: number; fat: number };
+    coachExplanation: string | null;
+    usedFallback: boolean;
+  } | null;
+}) {
+  return renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
+    step: 6,
+    data: {
+      goal: "fat_loss",
+      sex: "female",
+      age: 31,
+      heightCm: 165,
+      weightKg: 58,
+      activityLevel: "moderate",
+      trainingFrequency: "3_4",
+    },
+    validationIssues: [],
+    loading: props.loading ?? false,
+    transportError: props.transportError ?? null,
+    result: props.result ?? null,
+    onGoalSelect: () => undefined,
+    onGoalClarificationNext: () => undefined,
+    onBodyDataNext: () => undefined,
+    onLifestyleNext: () => undefined,
+    onAdvancedMetricsNext: () => undefined,
+    onAdvancedMetricsSkip: () => undefined,
+    onBack: () => undefined,
+    onStart: () => undefined,
+    onRetry: () => undefined,
+    onFieldEdit: () => undefined,
+  }));
+}
+
 describe("onboarding stepper UI", () => {
   it("renders Step 1 goal recovery with validation copy and selectable goals", () => {
     const html = renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
@@ -134,5 +172,81 @@ describe("onboarding stepper UI", () => {
     assert.match(html, /第 06 步 \/ 共 06 步/);
     assert.match(html, /sp-onboarding/);
     assert.doesNotMatch(html, /sk-/);
+  });
+
+  it("renders Step 6 loading as progress copy without target cards or success copy", () => {
+    const html = renderStepSix({ loading: true, result: null });
+
+    assert.match(html, /正在建立每日目標/);
+    assert.match(html, /完成前不會顯示數字/);
+    assert.doesNotMatch(html, /你的計畫已準備好/);
+    assert.doesNotMatch(html, /2,150|2150|145|240|65/);
+    assert.doesNotMatch(html, /每日熱量|蛋白質|碳水|脂肪/);
+  });
+
+  it("renders Step 6 transport failure without target cards or success copy", () => {
+    const html = renderStepSix({
+      transportError: "建立每日目標失敗，請重新送出。",
+      result: null,
+    });
+
+    assert.match(html, /建立每日目標失敗，請重新送出。/);
+    assert.match(html, /重新送出/);
+    assert.doesNotMatch(html, /你的計畫已準備好/);
+    assert.doesNotMatch(html, /2,150|2150|145|240|65/);
+    assert.doesNotMatch(html, /每日熱量|蛋白質|碳水|脂肪/);
+  });
+
+  it("renders Step 6 success with server targets and server coach explanation", () => {
+    const html = renderStepSix({
+      result: {
+        deviceId: "device-step-six-success",
+        dailyTargets: { calories: 1900, protein: 132, carbs: 210, fat: 58 },
+        coachExplanation: "SERVER_COACH_NOTE",
+        usedFallback: false,
+      },
+    });
+
+    assert.match(html, /你的計畫已準備好/);
+    assert.match(html, /1,900/);
+    assert.match(html, /132/);
+    assert.match(html, /210/);
+    assert.match(html, /58/);
+    assert.match(html, /SERVER_COACH_NOTE/);
+    assert.doesNotMatch(html, /根據減脂目標|TDEE −400/);
+  });
+
+  it("renders Step 6 deterministic generic coach copy only after a null-explanation result exists", () => {
+    const html = renderStepSix({
+      result: {
+        deviceId: "device-step-six-null-note",
+        dailyTargets: { calories: 1880, protein: 125, carbs: 206, fat: 57 },
+        coachExplanation: null,
+        usedFallback: false,
+      },
+    });
+
+    assert.match(html, /已依照你的資料建立每日目標。先照這個節奏記錄，之後可依實際變化調整。/);
+    assert.match(html, /1,880/);
+  });
+
+  it("renders Step 6 target fallback as conservative defaults without red failure treatment", () => {
+    const html = renderStepSix({
+      result: {
+        deviceId: "device-step-six-fallback",
+        dailyTargets: { calories: 2050, protein: 120, carbs: 230, fat: 70 },
+        coachExplanation: "先使用保守預設，完成幾餐記錄後再調整。",
+        usedFallback: true,
+      },
+    });
+
+    assert.match(html, /這次先使用保守預設目標。你可以重新產生，或之後到設定調整。/);
+    assert.match(html, /2,050/);
+    assert.match(html, /120/);
+    assert.match(html, /230/);
+    assert.match(html, /70/);
+    assert.match(html, /開始記錄飲食/);
+    assert.match(html, /重新產生/);
+    assert.doesNotMatch(html, /送出失敗|建立每日目標失敗|#ffb3b3/);
   });
 });
