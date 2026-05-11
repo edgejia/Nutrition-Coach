@@ -4,6 +4,7 @@ import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
+import type { Goal } from "../../server/services/device.js";
 
 function getSetCookieHeaders(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
   const rawHeader = res.headers["set-cookie"];
@@ -75,7 +76,7 @@ describe("Device API", () => {
     await app.close();
   });
 
-  async function createGuestDevice(goal: "fat_loss" | "muscle_gain" = "fat_loss") {
+  async function createGuestDevice(goal: Goal = "fat_loss") {
     const res = await app.inject({
       method: "POST",
       url: "/api/device",
@@ -252,6 +253,38 @@ describe("Device API", () => {
     assert.equal(setCookieHeaders.length, 2);
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session_resume=")));
+  });
+
+  it("POST /api/device/session preserves maintain goal for active and legacy sessions", async () => {
+    const create = await createGuestDevice("maintain");
+    const { deviceId, dailyTargets, cookieHeader } = create;
+
+    const active = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: cookieHeader },
+      payload: {},
+    });
+    const legacy = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      payload: { legacyDeviceId: deviceId },
+    });
+
+    assert.equal(active.statusCode, 200);
+    assert.deepEqual(active.json(), {
+      deviceId,
+      goal: "maintain",
+      dailyTargets,
+      establishedBy: "active",
+    });
+    assert.equal(legacy.statusCode, 200);
+    assert.deepEqual(legacy.json(), {
+      deviceId,
+      goal: "maintain",
+      dailyTargets,
+      establishedBy: "legacy_migration",
+    });
   });
 
   it("POST /api/device/session rejects invalid legacy device ids", async () => {
