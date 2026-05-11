@@ -69,8 +69,14 @@ describe("Chat bubble source contract", () => {
       messageBubble.indexOf("function AssistantTextBubble"),
     );
 
-    for (const expectedCopy of ["已記錄", "蛋白質", "碳水", "脂肪"]) {
-      assert.match(receiptCard, new RegExp(expectedCopy));
+    assert.match(receiptCard, /已記錄/);
+
+    for (const expectedCopy of ["蛋白質", "碳水", "脂肪"]) {
+      assert.match(messageBubble, new RegExp(expectedCopy));
+    }
+
+    for (const macroKey of ["protein", "carbs", "fat"]) {
+      assert.match(receiptCard, new RegExp(`MacroRow label="${macroKey}"`));
     }
 
     for (const payloadAccess of ["loggedMeal.protein", "loggedMeal.carbs", "loggedMeal.fat"]) {
