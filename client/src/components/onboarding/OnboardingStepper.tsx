@@ -740,7 +740,79 @@ function SpStepHandoff({
   onRetry?: () => void;
   onBack?: () => void;
 }) {
-  const targets = result?.dailyTargets ?? { calories: 2150, protein: 145, carbs: 240, fat: 65 };
+  const renderStatusShell = (content: React.ReactNode, actionLabel = "建立中...") => (
+    <div className="sp-screen">
+      <SpObHeader />
+      <SpStepperBar step={6} />
+      <main className="sp-scroll sp-scroll-actions" style={{ paddingTop: 18 }}>
+        {content}
+      </main>
+      <SpObActions onBack={onBack} onNext={undefined} nextLabel={actionLabel} />
+    </div>
+  );
+
+  if (loading && !result) {
+    return renderStatusShell(
+      <section className="sp-card-glow" style={{
+        padding: 18,
+        background: "linear-gradient(135deg, rgba(214,255,58,.08) 0%, rgba(20,21,25,1) 70%), var(--sp-surface)",
+        borderColor: "var(--sp-lime-line)",
+      }}>
+        <div className="sp-label" style={{ color: "var(--sp-lime)" }}>建立中</div>
+        <h1 className="sp-zh" style={{ fontSize: 28, lineHeight: 1.18, margin: "8px 0 0", color: "var(--sp-ink)", fontWeight: 900 }}>
+          正在建立每日目標
+        </h1>
+        <p className="sp-zh" style={{ margin: "10px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--sp-ink-2)" }}>
+          正在依照你的資料產生目標，完成前不會顯示數字。
+        </p>
+      </section>,
+    );
+  }
+
+  if (transportError && !result) {
+    return (
+      <div className="sp-screen">
+        <SpObHeader />
+        <SpStepperBar step={6} />
+        <main className="sp-scroll sp-scroll-actions" style={{ paddingTop: 18 }}>
+          <section className="sp-card" style={{ borderColor: "rgba(255,77,77,.32)", color: "#ffb3b3" }}>
+            <div className="sp-label" style={{ color: "#ffb3b3" }}>送出失敗</div>
+            <h1 className="sp-zh" style={{ fontSize: 28, lineHeight: 1.18, margin: "8px 0 0", color: "#ffb3b3", fontWeight: 900 }}>
+              建立每日目標失敗，請重新送出。
+            </h1>
+            <p className="sp-zh" style={{ margin: "10px 0 0", fontSize: 13, lineHeight: 1.55 }}>{transportError}</p>
+            <button type="button" className="sp-btn sp-btn-primary" style={{ marginTop: 12 }} onClick={onRetry}>重新送出</button>
+          </section>
+        </main>
+        <div className="sp-ob-actions">
+          <button type="button" className="sp-btn sp-btn-ghost" onClick={onBack}>← 上一步</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!result) {
+    return renderStatusShell(
+      <section className="sp-card-glow" style={{
+        padding: 18,
+        background: "linear-gradient(135deg, rgba(214,255,58,.08) 0%, rgba(20,21,25,1) 70%), var(--sp-surface)",
+        borderColor: "var(--sp-lime-line)",
+      }}>
+        <div className="sp-label" style={{ color: "var(--sp-lime)" }}>建立中</div>
+        <h1 className="sp-zh" style={{ fontSize: 28, lineHeight: 1.18, margin: "8px 0 0", color: "var(--sp-ink)", fontWeight: 900 }}>
+          正在建立每日目標
+        </h1>
+        <p className="sp-zh" style={{ margin: "10px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--sp-ink-2)" }}>
+          正在依照你的資料產生目標，完成前不會顯示數字。
+        </p>
+      </section>,
+    );
+  }
+
+  const targets = result.dailyTargets;
+  const coachNote = result.coachExplanation ?? "已依照你的資料建立每日目標。先照這個節奏記錄，之後可依實際變化調整。";
+  const isTargetFallback = result.usedFallback;
+
   return (
     <div className="sp-screen">
       <SpObHeader />
@@ -753,6 +825,21 @@ function SpStepHandoff({
           </h1>
         </div>
 
+        {isTargetFallback ? (
+          <section className="sp-card" style={{
+            borderColor: "rgba(255,183,77,.34)",
+            background: "rgba(255,183,77,.08)",
+          }}>
+            <div className="sp-label" style={{ color: "var(--sp-amber)" }}>保守預設</div>
+            <p className="sp-zh" style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.55, color: "var(--sp-ink)" }}>
+              這次先使用保守預設目標。你可以重新產生，或之後到設定調整。
+            </p>
+            {onRetry ? (
+              <button type="button" className="sp-btn sp-btn-ghost" style={{ marginTop: 12 }} onClick={onRetry}>重新產生</button>
+            ) : null}
+          </section>
+        ) : null}
+
         <section className="sp-card-glow" style={{
           padding: 18,
           background: "linear-gradient(135deg, rgba(214,255,58,.10) 0%, rgba(20,21,25,1) 70%), var(--sp-surface)",
@@ -762,9 +849,6 @@ function SpStepHandoff({
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
             <span className="sp-display" style={{ fontSize: 72, color: "var(--sp-ink)" }}>{targets.calories.toLocaleString("en-US")}</span>
             <span className="sp-num" style={{ fontSize: 13, color: "var(--sp-ink-3)" }}>kcal</span>
-          </div>
-          <div className="sp-zh" style={{ fontSize: 12, color: "var(--sp-ink-2)", marginTop: 2 }}>
-            根據減脂目標 · 中度活動 · TDEE −400
           </div>
         </section>
 
@@ -800,20 +884,11 @@ function SpStepHandoff({
             <span className="sp-label" style={{ color: "var(--sp-lime)" }}>教練備註</span>
           </div>
           <p className="sp-zh" style={{ fontSize: 13, lineHeight: 1.55, margin: 0, color: "var(--sp-ink)" }}>
-            減脂期蛋白優先：每餐至少 30g。碳水多放在訓練日，脂肪維持基本量。
-            前兩週體重每週掉 0.5–1% 是健康的節奏。
+            {coachNote}
           </p>
         </section>
-
-        {transportError ? (
-          <section className="sp-card" style={{ borderColor: "rgba(255,77,77,.32)", color: "#ffb3b3" }}>
-            <div className="sp-label" style={{ color: "#ffb3b3" }}>送出失敗</div>
-            <p className="sp-zh" style={{ margin: "8px 0 0", fontSize: 13, lineHeight: 1.55 }}>{transportError}</p>
-            <button type="button" className="sp-btn sp-btn-primary" style={{ marginTop: 12 }} onClick={onRetry}>重新送出</button>
-          </section>
-        ) : null}
       </main>
-      <SpObActions onBack={onBack} onNext={result ? onStart : undefined} nextLabel={loading ? "建立中…" : "開始記錄飲食 →"} />
+      <SpObActions onBack={onBack} onNext={onStart} nextLabel="開始記錄飲食" />
     </div>
   );
 }
