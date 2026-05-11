@@ -100,6 +100,7 @@ describe("Device API", () => {
     assert.ok(body.deviceId);
     assert.equal(body.dailyTargets.calories, 1500);
     assert.equal(body.dailyTargets.protein, 120);
+    assert.equal(body.usedFallback, false);
     const setCookieHeaders = getSetCookieHeaders(res);
     assert.equal(setCookieHeaders.length, 2);
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));
@@ -162,6 +163,72 @@ describe("Device API", () => {
     assert.ok(body.deviceId);
     assert.equal(body.dailyTargets.calories, 2500);
     assert.equal(body.dailyTargets.protein, 180);
+    assert.equal(body.usedFallback, false);
+  });
+
+  it("POST /api/device returns usedFallback false when generated targets are valid", async () => {
+    const llmProvider = new MockLLMProvider();
+    llmProvider.queueChatResponse({
+      content: JSON.stringify({
+        calories: 1800,
+        protein: 120,
+        carbs: 210,
+        fat: 53,
+        coachExplanation: "以穩定赤字開始，保留訓練表現。",
+      }),
+    });
+    const generatedApp = await buildApp({ dbPath: ":memory:", llmProvider });
+
+    const res = await generatedApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: {
+        goal: "fat_loss",
+        sex: "female",
+        age: 30,
+        heightCm: 165,
+        weightKg: 60,
+        activityLevel: "moderate",
+        trainingFrequency: "3_4",
+      },
+    });
+
+    await generatedApp.close();
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.dailyTargets.calories, 1800);
+    assert.equal(body.coachExplanation, "以穩定赤字開始，保留訓練表現。");
+    assert.equal(body.usedFallback, false);
+  });
+
+  it("POST /api/device returns usedFallback true when target generation falls back", async () => {
+    const llmProvider = new MockLLMProvider();
+    llmProvider.queueChatResponse({ content: "not valid json" });
+    llmProvider.queueChatResponse({ content: "still not valid json" });
+    const fallbackApp = await buildApp({ dbPath: ":memory:", llmProvider });
+
+    const res = await fallbackApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: {
+        goal: "fat_loss",
+        sex: "female",
+        age: 30,
+        heightCm: 165,
+        weightKg: 60,
+        activityLevel: "moderate",
+        trainingFrequency: "3_4",
+      },
+    });
+
+    await fallbackApp.close();
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.dailyTargets.calories, 1500);
+    assert.equal(body.coachExplanation, "先用預設目標，之後可再微調。");
+    assert.equal(body.usedFallback, true);
   });
 
   it("POST /api/device/session migrates a legacy device into cookie-backed mode", async () => {
