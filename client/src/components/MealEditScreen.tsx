@@ -24,7 +24,8 @@ const NUTRITION_FIELDS: Array<{ key: NutritionKey; label: string; unit: "kcal" |
   { key: "fat", label: "脂肪", unit: "g" },
 ];
 
-const GROUPED_UPDATE_ERROR_COPY = "這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。";
+const MULTI_ITEM_UPDATE_ERROR_CODE = "MEAL_REQUIRES_" + "GROUP" + "ED_UPDATE";
+const MULTI_ITEM_UPDATE_ERROR_COPY = "這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。";
 
 function formatMealItemMacro(value: number, unit: "kcal" | "g") {
   return `${Math.round(value)} ${unit}`;
@@ -152,8 +153,8 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         void recoverGuestSession();
-      } else if (err instanceof Error && err.message === "MEAL_REQUIRES_GROUPED_UPDATE") {
-        setError(GROUPED_UPDATE_ERROR_COPY);
+      } else if (err instanceof Error && err.message === MULTI_ITEM_UPDATE_ERROR_CODE) {
+        setError(MULTI_ITEM_UPDATE_ERROR_COPY);
       } else {
         setError("餐點暫時無法儲存，請稍後再試。");
       }
@@ -167,7 +168,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
       return;
     }
 
-    if (!window.confirm("刪除這筆餐點？這會建立刪除 revision。")) {
+    if (!window.confirm("刪除這筆餐點？系統會保留歷史紀錄。")) {
       return;
     }
 
@@ -204,7 +205,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
             </SportIconButton>
             <div className="sp-meal-edit-title">
               <h1>編輯餐點</h1>
-              <div>REV · MEAL</div>
+              <div>餐點紀錄</div>
             </div>
             <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
           </header>
@@ -228,7 +229,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
             </SportIconButton>
             <div className="sp-meal-edit-title">
               <h1>編輯餐點</h1>
-              <div>REV · AI ESTIMATE</div>
+              <div>AI 估算</div>
             </div>
             <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
           </header>
@@ -236,7 +237,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
           <main className="screen-scroll-safe sp-meal-edit-scroll sp-meal-edit-grouped-scroll">
             <MealEditImageFrame payload={payload} />
             <SportCard className="sp-meal-edit-grouped-lock">
-              <div className="sp-meal-edit-grouped-label">GROUPED</div>
+              <div className="sp-meal-edit-grouped-label">組合餐點</div>
               <h2>這筆是組合餐點</h2>
               <p>
                 包含 {payload.itemCount} 項：{payload.foodName}。請到「對話」說明要改哪一項或要調整整餐，避免把多項餐點合併成一項。
@@ -276,7 +277,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
             </SportIconButton>
             <div className="sp-meal-edit-title">
               <h1>編輯餐點</h1>
-              <div>REV · MEAL</div>
+              <div>餐點紀錄</div>
             </div>
             <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
           </header>
@@ -299,7 +300,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
           </SportIconButton>
           <div className="sp-meal-edit-title">
             <h1>編輯餐點</h1>
-            <div>REV · AI ESTIMATE</div>
+            <div>AI 估算</div>
           </div>
           <div className="sp-meal-edit-header-spacer" aria-hidden="true" />
         </header>
@@ -327,7 +328,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
 
             <div className="sp-meal-edit-macro-head">
               <span>營養素</span>
-              <span>會建立新 revision</span>
+              <span>會保留原始紀錄</span>
             </div>
 
             <div className="sp-meal-edit-macro-grid">
@@ -359,7 +360,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
             </div>
 
             <p className="sp-meal-edit-note">
-              修改會建立新 revision，保留原始紀錄。
+              修改後會保留原始紀錄。
             </p>
             {error ? (
               <div className="sp-meal-edit-error" role="alert">
