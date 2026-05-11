@@ -8,7 +8,7 @@
  */
 export const config = {
   /** LLM model used by the orchestrator. */
-  orchestratorModel: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5-nano",
+  orchestratorModel: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5.4-mini",
 
   /** HMAC secret used to sign guest-session cookies. */
   guestSessionSecret: process.env.GUEST_SESSION_SECRET ?? "dev-guest-session-secret-change-me",

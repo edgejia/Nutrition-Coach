@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { loadEnvFile } from "node:process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
@@ -94,6 +95,9 @@ export async function runMigrations(dbPath: string) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  if (existsSync(".env")) {
+    loadEnvFile(".env");
+  }
   const dbPath = process.env.DB_PATH ?? "./data/nutrition.db";
   await runMigrations(dbPath);
 }

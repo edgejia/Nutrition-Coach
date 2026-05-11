@@ -54,7 +54,7 @@ describe("OpenAI Provider", () => {
     ], tools);
 
     assert.deepEqual(capturedRequest, {
-      model: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5-nano",
+      model: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5.4-mini",
       messages: [{
         role: "user",
         content: [
@@ -126,7 +126,7 @@ describe("OpenAI Provider", () => {
     assert.ok(result);
     assert.equal(result.kind, "stream");
     assert.deepEqual(capturedRequest, {
-      model: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5-nano",
+      model: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5.4-mini",
       messages: [{ role: "user", content: "你好" }],
       stream: true,
     });
