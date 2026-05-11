@@ -216,7 +216,7 @@ describe("API Client", () => {
   it("establishGuestSession migrates a legacy device into cookie-backed mode", async () => {
     mockFetch(200, {
       deviceId: "d-legacy",
-      goal: "fat_loss",
+      goal: "maintain",
       dailyTargets: { calories: 1500, protein: 120, carbs: 150, fat: 50 },
       establishedBy: "legacy_migration",
     });
@@ -227,6 +227,7 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.method, "POST");
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), { legacyDeviceId: "d-legacy" });
+    assert.equal(result.goal, "maintain");
     assert.equal(result.establishedBy, "legacy_migration");
   });
 

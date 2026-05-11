@@ -20,7 +20,7 @@ import { getEarliestValidationStep } from "./lib/onboarding-intake-validation.js
 
 export interface GuestSessionBootstrapResult {
   deviceId: string;
-  goal: "fat_loss" | "muscle_gain";
+  goal: IntakeData["goal"];
   dailyTargets: DailyTargets;
   establishedBy: "active" | "resume" | "legacy_migration";
 }

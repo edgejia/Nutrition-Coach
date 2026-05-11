@@ -115,6 +115,17 @@ describe("onboarding-stepper-flow", () => {
     assert.deepEqual(stepperFlow.applyFieldEditRecovery(errors, "age"), [errors[1]]);
   });
 
+  it("applyFieldEditRecovery clears sex and allergies validation issues", () => {
+    const errors: IntakeValidationIssue[] = [
+      { field: "sex", code: "INVALID_SEX", step: 3, message: "請選擇有效的性別" },
+      { field: "allergies", code: "ALLERGIES_TOO_LONG", step: 4, message: "飲食限制請控制在 300 字內" },
+      { field: "age", code: "AGE_OUT_OF_RANGE", step: 3, message: "年齡需介於 10-120" },
+    ];
+
+    assert.deepEqual(stepperFlow.applyFieldEditRecovery(errors, "sex"), [errors[1], errors[2]]);
+    assert.deepEqual(stepperFlow.applyFieldEditRecovery(errors, "allergies"), [errors[0], errors[2]]);
+  });
+
   it("keeps Step 6 transport failure UI separate from validation recovery", async () => {
     const outcome = await stepperFlow.runSubmitAttempt(
       makeIntake(),
