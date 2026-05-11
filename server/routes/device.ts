@@ -384,7 +384,7 @@ export function registerDeviceRoutes(
       const result = await deviceService.createDevice(body.goal);
       logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: false });
       setGuestSessionCookies(reply, guestSessionService, result.deviceId);
-      return { ...result, coachExplanation: null };
+      return { ...result, coachExplanation: null, usedFallback: false };
     }
 
     const intakeResult = buildIntake(body);
@@ -405,7 +405,7 @@ export function registerDeviceRoutes(
     );
     logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: usedFallback });
     setGuestSessionCookies(reply, guestSessionService, result.deviceId);
-    return { ...result, coachExplanation };
+    return { ...result, coachExplanation, usedFallback };
   });
 
   app.post("/api/device/session", async (request, reply) => {
