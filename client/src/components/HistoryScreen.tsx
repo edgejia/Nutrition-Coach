@@ -131,9 +131,9 @@ function HistoryStatGrid({ stats }: { stats: ReturnType<typeof buildHistoryWeekS
     {
       label: "達標天數",
       value: stats.inRangeDays === null || stats.loggedDays === null ? "--" : `${stats.inRangeDays}/${stats.loggedDays}`,
-      sublabel: "days",
+      sublabel: "天",
     },
-    { label: "紀錄餐數", value: formatHistoryStatValue(stats.mealCount), sublabel: "entries" },
+    { label: "紀錄餐數", value: formatHistoryStatValue(stats.mealCount), sublabel: "筆紀錄" },
   ];
 
   return (

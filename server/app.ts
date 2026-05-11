@@ -26,6 +26,7 @@ import { registerAssetRoutes } from "./routes/assets.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
 import type { LLMProvider } from "./llm/types.js";
+import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
 import { config } from "./config.js";
 
 export interface AppServices {
@@ -59,6 +60,8 @@ export interface AppOptions {
    * In OBS-04 tests: pass `{ level: 'info', stream: captureStream }` to capture log lines.
    */
   logger?: import("fastify").FastifyServerOptions["logger"];
+  /** Optional test/harness trace recorder factory. SSE chat routes create at most one recorder per turn. */
+  llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
   /** Test harness observer for in-process service access. Does not expose an HTTP surface. */
   onServicesReady?: (services: AppServices) => void;
 }
@@ -125,6 +128,7 @@ export async function buildApp(opts: AppOptions) {
     assetService,
     publisher,
     uploadsDir: opts.uploadsDir,
+    llmTraceRecorderFactory: opts.llmTraceRecorderFactory,
   });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, assetService, publisher });
   registerDaySnapshotRoutes(app, { daySnapshotService, deviceService, guestSessionService });

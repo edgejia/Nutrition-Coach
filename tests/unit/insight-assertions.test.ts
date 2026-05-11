@@ -2,10 +2,12 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   assertMedicalBoundary,
   assertNoInventedMeals,
   assertNumericGrounding,
+  assertTraditionalChineseAnswer,
   evaluateInsightAnswer,
 } from "../harness/insight-assertions.js";
 import { buildInsightMetrics, loadInsightFixture } from "../harness/insight-fixtures.js";
@@ -32,6 +34,20 @@ describe("insight assertions", () => {
 
   test("known meal name from fixture passes", () => {
     const result = assertNoInventedMeals("你記錄了「雞胸便當」和「優格」。", weeklyMetrics);
+    assert.equal(result.ok, true);
+  });
+
+  test("insight assertions remain thin compatibility wrappers over behavior assertions", () => {
+    const source = readFileSync("tests/harness/insight-assertions.ts", "utf-8");
+    assert.match(
+      source,
+      /Generic behavior assertions belong in behavior-assertions\.ts; insight-assertions\.ts owns insight-specific metrics-bound assertions and compatibility wrappers\./,
+    );
+    assert.match(source, /from "\.\/behavior-assertions\.js"/);
+    assert.match(source, /export function assertSparseDataCaveat/);
+
+    const result = assertTraditionalChineseAnswer("這是繁體中文回覆");
+    assert.deepEqual(Object.keys(result), ["name", "ok"]);
     assert.equal(result.ok, true);
   });
 

@@ -80,7 +80,7 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
   });
 
-  it("submitIntake sends POST to /api/device with intake payload and returns coachExplanation", async () => {
+  it("submitIntake sends POST to /api/device with intake payload and preserves usedFallback false", async () => {
     const intake: IntakeData = {
       goal: "fat_loss",
       sex: "female",
@@ -99,15 +99,41 @@ describe("API Client", () => {
       deviceId: "d-2",
       dailyTargets: { calories: 1600, protein: 110, carbs: 140, fat: 55 },
       coachExplanation: "Use a modest deficit.",
+      usedFallback: false,
     });
 
     const result = await api.submitIntake(intake);
+    const usedFallback: boolean = result.usedFallback;
 
     assert.equal(fetchCalls[0].url, "/api/device");
     assert.equal(fetchCalls[0].init.method, "POST");
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), intake);
     assert.equal(result.coachExplanation, "Use a modest deficit.");
+    assert.equal(usedFallback, false);
+  });
+
+  it("submitIntake preserves usedFallback true from the server response", async () => {
+    const intake: IntakeData = {
+      goal: "fat_loss",
+      sex: "female",
+      age: 31,
+      heightCm: 165,
+      weightKg: 58,
+      activityLevel: "moderate",
+      trainingFrequency: "3_4",
+    };
+    mockFetch(200, {
+      deviceId: "d-2",
+      dailyTargets: { calories: 1500, protein: 120, carbs: 150, fat: 50 },
+      coachExplanation: "Using conservative targets.",
+      usedFallback: true,
+    });
+
+    const result = await api.submitIntake(intake);
+    const usedFallback: boolean = result.usedFallback;
+
+    assert.equal(usedFallback, true);
   });
 
   it("submitIntake throws IntakeValidationError for VALIDATION_ERROR responses", async () => {

@@ -19,6 +19,12 @@ function formatNutritionValue(value: number) {
   return Math.round(value).toLocaleString("en-US");
 }
 
+const macroLabelCopy = {
+  protein: "蛋白質",
+  carbs: "碳水",
+  fat: "脂肪",
+} satisfies Record<"protein" | "carbs" | "fat", string>;
+
 function isCompleteLoggedMealReceipt(message: Message) {
   return getCompleteReceiptEditPayload(message) !== null;
 }
@@ -45,7 +51,7 @@ export function getUserMessagePresentation(message: Message) {
 function MacroRow({ label, value }: { label: "protein" | "carbs" | "fat"; value: number }) {
   return (
     <div className="sp-receipt-row">
-      <span>{label}</span>
+      <span>{macroLabelCopy[label]}</span>
       <span>{formatNutritionValue(value)} g</span>
     </div>
   );
@@ -105,7 +111,7 @@ function ReceiptCard(props: {
             </div>
           ) : null}
           <div className="sp-receipt-title">
-            <div className="sp-receipt-label">logged</div>
+            <div className="sp-receipt-label">已記錄</div>
             <div className="sp-receipt-food">{loggedMeal.foodName}</div>
           </div>
           <div className="sp-receipt-kcal">

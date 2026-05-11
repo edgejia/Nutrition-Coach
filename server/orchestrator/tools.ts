@@ -26,6 +26,7 @@ import {
   type ProteinSourceInput,
   type TrustedProteinSource,
 } from "./protein-trust.js";
+import type { DeletedMealSnapshot } from "./mutation-effects.js";
 
 // ---------------------------------------------------------------------------
 // Public types preserved for the orchestrator (Phase 8/9 callers).
@@ -55,6 +56,7 @@ export interface ToolExecutionResult {
   dailySummary?: DailySummary;
   affectedDate?: string;
   mealMutationKind?: "log" | "update" | "delete";
+  deletedMeal?: DeletedMealSnapshot;
   loggedMeal?: {
     mealId: string;
     mealRevisionId: string;
@@ -246,6 +248,7 @@ interface DeleteMealResult {
   dailySummary: DailySummary;
   affectedDate: string;
   deletedMealId: string;
+  deletedMeal: DeletedMealSnapshot;
 }
 
 interface GetDailySummaryArgs {
@@ -430,6 +433,26 @@ function extractPreviousHistoricalDateKey(
 
 function buildLocalMidpointDate(dateKey: string): Date {
   return new Date(`${dateKey}T12:00:00`);
+}
+
+async function recoverDailySummaryFromPersistedMeals(
+  deps: ToolDeps,
+  deviceId: string,
+  dateKey: string,
+): Promise<DailySummary> {
+  const meals = await deps.foodLoggingService.getMealsByDate(
+    deviceId,
+    buildLocalMidpointDate(dateKey),
+  );
+
+  return {
+    totalCalories: meals.reduce((sum, meal) => sum + meal.calories, 0),
+    totalProtein: meals.reduce((sum, meal) => sum + meal.protein, 0),
+    totalCarbs: meals.reduce((sum, meal) => sum + meal.carbs, 0),
+    totalFat: meals.reduce((sum, meal) => sum + meal.fat, 0),
+    mealCount: meals.length,
+    date: dateKey,
+  };
 }
 
 function roundProtein(value: number): number {
@@ -883,12 +906,12 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         deviceId,
         buildLocalMidpointDate(dateIntent.dateKey),
       );
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "log_food dailySummary recomputation failed";
-      throw new FatalToolError(message, { cause: err });
+    } catch {
+      dailySummary = await recoverDailySummaryFromPersistedMeals(
+        deps,
+        deviceId,
+        dateIntent.dateKey,
+      );
     }
 
     return {
@@ -1452,6 +1475,7 @@ export async function executeTool(
       mealMutationKind: "delete",
       dailySummary: contractResult.dailySummary,
       affectedDate: contractResult.affectedDate,
+      deletedMeal: contractResult.deletedMeal,
     };
   }
 

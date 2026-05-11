@@ -62,9 +62,9 @@ describe("insight trace artifacts", () => {
 
     assert.equal(trace.scenario, "weekly-basic");
     assert.equal(trace.status, "pass");
-    assert.equal(trace.finalAnswer, "本週共 2130 大卡。");
     assert.equal(trace.llmRoundCount, 1);
     assert.ok(!("llmRounds" in trace));
+    assert.ok(!("finalAnswer" in trace));
     assert.match(stringify(trace), /deterministicMetrics/);
     assert.match(stringify(trace), /assertions/);
   });
@@ -131,7 +131,7 @@ describe("insight trace artifacts", () => {
       assert.doesNotMatch(raw, /raw prompt text should not persist/);
       assert.doesNotMatch(raw, /Error: stack should not persist/);
       assert.match(raw, /deterministicMetrics/);
-      assert.match(raw, /finalAnswer/);
+      assert.doesNotMatch(raw, /finalAnswer/);
       assert.match(raw, /assertions/);
     });
   });
