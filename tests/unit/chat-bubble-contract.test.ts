@@ -2,6 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MessageBubble } from "../../client/src/components/MessageBubble.js";
+import type { Message } from "../../client/src/types.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -59,10 +63,10 @@ describe("chat bubble source contract", () => {
       "sp-status-bubble",
       "sp-stream-caret",
       "sp-receipt",
-      "logged",
-      "protein",
-      "carbs",
-      "fat",
+      "已記錄",
+      "蛋白質",
+      "碳水",
+      "脂肪",
       "SportBoltIcon",
       "SportChevronRightIcon",
       "AssistantMarkdown",
@@ -72,6 +76,45 @@ describe("chat bubble source contract", () => {
     ]) {
       assert.match(bubble, new RegExp(required));
     }
+
+    assert.doesNotMatch(bubble, /sp-receipt-label">logged</);
+    assert.doesNotMatch(bubble, /<span>protein<\/span>/);
+    assert.doesNotMatch(bubble, /<span>carbs<\/span>/);
+    assert.doesNotMatch(bubble, /<span>fat<\/span>/);
+    assert.match(bubble, /loggedMeal\.protein/);
+    assert.match(bubble, /loggedMeal\.carbs/);
+    assert.match(bubble, /loggedMeal\.fat/);
+  });
+
+  it("renders localized receipt labels without changing logged meal payload fields", () => {
+    const message: Message = {
+      id: "receipt-1",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-05-11T10:00:00.000Z",
+      loggedMeal: {
+        foodName: "雞胸便當",
+        calories: 640,
+        protein: 42,
+        carbs: 68,
+        fat: 18,
+        itemCount: 1,
+      },
+    };
+
+    const html = renderToStaticMarkup(createElement(MessageBubble, { message }));
+
+    assert.match(html, />已記錄</);
+    assert.match(html, />蛋白質</);
+    assert.match(html, />碳水</);
+    assert.match(html, />脂肪</);
+    assert.match(html, />42 g</);
+    assert.match(html, />68 g</);
+    assert.match(html, />18 g</);
+    assert.doesNotMatch(html, />logged</);
+    assert.doesNotMatch(html, />protein</);
+    assert.doesNotMatch(html, />carbs</);
+    assert.doesNotMatch(html, />fat</);
   });
 
   it("renders image-only user messages without the green text bubble", async () => {

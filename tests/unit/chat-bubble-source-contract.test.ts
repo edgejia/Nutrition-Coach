@@ -61,4 +61,25 @@ describe("Chat bubble source contract", () => {
     assert.doesNotMatch(receiptCard, /backgroundImage/);
     assert.doesNotMatch(receiptCard, /dangerouslySetInnerHTML/);
   });
+
+  it("localizes visible receipt labels while preserving payload field access", async () => {
+    const messageBubble = await readSource("../../client/src/components/MessageBubble.tsx");
+    const receiptCard = messageBubble.slice(
+      messageBubble.indexOf("function ReceiptCard"),
+      messageBubble.indexOf("function AssistantTextBubble"),
+    );
+
+    for (const expectedCopy of ["已記錄", "蛋白質", "碳水", "脂肪"]) {
+      assert.match(receiptCard, new RegExp(expectedCopy));
+    }
+
+    for (const payloadAccess of ["loggedMeal.protein", "loggedMeal.carbs", "loggedMeal.fat"]) {
+      assert.match(receiptCard, new RegExp(payloadAccess.replace(".", "\\.")));
+    }
+
+    assert.doesNotMatch(receiptCard, /sp-receipt-label">logged</);
+    assert.doesNotMatch(receiptCard, /<span>protein<\/span>/);
+    assert.doesNotMatch(receiptCard, /<span>carbs<\/span>/);
+    assert.doesNotMatch(receiptCard, /<span>fat<\/span>/);
+  });
 });
