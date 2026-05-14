@@ -251,7 +251,10 @@ describe("createLlmTraceRecorder", () => {
     const trace = recorder.build({ scenario: "unit-provider-fallback", status: "pass" });
 
     assert.equal(trace.schemaVersion, "llm-trace.v1");
-    assert.equal(trace.timeline.some((event) => event.type === "llm_error"), false);
+    assert.equal(
+      (trace.timeline as Array<{ type: string }>).some((event) => event.type === "llm_error"),
+      false,
+    );
     assert.deepEqual(trace.timeline.at(-1), {
       type: "orchestrator_fallback",
       reason: "llm_error",
@@ -318,7 +321,10 @@ describe("createLlmTraceRecorder", () => {
     ]);
     assert.deepEqual(Object.keys(captured[0]), ["event", "round", "lastTool", "providerMetadata"]);
     assert.deepEqual(Object.keys(captured[1]), ["event", "reason", "round", "lastTool", "providerMetadata"]);
-    assert.deepEqual(Object.keys(captured[0]?.providerMetadata as Record<string, unknown>), providerMetadataKeys);
+    assert.deepEqual(
+      Object.keys(captured[0]?.providerMetadata as unknown as Record<string, unknown>),
+      providerMetadataKeys,
+    );
 
     const logJson = JSON.stringify(captured);
     for (const forbidden of [

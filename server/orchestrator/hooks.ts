@@ -1,11 +1,26 @@
 import type { FastifyBaseLogger } from "fastify";
+import type { ProviderErrorMetadata } from "../llm/types.js";
 
 export interface OrchestratorHooks {
   onLLMStart?(round: number): void;
   onLLMEnd?(round: number, hadToolCalls: boolean): void;
   onToolReceived?(tool: string, argsRedacted: string): void;
   onToolResult?(payload: ToolResultPayload): void;
-  onFallback?(reason: FallbackReason): void;
+  onLLMError?(payload: LLMErrorPayload): void;
+  onFallback?(payload: FallbackPayload): void;
+}
+
+export interface LLMErrorPayload {
+  round: number;
+  providerMetadata: ProviderErrorMetadata;
+  lastTool?: string;
+}
+
+export interface FallbackPayload {
+  reason: FallbackReason;
+  round?: number;
+  lastTool?: string;
+  providerMetadata?: ProviderErrorMetadata;
 }
 
 export interface ToolResultPayload {
@@ -85,8 +100,28 @@ export function createStructuredHooks(log: FastifyBaseLogger): OrchestratorHooks
         );
       }
     },
-    onFallback(reason) {
-      log.warn({ event: "orchestrator_fallback", reason }, "Orchestrator fallback");
+    onLLMError(payload) {
+      log.warn(
+        {
+          event: "llm_provider_error",
+          round: payload.round,
+          ...(payload.lastTool !== undefined ? { lastTool: payload.lastTool } : {}),
+          providerMetadata: payload.providerMetadata,
+        },
+        "LLM provider error",
+      );
+    },
+    onFallback(payload) {
+      log.warn(
+        {
+          event: "orchestrator_fallback",
+          reason: payload.reason,
+          ...(payload.round !== undefined ? { round: payload.round } : {}),
+          ...(payload.lastTool !== undefined ? { lastTool: payload.lastTool } : {}),
+          ...(payload.providerMetadata !== undefined ? { providerMetadata: payload.providerMetadata } : {}),
+        },
+        "Orchestrator fallback",
+      );
     },
   };
 }

@@ -404,7 +404,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
       opts?.onUserMessageSaved?.();
       if (hallucinatedChoiceRecovery) {
-        opts?.hooks?.onFallback?.("hallucination_detected");
+        opts?.hooks?.onFallback?.({ reason: "hallucination_detected" });
         return {
           reply: hallucinatedChoiceRecovery,
           didLogMeal: false,
@@ -514,7 +514,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = await llmProvider.chat(messages, toolDefinitions, { signal: opts?.signal });
           }
         } catch (err) {
-          opts?.hooks?.onFallback?.(didMutateMeal ? "partial_success" : "llm_error");
+          opts?.hooks?.onFallback?.({ reason: didMutateMeal ? "partial_success" : "llm_error", round: round + 1 });
           if (mutationReceiptText && mutationEffects) {
             return {
               reply: mutationReceiptText,
@@ -847,7 +847,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       }
 
       // Fallback after MAX_ROUNDS
-      opts?.hooks?.onFallback?.("max_rounds");
+      opts?.hooks?.onFallback?.({ reason: "max_rounds" });
       if (mutationReceiptText && mutationEffects) {
         return {
           reply: mutationReceiptText,

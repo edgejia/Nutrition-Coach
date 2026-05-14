@@ -1,4 +1,4 @@
-import type { FallbackReason, OrchestratorHooks, ToolResultPayload } from "./hooks.js";
+import type { FallbackPayload, OrchestratorHooks, ToolResultPayload } from "./hooks.js";
 import {
   ACTIVE_SYSTEM_PROMPT_VERSION,
   SYSTEM_PROMPT_SECTION_IDS,
@@ -20,7 +20,7 @@ export type LlmTraceTimelineEvent =
       updatedFields?: string[];
       publishedEvents?: string[];
     }
-  | { type: "orchestrator_fallback"; reason: FallbackReason }
+  | ({ type: "orchestrator_fallback" } & FallbackPayload)
   | {
       type: "route_completion";
       transport: "sse";
@@ -199,8 +199,12 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
         onToolResult(payload) {
           timeline.push(buildToolResultEvent(payload, currentRound));
         },
-        onFallback(reason) {
-          timeline.push({ type: "orchestrator_fallback", reason });
+        onLLMError() {
+          // Trace v1 accepts provider-error hook facts for contract parity but
+          // does not persist a dedicated llm_error timeline event until trace v2.
+        },
+        onFallback(payload) {
+          timeline.push({ type: "orchestrator_fallback", ...payload });
         },
       };
     },

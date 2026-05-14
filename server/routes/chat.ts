@@ -119,8 +119,11 @@ function fanOutOrchestratorHooks(
     onToolResult(payload) {
       for (const hook of activeHooks) hook.onToolResult?.(payload);
     },
-    onFallback(reason) {
-      for (const hook of activeHooks) hook.onFallback?.(reason);
+    onLLMError(payload) {
+      for (const hook of activeHooks) hook.onLLMError?.(payload);
+    },
+    onFallback(payload) {
+      for (const hook of activeHooks) hook.onFallback?.(payload);
     },
   };
 }
@@ -525,7 +528,7 @@ async function handleStreamingReply(
   }
 
   if (hallucinationDetected) {
-    hooks?.onFallback?.("hallucination_detected");
+    hooks?.onFallback?.({ reason: "hallucination_detected" });
     const retryMsg = didMutateMeal && partialMutationReply
       ? partialMutationReply
       : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";

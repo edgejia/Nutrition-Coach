@@ -297,7 +297,7 @@ describe("Orchestrator", () => {
     assert.equal(spyHooks.onLLMEnd.mock.calls[1].arguments[1], false, "Second onLLMEnd should have hadToolCalls=false");
   });
 
-  it("OBS-02: fires onFallback('max_rounds') after 3 rounds of only tool calls", async () => {
+  it("OBS-02: fires onFallback max_rounds after 3 rounds of only tool calls", async () => {
     for (let i = 0; i < 3; i++) {
       mockLLM.queueChatResponse({
         toolCalls: [{
@@ -309,7 +309,7 @@ describe("Orchestrator", () => {
     }
     await orchestrator.handleMessage(deviceId, "test", undefined, undefined, { hooks: spyHooks });
     assert.equal(spyHooks.onFallback.mock.callCount(), 1, "onFallback should fire exactly once");
-    assert.equal(spyHooks.onFallback.mock.calls[0].arguments[0], "max_rounds");
+    assert.deepEqual(spyHooks.onFallback.mock.calls[0].arguments[0], { reason: "max_rounds" });
   });
 
   it("OBS-03: hook payloads contain no raw deviceId and no raw meal text", async () => {

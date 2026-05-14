@@ -16,6 +16,7 @@ export function createSpyHooks(): OrchestratorHooks & {
   onLLMEnd: ReturnType<typeof mock.fn<NonNullable<OrchestratorHooks["onLLMEnd"]>>>;
   onToolReceived: ReturnType<typeof mock.fn<NonNullable<OrchestratorHooks["onToolReceived"]>>>;
   onToolResult: ReturnType<typeof mock.fn<NonNullable<OrchestratorHooks["onToolResult"]>>>;
+  onLLMError: ReturnType<typeof mock.fn<NonNullable<OrchestratorHooks["onLLMError"]>>>;
   onFallback: ReturnType<typeof mock.fn<NonNullable<OrchestratorHooks["onFallback"]>>>;
 } {
   return {
@@ -23,6 +24,7 @@ export function createSpyHooks(): OrchestratorHooks & {
     onLLMEnd: mock.fn<NonNullable<OrchestratorHooks["onLLMEnd"]>>(),
     onToolReceived: mock.fn<NonNullable<OrchestratorHooks["onToolReceived"]>>(),
     onToolResult: mock.fn<NonNullable<OrchestratorHooks["onToolResult"]>>(),
+    onLLMError: mock.fn<NonNullable<OrchestratorHooks["onLLMError"]>>(),
     onFallback: mock.fn<NonNullable<OrchestratorHooks["onFallback"]>>(),
   };
 }
