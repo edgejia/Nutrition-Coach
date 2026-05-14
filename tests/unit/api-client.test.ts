@@ -255,6 +255,24 @@ describe("API Client", () => {
     assert.deepEqual(result, { reply: "已記錄", didLogMeal: true });
   });
 
+  it("formatTurnReference returns the short public reference code", () => {
+    assert.equal(
+      api.formatTurnReference("a1b2c3d4-1111-4222-8333-0123456789ab"),
+      "t-a1b2c3d4",
+    );
+  });
+
+  it("sendMessage preserves the top-level turnId returned by the backend", async () => {
+    storage.set("deviceId", "d-1");
+    const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";
+    mockFetch(200, { turnId, reply: "已記錄", didLogMeal: true });
+
+    const result = await api.sendMessage("我吃了雞胸肉");
+
+    assert.equal(result.turnId, turnId);
+    assert.deepEqual(result, { turnId, reply: "已記錄", didLogMeal: true });
+  });
+
   it("sendMessage normalizes loggedMeal image urls through withAuthorizedAssetUrl", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {

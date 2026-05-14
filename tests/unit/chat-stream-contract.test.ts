@@ -129,6 +129,86 @@ describe("chat stream contract", () => {
     assert.equal(donePayload?.loggedMeal, undefined);
   });
 
+  it("sendMessageStream emits turn start before later stream effects and passes done turnId", async () => {
+    const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";
+    mockStreamFetch([
+      `event: start\ndata: ${JSON.stringify({ turnId })}\n\n`,
+      `event: status\ndata: ${JSON.stringify({ label: "思考中...", turnId })}\n\n`,
+      'event: chunk\ndata: {"token":"已"}\n\n',
+      `event: done\ndata: ${JSON.stringify({ turnId, didLogMeal: false })}\n\n`,
+    ]);
+
+    const events: string[] = [];
+    let donePayload: { didLogMeal: boolean; turnId?: string } | undefined;
+
+    await sendMessageStream("hello", {
+      onTurnStart: (receivedTurnId) => events.push(`start:${receivedTurnId}`),
+      onStatus: (label) => events.push(`status:${label}`),
+      onToken: (token) => events.push(`chunk:${token}`),
+      onDone: (data) => {
+        events.push("done");
+        donePayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.deepEqual(events, [`start:${turnId}`, "status:思考中...", "chunk:已", "done"]);
+    assert.equal(donePayload?.turnId, turnId);
+  });
+
+  it("sendMessageStream dedupes later turn ids and ignores malformed turn ids", async () => {
+    const turnId = "b2c3d4e5-1111-4222-8333-0123456789ab";
+    mockStreamFetch([
+      `event: start\ndata: ${JSON.stringify({ turnId })}\n\n`,
+      `event: status\ndata: ${JSON.stringify({ label: "分析中...", turnId })}\n\n`,
+      `event: done\ndata: ${JSON.stringify({ turnId, didLogMeal: false })}\n\n`,
+    ]);
+
+    const turnStarts: string[] = [];
+    let donePayload: { didLogMeal: boolean; turnId?: string } | undefined;
+
+    await sendMessageStream("hello", {
+      onTurnStart: (receivedTurnId) => turnStarts.push(receivedTurnId),
+      onStatus: () => undefined,
+      onToken: () => undefined,
+      onDone: (data) => {
+        donePayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.deepEqual(turnStarts, [turnId]);
+    assert.equal(donePayload?.turnId, turnId);
+
+    mockStreamFetch([
+      'event: start\ndata: {"turnId":""}\n\n',
+      'event: status\ndata: {"label":"思考中...","turnId":42}\n\n',
+      'event: done\ndata: {"didLogMeal":false}\n\n',
+    ]);
+
+    const malformedTurnStarts: string[] = [];
+    let malformedDonePayload: { didLogMeal: boolean; turnId?: string } | undefined;
+
+    await sendMessageStream("missing id", {
+      onTurnStart: (receivedTurnId) => malformedTurnStarts.push(receivedTurnId),
+      onStatus: () => undefined,
+      onToken: () => undefined,
+      onDone: (data) => {
+        malformedDonePayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.deepEqual(malformedTurnStarts, []);
+    assert.equal(malformedDonePayload?.turnId, undefined);
+  });
+
   it("sendMessageStream exposes turnId status metadata and parses event: stopped as terminal", async () => {
     const todayKey = formatLocalDate(new Date());
     mockStreamFetch([
