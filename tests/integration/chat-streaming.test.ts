@@ -320,6 +320,8 @@ function assertNoSuccessfulLogInternalCopy(text: string) {
   assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 describe("chat-streaming", () => {
   let app: FastifyInstance;
   let mockLLM: StreamingLLMProvider;
@@ -432,6 +434,51 @@ describe("chat-streaming", () => {
         didMutateMeal: false,
         completed: true,
       });
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE emits start before any status, chunk, done, or stopped frame and reuses that turnId", async () => {
+    mockLLM.queueChatStream(["直接", "回覆"]);
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const events = parseSSEEvents(text);
+
+      assert.equal(events[0]?.event, "start", "first SSE frame must be event: start");
+      const startPayload = JSON.parse(events[0]!.data) as { turnId?: string };
+      assert.match(startPayload.turnId ?? "", UUID_PATTERN);
+
+      const firstNonStartIndex = events.findIndex((event) =>
+        ["status", "chunk", "done", "stopped"].includes(event.event)
+      );
+      assert.equal(firstNonStartIndex, 1, "no status, chunk, done, or stopped frame may precede start");
+
+      for (const event of events) {
+        if (event.event === "status" || event.event === "done" || event.event === "stopped") {
+          const payload = JSON.parse(event.data) as { turnId?: string };
+          assert.equal(payload.turnId, startPayload.turnId, `${event.event} must reuse start.turnId`);
+        }
+        if (event.event === "chunk") {
+          const payload = JSON.parse(event.data) as { turnId?: string; token?: string };
+          assert.equal("turnId" in payload, false, "chunk payloads remain text-only");
+        }
+      }
     } finally {
       clearTimeout(timeout);
     }
@@ -834,12 +881,12 @@ describe("chat-streaming", () => {
       const firstText = await readStreamUntil(reader, "event: chunk");
       const firstEvents = parseSSEEvents(firstText);
       const startPayload = firstEvents
-        .filter((event) => event.event === "status")
+        .filter((event) => event.event === "start")
         .map((event) => JSON.parse(event.data) as { turnId?: string })
         .find((payload) => typeof payload.turnId === "string");
       const turnId = startPayload?.turnId;
 
-      assert.ok(turnId, "stream must expose a turnId before stop");
+      assert.match(turnId ?? "", UUID_PATTERN, "stream must expose a server UUID turnId before stop");
 
       const stopRes = await fetch(`${address}/api/chat/stop`, {
         method: "POST",
@@ -863,6 +910,7 @@ describe("chat-streaming", () => {
 
       const stoppedPayload = JSON.parse(stoppedEvents[0]!.data) as {
         stopped?: boolean;
+        turnId?: string;
         tokensStreamed?: number;
         didLogMeal?: boolean;
         didMutateMeal?: boolean;
@@ -870,6 +918,7 @@ describe("chat-streaming", () => {
         loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
       };
       assert.equal(stoppedPayload.stopped, true);
+      assert.equal(stoppedPayload.turnId, turnId);
       assert.equal(stoppedPayload.tokensStreamed, 1);
       assert.equal(stoppedPayload.didLogMeal, false);
       assert.equal(stoppedPayload.didMutateMeal, false);

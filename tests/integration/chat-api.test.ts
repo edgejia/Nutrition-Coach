@@ -77,6 +77,8 @@ function chatTurnCompletedMetadata(record: Record<string, unknown>) {
   };
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 async function readUntilEventCount(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   targetEvent: string,
@@ -1930,6 +1932,100 @@ describe("Chat API", () => {
       assert.ok(!serializedLogs.includes(rawMealText));
       assert.ok(!serializedLogs.includes(assistantReply));
       assert.ok(!serializedLogs.includes(logDeviceId));
+    } finally {
+      await logApp.close();
+    }
+  });
+
+  it("POST /api/chat JSON returns a server turnId and correlates route plus orchestrator logs without raw content", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const clientSuppliedTurnId = "11111111-1111-4111-8111-111111111111";
+    const rawMealText = "我吃了機密 turnId 測試餐點";
+    const assistantReply = "已幫你記錄機密 turnId 測試餐點！";
+    const logLLM = new MockLLMProvider();
+    logLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_client_spoof_turn_id",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "機密 turnId 測試餐點",
+            calories: 520,
+            protein: 36,
+            carbs: 60,
+            fat: 12,
+          }),
+        },
+      }],
+    });
+    logLLM.queueChatResponse({ content: assistantReply });
+
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: logLLM,
+      logger: { level: "info", stream: logStream },
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", rawMealText);
+      form.append("turnId", clientSuppliedTurnId);
+      form.append("metadata", JSON.stringify({ turnId: clientSuppliedTurnId }));
+
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        turnId?: string;
+        reply?: string;
+        didLogMeal?: boolean;
+        loggedMeal?: unknown;
+        dailySummary?: unknown;
+      };
+      assert.match(body.turnId ?? "", UUID_PATTERN);
+      assert.notEqual(body.turnId, clientSuppliedTurnId, "client-supplied ids must be ignored");
+      assert.equal(typeof body.reply, "string", "existing top-level reply field must remain");
+      assert.equal(body.didLogMeal, true, "existing top-level didLogMeal field must remain");
+      assert.ok(body.loggedMeal, "existing top-level loggedMeal field must remain");
+      assert.ok(body.dailySummary, "existing top-level dailySummary field must remain");
+
+      const records = parseLogLines(logLines);
+      const completedRecords = records.filter((record) => record.event === "chat_turn_completed");
+      assert.equal(completedRecords.length, 1);
+      assert.equal(completedRecords[0]!.turnId, body.turnId);
+
+      const llmRoundStarts = records.filter((record) => record.event === "llm_round_start");
+      assert.ok(llmRoundStarts.length >= 1, "expected at least one orchestrator llm_round_start log");
+      for (const record of llmRoundStarts) {
+        assert.equal(record.turnId, body.turnId);
+        assert.equal(record.component, "orchestrator");
+      }
+      const orchestratorRecords = records.filter((record) => record.component === "orchestrator");
+      assert.ok(orchestratorRecords.length >= 1, "expected orchestrator child log records");
+      for (const record of orchestratorRecords) {
+        assert.equal(record.turnId, body.turnId);
+      }
+
+      const serializedLogs = JSON.stringify(records);
+      assert.ok(!serializedLogs.includes(rawMealText));
+      assert.ok(!serializedLogs.includes(assistantReply));
+      assert.ok(!serializedLogs.includes(logDeviceId));
+      assert.ok(!serializedLogs.includes(logCookieHeader));
+      assert.ok(!serializedLogs.includes(clientSuppliedTurnId));
+      assert.doesNotMatch(serializedLogs, /機密 turnId 測試餐點|call_client_spoof_turn_id|messages|tools|imagePath|data:image|guest_session/);
     } finally {
       await logApp.close();
     }
