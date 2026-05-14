@@ -38,6 +38,15 @@ function formatMealCountCompact(mealCount: number) {
   return `${mealCount} 餐`;
 }
 
+function isFallbackReplyContent(content: string) {
+  return (
+    content.includes("抱歉，這次無法完成請求") ||
+    content.includes("抱歉，無法辨識這次的請求") ||
+    content.includes("已完成記錄，但回覆生成失敗") ||
+    (content.includes("已完成餐點") && content.includes("回覆生成失敗"))
+  );
+}
+
 function shouldShowPhase40IncompleteReceiptMock() {
   if (typeof window === "undefined") {
     return false;
@@ -495,7 +504,7 @@ export function ChatPanel() {
           onToken: (token) => {
             useStore.getState().appendProvisionalToken(token);
           },
-          onDone: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets }) => {
+          onDone: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets, turnId }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -509,7 +518,16 @@ export function ChatPanel() {
             if (didLogMeal || didMutateMeal) {
               void refreshTodayMeals();
             }
-            commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary, loggedMeal });
+            const content = useStore.getState().provisionalBubble?.content ?? "";
+            const isFallbackReply = isFallbackReplyContent(content);
+            const fallbackTurnId = turnId ?? activeTurnIdRef.current;
+            commitProvisionalBubble({
+              didLogMeal: didLogMeal || didMutateMeal,
+              dailySummary,
+              loggedMeal,
+              ...(isFallbackReply ? { status: "error" as const } : {}),
+              ...(isFallbackReply && fallbackTurnId ? { turnId: fallbackTurnId } : {}),
+            });
             setSending(false);
             clearActiveStreamAfterTerminal();
           },

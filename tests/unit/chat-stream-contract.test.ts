@@ -413,4 +413,26 @@ describe("chat stream contract", () => {
     assert.match(branchSource, /setSending\(false\)/);
     assert.match(branchSource, /recoverGuestSession\(\)/);
   });
+
+  it("classifies server fallback done payloads as error messages with turn references", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+
+    assert.match(chatPanel, /function isFallbackReplyContent\(content: string\)/);
+    for (const expected of [
+      "抱歉，這次無法完成請求",
+      "抱歉，無法辨識這次的請求",
+      "已完成記錄，但回覆生成失敗",
+      "已完成餐點",
+      "回覆生成失敗",
+    ]) {
+      assert.match(chatPanel, new RegExp(expected));
+    }
+
+    assert.match(chatPanel, /onDone: \(\{[^}]*turnId[^}]*\}\) =>/);
+    assert.match(chatPanel, /const content = useStore\.getState\(\)\.provisionalBubble\?\.content \?\? ""/);
+    assert.match(chatPanel, /const isFallbackReply = isFallbackReplyContent\(content\)/);
+    assert.match(chatPanel, /const fallbackTurnId = turnId \?\? activeTurnIdRef\.current/);
+    assert.match(chatPanel, /\.\.\.\(isFallbackReply \? \{ status: "error" as const \} : \{\}\)/);
+    assert.match(chatPanel, /\.\.\.\(isFallbackReply && fallbackTurnId \? \{ turnId: fallbackTurnId \} : \{\}\)/);
+  });
 });
