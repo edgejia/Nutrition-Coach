@@ -1,4 +1,5 @@
-import type { FallbackPayload, OrchestratorHooks, ToolResultPayload } from "./hooks.js";
+import type { ProviderErrorMetadata } from "../llm/types.js";
+import type { FallbackPayload, FallbackReason, OrchestratorHooks, ToolResultPayload } from "./hooks.js";
 import {
   ACTIVE_SYSTEM_PROMPT_VERSION,
   SYSTEM_PROMPT_SECTION_IDS,
@@ -20,7 +21,13 @@ export type LlmTraceTimelineEvent =
       updatedFields?: string[];
       publishedEvents?: string[];
     }
-  | ({ type: "orchestrator_fallback" } & FallbackPayload)
+  | {
+      type: "orchestrator_fallback";
+      reason: FallbackReason;
+      round?: number;
+      lastTool?: string;
+      providerMetadata?: ProviderErrorMetadata;
+    }
   | {
       type: "route_completion";
       transport: "sse";
@@ -139,6 +146,64 @@ function sanitizeTraceLabels(values: string[]): string[] {
   return [...new Set(values.map(sanitizeTraceLabel))];
 }
 
+const SAFE_PROVIDER_OPERATIONS = new Set<ProviderErrorMetadata["operation"]>([
+  "chat",
+  "chat_round_initial",
+  "chat_round_stream_continuation",
+  "chat_stream_initial",
+  "chat_stream_continuation",
+]);
+
+function sanitizeProviderOperation(operation: ProviderErrorMetadata["operation"]): ProviderErrorMetadata["operation"] {
+  return SAFE_PROVIDER_OPERATIONS.has(operation) ? operation : "chat";
+}
+
+function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErrorMetadata {
+  const sanitized: ProviderErrorMetadata = {
+    provider: "openai",
+    operation: sanitizeProviderOperation(metadata.operation),
+    model: sanitizeTraceLabel(metadata.model),
+    aborted: metadata.aborted,
+  };
+
+  if (typeof metadata.status === "number") {
+    sanitized.status = metadata.status;
+  }
+  if (metadata.providerRequestId !== undefined) {
+    sanitized.providerRequestId = sanitizeTraceLabel(metadata.providerRequestId);
+  }
+  if (metadata.errorName !== undefined) {
+    sanitized.errorName = sanitizeTraceLabel(metadata.errorName);
+  }
+  if (metadata.errorType !== undefined) {
+    sanitized.errorType = sanitizeTraceLabel(metadata.errorType);
+  }
+  if (metadata.errorCode !== undefined) {
+    sanitized.errorCode = sanitizeTraceLabel(metadata.errorCode);
+  }
+
+  return sanitized;
+}
+
+function buildFallbackEvent(payload: FallbackPayload): Extract<LlmTraceTimelineEvent, { type: "orchestrator_fallback" }> {
+  const event: Extract<LlmTraceTimelineEvent, { type: "orchestrator_fallback" }> = {
+    type: "orchestrator_fallback",
+    reason: payload.reason,
+  };
+
+  if (payload.round !== undefined) {
+    event.round = payload.round;
+  }
+  if (payload.lastTool !== undefined) {
+    event.lastTool = sanitizeTraceLabel(payload.lastTool);
+  }
+  if (payload.providerMetadata !== undefined) {
+    event.providerMetadata = sanitizeProviderMetadata(payload.providerMetadata);
+  }
+
+  return event;
+}
+
 function buildToolResultEvent(
   payload: ToolResultPayload,
   round?: number,
@@ -204,7 +269,7 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
           // does not persist a dedicated llm_error timeline event until trace v2.
         },
         onFallback(payload) {
-          timeline.push({ type: "orchestrator_fallback", ...payload });
+          timeline.push(buildFallbackEvent(payload));
         },
       };
     },

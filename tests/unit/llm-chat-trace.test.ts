@@ -284,6 +284,65 @@ describe("createLlmTraceRecorder", () => {
     }
   });
 
+  it("sanitizes fallback trace fields without spreading extra payload properties", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+    const unsafeProviderMetadata: ProviderErrorMetadata = {
+      ...providerMetadata,
+      model: "raw provider model",
+      providerRequestId: "Authorization Bearer",
+      errorName: "raw prompt",
+      errorType: "guest_session",
+      errorCode: "sk-secret",
+    };
+
+    hooks.onFallback?.({
+      reason: "llm_error",
+      round: 1,
+      lastTool: "raw prompt",
+      providerMetadata: unsafeProviderMetadata,
+      rawProviderBody: "raw provider body",
+      headers: "Authorization",
+      finalReply: "final assistant text",
+    } as never);
+
+    const trace = recorder.build({ scenario: "unit-sanitized-fallback", status: "pass" });
+
+    assert.deepEqual(trace.timeline.at(-1), {
+      type: "orchestrator_fallback",
+      reason: "llm_error",
+      round: 1,
+      lastTool: "redacted",
+      providerMetadata: {
+        provider: "openai",
+        operation: "chat_round_initial",
+        model: "redacted",
+        aborted: false,
+        status: 429,
+        providerRequestId: "redacted",
+        errorName: "redacted",
+        errorType: "redacted",
+        errorCode: "redacted",
+      },
+    });
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "Authorization",
+      "Bearer",
+      "raw provider body",
+      "raw prompt",
+      "raw provider model",
+      "final assistant text",
+      "guest_session",
+      "sk-secret",
+      "headers",
+      "rawProviderBody",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
   it("structured hooks log exact metadata-only LLM error and fallback payloads", () => {
     const captured: Array<Record<string, unknown>> = [];
     const log = {
