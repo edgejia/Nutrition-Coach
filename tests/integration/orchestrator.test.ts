@@ -442,6 +442,7 @@ describe("Orchestrator", () => {
     const result = await orchestrator.handleMessage(deviceId, "raw user sentinel");
 
     assertReplyResult(result);
+    assert.ok(result.providerFallbackContext);
     assertProviderFallbackContextExact(result.providerFallbackContext);
     const serialized = JSON.stringify(result.providerFallbackContext);
     assert.doesNotMatch(serialized, /raw user sentinel|headers|raw body|tool arguments|assistant final text/);

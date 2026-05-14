@@ -1,4 +1,4 @@
-import type { LLMProvider, ChatMessage } from "../llm/types.js";
+import type { LLMProvider, ChatMessage, ProviderErrorMetadata } from "../llm/types.js";
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createChatService } from "../services/chat.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
@@ -45,9 +45,17 @@ const IMAGE_PLACEHOLDER = "(圖片)";
 const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 
+export interface ProviderFallbackContext {
+  reason: "llm_error" | "partial_success";
+  round: number;
+  providerMetadata: ProviderErrorMetadata;
+  lastTool?: string;
+}
+
 interface FinalReplyTraceMetadata {
   finalReplySource?: LlmTraceFinalReplySource;
   finalReplyShape?: LlmTraceFinalReplyShape;
+  providerFallbackContext?: ProviderFallbackContext;
 }
 
 export type OrchestratorResult =
@@ -518,15 +526,22 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = await llmProvider.chat(messages, toolDefinitions, { signal: opts?.signal });
           }
         } catch (err) {
-          const fallbackReason = didMutateMeal ? "partial_success" : "llm_error";
+          const fallbackReason: ProviderFallbackContext["reason"] = didMutateMeal ? "partial_success" : "llm_error";
           const fallbackPayload: FallbackPayload = {
             reason: fallbackReason,
             round: round + 1,
             ...(lastTool !== undefined ? { lastTool } : {}),
           };
+          let providerFallbackContext: ProviderFallbackContext | undefined;
 
           if (isLLMProviderError(err)) {
             const providerPayload = {
+              round: round + 1,
+              providerMetadata: err.providerMetadata,
+              ...(lastTool !== undefined ? { lastTool } : {}),
+            };
+            providerFallbackContext = {
+              reason: fallbackReason,
               round: round + 1,
               providerMetadata: err.providerMetadata,
               ...(lastTool !== undefined ? { lastTool } : {}),
@@ -551,6 +566,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMealToolMessageId,
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
+              providerFallbackContext,
             };
           }
           if (didMutateMeal) {
@@ -567,6 +583,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMealToolMessageId,
               finalReplySource: "fallback",
               finalReplyShape: classifyFallbackReplyShape(partialFallback),
+              providerFallbackContext,
             };
           }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
@@ -580,6 +597,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             loggedMealToolMessageId,
             finalReplySource: "fallback",
             finalReplyShape: classifyFallbackReplyShape(errorMsg),
+            providerFallbackContext,
           };
         }
 
