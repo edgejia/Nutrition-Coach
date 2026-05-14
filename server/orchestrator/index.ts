@@ -353,6 +353,38 @@ async function* appendMutationReceiptStream(
   }
 }
 
+function observeProviderStream(
+  stream: AsyncGenerator<string>,
+  hooks: OrchestratorHooks | undefined,
+  round: number,
+  fallbackReason: ProviderFallbackContext["reason"],
+  lastTool: string | undefined,
+): AsyncGenerator<string> {
+  async function* observed() {
+    try {
+      yield* stream;
+    } catch (err) {
+      if (isLLMProviderError(err)) {
+        const providerPayload = {
+          round,
+          providerMetadata: err.providerMetadata,
+          ...(lastTool !== undefined ? { lastTool } : {}),
+        };
+        hooks?.onLLMError?.(providerPayload);
+        hooks?.onFallback?.({
+          reason: fallbackReason,
+          round,
+          ...(lastTool !== undefined ? { lastTool } : {}),
+          providerMetadata: err.providerMetadata,
+        });
+      }
+      throw err;
+    }
+  }
+
+  return observed();
+}
+
 function detectHallucinatedChoiceFollowUp(
   userMessage: string,
   recentMessages: Array<{ role: string; content: unknown; didLogMeal?: boolean }>
@@ -489,10 +521,17 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               signal: opts?.signal,
             });
             if (roundResult.kind === "stream") {
+              const fallbackReason: ProviderFallbackContext["reason"] = didMutateMeal ? "partial_success" : "llm_error";
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
                 streamGenerator: appendMutationReceiptStream(
-                  roundResult.streamGenerator,
+                  observeProviderStream(
+                    roundResult.streamGenerator,
+                    opts?.hooks,
+                    round + 1,
+                    fallbackReason,
+                    lastTool,
+                  ),
                   mutationReceiptText,
                 ),
                 didLogMeal,
@@ -507,10 +546,17 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = roundResult.response;
           } else {
             if (shouldStreamFinalReply && typeof llmProvider.chatStream === "function") {
+              const fallbackReason: ProviderFallbackContext["reason"] = didMutateMeal ? "partial_success" : "llm_error";
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
                 streamGenerator: appendMutationReceiptStream(
-                  llmProvider.chatStream(messages, [], { signal: opts?.signal }),
+                  observeProviderStream(
+                    llmProvider.chatStream(messages, [], { signal: opts?.signal }),
+                    opts?.hooks,
+                    round + 1,
+                    fallbackReason,
+                    lastTool,
+                  ),
                   mutationReceiptText,
                 ),
                 didLogMeal,

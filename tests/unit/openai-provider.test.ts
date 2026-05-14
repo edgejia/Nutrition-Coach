@@ -466,7 +466,7 @@ describe("OpenAI Provider", () => {
     assert.equal(result.toolCalls?.[0].function.name, "get_daily_summary");
   });
 
-  it("throws when chat receives empty choices", async () => {
+  it("normalizes empty chat choices as metadata-only provider errors", async () => {
     const fakeClient = {
       chat: {
         completions: {
@@ -476,8 +476,14 @@ describe("OpenAI Provider", () => {
     } as unknown as OpenAI;
 
     const provider = new OpenAIProvider(fakeClient);
-    await assert.rejects(() => provider.chat([{ role: "user", content: "test" }], []), {
-      message: "OpenAI returned no choices",
+    const error = await captureProviderError(() => provider.chat([{ role: "user", content: "test" }], []));
+
+    assertProviderMetadata(error, {
+      provider: "openai",
+      operation: "chat",
+      model: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5.4-mini",
+      aborted: false,
+      errorName: "OpenAINoChoicesError",
     });
   });
 

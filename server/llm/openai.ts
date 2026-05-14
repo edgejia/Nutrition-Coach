@@ -101,7 +101,13 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     if (!response.choices.length) {
-      throw new Error("OpenAI returned no choices");
+      throw new LLMProviderError({
+        provider: "openai",
+        operation: "chat",
+        model: this.model,
+        aborted: opts?.signal?.aborted === true,
+        errorName: "OpenAINoChoicesError",
+      });
     }
 
     const choice = response.choices[0];

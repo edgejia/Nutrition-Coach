@@ -1,5 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import type OpenAI from "openai";
 import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
 import { chatMessages } from "../../server/db/schema.js";
@@ -9,15 +10,36 @@ import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { LLMProviderError } from "../../server/llm/errors.js";
+import { OpenAIProvider } from "../../server/llm/openai.js";
 import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
 import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createSpyHooks } from "../helpers/spy-hooks.js";
 import type { DailyTargets } from "../../server/services/device.js";
-import type { ProviderErrorMetadata } from "../../server/llm/types.js";
+import type { LLMProvider, ProviderErrorMetadata } from "../../server/llm/types.js";
 
 function assertReplyResult(result: OrchestratorResult): asserts result is Extract<OrchestratorResult, { reply: string }> {
   assert.ok("reply" in result);
+}
+
+function assertStreamResult(
+  result: OrchestratorResult,
+): asserts result is Extract<OrchestratorResult, { streamGenerator: AsyncGenerator<string> }> {
+  assert.ok("streamGenerator" in result);
+}
+
+async function collectStreamFailure(stream: AsyncGenerator<string>): Promise<{ tokens: string[]; error: unknown }> {
+  const tokens: string[] = [];
+
+  try {
+    for await (const token of stream) {
+      tokens.push(token);
+    }
+  } catch (error) {
+    return { tokens, error };
+  }
+
+  assert.fail("Expected stream to throw");
 }
 
 const providerMetadataFixture: ProviderErrorMetadata = {
@@ -59,6 +81,7 @@ describe("Orchestrator", () => {
   let mockLLM: MockLLMProvider;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let chatService: ReturnType<typeof createChatService>;
+  let summaryService: ReturnType<typeof createSummaryService>;
   let deviceService: ReturnType<typeof createDeviceService>;
   let db: ReturnType<typeof createDb>;
   let deviceId: string;
@@ -69,7 +92,7 @@ describe("Orchestrator", () => {
     db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
-    const summaryService = createSummaryService(db);
+    summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
     publishedGoals = [];
@@ -91,6 +114,22 @@ describe("Orchestrator", () => {
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
     spyHooks = createSpyHooks(); // fresh mocks each test — never at module scope (Pitfall 6)
   });
+
+  function createOrchestratorWithProvider(llmProvider: LLMProvider) {
+    return createOrchestrator({
+      llmProvider,
+      chatService,
+      summaryService,
+      foodLoggingService,
+      deviceService,
+      publisher: {
+        publishGoalsUpdate(id: string, targets: DailyTargets) {
+          publishedGoals.push({ deviceId: id, targets });
+          return { sent: 1 };
+        },
+      },
+    } as Parameters<typeof createOrchestrator>[0]);
+  }
 
   it("returns text reply when LLM responds with content", async () => {
     mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
@@ -385,6 +424,158 @@ describe("Orchestrator", () => {
 
     const serialized = JSON.stringify([errorPayload, fallbackPayload]);
     assert.doesNotMatch(serialized, /raw user sentinel|headers|raw body|tool arguments|assistant final text/);
+  });
+
+  it("CR-01: observes chatRound stream continuation provider errors through LLM error and fallback hooks", async () => {
+    const events: Array<{ event: string; payload: unknown }> = [];
+    const streamMetadata: ProviderErrorMetadata = {
+      ...providerMetadataFixture,
+      operation: "chat_round_stream_continuation",
+      model: "gpt-stream-round",
+      providerRequestId: "req_stream_round",
+    };
+    const llmProvider: LLMProvider = {
+      async chat() {
+        return { content: "unused" };
+      },
+      async chatRound() {
+        return {
+          kind: "stream",
+          streamGenerator: (async function* () {
+            yield "先";
+            throw new LLMProviderError(streamMetadata);
+          })(),
+        };
+      },
+    };
+    const streamingOrchestrator = createOrchestratorWithProvider(llmProvider);
+
+    const result = await streamingOrchestrator.handleMessage(deviceId, "串流測試", undefined, undefined, {
+      hooks: {
+        ...spyHooks,
+        onLLMError(payload) {
+          events.push({ event: "llm_error", payload });
+          spyHooks.onLLMError(payload);
+        },
+        onFallback(payload) {
+          events.push({ event: "fallback", payload });
+          spyHooks.onFallback(payload);
+        },
+      },
+    });
+    assertStreamResult(result);
+
+    const failure = await collectStreamFailure(result.streamGenerator);
+
+    assert.deepEqual(failure.tokens, ["先"]);
+    assert.ok(failure.error instanceof LLMProviderError);
+    assert.deepEqual(events.map((event) => event.event), ["llm_error", "fallback"]);
+    assert.equal(spyHooks.onLLMError.mock.callCount(), 1);
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    assert.deepEqual(Object.keys(errorPayload).sort(), ["providerMetadata", "round"]);
+    assert.equal(errorPayload.round, 1);
+    assert.deepEqual(errorPayload.providerMetadata, streamMetadata);
+
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.deepEqual(Object.keys(fallbackPayload).sort(), ["providerMetadata", "reason", "round"]);
+    assert.equal(fallbackPayload.reason, "llm_error");
+    assert.equal(fallbackPayload.round, 1);
+    assert.deepEqual(fallbackPayload.providerMetadata, streamMetadata);
+  });
+
+  it("CR-01: observes chatStream continuation provider errors with safe lastTool context", async () => {
+    const streamMetadata: ProviderErrorMetadata = {
+      ...providerMetadataFixture,
+      operation: "chat_stream_continuation",
+      model: "gpt-stream-final",
+      providerRequestId: "req_stream_final",
+    };
+    const llmProvider: LLMProvider = {
+      async chat() {
+        return {
+          toolCalls: [{
+            id: "stream_after_tool",
+            type: "function",
+            function: { name: "get_daily_summary", arguments: "{}" },
+          }],
+        };
+      },
+      async *chatStream() {
+        yield "後";
+        throw new LLMProviderError(streamMetadata);
+      },
+    };
+    const streamingOrchestrator = createOrchestratorWithProvider(llmProvider);
+
+    const result = await streamingOrchestrator.handleMessage(deviceId, "先查摘要再串流", undefined, undefined, {
+      hooks: spyHooks,
+    });
+    assertStreamResult(result);
+
+    const failure = await collectStreamFailure(result.streamGenerator);
+
+    assert.deepEqual(failure.tokens, ["後"]);
+    assert.ok(failure.error instanceof LLMProviderError);
+    assert.equal(spyHooks.onLLMError.mock.callCount(), 1);
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    assert.equal(errorPayload.round, 2);
+    assert.equal(errorPayload.lastTool, "get_daily_summary");
+    assert.deepEqual(errorPayload.providerMetadata, streamMetadata);
+
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.equal(fallbackPayload.reason, "llm_error");
+    assert.equal(fallbackPayload.round, 2);
+    assert.equal(fallbackPayload.lastTool, "get_daily_summary");
+    assert.deepEqual(fallbackPayload.providerMetadata, streamMetadata);
+  });
+
+  it("WR-02: OpenAI empty chat choices reach orchestrator hooks as provider errors", async () => {
+    const events: Array<{ event: string; payload: unknown }> = [];
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async () => ({ choices: [] }),
+        },
+      },
+    } as unknown as OpenAI;
+    const openAIProvider = new OpenAIProvider(fakeClient);
+    const chatOnlyProvider: LLMProvider = {
+      chat: openAIProvider.chat.bind(openAIProvider),
+    };
+    const openAIOrchestrator = createOrchestratorWithProvider(chatOnlyProvider);
+
+    const result = await openAIOrchestrator.handleMessage(deviceId, "empty choices", undefined, undefined, {
+      hooks: {
+        ...spyHooks,
+        onLLMError(payload) {
+          events.push({ event: "llm_error", payload });
+          spyHooks.onLLMError(payload);
+        },
+        onFallback(payload) {
+          events.push({ event: "fallback", payload });
+          spyHooks.onFallback(payload);
+        },
+      },
+    });
+
+    assertReplyResult(result);
+    assert.deepEqual(events.map((event) => event.event), ["llm_error", "fallback"]);
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    assert.deepEqual(errorPayload.providerMetadata, {
+      provider: "openai",
+      operation: "chat",
+      model: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5.4-mini",
+      aborted: false,
+      errorName: "OpenAINoChoicesError",
+    });
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.equal(fallbackPayload.reason, "llm_error");
+    assert.deepEqual(fallbackPayload.providerMetadata, errorPayload.providerMetadata);
+    assert.deepEqual(result.providerFallbackContext?.providerMetadata, errorPayload.providerMetadata);
   });
 
   it("HOOK-01: includes only a recognized safe lastTool on provider-caused fallback", async () => {
