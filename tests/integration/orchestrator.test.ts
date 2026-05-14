@@ -8,14 +8,43 @@ import { createFoodLoggingService } from "../../server/services/food-logging.js"
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { LLMProviderError } from "../../server/llm/errors.js";
 import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
 import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createSpyHooks } from "../helpers/spy-hooks.js";
 import type { DailyTargets } from "../../server/services/device.js";
+import type { ProviderErrorMetadata } from "../../server/llm/types.js";
 
 function assertReplyResult(result: OrchestratorResult): asserts result is Extract<OrchestratorResult, { reply: string }> {
   assert.ok("reply" in result);
+}
+
+const providerMetadataFixture: ProviderErrorMetadata = {
+  provider: "openai",
+  operation: "chat",
+  model: "gpt-provider-fixture",
+  aborted: false,
+  status: 429,
+  providerRequestId: "req_provider_fixture",
+  errorName: "RateLimitError",
+  errorType: "rate_limit_exceeded",
+  errorCode: "rate_limit",
+};
+
+function assertProviderMetadataExact(metadata: ProviderErrorMetadata) {
+  assert.deepEqual(Object.keys(metadata).sort(), [
+    "aborted",
+    "errorCode",
+    "errorName",
+    "errorType",
+    "model",
+    "operation",
+    "provider",
+    "providerRequestId",
+    "status",
+  ]);
+  assert.deepEqual(metadata, providerMetadataFixture);
 }
 
 describe("Orchestrator", () => {
@@ -310,6 +339,94 @@ describe("Orchestrator", () => {
     await orchestrator.handleMessage(deviceId, "test", undefined, undefined, { hooks: spyHooks });
     assert.equal(spyHooks.onFallback.mock.callCount(), 1, "onFallback should fire exactly once");
     assert.deepEqual(spyHooks.onFallback.mock.calls[0].arguments[0], { reason: "max_rounds" });
+  });
+
+  it("HOOK-01: emits LLM provider error before provider-caused fallback with metadata only", async () => {
+    const events: Array<{ event: string; payload: unknown }> = [];
+    mockLLM.queueChatError(new LLMProviderError(providerMetadataFixture));
+
+    const result = await orchestrator.handleMessage(deviceId, "raw user sentinel", undefined, undefined, {
+      hooks: {
+        ...spyHooks,
+        onLLMError(payload) {
+          events.push({ event: "llm_error", payload });
+          spyHooks.onLLMError(payload);
+        },
+        onFallback(payload) {
+          events.push({ event: "fallback", payload });
+          spyHooks.onFallback(payload);
+        },
+      },
+    });
+
+    assertReplyResult(result);
+    assert.equal(result.finalReplySource, "fallback");
+    assert.deepEqual(events.map((event) => event.event), ["llm_error", "fallback"]);
+    assert.equal(spyHooks.onLLMError.mock.callCount(), 1);
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    assert.deepEqual(Object.keys(errorPayload).sort(), ["providerMetadata", "round"]);
+    assert.equal(errorPayload.round, 1);
+    assertProviderMetadataExact(errorPayload.providerMetadata);
+
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.deepEqual(Object.keys(fallbackPayload).sort(), ["providerMetadata", "reason", "round"]);
+    assert.equal(fallbackPayload.reason, "llm_error");
+    assert.equal(fallbackPayload.round, 1);
+    assert.deepEqual(fallbackPayload.providerMetadata, errorPayload.providerMetadata);
+
+    const serialized = JSON.stringify([errorPayload, fallbackPayload]);
+    assert.doesNotMatch(serialized, /raw user sentinel|headers|raw body|tool arguments|assistant final text/);
+  });
+
+  it("HOOK-01: includes only a recognized safe lastTool on provider-caused fallback", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "safe_last_tool",
+        type: "function",
+        function: { name: "get_daily_summary", arguments: "{}" },
+      }],
+    });
+    mockLLM.queueChatError(new LLMProviderError(providerMetadataFixture));
+
+    await orchestrator.handleMessage(deviceId, "raw user sentinel", undefined, undefined, { hooks: spyHooks });
+
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.equal(errorPayload.lastTool, "get_daily_summary");
+    assert.equal(fallbackPayload.lastTool, "get_daily_summary");
+    assert.deepEqual(fallbackPayload.providerMetadata, errorPayload.providerMetadata);
+
+    const serialized = JSON.stringify([errorPayload.lastTool, fallbackPayload.lastTool]);
+    assert.doesNotMatch(serialized, /raw user sentinel|summary|provider|model|assistant/);
+  });
+
+  it("HOOK-02: omits provider metadata from non-provider max_rounds and hallucination fallbacks", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `no_metadata_${i}`,
+          type: "function",
+          function: { name: "get_daily_summary", arguments: "{}" },
+        }],
+      });
+    }
+
+    const maxRoundResult = await orchestrator.handleMessage(deviceId, "test", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(maxRoundResult);
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+    assert.deepEqual(spyHooks.onFallback.mock.calls[0].arguments[0], { reason: "max_rounds" });
+
+    mockLLM.reset();
+    spyHooks = createSpyHooks();
+    await chatService.saveMessage(deviceId, "assistant", "[系統已完成餐點記錄]\n方式 1：保留\n方式 2：調整");
+    const hallucinationResult = await orchestrator.handleMessage(deviceId, "2", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(hallucinationResult);
+    assert.equal(hallucinationResult.finalReplySource, "fallback");
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+    assert.deepEqual(spyHooks.onFallback.mock.calls[0].arguments[0], { reason: "hallucination_detected" });
+    assert.equal(spyHooks.onLLMError.mock.callCount(), 0);
   });
 
   it("OBS-03: hook payloads contain no raw deviceId and no raw meal text", async () => {
