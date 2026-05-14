@@ -1,5 +1,6 @@
 import type { MealEditPayload, Message } from "../types.js";
 import type { KeyboardEvent } from "react";
+import { formatTurnReference } from "../api.js";
 import { buildReceiptMealEditPayload } from "../meal-edit-payload.js";
 import { AssistantMarkdown } from "./AssistantMarkdown.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
@@ -140,7 +141,16 @@ function AssistantTextBubble(props: {
   isStatusLabel?: boolean;
 }) {
   const { message, isProvisional, isStatusLabel } = props;
-  const isError = !isProvisional && message.content.includes("抱歉，發生錯誤");
+  const isFallbackOrError = message.status === "error" || message.content.includes("抱歉，發生錯誤");
+  const isError = !isProvisional && isFallbackOrError;
+  const turnReference =
+    !isProvisional &&
+    !isStatusLabel &&
+    isFallbackOrError &&
+    typeof message.turnId === "string" &&
+    message.turnId.trim().length > 0
+      ? formatTurnReference(message.turnId)
+      : null;
 
   if (!message.content.trim()) {
     return null;
@@ -171,6 +181,7 @@ function AssistantTextBubble(props: {
         ) : (
           <AssistantMarkdown content={message.content} />
         )}
+        {turnReference ? <div className="sp-turn-reference">引用碼 {turnReference}</div> : null}
       </div>
     </div>
   );

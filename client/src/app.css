@@ -1553,6 +1553,13 @@ textarea {
   color: #ffb3b3;
 }
 
+.sp-turn-reference {
+  margin-top: 8px;
+  color: var(--sp-ink-2);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .sp-status-bubble {
   display: inline-flex;
   align-items: center;
