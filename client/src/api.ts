@@ -370,6 +370,10 @@ export function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMe
   };
 }
 
+export function formatTurnReference(turnId: string) {
+  return `t-${turnId.slice(0, 8)}`;
+}
+
 function normalizeChatReply<T extends { loggedMeal?: LoggedMealReceipt }>(reply: T): T {
   if (!reply.loggedMeal) {
     return reply;
@@ -506,6 +510,7 @@ export interface StreamCallbacks {
     dailySummary?: DailySummary;
     dailyTargets?: DailyTargets;
     affectedDate?: string;
+    turnId?: string;
   }) => void;
   onStopped?: (data: {
     stopped: true;
@@ -565,12 +570,17 @@ export async function sendMessageStream(
   let sawTerminalEvent = false;
   let activeTurnId: string | null = null;
 
+  function getValidTurnId(turnId: unknown): string | undefined {
+    return typeof turnId === "string" && turnId.trim().length > 0 ? turnId : undefined;
+  }
+
   function maybeEmitTurnStart(turnId: unknown) {
-    if (typeof turnId !== "string" || turnId.trim().length === 0 || turnId === activeTurnId) {
+    const validTurnId = getValidTurnId(turnId);
+    if (!validTurnId || validTurnId === activeTurnId) {
       return;
     }
-    activeTurnId = turnId;
-    callbacks.onTurnStart?.(turnId);
+    activeTurnId = validTurnId;
+    callbacks.onTurnStart?.(validTurnId);
   }
 
   while (true) {
@@ -627,6 +637,7 @@ export async function sendMessageStream(
             ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
+            ...(getValidTurnId(parsed.turnId) ? { turnId: getValidTurnId(parsed.turnId) } : {}),
           });
         } else if (eventType === "stopped") {
           maybeEmitTurnStart(parsed.turnId);

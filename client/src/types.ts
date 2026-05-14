@@ -148,6 +148,7 @@ export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  turnId?: string;
   imagePath?: string | null;
   imageAssetId?: string | null;
   imageUrl?: string | null;
@@ -166,6 +167,7 @@ export interface PendingHomeChatDraft {
 }
 
 export interface ChatReply {
+  turnId: string;
   reply: string;
   didLogMeal?: boolean;
   didMutateMeal?: boolean;
