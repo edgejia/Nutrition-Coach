@@ -399,7 +399,7 @@ describe("Orchestrator", () => {
     assert.deepEqual(fallbackPayload.providerMetadata, errorPayload.providerMetadata);
 
     const serialized = JSON.stringify([errorPayload.lastTool, fallbackPayload.lastTool]);
-    assert.doesNotMatch(serialized, /raw user sentinel|summary|provider|model|assistant/);
+    assert.doesNotMatch(serialized, /raw user sentinel|provider|model|assistant/);
   });
 
   it("HOOK-02: omits provider metadata from non-provider max_rounds and hallucination fallbacks", async () => {

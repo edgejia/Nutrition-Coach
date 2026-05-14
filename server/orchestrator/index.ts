@@ -1,4 +1,5 @@
 import type { LLMProvider, ChatMessage } from "../llm/types.js";
+import { isLLMProviderError } from "../llm/errors.js";
 import type { createChatService } from "../services/chat.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
@@ -16,6 +17,7 @@ import {
 } from "./tools.js";
 import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
 import type { OrchestratorHooks } from "./hooks.js";
+import type { FallbackPayload } from "./hooks.js";
 import type {
   LlmTraceFinalReplyShape,
   LlmTraceFinalReplySource,
@@ -450,6 +452,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       const messages: ChatMessage[] = [systemMsg, ...history, userContent];
       const toolDefinitions = getToolDefinitions();
+      const safeToolNames = new Set(toolDefinitions.map((definition) => definition.function.name));
       const toolSessionState = { resolvedMealIds: [] as string[] };
 
       let didLogMeal = false;
@@ -465,6 +468,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         | undefined;
       let loggedMealToolMessageId: string | undefined;
       let correctionClarificationReply: string | undefined;
+      let lastTool: string | undefined;
 
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
@@ -514,7 +518,27 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = await llmProvider.chat(messages, toolDefinitions, { signal: opts?.signal });
           }
         } catch (err) {
-          opts?.hooks?.onFallback?.({ reason: didMutateMeal ? "partial_success" : "llm_error", round: round + 1 });
+          const fallbackReason = didMutateMeal ? "partial_success" : "llm_error";
+          const fallbackPayload: FallbackPayload = {
+            reason: fallbackReason,
+            round: round + 1,
+            ...(lastTool !== undefined ? { lastTool } : {}),
+          };
+
+          if (isLLMProviderError(err)) {
+            const providerPayload = {
+              round: round + 1,
+              providerMetadata: err.providerMetadata,
+              ...(lastTool !== undefined ? { lastTool } : {}),
+            };
+            opts?.hooks?.onLLMError?.(providerPayload);
+            opts?.hooks?.onFallback?.({
+              ...fallbackPayload,
+              providerMetadata: providerPayload.providerMetadata,
+            });
+          } else {
+            opts?.hooks?.onFallback?.(fallbackPayload);
+          }
           if (mutationReceiptText && mutationEffects) {
             return {
               reply: mutationReceiptText,
@@ -590,6 +614,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 opts?.onStatus?.("刪除餐點中...");
               }
               const argsRedacted = redactToolArgsForHook(toolCall.function.name, toolCall.function.arguments);
+              if (safeToolNames.has(toolCall.function.name)) {
+                lastTool = toolCall.function.name;
+              }
               opts?.hooks?.onToolReceived?.(toolCall.function.name, argsRedacted);
               const {
                 result,
@@ -714,17 +741,17 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 loggedMealToolMessageId = toolMessage.id;
               }
               toolResults.push({ toolCall, result });
-            } catch (err) {
-              const errorStr = err instanceof Error ? err.message : "Tool execution failed";
-              if (isFatalToolError(err)) {
+            } catch (toolErr) {
+              const errorStr = toolErr instanceof Error ? toolErr.message : "Tool execution failed";
+              if (isFatalToolError(toolErr)) {
                 // Validation failed before execution — emit executed:false BEFORE propagating
                 opts?.hooks?.onToolResult?.({
                   tool: toolCall.function.name,
                   success: false,
                   executed: false,
-                  failureReason: err.diagnostic?.failureReason ?? errorStr,
-                  reason: err.diagnostic?.reason,
-                  fields: err.diagnostic?.fields,
+                  failureReason: toolErr.diagnostic?.failureReason ?? errorStr,
+                  reason: toolErr.diagnostic?.reason,
+                  fields: toolErr.diagnostic?.fields,
                 });
                 if (mutationReceiptText && mutationEffects) {
                   return {
@@ -740,7 +767,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
                   };
                 }
-                throw err;
+                throw toolErr;
               }
               opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: false, executed: true, failureReason: errorStr });
               toolResults.push({ toolCall, result: `Error: ${errorStr}` });
