@@ -58,7 +58,9 @@ async function captureProviderError(action: () => Promise<unknown>): Promise<LLM
   try {
     await action();
   } catch (error) {
-    assert.equal(isLLMProviderError(error), true);
+    if (!isLLMProviderError(error)) {
+      assert.fail("Expected LLMProviderError");
+    }
     return error;
   }
 

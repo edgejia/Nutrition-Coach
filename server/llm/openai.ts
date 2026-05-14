@@ -1,6 +1,80 @@
 import OpenAI from "openai";
-import type { LLMProvider, ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, ToolCall, LLMCallOptions } from "./types.js";
+import type {
+  LLMProvider,
+  ChatMessage,
+  ToolDefinition,
+  LLMResponse,
+  LLMRoundResult,
+  ToolCall,
+  LLMCallOptions,
+  ProviderErrorMetadata,
+  ProviderOperation,
+} from "./types.js";
+import { LLMProviderError } from "./errors.js";
 import { config } from "../config.js";
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function sdkErrorName(error: { constructor: { name: string } }): string | undefined {
+  return nonEmptyString(error.constructor.name);
+}
+
+function isOpenAIAbort(error: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true || error instanceof OpenAI.APIUserAbortError;
+}
+
+function normalizeOpenAIError(
+  error: unknown,
+  operation: ProviderOperation,
+  model: string,
+  opts?: LLMCallOptions,
+): ProviderErrorMetadata {
+  const metadata: ProviderErrorMetadata = {
+    provider: "openai",
+    operation,
+    model,
+    aborted: isOpenAIAbort(error, opts?.signal),
+  };
+
+  if (error instanceof OpenAI.APIError) {
+    if (typeof error.status === "number") {
+      metadata.status = error.status;
+    }
+
+    const providerRequestId = nonEmptyString(error.request_id);
+    if (providerRequestId) {
+      metadata.providerRequestId = providerRequestId;
+    }
+
+    const errorName = sdkErrorName(error);
+    if (errorName) {
+      metadata.errorName = errorName;
+    }
+
+    const errorType = nonEmptyString(error.type);
+    if (errorType) {
+      metadata.errorType = errorType;
+    }
+
+    const errorCode = nonEmptyString(error.code);
+    if (errorCode) {
+      metadata.errorCode = errorCode;
+    }
+  }
+
+  return metadata;
+}
+
+function wrapOpenAIError(
+  error: unknown,
+  operation: ProviderOperation,
+  model: string,
+  opts?: LLMCallOptions,
+): LLMProviderError {
+  return new LLMProviderError(normalizeOpenAIError(error, operation, model, opts));
+}
 
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
@@ -12,14 +86,19 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async chat(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions): Promise<LLMResponse> {
-    const response = await this.client.chat.completions.create(
-      {
-        model: this.model,
-        messages: messages as OpenAI.ChatCompletionMessageParam[],
-        ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
-      },
-      { signal: opts?.signal },
-    );
+    let response: OpenAI.Chat.Completions.ChatCompletion;
+    try {
+      response = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: messages as OpenAI.ChatCompletionMessageParam[],
+          ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
+        },
+        { signal: opts?.signal },
+      );
+    } catch (error) {
+      throw wrapOpenAIError(error, "chat", this.model, opts);
+    }
 
     if (!response.choices.length) {
       throw new Error("OpenAI returned no choices");
@@ -40,77 +119,95 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async chatRound(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions): Promise<LLMRoundResult> {
-    const stream = await this.client.chat.completions.create(
-      {
-        model: this.model,
-        messages: messages as OpenAI.ChatCompletionMessageParam[],
-        ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
-        stream: true,
-      },
-      { signal: opts?.signal },
-    );
+    let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+    try {
+      stream = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: messages as OpenAI.ChatCompletionMessageParam[],
+          ...(tools.length > 0 ? { tools: tools as OpenAI.ChatCompletionTool[] } : {}),
+          stream: true,
+        },
+        { signal: opts?.signal },
+      );
+    } catch (error) {
+      throw wrapOpenAIError(error, "chat_round_initial", this.model, opts);
+    }
     const iterator = stream[Symbol.asyncIterator]();
     const bufferedTokens: string[] = [];
     const toolCalls = new Map<number, ToolCall>();
 
-    while (true) {
-      const nextChunk = await iterator.next();
-      if (nextChunk.done) {
-        return {
-          kind: "response",
-          response: { content: bufferedTokens.join("") || undefined },
-        };
-      }
+    try {
+      while (true) {
+        const nextChunk = await iterator.next();
+        if (nextChunk.done) {
+          return {
+            kind: "response",
+            response: { content: bufferedTokens.join("") || undefined },
+          };
+        }
 
-      const choice = nextChunk.value.choices[0];
-      if (!choice) {
-        continue;
-      }
+        const choice = nextChunk.value.choices[0];
+        if (!choice) {
+          continue;
+        }
 
-      const delta = choice.delta;
-      if (delta.tool_calls?.length) {
-        this.mergeToolCalls(toolCalls, delta.tool_calls);
-      }
+        const delta = choice.delta;
+        if (delta.tool_calls?.length) {
+          this.mergeToolCalls(toolCalls, delta.tool_calls);
+        }
 
-      if (delta.content) {
-        bufferedTokens.push(delta.content);
-        return {
-          kind: "stream",
-          streamGenerator: this.streamRemainingTokens(bufferedTokens, iterator),
-        };
-      }
+        if (delta.content) {
+          bufferedTokens.push(delta.content);
+          return {
+            kind: "stream",
+            streamGenerator: this.streamRemainingTokens(bufferedTokens, iterator, opts),
+          };
+        }
 
-      if (choice.finish_reason === "tool_calls") {
-        return {
-          kind: "response",
-          response: { toolCalls: this.sortToolCalls(toolCalls) },
-        };
-      }
+        if (choice.finish_reason === "tool_calls") {
+          return {
+            kind: "response",
+            response: { toolCalls: this.sortToolCalls(toolCalls) },
+          };
+        }
 
-      if (choice.finish_reason === "stop") {
-        return {
-          kind: "response",
-          response: { content: bufferedTokens.join("") || "" },
-        };
+        if (choice.finish_reason === "stop") {
+          return {
+            kind: "response",
+            response: { content: bufferedTokens.join("") || "" },
+          };
+        }
       }
+    } catch (error) {
+      throw wrapOpenAIError(error, "chat_round_initial", this.model, opts);
     }
   }
 
   async *chatStream(messages: ChatMessage[], _tools: ToolDefinition[], opts?: LLMCallOptions): AsyncGenerator<string> {
-    const stream = await this.client.chat.completions.create(
-      {
-        model: this.model,
-        messages: messages as OpenAI.ChatCompletionMessageParam[],
-        stream: true,
-      },
-      { signal: opts?.signal },
-    );
+    let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+    try {
+      stream = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: messages as OpenAI.ChatCompletionMessageParam[],
+          stream: true,
+        },
+        { signal: opts?.signal },
+      );
+    } catch (error) {
+      throw wrapOpenAIError(error, "chat_stream_initial", this.model, opts);
+    }
 
-    for await (const chunk of stream) {
-      const token = chunk.choices[0]?.delta?.content;
-      if (token) {
-        yield token;
+    try {
+      for await (const chunk of stream) {
+        const token = chunk.choices[0]?.delta?.content;
+        if (token) {
+          yield token;
+        }
       }
+    } catch (error) {
+      throw wrapOpenAIError(error, "chat_stream_continuation", this.model, opts);
     }
   }
 
@@ -154,21 +251,26 @@ export class OpenAIProvider implements LLMProvider {
   private async *streamRemainingTokens(
     bufferedTokens: string[],
     iterator: AsyncIterator<OpenAI.Chat.Completions.ChatCompletionChunk>,
+    opts?: LLMCallOptions,
   ): AsyncGenerator<string> {
     for (const token of bufferedTokens) {
       yield token;
     }
 
-    while (true) {
-      const nextChunk = await iterator.next();
-      if (nextChunk.done) {
-        return;
-      }
+    try {
+      while (true) {
+        const nextChunk = await iterator.next();
+        if (nextChunk.done) {
+          return;
+        }
 
-      const token = nextChunk.value.choices[0]?.delta?.content;
-      if (token) {
-        yield token;
+        const token = nextChunk.value.choices[0]?.delta?.content;
+        if (token) {
+          yield token;
+        }
       }
+    } catch (error) {
+      throw wrapOpenAIError(error, "chat_round_stream_continuation", this.model, opts);
     }
   }
 }
