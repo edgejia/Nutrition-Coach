@@ -1,7 +1,45 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import OpenAI from "openai";
+import { LLMProviderError, isLLMProviderError } from "../../server/llm/errors.js";
 import { OpenAIProvider } from "../../server/llm/openai.js";
+import type { ProviderErrorMetadata, ProviderOperation } from "../../server/llm/types.js";
+
+const allowedProviderMetadataKeys = [
+  "provider",
+  "operation",
+  "model",
+  "aborted",
+  "status",
+  "providerRequestId",
+  "errorName",
+  "errorType",
+  "errorCode",
+];
+
+const providerOperations = [
+  "chat",
+  "chat_round_initial",
+  "chat_round_stream_continuation",
+  "chat_stream_initial",
+  "chat_stream_continuation",
+] satisfies ProviderOperation[];
+
+const forbiddenProviderSentinels = [
+  "raw-provider-body-sentinel",
+  "authorization-header-sentinel",
+  "prompt-sentinel",
+  "message-sentinel",
+  "tool-payload-sentinel",
+  "user-input-sentinel",
+  "image-data-sentinel",
+  "session-material-sentinel",
+  "assistant-final-text-sentinel",
+];
+
+function assertExactKeys(value: Record<string, unknown>, expectedKeys: string[]) {
+  assert.deepEqual(Object.keys(value).sort(), [...expectedKeys].sort());
+}
 
 function createStream(chunks: unknown[]): AsyncIterable<unknown> {
   return {
@@ -14,6 +52,49 @@ function createStream(chunks: unknown[]): AsyncIterable<unknown> {
 }
 
 describe("OpenAI Provider", () => {
+  it("defines metadata-only LLMProviderError contracts with fixed serialization", () => {
+    assert.deepEqual(providerOperations, [
+      "chat",
+      "chat_round_initial",
+      "chat_round_stream_continuation",
+      "chat_stream_initial",
+      "chat_stream_continuation",
+    ]);
+
+    const providerMetadata: ProviderErrorMetadata = {
+      provider: "openai",
+      operation: "chat",
+      model: "gpt-test",
+      aborted: false,
+      status: 429,
+      providerRequestId: "req_safe",
+      errorName: "RateLimitError",
+      errorType: "rate_limit_error",
+      errorCode: "rate_limit_exceeded",
+    };
+
+    const error = new LLMProviderError(providerMetadata);
+
+    assert.equal(error.name, "LLMProviderError");
+    assert.equal(error.message, "LLM provider request failed");
+    assert.equal(isLLMProviderError(error), true);
+    assert.equal(isLLMProviderError(new Error("LLM provider request failed")), false);
+    assert.equal(Object.hasOwn(error, "cause"), false);
+    assert.equal("cause" in error, false);
+    assert.equal(error.providerMetadata, providerMetadata);
+    assertExactKeys(error.providerMetadata as unknown as Record<string, unknown>, allowedProviderMetadataKeys);
+
+    const serialized = JSON.parse(JSON.stringify(error)) as Record<string, unknown>;
+    assertExactKeys(serialized, ["name", "message", "providerMetadata"]);
+    assert.equal(serialized.name, "LLMProviderError");
+    assert.equal(serialized.message, "LLM provider request failed");
+    assertExactKeys(serialized.providerMetadata as Record<string, unknown>, allowedProviderMetadataKeys);
+
+    for (const sentinel of forbiddenProviderSentinels) {
+      assert.equal(JSON.stringify(error).includes(sentinel), false);
+    }
+  });
+
   it("forwards multimodal user content and tool definitions to OpenAI chat completions", async () => {
     let capturedRequest: unknown;
     const fakeClient = {
