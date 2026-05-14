@@ -217,6 +217,7 @@ describe("Orchestrator", () => {
     assert.equal(partialSuccessResult.finalReplySource, "renderer");
     assert.equal(partialSuccessResult.finalReplyShape, "plain_text");
     assert.equal(partialSuccessResult.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(partialSuccessResult.providerFallbackContext, undefined);
   });
 
   it("executes tool calls and returns final reply", async () => {

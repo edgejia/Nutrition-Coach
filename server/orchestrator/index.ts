@@ -46,7 +46,7 @@ const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 
 export interface ProviderFallbackContext {
-  reason: "llm_error" | "partial_success";
+  reason: "llm_error";
   round: number;
   providerMetadata: ProviderErrorMetadata;
   lastTool?: string;
@@ -357,7 +357,7 @@ function observeProviderStream(
   stream: AsyncGenerator<string>,
   hooks: OrchestratorHooks | undefined,
   round: number,
-  fallbackReason: ProviderFallbackContext["reason"],
+  fallbackReason: FallbackPayload["reason"],
   lastTool: string | undefined,
 ): AsyncGenerator<string> {
   async function* observed() {
@@ -521,7 +521,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               signal: opts?.signal,
             });
             if (roundResult.kind === "stream") {
-              const fallbackReason: ProviderFallbackContext["reason"] = didMutateMeal ? "partial_success" : "llm_error";
+              const fallbackReason: FallbackPayload["reason"] = didMutateMeal ? "partial_success" : "llm_error";
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
                 streamGenerator: appendMutationReceiptStream(
@@ -546,7 +546,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = roundResult.response;
           } else {
             if (shouldStreamFinalReply && typeof llmProvider.chatStream === "function") {
-              const fallbackReason: ProviderFallbackContext["reason"] = didMutateMeal ? "partial_success" : "llm_error";
+              const fallbackReason: FallbackPayload["reason"] = didMutateMeal ? "partial_success" : "llm_error";
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
                 streamGenerator: appendMutationReceiptStream(
@@ -572,7 +572,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             response = await llmProvider.chat(messages, toolDefinitions, { signal: opts?.signal });
           }
         } catch (err) {
-          const fallbackReason: ProviderFallbackContext["reason"] = didMutateMeal ? "partial_success" : "llm_error";
+          const fallbackReason: FallbackPayload["reason"] = didMutateMeal ? "partial_success" : "llm_error";
           const fallbackPayload: FallbackPayload = {
             reason: fallbackReason,
             round: round + 1,
@@ -586,12 +586,14 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               providerMetadata: err.providerMetadata,
               ...(lastTool !== undefined ? { lastTool } : {}),
             };
-            providerFallbackContext = {
-              reason: fallbackReason,
-              round: round + 1,
-              providerMetadata: err.providerMetadata,
-              ...(lastTool !== undefined ? { lastTool } : {}),
-            };
+            if (fallbackReason === "llm_error") {
+              providerFallbackContext = {
+                reason: fallbackReason,
+                round: round + 1,
+                providerMetadata: err.providerMetadata,
+                ...(lastTool !== undefined ? { lastTool } : {}),
+              };
+            }
             opts?.hooks?.onLLMError?.(providerPayload);
             opts?.hooks?.onFallback?.({
               ...fallbackPayload,
