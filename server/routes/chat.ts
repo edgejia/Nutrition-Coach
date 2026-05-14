@@ -87,6 +87,13 @@ function activeChatTurnKey(deviceId: string, turnId: string) {
   return `${deviceId}:${turnId}`;
 }
 
+function createChatTurnContext(request: FastifyRequest) {
+  const turnId = crypto.randomUUID();
+  const turnLog = request.log.child({ turnId });
+  const orchLog = turnLog.child({ component: "orchestrator" });
+  return { turnId, turnLog, orchLog };
+}
+
 function writeStatus(stream: PassThrough, label: string, turnId?: string) {
   stream.write(`event: status\ndata: ${JSON.stringify({ label, ...(turnId ? { turnId } : {}) })}\n\n`);
 }
@@ -691,6 +698,7 @@ async function handleOrchestratorSSE(
       }
 
       const doneData = {
+        turnId: stopControl?.turnId,
         didLogMeal: streamDidLogMeal,
         didMutateMeal: streamDidMutateMeal,
         ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
@@ -737,6 +745,7 @@ async function handleOrchestratorSSE(
       );
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
+        turnId: stopControl?.turnId,
         didLogMeal,
         didMutateMeal: streamDidMutateMeal,
         ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
@@ -790,6 +799,7 @@ async function handleOrchestratorSSE(
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: fallback })}\n\n`);
     }
     const doneData = {
+      turnId: stopControl?.turnId,
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
       ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
@@ -894,6 +904,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const { message, image } = parseResult;
     const chatTurnStartedAt = Date.now();
     const hadImage = Boolean(image);
+    const { turnId, turnLog, orchLog } = createChatTurnContext(request);
 
     // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
     const acceptHeader = request.headers["accept"] ?? "";
@@ -911,6 +922,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
       let jsonReceiptIdentity: ReceiptIdentity | undefined;
+      const hooks = fanOutOrchestratorHooks(createStructuredHooks(orchLog));
 
       try {
         const durableAsset = await createDurableAssetIfNeeded(assetService, deviceId, image);
@@ -927,6 +939,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             onUserMessageSaved: () => {
               userMessagePersisted = true;
             },
+            hooks,
           },
         );
         jsonDidLogMeal = result.didLogMeal;
@@ -976,9 +989,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             deviceId,
             didMutateMeal,
             dailySummary,
-            request.log,
+            turnLog,
           );
-          logChatTurnCompleted(request.log, {
+          logChatTurnCompleted(turnLog, {
             source: "json",
             didLogMeal,
             didMutateMeal,
@@ -986,6 +999,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             latencyMs: Date.now() - chatTurnStartedAt,
           });
           return {
+            turnId,
             reply: sanitized,
             didLogMeal,
             ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
@@ -1006,8 +1020,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         );
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, request.log);
-        logChatTurnCompleted(request.log, {
+        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, turnLog);
+        logChatTurnCompleted(turnLog, {
           source: "json",
           didLogMeal,
           didMutateMeal: jsonDidMutateMeal,
@@ -1015,6 +1029,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           latencyMs: Date.now() - chatTurnStartedAt,
         });
         return {
+          turnId,
           reply: sanitizedJson,
           didLogMeal,
           ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
@@ -1046,8 +1061,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         );
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, request.log);
-        logChatTurnCompleted(request.log, {
+        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, turnLog);
+        logChatTurnCompleted(turnLog, {
           source: "json",
           didLogMeal: jsonDidLogMeal,
           didMutateMeal: jsonDidMutateMeal,
@@ -1055,6 +1070,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           latencyMs: Date.now() - chatTurnStartedAt,
         });
         return {
+          turnId,
           reply: sanitizedJson,
           didLogMeal: jsonDidLogMeal,
           ...(jsonDidMutateMeal ? { didMutateMeal: true } : {}),
@@ -1069,17 +1085,16 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           deviceId,
           durableAssetId,
           durableAssetRef,
-          request.log,
+          turnLog,
         );
         // D-08: Delete upload file after processing completes (success or failure).
-        await cleanupUploadSafe(image?.path, request.log);
+        await cleanupUploadSafe(image?.path, turnLog);
       }
     }
 
     // SSE path: open stream BEFORE awaiting orchestrator so status labels are
     // visible during the real waiting period (D-03, D-04, D-05).
     const stream = new PassThrough();
-    const turnId = crypto.randomUUID();
     const turnKey = activeChatTurnKey(deviceId, turnId);
     const activeTurn: ActiveChatTurn = {
       controller: new AbortController(),
@@ -1100,7 +1115,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       .header("cache-control", "no-cache")
       .send(stream);
 
-    const orchLog = request.log.child({ component: "orchestrator" });
+    stream.write(`event: start\ndata: ${JSON.stringify({ turnId })}\n\n`);
+
     const traceRecorder = llmTraceRecorderFactory?.();
     const hooks = fanOutOrchestratorHooks(
       createStructuredHooks(orchLog),
@@ -1110,7 +1126,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     setImmediate(() => {
       void handleOrchestratorSSE(
         stream,
-        { assetService, orchestrator, chatService, publisher, log: request.log },
+        { assetService, orchestrator, chatService, publisher, log: turnLog },
         deviceId,
         message,
         image,
