@@ -38,6 +38,7 @@ type CommitProvisionalBubbleExtra = {
   dailySummary?: DailySummary;
   dailyTargets?: DailyTargets;
   status?: Message["status"];
+  turnId?: string;
 };
 
 function getStoppedMessageContent(content: string) {
@@ -324,6 +325,7 @@ export const useStore = create<AppState>((set, get) => ({
         content: state.provisionalBubble.content,
         createdAt: new Date().toISOString(),
         ...(extra.status ? { status: extra.status } : {}),
+        ...(extra.turnId ? { turnId: extra.turnId } : {}),
         didLogMeal: extra.didLogMeal,
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
       };

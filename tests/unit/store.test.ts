@@ -500,10 +500,11 @@ describe("ProvisionalBubble actions", () => {
     });
 
     const message = useStore.getState().messages[0];
+    const messageRecord = message as unknown as Record<string, unknown>;
     assert.equal(message.status, "error");
     assert.equal(message.turnId, turnId);
-    assert.equal((message as Record<string, unknown>).referenceCode, undefined);
-    assert.equal((message as Record<string, unknown>).turnReference, undefined);
+    assert.equal(messageRecord.referenceCode, undefined);
+    assert.equal(messageRecord.turnReference, undefined);
   });
 
   it("commitProvisionalBubble does not synthesize turnId or reference fields for normal completion", () => {
@@ -517,10 +518,11 @@ describe("ProvisionalBubble actions", () => {
     useStore.getState().commitProvisionalBubble({ didLogMeal: true });
 
     const message = useStore.getState().messages[0];
+    const messageRecord = message as unknown as Record<string, unknown>;
     assert.equal(message.status, undefined);
     assert.equal(message.turnId, undefined);
-    assert.equal((message as Record<string, unknown>).referenceCode, undefined);
-    assert.equal((message as Record<string, unknown>).turnReference, undefined);
+    assert.equal(messageRecord.referenceCode, undefined);
+    assert.equal(messageRecord.turnReference, undefined);
   });
 
   it("commitProvisionalBubble is no-op when provisionalBubble is null", () => {

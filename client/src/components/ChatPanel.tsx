@@ -538,6 +538,7 @@ export function ChatPanel() {
           },
           onError: (errorMessage) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
+            const turnId = activeTurnIdRef.current;
             if (stoppingRef.current) {
               commitStoppedProvisionalBubble({ didLogMeal: false });
               if (opts?.draftId) {
@@ -556,7 +557,11 @@ export function ChatPanel() {
               content: errorMessage || "抱歉，發生錯誤，請再試一次。",
               isStreaming: false,
             });
-            commitProvisionalBubble({ didLogMeal: false });
+            commitProvisionalBubble({
+              didLogMeal: false,
+              status: "error",
+              ...(turnId ? { turnId } : {}),
+            });
             if (opts?.draftId) {
               const currentDraft = useStore.getState().pendingHomeChatDraft;
               if (currentDraft && currentDraft.id === opts.draftId) {
@@ -596,13 +601,18 @@ export function ChatPanel() {
       const errorMessage = err instanceof Error && err.message
         ? err.message
         : "抱歉，發生錯誤，請再試一次。";
+      const turnId = activeTurnIdRef.current;
       useStore.getState().setProvisionalBubble({
         id: bubbleId,
         statusLabel: "",
         content: errorMessage,
         isStreaming: false,
       });
-      commitProvisionalBubble({ didLogMeal: false });
+      commitProvisionalBubble({
+        didLogMeal: false,
+        status: "error",
+        ...(turnId ? { turnId } : {}),
+      });
       if (opts?.draftId) {
         const currentDraft = useStore.getState().pendingHomeChatDraft;
         if (currentDraft && currentDraft.id === opts.draftId) {
