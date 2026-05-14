@@ -9,6 +9,32 @@ import {
   type LlmTraceFinalReplyShape,
   type LlmTraceFinalReplySource,
 } from "../../server/orchestrator/llm-trace.js";
+import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
+import type { ProviderErrorMetadata } from "../../server/llm/types.js";
+
+const providerMetadata: ProviderErrorMetadata = {
+  provider: "openai",
+  operation: "chat_round_initial",
+  model: "gpt-test",
+  aborted: false,
+  status: 429,
+  providerRequestId: "req_safe_123",
+  errorName: "RateLimitError",
+  errorType: "rate_limit_error",
+  errorCode: "rate_limit_exceeded",
+};
+
+const providerMetadataKeys = [
+  "provider",
+  "operation",
+  "model",
+  "aborted",
+  "status",
+  "providerRequestId",
+  "errorName",
+  "errorType",
+  "errorCode",
+];
 
 describe("createLlmTraceRecorder", () => {
   it("records orchestrator timeline entries in call order", () => {
@@ -25,7 +51,7 @@ describe("createLlmTraceRecorder", () => {
       publishedEvents: ["daily_summary"],
     });
     hooks.onLLMEnd?.(1, true);
-    hooks.onFallback?.("max_rounds");
+    hooks.onFallback?.({ reason: "max_rounds" });
 
     const trace = recorder.build({ scenario: "unit-trace", status: "pass" });
 
@@ -166,7 +192,7 @@ describe("createLlmTraceRecorder", () => {
     hooks.onToolReceived?.("log_food", "我吃了隱私測試餐點 /uploads/raw-secret.jpg");
     hooks.onToolResult?.(unsafeToolPayload);
     hooks.onLLMEnd?.(1, true);
-    hooks.onFallback?.("llm_error");
+    hooks.onFallback?.({ reason: "llm_error" });
     recorder.recordFinalReply(unsafeFinalReply);
     recorder.recordRouteCompletion(unsafeRouteCompletion);
     recorder.recordMetrics(unsafeMetrics);
@@ -206,6 +232,108 @@ describe("createLlmTraceRecorder", () => {
       "shape",
     ]) {
       assert.equal(traceJson.includes(key), true, `trace should include ${key}`);
+    }
+  });
+
+  it("records provider-caused fallback hook facts with metadata-only trace fields", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+
+    hooks.onLLMStart?.(2);
+    hooks.onLLMError?.({ round: 2, lastTool: "log_food", providerMetadata });
+    hooks.onFallback?.({
+      reason: "llm_error",
+      round: 2,
+      lastTool: "log_food",
+      providerMetadata,
+    });
+
+    const trace = recorder.build({ scenario: "unit-provider-fallback", status: "pass" });
+
+    assert.equal(trace.schemaVersion, "llm-trace.v1");
+    assert.equal(trace.timeline.some((event) => event.type === "llm_error"), false);
+    assert.deepEqual(trace.timeline.at(-1), {
+      type: "orchestrator_fallback",
+      reason: "llm_error",
+      round: 2,
+      lastTool: "log_food",
+      providerMetadata,
+    });
+    const fallbackEvent = trace.timeline.at(-1) as {
+      providerMetadata?: Record<string, unknown>;
+    };
+    assert.deepEqual(Object.keys(fallbackEvent.providerMetadata ?? {}), providerMetadataKeys);
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "Authorization",
+      "Bearer",
+      "raw provider body",
+      "raw prompt",
+      "raw user text",
+      "raw tool arguments",
+      "raw tool results",
+      "final assistant text",
+      "guest_session",
+      "data:image",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("structured hooks log exact metadata-only LLM error and fallback payloads", () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const log = {
+      info(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+      warn(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+    };
+    const hooks = createStructuredHooks(log as never);
+
+    hooks.onLLMError?.({ round: 3, lastTool: "get_daily_summary", providerMetadata });
+    hooks.onFallback?.({
+      reason: "llm_error",
+      round: 3,
+      lastTool: "get_daily_summary",
+      providerMetadata,
+    });
+
+    assert.deepEqual(captured, [
+      {
+        event: "llm_provider_error",
+        round: 3,
+        lastTool: "get_daily_summary",
+        providerMetadata,
+      },
+      {
+        event: "orchestrator_fallback",
+        reason: "llm_error",
+        round: 3,
+        lastTool: "get_daily_summary",
+        providerMetadata,
+      },
+    ]);
+    assert.deepEqual(Object.keys(captured[0]), ["event", "round", "lastTool", "providerMetadata"]);
+    assert.deepEqual(Object.keys(captured[1]), ["event", "reason", "round", "lastTool", "providerMetadata"]);
+    assert.deepEqual(Object.keys(captured[0]?.providerMetadata as Record<string, unknown>), providerMetadataKeys);
+
+    const logJson = JSON.stringify(captured);
+    for (const forbidden of [
+      "Authorization",
+      "Bearer",
+      "raw provider body",
+      "raw prompt",
+      "raw user text",
+      "raw tool arguments",
+      "raw tool results",
+      "final assistant text",
+      "guest_session",
+      "data:image",
+    ]) {
+      assert.equal(logJson.includes(forbidden), false, `structured hook log should exclude ${forbidden}`);
     }
   });
 });
