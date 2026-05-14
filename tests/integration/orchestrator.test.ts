@@ -47,6 +47,13 @@ function assertProviderMetadataExact(metadata: ProviderErrorMetadata) {
   assert.deepEqual(metadata, providerMetadataFixture);
 }
 
+function assertProviderFallbackContextExact(context: NonNullable<OrchestratorResult["providerFallbackContext"]>) {
+  assert.deepEqual(Object.keys(context).sort(), ["providerMetadata", "reason", "round"]);
+  assert.equal(context.reason, "llm_error");
+  assert.equal(context.round, 1);
+  assertProviderMetadataExact(context.providerMetadata);
+}
+
 describe("Orchestrator", () => {
   let orchestrator: ReturnType<typeof createOrchestrator>;
   let mockLLM: MockLLMProvider;
@@ -427,6 +434,65 @@ describe("Orchestrator", () => {
     assert.equal(spyHooks.onFallback.mock.callCount(), 1);
     assert.deepEqual(spyHooks.onFallback.mock.calls[0].arguments[0], { reason: "hallucination_detected" });
     assert.equal(spyHooks.onLLMError.mock.callCount(), 0);
+  });
+
+  it("HOOK-02: returns route-readable provider fallback context without hook collectors", async () => {
+    mockLLM.queueChatError(new LLMProviderError(providerMetadataFixture));
+
+    const result = await orchestrator.handleMessage(deviceId, "raw user sentinel");
+
+    assertReplyResult(result);
+    assertProviderFallbackContextExact(result.providerFallbackContext);
+    const serialized = JSON.stringify(result.providerFallbackContext);
+    assert.doesNotMatch(serialized, /raw user sentinel|headers|raw body|tool arguments|assistant final text/);
+  });
+
+  it("HOOK-02: route-readable provider fallback context matches hook metadata and lastTool", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "bridge_last_tool",
+        type: "function",
+        function: { name: "get_daily_summary", arguments: "{}" },
+      }],
+    });
+    mockLLM.queueChatError(new LLMProviderError(providerMetadataFixture));
+
+    const result = await orchestrator.handleMessage(deviceId, "raw user sentinel", undefined, undefined, { hooks: spyHooks });
+
+    assertReplyResult(result);
+    assert.deepEqual(Object.keys(result.providerFallbackContext ?? {}).sort(), [
+      "lastTool",
+      "providerMetadata",
+      "reason",
+      "round",
+    ]);
+    assert.equal(result.providerFallbackContext?.reason, "llm_error");
+    assert.equal(result.providerFallbackContext?.round, 2);
+    assert.equal(result.providerFallbackContext?.lastTool, "get_daily_summary");
+    assert.deepEqual(result.providerFallbackContext?.providerMetadata, spyHooks.onLLMError.mock.calls[0].arguments[0].providerMetadata);
+    assert.deepEqual(result.providerFallbackContext?.providerMetadata, spyHooks.onFallback.mock.calls[0].arguments[0].providerMetadata);
+  });
+
+  it("HOOK-02: omits route-readable provider fallback context for non-provider fallbacks", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `bridge_no_metadata_${i}`,
+          type: "function",
+          function: { name: "get_daily_summary", arguments: "{}" },
+        }],
+      });
+    }
+
+    const maxRoundResult = await orchestrator.handleMessage(deviceId, "test");
+    assertReplyResult(maxRoundResult);
+    assert.equal(maxRoundResult.providerFallbackContext, undefined);
+
+    mockLLM.reset();
+    await chatService.saveMessage(deviceId, "assistant", "[系統已完成餐點記錄]\n方式 1：保留\n方式 2：調整");
+    const hallucinationResult = await orchestrator.handleMessage(deviceId, "2");
+    assertReplyResult(hallucinationResult);
+    assert.equal(hallucinationResult.providerFallbackContext, undefined);
   });
 
   it("OBS-03: hook payloads contain no raw deviceId and no raw meal text", async () => {
