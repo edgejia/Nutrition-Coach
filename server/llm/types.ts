@@ -34,6 +34,25 @@ export interface LLMResponse {
   toolCalls?: ToolCall[];
 }
 
+export type ProviderOperation =
+  | "chat"
+  | "chat_round_initial"
+  | "chat_round_stream_continuation"
+  | "chat_stream_initial"
+  | "chat_stream_continuation";
+
+export interface ProviderErrorMetadata {
+  provider: "openai";
+  operation: ProviderOperation;
+  model: string;
+  aborted: boolean;
+  status?: number;
+  providerRequestId?: string;
+  errorName?: string;
+  errorType?: string;
+  errorCode?: string;
+}
+
 export type LLMRoundResult =
   | { kind: "response"; response: LLMResponse }
   | { kind: "stream"; streamGenerator: AsyncGenerator<string> };
