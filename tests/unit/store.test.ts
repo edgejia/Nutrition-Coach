@@ -484,6 +484,45 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(useStore.getState().messages[0].didLogMeal, true);
   });
 
+  it("commitProvisionalBubble retains supplied full turnId for finalized error messages", () => {
+    const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";
+    useStore.getState().setProvisionalBubble({
+      id: "msg-error",
+      statusLabel: "",
+      content: "抱歉，發生錯誤，請再試一次。",
+      isStreaming: false,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      status: "error",
+      turnId,
+    });
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message.status, "error");
+    assert.equal(message.turnId, turnId);
+    assert.equal((message as Record<string, unknown>).referenceCode, undefined);
+    assert.equal((message as Record<string, unknown>).turnReference, undefined);
+  });
+
+  it("commitProvisionalBubble does not synthesize turnId or reference fields for normal completion", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "msg-normal",
+      statusLabel: "",
+      content: "完整回覆",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({ didLogMeal: true });
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message.status, undefined);
+    assert.equal(message.turnId, undefined);
+    assert.equal((message as Record<string, unknown>).referenceCode, undefined);
+    assert.equal((message as Record<string, unknown>).turnReference, undefined);
+  });
+
   it("commitProvisionalBubble is no-op when provisionalBubble is null", () => {
     useStore.getState().commitProvisionalBubble({ didLogMeal: false });
 
