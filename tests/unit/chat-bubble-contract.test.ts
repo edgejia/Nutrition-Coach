@@ -17,6 +17,10 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function renderMessageBubble(message: Message, options?: { isProvisional?: boolean; isStatusLabel?: boolean }) {
+  return renderToStaticMarkup(createElement(MessageBubble, { message, ...options }));
+}
+
 describe("chat bubble source contract", () => {
   it("uses the sport composer controls while preserving upload and send behavior", async () => {
     const chatInput = await readSource("client/src/components/ChatInput.tsx");
@@ -197,6 +201,95 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(bubble, /deleted/);
     assert.doesNotMatch(bubble, /deletedMeal/);
     assert.doesNotMatch(bubble, /delete_meal/);
+  });
+
+  it("renders a short reference code for finalized assistant errors without exposing the full turn id", () => {
+    const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";
+    const message: Message = {
+      id: "error-reference-1",
+      role: "assistant",
+      content: "抱歉，發生錯誤，請再試一次。",
+      createdAt: "2026-05-14T09:30:00.000Z",
+      status: "error",
+      turnId,
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, /引用碼/);
+    assert.match(html, /t-a1b2c3d4/);
+    assert.doesNotMatch(html, new RegExp(escapeRegExp(turnId)));
+  });
+
+  it("does not render reference codes for happy assistant messages with turn ids", () => {
+    const message: Message = {
+      id: "happy-reference-free-1",
+      role: "assistant",
+      content: "已幫你記錄早餐。",
+      createdAt: "2026-05-14T09:31:00.000Z",
+      status: "complete",
+      turnId: "a1b2c3d4-1111-4222-8333-0123456789ab",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.doesNotMatch(html, /引用碼/);
+    assert.doesNotMatch(html, /t-a1b2c3d4/);
+  });
+
+  it("does not render reference codes for normal stopped assistant messages", () => {
+    const message: Message = {
+      id: "stopped-reference-free-1",
+      role: "assistant",
+      content: "已停止產生回覆。",
+      createdAt: "2026-05-14T09:32:00.000Z",
+      status: "stopped",
+      turnId: "a1b2c3d4-1111-4222-8333-0123456789ab",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.doesNotMatch(html, /引用碼/);
+    assert.doesNotMatch(html, /t-a1b2c3d4/);
+  });
+
+  it("does not render reference codes for provisional status labels", () => {
+    const message: Message = {
+      id: "status-reference-free-1",
+      role: "assistant",
+      content: "思考中...",
+      createdAt: "2026-05-14T09:33:00.000Z",
+      turnId: "a1b2c3d4-1111-4222-8333-0123456789ab",
+    };
+
+    const html = renderMessageBubble(message, { isProvisional: true, isStatusLabel: true });
+
+    assert.match(html, /sp-status-bubble/);
+    assert.doesNotMatch(html, /引用碼/);
+    assert.doesNotMatch(html, /t-a1b2c3d4/);
+  });
+
+  it("omits the reference line for assistant errors without a turn id", () => {
+    const message: Message = {
+      id: "missing-turn-reference-free-1",
+      role: "assistant",
+      content: "抱歉，發生錯誤，請再試一次。",
+      createdAt: "2026-05-14T09:34:00.000Z",
+      status: "error",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.doesNotMatch(html, /引用碼/);
+    assert.doesNotMatch(html, /t-a1b2c3d4/);
+    assert.doesNotMatch(html, /placeholder/i);
+  });
+
+  it("centralizes assistant reference rendering through formatTurnReference", async () => {
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
+
+    assert.match(bubble, /formatTurnReference/);
+    assert.match(bubble, /formatTurnReference\(message\.turnId\)/);
   });
 
   it("passes Meal Edit callbacks from ChatPanel with chat origin", async () => {
