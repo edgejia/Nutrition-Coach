@@ -98,7 +98,15 @@ function writeStatus(stream: PassThrough, label: string, turnId?: string) {
   stream.write(`event: status\ndata: ${JSON.stringify({ label, ...(turnId ? { turnId } : {}) })}\n\n`);
 }
 
-function fanOutOrchestratorHooks(
+function callHookConsumer(invoke: () => void): void {
+  try {
+    invoke();
+  } catch {
+    // Hooks are best-effort observability only; consumer failures must not alter chat flow.
+  }
+}
+
+export function fanOutOrchestratorHooks(
   ...hooks: Array<OrchestratorHooks | undefined>
 ): OrchestratorHooks | undefined {
   const activeHooks = hooks.filter((hook): hook is OrchestratorHooks => Boolean(hook));
@@ -108,22 +116,22 @@ function fanOutOrchestratorHooks(
 
   return {
     onLLMStart(round) {
-      for (const hook of activeHooks) hook.onLLMStart?.(round);
+      for (const hook of activeHooks) callHookConsumer(() => hook.onLLMStart?.(round));
     },
     onLLMEnd(round, hadToolCalls) {
-      for (const hook of activeHooks) hook.onLLMEnd?.(round, hadToolCalls);
+      for (const hook of activeHooks) callHookConsumer(() => hook.onLLMEnd?.(round, hadToolCalls));
     },
     onToolReceived(tool, argsRedacted) {
-      for (const hook of activeHooks) hook.onToolReceived?.(tool, argsRedacted);
+      for (const hook of activeHooks) callHookConsumer(() => hook.onToolReceived?.(tool, argsRedacted));
     },
     onToolResult(payload) {
-      for (const hook of activeHooks) hook.onToolResult?.(payload);
+      for (const hook of activeHooks) callHookConsumer(() => hook.onToolResult?.(payload));
     },
     onLLMError(payload) {
-      for (const hook of activeHooks) hook.onLLMError?.(payload);
+      for (const hook of activeHooks) callHookConsumer(() => hook.onLLMError?.(payload));
     },
     onFallback(payload) {
-      for (const hook of activeHooks) hook.onFallback?.(payload);
+      for (const hook of activeHooks) callHookConsumer(() => hook.onFallback?.(payload));
     },
   };
 }
