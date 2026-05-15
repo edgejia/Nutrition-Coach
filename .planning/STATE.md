@@ -4,8 +4,8 @@ milestone: v2.2
 milestone_name: LLM Failure Localization Foundation
 status: Awaiting next milestone
 stopped_at: Completed 58-04-PLAN.md
-last_updated: "2026-05-16T05:01:16+08:00"
-last_activity: 2026-05-16 — Completed quick task 260516-6d2: Fix remaining v2.2 pre-promotion review blockers
+last_updated: "2026-05-16T06:31:14+08:00"
+last_activity: 2026-05-16 — Completed quick task 260516-7tu: Fix remaining clean sub-agent review blockers
 progress:
   total_phases: 4
   completed_phases: 4
@@ -21,7 +21,7 @@ progress:
 Phase: Milestone v2.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-05-16 — Completed quick task 260516-6d2: Fix remaining v2.2 pre-promotion review blockers
+Last activity: 2026-05-16 — Completed quick task 260516-7tu: Fix remaining clean sub-agent review blockers
 
 ## Project Reference
 
@@ -91,11 +91,12 @@ Items acknowledged and deferred at milestone close on 2026-05-15:
 | 260516-4a1 | v2.2 pre-promotion UAT patch: based on Notion BUG FEATURE manual test report, fix the remaining promotion blockers without reopening archived v2.2. Scope: fix grouped log_food schema to accept/normalize top-level quantity and serving metadata from the exact text case 早餐吃雞胸肉150g和一碗白飯; add regression coverage for that incident; add a guard so failed/no-mutation follow-up turns cannot claim 已記錄; fix stale onboarding goal validation copy to include 維持; remove or neutralize remaining headline/先抓低/保守估算 user-facing copy if reachable. Do not promote to staging or main. Verify with targeted unit tests, image-log-failure harness, and release-relevant checks. | 2026-05-16 | 1b37eaf | Verified | [260516-4a1-v2-2-pre-promotion-uat-patch-based-on-no](./quick/260516-4a1-v2-2-pre-promotion-uat-patch-based-on-no/) |
 | 260516-5ei | Fix code-review findings for v2.2 pre-promotion UAT patch: strengthened no-mutation false-log guards, removed stale reachable prompt copy, accepted grouped Chinese serving metadata as quantity evidence, and hardened image logging regression proof. | 2026-05-16 | 4678bf0 | Verified | [260516-5ei-fix-code-review-findings-for-v2-2-pre-pr](./quick/260516-5ei-fix-code-review-findings-for-v2-2-pre-pr/) |
 | 260516-6d2 | Fix remaining v2.2 pre-promotion review blockers: preserve legitimate summary/history 已記錄 replies across orchestrator and route paths, harden SSE chunk parsing, and prove image upload cleanup before teardown. | 2026-05-16 | cd76006 | Verified | [260516-6d2-fix-remaining-v2-2-pre-promotion-review-](./quick/260516-6d2-fix-remaining-v2-2-pre-promotion-review-/) |
+| 260516-7tu | Fix remaining clean sub-agent review blockers: narrow no-mutation summary/history allowance, prevent summary-context SSE false-log leakage, and prove image-log-failure chunk ordering plus route-level upload cleanup before teardown. | 2026-05-16 | ec11307 | Verified | [260516-7tu-fix-the-remaining-clean-sub-agent-review](./quick/260516-7tu-fix-the-remaining-clean-sub-agent-review/) |
 
 ## Session
 
-Last session: 2026-05-15T14:58:13Z
-Stopped At: Completed 58-04-PLAN.md
+Last session: 2026-05-15T22:31:14Z
+Stopped At: Completed quick task 260516-7tu
 Resume File: None
 
 ## Operator Next Steps
