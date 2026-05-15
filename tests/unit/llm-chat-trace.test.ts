@@ -86,12 +86,13 @@ describe("createLlmTraceRecorder", () => {
     const trace = recorder.build({ scenario: "unit-trace", status: "pass" });
 
     assert.deepEqual(Object.keys(trace), ["schemaVersion", "scenario", "status", "summary", "timeline"]);
-    assert.equal(trace.schemaVersion, "llm-trace.v1");
+    assert.equal(trace.schemaVersion, "llm-trace.v2");
     assert.equal(trace.scenario, "unit-trace");
     assert.equal(trace.status, "pass");
     assert.equal(trace.summary.roundCount, 1);
     assert.equal(trace.summary.toolCount, 1);
     assert.equal(trace.summary.fallbackCount, 0);
+    assert.equal(trace.summary.providerErrorCount, 0);
     assert.equal(trace.summary.latencyMs, 42);
     assert.deepEqual(trace.summary.finalReply, {
       source: "model",
@@ -250,11 +251,14 @@ describe("createLlmTraceRecorder", () => {
 
     const trace = recorder.build({ scenario: "unit-provider-fallback", status: "pass" });
 
-    assert.equal(trace.schemaVersion, "llm-trace.v1");
-    assert.equal(
-      (trace.timeline as Array<{ type: string }>).some((event) => event.type === "llm_error"),
-      false,
-    );
+    assert.equal(trace.schemaVersion, "llm-trace.v2");
+    assert.equal(trace.summary.providerErrorCount, 1);
+    assert.deepEqual(trace.timeline.at(-2), {
+      type: "llm_error",
+      round: 2,
+      lastTool: "log_food",
+      providerMetadata,
+    });
     assert.deepEqual(trace.timeline.at(-1), {
       type: "orchestrator_fallback",
       reason: "llm_error",
@@ -266,6 +270,10 @@ describe("createLlmTraceRecorder", () => {
       providerMetadata?: Record<string, unknown>;
     };
     assert.deepEqual(Object.keys(fallbackEvent.providerMetadata ?? {}), providerMetadataKeys);
+    const providerErrorEvent = trace.timeline.at(-2) as {
+      providerMetadata?: Record<string, unknown>;
+    };
+    assert.deepEqual(Object.keys(providerErrorEvent.providerMetadata ?? {}), providerMetadataKeys);
 
     const traceJson = JSON.stringify(trace);
     for (const forbidden of [
@@ -312,6 +320,64 @@ describe("createLlmTraceRecorder", () => {
       type: "orchestrator_fallback",
       reason: "llm_error",
       round: 1,
+      lastTool: "redacted",
+      providerMetadata: {
+        provider: "openai",
+        operation: "chat_round_initial",
+        model: "redacted",
+        aborted: false,
+        status: 429,
+        providerRequestId: "redacted",
+        errorName: "redacted",
+        errorType: "redacted",
+        errorCode: "redacted",
+      },
+    });
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "Authorization",
+      "Bearer",
+      "raw provider body",
+      "raw prompt",
+      "raw provider model",
+      "final assistant text",
+      "guest_session",
+      "sk-secret",
+      "headers",
+      "rawProviderBody",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("sanitizes provider error trace fields without spreading extra payload properties", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+    const unsafeProviderMetadata: ProviderErrorMetadata = {
+      ...providerMetadata,
+      model: "raw provider model",
+      providerRequestId: "Authorization Bearer",
+      errorName: "raw prompt",
+      errorType: "guest_session",
+      errorCode: "sk-secret",
+    };
+
+    hooks.onLLMError?.({
+      round: 4,
+      lastTool: "raw prompt",
+      providerMetadata: unsafeProviderMetadata,
+      rawProviderBody: "raw provider body",
+      headers: "Authorization",
+      finalReply: "final assistant text",
+    } as never);
+
+    const trace = recorder.build({ scenario: "unit-sanitized-provider-error", status: "pass" });
+
+    assert.equal(trace.summary.providerErrorCount, 1);
+    assert.deepEqual(trace.timeline.at(-1), {
+      type: "llm_error",
+      round: 4,
       lastTool: "redacted",
       providerMetadata: {
         provider: "openai",
