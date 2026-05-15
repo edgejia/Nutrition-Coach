@@ -144,7 +144,7 @@ describe("Intake API", () => {
         field: "goal",
         code: "INVALID_GOAL",
         step: 1,
-        message: "請選擇減脂或增肌目標",
+        message: "請選擇減脂、增肌或維持目標",
       },
     ]);
   });

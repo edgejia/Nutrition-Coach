@@ -4,6 +4,7 @@ import type { MutationEffects } from "./mutation-effects.js";
 export const FORBIDDEN_RECEIPT_TERMS = [
   "headline",
   "先抓低",
+  "保守估算",
   "log_food",
   "update_meal",
   "delete_meal",

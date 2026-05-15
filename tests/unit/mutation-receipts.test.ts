@@ -215,6 +215,7 @@ describe("mutation receipt renderer", () => {
     const rejected = [
       "headline",
       "先抓低",
+      "保守估算",
       "log_food",
       "update_meal",
       "delete_meal",

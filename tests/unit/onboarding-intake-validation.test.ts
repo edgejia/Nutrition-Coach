@@ -33,6 +33,12 @@ describe("onboarding-intake-validation", () => {
     assert.deepEqual(validation.validateOnboardingStep(1, { goal: "maintain" } as any), []);
   });
 
+  it("validateOnboardingStep(1) lists every selectable goal in invalid-goal copy", () => {
+    assert.deepEqual(validation.validateOnboardingStep(1, { goal: "fly_to_moon" } as any), [
+      { field: "goal", code: "INVALID_GOAL", step: 1, message: "請選擇減脂、增肌或維持目標" },
+    ]);
+  });
+
   it("validateOnboardingStep(3) rejects invalid body metrics", () => {
     const issues = validation.validateOnboardingStep(3, {
       sex: "female",

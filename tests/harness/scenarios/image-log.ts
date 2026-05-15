@@ -32,6 +32,7 @@ import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioSte
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCENARIO_UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log", "uploads");
 const SCENARIO_ASSETS_DIR = path.resolve(__dirname, "..", "tmp", "image-log", "assets");
+const FORBIDDEN_USER_COPY_TERMS = ["headline", "先抓低", "保守估算"] as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,6 +47,23 @@ function makeJpegBytes(): ArrayBuffer {
     0xFF, 0xD9,
   ]);
   return bytes.buffer as ArrayBuffer;
+}
+
+function parseReplyText(rawSSE: string): string {
+  return parseSSEEvents(rawSSE)
+    .filter((event) => event.event === "chunk")
+    .map((event) => {
+      try {
+        return (JSON.parse(event.data) as { token: string }).token;
+      } catch {
+        return "";
+      }
+    })
+    .join("");
+}
+
+function findForbiddenUserCopy(text: string): string[] {
+  return FORBIDDEN_USER_COPY_TERMS.filter((term) => text.includes(term));
 }
 
 function stepOk(name: string, actual?: unknown): ScenarioStepResult {
@@ -112,7 +130,7 @@ const scenario: VerificationScenario = {
     });
     // Round 2: streamed final reply
     llm.queueChatStream([
-      "已先依照片做保守估算並完成記錄：",
+      "已先依照片完成記錄：",
       "豬肉燒烤飯盒，約 680 kcal。",
     ]);
 
@@ -169,6 +187,7 @@ const scenario: VerificationScenario = {
       }
 
       const sseEvents = parseSSEEvents(rawSSE);
+      const replyText = parseReplyText(rawSSE);
       const statusLabels = sseEvents
         .filter((e) => e.event === "status")
         .map((e) => {
@@ -284,6 +303,20 @@ const scenario: VerificationScenario = {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       if (assistantMsgs.length === 0) {
         steps.push(stepFail("verify_history", "no assistant message persisted", historyJson));
+        failedStep = "verify_history";
+        artifacts.history = historyJson;
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+      const assistantReply = assistantMsgs.at(-1)?.content ?? "";
+      const forbiddenReplyTerms = findForbiddenUserCopy(replyText);
+      const forbiddenHistoryTerms = findForbiddenUserCopy(assistantReply);
+      if (forbiddenReplyTerms.length > 0 || forbiddenHistoryTerms.length > 0) {
+        steps.push(stepFail("verify_history", "reachable reply contains forbidden internal copy", {
+          forbiddenReplyTerms,
+          forbiddenHistoryTerms,
+          replyText,
+          assistantReply,
+        }));
         failedStep = "verify_history";
         artifacts.history = historyJson;
         return buildResult(false, failedStep, steps, artifacts);

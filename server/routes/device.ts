@@ -159,7 +159,7 @@ function buildDeviceSessionResponse(device: Awaited<ReturnType<ReturnType<typeof
 }
 
 function buildGoalValidationIssue(): IntakeValidationIssue {
-  return createValidationIssue("goal", "INVALID_GOAL", 1, "請選擇減脂或增肌目標");
+  return createValidationIssue("goal", "INVALID_GOAL", 1, "請選擇減脂、增肌或維持目標");
 }
 
 function logOnboardingValidationIssues(

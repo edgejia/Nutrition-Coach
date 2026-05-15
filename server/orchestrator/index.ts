@@ -154,16 +154,16 @@ function buildTrustedProteinExplanation(loggedMeal: LoggedMealReceipt): string {
 
   if (countedSourceNames.length === 0) {
     return loggedMeal.usedConservativeAssumption
-      ? "蛋白質目前缺少清楚主來源，先用保守方式低估，不把配菜列入 headline。"
-      : "蛋白質目前沒有明確主來源，先不把配菜列入 headline。";
+      ? "蛋白質目前缺少清楚主來源，先用偏低方式估算，未把配菜列入主要蛋白質。"
+      : "蛋白質目前沒有明確主來源，未把配菜列入主要蛋白質。";
   }
 
   const sourceLabel = joinProteinSourceNames(countedSourceNames);
   if (loggedMeal.usedConservativeAssumption) {
-    return `蛋白質先按${sourceLabel}作為主要來源保守估算；其他配菜不列入 headline，份量不清楚時先抓低一些。`;
+    return `蛋白質先按${sourceLabel}作為主要來源估算；其他配菜不列入主要蛋白質，份量不清楚時用偏低值。`;
   }
   if (loggedMeal.excludedSources.length > 0) {
-    return `蛋白質先按${sourceLabel}作為主要來源估算，其他配菜不列入 headline。`;
+    return `蛋白質先按${sourceLabel}作為主要來源估算，其他配菜不列入主要蛋白質。`;
   }
   return `蛋白質先按${sourceLabel}作為主要來源估算。`;
 }
@@ -179,7 +179,7 @@ function getUniqueCountedProteinNames(loggedMeal: LoggedMealReceipt): string[] {
 function buildCompactProteinSuffix(loggedMeal: LoggedMealReceipt): string {
   const countedSourceNames = getUniqueCountedProteinNames(loggedMeal);
   if (loggedMeal.usedConservativeAssumption) {
-    return "（先抓低）";
+    return "（偏低估）";
   }
   if (countedSourceNames.length > 1) {
     return `（${joinProteinSourceNames(countedSourceNames.slice(0, 3))}）`;

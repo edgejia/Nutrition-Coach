@@ -21,6 +21,7 @@ const STEP_NAMES = [
   "carb_dominant_small_protein",
   "high_uncertainty_image",
 ] as const;
+const FORBIDDEN_USER_COPY_TERMS = ["headline", "先抓低", "保守估算"] as const;
 
 type StepName = typeof STEP_NAMES[number];
 
@@ -138,6 +139,13 @@ function parseDonePayload(rawSSE: string): DonePayload | undefined {
   }
 }
 
+function assertNoForbiddenUserCopy(label: string, text: string) {
+  const matchedTerms = FORBIDDEN_USER_COPY_TERMS.filter((term) => text.includes(term));
+  if (matchedTerms.length > 0) {
+    throw new Error(`${label} contains forbidden copy: ${matchedTerms.join(", ")}`);
+  }
+}
+
 async function fetchMeals(address: string, cookieHeader: string): Promise<MealDto[]> {
   const res = await fetch(`${address}/api/meals`, {
     headers: { cookie: cookieHeader },
@@ -240,6 +248,8 @@ async function runProteinTrustCase(
       throw new Error(`assistant history "${assistantReply}" did not match ${String(pattern)}`);
     }
   }
+  assertNoForbiddenUserCopy("reply", replyText);
+  assertNoForbiddenUserCopy("assistant history", assistantReply);
 
   return {
     caseName: trustCase.stepName,
@@ -287,11 +297,11 @@ const scenario: VerificationScenario = {
             { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
           ],
         },
-        streamedReply: "已幫你記錄雞腿便當。蛋白質先按雞腿作為主要來源估算，其他配菜不列入 headline。",
+        streamedReply: "已幫你記錄雞腿便當。蛋白質先按雞腿作為主要來源估算，其他配菜不列入主要蛋白質。",
         expectedProtein: 24,
         rawProtein: 30,
         expectedFoodName: "雞腿便當",
-        expectedReplyPatterns: [/雞腿/, /headline/],
+        expectedReplyPatterns: [/雞腿便當/, /蛋白質 24 g/],
       },
       {
         stepName: "plant_protein",
@@ -311,7 +321,7 @@ const scenario: VerificationScenario = {
         expectedProtein: 30,
         rawProtein: 30,
         expectedFoodName: "豆腐豆漿餐",
-        expectedReplyPatterns: [/豆腐/, /豆漿/],
+        expectedReplyPatterns: [/豆腐豆漿餐/, /蛋白質 30 g/],
       },
       {
         stepName: "carb_dominant_small_protein",
@@ -322,6 +332,12 @@ const scenario: VerificationScenario = {
           protein: 16,
           carbs: 85,
           fat: 14,
+          items: [
+            { food_name: "雞肉", calories: 90, protein: 6, carbs: 0, fat: 4 },
+            { food_name: "白飯", calories: 360, protein: 6, carbs: 78, fat: 1 },
+            { food_name: "馬鈴薯", calories: 70, protein: 2, carbs: 7, fat: 4 },
+            { food_name: "紅蘿蔔", calories: 40, protein: 2, carbs: 0, fat: 5 },
+          ],
           protein_sources: [
             { name: "雞肉", protein: 6, is_primary: true, certainty: "clear" },
             { name: "白飯", protein: 6, is_primary: false, certainty: "clear" },
@@ -329,11 +345,11 @@ const scenario: VerificationScenario = {
             { name: "紅蘿蔔", protein: 2, is_primary: false, certainty: "clear" },
           ],
         },
-        streamedReply: "已幫你記錄咖哩飯。蛋白質先按雞肉作為主要來源估算，其他配菜不列入 headline。",
+        streamedReply: "已幫你記錄咖哩飯。蛋白質先按雞肉作為主要來源估算，其他配菜不列入主要蛋白質。",
         expectedProtein: 6,
         rawProtein: 16,
-        expectedFoodName: "咖哩飯",
-        expectedReplyPatterns: [/雞肉/, /headline/],
+        expectedFoodName: "雞肉、白飯、馬鈴薯、紅蘿蔔",
+        expectedReplyPatterns: [/雞肉、白飯、馬鈴薯、紅蘿蔔/, /蛋白質 6 g/],
       },
       {
         stepName: "high_uncertainty_image",
@@ -354,7 +370,7 @@ const scenario: VerificationScenario = {
         expectedProtein: 18,
         rawProtein: 18,
         expectedFoodName: "豆腐便當",
-        expectedReplyPatterns: [/保守估算/, /豆腐/, /先抓低一些/],
+        expectedReplyPatterns: [/豆腐便當/, /蛋白質 18 g/, /若份量不同/],
       },
     ];
 

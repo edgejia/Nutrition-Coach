@@ -287,6 +287,7 @@ describe("behavior matrix contract", () => {
     for (const term of [
       "headline",
       "先抓低",
+      "保守估算",
       "log_food",
       "update_meal",
       "delete_meal",
