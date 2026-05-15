@@ -103,6 +103,25 @@ function parseDonePayload(rawSSE: string): { didLogMeal?: boolean; dailySummary?
   }
 }
 
+function parseLiveChunkText(rawSSE: string): string {
+  return parseSSEEvents(rawSSE)
+    .filter((event) => event.event === "chunk")
+    .map((event, index) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(event.data);
+      } catch (error) {
+        throw new Error(`Malformed chunk JSON at index ${index}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const token = (parsed as { token?: unknown }).token;
+      if (typeof token !== "string") {
+        throw new Error(`Malformed chunk payload at index ${index}: missing token`);
+      }
+      return token;
+    })
+    .join("");
+}
+
 function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boolean {
   return typeof summary?.date === "string" && DATE_KEY_PATTERN.test(summary.date);
 }
@@ -271,12 +290,25 @@ const scenario: VerificationScenario = {
       },
       async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
+        let liveChunkText = "";
+        try {
+          liveChunkText = parseLiveChunkText(rawSSE);
+        } catch (error) {
+          return {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            evidence: { donePayload, rawLength: rawSSE.length },
+          };
+        }
         const assistantMsgs = (await fetchHistory(address, cookieHeader)).filter((m) => m.role === "assistant");
         const meals = await fetchMeals(address, cookieHeader);
         const fallbackContent = assistantMsgs[0]?.content ?? "";
+        const falseLogChunkClaim = /已記錄|完成記錄/.test(liveChunkText);
 
         const evidence = {
           donePayload,
+          liveChunkText,
+          falseLogChunkClaim,
           assistantCount: assistantMsgs.length,
           fallbackContent,
           mealCount: meals.length,
@@ -287,6 +319,7 @@ const scenario: VerificationScenario = {
         if (assistantMsgs.length !== 1) return { ok: false, error: `D-10: expected 1 assistant msg, got ${assistantMsgs.length}`, evidence };
         if (!/抱歉/.test(fallbackContent)) return { ok: false, error: "IMG-03: expected friendly fallback wording", evidence };
         if (/log_food|FatalToolError/.test(fallbackContent)) return { ok: false, error: "IMG-03: fallback must not expose internal names", evidence };
+        if (falseLogChunkClaim) return { ok: false, error: "IMG-03: failed image analysis chunk must not claim a meal was logged", evidence };
         if (/已記錄|完成記錄/.test(fallbackContent)) return { ok: false, error: "IMG-03: failed image analysis must not claim a meal was logged", evidence };
         if (meals.length !== 0) return { ok: false, error: `IMG-03: expected 0 meals on analysis failure, got ${meals.length}`, evidence };
 
@@ -350,12 +383,25 @@ const scenario: VerificationScenario = {
       },
       async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
+        let liveChunkText = "";
+        try {
+          liveChunkText = parseLiveChunkText(rawSSE);
+        } catch (error) {
+          return {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            evidence: { donePayload, rawLength: rawSSE.length },
+          };
+        }
         const assistantMsgs = (await fetchHistory(address, cookieHeader)).filter((m) => m.role === "assistant");
         const meals = await fetchMeals(address, cookieHeader);
         const fallbackContent = assistantMsgs[0]?.content ?? "";
+        const falseLogChunkClaim = /已記錄|完成記錄/.test(liveChunkText);
 
         const evidence = {
           donePayload,
+          liveChunkText,
+          falseLogChunkClaim,
           assistantCount: assistantMsgs.length,
           fallbackContent,
           mealCount: meals.length,
@@ -365,6 +411,7 @@ const scenario: VerificationScenario = {
         if (donePayload.didLogMeal) return { ok: false, error: "expected didLogMeal false when log_food fails", evidence };
         if (assistantMsgs.length !== 1) return { ok: false, error: `D-10: expected 1 assistant msg, got ${assistantMsgs.length}`, evidence };
         if (fallbackContent !== UNIFIED_FALLBACK) return { ok: false, error: "IMG-03: expected fallback wording when log_food fails", evidence };
+        if (falseLogChunkClaim) return { ok: false, error: "IMG-03: failed tool chunk must not claim a meal was logged", evidence };
         if (/已記錄|完成記錄/.test(fallbackContent)) return { ok: false, error: "IMG-03: failed tool path must not claim a meal was logged", evidence };
         if (meals.length !== 0) return { ok: false, error: `IMG-03: expected 0 meals when tool fails, got ${meals.length}`, evidence };
 

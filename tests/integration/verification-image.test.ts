@@ -55,7 +55,21 @@ test("image-log artifacts prove D-12 status and persistence invariants", async (
   const streamArtifact = result.artifacts.stream as {
     analysisIdx?: number;
     loggingIdx?: number;
-    donePayload?: { didLogMeal?: boolean };
+    replyText?: string;
+    donePayload?: {
+      didLogMeal?: boolean;
+      loggedMeal?: {
+        mealId?: string;
+        foodName?: string;
+        itemCount?: number;
+        calories?: number;
+        protein?: number;
+        carbs?: number;
+        fat?: number;
+        items?: Array<{ name?: string; position?: number }>;
+      };
+    };
+    loggedMealReceiptVerified?: boolean;
   } | undefined;
   const historyArtifact = result.artifacts.history as {
     d12_3_verified?: boolean;
@@ -68,6 +82,18 @@ test("image-log artifacts prove D-12 status and persistence invariants", async (
 
   assert.ok(streamArtifact, "expected stream artifact");
   assert.equal(streamArtifact.donePayload?.didLogMeal, true, "D-12.2: done.didLogMeal must be true");
+  assert.ok((streamArtifact.replyText ?? "").trim().length > 0, "expected non-empty assembled chunk text");
+  assert.equal(streamArtifact.loggedMealReceiptVerified, true, "expected stream artifact to verify loggedMeal receipt shape");
+  assert.match(streamArtifact.donePayload?.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+  assert.equal(streamArtifact.donePayload?.loggedMeal?.foodName, "豬肉燒烤飯盒");
+  assert.ok((streamArtifact.donePayload?.loggedMeal?.itemCount ?? 0) > 0);
+  for (const field of ["calories", "protein", "carbs", "fat"] as const) {
+    assert.equal(Number.isFinite(streamArtifact.donePayload?.loggedMeal?.[field]), true, `expected finite ${field}`);
+  }
+  for (const item of streamArtifact.donePayload?.loggedMeal?.items ?? []) {
+    assert.ok((item.name ?? "").trim().length > 0, `expected non-empty item name for ${JSON.stringify(item)}`);
+    assert.equal(Number.isFinite(item.position), true, `expected finite item position for ${JSON.stringify(item)}`);
+  }
   assert.ok(
     typeof streamArtifact.analysisIdx === "number" && streamArtifact.analysisIdx >= 0,
     `D-12.1: expected analysisIdx >= 0, got ${streamArtifact.analysisIdx}`,
@@ -164,7 +190,26 @@ test("runScenarioByName(\"image-log-failure\") succeeds with all three sub-scena
 
 test("image-log-failure artifacts show sub_a_analysis_fail evidence", async () => {
   const result: ScenarioResult = await runScenarioByName("image-log-failure");
-  assert.ok(result.artifacts.sub_a_analysis_fail, "expected sub_a_analysis_fail artifact");
+  const subA = result.artifacts.sub_a_analysis_fail as {
+    liveChunkText?: string;
+    falseLogChunkClaim?: boolean;
+  } | undefined;
+  assert.ok(subA, "expected sub_a_analysis_fail artifact");
+  assert.equal(typeof subA.liveChunkText, "string", "expected live chunk text evidence");
+  assert.equal(subA.falseLogChunkClaim, false, "failed/no-mutation chunks must not claim logging");
+  assert.doesNotMatch(subA.liveChunkText ?? "", /已記錄|完成記錄/);
+});
+
+test("image-log-failure artifacts show sub_b_tool_fail chunk evidence", async () => {
+  const result: ScenarioResult = await runScenarioByName("image-log-failure");
+  const subB = result.artifacts.sub_b_tool_fail as {
+    liveChunkText?: string;
+    falseLogChunkClaim?: boolean;
+  } | undefined;
+  assert.ok(subB, "expected sub_b_tool_fail artifact");
+  assert.equal(typeof subB.liveChunkText, "string", "expected live chunk text evidence");
+  assert.equal(subB.falseLogChunkClaim, false, "failed/no-mutation chunks must not claim logging");
+  assert.doesNotMatch(subB.liveChunkText ?? "", /已記錄|完成記錄/);
 });
 
 test("image-log-failure artifacts show sub_c_reply_fail with mealKept true", async () => {

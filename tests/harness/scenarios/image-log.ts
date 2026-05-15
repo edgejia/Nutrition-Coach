@@ -50,16 +50,26 @@ function makeJpegBytes(): ArrayBuffer {
 }
 
 function parseReplyText(rawSSE: string): string {
-  return parseSSEEvents(rawSSE)
+  const tokens = parseSSEEvents(rawSSE)
     .filter((event) => event.event === "chunk")
-    .map((event) => {
+    .map((event, index) => {
+      let parsed: unknown;
       try {
-        return (JSON.parse(event.data) as { token: string }).token;
-      } catch {
-        return "";
+        parsed = JSON.parse(event.data);
+      } catch (error) {
+        throw new Error(`Malformed chunk JSON at index ${index}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    })
-    .join("");
+      const token = (parsed as { token?: unknown }).token;
+      if (typeof token !== "string" || token.length === 0) {
+        throw new Error(`Malformed chunk payload at index ${index}: missing non-empty token`);
+      }
+      return token;
+    });
+  const replyText = tokens.join("");
+  if (replyText.trim().length === 0) {
+    throw new Error("Assembled chunk reply text is empty");
+  }
+  return replyText;
 }
 
 function findForbiddenUserCopy(text: string): string[] {
@@ -78,6 +88,24 @@ interface DailySummaryPayload {
   date: string;
 }
 
+interface LoggedMealReceiptPayload {
+  mealId?: string;
+  foodName?: string;
+  itemCount?: number;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  items?: Array<{
+    name?: string;
+    position?: number;
+    calories?: number;
+    protein?: number;
+    carbs?: number;
+    fat?: number;
+  }>;
+}
+
 interface ImageAssetDto {
   imagePath?: string | null;
   imageAssetId?: string | null;
@@ -88,6 +116,37 @@ const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boolean {
   return typeof summary?.date === "string" && DATE_KEY_PATTERN.test(summary.date);
+}
+
+function verifyLoggedMealReceiptShape(receipt: LoggedMealReceiptPayload | undefined): { ok: boolean; error?: string } {
+  if (!receipt) {
+    return { ok: false, error: "missing done.loggedMeal receipt" };
+  }
+  if (typeof receipt.mealId !== "string" || !/^[0-9a-f-]{36}$/i.test(receipt.mealId)) {
+    return { ok: false, error: "missing loggedMeal meal identity" };
+  }
+  if (typeof receipt.foodName !== "string" || receipt.foodName.trim().length === 0) {
+    return { ok: false, error: "missing loggedMeal foodName" };
+  }
+  if (!Number.isFinite(receipt.itemCount) || (receipt.itemCount ?? 0) <= 0) {
+    return { ok: false, error: "expected positive loggedMeal itemCount" };
+  }
+  for (const field of ["calories", "protein", "carbs", "fat"] as const) {
+    if (!Number.isFinite(receipt[field])) {
+      return { ok: false, error: `expected finite loggedMeal ${field}` };
+    }
+  }
+  for (const item of receipt.items ?? []) {
+    if (typeof item.name !== "string" || item.name.trim().length === 0) {
+      return { ok: false, error: "expected non-empty loggedMeal item name" };
+    }
+    for (const field of ["position", "calories", "protein", "carbs", "fat"] as const) {
+      if (!Number.isFinite(item[field])) {
+        return { ok: false, error: `expected finite loggedMeal item ${field}` };
+      }
+    }
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +246,16 @@ const scenario: VerificationScenario = {
       }
 
       const sseEvents = parseSSEEvents(rawSSE);
-      const replyText = parseReplyText(rawSSE);
+      let replyText = "";
+      try {
+        replyText = parseReplyText(rawSSE);
+      } catch (error) {
+        const parseError = error instanceof Error ? error.message : String(error);
+        steps.push(stepFail("collect_stream_chunks", parseError, { rawLength: rawSSE.length }));
+        failedStep = "collect_stream_chunks";
+        artifacts.stream = { parseError, rawLength: rawSSE.length };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
       const statusLabels = sseEvents
         .filter((e) => e.event === "status")
         .map((e) => {
@@ -198,7 +266,11 @@ const scenario: VerificationScenario = {
           }
         });
       const doneEvent = sseEvents.find((e) => e.event === "done");
-      let donePayload: { didLogMeal?: boolean; dailySummary?: DailySummaryPayload } = {};
+      let donePayload: {
+        didLogMeal?: boolean;
+        dailySummary?: DailySummaryPayload;
+        loggedMeal?: LoggedMealReceiptPayload;
+      } = {};
       if (doneEvent) {
         try {
           donePayload = JSON.parse(doneEvent.data) as typeof donePayload;
@@ -221,7 +293,7 @@ const scenario: VerificationScenario = {
           .join("; ");
         steps.push(stepFail("collect_stream", err, { statusLabels, hasDone }));
         failedStep = "collect_stream";
-        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length };
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length };
         return buildResult(false, failedStep, steps, artifacts);
       }
 
@@ -251,7 +323,7 @@ const scenario: VerificationScenario = {
           { analysisIdx, loggingIdx },
         ));
         failedStep = "collect_stream_order";
-        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
         return buildResult(false, failedStep, steps, artifacts);
       }
 
@@ -261,7 +333,19 @@ const scenario: VerificationScenario = {
       if (donePayload.didLogMeal !== true) {
         steps.push(stepFail("collect_stream_didlogmeal", "D-12.2 failed: done.didLogMeal is not true", { donePayload }));
         failedStep = "collect_stream_didlogmeal";
-        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+
+      const loggedMealReceiptCheck = verifyLoggedMealReceiptShape(donePayload.loggedMeal);
+      if (!loggedMealReceiptCheck.ok) {
+        steps.push(stepFail(
+          "collect_stream_logged_meal",
+          loggedMealReceiptCheck.error ?? "invalid loggedMeal receipt",
+          { donePayload },
+        ));
+        failedStep = "collect_stream_logged_meal";
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
         return buildResult(false, failedStep, steps, artifacts);
       }
 
@@ -272,14 +356,30 @@ const scenario: VerificationScenario = {
           { donePayload },
         ));
         failedStep = "collect_stream_summary_date";
-        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
         return buildResult(false, failedStep, steps, artifacts);
       }
 
       steps.push(
-        stepOk("collect_stream", { statusLabels, donePayload, d12_order_ok: true, analysisIdx, loggingIdx }),
+        stepOk("collect_stream", {
+          statusLabels,
+          replyText,
+          donePayload,
+          d12_order_ok: true,
+          analysisIdx,
+          loggingIdx,
+          loggedMealReceiptVerified: true,
+        }),
       );
-      artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+      artifacts.stream = {
+        statusLabels,
+        replyText,
+        donePayload,
+        rawLength: rawSSE.length,
+        analysisIdx,
+        loggingIdx,
+        loggedMealReceiptVerified: true,
+      };
 
       // ------------------------------------------------------------------
       // Step: verify_history
