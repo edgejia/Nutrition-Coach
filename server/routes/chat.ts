@@ -623,6 +623,77 @@ async function handleOrchestratorSSE(
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
   let streamReceiptIdentity: ReceiptIdentity | undefined;
+  const recordSseCompletion = (params: {
+    didLogMeal: boolean;
+    didMutateMeal: boolean;
+    stopped?: boolean;
+    tokensStreamed?: number;
+  }) => {
+    const latencyMs = Date.now() - startedAt;
+    recorder?.recordRouteCompletion({
+      transport: "sse",
+      turnId: stopControl.turnId,
+      didLogMeal: params.didLogMeal,
+      didMutateMeal: params.didMutateMeal,
+      completed: true,
+    });
+    recorder?.recordMetrics({ latencyMs });
+    logChatTurnCompleted(deps.log, {
+      source: "sse",
+      turnId: stopControl.turnId,
+      didLogMeal: params.didLogMeal,
+      didMutateMeal: params.didMutateMeal,
+      hadImage: Boolean(image),
+      latencyMs,
+      ...(params.stopped !== undefined ? { stopped: params.stopped } : {}),
+      ...(params.tokensStreamed !== undefined ? { tokensStreamed: params.tokensStreamed } : {}),
+    });
+  };
+  const recordSseFallback = (params: {
+    fallbackSource: RouteFallbackSource;
+    reason?: RouteFallbackReason;
+    round?: number;
+    lastTool?: string;
+    catchSite?: RouteCatchSite;
+    errorName?: string;
+    errorMessage?: string;
+    providerMetadata?: ProviderErrorMetadata;
+    didLogMeal: boolean;
+    didMutateMeal: boolean;
+  }) => {
+    const latencyMs = Date.now() - startedAt;
+    recorder?.recordRouteFallback({
+      transport: "sse",
+      turnId: stopControl.turnId,
+      fallbackSource: params.fallbackSource,
+      ...(params.reason !== undefined ? { reason: params.reason } : {}),
+      didLogMeal: params.didLogMeal,
+      didMutateMeal: params.didMutateMeal,
+      ...(params.catchSite !== undefined ? { catchSite: params.catchSite } : {}),
+      ...(params.providerMetadata !== undefined ? { providerMetadata: params.providerMetadata } : {}),
+      ...(params.round !== undefined ? { round: params.round } : {}),
+      ...(params.lastTool !== undefined ? { lastTool: params.lastTool } : {}),
+      ...(params.errorName !== undefined ? { errorName: params.errorName } : {}),
+      ...(params.errorMessage !== undefined ? { errorMessage: params.errorMessage } : {}),
+    });
+    recorder?.recordMetrics({ latencyMs });
+    logChatRouteFallback(deps.log, {
+      source: "sse",
+      turnId: stopControl.turnId,
+      fallbackSource: params.fallbackSource,
+      ...(params.reason !== undefined ? { reason: params.reason } : {}),
+      ...(params.catchSite !== undefined ? { catchSite: params.catchSite } : {}),
+      didLogMeal: params.didLogMeal,
+      didMutateMeal: params.didMutateMeal,
+      hadImage: Boolean(image),
+      latencyMs,
+      ...(params.round !== undefined ? { round: params.round } : {}),
+      ...(params.lastTool !== undefined ? { lastTool: params.lastTool } : {}),
+      ...(params.providerMetadata !== undefined ? { providerMetadata: params.providerMetadata } : {}),
+      ...(params.errorName !== undefined ? { errorName: params.errorName } : {}),
+      ...(params.errorMessage !== undefined ? { errorMessage: params.errorMessage } : {}),
+    });
+  };
 
   try {
     writeStatus(stream, "思考中...", stopControl.turnId);
@@ -700,20 +771,9 @@ async function handleOrchestratorSSE(
           ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
         };
         stream.write(`event: stopped\ndata: ${JSON.stringify(stoppedData)}\n\n`);
-        recorder?.recordRouteCompletion({
-          transport: "sse",
+        recordSseCompletion({
           didLogMeal: streamDidLogMeal,
           didMutateMeal: streamDidMutateMeal,
-          completed: true,
-        });
-        recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
-        logChatTurnCompleted(deps.log, {
-          source: "sse",
-          turnId: stopControl.turnId,
-          didLogMeal: streamDidLogMeal,
-          didMutateMeal: streamDidMutateMeal,
-          hadImage: Boolean(image),
-          latencyMs: Date.now() - startedAt,
           stopped: true,
           tokensStreamed: streamResult.tokensStreamed,
         });
@@ -731,21 +791,19 @@ async function handleOrchestratorSSE(
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-      recorder?.recordRouteCompletion({
-        transport: "sse",
-        didLogMeal: streamDidLogMeal,
-        didMutateMeal: streamDidMutateMeal,
-        completed: true,
-      });
-      recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
-      logChatTurnCompleted(deps.log, {
-        source: "sse",
-        turnId: stopControl.turnId,
-        didLogMeal: streamDidLogMeal,
-        didMutateMeal: streamDidMutateMeal,
-        hadImage: Boolean(image),
-        latencyMs: Date.now() - startedAt,
-      });
+      if (streamResult.finalReplySource === "fallback") {
+        recordSseFallback({
+          fallbackSource: "route_hallucination",
+          reason: "hallucination_detected",
+          didLogMeal: streamDidLogMeal,
+          didMutateMeal: streamDidMutateMeal,
+        });
+      } else {
+        recordSseCompletion({
+          didLogMeal: streamDidLogMeal,
+          didMutateMeal: streamDidMutateMeal,
+        });
+      }
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
     } else {
       const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate, loggedMeal } = result;
@@ -779,21 +837,23 @@ async function handleOrchestratorSSE(
         ...(affectedDate ? { affectedDate } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-      recorder?.recordRouteCompletion({
-        transport: "sse",
-        didLogMeal,
-        didMutateMeal: streamDidMutateMeal,
-        completed: true,
-      });
-      recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
-      logChatTurnCompleted(deps.log, {
-        source: "sse",
-        turnId: stopControl.turnId,
-        didLogMeal,
-        didMutateMeal: streamDidMutateMeal,
-        hadImage: Boolean(image),
-        latencyMs: Date.now() - startedAt,
-      });
+      if (result.fallbackOutcomeContext) {
+        const providerMetadata = result.providerFallbackContext?.reason === "llm_error"
+          && result.fallbackOutcomeContext.reason === "llm_error"
+          ? result.providerFallbackContext.providerMetadata
+          : undefined;
+        recordSseFallback({
+          fallbackSource: result.fallbackOutcomeContext.fallbackSource,
+          reason: result.fallbackOutcomeContext.reason,
+          ...(result.fallbackOutcomeContext.round !== undefined ? { round: result.fallbackOutcomeContext.round } : {}),
+          ...(result.fallbackOutcomeContext.lastTool !== undefined ? { lastTool: result.fallbackOutcomeContext.lastTool } : {}),
+          ...(providerMetadata !== undefined ? { providerMetadata } : {}),
+          didLogMeal,
+          didMutateMeal: streamDidMutateMeal,
+        });
+      } else {
+        recordSseCompletion({ didLogMeal, didMutateMeal: streamDidMutateMeal });
+      }
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, deps.log);
     }
   } catch {

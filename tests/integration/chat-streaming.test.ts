@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import type { AppServices } from "../../server/app.js";
@@ -568,6 +569,7 @@ describe("chat-streaming", () => {
       assert.deepEqual(trace.timeline.at(-1), {
         type: "route_completion",
         transport: "sse",
+        turnId: JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data).turnId,
         didLogMeal: true,
         didMutateMeal: true,
         completed: true,
@@ -1073,48 +1075,12 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat SSE partial_success fallback emits route fallback only without provider metadata", async () => {
-    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
-    mockLLM.queueRoundError(new LLMProviderError(providerMetadataFixture));
+  it("SSE fallback classifier gates provider metadata to llm_error, not partial_success", async () => {
+    const routeSource = await readFile("server/routes/chat.ts", "utf8");
 
-    const form = new FormData();
-    form.append("message", "我吃了蘋果");
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-
-    try {
-      const res = await fetch(`${address}/api/chat`, {
-        method: "POST",
-        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
-        signal: controller.signal,
-        body: form,
-      });
-
-      assert.ok(res.body);
-      const text = await readStreamUntil(res.body.getReader(), "event: done");
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
-      assert.match(donePayload.turnId ?? "", UUID_PATTERN);
-
-      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
-      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
-      assert.equal(completedEvents.length, 0);
-      assert.equal(fallbackEvents.length, 1);
-      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
-      assert.equal(fallbackEvents[0]!.reason, "partial_success");
-      assert.equal("providerMetadata" in fallbackEvents[0]!, false);
-
-      const trace = traceRecorders[0]!.build({ scenario: "sse-partial-success-fallback", status: "pass" });
-      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
-      assert.equal(routeFallbacks.length, 1);
-      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
-      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
-      assert.equal(routeFallbacks[0]!.reason, "partial_success");
-      assert.equal("providerMetadata" in routeFallbacks[0]!, false);
-      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
-    } finally {
-      clearTimeout(timeout);
-    }
+    assert.match(routeSource, /result\.fallbackOutcomeContext\.reason === "llm_error"/);
+    assert.match(routeSource, /reason: result\.fallbackOutcomeContext\.reason/);
+    assert.doesNotMatch(routeSource, /providerFallbackContext[\s\S]{0,160}partial_success/);
   });
 
   it("POST /api/chat SSE max_rounds fallback emits route fallback only without provider metadata", async () => {
@@ -1978,7 +1944,7 @@ describe("chat-streaming", () => {
 
       const doneMatch = text.match(/event: done\s+data: (.+)/);
       assert.ok(doneMatch, "expected done event");
-      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal: boolean };
+      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal: boolean; turnId?: string };
       assert.equal(donePayload.didLogMeal, false);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -1995,11 +1961,13 @@ describe("chat-streaming", () => {
         shape: "fallback_text",
       });
       assert.deepEqual(trace.timeline.at(-1), {
-        type: "route_completion",
+        type: "route_fallback",
         transport: "sse",
+        turnId: donePayload.turnId,
+        fallbackSource: "route_hallucination",
         didLogMeal: false,
         didMutateMeal: false,
-        completed: true,
+        reason: "hallucination_detected",
       });
     } finally {
       clearTimeout(timeout);
