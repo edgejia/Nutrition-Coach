@@ -8,11 +8,12 @@
  */
 
 import path from "node:path";
+import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
-import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { collectEventSequence, parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { LLMProviderError } from "../../../server/llm/errors.js";
 import type { ProviderErrorMetadata } from "../../../server/llm/types.js";
 import { createLlmTraceRecorder, type LlmTraceArtifact, type LlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -54,6 +55,54 @@ function stepOk(name: string, actual?: unknown): ScenarioStepResult {
 
 function stepFail(name: string, error: string, actual?: unknown): ScenarioStepResult {
   return { name, ok: false, error, actual };
+}
+
+function createLogCapture() {
+  const logLines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+      callback();
+    },
+  });
+
+  return { logLines, stream };
+}
+
+function hasRouteUploadCleanupLog(logLines: string[]): boolean {
+  return logLines.some((line) => {
+    try {
+      return (JSON.parse(line) as { event?: unknown }).event === "upload_cleanup_success";
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function readUploadFiles(uploadsDir: string): Promise<string[]> {
+  try {
+    return await readdir(uploadsDir);
+  } catch {
+    return [];
+  }
+}
+
+async function waitForRouteUploadCleanup(logLines: string[], uploadsDir: string) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const files = await readUploadFiles(uploadsDir);
+    const cleanupLogSeen = hasRouteUploadCleanupLog(logLines);
+    if (files.length === 0 && cleanupLogSeen) {
+      return { files, cleanupLogSeen, attempts: attempt + 1 };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const files = await readUploadFiles(uploadsDir);
+  return {
+    files,
+    cleanupLogSeen: hasRouteUploadCleanupLog(logLines),
+    attempts: 20,
+  };
 }
 
 function buildResult(
@@ -103,32 +152,58 @@ function parseDonePayload(rawSSE: string): { didLogMeal?: boolean; dailySummary?
   }
 }
 
-function parseLiveChunkText(rawSSE: string): { text: string; chunkCount: number; nonEmptyChunkCount: number } {
-  const tokens = parseSSEEvents(rawSSE)
+function parseLiveChunkText(rawSSE: string): {
+  text: string;
+  chunkCount: number;
+  nonEmptyChunkCount: number;
+  eventSequence: string[];
+  firstNonEmptyChunkIndex: number;
+  firstDoneIndex: number;
+  nonEmptyChunkBeforeDone: boolean;
+} {
+  const events = parseSSEEvents(rawSSE);
+  const eventSequence = collectEventSequence(rawSSE);
+  const firstDoneIndex = events.findIndex((event) => event.event === "done");
+  let firstNonEmptyChunkIndex = -1;
+  const tokens = events
     .filter((event) => event.event === "chunk")
-    .map((event, index) => {
+    .map((event) => {
+      const originalIndex = events.indexOf(event);
       let parsed: unknown;
       try {
         parsed = JSON.parse(event.data);
       } catch (error) {
-        throw new Error(`Malformed chunk JSON at index ${index}: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Malformed chunk JSON at index ${originalIndex}: ${error instanceof Error ? error.message : String(error)}`);
       }
       const token = (parsed as { token?: unknown }).token;
       if (typeof token !== "string") {
-        throw new Error(`Malformed chunk payload at index ${index}: missing token`);
+        throw new Error(`Malformed chunk payload at index ${originalIndex}: missing token`);
       }
       if (token.trim().length === 0) {
-        throw new Error(`Malformed chunk payload at index ${index}: empty token`);
+        throw new Error(`Malformed chunk payload at index ${originalIndex}: empty token`);
+      }
+      if (firstNonEmptyChunkIndex === -1) {
+        firstNonEmptyChunkIndex = originalIndex;
       }
       return token;
     });
   if (tokens.length === 0) {
     throw new Error("Expected at least one non-empty chunk before done");
   }
+  if (firstDoneIndex === -1) {
+    throw new Error("Expected done event in SSE transcript");
+  }
+  if (firstNonEmptyChunkIndex >= firstDoneIndex) {
+    throw new Error("Expected at least one non-empty chunk before first done");
+  }
   return {
     text: tokens.join(""),
     chunkCount: tokens.length,
     nonEmptyChunkCount: tokens.filter((token) => token.trim().length > 0).length,
+    eventSequence,
+    firstNonEmptyChunkIndex,
+    firstDoneIndex,
+    nonEmptyChunkBeforeDone: true,
   };
 }
 
@@ -224,12 +299,14 @@ async function runSubScenario(
 
   const llm = new StreamingLLMProvider();
   setupLLM(llm);
+  const { logLines, stream: logStream } = createLogCapture();
 
   const uploadsDir = `${UPLOADS_DIR}-${label}`;
   await mkdir(uploadsDir, { recursive: true });
   const scenarioCtx = await createScenarioApp({
     llmProvider: llm,
     uploadsDir,
+    logger: { level: "info", stream: logStream },
     ...(options.llmTraceRecorderFactory !== undefined ? { llmTraceRecorderFactory: options.llmTraceRecorderFactory } : {}),
   });
 
@@ -268,6 +345,22 @@ async function runSubScenario(
       cookieHeader: scenarioCtx.cookieHeader,
     });
     artifacts[label] = result.evidence;
+    const routeCleanupEvidence = await waitForRouteUploadCleanup(logLines, uploadsDir);
+    artifacts[`${label}_route_upload_cleanup`] = {
+      filesAfterRouteCleanup: routeCleanupEvidence.files,
+      cleanupLogSeen: routeCleanupEvidence.cleanupLogSeen,
+      attempts: routeCleanupEvidence.attempts,
+      checkedBeforeScenarioClose: true,
+    };
+    if (routeCleanupEvidence.files.length > 0 || !routeCleanupEvidence.cleanupLogSeen) {
+      steps.push(stepFail(
+        `${label}_route_upload_cleanup`,
+        "route-level staged upload cleanup did not complete before scenario close",
+        artifacts[`${label}_route_upload_cleanup`],
+      ));
+      return { steps, artifacts, ok: false, failedStep: `${label}_route_upload_cleanup` };
+    }
+    steps.push(stepOk(`${label}_route_upload_cleanup`, artifacts[`${label}_route_upload_cleanup`]));
     if (!result.ok) {
       steps.push(stepFail(`${label}_assert`, result.error ?? "assertion failed", result.evidence));
       return { steps, artifacts, ok: false, failedStep: `${label}_assert` };
@@ -301,13 +394,24 @@ const scenario: VerificationScenario = {
       async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
         let liveChunkText = "";
-        let liveChunkEvidence = { chunkCount: 0, nonEmptyChunkCount: 0 };
+        let liveChunkEvidence: Omit<ReturnType<typeof parseLiveChunkText>, "text"> = {
+          chunkCount: 0,
+          nonEmptyChunkCount: 0,
+          eventSequence: [],
+          firstNonEmptyChunkIndex: -1,
+          firstDoneIndex: -1,
+          nonEmptyChunkBeforeDone: false,
+        };
         try {
           const parsedLiveChunks = parseLiveChunkText(rawSSE);
           liveChunkText = parsedLiveChunks.text;
           liveChunkEvidence = {
             chunkCount: parsedLiveChunks.chunkCount,
             nonEmptyChunkCount: parsedLiveChunks.nonEmptyChunkCount,
+            eventSequence: parsedLiveChunks.eventSequence,
+            firstNonEmptyChunkIndex: parsedLiveChunks.firstNonEmptyChunkIndex,
+            firstDoneIndex: parsedLiveChunks.firstDoneIndex,
+            nonEmptyChunkBeforeDone: parsedLiveChunks.nonEmptyChunkBeforeDone,
           };
         } catch (error) {
           return {
@@ -401,13 +505,24 @@ const scenario: VerificationScenario = {
       async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
         let liveChunkText = "";
-        let liveChunkEvidence = { chunkCount: 0, nonEmptyChunkCount: 0 };
+        let liveChunkEvidence: Omit<ReturnType<typeof parseLiveChunkText>, "text"> = {
+          chunkCount: 0,
+          nonEmptyChunkCount: 0,
+          eventSequence: [],
+          firstNonEmptyChunkIndex: -1,
+          firstDoneIndex: -1,
+          nonEmptyChunkBeforeDone: false,
+        };
         try {
           const parsedLiveChunks = parseLiveChunkText(rawSSE);
           liveChunkText = parsedLiveChunks.text;
           liveChunkEvidence = {
             chunkCount: parsedLiveChunks.chunkCount,
             nonEmptyChunkCount: parsedLiveChunks.nonEmptyChunkCount,
+            eventSequence: parsedLiveChunks.eventSequence,
+            firstNonEmptyChunkIndex: parsedLiveChunks.firstNonEmptyChunkIndex,
+            firstDoneIndex: parsedLiveChunks.firstDoneIndex,
+            nonEmptyChunkBeforeDone: parsedLiveChunks.nonEmptyChunkBeforeDone,
           };
         } catch (error) {
           return {

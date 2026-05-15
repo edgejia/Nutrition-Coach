@@ -556,6 +556,7 @@ async function handleStreamingReply(
   const sanitizer = createStreamingSanitizer();
   const hasSummaryContext = hasSummaryOrHistoryContext(dailySummary);
   const shouldGuardNoMutationModelText = !didLogMeal && !didMutateMeal && !hasSummaryContext;
+  const shouldHoldNoMutationSummaryText = !didLogMeal && !didMutateMeal && hasSummaryContext;
   const noMutationClaimGuard = shouldGuardNoMutationModelText
     ? createNoMutationLoggingClaimStreamGuard()
     : undefined;
@@ -568,6 +569,9 @@ async function handleStreamingReply(
   let noMutationLoggingClaimDetected = false;
 
   function writeVisibleChunk(token: string): void {
+    if (shouldHoldNoMutationSummaryText) {
+      return;
+    }
     const guardedToken = noMutationClaimGuard ? noMutationClaimGuard.push(token) : token;
     if (noMutationClaimGuard?.detected()) {
       noMutationLoggingClaimDetected = true;
@@ -674,6 +678,25 @@ async function handleStreamingReply(
       finalReplyShape: sanitizedReply.trim()
         ? "fallback_text"
         : "empty_or_missing",
+    };
+  }
+  if (shouldHoldNoMutationSummaryText) {
+    const sanitizedReplyChunk = sanitizer.push(fullReply);
+    if (sanitizedReplyChunk) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedReplyChunk })}\n\n`);
+    }
+    const finalHeldChunk = sanitizer.flush();
+    if (finalHeldChunk) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalHeldChunk })}\n\n`);
+    }
+    await finalizeAssistantReply(chatService, deviceId, fullReply, receiptIdentity);
+    return {
+      fullReply,
+      didLogMeal,
+      dailySummary,
+      tokensStreamed,
+      finalReplySource: "model",
+      finalReplyShape: fullReply.trim() ? "streamed_text" : "empty_or_missing",
     };
   }
   const guardedFinalChunk = noMutationClaimGuard?.flush() ?? "";
