@@ -44,6 +44,8 @@ const MAX_ROUNDS = 3;
 const IMAGE_PLACEHOLDER = "(圖片)";
 const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
+const NO_MUTATION_LOGGING_CLAIM_PATTERN = /已\s*(?:經\s*)?記錄|完成\s*記錄/;
+const NO_MUTATION_LOGGING_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
 
 export interface ProviderFallbackContext {
   reason: "llm_error";
@@ -332,6 +334,13 @@ function classifyPlainReplyShape(reply: string): LlmTraceFinalReplyShape {
 
 function classifyFallbackReplyShape(reply: string): LlmTraceFinalReplyShape {
   return reply.trim().length > 0 ? "fallback_text" : "empty_or_missing";
+}
+
+export function guardNoMutationLoggingClaim(reply: string, didLogMeal: boolean, didMutateMeal: boolean): string {
+  if (!didLogMeal && !didMutateMeal && NO_MUTATION_LOGGING_CLAIM_PATTERN.test(reply)) {
+    return NO_MUTATION_LOGGING_FALLBACK;
+  }
+  return reply;
 }
 
 async function* appendMutationReceiptStream(
@@ -669,7 +678,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
-          const reply = response.content;
+          const reply = guardNoMutationLoggingClaim(response.content, didLogMeal, didMutateMeal);
+          const finalReplySource = reply === response.content ? "model" : "fallback";
           return {
             reply,
             didLogMeal,
@@ -679,8 +689,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             affectedDate: resolvedAffectedDate,
             loggedMeal,
             loggedMealToolMessageId,
-            finalReplySource: "model",
-            finalReplyShape: classifyPlainReplyShape(reply),
+            finalReplySource,
+            finalReplyShape: finalReplySource === "fallback"
+              ? classifyFallbackReplyShape(reply)
+              : classifyPlainReplyShape(reply),
           };
         }
 

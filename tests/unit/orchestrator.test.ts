@@ -1073,6 +1073,18 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(streamingLLM.chatCalls.length, 1);
   });
 
+  it("handleMessage replaces no-mutation model replies that claim logging", async () => {
+    mockLLM.queueChatResponse({ content: "已記錄牛肉飯，650 kcal，蛋白質 28 g。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "你好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.doesNotMatch(result.reply, /已記錄|完成記錄/);
+    assert.match(result.reply, /尚未|沒有|無法|補充/);
+  });
+
   it("returns a renderer goal receipt instead of streaming model prefix/suffix text", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");

@@ -263,6 +263,73 @@ describe("Chat API", () => {
     assert.ok(body.reply);
   });
 
+  it("POST /api/chat SSE replaces no-mutation model logging claims before chunk and history", async () => {
+    mockLLM.queueChatResponse({ content: "已記錄牛肉飯，650 kcal，蛋白質 28 g。" });
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, Accept: "text/event-stream" },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const reader = res.body?.getReader();
+    assert.ok(reader);
+    try {
+      const { raw } = await readUntilEventCount(reader, "done", 1);
+      const events = parseSSEEvents(raw);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => (JSON.parse(event.data) as { token?: string }).token ?? "")
+        .join("");
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")?.data ?? "{}") as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+      };
+
+      assert.equal(donePayload.didLogMeal, false);
+      assert.equal(donePayload.didMutateMeal, false);
+      assert.doesNotMatch(chunkText, /已記錄|完成記錄/);
+
+      const history = await services?.chatService.getHistory(deviceId, 10);
+      const assistant = history?.findLast((message) => message.role === "assistant");
+      assert.ok(assistant);
+      assert.doesNotMatch(String(assistant.content), /已記錄|完成記錄/);
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+  });
+
+  it("POST /api/chat JSON replaces no-mutation model logging claims before response and history", async () => {
+    mockLLM.queueChatResponse({ content: "已完成記錄，這餐是雞肉沙拉。" });
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+    };
+
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.doesNotMatch(body.reply ?? "", /已記錄|完成記錄/);
+
+    const history = await services?.chatService.getHistory(deviceId, 10);
+    const assistant = history?.findLast((message) => message.role === "assistant");
+    assert.ok(assistant);
+    assert.doesNotMatch(String(assistant.content), /已記錄|完成記錄/);
+  });
+
   it("POST /api/chat accepts multipart image upload", async () => {
     const form = new FormData();
     form.append("message", "");

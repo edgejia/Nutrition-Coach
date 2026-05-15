@@ -119,7 +119,7 @@ function renderSystemPromptSections(goal: string, targets: DailyTargets, intake?
     id: SYSTEM_PROMPT_SECTION_IDS.responsibilities,
     content: `你的職責：
 1. 當使用者描述吃了什麼（文字或照片）時，直接根據文字與照片內容估算餐點營養，並立即完成餐點記錄。
-2. 若只有照片沒有補充文字，使用常見份量做一次保守估算並直接記錄。本產品沒有「方式1 / 方式2」或額外確認流程，不要要求使用者選擇處理方向。
+2. 若只有照片沒有補充文字，使用常見份量做一次審慎估計並直接記錄。本產品沒有「方式1 / 方式2」或額外確認流程，不要要求使用者選擇處理方向。
 3. 只有在照片內容完全無法辨識為任何合理餐點時，才請使用者補充文字描述。
 4. 當使用者說「直接記錄」、「幫我記錄」、「不知道」、「隨便」等，視為同意使用目前估算值立即完成餐點記錄。
 5. 若該餐已經在本輪對話中記錄完成，就直接告知已完成記錄與大致估算；不要在記錄後再要求確認、改選方法或重新決定要不要記錄。
@@ -148,9 +148,9 @@ function renderSystemPromptSections(goal: string, targets: DailyTargets, intake?
     id: SYSTEM_PROMPT_SECTION_IDS.proteinEstimation,
     content: `蛋白質估算規則：
 1. 顯示給使用者看的單一蛋白質數字，代表「可信蛋白」，不是把整餐所有 trace protein 直接加總。
-2. 白飯、麵、蔬菜、菇類、醬料、湯、油脂等 trace protein 不列入 headline protein。
-3. 豆類、毛豆、堅果、種子、燕麥、全穀只有在明確是主要蛋白來源時，才列入 headline protein。
-4. 畫面或份量不清楚時，只算看得出的主要蛋白來源，並用偏低的常見份量保守估算。
+2. 白飯、麵、蔬菜、菇類、醬料、湯、油脂等 trace protein 不列入可信蛋白。
+3. 豆類、毛豆、堅果、種子、燕麥、全穀只有在明確是主要蛋白來源時，才列入可信蛋白。
+4. 畫面或份量不清楚時，只算看得出的主要蛋白來源，並用偏低的常見份量審慎估計。
 5. 當你呼叫 log_food 時，必須提供 protein_sources 陣列；每個來源都要帶 name、protein、is_primary、certainty。
 6. 成功記錄後，最終回覆要依下方成功 log_food 回覆契約；只有符合條件時才用一句簡短繁體中文說明主要蛋白來源。`,
   });
@@ -159,10 +159,10 @@ function renderSystemPromptSections(goal: string, targets: DailyTargets, intake?
     id: SYSTEM_PROMPT_SECTION_IDS.logFoodReceipt,
     content: `成功 log_food 回覆契約：
 A. 範圍只限成功 log_food 回覆；摘要、查找、目標更新、餐點修改、刪除、fallback 與一般對話維持各自規則。成功 log_food 回覆只能是一個純文字段落，用一或兩個句段表達，不得換行、emoji、markdown heading、項目符號 bullet、table 表格或巢狀格式。目標長度最多 90 個中文可讀字元；91-120 是警示但可接受；超過 120 無效。
-B. 必須包含「已記錄」、完整餐點名稱、卡路里 kcal、headline trusted protein 可信蛋白，以及影響日期不是今天時的具體日期。
+B. 必須包含「已記錄」、完整餐點名稱、卡路里 kcal、可信蛋白，以及影響日期不是今天時的具體日期。
 C. 不確定性只能在三種情況出現：usedConservativeAssumption 為 true、文字記錄缺少份量且 transient tool-result metadata 為 quantityUncertaintyReason === "missing_quantity"，或餐點是高變異類別如湯、麵、便當、buffet/自助餐。此時才可給估計區間，並只點出一個最大誤差來源，例如份量、油脂與飯量、湯底與份量。
 D. 蛋白質說明是條件式：只有多個 counted protein sources、存在 excluded sources，或保守假設影響蛋白質時才補一句短說明；不要列 trace protein 清單。
-E. 最多一個下一步；只有保守估算或 missing_quantity 這類確定的精準度調整情境，才可說「可再補份量修正」。不要加入尚未定義門檻的目標追趕或異常餐 coaching。
+E. 最多一個下一步；只有審慎估計或 missing_quantity 這類確定的精準度調整情境，才可說「可再補份量修正」。不要加入尚未定義門檻的目標追趕或異常餐 coaching。
 F. 不得出現內部工具、函式或欄位名稱，例如 log_food、protein_sources、usedConservativeAssumption、quantityUncertaintyReason、missing_quantity；不得捏造假時間、不得逐項 per-item macro breakdown、不得列 trace protein lists，也不要用未被要求的 coaching opening 開場。`,
   });
 

@@ -11,7 +11,7 @@ import type { DailySummary } from "../services/summary.js";
 import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
-import { buildPartialSuccessLoggedReply } from "../orchestrator/index.js";
+import { buildPartialSuccessLoggedReply, guardNoMutationLoggingClaim } from "../orchestrator/index.js";
 import type {
   LlmTraceFinalReplyShape,
   LlmTraceFinalReplySource,
@@ -516,6 +516,7 @@ async function handleStreamingReply(
   stopControl?: StreamingStopControl,
 ): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
+  const shouldGuardNoMutationModelText = !didLogMeal && !didMutateMeal;
   let fullReply = "";
   let tokensStreamed = 0;
   let hallucAccum = "";
@@ -537,6 +538,9 @@ async function handleStreamingReply(
         continue;
       }
       fullReply += token;
+      if (shouldGuardNoMutationModelText) {
+        continue;
+      }
       const sanitizedChunk = sanitizer.push(token);
       if (sanitizedChunk) {
         stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
@@ -549,7 +553,9 @@ async function handleStreamingReply(
   }
 
   if (stopControl?.isStopped() || stopControl?.signal.aborted) {
-    const stoppedReply = sanitizeReply(fullReply) || "（已停止）";
+    const stoppedReply = sanitizeReply(
+      guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal),
+    ) || "（已停止）";
     await finalizeAssistantReply(chatService, deviceId, stoppedReply, receiptIdentity, { status: "stopped" });
     return {
       fullReply: stoppedReply,
@@ -581,6 +587,9 @@ async function handleStreamingReply(
 
   for (const heldToken of heldTokens) {
     fullReply += heldToken;
+    if (shouldGuardNoMutationModelText) {
+      continue;
+    }
     const sanitizedChunk = sanitizer.push(heldToken);
     if (sanitizedChunk) {
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
@@ -590,10 +599,30 @@ async function handleStreamingReply(
   const appendedText = normalizedReply.slice(fullReply.length);
   if (appendedText) {
     fullReply = normalizedReply;
-    const sanitizedChunk = sanitizer.push(appendedText);
-    if (sanitizedChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+    if (!shouldGuardNoMutationModelText) {
+      const sanitizedChunk = sanitizer.push(appendedText);
+      if (sanitizedChunk) {
+        stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+      }
     }
+  }
+  if (shouldGuardNoMutationModelText) {
+    const guardedReply = guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal);
+    const sanitizedReply = sanitizeReply(guardedReply);
+    if (sanitizedReply) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedReply })}\n\n`);
+    }
+    await finalizeAssistantReply(chatService, deviceId, sanitizedReply, receiptIdentity);
+    return {
+      fullReply: sanitizedReply,
+      didLogMeal,
+      dailySummary,
+      tokensStreamed,
+      finalReplySource: sanitizedReply === fullReply ? "model" : "fallback",
+      finalReplyShape: sanitizedReply.trim()
+        ? (sanitizedReply === fullReply ? "streamed_text" : "fallback_text")
+        : "empty_or_missing",
+    };
   }
   const finalChunk = sanitizer.flush();
   if (finalChunk) {
@@ -1149,9 +1178,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const fallbackReply = didMutateMeal
             ? (jsonLoggedMealFallback ?? PARTIAL_MUTATION_FALLBACK)
             : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
-          const replyText = hallucinationDetected
+          const modelReplyText = hallucinationDetected
             ? fallbackReply
             : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
+          const replyText = guardNoMutationLoggingClaim(modelReplyText, didLogMeal, didMutateMeal);
           const { sanitized } = await finalizeAssistantReply(
             chatService,
             deviceId,
@@ -1194,7 +1224,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         }
 
         const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate } = result;
-        const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
+        const normalizedReply = guardNoMutationLoggingClaim(
+          appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
+          didLogMeal,
+          jsonDidMutateMeal,
+        );
         const { sanitized: sanitizedJson } = await finalizeAssistantReply(
           chatService,
           deviceId,
