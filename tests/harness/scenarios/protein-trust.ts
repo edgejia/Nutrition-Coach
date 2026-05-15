@@ -115,16 +115,26 @@ async function createFreshDevice(app: ScenarioContext["app"]): Promise<{ deviceI
 }
 
 function parseReplyText(rawSSE: string): string {
-  return parseSSEEvents(rawSSE)
+  const tokens = parseSSEEvents(rawSSE)
     .filter((event) => event.event === "chunk")
-    .map((event) => {
+    .map((event, index) => {
+      let parsed: unknown;
       try {
-        return (JSON.parse(event.data) as { token: string }).token;
-      } catch {
-        return "";
+        parsed = JSON.parse(event.data);
+      } catch (error) {
+        throw new Error(`Malformed chunk JSON at index ${index}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    })
-    .join("");
+      const token = (parsed as { token?: unknown }).token;
+      if (typeof token !== "string" || token.trim().length === 0) {
+        throw new Error(`Malformed chunk payload at index ${index}: missing non-empty token`);
+      }
+      return token;
+    });
+  const replyText = tokens.join("");
+  if (replyText.trim().length === 0) {
+    throw new Error("Assembled chunk reply text is empty");
+  }
+  return replyText;
 }
 
 function parseDonePayload(rawSSE: string): DonePayload | undefined {

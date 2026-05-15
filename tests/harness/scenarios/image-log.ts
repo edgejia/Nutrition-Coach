@@ -16,8 +16,8 @@
  *   6. Removes the temp directory and asserts no residual files remain.
  */
 
-import fs from "node:fs";
 import path from "node:path";
+import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { rm, readdir, mkdir } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
@@ -82,6 +82,54 @@ function stepOk(name: string, actual?: unknown): ScenarioStepResult {
 
 function stepFail(name: string, error: string, actual?: unknown): ScenarioStepResult {
   return { name, ok: false, error, actual };
+}
+
+function createLogCapture() {
+  const logLines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+      callback();
+    },
+  });
+
+  return { logLines, stream };
+}
+
+function hasRouteUploadCleanupLog(logLines: string[]): boolean {
+  return logLines.some((line) => {
+    try {
+      return (JSON.parse(line) as { event?: unknown }).event === "upload_cleanup_success";
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function readUploadFiles(): Promise<string[]> {
+  try {
+    return await readdir(SCENARIO_UPLOADS_DIR);
+  } catch {
+    return [];
+  }
+}
+
+async function waitForRouteUploadCleanup(logLines: string[]) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const files = await readUploadFiles();
+    const cleanupLogSeen = hasRouteUploadCleanupLog(logLines);
+    if (files.length === 0 && cleanupLogSeen) {
+      return { files, cleanupLogSeen, attempts: attempt + 1 };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const files = await readUploadFiles();
+  return {
+    files,
+    cleanupLogSeen: hasRouteUploadCleanupLog(logLines),
+    attempts: 20,
+  };
 }
 
 interface DailySummaryPayload {
@@ -161,6 +209,7 @@ const scenario: VerificationScenario = {
     const artifacts: Record<string, unknown> = {};
     let failedStep: string | undefined;
     let uploadFilesBeforeCleanup: string[] = [];
+    const { logLines, stream: logStream } = createLogCapture();
 
     // Boot our own app instance with the scenario-local uploads directory so
     // uploads never land in `server/uploads/`.
@@ -197,6 +246,7 @@ const scenario: VerificationScenario = {
       llmProvider: llm,
       uploadsDir: SCENARIO_UPLOADS_DIR,
       assetsDir: SCENARIO_ASSETS_DIR,
+      logger: { level: "info", stream: logStream },
     });
 
     try {
@@ -536,13 +586,25 @@ const scenario: VerificationScenario = {
         status: assetRes.status,
         contentType: assetRes.headers.get("content-type"),
       };
+
+      // ------------------------------------------------------------------
+      // Step: verify_route_upload_cleanup
+      // ------------------------------------------------------------------
+      const routeCleanupEvidence = await waitForRouteUploadCleanup(logLines);
+      artifacts.route_upload_cleanup = {
+        filesAfterRouteCleanup: routeCleanupEvidence.files,
+        cleanupLogSeen: routeCleanupEvidence.cleanupLogSeen,
+        attempts: routeCleanupEvidence.attempts,
+      };
+      if (routeCleanupEvidence.files.length > 0 || !routeCleanupEvidence.cleanupLogSeen) {
+        steps.push(stepFail("verify_route_upload_cleanup", "route-level staged upload cleanup did not complete", artifacts.route_upload_cleanup));
+        failedStep = "verify_route_upload_cleanup";
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+      steps.push(stepOk("verify_route_upload_cleanup", artifacts.route_upload_cleanup));
     } finally {
       await scenarioCtx.close();
-      try {
-        uploadFilesBeforeCleanup = await readdir(SCENARIO_UPLOADS_DIR);
-      } catch {
-        uploadFilesBeforeCleanup = [];
-      }
+      uploadFilesBeforeCleanup = await readUploadFiles();
       await rm(SCENARIO_UPLOADS_DIR, { recursive: true, force: true });
       await rm(SCENARIO_ASSETS_DIR, { recursive: true, force: true });
     }

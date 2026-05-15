@@ -103,8 +103,8 @@ function parseDonePayload(rawSSE: string): { didLogMeal?: boolean; dailySummary?
   }
 }
 
-function parseLiveChunkText(rawSSE: string): string {
-  return parseSSEEvents(rawSSE)
+function parseLiveChunkText(rawSSE: string): { text: string; chunkCount: number; nonEmptyChunkCount: number } {
+  const tokens = parseSSEEvents(rawSSE)
     .filter((event) => event.event === "chunk")
     .map((event, index) => {
       let parsed: unknown;
@@ -117,9 +117,19 @@ function parseLiveChunkText(rawSSE: string): string {
       if (typeof token !== "string") {
         throw new Error(`Malformed chunk payload at index ${index}: missing token`);
       }
+      if (token.trim().length === 0) {
+        throw new Error(`Malformed chunk payload at index ${index}: empty token`);
+      }
       return token;
-    })
-    .join("");
+    });
+  if (tokens.length === 0) {
+    throw new Error("Expected at least one non-empty chunk before done");
+  }
+  return {
+    text: tokens.join(""),
+    chunkCount: tokens.length,
+    nonEmptyChunkCount: tokens.filter((token) => token.trim().length > 0).length,
+  };
 }
 
 function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boolean {
@@ -291,8 +301,14 @@ const scenario: VerificationScenario = {
       async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
         let liveChunkText = "";
+        let liveChunkEvidence = { chunkCount: 0, nonEmptyChunkCount: 0 };
         try {
-          liveChunkText = parseLiveChunkText(rawSSE);
+          const parsedLiveChunks = parseLiveChunkText(rawSSE);
+          liveChunkText = parsedLiveChunks.text;
+          liveChunkEvidence = {
+            chunkCount: parsedLiveChunks.chunkCount,
+            nonEmptyChunkCount: parsedLiveChunks.nonEmptyChunkCount,
+          };
         } catch (error) {
           return {
             ok: false,
@@ -308,6 +324,7 @@ const scenario: VerificationScenario = {
         const evidence = {
           donePayload,
           liveChunkText,
+          liveChunkEvidence,
           falseLogChunkClaim,
           assistantCount: assistantMsgs.length,
           fallbackContent,
@@ -384,8 +401,14 @@ const scenario: VerificationScenario = {
       async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
         let liveChunkText = "";
+        let liveChunkEvidence = { chunkCount: 0, nonEmptyChunkCount: 0 };
         try {
-          liveChunkText = parseLiveChunkText(rawSSE);
+          const parsedLiveChunks = parseLiveChunkText(rawSSE);
+          liveChunkText = parsedLiveChunks.text;
+          liveChunkEvidence = {
+            chunkCount: parsedLiveChunks.chunkCount,
+            nonEmptyChunkCount: parsedLiveChunks.nonEmptyChunkCount,
+          };
         } catch (error) {
           return {
             ok: false,
@@ -401,6 +424,7 @@ const scenario: VerificationScenario = {
         const evidence = {
           donePayload,
           liveChunkText,
+          liveChunkEvidence,
           falseLogChunkClaim,
           assistantCount: assistantMsgs.length,
           fallbackContent,
