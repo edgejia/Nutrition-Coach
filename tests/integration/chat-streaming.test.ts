@@ -2052,6 +2052,182 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat SSE outer catch emits sanitized route fallback without completed turn", async () => {
+    assert.ok(services);
+    const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);
+    services.chatService.getCompressedHistory = async () => {
+      throw new Error("SseOuterSafeFailure");
+    };
+
+    const form = new FormData();
+    form.append("message", "今天午餐是豆腐");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      assert.match(donePayload.turnId ?? "", UUID_PATTERN);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.deepEqual({
+        source: fallbackEvents[0]!.source,
+        turnId: fallbackEvents[0]!.turnId,
+        fallbackSource: fallbackEvents[0]!.fallbackSource,
+        reason: fallbackEvents[0]!.reason,
+        catchSite: fallbackEvents[0]!.catchSite,
+        errorName: fallbackEvents[0]!.errorName,
+        errorMessage: fallbackEvents[0]!.errorMessage,
+      }, {
+        source: "sse",
+        turnId: donePayload.turnId,
+        fallbackSource: "route_catch",
+        reason: "route_catch",
+        catchSite: "sse_outer",
+        errorName: "Error",
+        errorMessage: "SseOuterSafeFailure",
+      });
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-route-catch", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "route_catch");
+      assert.equal(routeFallbacks[0]!.reason, "route_catch");
+      assert.equal(routeFallbacks[0]!.catchSite, "sse_outer");
+      assert.equal(routeFallbacks[0]!.errorName, "Error");
+      assert.equal(routeFallbacks[0]!.errorMessage, "SseOuterSafeFailure");
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      services.chatService.getCompressedHistory = originalGetCompressedHistory;
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE persistence catch emits sse_persist route fallback", async () => {
+    assert.ok(services);
+    const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);
+    const originalSaveMessage = services.chatService.saveMessage.bind(services.chatService);
+    services.chatService.getCompressedHistory = async () => {
+      throw new Error("SseOuterBeforePersist");
+    };
+    services.chatService.saveMessage = async () => {
+      throw new Error("SsePersistSafeFailure");
+    };
+
+    const form = new FormData();
+    form.append("message", "今天午餐是豆腐");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      assert.match(text, /event: done/);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.turnId, donePayload.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "route_catch");
+      assert.equal(fallbackEvents[0]!.reason, "route_catch");
+      assert.equal(fallbackEvents[0]!.catchSite, "sse_persist");
+      assert.equal(fallbackEvents[0]!.errorName, "Error");
+      assert.equal(fallbackEvents[0]!.errorMessage, "SsePersistSafeFailure");
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-route-persist-catch", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.catchSite, "sse_persist");
+      assert.equal(routeFallbacks[0]!.errorMessage, "SsePersistSafeFailure");
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      services.chatService.getCompressedHistory = originalGetCompressedHistory;
+      services.chatService.saveMessage = originalSaveMessage;
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE catch omits unsafe thrown material from fallback logs and trace", async () => {
+    assert.ok(services);
+    const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);
+    const rawMealText = "機密營養文字";
+    const unsafeErrorMessage = `prompt ${rawMealText} provider body header tool payload assistant final text data:image guest_session`;
+    services.chatService.getCompressedHistory = async () => {
+      const error = new Error(unsafeErrorMessage);
+      (error as Error & { cause?: unknown }).cause = new Error("CAUSE_SECRET");
+      throw error;
+    };
+
+    const form = new FormData();
+    form.append("message", rawMealText);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      assert.match(donePayload.turnId ?? "", UUID_PATTERN);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.catchSite, "sse_outer");
+      assert.equal("errorName" in fallbackEvents[0]!, false);
+      assert.equal("errorMessage" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-route-catch-redaction", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.catchSite, "sse_outer");
+      assert.equal("errorName" in routeFallbacks[0]!, false);
+      assert.equal("errorMessage" in routeFallbacks[0]!, false);
+
+      const serializedLogs = JSON.stringify(parseLogLines(logLines));
+      const serializedTrace = JSON.stringify(trace);
+      for (const serialized of [serializedLogs, serializedTrace]) {
+        assert.ok(!serialized.includes(rawMealText));
+        assert.doesNotMatch(serialized, /CAUSE_SECRET|prompt 機密營養文字|provider body|header|tool payload|assistant final text|data:image|guest_session|stack/);
+      }
+    } finally {
+      services.chatService.getCompressedHistory = originalGetCompressedHistory;
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat treats invalid log_food JSON as fatal and writes unified route fallback", async () => {
     mockLLM.queueRoundResponse({
       toolCalls: [createLogFoodToolCallWithArguments("{bad json")],
