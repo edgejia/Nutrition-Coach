@@ -13,6 +13,8 @@ import { mkdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { LLMProviderError } from "../../../server/llm/errors.js";
+import type { ProviderErrorMetadata } from "../../../server/llm/types.js";
 import { createLlmTraceRecorder, type LlmTraceArtifact, type LlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
@@ -20,6 +22,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log-failure", "uploads");
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const PROVIDER_METADATA_FIXTURE: ProviderErrorMetadata = {
+  provider: "openai",
+  operation: "chat",
+  model: "gpt-image-trace-fixture",
+  aborted: false,
+  status: 429,
+  providerRequestId: "req_image_trace_fixture",
+  errorName: "RateLimitError",
+  errorType: "rate_limit_exceeded",
+  errorCode: "rate_limit",
+};
 
 interface DailySummaryPayload {
   date: string;
@@ -101,19 +114,53 @@ function verifyFallbackTraceContract(
   const evidence = trace ?? null;
 
   if (!trace) return { ok: false, error: "expected sub-A llm trace", evidence };
+  const topLevelKeys = Object.keys(trace).sort();
+  if (topLevelKeys.join(",") !== "scenario,schemaVersion,status,summary,timeline") {
+    return { ok: false, error: "expected five-key llm-trace.v2 top-level shape", evidence };
+  }
   if (trace.schemaVersion !== "llm-trace.v2") return { ok: false, error: "expected llm-trace.v2 schema version", evidence };
   if (trace.scenario !== "image-log-failure") return { ok: false, error: "expected image-log-failure trace scenario", evidence };
+  const llmErrorEvents = trace.timeline.filter((event) => event.type === "llm_error");
+  if (llmErrorEvents.length < 1) {
+    return { ok: false, error: "expected llm_error trace event", evidence };
+  }
   if (!trace.timeline.some((event) => event.type === "orchestrator_fallback" && event.reason === "llm_error")) {
     return { ok: false, error: "expected llm_error orchestrator_fallback trace event", evidence };
+  }
+  if (!trace.timeline.some((event) => event.type === "route_fallback" && event.reason === "llm_error" && event.fallbackSource === "orchestrator")) {
+    return { ok: false, error: "expected llm_error route_fallback trace event", evidence };
   }
   if (trace.summary.roundCount !== 1) return { ok: false, error: "expected one LLM round before fallback diagnosis", evidence };
   if (trace.summary.toolCount !== 0) return { ok: false, error: "expected no tools before sub-A analysis fallback", evidence };
   if (trace.summary.fallbackCount < 1) return { ok: false, error: "expected fallbackCount >= 1", evidence };
+  if (trace.summary.providerErrorCount !== llmErrorEvents.length) {
+    return { ok: false, error: "expected providerErrorCount to equal llm_error event count", evidence };
+  }
   if (typeof trace.summary.latencyMs !== "number" || trace.summary.latencyMs < 0) {
     return { ok: false, error: "expected non-negative latencyMs", evidence };
   }
   if (trace.summary.finalReply.source !== "fallback") return { ok: false, error: "expected fallback final reply source", evidence };
   if (trace.summary.finalReply.shape !== "fallback_text") return { ok: false, error: "expected fallback_text final reply shape", evidence };
+
+  let providerMetadataEventCount = 0;
+  for (const event of trace.timeline) {
+    const providerMetadata =
+      event.type === "llm_error"
+        ? event.providerMetadata
+        : event.type === "orchestrator_fallback" || event.type === "route_fallback"
+          ? event.providerMetadata
+          : undefined;
+    if (providerMetadata === undefined) {
+      continue;
+    }
+    providerMetadataEventCount += 1;
+    if (JSON.stringify(providerMetadata) !== JSON.stringify(PROVIDER_METADATA_FIXTURE)) {
+      return { ok: false, error: "expected allowlisted provider metadata to survive trace recording", evidence };
+    }
+  }
+  if (providerMetadataEventCount < 3) {
+    return { ok: false, error: "expected provider metadata on llm_error, orchestrator_fallback, and route_fallback", evidence };
+  }
 
   const serialized = JSON.stringify(trace);
   for (const probe of forbiddenProbes) {
@@ -121,10 +168,10 @@ function verifyFallbackTraceContract(
       return { ok: false, error: `serialized trace contains ${probe.label}`, evidence };
     }
   }
-  if (/data:image|\/uploads\/|providerPayload|finalAssistantContent|toolArguments|toolResult/.test(serialized)) {
+  if (/data:image|\/uploads\/|providerPayload|rawProviderPayload|finalAssistantContent|toolArguments|toolResult|streamFrames/.test(serialized)) {
     return {
       ok: false,
-      error: "serialized trace contains forbidden provider payload, data:image, /uploads/, raw tool, or final reply content marker",
+      error: "serialized trace contains forbidden provider payload, data:image, /uploads/, stream, raw tool, or final reply content marker",
       evidence,
     };
   }
@@ -220,7 +267,7 @@ const scenario: VerificationScenario = {
     const subA = await runSubScenario(
       "sub_a_analysis_fail",
       (llm) => {
-        llm.queueRoundError(new Error("Vision API timeout"));
+        llm.queueRoundError(new LLMProviderError(PROVIDER_METADATA_FIXTURE));
       },
       async ({ rawSSE, address, cookieHeader }) => {
         const donePayload = parseDonePayload(rawSSE);
@@ -256,7 +303,11 @@ const scenario: VerificationScenario = {
     const subATraceEvidence = subA.artifacts.sub_a_analysis_fail as { fallbackContent?: string } | undefined;
     const subATraceCheck = verifyFallbackTraceContract(subALlmTrace, [
       { label: "final reply content", value: subATraceEvidence?.fallbackContent },
-      { label: "provider payload", value: "Vision API timeout" },
+      { label: "raw provider error message", value: "LLM provider request failed" },
+      { label: "raw provider payload", value: "providerPayload" },
+      { label: "raw provider payload", value: "rawProviderPayload" },
+      { label: "raw provider headers", value: "headers" },
+      { label: "raw provider body", value: "body" },
       { label: "raw image data/data URI", value: "data:image" },
       { label: "upload path", value: "/uploads/" },
       { label: "raw device ID", value: "device_" },
@@ -265,8 +316,12 @@ const scenario: VerificationScenario = {
       { label: "authorization/API keys", value: "authorization" },
       { label: "authorization/API keys", value: "api_key" },
       { label: "prompt/messages", value: "messages" },
+      { label: "prompt/messages", value: "rawPrompt" },
+      { label: "prompt/messages", value: "promptText" },
       { label: "raw tool args/results", value: "toolArguments" },
       { label: "raw tool args/results", value: "toolResult" },
+      { label: "stream frames", value: "streamFrames" },
+      { label: "token text", value: "token" },
     ]);
     if (!subATraceCheck.ok) {
       allSteps.push(stepFail("verify_llm_trace", subATraceCheck.error ?? "trace assertion failed", subATraceCheck.evidence));

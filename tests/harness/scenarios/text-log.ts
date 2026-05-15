@@ -715,13 +715,24 @@ const textLogScenario: VerificationScenario = {
           );
         });
         const roundEndIndex = timeline.findIndex((event) => isRecord(event) && event.type === "llm_round_end");
+        const routeCompletionIndex = timeline.findIndex((event) => {
+          return (
+            isRecord(event)
+            && event.type === "route_completion"
+            && event.transport === "sse"
+            && event.didLogMeal === true
+            && event.didMutateMeal === true
+            && event.completed === true
+          );
+        });
 
         if (
           roundStartIndex < 0
           || toolReceivedIndex < 0
           || toolResultIndex < 0
           || roundEndIndex < 0
-          || !(roundStartIndex < toolReceivedIndex && toolReceivedIndex < toolResultIndex && toolResultIndex < roundEndIndex)
+          || routeCompletionIndex < 0
+          || !(roundStartIndex < toolReceivedIndex && toolReceivedIndex < toolResultIndex && toolResultIndex < roundEndIndex && roundEndIndex < routeCompletionIndex)
         ) {
           const stepResult = fail("verify_llm_trace", "Trace timeline did not preserve llm/tool event ordering for log_food", {
             eventIndexes: {
@@ -729,7 +740,16 @@ const textLogScenario: VerificationScenario = {
               tool_received: toolReceivedIndex,
               tool_result: toolResultIndex,
               llm_round_end: roundEndIndex,
+              route_completion: routeCompletionIndex,
             },
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (timeline.some((event) => isRecord(event) && (event.type === "llm_error" || event.type === "route_fallback"))) {
+          const stepResult = fail("verify_llm_trace", "Clean text-log trace contained failure-only timeline facts", {
+            timeline,
           });
           steps.push(stepResult);
           return failScenario("verify_llm_trace");
@@ -741,6 +761,19 @@ const textLogScenario: VerificationScenario = {
           finalAssistantContent,
           "/uploads/",
           "data:image",
+          "device_",
+          "guest_session",
+          "authorization",
+          "api_key",
+          "messages",
+          "rawPrompt",
+          "promptText",
+          "providerPayload",
+          "rawProviderPayload",
+          "headers",
+          "body",
+          "toolArguments",
+          "toolResult",
           "historySnapshot",
           "mealsSnapshot",
           "streamFrames",
