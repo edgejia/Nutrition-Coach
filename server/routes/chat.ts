@@ -21,6 +21,7 @@ import type { ToolExecutionResult } from "../orchestrator/tools.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import { isLLMProviderError } from "../llm/errors.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import {
   logChatRouteFallback,
@@ -432,6 +433,24 @@ function projectAssetFields(imagePath: string | null | undefined) {
   return {
     imageAssetId,
     imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+  };
+}
+
+function providerStreamFallback(error: unknown):
+  | {
+      fallbackSource: "orchestrator";
+      reason: "llm_error";
+      providerMetadata: ProviderErrorMetadata;
+    }
+  | undefined {
+  if (!isLLMProviderError(error)) {
+    return undefined;
+  }
+
+  return {
+    fallbackSource: "orchestrator",
+    reason: "llm_error",
+    providerMetadata: error.providerMetadata,
   };
 }
 
@@ -863,7 +882,8 @@ async function handleOrchestratorSSE(
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
     let catchSite: RouteCatchSite = "sse_outer";
-    let sanitizedCatchError = sanitizeRouteCatchError(error);
+    const providerFallback = providerStreamFallback(error);
+    let sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(error);
     recorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
     try {
       if (!userMessagePersisted) {
@@ -884,7 +904,7 @@ async function handleOrchestratorSSE(
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
     } catch (persistError) {
       catchSite = "sse_persist";
-      sanitizedCatchError = sanitizeRouteCatchError(persistError);
+      sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(persistError);
       // If history persistence also fails, still close the stream with done.
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: fallback })}\n\n`);
     }
@@ -899,10 +919,12 @@ async function handleOrchestratorSSE(
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
     recordSseFallback({
-      fallbackSource: "route_catch",
-      reason: "route_catch",
-      catchSite,
-      ...sanitizedCatchError,
+      ...(providerFallback ?? {
+        fallbackSource: "route_catch" as const,
+        reason: "route_catch" as const,
+        catchSite,
+        ...sanitizedCatchError,
+      }),
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
     });
@@ -1219,7 +1241,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           : jsonDidMutateMeal
             ? PARTIAL_MUTATION_FALLBACK
             : UNIFIED_FALLBACK;
-        const sanitizedCatchError = sanitizeRouteCatchError(error);
+        const providerFallback = providerStreamFallback(error);
+        const sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(error);
         if (!userMessagePersisted) {
           await chatService.saveMessage(
             deviceId,
@@ -1240,10 +1263,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, turnLog);
         traceRecorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
         recordJsonFallback({
-          fallbackSource: "route_catch",
-          reason: "route_catch",
-          catchSite: "json_outer",
-          ...sanitizedCatchError,
+          ...(providerFallback ?? {
+            fallbackSource: "route_catch" as const,
+            reason: "route_catch" as const,
+            catchSite: "json_outer" as const,
+            ...sanitizedCatchError,
+          }),
           didLogMeal: jsonDidLogMeal,
           didMutateMeal: jsonDidMutateMeal,
         });
