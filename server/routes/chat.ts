@@ -25,6 +25,8 @@ import type { createGuestSessionService } from "../services/guest-session.js";
 import {
   logChatRouteFallback,
   logChatTurnCompleted,
+  sanitizeRouteCatchError,
+  type RouteCatchSite,
   type RouteFallbackReason,
   type RouteFallbackSource,
 } from "../observability/events.js";
@@ -979,6 +981,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         reason?: RouteFallbackReason;
         round?: number;
         lastTool?: string;
+        catchSite?: RouteCatchSite;
+        errorName?: string;
+        errorMessage?: string;
         providerMetadata?: ProviderErrorMetadata;
         didLogMeal: boolean;
         didMutateMeal: boolean;
@@ -991,9 +996,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(params.reason !== undefined ? { reason: params.reason } : {}),
           didLogMeal: params.didLogMeal,
           didMutateMeal: params.didMutateMeal,
+          ...(params.catchSite !== undefined ? { catchSite: params.catchSite } : {}),
           ...(params.providerMetadata !== undefined ? { providerMetadata: params.providerMetadata } : {}),
           ...(params.round !== undefined ? { round: params.round } : {}),
           ...(params.lastTool !== undefined ? { lastTool: params.lastTool } : {}),
+          ...(params.errorName !== undefined ? { errorName: params.errorName } : {}),
+          ...(params.errorMessage !== undefined ? { errorMessage: params.errorMessage } : {}),
         });
         traceRecorder?.recordMetrics({ latencyMs });
         logChatRouteFallback(turnLog, {
@@ -1001,6 +1009,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           turnId,
           fallbackSource: params.fallbackSource,
           ...(params.reason !== undefined ? { reason: params.reason } : {}),
+          ...(params.catchSite !== undefined ? { catchSite: params.catchSite } : {}),
           didLogMeal: params.didLogMeal,
           didMutateMeal: params.didMutateMeal,
           hadImage,
@@ -1008,6 +1017,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(params.round !== undefined ? { round: params.round } : {}),
           ...(params.lastTool !== undefined ? { lastTool: params.lastTool } : {}),
           ...(params.providerMetadata !== undefined ? { providerMetadata: params.providerMetadata } : {}),
+          ...(params.errorName !== undefined ? { errorName: params.errorName } : {}),
+          ...(params.errorMessage !== undefined ? { errorMessage: params.errorMessage } : {}),
         });
       };
 
@@ -1146,12 +1157,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(dailyTargets ? { dailyTargets } : {}),
           ...(affectedDate ? { affectedDate } : {}),
         };
-      } catch {
+      } catch (error) {
         const fallback = jsonDidLogMeal
           ? (jsonLoggedMealFallback ?? PARTIAL_SUCCESS_FALLBACK)
           : jsonDidMutateMeal
             ? PARTIAL_MUTATION_FALLBACK
             : UNIFIED_FALLBACK;
+        const sanitizedCatchError = sanitizeRouteCatchError(error);
         if (!userMessagePersisted) {
           await chatService.saveMessage(
             deviceId,
@@ -1170,13 +1182,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, turnLog);
-        logChatTurnCompleted(turnLog, {
-          source: "json",
-          turnId,
+        traceRecorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
+        recordJsonFallback({
+          fallbackSource: "route_catch",
+          reason: "route_catch",
+          catchSite: "json_outer",
+          ...sanitizedCatchError,
           didLogMeal: jsonDidLogMeal,
           didMutateMeal: jsonDidMutateMeal,
-          hadImage,
-          latencyMs: Date.now() - chatTurnStartedAt,
         });
         return {
           turnId,

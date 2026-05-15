@@ -60,6 +60,8 @@ export type LlmTraceTimelineEvent =
       providerMetadata?: ProviderErrorMetadata;
       round?: number;
       lastTool?: string;
+      errorName?: string;
+      errorMessage?: string;
     };
 
 // Phase 53 migration inputs:
@@ -134,6 +136,8 @@ interface RecordRouteFallbackInput {
   providerMetadata?: ProviderErrorMetadata;
   round?: number;
   lastTool?: string;
+  errorName?: string;
+  errorMessage?: string;
 }
 
 interface RecordMetricsInput {
@@ -286,6 +290,12 @@ function buildRouteFallbackEvent(
   }
   if (input.lastTool !== undefined) {
     event.lastTool = sanitizeTraceLabel(input.lastTool);
+  }
+  if (input.errorName !== undefined) {
+    event.errorName = sanitizeTraceLabel(input.errorName);
+  }
+  if (input.errorMessage !== undefined) {
+    event.errorMessage = sanitizeTraceLabel(input.errorMessage);
   }
 
   return event;

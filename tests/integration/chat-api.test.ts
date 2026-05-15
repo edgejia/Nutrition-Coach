@@ -2449,7 +2449,7 @@ describe("Chat API", () => {
         assert.ok(!serialized.includes(rawMealText));
         assert.ok(!serialized.includes(logDeviceId));
         assert.ok(!serialized.includes(logCookieHeader));
-        assert.doesNotMatch(serialized, /CAUSE_SECRET|prompt|provider body|header|tool payload|assistant final text|data:image|guest_session|stack/);
+        assert.doesNotMatch(serialized, /CAUSE_SECRET|prompt 機密營養文字|provider body|header|tool payload|assistant final text|data:image|guest_session|stack/);
       }
     } finally {
       logServices.chatService.getCompressedHistory = originalGetCompressedHistory;
