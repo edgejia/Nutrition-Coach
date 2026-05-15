@@ -39,14 +39,15 @@ interface LoggedMealReceipt {
 }
 
 function formatToolSummary(toolName: string, content: string): string {
+  const completed = content.trim() === "成功";
   if (toolName === "log_food") {
-    return "[系統已完成餐點記錄]";
+    return completed ? "[系統已完成餐點記錄]" : "[系統餐點記錄未完成]";
   }
   if (toolName === "update_meal") {
-    return "[系統已完成餐點修改]";
+    return completed ? "[系統已完成餐點修改]" : "[系統餐點修改未完成]";
   }
   if (toolName === "delete_meal") {
-    return "[系統已完成餐點刪除]";
+    return completed ? "[系統已完成餐點刪除]" : "[系統餐點刪除未完成]";
   }
   if (toolName === "find_meals") {
     return "[系統已完成餐點查找]";

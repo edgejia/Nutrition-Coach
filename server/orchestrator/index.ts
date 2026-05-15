@@ -407,7 +407,8 @@ function detectHallucinatedChoiceFollowUp(
   if (!lastAssistant?.didLogMeal) {
     const hasRecentMealMutationSummary =
       lastAssistantContent.includes("[系統已完成餐點記錄]") ||
-      lastAssistantContent.includes("[系統已完成餐點修改]");
+      lastAssistantContent.includes("[系統已完成餐點修改]") ||
+      lastAssistantContent.includes("[系統已完成餐點刪除]");
     if (!hasRecentMealMutationSummary) {
       return undefined;
     }

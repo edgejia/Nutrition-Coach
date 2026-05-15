@@ -287,6 +287,7 @@ const scenario: VerificationScenario = {
         if (assistantMsgs.length !== 1) return { ok: false, error: `D-10: expected 1 assistant msg, got ${assistantMsgs.length}`, evidence };
         if (!/抱歉/.test(fallbackContent)) return { ok: false, error: "IMG-03: expected friendly fallback wording", evidence };
         if (/log_food|FatalToolError/.test(fallbackContent)) return { ok: false, error: "IMG-03: fallback must not expose internal names", evidence };
+        if (/已記錄|完成記錄/.test(fallbackContent)) return { ok: false, error: "IMG-03: failed image analysis must not claim a meal was logged", evidence };
         if (meals.length !== 0) return { ok: false, error: `IMG-03: expected 0 meals on analysis failure, got ${meals.length}`, evidence };
 
         return { ok: true, evidence };
@@ -361,8 +362,10 @@ const scenario: VerificationScenario = {
         };
 
         if (!donePayload) return { ok: false, error: "missing done event", evidence };
+        if (donePayload.didLogMeal) return { ok: false, error: "expected didLogMeal false when log_food fails", evidence };
         if (assistantMsgs.length !== 1) return { ok: false, error: `D-10: expected 1 assistant msg, got ${assistantMsgs.length}`, evidence };
         if (fallbackContent !== UNIFIED_FALLBACK) return { ok: false, error: "IMG-03: expected fallback wording when log_food fails", evidence };
+        if (/已記錄|完成記錄/.test(fallbackContent)) return { ok: false, error: "IMG-03: failed tool path must not claim a meal was logged", evidence };
         if (meals.length !== 0) return { ok: false, error: `IMG-03: expected 0 meals when tool fails, got ${meals.length}`, evidence };
 
         return { ok: true, evidence };

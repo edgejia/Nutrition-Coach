@@ -948,6 +948,43 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(mockLLM.chatCalls.length, 0, "recovery path should not call the model again");
   });
 
+  it("does not recover locally when a hallucinated choice prompt has no successful mutation evidence", async () => {
+    await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "asset:meal-image" });
+    await chatService.saveMessage(
+      deviceId,
+      "assistant",
+      "已收到圖片。若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算並記錄。",
+    );
+    mockLLM.queueChatResponse({ content: "請補充份量，我再幫你估算。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "2");
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.reply, "請補充份量，我再幫你估算。");
+    assert.doesNotMatch(result.reply, /已記錄|完成記錄/);
+    assert.equal(mockLLM.chatCalls.length, 1, "normal path should call the model");
+  });
+
+  it("does not recover locally when the prior log_food tool summary failed", async () => {
+    await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "asset:meal-image" });
+    await chatService.saveMessage(deviceId, "tool", "Error: validation failed", { toolName: "log_food" });
+    await chatService.saveMessage(
+      deviceId,
+      "assistant",
+      "已收到圖片。若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算並記錄。",
+    );
+    mockLLM.queueChatResponse({ content: "我需要你補充餐點內容，才能完成估算。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "2");
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.reply, "我需要你補充餐點內容，才能完成估算。");
+    assert.doesNotMatch(result.reply, /已記錄|完成記錄/);
+    assert.equal(mockLLM.chatCalls.length, 1, "failed tool summary must not trigger local recovery");
+  });
+
   it("handleMessage projects successful text log replies from normalized loggedMeal instead of model stream", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
