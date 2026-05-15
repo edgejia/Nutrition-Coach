@@ -2256,9 +2256,14 @@ describe("Chat API", () => {
       });
 
       assert.equal(res.status, 200);
-      const body = await res.json() as { turnId?: string; didLogMeal?: boolean };
+      const body = await res.json() as { turnId?: string; didLogMeal?: boolean; reply?: string };
       assert.match(body.turnId ?? "", UUID_PATTERN);
       assert.equal(body.didLogMeal, false);
+      assert.match(body.reply ?? "", /抱歉|無法|稍後/);
+      assert.doesNotMatch(
+        body.reply ?? "",
+        /AuthenticationError|invalid_api_key|api[_ -]?key|Bearer|sk-|provider|OpenAI/i,
+      );
 
       const providerErrorEvents = observabilityEvents(logLines, "llm_provider_error");
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
