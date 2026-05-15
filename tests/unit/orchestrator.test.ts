@@ -1085,6 +1085,69 @@ describe("Orchestrator - didLogMeal", () => {
     assert.match(result.reply, /尚未|沒有|無法|補充/);
   });
 
+  it("preserves get_daily_summary replies that mention recorded meals without mutation", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 450,
+      protein: 45,
+      carbs: 30,
+      fat: 10,
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 450,
+      protein: 35,
+      carbs: 45,
+      fat: 14,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_today",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄 2 餐，共 900 kcal。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "今天吃了多少？");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.reply, "今天已記錄 2 餐，共 900 kcal。");
+  });
+
+  it("preserves summary history replies after get_daily_summary without mutation", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_history",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "目前已記錄的餐點有豆腐飯，約 520 kcal。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "列出今天記錄的餐點");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.reply, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+  });
+
   it("returns a renderer goal receipt instead of streaming model prefix/suffix text", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
