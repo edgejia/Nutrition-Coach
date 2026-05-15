@@ -619,17 +619,17 @@ const textLogScenario: VerificationScenario = {
         const topLevelKeys = Object.keys(trace).sort();
 
         if (topLevelKeys.join(",") !== "scenario,schemaVersion,status,summary,timeline") {
-          const stepResult = fail("verify_llm_trace", "Trace top-level keys did not match the llm-trace.v1 contract", {
+          const stepResult = fail("verify_llm_trace", "Trace top-level keys did not match the llm-trace.v2 contract", {
             topLevelKeys,
           });
           steps.push(stepResult);
           return failScenario("verify_llm_trace");
         }
 
-        if (trace.schemaVersion !== "llm-trace.v1") {
+        if (trace.schemaVersion !== "llm-trace.v2") {
           const stepResult = fail(
             "verify_llm_trace",
-            `Expected llmTrace.schemaVersion === "llm-trace.v1", got ${String(trace.schemaVersion)}`,
+            `Expected llmTrace.schemaVersion === "llm-trace.v2", got ${String(trace.schemaVersion)}`,
             { schemaVersion: trace.schemaVersion },
           );
           steps.push(stepResult);
@@ -662,6 +662,7 @@ const textLogScenario: VerificationScenario = {
           || typeof summary.toolCount !== "number"
           || summary.toolCount < 1
           || summary.fallbackCount !== 0
+          || summary.providerErrorCount !== 0
           || typeof summary.latencyMs !== "number"
           || summary.latencyMs < 0
         ) {

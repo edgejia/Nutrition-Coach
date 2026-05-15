@@ -22,7 +22,13 @@ import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
-import { logChatTurnCompleted } from "../observability/events.js";
+import {
+  logChatRouteFallback,
+  logChatTurnCompleted,
+  type RouteFallbackReason,
+  type RouteFallbackSource,
+} from "../observability/events.js";
+import type { ProviderErrorMetadata } from "../llm/types.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -941,7 +947,69 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
       let jsonReceiptIdentity: ReceiptIdentity | undefined;
-      const hooks = fanOutOrchestratorHooks(createStructuredHooks(orchLog));
+      const traceRecorder = llmTraceRecorderFactory?.();
+      const hooks = fanOutOrchestratorHooks(
+        createStructuredHooks(orchLog),
+        traceRecorder?.asOrchestratorHooks(),
+      );
+      const recordJsonCompletion = (params: {
+        didLogMeal: boolean;
+        didMutateMeal: boolean;
+      }) => {
+        const latencyMs = Date.now() - chatTurnStartedAt;
+        traceRecorder?.recordRouteCompletion({
+          transport: "json",
+          turnId,
+          didLogMeal: params.didLogMeal,
+          didMutateMeal: params.didMutateMeal,
+          completed: true,
+        });
+        traceRecorder?.recordMetrics({ latencyMs });
+        logChatTurnCompleted(turnLog, {
+          source: "json",
+          turnId,
+          didLogMeal: params.didLogMeal,
+          didMutateMeal: params.didMutateMeal,
+          hadImage,
+          latencyMs,
+        });
+      };
+      const recordJsonFallback = (params: {
+        fallbackSource: RouteFallbackSource;
+        reason?: RouteFallbackReason;
+        round?: number;
+        lastTool?: string;
+        providerMetadata?: ProviderErrorMetadata;
+        didLogMeal: boolean;
+        didMutateMeal: boolean;
+      }) => {
+        const latencyMs = Date.now() - chatTurnStartedAt;
+        traceRecorder?.recordRouteFallback({
+          transport: "json",
+          turnId,
+          fallbackSource: params.fallbackSource,
+          ...(params.reason !== undefined ? { reason: params.reason } : {}),
+          didLogMeal: params.didLogMeal,
+          didMutateMeal: params.didMutateMeal,
+          ...(params.providerMetadata !== undefined ? { providerMetadata: params.providerMetadata } : {}),
+          ...(params.round !== undefined ? { round: params.round } : {}),
+          ...(params.lastTool !== undefined ? { lastTool: params.lastTool } : {}),
+        });
+        traceRecorder?.recordMetrics({ latencyMs });
+        logChatRouteFallback(turnLog, {
+          source: "json",
+          turnId,
+          fallbackSource: params.fallbackSource,
+          ...(params.reason !== undefined ? { reason: params.reason } : {}),
+          didLogMeal: params.didLogMeal,
+          didMutateMeal: params.didMutateMeal,
+          hadImage,
+          latencyMs,
+          ...(params.round !== undefined ? { round: params.round } : {}),
+          ...(params.lastTool !== undefined ? { lastTool: params.lastTool } : {}),
+          ...(params.providerMetadata !== undefined ? { providerMetadata: params.providerMetadata } : {}),
+        });
+      };
 
       try {
         const durableAsset = await createDurableAssetIfNeeded(assetService, deviceId, image);
@@ -1001,6 +1069,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             replyText,
             jsonReceiptIdentity,
           );
+          traceRecorder?.recordFinalReply({
+            source: hallucinationDetected ? "fallback" : "model",
+            shape: sanitized.trim() ? (hallucinationDetected ? "fallback_text" : "streamed_text") : "empty_or_missing",
+          });
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
           // C1: try/catch ensures publish failure never changes the HTTP response or status code.
           publishSummarySafe(
@@ -1010,14 +1082,16 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             dailySummary,
             turnLog,
           );
-          logChatTurnCompleted(turnLog, {
-            source: "json",
-            turnId,
-            didLogMeal,
-            didMutateMeal,
-            hadImage,
-            latencyMs: Date.now() - chatTurnStartedAt,
-          });
+          if (hallucinationDetected) {
+            recordJsonFallback({
+              fallbackSource: "route_hallucination",
+              reason: "hallucination_detected",
+              didLogMeal,
+              didMutateMeal,
+            });
+          } else {
+            recordJsonCompletion({ didLogMeal, didMutateMeal });
+          }
           return {
             turnId,
             reply: sanitized,
@@ -1038,17 +1112,30 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           normalizedReply,
           jsonReceiptIdentity,
         );
+        traceRecorder?.recordFinalReply({
+          source: result.finalReplySource ?? "model",
+          shape: result.finalReplyShape ?? "empty_or_missing",
+        });
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, turnLog);
-        logChatTurnCompleted(turnLog, {
-          source: "json",
-          turnId,
-          didLogMeal,
-          didMutateMeal: jsonDidMutateMeal,
-          hadImage,
-          latencyMs: Date.now() - chatTurnStartedAt,
-        });
+        if (result.fallbackOutcomeContext) {
+          const providerMetadata = result.providerFallbackContext?.reason === "llm_error"
+            && result.fallbackOutcomeContext.reason === "llm_error"
+            ? result.providerFallbackContext.providerMetadata
+            : undefined;
+          recordJsonFallback({
+            fallbackSource: result.fallbackOutcomeContext.fallbackSource,
+            reason: result.fallbackOutcomeContext.reason,
+            ...(result.fallbackOutcomeContext.round !== undefined ? { round: result.fallbackOutcomeContext.round } : {}),
+            ...(result.fallbackOutcomeContext.lastTool !== undefined ? { lastTool: result.fallbackOutcomeContext.lastTool } : {}),
+            ...(providerMetadata !== undefined ? { providerMetadata } : {}),
+            didLogMeal,
+            didMutateMeal: jsonDidMutateMeal,
+          });
+        } else {
+          recordJsonCompletion({ didLogMeal, didMutateMeal: jsonDidMutateMeal });
+        }
         return {
           turnId,
           reply: sanitizedJson,

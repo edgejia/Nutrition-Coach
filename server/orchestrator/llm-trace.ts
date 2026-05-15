@@ -42,7 +42,8 @@ export type LlmTraceTimelineEvent =
     }
   | {
       type: "route_completion";
-      transport: "sse";
+      transport: "json" | "sse";
+      turnId?: string;
       didLogMeal: boolean;
       didMutateMeal: boolean;
       completed: true;
@@ -57,6 +58,8 @@ export type LlmTraceTimelineEvent =
       reason?: string;
       catchSite?: string;
       providerMetadata?: ProviderErrorMetadata;
+      round?: number;
+      lastTool?: string;
     };
 
 // Phase 53 migration inputs:
@@ -113,7 +116,8 @@ interface RecordFinalReplyInput {
 }
 
 interface RecordRouteCompletionInput {
-  transport: "sse";
+  transport: "json" | "sse";
+  turnId?: string;
   didLogMeal: boolean;
   didMutateMeal: boolean;
   completed: true;
@@ -128,6 +132,8 @@ interface RecordRouteFallbackInput {
   reason?: string;
   catchSite?: string;
   providerMetadata?: ProviderErrorMetadata;
+  round?: number;
+  lastTool?: string;
 }
 
 interface RecordMetricsInput {
@@ -275,6 +281,12 @@ function buildRouteFallbackEvent(
   if (input.providerMetadata !== undefined) {
     event.providerMetadata = sanitizeProviderMetadata(input.providerMetadata);
   }
+  if (input.round !== undefined) {
+    event.round = Math.max(0, Math.round(input.round));
+  }
+  if (input.lastTool !== undefined) {
+    event.lastTool = sanitizeTraceLabel(input.lastTool);
+  }
 
   return event;
 }
@@ -354,13 +366,17 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
       };
     },
     recordRouteCompletion(input) {
-      timeline.push({
+      const event: Extract<LlmTraceTimelineEvent, { type: "route_completion" }> = {
         type: "route_completion",
         transport: input.transport,
         didLogMeal: input.didLogMeal,
         didMutateMeal: input.didMutateMeal,
         completed: input.completed,
-      });
+      };
+      if (input.turnId !== undefined) {
+        event.turnId = sanitizeTraceLabel(input.turnId);
+      }
+      timeline.push(event);
     },
     recordRouteFallback(input) {
       timeline.push(buildRouteFallbackEvent(input));

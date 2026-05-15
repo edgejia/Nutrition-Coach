@@ -52,10 +52,18 @@ export interface ProviderFallbackContext {
   lastTool?: string;
 }
 
+export interface FallbackOutcomeContext {
+  fallbackSource: "orchestrator";
+  reason: "llm_error" | "partial_success" | "max_rounds";
+  round?: number;
+  lastTool?: string;
+}
+
 interface FinalReplyTraceMetadata {
   finalReplySource?: LlmTraceFinalReplySource;
   finalReplyShape?: LlmTraceFinalReplyShape;
   providerFallbackContext?: ProviderFallbackContext;
+  fallbackOutcomeContext?: FallbackOutcomeContext;
 }
 
 export type OrchestratorResult =
@@ -578,6 +586,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             round: round + 1,
             ...(lastTool !== undefined ? { lastTool } : {}),
           };
+          const fallbackOutcomeContext: FallbackOutcomeContext = {
+            fallbackSource: "orchestrator",
+            reason: fallbackReason,
+            round: round + 1,
+            ...(lastTool !== undefined ? { lastTool } : {}),
+          };
           let providerFallbackContext: ProviderFallbackContext | undefined;
 
           if (isLLMProviderError(err)) {
@@ -615,6 +629,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
               providerFallbackContext,
+              fallbackOutcomeContext,
             };
           }
           if (didMutateMeal) {
@@ -632,6 +647,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               finalReplySource: "fallback",
               finalReplyShape: classifyFallbackReplyShape(partialFallback),
               providerFallbackContext,
+              fallbackOutcomeContext,
             };
           }
           const errorMsg = "抱歉，目前無法處理您的請求，請稍後再試。";
@@ -646,6 +662,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             finalReplySource: "fallback",
             finalReplyShape: classifyFallbackReplyShape(errorMsg),
             providerFallbackContext,
+            fallbackOutcomeContext,
           };
         }
 
@@ -941,6 +958,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       // Fallback after MAX_ROUNDS
       opts?.hooks?.onFallback?.({ reason: "max_rounds" });
+      const maxRoundsFallbackOutcomeContext: FallbackOutcomeContext = {
+        fallbackSource: "orchestrator",
+        reason: "max_rounds",
+      };
       if (mutationReceiptText && mutationEffects) {
         return {
           reply: mutationReceiptText,
@@ -953,6 +974,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           loggedMealToolMessageId,
           finalReplySource: "renderer",
           finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
+          fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
         };
       }
       return {
@@ -965,6 +987,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         loggedMealToolMessageId,
         finalReplySource: "fallback",
         finalReplyShape: classifyFallbackReplyShape(FALLBACK),
+        fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
       };
     },
   };

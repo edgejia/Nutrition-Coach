@@ -2161,7 +2161,7 @@ describe("Chat API", () => {
         hadImage: false,
       });
       assert.deepEqual(fallbackEvents[0]!.providerMetadata, providerMetadataFixture);
-      const providerMetadataKeys = Object.keys(fallbackEvents[0]!.providerMetadata as Record<string, unknown>).sort();
+      const providerMetadataKeys = Object.keys(fallbackEvents[0]!.providerMetadata as unknown as Record<string, unknown>).sort();
       assert.deepEqual(providerMetadataKeys, [
         "aborted",
         "errorCode",
