@@ -1120,6 +1120,60 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.reply, "今天已記錄 2 餐，共 900 kcal。");
   });
 
+  it("replaces false new-log claims after get_daily_summary without mutation", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_false_log",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄牛肉飯，650 kcal。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "今天吃了什麼？");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.doesNotMatch(result.reply, /已記錄牛肉飯|650 kcal/);
+    assert.match(result.reply, /還沒有把這餐寫入紀錄/);
+  });
+
+  it("does not let broad summary words bypass the no-mutation false-log guard", async () => {
+    const falseClaims = [
+      "今天已記錄牛肉飯，650 kcal。",
+      "目前已記錄牛肉飯，650 kcal。",
+      "共已記錄牛肉飯，650 kcal。",
+      "攝取已記錄牛肉飯，650 kcal。",
+    ];
+
+    for (const claim of falseClaims) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `call_summary_false_log_${falseClaims.indexOf(claim)}`,
+          type: "function",
+          function: {
+            name: "get_daily_summary",
+            arguments: "{}",
+          },
+        }],
+      });
+      mockLLM.queueChatResponse({ content: claim });
+
+      const { deviceId: localDeviceId } = await deviceService.createDevice("fat_loss");
+      const result = await orchestrator.handleMessage(localDeviceId, "今天吃了什麼？");
+
+      assert.ok("reply" in result);
+      assert.equal(result.didLogMeal, false);
+      assert.equal(result.didMutateMeal, false);
+      assert.doesNotMatch(result.reply, /已記錄牛肉飯|650 kcal/);
+      assert.match(result.reply, /還沒有把這餐寫入紀錄/);
+    }
+  });
+
   it("preserves summary history replies after get_daily_summary without mutation", async () => {
     await foodLoggingService.logFood(deviceId, {
       foodName: "豆腐飯",

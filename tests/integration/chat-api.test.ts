@@ -385,6 +385,44 @@ describe("Chat API", () => {
     assert.equal(assistant.content, "今天已記錄 2 餐，共 900 kcal。");
   });
 
+  it("POST /api/chat JSON replaces false new-log claims after get_daily_summary", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_route_summary_false_log_json",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄牛肉飯，650 kcal。" });
+
+    const form = new FormData();
+    form.append("message", "今天吃了什麼？");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.doesNotMatch(body.reply ?? "", /已記錄牛肉飯|650 kcal/);
+    assert.match(body.reply ?? "", /還沒有把這餐寫入紀錄/);
+
+    const history = await services?.chatService.getHistory(deviceId, 10);
+    const assistant = [...(history ?? [])].reverse().find((message) => message.role === "assistant");
+    assert.ok(assistant);
+    assert.doesNotMatch(String(assistant.content), /已記錄牛肉飯|650 kcal/);
+  });
+
   it("POST /api/chat SSE preserves get_daily_summary replies that mention recorded meals", async () => {
     assert.ok(services, "expected app services");
     await services.foodLoggingService.logFood(deviceId, {
