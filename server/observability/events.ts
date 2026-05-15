@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { ProviderErrorMetadata } from "../llm/types.js";
+import type { ProviderErrorMetadata, ProviderOperation } from "../llm/types.js";
 
 export type RedactedObservabilityEventName =
   | "onboarding_submit_started"
@@ -51,6 +51,22 @@ const VALID_GOAL_VALIDATION_CODE = /^[a-z0-9_]{1,64}$/;
 const SAFE_ROUTE_ERROR_TEXT = /^[A-Za-z0-9 .:_/-]+$/;
 const ROUTE_ERROR_NAME_LIMIT = 80;
 const ROUTE_ERROR_MESSAGE_LIMIT = 160;
+const UNSAFE_PROVIDER_METADATA_LABEL_FRAGMENTS = [
+  "authorization",
+  "bearer",
+  "cookie",
+  "data:image",
+  "device",
+  "guest_session",
+  "message",
+  "prompt",
+  "provider",
+  "raw",
+  "secret",
+  "sk-",
+  "token",
+  "upload",
+] as const;
 const UNSAFE_ROUTE_ERROR_TERMS = [
   "prompt",
   "message",
@@ -207,18 +223,54 @@ function isIdentifier(value: unknown): value is string {
   return typeof value === "string" && VALID_IDENTIFIER.test(value);
 }
 
+const SAFE_PROVIDER_OPERATIONS = new Set<ProviderOperation>([
+  "chat",
+  "chat_round_initial",
+  "chat_round_stream_continuation",
+  "chat_stream_initial",
+  "chat_stream_continuation",
+]);
+
+function sanitizeProviderOperation(operation: ProviderErrorMetadata["operation"]): ProviderOperation {
+  return SAFE_PROVIDER_OPERATIONS.has(operation) ? operation : "chat";
+}
+
+function sanitizeProviderMetadataLabel(value: string): string {
+  const normalized = value.toLowerCase();
+  if (
+    !/^[A-Za-z0-9_.:-]+$/.test(value)
+    || UNSAFE_PROVIDER_METADATA_LABEL_FRAGMENTS.some((fragment) => normalized.includes(fragment))
+  ) {
+    return "redacted";
+  }
+  return value;
+}
+
 function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErrorMetadata {
-  return {
-    provider: metadata.provider,
-    operation: metadata.operation,
-    model: metadata.model,
+  const sanitized: ProviderErrorMetadata = {
+    provider: "openai",
+    operation: sanitizeProviderOperation(metadata.operation),
+    model: sanitizeProviderMetadataLabel(metadata.model),
     aborted: metadata.aborted,
-    ...(metadata.status !== undefined ? { status: metadata.status } : {}),
-    ...(metadata.providerRequestId !== undefined ? { providerRequestId: metadata.providerRequestId } : {}),
-    ...(metadata.errorName !== undefined ? { errorName: metadata.errorName } : {}),
-    ...(metadata.errorType !== undefined ? { errorType: metadata.errorType } : {}),
-    ...(metadata.errorCode !== undefined ? { errorCode: metadata.errorCode } : {}),
   };
+
+  if (typeof metadata.status === "number") {
+    sanitized.status = metadata.status;
+  }
+  if (metadata.providerRequestId !== undefined) {
+    sanitized.providerRequestId = sanitizeProviderMetadataLabel(metadata.providerRequestId);
+  }
+  if (metadata.errorName !== undefined) {
+    sanitized.errorName = sanitizeProviderMetadataLabel(metadata.errorName);
+  }
+  if (metadata.errorType !== undefined) {
+    sanitized.errorType = sanitizeProviderMetadataLabel(metadata.errorType);
+  }
+  if (metadata.errorCode !== undefined) {
+    sanitized.errorCode = sanitizeProviderMetadataLabel(metadata.errorCode);
+  }
+
+  return sanitized;
 }
 
 function sanitizeRouteErrorText(value: string, limit: number): string | undefined {
