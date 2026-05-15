@@ -2275,6 +2275,100 @@ describe("Chat API", () => {
     }
   });
 
+  it("JSON partial_success fallback result emits route fallback only without provider metadata", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const traceRecorder = createLlmTraceRecorder();
+    let logServices: AppServices | undefined;
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+      llmTraceRecorderFactory: () => traceRecorder,
+      onServicesReady: (readyServices) => {
+        logServices = readyServices;
+      },
+    });
+    assert.ok(logServices);
+    const originalHandleMessage = logServices.orchestrator.handleMessage.bind(logServices.orchestrator);
+    logServices.orchestrator.handleMessage = async (requestDeviceId, userMessage, _imageBase64, _assetRef, opts) => {
+      await logServices!.chatService.saveMessage(requestDeviceId, "user", userMessage);
+      opts?.onUserMessageSaved?.();
+      return {
+        reply: "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。",
+        didLogMeal: true,
+        didMutateMeal: true,
+        dailySummary: {
+          totalCalories: 95,
+          totalProtein: 0,
+          totalCarbs: 25,
+          totalFat: 0.3,
+          mealCount: 1,
+          date: formatLocalDate(new Date()),
+        },
+        finalReplySource: "fallback",
+        finalReplyShape: "fallback_text",
+        fallbackOutcomeContext: {
+          fallbackSource: "orchestrator",
+          reason: "partial_success",
+          round: 2,
+          lastTool: "log_food",
+        },
+      };
+    };
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", "我吃了蘋果");
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { turnId?: string; didLogMeal?: boolean; didMutateMeal?: boolean };
+      assert.match(body.turnId ?? "", UUID_PATTERN);
+      assert.equal(body.didLogMeal, true);
+      assert.equal(body.didMutateMeal, true);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.source, "json");
+      assert.equal(fallbackEvents[0]!.turnId, body.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
+      assert.equal(fallbackEvents[0]!.reason, "partial_success");
+      assert.equal(fallbackEvents[0]!.didLogMeal, true);
+      assert.equal(fallbackEvents[0]!.didMutateMeal, true);
+      assert.equal(fallbackEvents[0]!.round, 2);
+      assert.equal(fallbackEvents[0]!.lastTool, "log_food");
+      assert.equal("providerMetadata" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorder.build({ scenario: "json-partial-success-fallback", status: "passed" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.transport, "json");
+      assert.equal(routeFallbacks[0]!.turnId, body.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "partial_success");
+      assert.equal(routeFallbacks[0]!.didLogMeal, true);
+      assert.equal(routeFallbacks[0]!.didMutateMeal, true);
+      assert.equal("providerMetadata" in routeFallbacks[0]!, false);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      logServices.orchestrator.handleMessage = originalHandleMessage;
+      await logApp.close();
+    }
+  });
+
   it("JSON non-provider orchestrator max_rounds fallback omits provider metadata and completion", async () => {
     const { logLines, stream: logStream } = createLogCapture();
     const logLLM = new MockLLMProvider();

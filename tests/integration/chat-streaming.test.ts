@@ -7,6 +7,7 @@ import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import type { AppServices } from "../../server/app.js";
 import { LLMProviderError } from "../../server/llm/errors.js";
+import { formatLocalDate } from "../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { FastifyInstance } from "fastify";
 import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ProviderErrorMetadata, ToolCall, ToolDefinition } from "../../server/llm/types.js";
@@ -1142,6 +1143,93 @@ describe("chat-streaming", () => {
     assert.match(routeSource, /result\.fallbackOutcomeContext\.reason === "llm_error"/);
     assert.match(routeSource, /reason: result\.fallbackOutcomeContext\.reason/);
     assert.doesNotMatch(routeSource, /providerFallbackContext[\s\S]{0,160}partial_success/);
+  });
+
+  it("POST /api/chat SSE partial_success fallback result emits route fallback only without provider metadata", async () => {
+    assert.ok(services);
+    const originalHandleMessage = services.orchestrator.handleMessage.bind(services.orchestrator);
+    services.orchestrator.handleMessage = async (requestDeviceId, userMessage, _imageBase64, _assetRef, opts) => {
+      await services!.chatService.saveMessage(requestDeviceId, "user", userMessage);
+      opts?.onUserMessageSaved?.();
+      return {
+        reply: "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。",
+        didLogMeal: true,
+        didMutateMeal: true,
+        dailySummary: {
+          totalCalories: 95,
+          totalProtein: 0,
+          totalCarbs: 25,
+          totalFat: 0.3,
+          mealCount: 1,
+          date: formatLocalDate(new Date()),
+        },
+        finalReplySource: "fallback",
+        finalReplyShape: "fallback_text",
+        fallbackOutcomeContext: {
+          fallbackSource: "orchestrator",
+          reason: "partial_success",
+          round: 2,
+          lastTool: "log_food",
+        },
+      };
+    };
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const events = parseSSEEvents(text);
+      assert.equal(events.filter((event) => event.event === "done").length, 1);
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+      };
+      assert.match(donePayload.turnId ?? "", UUID_PATTERN);
+      assert.equal(donePayload.didLogMeal, true);
+      assert.equal(donePayload.didMutateMeal, true);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.source, "sse");
+      assert.equal(fallbackEvents[0]!.turnId, donePayload.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
+      assert.equal(fallbackEvents[0]!.reason, "partial_success");
+      assert.equal(fallbackEvents[0]!.didLogMeal, true);
+      assert.equal(fallbackEvents[0]!.didMutateMeal, true);
+      assert.equal(fallbackEvents[0]!.round, 2);
+      assert.equal(fallbackEvents[0]!.lastTool, "log_food");
+      assert.equal("providerMetadata" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-partial-success-fallback", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.transport, "sse");
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "partial_success");
+      assert.equal(routeFallbacks[0]!.didLogMeal, true);
+      assert.equal(routeFallbacks[0]!.didMutateMeal, true);
+      assert.equal("providerMetadata" in routeFallbacks[0]!, false);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      clearTimeout(timeout);
+      services.orchestrator.handleMessage = originalHandleMessage;
+    }
   });
 
   it("POST /api/chat SSE max_rounds fallback emits route fallback only without provider metadata", async () => {

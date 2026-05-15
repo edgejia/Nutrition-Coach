@@ -36,6 +36,7 @@ export interface AppServices {
   guestSessionService: ReturnType<typeof createGuestSessionService>;
   historyQueryService: ReturnType<typeof createHistoryQueryService>;
   mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
+  orchestrator: ReturnType<typeof createOrchestrator>;
   summaryService: ReturnType<typeof createSummaryService>;
 }
 
@@ -96,16 +97,6 @@ export async function buildApp(opts: AppOptions) {
   const mealCorrectionService = createMealCorrectionService(db);
   const publisher = new RealtimePublisher();
 
-  opts.onServicesReady?.({
-    assetService,
-    chatService,
-    foodLoggingService,
-    guestSessionService,
-    historyQueryService,
-    mealCorrectionService,
-    summaryService,
-  });
-
   const orchestrator = createOrchestrator({
     llmProvider,
     chatService,
@@ -114,6 +105,17 @@ export async function buildApp(opts: AppOptions) {
     mealCorrectionService,
     deviceService,
     publisher,
+  });
+
+  opts.onServicesReady?.({
+    assetService,
+    chatService,
+    foodLoggingService,
+    guestSessionService,
+    historyQueryService,
+    mealCorrectionService,
+    orchestrator,
+    summaryService,
   });
   await app.register(cors);
   // Keep the parser limit above the product limit so the chat route can return a controlled 400 at 5MB.
