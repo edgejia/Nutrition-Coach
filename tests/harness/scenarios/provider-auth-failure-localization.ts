@@ -27,6 +27,9 @@ const SCENARIO_NAME = "provider-auth-failure-localization";
 const RAW_USER_TEXT = "這段 auth harness 文字不應進入證據";
 const FINAL_ASSISTANT_TEXT = "抱歉，目前無法處理您的請求，請稍後再試。";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CHAT_STREAM_TIMEOUT_MS = 5_000;
+const LOCALIZED_FALLBACK_PATTERN = /抱歉|無法|稍後/;
+const PROVIDER_AUTH_DETAIL_PATTERN = /AuthenticationError|invalid_api_key|api[_ -]?key|Bearer|sk-|provider|OpenAI/i;
 
 const AUTH_PROVIDER_METADATA_FIXTURE: ProviderErrorMetadata = {
   provider: "openai",
@@ -232,6 +235,18 @@ const scenario: VerificationScenario = {
       }
 
       let chatRes: Response | undefined;
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+      const chatController = new AbortController();
+      let streamTimedOut = false;
+      const streamTimeout = setTimeout(() => {
+        streamTimedOut = true;
+        chatController.abort();
+      }, CHAT_STREAM_TIMEOUT_MS);
+      const cleanupChatStream = async () => {
+        clearTimeout(streamTimeout);
+        chatController.abort();
+        await reader?.cancel().catch(() => {});
+      };
       try {
         const form = new FormData();
         form.append("message", RAW_USER_TEXT);
@@ -241,6 +256,7 @@ const scenario: VerificationScenario = {
             cookie: fixture.cookieHeader,
             Accept: "text/event-stream",
           },
+          signal: chatController.signal,
           body: form,
         });
 
@@ -250,12 +266,20 @@ const scenario: VerificationScenario = {
             status: chatRes.status,
             contentType,
           }));
+          await cleanupChatStream();
           return failScenario("post_chat");
         }
         steps.push(pass("post_chat", { status: chatRes.status, contentType }));
       } catch (error) {
-        steps.push(fail("post_chat", error instanceof Error ? error.message : String(error)));
-        return failScenario("post_chat");
+        await cleanupChatStream();
+        const failedStepName = streamTimedOut ? "collect_done" : "post_chat";
+        const message = streamTimedOut
+          ? `Timed out after ${CHAT_STREAM_TIMEOUT_MS}ms waiting for SSE response or done event`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+        steps.push(fail(failedStepName, message));
+        return failScenario(failedStepName);
       }
 
       let startTurnId: string | undefined;
@@ -264,19 +288,36 @@ const scenario: VerificationScenario = {
           steps.push(fail("collect_done", "Chat response has no body"));
           return failScenario("collect_done");
         }
-        const rawStream = await readStreamUntilEvent(chatRes.body.getReader(), "done", 60);
+        reader = chatRes.body.getReader();
+        const rawStream = await readStreamUntilEvent(reader, "done", 60);
         const events = parseSSEEvents(rawStream);
         const startPayload = parseJsonObject(events.find((event) => event.event === "start")?.data ?? "");
         const donePayload = parseJsonObject(events.find((event) => event.event === "done")?.data ?? "");
         startTurnId = typeof startPayload?.turnId === "string" ? startPayload.turnId : undefined;
         terminalTurnId = typeof donePayload?.turnId === "string" ? donePayload.turnId : undefined;
         const eventNames = events.map((event) => event.event);
+        const chunkTokens = events
+          .filter((event) => event.event === "chunk")
+          .map((event) => parseJsonObject(event.data)?.token)
+          .filter((token): token is string => typeof token === "string");
+        const chunkText = chunkTokens.join("");
+        const chunkProof = {
+          chunkTokenCount: chunkTokens.length,
+          streamedFallbackTextLength: chunkText.length,
+          hasLocalizedFallbackCopy: LOCALIZED_FALLBACK_PATTERN.test(chunkText),
+          hasProviderAuthDetailLeak: PROVIDER_AUTH_DETAIL_PATTERN.test(chunkText),
+        };
 
         if (!terminalTurnId || !eventNames.includes("done")) {
           steps.push(fail("collect_done", "Expected terminal done event with turnId", {
             eventNames,
             donePayload,
           }));
+          return failScenario("collect_done");
+        }
+
+        if (!chunkProof.hasLocalizedFallbackCopy || chunkProof.hasProviderAuthDetailLeak) {
+          steps.push(fail("collect_done", "SSE chunk fallback copy failed localization/privacy checks", chunkProof));
           return failScenario("collect_done");
         }
 
@@ -288,6 +329,7 @@ const scenario: VerificationScenario = {
             didLogMeal: donePayload?.didLogMeal,
             didMutateMeal: donePayload?.didMutateMeal,
           },
+          chunkProof,
         };
         steps.push(pass("collect_done", {
           eventNames,
@@ -296,10 +338,18 @@ const scenario: VerificationScenario = {
             didLogMeal: donePayload?.didLogMeal,
             didMutateMeal: donePayload?.didMutateMeal,
           },
+          chunkProof,
         }));
       } catch (error) {
-        steps.push(fail("collect_done", error instanceof Error ? error.message : String(error)));
+        const message = streamTimedOut
+          ? `Timed out after ${CHAT_STREAM_TIMEOUT_MS}ms waiting for SSE done event`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+        steps.push(fail("collect_done", message));
         return failScenario("collect_done");
+      } finally {
+        await cleanupChatStream();
       }
 
       if (!terminalTurnId || !UUID_PATTERN.test(terminalTurnId) || startTurnId !== terminalTurnId) {
