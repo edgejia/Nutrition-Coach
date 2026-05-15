@@ -23,11 +23,18 @@ server/uploads/
 tests/harness/artifacts/
 tests/harness/tmp/
 
-# Local research and generated docs
+# Local research, personal notes, and project-level agent habits
 docs/research/
 docs/superpowers/
+docs/local/
+docs/notes/
+docs/personal/
+docs/workflow/
+docs/workflows/
 docs/README.md
 docs/codex.md
+docs/*.local.md
+docs/*-notes.md
 
 # Secrets, databases, OS files, and browser/tool cache
 .env
