@@ -2302,6 +2302,161 @@ describe("Chat API", () => {
     }
   });
 
+  it("JSON outer catch emits sanitized route_catch fallback without completed turn", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const traceRecorder = createLlmTraceRecorder();
+    let logServices: AppServices | undefined;
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+      llmTraceRecorderFactory: () => traceRecorder,
+      onServicesReady: (readyServices) => {
+        logServices = readyServices;
+      },
+    });
+    assert.ok(logServices);
+    const originalGetCompressedHistory = logServices.chatService.getCompressedHistory.bind(logServices.chatService);
+    logServices.chatService.getCompressedHistory = async () => {
+      throw new Error("RouteSafeFailure");
+    };
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", "今天午餐是豆腐");
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { turnId?: string; reply?: string; didLogMeal?: boolean };
+      assert.match(body.turnId ?? "", UUID_PATTERN);
+      assert.match(body.reply ?? "", /抱歉|無法/);
+      assert.equal(body.didLogMeal, false);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.deepEqual({
+        source: fallbackEvents[0]!.source,
+        turnId: fallbackEvents[0]!.turnId,
+        fallbackSource: fallbackEvents[0]!.fallbackSource,
+        reason: fallbackEvents[0]!.reason,
+        catchSite: fallbackEvents[0]!.catchSite,
+        errorName: fallbackEvents[0]!.errorName,
+        errorMessage: fallbackEvents[0]!.errorMessage,
+      }, {
+        source: "json",
+        turnId: body.turnId,
+        fallbackSource: "route_catch",
+        reason: "route_catch",
+        catchSite: "json_outer",
+        errorName: "Error",
+        errorMessage: "RouteSafeFailure",
+      });
+
+      const trace = traceRecorder.build({ scenario: "json-route-catch", status: "passed" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.turnId, body.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "route_catch");
+      assert.equal(routeFallbacks[0]!.reason, "route_catch");
+      assert.equal(routeFallbacks[0]!.catchSite, "json_outer");
+      assert.equal(routeFallbacks[0]!.errorName, "Error");
+      assert.equal(routeFallbacks[0]!.errorMessage, "RouteSafeFailure");
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      logServices.chatService.getCompressedHistory = originalGetCompressedHistory;
+      await logApp.close();
+    }
+  });
+
+  it("JSON outer catch omits unsafe thrown material from route fallback logs and trace", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const traceRecorder = createLlmTraceRecorder();
+    let logServices: AppServices | undefined;
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+      llmTraceRecorderFactory: () => traceRecorder,
+      onServicesReady: (readyServices) => {
+        logServices = readyServices;
+      },
+    });
+    assert.ok(logServices);
+    const originalGetCompressedHistory = logServices.chatService.getCompressedHistory.bind(logServices.chatService);
+    const rawMealText = "機密營養文字";
+    const unsafeErrorMessage = `prompt ${rawMealText} provider body header tool payload assistant final text data:image guest_session`;
+    logServices.chatService.getCompressedHistory = async () => {
+      const error = new Error(unsafeErrorMessage);
+      (error as Error & { cause?: unknown }).cause = new Error("CAUSE_SECRET");
+      throw error;
+    };
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", rawMealText);
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { turnId?: string; reply?: string };
+      assert.match(body.turnId ?? "", UUID_PATTERN);
+      assert.match(body.reply ?? "", /抱歉|無法/);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "route_catch");
+      assert.equal(fallbackEvents[0]!.catchSite, "json_outer");
+      assert.equal("errorName" in fallbackEvents[0]!, false);
+      assert.equal("errorMessage" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorder.build({ scenario: "json-route-catch-redaction", status: "passed" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "route_catch");
+      assert.equal(routeFallbacks[0]!.catchSite, "json_outer");
+      assert.equal("errorName" in routeFallbacks[0]!, false);
+      assert.equal("errorMessage" in routeFallbacks[0]!, false);
+
+      const serializedLogs = JSON.stringify(parseLogLines(logLines));
+      const serializedTrace = JSON.stringify(trace);
+      for (const serialized of [serializedLogs, serializedTrace]) {
+        assert.ok(!serialized.includes(rawMealText));
+        assert.ok(!serialized.includes(logDeviceId));
+        assert.ok(!serialized.includes(logCookieHeader));
+        assert.doesNotMatch(serialized, /CAUSE_SECRET|prompt|provider body|header|tool payload|assistant final text|data:image|guest_session|stack/);
+      }
+    } finally {
+      logServices.chatService.getCompressedHistory = originalGetCompressedHistory;
+      await logApp.close();
+    }
+  });
+
   it("logs one redacted chat_turn_completed event for SSE image requests", async () => {
     const { logLines, stream: logStream } = createLogCapture();
     const rawMealText = "這張圖是機密牛肉飯";
