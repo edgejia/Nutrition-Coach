@@ -46,6 +46,8 @@ const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 const NO_MUTATION_LOGGING_CLAIM_PATTERN = /已\s*(?:經\s*)?記錄|完成\s*記錄/;
 const NO_MUTATION_LOGGING_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
+const SUMMARY_OR_HISTORY_LOGGING_REFERENCE_PATTERN =
+  /(?:今天|今日|目前|到目前|截至|共|總共|摘要|攝取|已\s*(?:經\s*)?記錄\s*\d+\s*餐|已\s*(?:經\s*)?記錄的餐點|記錄的餐點|餐點有)/;
 
 export interface ProviderFallbackContext {
   reason: "llm_error";
@@ -336,8 +338,20 @@ function classifyFallbackReplyShape(reply: string): LlmTraceFinalReplyShape {
   return reply.trim().length > 0 ? "fallback_text" : "empty_or_missing";
 }
 
-export function guardNoMutationLoggingClaim(reply: string, didLogMeal: boolean, didMutateMeal: boolean): string {
-  if (!didLogMeal && !didMutateMeal && NO_MUTATION_LOGGING_CLAIM_PATTERN.test(reply)) {
+export function guardNoMutationLoggingClaim(
+  reply: string,
+  didLogMeal: boolean,
+  didMutateMeal: boolean,
+  context: { hasSummaryOrHistoryContext?: boolean } = {},
+): string {
+  const hasNoMutationLoggingClaim = !didLogMeal && !didMutateMeal && NO_MUTATION_LOGGING_CLAIM_PATTERN.test(reply);
+  if (!hasNoMutationLoggingClaim) {
+    return reply;
+  }
+  if (context.hasSummaryOrHistoryContext && SUMMARY_OR_HISTORY_LOGGING_REFERENCE_PATTERN.test(reply)) {
+    return reply;
+  }
+  if (hasNoMutationLoggingClaim) {
     return NO_MUTATION_LOGGING_FALLBACK;
   }
   return reply;
@@ -678,7 +692,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
-          const reply = guardNoMutationLoggingClaim(response.content, didLogMeal, didMutateMeal);
+          const reply = guardNoMutationLoggingClaim(response.content, didLogMeal, didMutateMeal, {
+            hasSummaryOrHistoryContext: logMealSummary !== undefined,
+          });
           const finalReplySource = reply === response.content ? "model" : "fallback";
           return {
             reply,
