@@ -48,6 +48,34 @@ const GOAL_VALIDATION_CODE_SET = new Set<string>(GOAL_VALIDATION_CODES);
 const VALID_IDENTIFIER = /^[a-z0-9_-]{1,64}$/;
 const VALID_CODE = /^[A-Z0-9_]{1,64}$/;
 const VALID_GOAL_VALIDATION_CODE = /^[a-z0-9_]{1,64}$/;
+const SAFE_ROUTE_ERROR_TEXT = /^[A-Za-z0-9 .:_/-]+$/;
+const ROUTE_ERROR_NAME_LIMIT = 80;
+const ROUTE_ERROR_MESSAGE_LIMIT = 160;
+const UNSAFE_ROUTE_ERROR_TERMS = [
+  "prompt",
+  "message",
+  "messages",
+  "user",
+  "nutrition",
+  "provider",
+  "body",
+  "header",
+  "authorization",
+  "bearer",
+  "tool",
+  "payload",
+  "guest_session",
+  "session",
+  "cookie",
+  "image",
+  "data:image",
+  "assistant",
+  "final reply",
+  "stack",
+  "cause",
+  "device",
+  "upload",
+] as const;
 
 export type IntakeObservabilityField = (typeof INTAKE_FIELDS)[number];
 export type GoalUpdateField = (typeof GOAL_UPDATE_FIELDS)[number];
@@ -191,6 +219,18 @@ function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErro
     ...(metadata.errorType !== undefined ? { errorType: metadata.errorType } : {}),
     ...(metadata.errorCode !== undefined ? { errorCode: metadata.errorCode } : {}),
   };
+}
+
+function sanitizeRouteErrorText(value: string, limit: number): string | undefined {
+  const text = value.slice(0, limit).trim();
+  if (!text || !SAFE_ROUTE_ERROR_TEXT.test(text)) {
+    return undefined;
+  }
+  const lower = text.toLowerCase();
+  if (UNSAFE_ROUTE_ERROR_TERMS.some((term) => lower.includes(term))) {
+    return undefined;
+  }
+  return text;
 }
 
 function logRedactedEvent(log: FastifyBaseLogger, payload: RedactedObservabilityEvent, message: string) {
@@ -359,6 +399,25 @@ export function logChatRouteFallback(
   params: Parameters<typeof buildChatRouteFallbackEvent>[0],
 ) {
   logRedactedEvent(log, buildChatRouteFallbackEvent(params), "Chat route fallback");
+}
+
+export function sanitizeRouteCatchError(
+  error: unknown,
+): Pick<ChatRouteFallbackEvent, "errorName" | "errorMessage"> {
+  if (!(error instanceof Error)) {
+    return {};
+  }
+
+  const errorMessage = sanitizeRouteErrorText(error.message, ROUTE_ERROR_MESSAGE_LIMIT);
+  if (!errorMessage) {
+    return {};
+  }
+
+  const errorName = sanitizeRouteErrorText(error.name, ROUTE_ERROR_NAME_LIMIT);
+  return {
+    ...(errorName !== undefined ? { errorName } : {}),
+    errorMessage,
+  };
 }
 
 export function buildDeviceGoalsValidationFailedEvent(params: {
