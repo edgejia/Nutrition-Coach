@@ -611,12 +611,16 @@ describe("chat-streaming", () => {
       assert.ok(latencyMs !== undefined);
       assert.equal(typeof latencyMs, "number");
       assert.ok(latencyMs >= 0);
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
       assert.deepEqual(trace.timeline.at(-1), {
-        type: "route_completion",
+        type: "route_fallback",
         transport: "sse",
+        turnId: donePayload.turnId,
+        fallbackSource: "route_catch",
         didLogMeal: false,
         didMutateMeal: false,
-        completed: true,
+        reason: "route_catch",
+        catchSite: "sse_outer",
       });
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {

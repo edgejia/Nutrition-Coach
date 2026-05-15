@@ -856,12 +856,14 @@ async function handleOrchestratorSSE(
       }
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, deps.log);
     }
-  } catch {
+  } catch (error) {
     const fallback = streamDidLogMeal
       ? (streamLoggedMeal ?? PARTIAL_SUCCESS_FALLBACK)
       : streamDidMutateMeal
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
+    let catchSite: RouteCatchSite = "sse_outer";
+    let sanitizedCatchError = sanitizeRouteCatchError(error);
     recorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
     try {
       if (!userMessagePersisted) {
@@ -880,7 +882,9 @@ async function handleOrchestratorSSE(
         streamReceiptIdentity,
       );
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
-    } catch {
+    } catch (persistError) {
+      catchSite = "sse_persist";
+      sanitizedCatchError = sanitizeRouteCatchError(persistError);
       // If history persistence also fails, still close the stream with done.
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: fallback })}\n\n`);
     }
@@ -894,21 +898,13 @@ async function handleOrchestratorSSE(
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
-    recorder?.recordRouteCompletion({
-      transport: "sse",
+    recordSseFallback({
+      fallbackSource: "route_catch",
+      reason: "route_catch",
+      catchSite,
+      ...sanitizedCatchError,
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
-      completed: true,
-    });
-    recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
-    logChatTurnCompleted(deps.log, {
-      source: "sse",
-      turnId: stopControl.turnId,
-      didLogMeal: streamDidLogMeal,
-      didMutateMeal: streamDidMutateMeal,
-      hadImage: Boolean(image),
-      latencyMs: Date.now() - startedAt,
-      ...(stopControl.isStopped() ? { stopped: true } : {}),
     });
     publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
   } finally {
