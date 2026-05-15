@@ -145,7 +145,6 @@ export const capabilityMatrix = [
     testCoverage: [
       "tests/unit/capability-matrix-source-scan.test.ts",
       "tests/unit/chat-stream-contract.test.ts",
-      "tests/unit/chat-shell-source-contract.test.ts",
     ],
     visibleCopy: "停止生成",
     disabledEvidence: ["stopDisabled={stopping || !activeTurnId}"],
