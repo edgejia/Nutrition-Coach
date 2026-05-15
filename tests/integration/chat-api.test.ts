@@ -115,6 +115,30 @@ class JsonHallucinationStreamProvider implements LLMProvider {
   }
 }
 
+class JsonProviderStreamErrorProvider implements LLMProvider {
+  public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
+
+  constructor(private readonly error: LLMProviderError) {}
+
+  async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMResponse> {
+    this.chatCalls.push({ messages, tools });
+    return { content: "unused" };
+  }
+
+  async chatRound(messages: ChatMessage[], tools: ToolDefinition[]) {
+    this.chatCalls.push({ messages, tools });
+    return {
+      kind: "stream" as const,
+      streamGenerator: this.streamThenThrow(),
+    };
+  }
+
+  private async *streamThenThrow(): AsyncGenerator<string> {
+    yield "partial token";
+    throw this.error;
+  }
+}
+
 async function readUntilEventCount(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   targetEvent: string,
@@ -2181,6 +2205,70 @@ describe("Chat API", () => {
       assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
       assert.equal(routeFallbacks[0]!.reason, "llm_error");
       assert.deepEqual(routeFallbacks[0]!.providerMetadata, providerMetadataFixture);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      await logApp.close();
+    }
+  });
+
+  it("JSON provider stream continuation llm_error fallback emits route fallback only with provider metadata", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const traceRecorder = createLlmTraceRecorder();
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new JsonProviderStreamErrorProvider(new LLMProviderError(providerMetadataFixture)),
+      logger: { level: "info", stream: logStream },
+      llmTraceRecorderFactory: () => traceRecorder,
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", "這段文字不應進 stream fallback event");
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { turnId?: string; reply?: string; didLogMeal?: boolean };
+      assert.match(body.turnId ?? "", UUID_PATTERN);
+      assert.match(body.reply ?? "", /抱歉|無法/);
+      assert.equal(body.didLogMeal, false);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.source, "json");
+      assert.equal(fallbackEvents[0]!.turnId, body.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
+      assert.equal(fallbackEvents[0]!.reason, "llm_error");
+      assert.deepEqual(fallbackEvents[0]!.providerMetadata, providerMetadataFixture);
+      assert.equal("catchSite" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorder.build({ scenario: "json-provider-stream-fallback", status: "passed" });
+      const llmErrors = trace.timeline.filter((event) => event.type === "llm_error");
+      const orchestratorFallbacks = trace.timeline.filter((event) => event.type === "orchestrator_fallback");
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.ok(llmErrors.length >= 1);
+      assert.ok(orchestratorFallbacks.some((event) =>
+        event.reason === "llm_error"
+        && JSON.stringify(event.providerMetadata) === JSON.stringify(providerMetadataFixture)
+      ));
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.turnId, body.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "llm_error");
+      assert.deepEqual(routeFallbacks[0]!.providerMetadata, providerMetadataFixture);
+      assert.equal("catchSite" in routeFallbacks[0]!, false);
       assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
     } finally {
       await logApp.close();

@@ -1079,6 +1079,63 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat SSE provider stream continuation llm_error fallback emits route fallback only with provider metadata", async () => {
+    mockLLM.queueChatStreamError(["partial token"], new LLMProviderError(providerMetadataFixture));
+
+    const form = new FormData();
+    form.append("message", "這段文字不應進 stream fallback event");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const events = parseSSEEvents(text);
+      assert.equal(events.filter((event) => event.event === "done").length, 1);
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as { turnId?: string };
+      assert.match(donePayload.turnId ?? "", UUID_PATTERN);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.source, "sse");
+      assert.equal(fallbackEvents[0]!.turnId, donePayload.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
+      assert.equal(fallbackEvents[0]!.reason, "llm_error");
+      assert.deepEqual(fallbackEvents[0]!.providerMetadata, providerMetadataFixture);
+      assert.equal("catchSite" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-provider-stream-fallback", status: "pass" });
+      const llmErrors = trace.timeline.filter((event) => event.type === "llm_error");
+      const orchestratorFallbacks = trace.timeline.filter((event) => event.type === "orchestrator_fallback");
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.ok(llmErrors.length >= 1);
+      assert.ok(orchestratorFallbacks.some((event) =>
+        event.reason === "llm_error"
+        && JSON.stringify(event.providerMetadata) === JSON.stringify(providerMetadataFixture)
+      ));
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.transport, "sse");
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "llm_error");
+      assert.deepEqual(routeFallbacks[0]!.providerMetadata, providerMetadataFixture);
+      assert.equal("catchSite" in routeFallbacks[0]!, false);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("SSE fallback classifier gates provider metadata to llm_error, not partial_success", async () => {
     const routeSource = await readFile("server/routes/chat.ts", "utf8");
 
