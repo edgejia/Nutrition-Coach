@@ -45,7 +45,18 @@ export type LlmTraceTimelineEvent =
       transport: "sse";
       didLogMeal: boolean;
       didMutateMeal: boolean;
-      completed: boolean;
+      completed: true;
+    }
+  | {
+      type: "route_fallback";
+      transport: "json" | "sse";
+      turnId: string;
+      fallbackSource: "orchestrator" | "route_hallucination" | "route_catch";
+      didLogMeal: boolean;
+      didMutateMeal: boolean;
+      reason?: string;
+      catchSite?: string;
+      providerMetadata?: ProviderErrorMetadata;
     };
 
 // Phase 53 migration inputs:
@@ -105,7 +116,18 @@ interface RecordRouteCompletionInput {
   transport: "sse";
   didLogMeal: boolean;
   didMutateMeal: boolean;
-  completed: boolean;
+  completed: true;
+}
+
+interface RecordRouteFallbackInput {
+  transport: "json" | "sse";
+  turnId: string;
+  fallbackSource: "orchestrator" | "route_hallucination" | "route_catch";
+  didLogMeal: boolean;
+  didMutateMeal: boolean;
+  reason?: string;
+  catchSite?: string;
+  providerMetadata?: ProviderErrorMetadata;
 }
 
 interface RecordMetricsInput {
@@ -121,6 +143,7 @@ export interface LlmTraceRecorder {
   asOrchestratorHooks(): OrchestratorHooks;
   recordFinalReply(input: RecordFinalReplyInput): void;
   recordRouteCompletion(input: RecordRouteCompletionInput): void;
+  recordRouteFallback(input: RecordRouteFallbackInput): void;
   recordMetrics(input: RecordMetricsInput): void;
   build(input: BuildInput): LlmTraceArtifact;
 }
@@ -231,6 +254,31 @@ function buildLLMErrorEvent(payload: LLMErrorPayload): Extract<LlmTraceTimelineE
   return event;
 }
 
+function buildRouteFallbackEvent(
+  input: RecordRouteFallbackInput,
+): Extract<LlmTraceTimelineEvent, { type: "route_fallback" }> {
+  const event: Extract<LlmTraceTimelineEvent, { type: "route_fallback" }> = {
+    type: "route_fallback",
+    transport: input.transport,
+    turnId: sanitizeTraceLabel(input.turnId),
+    fallbackSource: input.fallbackSource,
+    didLogMeal: input.didLogMeal,
+    didMutateMeal: input.didMutateMeal,
+  };
+
+  if (input.reason !== undefined) {
+    event.reason = sanitizeTraceLabel(input.reason);
+  }
+  if (input.catchSite !== undefined) {
+    event.catchSite = sanitizeTraceLabel(input.catchSite);
+  }
+  if (input.providerMetadata !== undefined) {
+    event.providerMetadata = sanitizeProviderMetadata(input.providerMetadata);
+  }
+
+  return event;
+}
+
 function buildToolResultEvent(
   payload: ToolResultPayload,
   round?: number,
@@ -313,6 +361,9 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
         didMutateMeal: input.didMutateMeal,
         completed: input.completed,
       });
+    },
+    recordRouteFallback(input) {
+      timeline.push(buildRouteFallbackEvent(input));
     },
     recordMetrics(input) {
       latencyMs = input.latencyMs;

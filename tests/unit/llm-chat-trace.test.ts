@@ -180,7 +180,7 @@ describe("createLlmTraceRecorder", () => {
       transport: "sse" as const,
       didLogMeal: false,
       didMutateMeal: false,
-      completed: true,
+      completed: true as const,
       cookie: "guest_session=secret",
       reply: "final assistant text",
     };
@@ -275,7 +275,7 @@ describe("createLlmTraceRecorder", () => {
       },
     });
     assert.equal(
-      trace.timeline.some((event) => event.type === "route_completion" && event.completed === false),
+      trace.timeline.some((event) => event.type === "route_completion"),
       false,
     );
 
