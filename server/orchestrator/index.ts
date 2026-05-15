@@ -46,8 +46,12 @@ const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 const NO_MUTATION_LOGGING_CLAIM_PATTERN = /已\s*(?:經\s*)?記錄|完成\s*記錄/;
 const NO_MUTATION_LOGGING_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
-const SUMMARY_OR_HISTORY_LOGGING_REFERENCE_PATTERN =
-  /(?:今天|今日|目前|到目前|截至|共|總共|摘要|攝取|已\s*(?:經\s*)?記錄\s*\d+\s*餐|已\s*(?:經\s*)?記錄的餐點|記錄的餐點|餐點有)/;
+const SUMMARY_OR_HISTORY_ALLOWED_LOGGING_REFERENCE_PATTERNS = [
+  /已\s*(?:經\s*)?記錄\s*\d+\s*餐/,
+  /(?:總攝取|總熱量|總共攝取|共攝取|攝取總計|熱量總計|合計)\s*(?:約\s*)?\d+(?:\.\d+)?\s*(?:kcal|大卡|卡)/i,
+  /已\s*(?:經\s*)?記錄的餐點/,
+  /記錄的餐點有/,
+];
 
 export interface ProviderFallbackContext {
   reason: "llm_error";
@@ -348,7 +352,10 @@ export function guardNoMutationLoggingClaim(
   if (!hasNoMutationLoggingClaim) {
     return reply;
   }
-  if (context.hasSummaryOrHistoryContext && SUMMARY_OR_HISTORY_LOGGING_REFERENCE_PATTERN.test(reply)) {
+  if (
+    context.hasSummaryOrHistoryContext
+    && SUMMARY_OR_HISTORY_ALLOWED_LOGGING_REFERENCE_PATTERNS.some((pattern) => pattern.test(reply))
+  ) {
     return reply;
   }
   if (hasNoMutationLoggingClaim) {
