@@ -1,5 +1,11 @@
 import type { ProviderErrorMetadata } from "../llm/types.js";
-import type { FallbackPayload, FallbackReason, OrchestratorHooks, ToolResultPayload } from "./hooks.js";
+import type {
+  FallbackPayload,
+  FallbackReason,
+  LLMErrorPayload,
+  OrchestratorHooks,
+  ToolResultPayload,
+} from "./hooks.js";
 import {
   ACTIVE_SYSTEM_PROMPT_VERSION,
   SYSTEM_PROMPT_SECTION_IDS,
@@ -20,6 +26,12 @@ export type LlmTraceTimelineEvent =
       fields?: string[];
       updatedFields?: string[];
       publishedEvents?: string[];
+    }
+  | {
+      type: "llm_error";
+      round: number;
+      lastTool?: string;
+      providerMetadata: ProviderErrorMetadata;
     }
   | {
       type: "orchestrator_fallback";
@@ -67,6 +79,7 @@ export interface LlmTraceSummary {
   roundCount: number;
   toolCount: number;
   fallbackCount: number;
+  providerErrorCount: number;
   latencyMs?: number;
   prompt: {
     version: typeof ACTIVE_SYSTEM_PROMPT_VERSION;
@@ -76,7 +89,7 @@ export interface LlmTraceSummary {
 }
 
 export interface LlmTraceArtifact {
-  schemaVersion: "llm-trace.v1";
+  schemaVersion: "llm-trace.v2";
   scenario: string;
   status: string;
   summary: LlmTraceSummary;
@@ -204,6 +217,20 @@ function buildFallbackEvent(payload: FallbackPayload): Extract<LlmTraceTimelineE
   return event;
 }
 
+function buildLLMErrorEvent(payload: LLMErrorPayload): Extract<LlmTraceTimelineEvent, { type: "llm_error" }> {
+  const event: Extract<LlmTraceTimelineEvent, { type: "llm_error" }> = {
+    type: "llm_error",
+    round: payload.round,
+    providerMetadata: sanitizeProviderMetadata(payload.providerMetadata),
+  };
+
+  if (payload.lastTool !== undefined) {
+    event.lastTool = sanitizeTraceLabel(payload.lastTool);
+  }
+
+  return event;
+}
+
 function buildToolResultEvent(
   payload: ToolResultPayload,
   round?: number,
@@ -264,9 +291,8 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
         onToolResult(payload) {
           timeline.push(buildToolResultEvent(payload, currentRound));
         },
-        onLLMError() {
-          // Trace v1 accepts provider-error hook facts for contract parity but
-          // does not persist a dedicated llm_error timeline event until trace v2.
+        onLLMError(payload) {
+          timeline.push(buildLLMErrorEvent(payload));
         },
         onFallback(payload) {
           timeline.push(buildFallbackEvent(payload));
@@ -296,6 +322,7 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
         roundCount: countTimelineEvents(timeline, "llm_round_start"),
         toolCount: countTimelineEvents(timeline, "tool_received"),
         fallbackCount: countTimelineEvents(timeline, "orchestrator_fallback"),
+        providerErrorCount: countTimelineEvents(timeline, "llm_error"),
         prompt: {
           version: ACTIVE_SYSTEM_PROMPT_VERSION,
           sectionIds: Object.values(SYSTEM_PROMPT_SECTION_IDS),
@@ -308,7 +335,7 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
       }
 
       return {
-        schemaVersion: "llm-trace.v1",
+        schemaVersion: "llm-trace.v2",
         scenario: input.scenario,
         status: input.status,
         summary,

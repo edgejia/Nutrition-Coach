@@ -101,7 +101,7 @@ function verifyFallbackTraceContract(
   const evidence = trace ?? null;
 
   if (!trace) return { ok: false, error: "expected sub-A llm trace", evidence };
-  if (trace.schemaVersion !== "llm-trace.v1") return { ok: false, error: "expected llm-trace.v1 schema version", evidence };
+  if (trace.schemaVersion !== "llm-trace.v2") return { ok: false, error: "expected llm-trace.v2 schema version", evidence };
   if (trace.scenario !== "image-log-failure") return { ok: false, error: "expected image-log-failure trace scenario", evidence };
   if (!trace.timeline.some((event) => event.type === "orchestrator_fallback" && event.reason === "llm_error")) {
     return { ok: false, error: "expected llm_error orchestrator_fallback trace event", evidence };
