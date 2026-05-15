@@ -440,6 +440,76 @@ describe("verification-artifacts", () => {
     );
   });
 
+  test("persisted llm-trace.json preserves provider metadata while removing raw provider payload material", async () => {
+    const result = makePassResult("trace-provider-metadata-redaction") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.llmTrace = {
+      schemaVersion: "llm-trace.v2",
+      scenario: "trace-provider-metadata-redaction",
+      status: "pass",
+      summary: {
+        roundCount: 1,
+        toolCount: 0,
+        fallbackCount: 1,
+        providerErrorCount: 1,
+        prompt: { version: "system-prompt.test", sectionIds: ["role"] },
+        finalReply: { source: "fallback", shape: "fallback_text" },
+      },
+      timeline: [
+        {
+          type: "llm_error",
+          round: 1,
+          providerMetadata: {
+            provider: "openai",
+            operation: "chat_round_initial",
+            model: "gpt-test",
+            aborted: false,
+            status: 429,
+            providerRequestId: "req_safe_123",
+            errorName: "RateLimitError",
+            errorType: "rate_limit_error",
+            errorCode: "rate_limit_exceeded",
+            providerPayload: { raw: "raw provider body should not persist" },
+            headers: { authorization: "Bearer provider-token" },
+            body: "raw provider body should not persist",
+            messages: [{ role: "user", content: "raw user text should not persist" }],
+            tools: [{ function: { name: "log_food" } }],
+            promptText: "raw prompt text should not persist",
+            rawUserMessage: "raw user text should not persist",
+            rawToolResult: { reply: "raw tool result should not persist" },
+            finalAssistantContent: "assistant final answer should not persist",
+          },
+        },
+      ],
+    };
+
+    await writeScenarioArtifacts("trace-provider-metadata-redaction", result);
+
+    const raw = readArtifact(tmpDir, "trace-provider-metadata-redaction", "llm-trace.json");
+    const trace = JSON.parse(raw) as {
+      timeline: Array<{
+        providerMetadata?: Record<string, unknown>;
+      }>;
+    };
+
+    assert.deepEqual(trace.timeline[0]!.providerMetadata, {
+      provider: "openai",
+      operation: "chat_round_initial",
+      model: "gpt-test",
+      aborted: false,
+      status: 429,
+      providerRequestId: "req_safe_123",
+      errorName: "RateLimitError",
+      errorType: "rate_limit_error",
+      errorCode: "rate_limit_exceeded",
+    });
+    assert.doesNotMatch(
+      raw,
+      /providerPayload|headers|body|messages|tools|promptText|rawUserMessage|rawToolResult|finalAssistantContent|raw provider body should not persist|Bearer provider-token|raw prompt text should not persist|raw user text should not persist|raw tool result should not persist|assistant final answer should not persist/,
+    );
+  });
+
   test("failed scenario produces ok=false and populated failedStep in summary.json", async () => {
     const result = makeFailResult("image-log-fail");
     await writeScenarioArtifacts("image-log-fail", result);

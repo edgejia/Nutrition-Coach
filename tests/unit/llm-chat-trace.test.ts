@@ -236,6 +236,55 @@ describe("createLlmTraceRecorder", () => {
     }
   });
 
+  it("records route fallback as a dedicated terminal trace fact", () => {
+    const recorder = createLlmTraceRecorder();
+    const unsafeProviderMetadata: ProviderErrorMetadata = {
+      ...providerMetadata,
+      providerRequestId: "Authorization Bearer",
+      errorName: "raw prompt",
+    };
+
+    recorder.recordRouteFallback({
+      transport: "json",
+      turnId: "t_safe_123",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      reason: "llm_error",
+      catchSite: "json_outer",
+      providerMetadata: unsafeProviderMetadata,
+      providerPayload: { body: "raw provider body" },
+      finalAssistantContent: "final assistant text",
+    } as never);
+
+    const trace = recorder.build({ scenario: "unit-route-fallback", status: "pass" });
+
+    assert.deepEqual(trace.timeline.at(-1), {
+      type: "route_fallback",
+      transport: "json",
+      turnId: "t_safe_123",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      reason: "llm_error",
+      catchSite: "json_outer",
+      providerMetadata: {
+        ...providerMetadata,
+        providerRequestId: "redacted",
+        errorName: "redacted",
+      },
+    });
+    assert.equal(
+      trace.timeline.some((event) => event.type === "route_completion" && event.completed === false),
+      false,
+    );
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of ["Authorization", "Bearer", "raw prompt", "raw provider body", "final assistant text"]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
   it("records provider-caused fallback hook facts with metadata-only trace fields", () => {
     const recorder = createLlmTraceRecorder();
     const hooks = recorder.asOrchestratorHooks();
