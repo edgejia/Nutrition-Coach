@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
+import type { ProviderErrorMetadata } from "../llm/types.js";
 
 export type RedactedObservabilityEventName =
   | "onboarding_submit_started"
@@ -7,12 +8,21 @@ export type RedactedObservabilityEventName =
   | "home_cta_intent_selected"
   | "home_cta_option_sent"
   | "chat_turn_completed"
+  | "chat_route_fallback"
   | "device_goals_validation_failed"
   | "device_goals_updated_rest"
   | "sse_connection_state";
 
 export type OnboardingSource = "server";
 export type ChatTurnSource = "json" | "sse";
+export type RouteFallbackSource = "orchestrator" | "route_hallucination" | "route_catch";
+export type RouteFallbackReason =
+  | "llm_error"
+  | "partial_success"
+  | "max_rounds"
+  | "hallucination_detected"
+  | "route_catch";
+export type RouteCatchSite = "json_outer" | "sse_outer" | "sse_persist";
 export type SseConnectionState = "opened" | "closed" | "rejected";
 
 const INTAKE_FIELDS = [
@@ -74,12 +84,31 @@ export interface HomeCtaOptionSentEvent {
 export interface ChatTurnCompletedEvent {
   event: "chat_turn_completed";
   source: ChatTurnSource;
+  turnId: string;
   didLogMeal: boolean;
   didMutateMeal: boolean;
   hadImage: boolean;
   latencyMs: number;
   stopped?: boolean;
   tokensStreamed?: number;
+}
+
+export interface ChatRouteFallbackEvent {
+  event: "chat_route_fallback";
+  source: ChatTurnSource;
+  turnId: string;
+  fallbackSource: RouteFallbackSource;
+  didLogMeal: boolean;
+  didMutateMeal: boolean;
+  hadImage: boolean;
+  latencyMs: number;
+  reason?: RouteFallbackReason;
+  catchSite?: RouteCatchSite;
+  providerMetadata?: ProviderErrorMetadata;
+  errorName?: string;
+  errorMessage?: string;
+  round?: number;
+  lastTool?: string;
 }
 
 export interface DeviceGoalsUpdatedRestEvent {
@@ -105,6 +134,7 @@ export type RedactedObservabilityEvent =
   | HomeCtaIntentSelectedEvent
   | HomeCtaOptionSentEvent
   | ChatTurnCompletedEvent
+  | ChatRouteFallbackEvent
   | DeviceGoalsValidationFailedEvent
   | DeviceGoalsUpdatedRestEvent
   | SseConnectionStateEvent;
@@ -147,6 +177,20 @@ function sanitizeGoalValidationCodes(codes: readonly string[]): string[] {
 
 function isIdentifier(value: unknown): value is string {
   return typeof value === "string" && VALID_IDENTIFIER.test(value);
+}
+
+function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErrorMetadata {
+  return {
+    provider: metadata.provider,
+    operation: metadata.operation,
+    model: metadata.model,
+    aborted: metadata.aborted,
+    ...(metadata.status !== undefined ? { status: metadata.status } : {}),
+    ...(metadata.providerRequestId !== undefined ? { providerRequestId: metadata.providerRequestId } : {}),
+    ...(metadata.errorName !== undefined ? { errorName: metadata.errorName } : {}),
+    ...(metadata.errorType !== undefined ? { errorType: metadata.errorType } : {}),
+    ...(metadata.errorCode !== undefined ? { errorCode: metadata.errorCode } : {}),
+  };
 }
 
 function logRedactedEvent(log: FastifyBaseLogger, payload: RedactedObservabilityEvent, message: string) {
@@ -243,6 +287,7 @@ export function logHomeCtaOptionSent(
 
 export function buildChatTurnCompletedEvent(params: {
   source: ChatTurnSource;
+  turnId: string;
   didLogMeal: boolean;
   didMutateMeal: boolean;
   hadImage: boolean;
@@ -253,6 +298,7 @@ export function buildChatTurnCompletedEvent(params: {
   return {
     event: "chat_turn_completed",
     source: params.source,
+    turnId: params.turnId,
     didLogMeal: params.didLogMeal,
     didMutateMeal: params.didMutateMeal,
     hadImage: params.hadImage,
@@ -269,6 +315,50 @@ export function logChatTurnCompleted(
   params: Parameters<typeof buildChatTurnCompletedEvent>[0],
 ) {
   logRedactedEvent(log, buildChatTurnCompletedEvent(params), "Chat turn completed");
+}
+
+export function buildChatRouteFallbackEvent(params: {
+  source: ChatTurnSource;
+  turnId: string;
+  fallbackSource: RouteFallbackSource;
+  didLogMeal: boolean;
+  didMutateMeal: boolean;
+  hadImage: boolean;
+  latencyMs: number;
+  reason?: RouteFallbackReason;
+  catchSite?: RouteCatchSite;
+  providerMetadata?: ProviderErrorMetadata;
+  errorName?: string;
+  errorMessage?: string;
+  round?: number;
+  lastTool?: string;
+}): ChatRouteFallbackEvent {
+  return {
+    event: "chat_route_fallback",
+    source: params.source,
+    turnId: params.turnId,
+    fallbackSource: params.fallbackSource,
+    didLogMeal: params.didLogMeal,
+    didMutateMeal: params.didMutateMeal,
+    hadImage: params.hadImage,
+    latencyMs: Math.max(0, Math.round(params.latencyMs)),
+    ...(params.reason !== undefined ? { reason: params.reason } : {}),
+    ...(params.catchSite !== undefined ? { catchSite: params.catchSite } : {}),
+    ...(params.providerMetadata !== undefined
+      ? { providerMetadata: sanitizeProviderMetadata(params.providerMetadata) }
+      : {}),
+    ...(params.errorName !== undefined ? { errorName: params.errorName } : {}),
+    ...(params.errorMessage !== undefined ? { errorMessage: params.errorMessage } : {}),
+    ...(params.round !== undefined ? { round: Math.max(0, Math.round(params.round)) } : {}),
+    ...(params.lastTool !== undefined ? { lastTool: params.lastTool } : {}),
+  };
+}
+
+export function logChatRouteFallback(
+  log: FastifyBaseLogger,
+  params: Parameters<typeof buildChatRouteFallbackEvent>[0],
+) {
+  logRedactedEvent(log, buildChatRouteFallbackEvent(params), "Chat route fallback");
 }
 
 export function buildDeviceGoalsValidationFailedEvent(params: {

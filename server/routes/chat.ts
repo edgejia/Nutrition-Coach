@@ -600,6 +600,10 @@ async function handleOrchestratorSSE(
   recorder?: LlmTraceRecorder,
   stopControl?: StreamingStopControl,
 ): Promise<void> {
+  if (!stopControl) {
+    throw new Error("SSE stop control is required");
+  }
+
   let durableAssetId: string | undefined;
   let durableAssetRef: string | undefined;
   let userMessagePersisted = false;
@@ -613,9 +617,9 @@ async function handleOrchestratorSSE(
   let streamReceiptIdentity: ReceiptIdentity | undefined;
 
   try {
-    writeStatus(stream, "思考中...", stopControl?.turnId);
+    writeStatus(stream, "思考中...", stopControl.turnId);
     if (image) {
-      writeStatus(stream, "分析圖片中...", stopControl?.turnId);
+      writeStatus(stream, "分析圖片中...", stopControl.turnId);
     }
 
     const durableAsset = await createDurableAssetIfNeeded(
@@ -633,7 +637,7 @@ async function handleOrchestratorSSE(
       durableAssetRef,
       {
         onStatus: (label: string) => {
-          writeStatus(stream, label, stopControl?.turnId);
+          writeStatus(stream, label, stopControl.turnId);
         },
         onUserMessageSaved: () => {
           userMessagePersisted = true;
@@ -678,7 +682,7 @@ async function handleOrchestratorSSE(
       if (streamResult.stopped) {
         const stoppedData = {
           stopped: true,
-          turnId: stopControl?.turnId,
+          turnId: stopControl.turnId,
           tokensStreamed: streamResult.tokensStreamed,
           didLogMeal: streamDidLogMeal,
           didMutateMeal: streamDidMutateMeal,
@@ -697,6 +701,7 @@ async function handleOrchestratorSSE(
         recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
         logChatTurnCompleted(deps.log, {
           source: "sse",
+          turnId: stopControl.turnId,
           didLogMeal: streamDidLogMeal,
           didMutateMeal: streamDidMutateMeal,
           hadImage: Boolean(image),
@@ -709,7 +714,7 @@ async function handleOrchestratorSSE(
       }
 
       const doneData = {
-        turnId: stopControl?.turnId,
+        turnId: stopControl.turnId,
         didLogMeal: streamDidLogMeal,
         didMutateMeal: streamDidMutateMeal,
         ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
@@ -727,6 +732,7 @@ async function handleOrchestratorSSE(
       recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
       logChatTurnCompleted(deps.log, {
         source: "sse",
+        turnId: stopControl.turnId,
         didLogMeal: streamDidLogMeal,
         didMutateMeal: streamDidMutateMeal,
         hadImage: Boolean(image),
@@ -756,7 +762,7 @@ async function handleOrchestratorSSE(
       );
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
-        turnId: stopControl?.turnId,
+        turnId: stopControl.turnId,
         didLogMeal,
         didMutateMeal: streamDidMutateMeal,
         ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
@@ -774,6 +780,7 @@ async function handleOrchestratorSSE(
       recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
       logChatTurnCompleted(deps.log, {
         source: "sse",
+        turnId: stopControl.turnId,
         didLogMeal,
         didMutateMeal: streamDidMutateMeal,
         hadImage: Boolean(image),
@@ -810,7 +817,7 @@ async function handleOrchestratorSSE(
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: fallback })}\n\n`);
     }
     const doneData = {
-      turnId: stopControl?.turnId,
+      turnId: stopControl.turnId,
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
       ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
@@ -828,11 +835,12 @@ async function handleOrchestratorSSE(
     recorder?.recordMetrics({ latencyMs: Date.now() - startedAt });
     logChatTurnCompleted(deps.log, {
       source: "sse",
+      turnId: stopControl.turnId,
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
       hadImage: Boolean(image),
       latencyMs: Date.now() - startedAt,
-      ...(stopControl?.isStopped() ? { stopped: true } : {}),
+      ...(stopControl.isStopped() ? { stopped: true } : {}),
     });
     publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
   } finally {
@@ -1004,6 +1012,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           );
           logChatTurnCompleted(turnLog, {
             source: "json",
+            turnId,
             didLogMeal,
             didMutateMeal,
             hadImage,
@@ -1034,6 +1043,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, turnLog);
         logChatTurnCompleted(turnLog, {
           source: "json",
+          turnId,
           didLogMeal,
           didMutateMeal: jsonDidMutateMeal,
           hadImage,
@@ -1075,6 +1085,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, turnLog);
         logChatTurnCompleted(turnLog, {
           source: "json",
+          turnId,
           didLogMeal: jsonDidLogMeal,
           didMutateMeal: jsonDidMutateMeal,
           hadImage,
