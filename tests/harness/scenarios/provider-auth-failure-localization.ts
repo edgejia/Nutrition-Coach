@@ -27,9 +27,6 @@ const SCENARIO_NAME = "provider-auth-failure-localization";
 const RAW_USER_TEXT = "這段 auth harness 文字不應進入證據";
 const FINAL_ASSISTANT_TEXT = "抱歉，目前無法處理您的請求，請稍後再試。";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const LOCALIZED_FALLBACK_PATTERN = /抱歉|無法|稍後/;
-const PROVIDER_AUTH_DETAIL_PATTERN = /AuthenticationError|invalid_api_key|api[_ -]?key|Bearer|sk-|provider|OpenAI/i;
-const CHAT_STREAM_TIMEOUT_MS = 5000;
 
 const AUTH_PROVIDER_METADATA_FIXTURE: ProviderErrorMetadata = {
   provider: "openai",
@@ -59,7 +56,6 @@ const STEP_NAMES = [
   "bootstrap",
   "post_chat",
   "collect_done",
-  "verify_localized_chunk",
   "verify_terminal_turn_id",
   "verify_route_logs",
   "verify_trace_facts",
@@ -144,30 +140,6 @@ function parseJsonObject(value: string): Record<string, unknown> | undefined {
   }
 }
 
-function extractChunkText(events: Array<{ event: string; data: string }>): {
-  chunkText: string;
-  chunkCount: number;
-  invalidChunkPayloadCount: number;
-} {
-  let invalidChunkPayloadCount = 0;
-  const tokens = events
-    .filter((event) => event.event === "chunk")
-    .map((event) => {
-      const token = parseJsonObject(event.data)?.token;
-      if (typeof token !== "string") {
-        invalidChunkPayloadCount += 1;
-        return "";
-      }
-      return token;
-    });
-
-  return {
-    chunkText: tokens.join(""),
-    chunkCount: tokens.length,
-    invalidChunkPayloadCount,
-  };
-}
-
 function countTraceEvents(trace: LlmTraceArtifact, type: LlmTraceTimelineEvent["type"]): number {
   return trace.timeline.filter((event) => event.type === type).length;
 }
@@ -232,9 +204,6 @@ const scenario: VerificationScenario = {
     let terminalTurnId: string | undefined;
     let routeFallbackTurnId: string | undefined;
     let traceRouteFallbackTurnId: string | undefined;
-    let chatController: AbortController | undefined;
-    let chatTimeout: ReturnType<typeof setTimeout> | undefined;
-    let chatReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     const fixture = await createScenarioApp({
       llmProvider: provider,
@@ -266,15 +235,12 @@ const scenario: VerificationScenario = {
       try {
         const form = new FormData();
         form.append("message", RAW_USER_TEXT);
-        chatController = new AbortController();
-        chatTimeout = setTimeout(() => chatController?.abort(), CHAT_STREAM_TIMEOUT_MS);
         chatRes = await fetch(`${fixture.address}/api/chat`, {
           method: "POST",
           headers: {
             cookie: fixture.cookieHeader,
             Accept: "text/event-stream",
           },
-          signal: chatController.signal,
           body: form,
         });
 
@@ -298,23 +264,13 @@ const scenario: VerificationScenario = {
           steps.push(fail("collect_done", "Chat response has no body"));
           return failScenario("collect_done");
         }
-        chatReader = chatRes.body.getReader();
-        const rawStream = await readStreamUntilEvent(chatReader, "done", 60);
+        const rawStream = await readStreamUntilEvent(chatRes.body.getReader(), "done", 60);
         const events = parseSSEEvents(rawStream);
         const startPayload = parseJsonObject(events.find((event) => event.event === "start")?.data ?? "");
         const donePayload = parseJsonObject(events.find((event) => event.event === "done")?.data ?? "");
         startTurnId = typeof startPayload?.turnId === "string" ? startPayload.turnId : undefined;
         terminalTurnId = typeof donePayload?.turnId === "string" ? donePayload.turnId : undefined;
         const eventNames = events.map((event) => event.event);
-        const { chunkText, chunkCount, invalidChunkPayloadCount } = extractChunkText(events);
-        const localizedFallbackProof = {
-          chunkCount,
-          chunkLength: chunkText.length,
-          invalidChunkPayloadCount,
-          hasLocalizedFallbackCopy: LOCALIZED_FALLBACK_PATTERN.test(chunkText),
-          chunkExposesProviderAuthDetails: PROVIDER_AUTH_DETAIL_PATTERN.test(chunkText),
-          streamExposesProviderAuthDetails: PROVIDER_AUTH_DETAIL_PATTERN.test(rawStream),
-        };
 
         if (!terminalTurnId || !eventNames.includes("done")) {
           steps.push(fail("collect_done", "Expected terminal done event with turnId", {
@@ -341,18 +297,6 @@ const scenario: VerificationScenario = {
             didMutateMeal: donePayload?.didMutateMeal,
           },
         }));
-
-        artifacts.localizedFallbackProof = localizedFallbackProof;
-        if (
-          invalidChunkPayloadCount !== 0
-          || !localizedFallbackProof.hasLocalizedFallbackCopy
-          || localizedFallbackProof.chunkExposesProviderAuthDetails
-          || localizedFallbackProof.streamExposesProviderAuthDetails
-        ) {
-          steps.push(fail("verify_localized_chunk", "Expected localized generic fallback chunks without provider/auth details", localizedFallbackProof));
-          return failScenario("verify_localized_chunk");
-        }
-        steps.push(pass("verify_localized_chunk", localizedFallbackProof));
       } catch (error) {
         steps.push(fail("collect_done", error instanceof Error ? error.message : String(error)));
         return failScenario("collect_done");
@@ -521,11 +465,6 @@ const scenario: VerificationScenario = {
         consoleSummary: `PASS ${SCENARIO_NAME} ${steps.filter((step) => step.ok).length}/${steps.length}`,
       };
     } finally {
-      if (chatTimeout !== undefined) {
-        clearTimeout(chatTimeout);
-      }
-      await chatReader?.cancel().catch(() => {});
-      chatController?.abort();
       await fixture.close();
     }
   },

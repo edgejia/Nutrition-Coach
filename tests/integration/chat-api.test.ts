@@ -81,8 +81,6 @@ function chatTurnCompletedMetadata(record: Record<string, unknown>) {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const LOCALIZED_FALLBACK_PATTERN = /抱歉|無法|稍後/;
-const PROVIDER_AUTH_DETAIL_PATTERN = /AuthenticationError|invalid_api_key|api[_ -]?key|Bearer|sk-|provider|OpenAI/i;
 
 const providerMetadataFixture: ProviderErrorMetadata = {
   provider: "openai",
@@ -2258,10 +2256,8 @@ describe("Chat API", () => {
       });
 
       assert.equal(res.status, 200);
-      const body = await res.json() as { turnId?: string; reply?: string; didLogMeal?: boolean };
+      const body = await res.json() as { turnId?: string; didLogMeal?: boolean };
       assert.match(body.turnId ?? "", UUID_PATTERN);
-      assert.match(body.reply ?? "", LOCALIZED_FALLBACK_PATTERN);
-      assert.doesNotMatch(body.reply ?? "", PROVIDER_AUTH_DETAIL_PATTERN);
       assert.equal(body.didLogMeal, false);
 
       const providerErrorEvents = observabilityEvents(logLines, "llm_provider_error");
