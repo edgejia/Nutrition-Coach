@@ -294,7 +294,7 @@ describe("Chat API", () => {
       assert.doesNotMatch(chunkText, /已記錄|完成記錄/);
 
       const history = await services?.chatService.getHistory(deviceId, 10);
-      const assistant = history?.findLast((message) => message.role === "assistant");
+      const assistant = [...(history ?? [])].reverse().find((message) => message.role === "assistant");
       assert.ok(assistant);
       assert.doesNotMatch(String(assistant.content), /已記錄|完成記錄/);
     } finally {
@@ -325,7 +325,7 @@ describe("Chat API", () => {
     assert.doesNotMatch(body.reply ?? "", /已記錄|完成記錄/);
 
     const history = await services?.chatService.getHistory(deviceId, 10);
-    const assistant = history?.findLast((message) => message.role === "assistant");
+    const assistant = [...(history ?? [])].reverse().find((message) => message.role === "assistant");
     assert.ok(assistant);
     assert.doesNotMatch(String(assistant.content), /已記錄|完成記錄/);
   });

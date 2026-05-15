@@ -242,6 +242,40 @@ function createStreamingSanitizer() {
   };
 }
 
+function createNoMutationLoggingClaimStreamGuard() {
+  const claimPattern = /已\s*(?:經\s*)?記錄|完成\s*記錄/;
+  const maxHoldLength = 8;
+  let tail = "";
+  let detected = false;
+
+  return {
+    push(token: string): string {
+      if (detected) return "";
+      tail += token;
+      if (claimPattern.test(tail)) {
+        detected = true;
+        tail = "";
+        return "";
+      }
+      if (tail.length <= maxHoldLength) {
+        return "";
+      }
+      const safePrefix = tail.slice(0, -maxHoldLength);
+      tail = tail.slice(-maxHoldLength);
+      return safePrefix;
+    },
+    flush(): string {
+      if (detected) return "";
+      const flushed = tail;
+      tail = "";
+      return flushed;
+    },
+    detected(): boolean {
+      return detected;
+    },
+  };
+}
+
 async function parseMultipartRequest(
   request: FastifyRequest,
   uploadsDir: string,
@@ -517,12 +551,28 @@ async function handleStreamingReply(
 ): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
   const shouldGuardNoMutationModelText = !didLogMeal && !didMutateMeal;
+  const noMutationClaimGuard = shouldGuardNoMutationModelText
+    ? createNoMutationLoggingClaimStreamGuard()
+    : undefined;
   let fullReply = "";
   let tokensStreamed = 0;
   let hallucAccum = "";
   const heldTokens: string[] = [];
   let holdingChoicePrompt = false;
   let hallucinationDetected = false;
+  let noMutationLoggingClaimDetected = false;
+
+  function writeVisibleChunk(token: string): void {
+    const guardedToken = noMutationClaimGuard ? noMutationClaimGuard.push(token) : token;
+    if (noMutationClaimGuard?.detected()) {
+      noMutationLoggingClaimDetected = true;
+      return;
+    }
+    const sanitizedChunk = sanitizer.push(guardedToken);
+    if (sanitizedChunk) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+    }
+  }
 
   try {
     for await (const token of streamGenerator) {
@@ -538,12 +588,9 @@ async function handleStreamingReply(
         continue;
       }
       fullReply += token;
-      if (shouldGuardNoMutationModelText) {
-        continue;
-      }
-      const sanitizedChunk = sanitizer.push(token);
-      if (sanitizedChunk) {
-        stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+      writeVisibleChunk(token);
+      if (noMutationLoggingClaimDetected) {
+        break;
       }
     }
   } catch (error) {
@@ -587,28 +634,24 @@ async function handleStreamingReply(
 
   for (const heldToken of heldTokens) {
     fullReply += heldToken;
-    if (shouldGuardNoMutationModelText) {
-      continue;
-    }
-    const sanitizedChunk = sanitizer.push(heldToken);
-    if (sanitizedChunk) {
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+    writeVisibleChunk(heldToken);
+    if (noMutationLoggingClaimDetected) {
+      break;
     }
   }
   const normalizedReply = appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
   const appendedText = normalizedReply.slice(fullReply.length);
   if (appendedText) {
     fullReply = normalizedReply;
-    if (!shouldGuardNoMutationModelText) {
-      const sanitizedChunk = sanitizer.push(appendedText);
-      if (sanitizedChunk) {
-        stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
-      }
-    }
+    writeVisibleChunk(appendedText);
   }
-  if (shouldGuardNoMutationModelText) {
-    const guardedReply = guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal);
-    const sanitizedReply = sanitizeReply(guardedReply);
+  const guardedFullReply = guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal);
+  if (noMutationLoggingClaimDetected || guardedFullReply !== fullReply) {
+    const sanitizedReply = sanitizeReply(guardedFullReply);
+    const finalChunk = sanitizer.flush();
+    if (finalChunk) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
+    }
     if (sanitizedReply) {
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedReply })}\n\n`);
     }
@@ -618,11 +661,18 @@ async function handleStreamingReply(
       didLogMeal,
       dailySummary,
       tokensStreamed,
-      finalReplySource: sanitizedReply === fullReply ? "model" : "fallback",
+      finalReplySource: "fallback",
       finalReplyShape: sanitizedReply.trim()
-        ? (sanitizedReply === fullReply ? "streamed_text" : "fallback_text")
+        ? "fallback_text"
         : "empty_or_missing",
     };
+  }
+  const guardedFinalChunk = noMutationClaimGuard?.flush() ?? "";
+  if (guardedFinalChunk) {
+    const sanitizedChunk = sanitizer.push(guardedFinalChunk);
+    if (sanitizedChunk) {
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedChunk })}\n\n`);
+    }
   }
   const finalChunk = sanitizer.flush();
   if (finalChunk) {

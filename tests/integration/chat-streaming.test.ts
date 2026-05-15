@@ -921,7 +921,7 @@ describe("chat-streaming", () => {
   });
 
   it("POST /api/chat/stop gracefully stops the active turn and persists stopped partial content", async () => {
-    mockLLM.queueAbortableChatStream(["已", "完成", "記錄"]);
+    mockLLM.queueAbortableChatStream(["這是一段安全的飲食建議內容", "後續內容"]);
 
     const form = new FormData();
     form.append("message", "請給我一些飲食建議");
@@ -1001,7 +1001,7 @@ describe("chat-streaming", () => {
       };
       const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMessages.length, 1, "stopped stream must persist one assistant row");
-      assert.equal(assistantMessages[0]?.content, "已");
+      assert.equal(assistantMessages[0]?.content, "這是一段安全的飲食建議內容");
       assert.equal(assistantMessages[0]?.status, "stopped");
       assert.equal(assistantMessages[0]?.loggedMeal, undefined);
 
@@ -2151,7 +2151,8 @@ describe("chat-streaming", () => {
         .join("");
 
       assert.match(combinedChunkText, /豬肉飯/);
-      assert.match(combinedChunkText, /680 kcal/);
+      assert.doesNotMatch(combinedChunkText, /已記錄|完成記錄/);
+      assert.match(combinedChunkText, /還沒有把這餐寫入紀錄/);
       assert.match(text, /event: done/);
       assert.doesNotMatch(text, /無法辨識這次的請求/);
     } finally {
