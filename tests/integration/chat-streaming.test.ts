@@ -2,11 +2,13 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import type { AppServices } from "../../server/app.js";
+import { LLMProviderError } from "../../server/llm/errors.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { FastifyInstance } from "fastify";
-import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ToolCall, ToolDefinition } from "../../server/llm/types.js";
+import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ProviderErrorMetadata, ToolCall, ToolDefinition } from "../../server/llm/types.js";
 
 type LLMCallOptions = { signal?: AbortSignal };
 type RoundQueueItem = LLMRoundResult | Error | ((opts?: LLMCallOptions) => LLMRoundResult);
@@ -316,11 +318,51 @@ function parseSSEEvents(body: string): Array<{ event: string; data: string }> {
     });
 }
 
+function createLogCapture() {
+  const logLines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _, cb) {
+      chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+      cb();
+    },
+  });
+
+  return { logLines, stream };
+}
+
+function parseLogLines(logLines: string[]) {
+  const records: Record<string, unknown>[] = [];
+  for (const line of logLines) {
+    try {
+      records.push(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      // Ignore non-JSON diagnostic output from the logger stream.
+    }
+  }
+  return records;
+}
+
+function observabilityEvents(logLines: string[], eventName: string) {
+  return parseLogLines(logLines).filter((record) => record.event === eventName);
+}
+
 function assertNoSuccessfulLogInternalCopy(text: string) {
   assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const providerMetadataFixture: ProviderErrorMetadata = {
+  provider: "openai",
+  operation: "chat",
+  model: "gpt-sse-route-fixture",
+  aborted: false,
+  status: 429,
+  providerRequestId: "req_sse_route_fixture",
+  errorName: "RateLimitError",
+  errorType: "rate_limit_exceeded",
+  errorCode: "rate_limit",
+};
 
 describe("chat-streaming", () => {
   let app: FastifyInstance;
@@ -330,6 +372,7 @@ describe("chat-streaming", () => {
   let address: string;
   let services: AppServices | undefined;
   let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
+  let logLines: string[];
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -340,9 +383,12 @@ describe("chat-streaming", () => {
     mockLLM = new StreamingLLMProvider();
     services = undefined;
     traceRecorders = [];
+    const logCapture = createLogCapture();
+    logLines = logCapture.logLines;
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: mockLLM,
+      logger: { level: "info", stream: logCapture.stream },
       onServicesReady: (readyServices) => {
         services = readyServices;
       },
@@ -430,10 +476,19 @@ describe("chat-streaming", () => {
       assert.deepEqual(trace.timeline.at(-1), {
         type: "route_completion",
         transport: "sse",
+        turnId: JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data).turnId,
         didLogMeal: false,
         didMutateMeal: false,
         completed: true,
       });
+
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 1);
+      assert.equal(fallbackEvents.length, 0);
+      assert.equal(completedEvents[0]!.source, "sse");
+      assert.equal(completedEvents[0]!.turnId, donePayload.turnId);
     } finally {
       clearTimeout(timeout);
     }
@@ -942,10 +997,219 @@ describe("chat-streaming", () => {
       assert.equal(assistantMessages[0]?.content, "已");
       assert.equal(assistantMessages[0]?.status, "stopped");
       assert.equal(assistantMessages[0]?.loggedMeal, undefined);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 1);
+      assert.equal(fallbackEvents.length, 0);
+      assert.equal(completedEvents[0]!.source, "sse");
+      assert.equal(completedEvents[0]!.turnId, turnId);
+      assert.equal(completedEvents[0]!.stopped, true);
+      assert.equal(completedEvents[0]!.tokensStreamed, 1);
+
+      const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-stopped", status: "pass" });
+      assert.deepEqual(
+        trace.timeline.filter((event) => event.type === "route_completion"),
+        [{
+          type: "route_completion",
+          transport: "sse",
+          turnId,
+          didLogMeal: false,
+          didMutateMeal: false,
+          completed: true,
+        }],
+      );
+      assert.equal(trace.timeline.some((event) => event.type === "route_fallback"), false);
     } finally {
       clearTimeout(timeout);
       await reader?.cancel().catch(() => {});
       controller.abort();
+    }
+  });
+
+  it("POST /api/chat SSE provider llm_error fallback emits route fallback only with provider metadata", async () => {
+    mockLLM.queueRoundError(new LLMProviderError(providerMetadataFixture));
+
+    const form = new FormData();
+    form.append("message", "這段文字不應進 fallback event");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      assert.match(donePayload.turnId ?? "", UUID_PATTERN);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.source, "sse");
+      assert.equal(fallbackEvents[0]!.turnId, donePayload.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
+      assert.equal(fallbackEvents[0]!.reason, "llm_error");
+      assert.deepEqual(fallbackEvents[0]!.providerMetadata, providerMetadataFixture);
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-llm-error-fallback", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.transport, "sse");
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "llm_error");
+      assert.deepEqual(routeFallbacks[0]!.providerMetadata, providerMetadataFixture);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE partial_success fallback emits route fallback only without provider metadata", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createLogFoodToolCall()] });
+    mockLLM.queueRoundError(new LLMProviderError(providerMetadataFixture));
+
+    const form = new FormData();
+    form.append("message", "我吃了蘋果");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      assert.match(donePayload.turnId ?? "", UUID_PATTERN);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
+      assert.equal(fallbackEvents[0]!.reason, "partial_success");
+      assert.equal("providerMetadata" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-partial-success-fallback", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "partial_success");
+      assert.equal("providerMetadata" in routeFallbacks[0]!, false);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE max_rounds fallback emits route fallback only without provider metadata", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueRoundResponse({
+        toolCalls: [{
+          id: `max_round_sse_${i}`,
+          type: "function",
+          function: { name: "get_daily_summary", arguments: "{}" },
+        }],
+      });
+    }
+
+    const form = new FormData();
+    form.append("message", "查一下摘要");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.turnId, donePayload.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
+      assert.equal(fallbackEvents[0]!.reason, "max_rounds");
+      assert.equal("providerMetadata" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-max-rounds-fallback", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "max_rounds");
+      assert.equal("providerMetadata" in routeFallbacks[0]!, false);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE route-owned hallucination fallback emits route fallback only", async () => {
+    mockLLM.queueChatStream(["方式1 直接記錄\n", "方式2 補充描述"]);
+
+    const form = new FormData();
+    form.append("message", "請記錄一餐");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      assert.match(text, /event: done/);
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.source, "sse");
+      assert.equal(fallbackEvents[0]!.turnId, donePayload.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "route_hallucination");
+      assert.equal(fallbackEvents[0]!.reason, "hallucination_detected");
+      assert.equal("providerMetadata" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-hallucination-fallback", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "route_hallucination");
+      assert.equal(routeFallbacks[0]!.reason, "hallucination_detected");
+      assert.equal("providerMetadata" in routeFallbacks[0]!, false);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      clearTimeout(timeout);
     }
   });
 
