@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.2 - 2026-05-15
+
+### Added
+
+- Server-generated chat `turnId` correlation across SSE start/done payloads, JSON responses, route logs, orchestrator child logs, trace facts, and frontend fallback references.
+- Short user-visible fallback reference codes such as `引用碼 t-XXXXXXXX` for finalized assistant fallback/error bubbles, while full UUID turn ids remain internal.
+- Metadata-only OpenAI provider failure normalization with allowlisted status, provider request id, error class/type/code, operation, model, and abort flag.
+- Structured orchestrator `onLLMError` and fallback hook payloads that carry safe provider metadata through route-readable fallback context.
+- `llm-trace.v2` harness evidence with metadata-only `llm_error`, `orchestrator_fallback`, `route_fallback`, and provider error counts.
+- Dedicated `provider-auth-failure-localization` harness proof for auth-style provider failures.
+
+### Changed
+
+- Chat completion observability now separates true completed turns from hard fallback paths through `chat_turn_completed` and `chat_route_fallback`.
+- Route catch logging now uses sanitized/truncated route error facts instead of empty catch bindings or raw thrown messages.
+- Provider stream continuation failures are classified as metadata-only `llm_error` route fallbacks instead of successful completions.
+- Auth-style fallback copy checks stay in runtime memory; generated release artifacts persist metadata counts and booleans, not user-visible assistant text.
+
+### Verified
+
+- v2.2 milestone audit passed `20/20` requirements, `4/4` phases, `4/4` integration checks, `4/4` E2E flows, and `4/4` Nyquist validation coverage.
+- Phase 58 verification records targeted JSON/SSE integration tests, `provider-auth-failure-localization`, `text-log`, auth trace shape/privacy scans, `yarn tsc --noEmit`, `yarn build`, `yarn test`, and `yarn release:check` as passed.
+- No staging or production promotion was performed during v2.2 closeout.
+
 ## v2.1 - 2026-05-12
 
 ### Added
