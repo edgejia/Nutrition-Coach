@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildChatRouteFallbackEvent,
   buildChatTurnCompletedEvent,
   buildDeviceGoalsValidationFailedEvent,
   buildDeviceGoalsUpdatedRestEvent,
@@ -13,6 +14,7 @@ import {
   parseHomeCtaClientEvent,
   type RedactedObservabilityEventName,
 } from "../../server/observability/events.js";
+import type { ProviderErrorMetadata } from "../../server/llm/types.js";
 
 const LOCKED_EVENT_NAMES: RedactedObservabilityEventName[] = [
   "onboarding_submit_started",
@@ -21,6 +23,7 @@ const LOCKED_EVENT_NAMES: RedactedObservabilityEventName[] = [
   "home_cta_intent_selected",
   "home_cta_option_sent",
   "chat_turn_completed",
+  "chat_route_fallback",
   "device_goals_validation_failed",
   "device_goals_updated_rest",
   "sse_connection_state",
@@ -34,12 +37,33 @@ const ALLOWED_METADATA_KEYS = new Set([
   "usedTargetFallback",
   "intent",
   "promptKey",
+  "turnId",
+  "fallbackSource",
   "didLogMeal",
   "didMutateMeal",
   "hadImage",
   "latencyMs",
+  "reason",
+  "catchSite",
+  "providerMetadata",
+  "errorName",
+  "errorMessage",
+  "round",
+  "lastTool",
   "updatedFields",
   "state",
+]);
+
+const ALLOWED_PROVIDER_METADATA_KEYS = new Set([
+  "provider",
+  "operation",
+  "model",
+  "aborted",
+  "status",
+  "providerRequestId",
+  "errorName",
+  "errorType",
+  "errorCode",
 ]);
 
 const FORBIDDEN_STRINGS = [
@@ -51,8 +75,7 @@ const FORBIDDEN_STRINGS = [
   "1800",
   "130",
   "raw body text",
-  "route",
-  "method",
+  '"method":"POST"',
   '"body"',
   '"value"',
 ];
@@ -85,10 +108,21 @@ describe("redacted observability event builders", () => {
       buildHomeCtaOptionSentEvent({ intent: "quick_log", promptKey: "describe_meal" }),
       buildChatTurnCompletedEvent({
         source: "sse",
+        turnId: "turn-completed-1",
         didLogMeal: true,
         didMutateMeal: true,
         hadImage: true,
         latencyMs: 42,
+      }),
+      buildChatRouteFallbackEvent({
+        source: "json",
+        turnId: "turn-fallback-1",
+        fallbackSource: "orchestrator",
+        didLogMeal: false,
+        didMutateMeal: false,
+        hadImage: false,
+        latencyMs: 7,
+        reason: "llm_error",
       }),
       buildDeviceGoalsValidationFailedEvent({ fields: ["protein"], codes: ["invalid_field_value"] }),
       buildDeviceGoalsUpdatedRestEvent({ updatedFields: ["protein", "calories"] }),
@@ -111,6 +145,7 @@ describe("redacted observability event builders", () => {
       }),
       buildChatTurnCompletedEvent({
         source: "json",
+        turnId: "turn-completed-2",
         didLogMeal: false,
         didMutateMeal: false,
         hadImage: true,
@@ -156,6 +191,108 @@ describe("redacted observability event builders", () => {
         codes: ["empty_valid_fields", "invalid_body", "invalid_field_value"],
       },
     );
+  });
+
+  it("builds completed chat turn events with required turnId", () => {
+    assert.deepEqual(
+      buildChatTurnCompletedEvent({
+        source: "json",
+        turnId: "turn-completed-required",
+        didLogMeal: true,
+        didMutateMeal: true,
+        hadImage: false,
+        latencyMs: 42.4,
+      }),
+      {
+        event: "chat_turn_completed",
+        source: "json",
+        turnId: "turn-completed-required",
+        didLogMeal: true,
+        didMutateMeal: true,
+        hadImage: false,
+        latencyMs: 42,
+      },
+    );
+  });
+
+  it("builds route fallback events with required controlled fields", () => {
+    const payload = buildChatRouteFallbackEvent({
+      source: "sse",
+      turnId: "turn-fallback-required",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: true,
+      hadImage: true,
+      latencyMs: -12.7,
+      reason: "route_catch",
+      catchSite: "sse_outer",
+    });
+
+    assert.deepEqual(payload, {
+      event: "chat_route_fallback",
+      source: "sse",
+      turnId: "turn-fallback-required",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: true,
+      hadImage: true,
+      latencyMs: 0,
+      reason: "route_catch",
+      catchSite: "sse_outer",
+    });
+    assert.equal("stopped" in payload, false);
+    assert.equal("tokensStreamed" in payload, false);
+    assertLockedPayload(payload);
+  });
+
+  it("preserves only allowlisted provider metadata on route fallback events", () => {
+    const providerMetadata: ProviderErrorMetadata & {
+      headers?: Record<string, string>;
+      body?: string;
+      message?: string;
+    } = {
+      provider: "openai",
+      operation: "chat_round_initial",
+      model: "gpt-4.1-mini",
+      aborted: false,
+      status: 429,
+      providerRequestId: "req_123",
+      errorName: "RateLimitError",
+      errorType: "rate_limit_error",
+      errorCode: "rate_limit_exceeded",
+      headers: { authorization: "Bearer secret" },
+      body: "raw body text",
+      message: "provider raw message",
+    };
+
+    const payload = buildChatRouteFallbackEvent({
+      source: "json",
+      turnId: "turn-provider-metadata",
+      fallbackSource: "orchestrator",
+      didLogMeal: false,
+      didMutateMeal: false,
+      hadImage: false,
+      latencyMs: 11,
+      reason: "llm_error",
+      providerMetadata,
+      round: 2,
+      lastTool: "log_food",
+    });
+
+    assert.deepEqual(new Set(Object.keys(payload.providerMetadata ?? {})), ALLOWED_PROVIDER_METADATA_KEYS);
+    assert.deepEqual(payload.providerMetadata, {
+      provider: "openai",
+      operation: "chat_round_initial",
+      model: "gpt-4.1-mini",
+      aborted: false,
+      status: 429,
+      providerRequestId: "req_123",
+      errorName: "RateLimitError",
+      errorType: "rate_limit_error",
+      errorCode: "rate_limit_exceeded",
+    });
+    assert.doesNotMatch(JSON.stringify(payload), /headers|authorization|body|raw body text|message|provider raw message/);
+    assertLockedPayload(payload);
   });
 
   it("covers all SSE connection states", () => {
