@@ -1,24 +1,78 @@
+# Local agent/workflow state
 .worktrees/
 .codex/
 .claude/
-.planning/
+.superpowers/
+chatgpt/
 CLAUDE.md
 AGENTS.md
 MILESTONES.md
-.superpowers/
+
+# Dependencies, build output, and runtime data
 node_modules/
 dist/
 output/
 data/*
 !data/.gitkeep
 server/uploads/
-tests/harness/artifacts/
+
+# Planning artifacts are mostly local. Allowlist the tracked milestone history
+# and codebase map so new active GSD artifacts can be committed intentionally.
+.planning/**
+!.planning/
+!.planning/MILESTONES.md
+!.planning/PROJECT.md
+!.planning/ROADMAP.md
+!.planning/STATE.md
+!.planning/codebase/
+!.planning/codebase/*.md
+!.planning/milestones/
+!.planning/milestones/_meta/
+!.planning/milestones/_meta/RETROSPECTIVE.md
+!.planning/milestones/v2.1/
+!.planning/milestones/v2.1/**
+!.planning/milestones/v2.2/
+!.planning/milestones/v2.2/**
+!.planning/ui-reviews/
+.planning/ui-reviews/*
+!.planning/ui-reviews/.gitignore
+
+# Harness artifacts are generated. Most runs stay ignored; selected release
+# evidence files are allowlisted below so tracked artifacts are not hidden.
+tests/harness/artifacts/**
+!tests/harness/artifacts/
+!tests/harness/artifacts/image-log-failure/
+!tests/harness/artifacts/image-log-failure/latest/
+!tests/harness/artifacts/image-log-failure/latest/llm-trace.json
+!tests/harness/artifacts/image-log-failure/latest/scenario-result.json
+!tests/harness/artifacts/image-log-failure/latest/snapshots.json
+!tests/harness/artifacts/image-log-failure/latest/steps.json
+!tests/harness/artifacts/provider-auth-failure-localization/
+!tests/harness/artifacts/provider-auth-failure-localization/latest/
+!tests/harness/artifacts/provider-auth-failure-localization/latest/llm-trace.json
+!tests/harness/artifacts/provider-auth-failure-localization/latest/scenario-result.json
+!tests/harness/artifacts/provider-auth-failure-localization/latest/snapshots.json
+!tests/harness/artifacts/provider-auth-failure-localization/latest/steps.json
+!tests/harness/artifacts/provider-auth-failure-localization/latest/summary.json
+!tests/harness/artifacts/text-log/
+!tests/harness/artifacts/text-log/latest/
+!tests/harness/artifacts/text-log/latest/llm-trace.json
+!tests/harness/artifacts/text-log/latest/scenario-result.json
+!tests/harness/artifacts/text-log/latest/snapshots.json
+!tests/harness/artifacts/text-log/latest/steps.json
 tests/harness/tmp/
-docs/research/
+
+# Local research and generated docs. Keep the tracked raw-debugger decision
+# available because v2.2 architecture docs reference it.
+docs/research/*
+!docs/research/logger/
+docs/research/logger/*
+!docs/research/logger/llm-trace-raw-debugger-decision.md
 docs/superpowers/
 docs/README.md
 docs/codex.md
-chatgpt/
+
+# Secrets, databases, OS files, and browser/tool cache
 .env
 .env.*
 !.env.example
