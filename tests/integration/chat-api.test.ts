@@ -330,6 +330,121 @@ describe("Chat API", () => {
     assert.doesNotMatch(String(assistant.content), /已記錄|完成記錄/);
   });
 
+  it("POST /api/chat JSON preserves get_daily_summary replies that mention recorded meals", async () => {
+    assert.ok(services, "expected app services");
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 450,
+      protein: 45,
+      carbs: 30,
+      fat: 10,
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 450,
+      protein: 35,
+      carbs: 45,
+      fat: 14,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_route_summary_json",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄 2 餐，共 900 kcal。" });
+
+    const form = new FormData();
+    form.append("message", "今天吃了多少？");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: { mealCount?: number; totalCalories?: number };
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, "今天已記錄 2 餐，共 900 kcal。");
+    assert.equal(body.dailySummary?.mealCount, 2);
+    assert.equal(body.dailySummary?.totalCalories, 900);
+
+    const history = await services.chatService.getHistory(deviceId, 10);
+    const assistant = [...history].reverse().find((message) => message.role === "assistant");
+    assert.ok(assistant);
+    assert.equal(assistant.content, "今天已記錄 2 餐，共 900 kcal。");
+  });
+
+  it("POST /api/chat SSE preserves get_daily_summary replies that mention recorded meals", async () => {
+    assert.ok(services, "expected app services");
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_route_summary_sse",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "目前已記錄的餐點有豆腐飯，約 520 kcal。" });
+
+    const form = new FormData();
+    form.append("message", "列出今天記錄的餐點");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, Accept: "text/event-stream" },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const reader = res.body?.getReader();
+    assert.ok(reader);
+    try {
+      const { raw } = await readUntilEventCount(reader, "done", 1);
+      const events = parseSSEEvents(raw);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => (JSON.parse(event.data) as { token?: string }).token ?? "")
+        .join("");
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")?.data ?? "{}") as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: { mealCount?: number; totalCalories?: number };
+      };
+
+      assert.equal(donePayload.didLogMeal, false);
+      assert.equal(donePayload.didMutateMeal, false);
+      assert.equal(donePayload.dailySummary?.mealCount, 1);
+      assert.equal(donePayload.dailySummary?.totalCalories, 520);
+      assert.equal(chunkText, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+
+      const history = await services.chatService.getHistory(deviceId, 10);
+      const assistant = [...history].reverse().find((message) => message.role === "assistant");
+      assert.ok(assistant);
+      assert.equal(assistant.content, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+  });
+
   it("POST /api/chat accepts multipart image upload", async () => {
     const form = new FormData();
     form.append("message", "");

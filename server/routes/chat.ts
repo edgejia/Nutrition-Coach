@@ -276,6 +276,10 @@ function createNoMutationLoggingClaimStreamGuard() {
   };
 }
 
+function hasSummaryOrHistoryContext(dailySummary: unknown): boolean {
+  return Boolean(dailySummary);
+}
+
 async function parseMultipartRequest(
   request: FastifyRequest,
   uploadsDir: string,
@@ -550,7 +554,8 @@ async function handleStreamingReply(
   stopControl?: StreamingStopControl,
 ): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
-  const shouldGuardNoMutationModelText = !didLogMeal && !didMutateMeal;
+  const hasSummaryContext = hasSummaryOrHistoryContext(dailySummary);
+  const shouldGuardNoMutationModelText = !didLogMeal && !didMutateMeal && !hasSummaryContext;
   const noMutationClaimGuard = shouldGuardNoMutationModelText
     ? createNoMutationLoggingClaimStreamGuard()
     : undefined;
@@ -601,7 +606,9 @@ async function handleStreamingReply(
 
   if (stopControl?.isStopped() || stopControl?.signal.aborted) {
     const stoppedReply = sanitizeReply(
-      guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal),
+      guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal, {
+        hasSummaryOrHistoryContext: hasSummaryContext,
+      }),
     ) || "（已停止）";
     await finalizeAssistantReply(chatService, deviceId, stoppedReply, receiptIdentity, { status: "stopped" });
     return {
@@ -645,7 +652,9 @@ async function handleStreamingReply(
     fullReply = normalizedReply;
     writeVisibleChunk(appendedText);
   }
-  const guardedFullReply = guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal);
+  const guardedFullReply = guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal, {
+    hasSummaryOrHistoryContext: hasSummaryContext,
+  });
   if (noMutationLoggingClaimDetected || guardedFullReply !== fullReply) {
     const sanitizedReply = sanitizeReply(guardedFullReply);
     const finalChunk = sanitizer.flush();
@@ -1231,7 +1240,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const modelReplyText = hallucinationDetected
             ? fallbackReply
             : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
-          const replyText = guardNoMutationLoggingClaim(modelReplyText, didLogMeal, didMutateMeal);
+          const replyText = guardNoMutationLoggingClaim(modelReplyText, didLogMeal, didMutateMeal, {
+            hasSummaryOrHistoryContext: hasSummaryOrHistoryContext(dailySummary),
+          });
           const { sanitized } = await finalizeAssistantReply(
             chatService,
             deviceId,
@@ -1278,6 +1289,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
           didLogMeal,
           jsonDidMutateMeal,
+          { hasSummaryOrHistoryContext: hasSummaryOrHistoryContext(dailySummary) },
         );
         const { sanitized: sanitizedJson } = await finalizeAssistantReply(
           chatService,
