@@ -12,6 +12,7 @@ import {
   buildOnboardingValidationFailedEvent,
   buildSseConnectionStateEvent,
   parseHomeCtaClientEvent,
+  sanitizeRouteCatchError,
   type RedactedObservabilityEventName,
 } from "../../server/observability/events.js";
 import type { ProviderErrorMetadata } from "../../server/llm/types.js";
@@ -306,6 +307,67 @@ describe("redacted observability event builders", () => {
         { event: "sse_connection_state", state: "rejected" },
       ],
     );
+  });
+});
+
+describe("route catch error sanitizer", () => {
+  it("keeps safe route error name and message", () => {
+    assert.deepEqual(sanitizeRouteCatchError(new Error("Safe route error")), {
+      errorName: "Error",
+      errorMessage: "Safe route error",
+    });
+  });
+
+  it("omits non-Error thrown values and unsafe messages from fallback payloads", () => {
+    assert.deepEqual(sanitizeRouteCatchError("raw thrown prompt text"), {});
+
+    const forbiddenValues = [
+      "prompt: system says log the meal",
+      "messages[0].content user nutrition text",
+      "我今天吃了雞胸便當",
+      "provider body raw payload",
+      "headers authorization bearer secret",
+      "tool payload {\"food\":\"secret\"}",
+      "guest_session=signed-session",
+      "image data:image/png;base64,abc123",
+      "assistant final reply text",
+      "cause: nested raw error",
+      "stack: at route handler",
+    ];
+
+    for (const forbidden of forbiddenValues) {
+      const sanitized = sanitizeRouteCatchError(new Error(forbidden));
+      assert.deepEqual(sanitized, {}, `expected unsafe value to be omitted: ${forbidden}`);
+
+      const payload = buildChatRouteFallbackEvent({
+        source: "json",
+        turnId: "turn-sanitized-route-catch",
+        fallbackSource: "route_catch",
+        didLogMeal: false,
+        didMutateMeal: false,
+        hadImage: true,
+        latencyMs: 5,
+        reason: "route_catch",
+        catchSite: "json_outer",
+        ...sanitized,
+      });
+
+      assert.doesNotMatch(JSON.stringify(payload), new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      assert.equal("errorName" in payload, false);
+      assert.equal("errorMessage" in payload, false);
+    }
+  });
+
+  it("caps safe route error fields before logging", () => {
+    const longNameError = new Error("A".repeat(200));
+    longNameError.name = "Route_Catch_Error_Name/" + "B".repeat(200);
+
+    const sanitized = sanitizeRouteCatchError(longNameError);
+
+    assert.equal(sanitized.errorName?.length, 80);
+    assert.equal(sanitized.errorMessage?.length, 160);
+    assert.match(sanitized.errorName ?? "", /^[A-Za-z0-9 .:_/-]+$/);
+    assert.match(sanitized.errorMessage ?? "", /^[A-Za-z0-9 .:_/-]+$/);
   });
 });
 
