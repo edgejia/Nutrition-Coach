@@ -2,7 +2,7 @@
 
 Generated from client/src/contracts/capability-matrix.ts.
 
-Run `yarn matrix:gen` to update this file and `yarn matrix:gen:check` before commit. Phase closeout may freeze a copy at `.planning/phases/44-capability-alignment-audit-and-repair/44-capability-matrix.md`.
+Run `yarn matrix:gen` to update this file and `yarn matrix:gen:check` before commit.
 
 | Surface | Affordance | Source | Support State | Client/Store | Backend | Handling | Requirements | Future |
 |---|---|---|---|---|---|---|---|---|
@@ -20,6 +20,7 @@ Run `yarn matrix:gen` to update this file and `yarn matrix:gen:check` before com
 | Home | Settings navigation | client/src/components/HomeScreen.tsx | supported | openSecondaryScreen | none | Home settings navigation may stay active only as the existing secondary-screen transition into supported Settings rows. | ALIGN-01<br>ALIGN-03 | none |
 | Home | Today meal rows and authorized thumbnails | client/src/components/HomeScreen.tsx | supported-read-only | getMeals<br>withAuthorizedAssetUrl<br>openMealEdit | /api/meals<br>/api/assets/:id<br>createFoodLoggingService<br>readOwnedAsset | Home can show current meals and asset-backed images, with mutation delegated to the supported Meal Edit surface. | ALIGN-01<br>ALIGN-03 | Meal Image Continuity |
 | Meal Edit | Delete meal | client/src/components/MealEditScreen.tsx | supported | deleteMeal<br>removeMeal<br>recordMealMutation | /api/meals/:id<br>deleteMeal | Meal delete is active only through the existing DELETE route and local meal removal action. | ALIGN-01<br>ALIGN-03 | none |
+| Meal Edit | Grouped meal chat correction handoff | client/src/components/MealEditScreen.tsx | supported-read-only | closeSecondaryScreen<br>setActiveScreen("chat") | none | Grouped meals are locked from direct single-form edits and hand off to Chat without submitting a mutation. | ALIGN-02<br>ALIGN-03 | none |
 | Meal Edit | Meal image display | client/src/components/MealEditScreen.tsx | supported-read-only | withAuthorizedAssetUrl | /api/assets/:id<br>readOwnedAsset | Meal Edit may display an existing authorized meal image reference; Phase 46 owns deeper continuity repairs. | ALIGN-03 | Meal Image Continuity |
 | Meal Edit | Update meal nutrition and image reference | client/src/components/MealEditScreen.tsx | supported | updateMeal<br>withAuthorizedAssetUrl<br>recordMealMutation<br>setMeals | /api/meals/:id<br>/api/assets/:id<br>updateMeal<br>getOwnedAsset | Meal save is active only through the existing PATCH route and mutation refresh path. | ALIGN-01<br>ALIGN-02<br>ALIGN-03 | none |
 | onboarding | Account restore and cross-device continuity | client/src/components/onboarding/OnboardingStepper.tsx | hidden-future-scope | none | none | Onboarding must not promise account login, restore, backup, or cross-device continuity in Phase 44. | ALIGN-04 | Identity and Continuity |

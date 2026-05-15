@@ -27,9 +27,10 @@ Routine logs and traces must not persist raw prompt, user input, transcript, too
 
 ## Verification
 
-v2.2 archived evidence:
+v2.2 was verified before closeout with:
 
-- `.planning/milestones/v2.2/MILESTONE-AUDIT.md`
-- `.planning/milestones/v2.2/phases/58-localization-proof-and-release-gate/58-VERIFICATION.md`
+- milestone audit coverage for requirements, phases, integrations, E2E flows, and Nyquist validation
+- Phase 58 targeted verification for route/orchestrator/provider failure localization
 - `tests/harness/scenarios/provider-auth-failure-localization.ts`
-- `tests/harness/artifacts/provider-auth-failure-localization/latest/`
+
+Generated GSD archives and harness artifacts are local ignored evidence, not tracked repo source.
