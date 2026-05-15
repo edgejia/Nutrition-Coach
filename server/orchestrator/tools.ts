@@ -148,6 +148,12 @@ interface LogFoodGroupedArgs extends HistoricalDateToolArgs {
   protein?: number;
   carbs?: number;
   fat?: number;
+  quantity?: number;
+  quantity_g?: number;
+  quantity_ml?: number;
+  amount?: string;
+  unit?: string;
+  serving_size?: string;
 }
 
 export type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
@@ -329,6 +335,12 @@ const logFoodSchema = z.union([
       protein: finiteNumber.optional(),
       carbs: finiteNumber.optional(),
       fat: finiteNumber.optional(),
+      quantity: finiteNumber.optional(),
+      quantity_g: finiteNumber.optional(),
+      quantity_ml: finiteNumber.optional(),
+      amount: z.string().optional(),
+      unit: z.string().optional(),
+      serving_size: z.string().optional(),
     })
     .strict(),
 ]);
@@ -500,7 +512,24 @@ function hasQuantityLikeNumberInText(text: string): boolean {
   return /(?:\d|[０-９]|[一二三四五六七八九十兩半])\s*(?:g|克|公斤|kg|ml|毫升|杯|碗|份|顆|片|根|條|個|包|盒|匙|湯匙|茶匙|碗|盤|瓶|罐|塊|枚|串|球|卷|張|把)?/i.test(text);
 }
 
-function shouldMarkMissingQuantity(items: LogFoodItemArgs[], sourceText?: string): boolean {
+function hasGroupedQuantityEvidence(args: LogFoodArgs): boolean {
+  return "items" in args && (
+    args.quantity !== undefined
+    || args.quantity_g !== undefined
+    || args.quantity_ml !== undefined
+    || /\d|[０-９]/.test(args.amount ?? "")
+    || /\d|[０-９]/.test(args.serving_size ?? "")
+  );
+}
+
+function shouldMarkMissingQuantity(
+  items: LogFoodItemArgs[],
+  sourceText?: string,
+  hasTopLevelQuantityEvidence = false,
+): boolean {
+  if (hasTopLevelQuantityEvidence) {
+    return false;
+  }
   if (sourceText && hasQuantityLikeNumberInText(sourceText)) {
     return false;
   }
@@ -564,7 +593,7 @@ export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): No
     ...(args.date_text !== undefined ? { date_text: args.date_text } : {}),
     ...(args.meal_period !== undefined ? { meal_period: args.meal_period } : {}),
     ...(args.protein_sources !== undefined ? { protein_sources: args.protein_sources } : {}),
-    ...(shouldMarkMissingQuantity(items, sourceText)
+    ...(shouldMarkMissingQuantity(items, sourceText, hasGroupedQuantityEvidence(args))
       ? { quantityUncertaintyReason: "missing_quantity" as const }
       : {}),
   };

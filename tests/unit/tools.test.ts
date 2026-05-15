@@ -204,6 +204,70 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(calls[0]?.input.items.reduce((sum: number, item: { calories: number }) => sum + item.calories, 0), 500);
   });
 
+  it("accepts grouped log_food incident args with top-level serving metadata while keeping items authoritative", async () => {
+    const incidentCall: ToolCall = {
+      id: "call_breakfast_chicken_rice",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "雞胸肉、白飯",
+          quantity: 1,
+          amount: "雞胸肉150g和一碗白飯",
+          unit: "餐",
+          serving_size: "早餐",
+          calories: 455,
+          protein: 49,
+          carbs: 58,
+          fat: 5,
+          items: [
+            {
+              food_name: "雞胸肉",
+              calories: 248,
+              protein: 46.5,
+              carbs: 0,
+              fat: 5.4,
+            },
+            {
+              food_name: "白飯",
+              calories: 207,
+              protein: 4.3,
+              carbs: 46,
+              fat: 0.4,
+            },
+          ],
+          protein_sources: [
+            { name: "雞胸肉", protein: 46.5, is_primary: true, certainty: "clear" },
+            { name: "白飯", protein: 4.3, is_primary: false, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(incidentCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    }, {
+      currentUserMessage: "早餐吃雞胸肉150g和一碗白飯",
+    });
+
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.itemCount, 2);
+    assert.equal(result.loggedMeal.foodName, "雞胸肉、白飯");
+    assert.equal(result.loggedMeal.quantityUncertaintyReason, undefined);
+    assert.deepEqual(result.loggedMeal.countedSources.map((source) => source.name), ["雞胸肉"]);
+    assert.deepEqual(result.loggedMeal.excludedSources.map((source) => source.name), ["白飯"]);
+    assert.deepEqual(result.loggedMeal.items, [
+      { name: "雞胸肉", position: 1, calories: 248, protein: 46.5, carbs: 0, fat: 5.4 },
+      { name: "白飯", position: 2, calories: 207, protein: 0, carbs: 46, fat: 0.4 },
+    ]);
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisionItems = await db.select().from(mealRevisionItems);
+    assert.equal(transactions.length, 1);
+    assert.equal(revisionItems.length, 2);
+  });
+
   it("Test 1: log_food persists meal and returns result/summary/dailySummary.date/loggedMeal", async () => {
     const result = await executeTool(logFoodCall, deviceId, {
       foodLoggingService,
