@@ -790,6 +790,72 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(quantityTextResult.loggedMeal.quantityUncertaintyReason, undefined);
   });
 
+  it("omits transient missing_quantity metadata for grouped top-level Chinese serving metadata", async () => {
+    const cases: Array<{
+      id: string;
+      args: Record<string, unknown>;
+      sourceText: string;
+    }> = [
+      {
+        id: "call_grouped_amount_one_serving",
+        args: { amount: "一份" },
+        sourceText: "我剛吃雞腿和白飯",
+      },
+      {
+        id: "call_grouped_serving_size_half_bowl",
+        args: { serving_size: "半碗" },
+        sourceText: "我剛吃白飯和青菜",
+      },
+      {
+        id: "call_grouped_amount_two_unit_serving",
+        args: { amount: "兩份", unit: "份" },
+        sourceText: "我剛吃雞腿和豆腐",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const groupedCall: ToolCall = {
+        id: testCase.id,
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              {
+                food_name: "雞腿",
+                calories: 260,
+                protein: 24,
+                carbs: 0,
+                fat: 15,
+              },
+              {
+                food_name: "白飯",
+                calories: 280,
+                protein: 5,
+                carbs: 62,
+                fat: 1,
+              },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+            ],
+            ...testCase.args,
+          }),
+        },
+      };
+
+      const result = await executeTool(groupedCall, deviceId, {
+        foodLoggingService,
+        summaryService,
+      }, {
+        currentUserMessage: testCase.sourceText,
+      });
+
+      assert.ok(result.loggedMeal);
+      assert.equal(result.loggedMeal.quantityUncertaintyReason, undefined, testCase.id);
+    }
+  });
+
   it("omits transient missing_quantity metadata when the source user text carries the quantity", async () => {
     const normalizedNameCall: ToolCall = {
       id: "call_user_text_quantity",

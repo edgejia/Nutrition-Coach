@@ -504,8 +504,8 @@ function hasQuantityBearingField(item: LogFoodItemArgs): boolean {
   return item.quantity !== undefined
     || item.quantity_g !== undefined
     || item.quantity_ml !== undefined
-    || /\d|[０-９]/.test(item.amount ?? "")
-    || /\d|[０-９]/.test(item.serving_size ?? "");
+    || hasQuantityLikeNumberInText(item.amount ?? "")
+    || hasQuantityLikeNumberInText(item.serving_size ?? "");
 }
 
 function hasQuantityLikeNumberInText(text: string): boolean {
@@ -517,8 +517,9 @@ function hasGroupedQuantityEvidence(args: LogFoodArgs): boolean {
     args.quantity !== undefined
     || args.quantity_g !== undefined
     || args.quantity_ml !== undefined
-    || /\d|[０-９]/.test(args.amount ?? "")
-    || /\d|[０-９]/.test(args.serving_size ?? "")
+    || hasQuantityLikeNumberInText(args.amount ?? "")
+    || hasQuantityLikeNumberInText(args.unit ?? "")
+    || hasQuantityLikeNumberInText(args.serving_size ?? "")
   );
 }
 
