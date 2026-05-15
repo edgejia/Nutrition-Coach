@@ -296,6 +296,49 @@ describe("redacted observability event builders", () => {
     assertLockedPayload(payload);
   });
 
+  it("redacts unsafe allowed provider metadata values on route fallback events", () => {
+    const providerMetadata: ProviderErrorMetadata = {
+      provider: "openai",
+      operation: "chat_round_initial",
+      model: "raw-prompt-model",
+      aborted: false,
+      status: 429,
+      providerRequestId: "guest_session=req",
+      errorName: "AuthorizationError",
+      errorType: "provider_body",
+      errorCode: "Bearer_secret",
+    };
+
+    const payload = buildChatRouteFallbackEvent({
+      source: "json",
+      turnId: "turn-unsafe-provider-metadata",
+      fallbackSource: "orchestrator",
+      didLogMeal: false,
+      didMutateMeal: false,
+      hadImage: false,
+      latencyMs: 11,
+      reason: "llm_error",
+      providerMetadata,
+    });
+
+    assert.deepEqual(payload.providerMetadata, {
+      provider: "openai",
+      operation: "chat_round_initial",
+      model: "redacted",
+      aborted: false,
+      status: 429,
+      providerRequestId: "redacted",
+      errorName: "redacted",
+      errorType: "redacted",
+      errorCode: "redacted",
+    });
+    assert.doesNotMatch(
+      JSON.stringify(payload),
+      /raw-prompt|guest_session|Authorization|provider_body|Bearer|secret/i,
+    );
+    assertLockedPayload(payload);
+  });
+
   it("covers all SSE connection states", () => {
     assert.deepEqual(
       ["opened", "closed", "rejected"].map((state) =>
