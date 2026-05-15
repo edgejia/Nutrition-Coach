@@ -94,6 +94,30 @@ const providerMetadataFixture: ProviderErrorMetadata = {
   errorCode: "rate_limit",
 };
 
+const authProviderMetadataFixture: ProviderErrorMetadata = {
+  provider: "openai",
+  operation: "chat",
+  model: "gpt-auth-trace-fixture",
+  aborted: false,
+  status: 401,
+  providerRequestId: "req_auth_trace_fixture",
+  errorName: "AuthenticationError",
+  errorType: "invalid_request_error",
+  errorCode: "invalid_api_key",
+};
+
+const PROVIDER_METADATA_KEYS = [
+  "aborted",
+  "errorCode",
+  "errorName",
+  "errorType",
+  "model",
+  "operation",
+  "provider",
+  "providerRequestId",
+  "status",
+];
+
 class JsonHallucinationStreamProvider implements LLMProvider {
   public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
 
@@ -2186,17 +2210,7 @@ describe("Chat API", () => {
       });
       assert.deepEqual(fallbackEvents[0]!.providerMetadata, providerMetadataFixture);
       const providerMetadataKeys = Object.keys(fallbackEvents[0]!.providerMetadata as unknown as Record<string, unknown>).sort();
-      assert.deepEqual(providerMetadataKeys, [
-        "aborted",
-        "errorCode",
-        "errorName",
-        "errorType",
-        "model",
-        "operation",
-        "provider",
-        "providerRequestId",
-        "status",
-      ]);
+      assert.deepEqual(providerMetadataKeys, PROVIDER_METADATA_KEYS);
 
       const trace = traceRecorder.build({ scenario: "json-provider-fallback", status: "passed" });
       const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
@@ -2206,6 +2220,113 @@ describe("Chat API", () => {
       assert.equal(routeFallbacks[0]!.reason, "llm_error");
       assert.deepEqual(routeFallbacks[0]!.providerMetadata, providerMetadataFixture);
       assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+    } finally {
+      await logApp.close();
+    }
+  });
+
+  it("JSON auth-style provider failure emits provider hook, route fallback, and correlated trace facts", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const rawMealText = "這段 auth 失敗文字不應進入結構化證據";
+    const logLLM = new MockLLMProvider();
+    logLLM.queueChatError(new LLMProviderError(authProviderMetadataFixture));
+    const traceRecorder = createLlmTraceRecorder();
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: logLLM,
+      logger: { level: "info", stream: logStream },
+      llmTraceRecorderFactory: () => traceRecorder,
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", rawMealText);
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { turnId?: string; didLogMeal?: boolean };
+      assert.match(body.turnId ?? "", UUID_PATTERN);
+      assert.equal(body.didLogMeal, false);
+
+      const providerErrorEvents = observabilityEvents(logLines, "llm_provider_error");
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(providerErrorEvents.length, 1);
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.deepEqual(providerErrorEvents[0]!.providerMetadata, authProviderMetadataFixture);
+      assert.deepEqual(
+        Object.keys(providerErrorEvents[0]!.providerMetadata as unknown as Record<string, unknown>).sort(),
+        PROVIDER_METADATA_KEYS,
+      );
+      assert.deepEqual({
+        event: fallbackEvents[0]!.event,
+        source: fallbackEvents[0]!.source,
+        turnId: fallbackEvents[0]!.turnId,
+        fallbackSource: fallbackEvents[0]!.fallbackSource,
+        reason: fallbackEvents[0]!.reason,
+        didLogMeal: fallbackEvents[0]!.didLogMeal,
+        didMutateMeal: fallbackEvents[0]!.didMutateMeal,
+        hadImage: fallbackEvents[0]!.hadImage,
+      }, {
+        event: "chat_route_fallback",
+        source: "json",
+        turnId: body.turnId,
+        fallbackSource: "orchestrator",
+        reason: "llm_error",
+        didLogMeal: false,
+        didMutateMeal: false,
+        hadImage: false,
+      });
+      assert.deepEqual(fallbackEvents[0]!.providerMetadata, authProviderMetadataFixture);
+      assert.deepEqual(
+        Object.keys(fallbackEvents[0]!.providerMetadata as unknown as Record<string, unknown>).sort(),
+        PROVIDER_METADATA_KEYS,
+      );
+
+      const trace = traceRecorder.build({ scenario: "json-auth-provider-fallback", status: "passed" });
+      assert.equal(trace.schemaVersion, "llm-trace.v2");
+
+      const llmErrors = trace.timeline.filter((event) => event.type === "llm_error");
+      assert.equal(llmErrors.length, 1);
+      assert.deepEqual(llmErrors[0]!.providerMetadata, authProviderMetadataFixture);
+
+      const orchestratorFallbacks = trace.timeline.filter((event) => event.type === "orchestrator_fallback");
+      assert.equal(orchestratorFallbacks.length, 1);
+      assert.equal(orchestratorFallbacks[0]!.reason, "llm_error");
+      assert.deepEqual(orchestratorFallbacks[0]!.providerMetadata, authProviderMetadataFixture);
+
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.turnId, body.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "llm_error");
+      assert.deepEqual(routeFallbacks[0]!.providerMetadata, authProviderMetadataFixture);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+
+      const serializedEvidence = JSON.stringify({
+        logs: parseLogLines(logLines),
+        trace,
+      });
+      assert.ok(!serializedEvidence.includes(rawMealText));
+      assert.ok(!serializedEvidence.includes(logDeviceId));
+      assert.ok(!serializedEvidence.includes(logCookieHeader));
+      assert.doesNotMatch(
+        serializedEvidence,
+        /Authorization|Bearer|sk-|rawHeaders|headers|rawBody|"body"|"messages"|"content"|cookie|guest_session|upload|data:image|final assistant/i,
+      );
     } finally {
       await logApp.close();
     }
