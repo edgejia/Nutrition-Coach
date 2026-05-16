@@ -9,7 +9,7 @@ import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, LLMProvider } from "../../server/llm/types.js";
-import { createOrchestrator } from "../../server/orchestrator/index.js";
+import { createOrchestrator, guardNoMutationLoggingClaim } from "../../server/orchestrator/index.js";
 import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
 
 function assertString(value: unknown): asserts value is string {
@@ -174,6 +174,107 @@ describe("orchestrator shared patterns", () => {
       assert.match(source, new RegExp(`kind: "${kind}"`));
     }
     assert.doesNotMatch(source, /successfulGoalReceipt|ensureGoalReceipt/);
+  });
+
+  it("guards no-mutation meal-specific summary claims against actual facts", () => {
+    const emptyFactsReply = guardNoMutationLoggingClaim(
+      "今天已記錄牛肉飯，650 kcal。",
+      false,
+      false,
+      {
+        summaryHistoryFacts: {
+          dailySummary: {
+            totalCalories: 0,
+            totalProtein: 0,
+            totalCarbs: 0,
+            totalFat: 0,
+            mealCount: 0,
+            date: "2026-05-16",
+          },
+          meals: [],
+        },
+      },
+    );
+    assert.doesNotMatch(emptyFactsReply, /已記錄牛肉飯|650 kcal/);
+    assert.match(emptyFactsReply, /還沒有把這餐寫入紀錄/);
+
+    const mismatchedFactsReply = guardNoMutationLoggingClaim(
+      "今天已記錄牛肉飯，650 kcal。",
+      false,
+      false,
+      {
+        summaryHistoryFacts: {
+          dailySummary: {
+            totalCalories: 520,
+            totalProtein: 24,
+            totalCarbs: 70,
+            totalFat: 14,
+            mealCount: 1,
+            date: "2026-05-16",
+          },
+          meals: [{ foodName: "豆腐飯", calories: 520 }],
+        },
+      },
+    );
+    assert.doesNotMatch(mismatchedFactsReply, /已記錄牛肉飯|650 kcal/);
+
+    const matchingFactsReply = guardNoMutationLoggingClaim(
+      "目前已記錄的餐點有豆腐飯，約 520 kcal。",
+      false,
+      false,
+      {
+        summaryHistoryFacts: {
+          dailySummary: {
+            totalCalories: 520,
+            totalProtein: 24,
+            totalCarbs: 70,
+            totalFat: 14,
+            mealCount: 1,
+            date: "2026-05-16",
+          },
+          meals: [{ foodName: "豆腐飯", calories: 520 }],
+        },
+      },
+    );
+    assert.equal(matchingFactsReply, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+  });
+
+  it("guards no-mutation aggregate summary claims against count and calorie facts", () => {
+    const facts = {
+      summaryHistoryFacts: {
+        dailySummary: {
+          totalCalories: 900,
+          totalProtein: 80,
+          totalCarbs: 75,
+          totalFat: 24,
+          mealCount: 2,
+          date: "2026-05-16",
+        },
+        meals: [
+          { foodName: "雞胸肉", calories: 450 },
+          { foodName: "鮭魚飯", calories: 450 },
+        ],
+      },
+    };
+
+    assert.equal(
+      guardNoMutationLoggingClaim("今天已記錄 2 餐，共 900 kcal。", false, false, facts),
+      "今天已記錄 2 餐，共 900 kcal。",
+    );
+
+    const wrongCount = guardNoMutationLoggingClaim("今天已記錄 3 餐，共 900 kcal。", false, false, facts);
+    assert.doesNotMatch(wrongCount, /今天已記錄 3 餐/);
+
+    const wrongCalories = guardNoMutationLoggingClaim("今天已記錄 2 餐，共 1200 kcal。", false, false, facts);
+    assert.doesNotMatch(wrongCalories, /1200 kcal/);
+
+    const aggregateWithWrongMeal = guardNoMutationLoggingClaim(
+      "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯。",
+      false,
+      false,
+      facts,
+    );
+    assert.doesNotMatch(aggregateWithWrongMeal, /牛肉飯/);
   });
 });
 

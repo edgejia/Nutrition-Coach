@@ -38,6 +38,86 @@ export function collectEventSequence(raw: string): string[] {
     .filter(Boolean);
 }
 
+export interface CollectedSSEStream {
+  raw: string;
+  events: Array<{ event: string; data: string }>;
+  closed: boolean;
+  firstDoneIndex: number;
+  eventsAfterFirstDone: Array<{ event: string; data: string }>;
+  nonEmptyChunkBeforeDone: boolean;
+  reads: number;
+}
+
+export async function readStreamThroughClose(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  options: { maxReads?: number; readTimeoutMs?: number } = {},
+): Promise<CollectedSSEStream> {
+  const decoder = new TextDecoder();
+  const maxReads = options.maxReads ?? 80;
+  const readTimeoutMs = options.readTimeoutMs ?? 5000;
+  let raw = "";
+
+  for (let reads = 0; reads < maxReads; reads += 1) {
+    const chunk = await readWithTimeout(reader, readTimeoutMs);
+    if (chunk.value) {
+      raw += decoder.decode(chunk.value, { stream: !chunk.done });
+    }
+    if (chunk.done) {
+      raw += decoder.decode();
+      return summarizeCollectedSSE(raw, true, reads + 1);
+    }
+  }
+
+  throw new Error(`SSE stream did not close within ${maxReads} reads`);
+}
+
+async function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  readTimeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`SSE stream read timed out after ${readTimeoutMs}ms`)),
+          readTimeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function summarizeCollectedSSE(raw: string, closed: boolean, reads: number): CollectedSSEStream {
+  const events = parseSSEEvents(raw);
+  const firstDoneIndex = events.findIndex((event) => event.event === "done");
+  const eventsBeforeDone = firstDoneIndex === -1 ? events : events.slice(0, firstDoneIndex);
+  return {
+    raw,
+    events,
+    closed,
+    firstDoneIndex,
+    eventsAfterFirstDone: firstDoneIndex === -1 ? [] : events.slice(firstDoneIndex + 1),
+    nonEmptyChunkBeforeDone: eventsBeforeDone.some((event) => {
+      if (event.event !== "chunk") {
+        return false;
+      }
+      try {
+        const parsed = JSON.parse(event.data) as { token?: unknown };
+        return typeof parsed.token === "string" && parsed.token.trim().length > 0;
+      } catch {
+        return false;
+      }
+    }),
+    reads,
+  };
+}
+
 /**
  * Read chunks from a `ReadableStreamDefaultReader<Uint8Array>` until the
  * accumulated text contains an SSE block with `event: <targetEvent>`, or

@@ -2218,6 +2218,73 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat summary-context stream preserves legitimate one-meal summary replies", async () => {
+    assert.ok(services);
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_streaming_summary_tofu",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["目前已記錄的餐點有", "豆腐飯", "，約 520 kcal。"]);
+
+    const form = new FormData();
+    form.append("message", "列出今天記錄的餐點");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: { mealCount?: number; totalCalories?: number };
+      };
+
+      assert.equal(donePayload.didLogMeal, false);
+      assert.equal(donePayload.didMutateMeal, false);
+      assert.equal(donePayload.dailySummary?.mealCount, 1);
+      assert.equal(donePayload.dailySummary?.totalCalories, 520);
+      assert.equal(chunkText, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMsgs.length, 1);
+      assert.equal(assistantMsgs[0]!.content, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat summary-context stream preserves legitimate aggregate summary replies", async () => {
     assert.ok(services);
     await services.foodLoggingService.logFood(deviceId, {
@@ -2287,6 +2354,81 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
       assert.equal(assistantMsgs[0]!.content, "今天已記錄 2 餐，共 900 kcal。");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat summary-context stream rejects aggregate summary count and calorie mismatches", async () => {
+    assert.ok(services);
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 450,
+      protein: 45,
+      carbs: 30,
+      fat: 10,
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 450,
+      protein: 35,
+      carbs: 45,
+      fat: 14,
+    });
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_streaming_summary_aggregate_mismatch",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["今天已記錄 ", "3 餐，", "共 1200 kcal。"]);
+
+    const form = new FormData();
+    form.append("message", "今天吃了多少？");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: { mealCount?: number; totalCalories?: number };
+      };
+
+      assert.equal(donePayload.didLogMeal, false);
+      assert.equal(donePayload.didMutateMeal, false);
+      assert.equal(donePayload.dailySummary?.mealCount, 2);
+      assert.equal(donePayload.dailySummary?.totalCalories, 900);
+      assert.equal(chunkText, "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。");
+      assert.doesNotMatch(chunkText, /3 餐|1200 kcal/);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMsgs.length, 1);
+      assert.equal(assistantMsgs[0]!.content, chunkText);
     } finally {
       clearTimeout(timeout);
     }

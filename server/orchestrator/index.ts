@@ -46,12 +46,20 @@ const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 const NO_MUTATION_LOGGING_CLAIM_PATTERN = /已\s*(?:經\s*)?記錄|完成\s*記錄/;
 const NO_MUTATION_LOGGING_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
-const SUMMARY_OR_HISTORY_ALLOWED_LOGGING_REFERENCE_PATTERNS = [
-  /已\s*(?:經\s*)?記錄\s*\d+\s*餐/,
-  /(?:總攝取|總熱量|總共攝取|共攝取|攝取總計|熱量總計|合計)\s*(?:約\s*)?\d+(?:\.\d+)?\s*(?:kcal|大卡|卡)/i,
-  /已\s*(?:經\s*)?記錄的餐點/,
-  /記錄的餐點有/,
-];
+// Summary replies often use approximate wording after totals are rounded by the model.
+const SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL = 10;
+
+export interface SummaryHistoryFacts {
+  dailySummary?: DailySummary;
+  meals: Array<{
+    foodName: string;
+    calories: number;
+  }>;
+}
+
+interface NoMutationLoggingGuardContext {
+  summaryHistoryFacts?: SummaryHistoryFacts;
+}
 
 export interface ProviderFallbackContext {
   reason: "llm_error";
@@ -80,6 +88,7 @@ export type OrchestratorResult =
       didLogMeal: boolean;
       didMutateMeal?: boolean;
       dailySummary?: DailySummary;
+      summaryHistoryFacts?: SummaryHistoryFacts;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
@@ -90,6 +99,7 @@ export type OrchestratorResult =
       didLogMeal: boolean;
       didMutateMeal?: boolean;
       dailySummary?: DailySummary;
+      summaryHistoryFacts?: SummaryHistoryFacts;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
@@ -120,6 +130,28 @@ function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined
 
 function formatCalories(calories: number): string {
   return Number.isInteger(calories) ? String(calories) : calories.toFixed(1).replace(/\.0$/, "");
+}
+
+function buildLocalMidpointDate(dateKey: string): Date {
+  return new Date(`${dateKey}T12:00:00`);
+}
+
+async function buildSummaryHistoryFacts(
+  deps: OrchestratorDeps,
+  deviceId: string,
+  dailySummary: DailySummary,
+): Promise<SummaryHistoryFacts> {
+  const meals = await deps.foodLoggingService.getMealsByDate(
+    deviceId,
+    buildLocalMidpointDate(dailySummary.date),
+  );
+  return {
+    dailySummary,
+    meals: meals.map((meal) => ({
+      foodName: meal.foodName,
+      calories: meal.calories,
+    })),
+  };
 }
 
 function isImageOnlyMessage(userMessage: string, imageBase64?: string): boolean {
@@ -346,22 +378,111 @@ export function guardNoMutationLoggingClaim(
   reply: string,
   didLogMeal: boolean,
   didMutateMeal: boolean,
-  context: { hasSummaryOrHistoryContext?: boolean } = {},
+  context: NoMutationLoggingGuardContext = {},
 ): string {
   const hasNoMutationLoggingClaim = !didLogMeal && !didMutateMeal && NO_MUTATION_LOGGING_CLAIM_PATTERN.test(reply);
   if (!hasNoMutationLoggingClaim) {
     return reply;
   }
-  if (
-    context.hasSummaryOrHistoryContext
-    && SUMMARY_OR_HISTORY_ALLOWED_LOGGING_REFERENCE_PATTERNS.some((pattern) => pattern.test(reply))
-  ) {
+  if (isFactGroundedSummaryHistoryReply(reply, context.summaryHistoryFacts)) {
     return reply;
   }
-  if (hasNoMutationLoggingClaim) {
-    return NO_MUTATION_LOGGING_FALLBACK;
+  return NO_MUTATION_LOGGING_FALLBACK;
+}
+
+function isFactGroundedSummaryHistoryReply(reply: string, facts: SummaryHistoryFacts | undefined): boolean {
+  if (!facts?.dailySummary || facts.dailySummary.mealCount <= 0 || facts.meals.length === 0) {
+    return false;
   }
-  return reply;
+
+  const claimedMealCount = extractClaimedMealCount(reply);
+  const claimedCalories = extractClaimedCalories(reply);
+  const claimedMealNames = extractClaimedMealNames(reply);
+  const matchedMeals = claimedMealNames.map((claim) => findMatchingFactMeal(claim, facts.meals));
+  if (matchedMeals.some((meal) => meal === undefined)) {
+    return false;
+  }
+
+  if (
+    claimedMealCount !== undefined
+    && claimedCalories !== undefined
+    && claimedMealCount === facts.dailySummary.mealCount
+    && caloriesCloseEnough(claimedCalories, facts.dailySummary.totalCalories)
+  ) {
+    return true;
+  }
+
+  if (claimedMealNames.length === 0) {
+    return false;
+  }
+
+  if (claimedCalories === undefined) {
+    return true;
+  }
+
+  return matchedMeals.some((meal) => caloriesCloseEnough(claimedCalories, meal?.calories ?? Number.NaN))
+    || caloriesCloseEnough(claimedCalories, facts.dailySummary.totalCalories);
+}
+
+function extractClaimedMealCount(reply: string): number | undefined {
+  const match = reply.match(/(\d+)\s*餐/);
+  return match?.[1] ? Number(match[1]) : undefined;
+}
+
+function extractClaimedCalories(reply: string): number | undefined {
+  const match = reply.match(/(?:約\s*)?(\d+(?:\.\d+)?)\s*(?:kcal|大卡|卡)/i);
+  return match?.[1] ? Number(match[1]) : undefined;
+}
+
+function extractClaimedMealNames(reply: string): string[] {
+  const names: string[] = [];
+  const patterns = [
+    /已\s*(?:經\s*)?記錄(?:的餐點(?:有|包含)?|(?:的)?餐點有)?\s*([^，。,.;；]+)/g,
+    /完成\s*記錄\s*([^，。,.;；]+)/g,
+    /(?:其中)?(?:包含|含有|有)\s*([^，。,.;；]+)/g,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of reply.matchAll(pattern)) {
+      const raw = match[1]?.trim();
+      if (!raw || /^\d+\s*餐/.test(raw) || /\d+(?:\.\d+)?\s*(?:kcal|大卡|卡)/i.test(raw)) {
+        continue;
+      }
+      for (const part of raw.split(/[、和與及]/)) {
+        const name = part.trim();
+        if (name && !/^(?:餐點|今天|目前|共|總共)$/.test(name) && !/^\d+\s*餐/.test(name)) {
+          names.push(name);
+        }
+      }
+    }
+  }
+
+  return [...new Set(names)];
+}
+
+function findMatchingFactMeal(
+  claim: string,
+  meals: SummaryHistoryFacts["meals"],
+): SummaryHistoryFacts["meals"][number] | undefined {
+  const normalizedClaim = normalizeClaimText(claim);
+  return meals.find((meal) => {
+    const normalizedFactName = normalizeClaimText(meal.foodName);
+    return normalizedFactName.includes(normalizedClaim) || normalizedClaim.includes(normalizedFactName);
+  });
+}
+
+function normalizeClaimText(value: string): string {
+  return value
+    .toLocaleLowerCase("zh-TW")
+    .replace(/[ \t\n\r，。,.;；:：()（）「」『』]/g, "")
+    .replace(/^的餐點有/, "")
+    .trim();
+}
+
+function caloriesCloseEnough(claimed: number, actual: number): boolean {
+  return Number.isFinite(claimed)
+    && Number.isFinite(actual)
+    && Math.abs(claimed - actual) <= SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL;
 }
 
 async function* appendMutationReceiptStream(
@@ -537,6 +658,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let didLogMeal = false;
       let didMutateMeal = false;
       let logMealSummary: DailySummary | undefined;
+      let summaryHistoryFacts: SummaryHistoryFacts | undefined;
       let shouldStreamFinalReply = false;
       let successfulGoalTargets: DailyTargets | undefined;
       let mutationEffects: MutationEffects | undefined;
@@ -576,6 +698,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 didLogMeal,
                 didMutateMeal,
                 dailySummary: logMealSummary,
+                summaryHistoryFacts,
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
                 loggedMeal,
@@ -601,6 +724,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 didLogMeal,
                 didMutateMeal,
                 dailySummary: logMealSummary,
+                summaryHistoryFacts,
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
                 loggedMeal,
@@ -700,7 +824,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
           const reply = guardNoMutationLoggingClaim(response.content, didLogMeal, didMutateMeal, {
-            hasSummaryOrHistoryContext: logMealSummary !== undefined,
+            summaryHistoryFacts,
           });
           const finalReplySource = reply === response.content ? "model" : "fallback";
           return {
@@ -708,6 +832,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             didLogMeal,
             didMutateMeal,
             dailySummary: logMealSummary,
+            summaryHistoryFacts,
             dailyTargets: successfulGoalTargets,
             affectedDate: resolvedAffectedDate,
             loggedMeal,
@@ -797,6 +922,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               }
               if (toolCall.function.name === "get_daily_summary" && dailySummary) {
                 logMealSummary = dailySummary;
+                summaryHistoryFacts = await buildSummaryHistoryFacts(deps, deviceId, dailySummary);
               }
               if (mealMutationKind === "update" || mealMutationKind === "delete") {
                 didMutateMeal = true;

@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
-import { collectEventSequence, parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { collectEventSequence, parseSSEEvents, readStreamThroughClose } from "../sse.js";
+import type { CollectedSSEStream } from "../sse.js";
 import { LLMProviderError } from "../../../server/llm/errors.js";
 import type { ProviderErrorMetadata } from "../../../server/llm/types.js";
 import { createLlmTraceRecorder, type LlmTraceArtifact, type LlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
@@ -288,6 +289,7 @@ async function runSubScenario(
   setupLLM: (llm: StreamingLLMProvider) => void,
   assertions: (params: {
     rawSSE: string;
+    sseCollection: CollectedSSEStream;
     address: string;
     deviceId: string;
     cookieHeader: string;
@@ -318,6 +320,7 @@ async function runSubScenario(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     let rawSSE = "";
+    let sseCollection: CollectedSSEStream | undefined;
     try {
       const res = await fetch(`${scenarioCtx.address}/api/chat`, {
         method: "POST",
@@ -333,13 +336,50 @@ async function runSubScenario(
         return { steps, artifacts, ok: false, failedStep: `${label}_post_chat` };
       }
       steps.push(stepOk(`${label}_post_chat`, { status: res.status }));
-      rawSSE = await readStreamUntilEvent(res.body.getReader(), "done", 60);
+      sseCollection = await readStreamThroughClose(res.body.getReader(), { maxReads: 60, readTimeoutMs: 5000 });
+      rawSSE = sseCollection.raw;
     } finally {
       clearTimeout(timeout);
     }
 
+    if (!sseCollection) {
+      steps.push(stepFail(`${label}_sse_terminal_contract`, "missing SSE collection", {}));
+      return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
+    }
+    const terminalViolations = sseCollection.eventsAfterFirstDone
+      .filter((event) => event.event === "chunk" || event.event === "status");
+    const terminalEvidence = {
+      closed: sseCollection.closed,
+      firstDoneIndex: sseCollection.firstDoneIndex,
+      eventSequence: sseCollection.events.map((event) => event.event),
+      eventsAfterFirstDone: sseCollection.eventsAfterFirstDone.map((event) => event.event),
+      terminalViolationEvents: terminalViolations.map((event) => event.event),
+      nonEmptyChunkBeforeDone: sseCollection.nonEmptyChunkBeforeDone,
+      readCount: sseCollection.reads,
+      rawLength: sseCollection.raw.length,
+    };
+    artifacts[`${label}_sse_terminal_contract`] = terminalEvidence;
+    if (!sseCollection.closed) {
+      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE stream close was not observed", terminalEvidence));
+      return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
+    }
+    if (sseCollection.firstDoneIndex === -1) {
+      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE transcript did not include event: done", terminalEvidence));
+      return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
+    }
+    if (!sseCollection.nonEmptyChunkBeforeDone) {
+      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE transcript lacked a non-empty chunk before first done", terminalEvidence));
+      return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
+    }
+    if (terminalViolations.length > 0) {
+      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE emitted chunk/status after first done", terminalEvidence));
+      return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
+    }
+    steps.push(stepOk(`${label}_sse_terminal_contract`, terminalEvidence));
+
     const result = await assertions({
       rawSSE,
+      sseCollection,
       address: scenarioCtx.address,
       deviceId: scenarioCtx.deviceId,
       cookieHeader: scenarioCtx.cookieHeader,

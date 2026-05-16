@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
-import type { createOrchestrator } from "../orchestrator/index.js";
+import type { createOrchestrator, SummaryHistoryFacts } from "../orchestrator/index.js";
 import { buildAssetUrl, makeAssetRef, parseAssetRef, type createAssetService } from "../services/assets.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
@@ -84,6 +84,7 @@ interface StreamingReplyResult {
   fullReply: string;
   didLogMeal: boolean;
   dailySummary?: unknown;
+  summaryHistoryFacts?: SummaryHistoryFacts;
   stopped?: boolean;
   tokensStreamed: number;
   finalReplySource: LlmTraceFinalReplySource;
@@ -274,10 +275,6 @@ function createNoMutationLoggingClaimStreamGuard() {
       return detected;
     },
   };
-}
-
-function hasSummaryOrHistoryContext(dailySummary: unknown): boolean {
-  return Boolean(dailySummary);
 }
 
 async function parseMultipartRequest(
@@ -547,6 +544,7 @@ async function handleStreamingReply(
   didLogMeal: boolean,
   didMutateMeal: boolean,
   dailySummary: unknown,
+  summaryHistoryFacts: SummaryHistoryFacts | undefined,
   receiptIdentity: ReceiptIdentity | undefined,
   affectedDate?: string,
   partialMutationReply?: string,
@@ -554,7 +552,7 @@ async function handleStreamingReply(
   stopControl?: StreamingStopControl,
 ): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
-  const hasSummaryContext = hasSummaryOrHistoryContext(dailySummary);
+  const hasSummaryContext = Boolean(summaryHistoryFacts?.dailySummary ?? dailySummary);
   const shouldGuardNoMutationModelText = !didLogMeal && !didMutateMeal && !hasSummaryContext;
   const shouldHoldNoMutationSummaryText = !didLogMeal && !didMutateMeal && hasSummaryContext;
   const noMutationClaimGuard = shouldGuardNoMutationModelText
@@ -611,7 +609,7 @@ async function handleStreamingReply(
   if (stopControl?.isStopped() || stopControl?.signal.aborted) {
     const stoppedReply = sanitizeReply(
       guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal, {
-        hasSummaryOrHistoryContext: hasSummaryContext,
+        summaryHistoryFacts,
       }),
     ) || "（已停止）";
     await finalizeAssistantReply(chatService, deviceId, stoppedReply, receiptIdentity, { status: "stopped" });
@@ -619,6 +617,7 @@ async function handleStreamingReply(
       fullReply: stoppedReply,
       didLogMeal,
       dailySummary,
+      summaryHistoryFacts,
       stopped: true,
       tokensStreamed,
       finalReplySource: "model",
@@ -637,6 +636,7 @@ async function handleStreamingReply(
       fullReply: retryMsg,
       didLogMeal,
       dailySummary,
+      summaryHistoryFacts,
       tokensStreamed,
       finalReplySource: "fallback",
       finalReplyShape: "fallback_text",
@@ -657,7 +657,7 @@ async function handleStreamingReply(
     writeVisibleChunk(appendedText);
   }
   const guardedFullReply = guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal, {
-    hasSummaryOrHistoryContext: hasSummaryContext,
+    summaryHistoryFacts,
   });
   if (noMutationLoggingClaimDetected || guardedFullReply !== fullReply) {
     const sanitizedReply = sanitizeReply(guardedFullReply);
@@ -673,6 +673,7 @@ async function handleStreamingReply(
       fullReply: sanitizedReply,
       didLogMeal,
       dailySummary,
+      summaryHistoryFacts,
       tokensStreamed,
       finalReplySource: "fallback",
       finalReplyShape: sanitizedReply.trim()
@@ -694,6 +695,7 @@ async function handleStreamingReply(
       fullReply,
       didLogMeal,
       dailySummary,
+      summaryHistoryFacts,
       tokensStreamed,
       finalReplySource: "model",
       finalReplyShape: fullReply.trim() ? "streamed_text" : "empty_or_missing",
@@ -715,6 +717,7 @@ async function handleStreamingReply(
     fullReply,
     didLogMeal,
     dailySummary,
+    summaryHistoryFacts,
     tokensStreamed,
     finalReplySource: "model",
     finalReplyShape: fullReply.trim() ? "streamed_text" : "empty_or_missing",
@@ -857,7 +860,7 @@ async function handleOrchestratorSSE(
     );
 
     if ("streamGenerator" in result) {
-      const { streamGenerator, didLogMeal, dailySummary, affectedDate, loggedMeal } = result;
+      const { streamGenerator, didLogMeal, dailySummary, summaryHistoryFacts, affectedDate, loggedMeal } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
@@ -875,6 +878,7 @@ async function handleOrchestratorSSE(
         didLogMeal,
         streamDidMutateMeal,
         dailySummary,
+        summaryHistoryFacts,
         streamReceiptIdentity,
         streamAffectedDate,
         streamLoggedMeal ?? (streamDidMutateMeal ? PARTIAL_MUTATION_FALLBACK : undefined),
@@ -936,7 +940,7 @@ async function handleOrchestratorSSE(
       }
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
     } else {
-      const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate, loggedMeal } = result;
+      const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate, loggedMeal } = result;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
         shape: result.finalReplyShape ?? "empty_or_missing",
@@ -949,7 +953,12 @@ async function handleOrchestratorSSE(
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
-      const normalizedReply = appendHistoricalDateSuffixIfMissing(replyText, affectedDate);
+      const normalizedReply = guardNoMutationLoggingClaim(
+        appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
+        didLogMeal,
+        streamDidMutateMeal,
+        { summaryHistoryFacts },
+      );
       const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
         deps.chatService,
         deviceId,
@@ -1246,7 +1255,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
-          const { streamGenerator, didLogMeal, dailySummary, affectedDate } = result;
+          const { streamGenerator, didLogMeal, dailySummary, summaryHistoryFacts, affectedDate } = result;
           const didMutateMeal = result.didMutateMeal ?? didLogMeal;
           let fullReply = "";
           let hallucinationDetected = false;
@@ -1264,7 +1273,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ? fallbackReply
             : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
           const replyText = guardNoMutationLoggingClaim(modelReplyText, didLogMeal, didMutateMeal, {
-            hasSummaryOrHistoryContext: hasSummaryOrHistoryContext(dailySummary),
+            summaryHistoryFacts,
           });
           const { sanitized } = await finalizeAssistantReply(
             chatService,
@@ -1307,12 +1316,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           };
         }
 
-        const { reply: replyText, didLogMeal, dailySummary, dailyTargets, affectedDate } = result;
+        const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
         const normalizedReply = guardNoMutationLoggingClaim(
           appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
           didLogMeal,
           jsonDidMutateMeal,
-          { hasSummaryOrHistoryContext: hasSummaryOrHistoryContext(dailySummary) },
+          { summaryHistoryFacts },
         );
         const { sanitized: sanitizedJson } = await finalizeAssistantReply(
           chatService,
