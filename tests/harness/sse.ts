@@ -48,6 +48,22 @@ export interface CollectedSSEStream {
   reads: number;
 }
 
+export interface SSETerminalProofEvidence {
+  closed: boolean;
+  firstDoneObserved: boolean;
+  firstDoneIndex: number;
+  noPostDoneChunkOrStatus: boolean;
+  postDoneEventNames: string[];
+  terminalViolationEvents: string[];
+  nonEmptyChunkBeforeDone: boolean;
+  readCount: number;
+  rawLength: number;
+}
+
+export type SSETerminalProofResult =
+  | { ok: true; evidence: SSETerminalProofEvidence }
+  | { ok: false; error: string; evidence: SSETerminalProofEvidence };
+
 export async function readStreamThroughClose(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   options: { maxReads?: number; readTimeoutMs?: number } = {},
@@ -69,6 +85,38 @@ export async function readStreamThroughClose(
   }
 
   throw new Error(`SSE stream did not close within ${maxReads} reads`);
+}
+
+export function summarizeSSETerminalProof(collection: CollectedSSEStream): SSETerminalProofEvidence {
+  const postDoneEventNames = collection.eventsAfterFirstDone.map((event) => event.event);
+  const terminalViolationEvents = postDoneEventNames.filter(
+    (eventName) => eventName === "chunk" || eventName === "status",
+  );
+  return {
+    closed: collection.closed,
+    firstDoneObserved: collection.firstDoneIndex !== -1,
+    firstDoneIndex: collection.firstDoneIndex,
+    noPostDoneChunkOrStatus: terminalViolationEvents.length === 0,
+    postDoneEventNames,
+    terminalViolationEvents,
+    nonEmptyChunkBeforeDone: collection.nonEmptyChunkBeforeDone,
+    readCount: collection.reads,
+    rawLength: collection.raw.length,
+  };
+}
+
+export function assertSSETerminalProof(collection: CollectedSSEStream): SSETerminalProofResult {
+  const evidence = summarizeSSETerminalProof(collection);
+  if (!evidence.closed) {
+    return { ok: false, error: "SSE stream close was not observed", evidence };
+  }
+  if (!evidence.firstDoneObserved) {
+    return { ok: false, error: "SSE stream did not include done", evidence };
+  }
+  if (!evidence.noPostDoneChunkOrStatus) {
+    return { ok: false, error: "SSE emitted chunk/status after first done", evidence };
+  }
+  return { ok: true, evidence };
 }
 
 async function readWithTimeout(
