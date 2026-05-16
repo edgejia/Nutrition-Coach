@@ -9,7 +9,7 @@
 
 ## Phases
 
-- [ ] **Phase 59: Authoritative Summary Facts and SSE Proof** - Backend summary/history replies use persisted facts as the authoritative meal-fact source, and SSE proof drains through stream close before promotion.
+- [x] **Phase 59: Authoritative Summary Facts and SSE Proof** - Backend summary/history replies use persisted facts as the authoritative meal-fact source, and SSE proof drains through stream close before promotion. Completed 2026-05-16.
 
 <details>
 <summary>v2.2 LLM Failure Localization Foundation (Phases 55-58) - SHIPPED 2026-05-15</summary>
@@ -72,7 +72,7 @@ Plans:
 | 56. Provider Metadata and Orchestrator Hook Plumbing | v2.2 | 4/4 | Complete | 2026-05-14 |
 | 57. Fallback Event Semantics and Trace v2 Schema | v2.2 | 6/6 | Complete | 2026-05-15 |
 | 58. Localization Proof and Release Gate | v2.2 | 4/4 | Complete | 2026-05-15 |
-| 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete   | 2026-05-16 |
+| 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
 
 ## Future Milestone Candidates
 
@@ -82,4 +82,4 @@ Plans:
 - Product polish beyond the v2.1 trust slice from `docs/research/product-improve.md`.
 
 ---
-*Last updated: 2026-05-16 after reopening v2.2 promotion blocker planning*
+*Last updated: 2026-05-16 after completing Phase 59 local verification*
