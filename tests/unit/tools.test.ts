@@ -1060,7 +1060,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(meals.length, 0);
   });
 
-  it("Test 4: get_daily_summary returns JSON.stringify(summary) plus the macro summary text", async () => {
+  it("Test 4: get_daily_summary returns persisted meal facts plus the macro summary text", async () => {
     // Seed one meal so totals are non-zero, easier to assert formatting.
     await foodLoggingService.logFood(deviceId, {
       foodName: "蛋白餐",
@@ -1068,6 +1068,13 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       protein: 35,
       carbs: 40,
       fat: 12,
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
     });
 
     const call: ToolCall = {
@@ -1085,7 +1092,50 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     });
 
     const summary = await summaryService.getDailySummary(deviceId, new Date());
-    assert.equal(result.result, JSON.stringify(summary));
+    assert.deepEqual(JSON.parse(result.result), {
+      dailySummary: summary,
+      meals: [
+        { foodName: "蛋白餐", calories: 450 },
+        { foodName: "豆腐飯", calories: 520 },
+      ],
+    });
+    assert.deepEqual(result.summaryHistoryFacts, {
+      dailySummary: summary,
+      meals: [
+        { foodName: "蛋白餐", calories: 450 },
+        { foodName: "豆腐飯", calories: 520 },
+      ],
+    });
+    assert.equal(
+      result.summary,
+      `熱量 ${summary.totalCalories}kcal, P${summary.totalProtein}g, C${summary.totalCarbs}g, F${summary.totalFat}g`,
+    );
+  });
+
+  it("get_daily_summary returns an empty persisted meal facts array without inventing aggregate item names", async () => {
+    const call: ToolCall = {
+      id: "call_empty_summary",
+      type: "function",
+      function: {
+        name: "get_daily_summary",
+        arguments: JSON.stringify({}),
+      },
+    };
+
+    const result = await executeTool(call, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    const summary = await summaryService.getDailySummary(deviceId, new Date());
+    assert.deepEqual(JSON.parse(result.result), {
+      dailySummary: summary,
+      meals: [],
+    });
+    assert.deepEqual(result.summaryHistoryFacts, {
+      dailySummary: summary,
+      meals: [],
+    });
     assert.equal(
       result.summary,
       `熱量 ${summary.totalCalories}kcal, P${summary.totalProtein}g, C${summary.totalCarbs}g, F${summary.totalFat}g`,
