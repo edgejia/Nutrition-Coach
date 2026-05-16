@@ -26,7 +26,7 @@
       "source": "fallback",
       "shape": "fallback_text"
     },
-    "latencyMs": 8
+    "latencyMs": 6
   },
   "timeline": [
     {
@@ -67,7 +67,7 @@
     {
       "type": "route_fallback",
       "transport": "sse",
-      "turnId": "9daf7d6e-e2b0-4220-8786-a76bd936dd17",
+      "turnId": "9fe01a8f-4da9-4e34-ab77-219353c67c88",
       "fallbackSource": "orchestrator",
       "didLogMeal": false,
       "didMutateMeal": false,

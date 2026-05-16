@@ -19,7 +19,7 @@
         "postDoneEventNames": [],
         "terminalViolationEvents": [],
         "nonEmptyChunkBeforeDone": true,
-        "readCount": 3,
+        "readCount": 4,
         "rawLength": 411
       }
     },
@@ -38,7 +38,7 @@
       "ok": true,
       "actual": {
         "donePayload": {
-          "turnId": "9daf7d6e-e2b0-4220-8786-a76bd936dd17",
+          "turnId": "9fe01a8f-4da9-4e34-ab77-219353c67c88",
           "didLogMeal": false,
           "didMutateMeal": false
         },
@@ -95,7 +95,7 @@
             "source": "fallback",
             "shape": "fallback_text"
           },
-          "latencyMs": 8
+          "latencyMs": 6
         },
         "timeline": [
           {
@@ -136,7 +136,7 @@
           {
             "type": "route_fallback",
             "transport": "sse",
-            "turnId": "9daf7d6e-e2b0-4220-8786-a76bd936dd17",
+            "turnId": "9fe01a8f-4da9-4e34-ab77-219353c67c88",
             "fallbackSource": "orchestrator",
             "didLogMeal": false,
             "didMutateMeal": false,
@@ -194,7 +194,7 @@
       "ok": true,
       "actual": {
         "donePayload": {
-          "turnId": "3f8346f4-a53f-4211-ba93-b2de8b2eda01",
+          "turnId": "1ef74e51-778e-4cea-9cf8-941b9863aceb",
           "didLogMeal": false,
           "didMutateMeal": false
         },
@@ -258,15 +258,15 @@
       "ok": true,
       "actual": {
         "donePayload": {
-          "turnId": "2376074c-e4e5-49b3-91a2-4cfb2c010142",
+          "turnId": "2d296691-9ebe-48ac-8365-6600550fcafd",
           "didLogMeal": true,
           "didMutateMeal": true,
           "loggedMeal": {
-            "mealId": "750dbf33-c04b-4009-8123-ae0d64c40fb9",
+            "mealId": "0534d633-77a5-4ebd-a923-624bdd3c9e7a",
             "dateKey": "2026-05-17",
-            "loggedAt": "2026-05-16T17:09:59.609Z",
-            "imageAssetId": "60dfd1dc-2d6c-496b-aa4c-206a678abdc8",
-            "imageUrl": "/api/assets/60dfd1dc-2d6c-496b-aa4c-206a678abdc8",
+            "loggedAt": "2026-05-16T17:13:07.957Z",
+            "imageAssetId": "780ca7f6-7ba2-485b-9803-a8555040df23",
+            "imageUrl": "/api/assets/780ca7f6-7ba2-485b-9803-a8555040df23",
             "foodName": "測試餐點C",
             "itemCount": 1,
             "calories": 300,
@@ -310,12 +310,12 @@
       "postDoneEventNames": [],
       "terminalViolationEvents": [],
       "nonEmptyChunkBeforeDone": true,
-      "readCount": 3,
+      "readCount": 4,
       "rawLength": 411
     },
     "sub_a_analysis_fail": {
       "donePayload": {
-        "turnId": "9daf7d6e-e2b0-4220-8786-a76bd936dd17",
+        "turnId": "9fe01a8f-4da9-4e34-ab77-219353c67c88",
         "didLogMeal": false,
         "didMutateMeal": false
       },
@@ -359,7 +359,7 @@
     },
     "sub_b_tool_fail": {
       "donePayload": {
-        "turnId": "3f8346f4-a53f-4211-ba93-b2de8b2eda01",
+        "turnId": "1ef74e51-778e-4cea-9cf8-941b9863aceb",
         "didLogMeal": false,
         "didMutateMeal": false
       },
@@ -404,15 +404,15 @@
     },
     "sub_c_reply_fail": {
       "donePayload": {
-        "turnId": "2376074c-e4e5-49b3-91a2-4cfb2c010142",
+        "turnId": "2d296691-9ebe-48ac-8365-6600550fcafd",
         "didLogMeal": true,
         "didMutateMeal": true,
         "loggedMeal": {
-          "mealId": "750dbf33-c04b-4009-8123-ae0d64c40fb9",
+          "mealId": "0534d633-77a5-4ebd-a923-624bdd3c9e7a",
           "dateKey": "2026-05-17",
-          "loggedAt": "2026-05-16T17:09:59.609Z",
-          "imageAssetId": "60dfd1dc-2d6c-496b-aa4c-206a678abdc8",
-          "imageUrl": "/api/assets/60dfd1dc-2d6c-496b-aa4c-206a678abdc8",
+          "loggedAt": "2026-05-16T17:13:07.957Z",
+          "imageAssetId": "780ca7f6-7ba2-485b-9803-a8555040df23",
+          "imageUrl": "/api/assets/780ca7f6-7ba2-485b-9803-a8555040df23",
           "foodName": "測試餐點C",
           "itemCount": 1,
           "calories": 300,
@@ -481,7 +481,7 @@
         "source": "fallback",
         "shape": "fallback_text"
       },
-      "latencyMs": 8
+      "latencyMs": 6
     },
     "timeline": [
       {
@@ -522,7 +522,7 @@
       {
         "type": "route_fallback",
         "transport": "sse",
-        "turnId": "9daf7d6e-e2b0-4220-8786-a76bd936dd17",
+        "turnId": "9fe01a8f-4da9-4e34-ab77-219353c67c88",
         "fallbackSource": "orchestrator",
         "didLogMeal": false,
         "didMutateMeal": false,
