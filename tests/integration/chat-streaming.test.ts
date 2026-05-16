@@ -2274,7 +2274,7 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didMutateMeal, false);
       assert.equal(donePayload.dailySummary?.mealCount, 1);
       assert.equal(donePayload.dailySummary?.totalCalories, 520);
-      assert.equal(chunkText, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+      assert.equal(chunkText, "今天已記錄 1 餐，共 520 kcal：豆腐飯 520 kcal。");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
@@ -2282,7 +2282,7 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
-      assert.equal(assistantMsgs[0]!.content, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+      assert.equal(assistantMsgs[0]!.content, "今天已記錄 1 餐，共 520 kcal：豆腐飯 520 kcal。");
     } finally {
       clearTimeout(timeout);
     }
@@ -2348,7 +2348,7 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didMutateMeal, false);
       assert.equal(donePayload.dailySummary?.mealCount, 2);
       assert.equal(donePayload.dailySummary?.totalCalories, 900);
-      assert.equal(chunkText, "今天已記錄 2 餐，共 900 kcal。");
+      assert.equal(chunkText, "今天已記錄 2 餐，共 900 kcal：雞胸肉 450 kcal、鮭魚飯 450 kcal。");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
@@ -2356,7 +2356,7 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
-      assert.equal(assistantMsgs[0]!.content, "今天已記錄 2 餐，共 900 kcal。");
+      assert.equal(assistantMsgs[0]!.content, "今天已記錄 2 餐，共 900 kcal：雞胸肉 450 kcal、鮭魚飯 450 kcal。");
     } finally {
       clearTimeout(timeout);
     }
@@ -2499,7 +2499,7 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didMutateMeal, false);
       assert.equal(donePayload.dailySummary?.mealCount, 2);
       assert.equal(donePayload.dailySummary?.totalCalories, 900);
-      assert.equal(chunkText, "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。");
+      assert.equal(chunkText, "今天已記錄 2 餐，共 900 kcal：雞胸肉 450 kcal、鮭魚飯 450 kcal。");
       assert.doesNotMatch(chunkText, /其中包含雞胸肉 900 kcal|雞胸肉 900 kcal/);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -2575,8 +2575,8 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didMutateMeal, false);
       assert.equal(donePayload.dailySummary?.mealCount, 2);
       assert.equal(donePayload.dailySummary?.totalCalories, 900);
-      assert.equal(chunkText, "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。");
-      assert.doesNotMatch(chunkText, /牛肉飯|今天已記錄 2 餐/);
+      assert.equal(chunkText, "今天已記錄 2 餐，共 900 kcal：雞胸肉 450 kcal、鮭魚飯 450 kcal。");
+      assert.doesNotMatch(chunkText, /牛肉飯/);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
@@ -2585,7 +2585,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
       assert.equal(assistantMsgs[0]!.content, chunkText);
-      assert.doesNotMatch(assistantMsgs[0]!.content, /牛肉飯|今天已記錄 2 餐/);
+      assert.doesNotMatch(assistantMsgs[0]!.content, /牛肉飯/);
     } finally {
       clearTimeout(timeout);
     }
@@ -2651,7 +2651,7 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didMutateMeal, false);
       assert.equal(donePayload.dailySummary?.mealCount, 2);
       assert.equal(donePayload.dailySummary?.totalCalories, 900);
-      assert.equal(chunkText, "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。");
+      assert.equal(chunkText, "今天已記錄 2 餐，共 900 kcal：雞胸肉 450 kcal、鮭魚飯 450 kcal。");
       assert.doesNotMatch(chunkText, /3 餐|1200 kcal/);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {

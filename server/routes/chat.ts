@@ -2,7 +2,11 @@ import { PassThrough } from "node:stream";
 import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
-import type { createOrchestrator, SummaryHistoryFacts } from "../orchestrator/index.js";
+import type { createOrchestrator } from "../orchestrator/index.js";
+import {
+  composeSummaryHistoryReply,
+  type SummaryHistoryFacts,
+} from "../orchestrator/summary-history-renderer.js";
 import { buildAssetUrl, makeAssetRef, parseAssetRef, type createAssetService } from "../services/assets.js";
 import type { createChatService } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
@@ -180,6 +184,34 @@ function appendHistoricalDateSuffixIfMissing(text: string, affectedDate?: string
   }
 
   return `${text}（${formatHistoricalDateLabel(affectedDate)}）`;
+}
+
+function shouldComposeSummaryHistoryReply(
+  didLogMeal: boolean,
+  didMutateMeal: boolean,
+  summaryHistoryFacts: SummaryHistoryFacts | undefined,
+): summaryHistoryFacts is SummaryHistoryFacts {
+  return !didLogMeal && !didMutateMeal && Boolean(summaryHistoryFacts?.dailySummary);
+}
+
+function normalizeRouteFinalReply(
+  rawReply: string,
+  didLogMeal: boolean,
+  didMutateMeal: boolean,
+  summaryHistoryFacts: SummaryHistoryFacts | undefined,
+  opts: { composeSummaryHistory?: boolean } = {},
+): { reply: string; composedSummaryHistory: boolean } {
+  const composedSummaryHistory = opts.composeSummaryHistory !== false
+    && shouldComposeSummaryHistoryReply(didLogMeal, didMutateMeal, summaryHistoryFacts);
+  const reply = composedSummaryHistory
+    ? composeSummaryHistoryReply(summaryHistoryFacts, rawReply)
+    : rawReply;
+  return {
+    reply: guardNoMutationLoggingClaim(reply, didLogMeal, didMutateMeal, {
+      summaryHistoryFacts,
+    }),
+    composedSummaryHistory,
+  };
 }
 
 async function finalizeAssistantReply(
@@ -656,9 +688,10 @@ async function handleStreamingReply(
     fullReply = normalizedReply;
     writeVisibleChunk(appendedText);
   }
-  const guardedFullReply = guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal, {
-    summaryHistoryFacts,
-  });
+  const {
+    reply: guardedFullReply,
+    composedSummaryHistory,
+  } = normalizeRouteFinalReply(fullReply, didLogMeal, didMutateMeal, summaryHistoryFacts);
   if (noMutationLoggingClaimDetected || guardedFullReply !== fullReply) {
     const sanitizedReply = sanitizeReply(guardedFullReply);
     const finalChunk = sanitizer.flush();
@@ -675,14 +708,14 @@ async function handleStreamingReply(
       dailySummary,
       summaryHistoryFacts,
       tokensStreamed,
-      finalReplySource: "fallback",
-      finalReplyShape: sanitizedReply.trim()
-        ? "fallback_text"
-        : "empty_or_missing",
+      finalReplySource: composedSummaryHistory ? "renderer" : "fallback",
+      finalReplyShape: composedSummaryHistory
+        ? (sanitizedReply.trim() ? "streamed_text" : "empty_or_missing")
+        : (sanitizedReply.trim() ? "fallback_text" : "empty_or_missing"),
     };
   }
   if (shouldHoldNoMutationSummaryText) {
-    const sanitizedReplyChunk = sanitizer.push(fullReply);
+    const sanitizedReplyChunk = sanitizer.push(guardedFullReply);
     if (sanitizedReplyChunk) {
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedReplyChunk })}\n\n`);
     }
@@ -690,15 +723,15 @@ async function handleStreamingReply(
     if (finalHeldChunk) {
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalHeldChunk })}\n\n`);
     }
-    await finalizeAssistantReply(chatService, deviceId, fullReply, receiptIdentity);
+    await finalizeAssistantReply(chatService, deviceId, guardedFullReply, receiptIdentity);
     return {
-      fullReply,
+      fullReply: guardedFullReply,
       didLogMeal,
       dailySummary,
       summaryHistoryFacts,
       tokensStreamed,
-      finalReplySource: "model",
-      finalReplyShape: fullReply.trim() ? "streamed_text" : "empty_or_missing",
+      finalReplySource: composedSummaryHistory ? "renderer" : "model",
+      finalReplyShape: guardedFullReply.trim() ? "streamed_text" : "empty_or_missing",
     };
   }
   const guardedFinalChunk = noMutationClaimGuard?.flush() ?? "";
@@ -953,12 +986,13 @@ async function handleOrchestratorSSE(
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
-      const normalizedReply = guardNoMutationLoggingClaim(
+      const normalizedReply = normalizeRouteFinalReply(
         appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
         didLogMeal,
         streamDidMutateMeal,
-        { summaryHistoryFacts },
-      );
+        summaryHistoryFacts,
+        { composeSummaryHistory: !result.fallbackOutcomeContext },
+      ).reply;
       const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
         deps.chatService,
         deviceId,
@@ -1272,9 +1306,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const modelReplyText = hallucinationDetected
             ? fallbackReply
             : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
-          const replyText = guardNoMutationLoggingClaim(modelReplyText, didLogMeal, didMutateMeal, {
+          const { reply: replyText, composedSummaryHistory } = normalizeRouteFinalReply(
+            modelReplyText,
+            didLogMeal,
+            didMutateMeal,
             summaryHistoryFacts,
-          });
+            { composeSummaryHistory: !hallucinationDetected },
+          );
           const { sanitized } = await finalizeAssistantReply(
             chatService,
             deviceId,
@@ -1282,7 +1320,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             jsonReceiptIdentity,
           );
           traceRecorder?.recordFinalReply({
-            source: hallucinationDetected ? "fallback" : "model",
+            source: hallucinationDetected ? "fallback" : composedSummaryHistory ? "renderer" : "model",
             shape: sanitized.trim() ? (hallucinationDetected ? "fallback_text" : "streamed_text") : "empty_or_missing",
           });
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
@@ -1317,12 +1355,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         }
 
         const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
-        const normalizedReply = guardNoMutationLoggingClaim(
+        const normalizedReply = normalizeRouteFinalReply(
           appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
           didLogMeal,
           jsonDidMutateMeal,
-          { summaryHistoryFacts },
-        );
+          summaryHistoryFacts,
+          { composeSummaryHistory: !result.fallbackOutcomeContext },
+        ).reply;
         const { sanitized: sanitizedJson } = await finalizeAssistantReply(
           chatService,
           deviceId,
