@@ -366,6 +366,9 @@ const providerMetadataFixture: ProviderErrorMetadata = {
   errorCode: "rate_limit",
 };
 
+const canonicalSummaryText = "今天已記錄 2 餐，共 900 kcal：豆腐飯 520 kcal、鮭魚飯 380 kcal。";
+const unsafeSummaryFactPattern = /牛肉飯|滷肉飯|豆腐飯 900 kcal/;
+
 describe("chat-streaming", () => {
   let app: FastifyInstance;
   let mockLLM: StreamingLLMProvider;
@@ -2354,6 +2357,83 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
       assert.equal(assistantMsgs[0]!.content, "今天已記錄 2 餐，共 900 kcal。");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat summary-context stream emits composed persisted facts without unsafe model meal facts", async () => {
+    assert.ok(services);
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 380,
+      protein: 30,
+      carbs: 42,
+      fat: 12,
+    });
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_streaming_summary_canonical",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["今天已記錄 2 餐，", "共 900 kcal，", "其中包含牛肉飯和滷肉飯，", "豆腐飯 900 kcal。"]);
+
+    const form = new FormData();
+    form.append("message", "今天吃了什麼？");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: { mealCount?: number; totalCalories?: number };
+      };
+
+      assert.equal(donePayload.didLogMeal, false);
+      assert.equal(donePayload.didMutateMeal, false);
+      assert.equal(donePayload.dailySummary?.mealCount, 2);
+      assert.equal(donePayload.dailySummary?.totalCalories, 900);
+      assert.equal(chunkText, canonicalSummaryText);
+      assert.doesNotMatch(chunkText, unsafeSummaryFactPattern);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMsgs.length, 1);
+      assert.equal(assistantMsgs[0]!.content, chunkText);
+      assert.equal(assistantMsgs[0]!.content, canonicalSummaryText);
+      assert.doesNotMatch(assistantMsgs[0]!.content, unsafeSummaryFactPattern);
     } finally {
       clearTimeout(timeout);
     }
