@@ -23,7 +23,7 @@ Phase 60 makes daily target changes backend-authoritative. Users can only change
 - **D-05:** Allow one active pending goal proposal per device. This matches the existing `turn_states` `(deviceId, kind)` uniqueness pattern and keeps short confirmations like `好` unambiguous.
 - **D-06:** A newer `propose_goals` overwrites the previous pending goal proposal for that device.
 - **D-07:** Pending goal proposals expire after 30 minutes.
-- **D-08:** Any successful `update_goals` mutation clears pending proposal state, whether the success came from the proposal path or from current-turn explicit numeric values.
+- **D-08:** Any successful `update_goals` target persistence clears pending proposal state, whether the success came from the proposal path or from current-turn explicit numeric values. Clearing follows committed target persistence, not later `goals_update` publish or summary/recompute success; post-persist publish/recompute failure must not leave the proposal available to reapply.
 - **D-09:** Validation failure, source guard failure, proposal mismatch, and execution failure must not mutate targets, must not publish `goals_update`, and should not consume the pending proposal for ordinary retryable failures.
 - **D-10:** Expired proposals are cleared or treated as unavailable and must not mutate targets.
 - **D-11:** Explicit rejection/cancel terms such as `不要`, `取消`, `先不用`, or `no` should clear the active pending proposal.
@@ -43,9 +43,9 @@ Phase 60 makes daily target changes backend-authoritative. Users can only change
 - **D-21:** Proposal copy must not include LLM-style rationale or success-tone wording. Exact strings are left for planning and tests.
 
 ### Rejected-Goal and Cancel Copy
-- **D-22:** Proposal/authority failures share one generic deterministic fail-closed copy. This includes missing, expired, consumed, mismatch, superseded, and guard-unauthorized proposal states.
+- **D-22:** Proposal/authority failures share one generic deterministic fail-closed copy. This includes missing, expired, consumed, mismatch, replaced/unavailable, and guard-unauthorized proposal states; planning should not infer that each bucket requires a distinct internal reason enum.
 - **D-23:** Validation range failures get field-specific deterministic copy. Internal reason granularity, renderer shape, and multi-field range details are left for planning.
-- **D-24:** Explicit cancel is a user-cancel path, not part of the rejected-goal failure taxonomy. Cancel clears active pending proposal, does not mutate targets, does not publish `goals_update`, and returns backend deterministic neutral copy saying the proposal was not applied and the user can later provide new numbers or ask for a new recommendation.
+- **D-24:** Explicit cancel is a user-cancel path, not part of the rejected-goal failure taxonomy. Cancel clears active pending proposal, does not mutate targets, does not publish `goals_update`, and returns backend deterministic neutral copy saying the proposal was not applied and the user can later provide new numbers or ask for a new recommendation. Exact wording is left to planning.
 - **D-25:** Failed `update_goals` authority/proposal/validation paths and explicit cancel paths must directly control the final reply with backend-owned copy. They must not enter a later LLM rewrite round.
 - **D-26:** Final reply metadata should identify rejected-goal/cancel copy as renderer/backend-owned rather than model-authored. Whether that is implemented through tool result, orchestrator branch, or route short-circuit is left for planning after inspecting the existing mutation receipt path.
 

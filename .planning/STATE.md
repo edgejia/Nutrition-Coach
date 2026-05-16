@@ -4,8 +4,8 @@ milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: planning
 stopped_at: Phase 60 context gathered
-last_updated: "2026-05-16T23:02:15.597Z"
-last_activity: 2026-05-17 — v2.3 roadmap created with Phases 60-64
+last_updated: "2026-05-17T07:13:15+08:00"
+last_activity: 2026-05-17 — Phase 60 context gathered
 progress:
   total_phases: 5
   completed_phases: 0
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-17)
 Phase: 60 of 64 (Goal Proposal Authority and Rejected-Goal Copy)
 Plan: —
 Status: Ready to plan
-Last activity: 2026-05-17 — v2.3 roadmap created with Phases 60-64
+Last activity: 2026-05-17 — Phase 60 context gathered
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -68,7 +68,7 @@ None yet for v2.3.
 
 ### Blockers/Concerns
 
-- Phase 60 planning should decide whether one active pending goal proposal per device is sufficient, or whether proposal ids need explicit multi-proposal disambiguation.
+- Phase 60 planning should prove hidden `proposal_id` handoff reliability; if it cannot be proven reliable without exposing the id to users, use explicit latest-active proposal mode.
 - Phase 62 planning should decide whether stale delete needs the same `expectedMealRevisionId` contract as stale edit.
 - Phase 64 must not include staging or main promotion without explicit current-thread approval.
 
