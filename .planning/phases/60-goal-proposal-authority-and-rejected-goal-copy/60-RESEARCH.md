@@ -442,22 +442,25 @@ it("rejects latest_proposal without active proposal without mutating or publishi
 |---|-------|---------|---------------|
 | A1 | A new dedicated `goal_proposals` SQL table could improve auditability later. [ASSUMED] | Standard Stack / Alternatives Considered | Low for Phase 60 because the locked decision and existing schema favor `turn_states`; future analytics/audit requirements might revisit storage shape. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should proposal confirmation use hidden `proposal_id` or latest-active mode?** [VERIFIED: 60-CONTEXT.md]
    - What we know: The user locked a preference for hidden `proposal_id` only if planning can prove reliable next-turn handoff without exposing it in user-facing copy. [VERIFIED: 60-CONTEXT.md]
    - What's unclear: Current code does not expose a hidden model-visible proposal id channel distinct from user-visible assistant text. [VERIFIED: server/orchestrator/index.ts + server/services/chat.ts via code search]
    - Recommendation: Plan latest-active proposal mode first, and add an explicit proof task if attempting hidden id handoff. [VERIFIED: 60-CONTEXT.md]
+   - RESOLVED: Phase 60 plans use explicit single-active `latest_proposal` mode per D-17. Hidden `proposal_id` handoff is not planned because current prompt/tool plumbing does not prove a reliable hidden next-turn channel without user-visible exposure.
 
 2. **Where exactly should rejected/cancel renderer metadata attach?** [VERIFIED: 60-CONTEXT.md]
    - What we know: Existing success receipts return `finalReplySource: "renderer"` from `server/orchestrator/index.ts`. [VERIFIED: server/orchestrator/index.ts]
    - What's unclear: Planner must choose whether failed/cancel replies are represented as a `ToolExecutionResult`, a controlled orchestrator branch, or a route-level short-circuit. [VERIFIED: 60-CONTEXT.md]
    - Recommendation: Keep it in orchestrator/tool outcome handling so JSON and SSE chat paths share the same source metadata. [VERIFIED: server/orchestrator/index.ts + server/routes/chat.ts]
+   - RESOLVED: Phase 60 plans attach rejected/cancel renderer ownership in orchestrator/tool outcome handling. Plan 02 creates controlled reply results from tool execution, and Plan 03 short-circuits those outcomes in `server/orchestrator/index.ts` with `finalReplySource: "renderer"` and `finalReplyShape: "plain_text"`.
 
 3. **Should a harness scenario be added in Phase 60 or deferred to Phase 64?** [VERIFIED: .planning/ROADMAP.md]
    - What we know: Roadmap Phase 64 owns milestone-wide verification hardening, but Phase 60 proof must include exact-copy and negative invariants. [VERIFIED: .planning/ROADMAP.md + 60-CONTEXT.md]
    - What's unclear: Integration tests may be enough if they prove no publish, unchanged targets, final source, and no second model round. [VERIFIED: tests/integration/chat-goal-update.integration.test.ts]
    - Recommendation: Plan unit/integration coverage as required, then add a focused harness scenario only if no-publish/final-source evidence is weak. [VERIFIED: nutrition-new-harness-scenario skill + AGENTS.md]
+   - RESOLVED: Phase 60 plans require unit and integration proof for exact copy, unchanged targets, no `goals_update`, renderer-owned final source, and no later LLM rewrite. No harness scenario is planned unless execution discovers an invariant that cannot be proven through the targeted unit/integration tests.
 
 ## Environment Availability
 
