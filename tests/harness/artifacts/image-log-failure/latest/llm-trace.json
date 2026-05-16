@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "llm-trace.v2",
+  "scenario": "image-log-failure",
+  "status": "pass",
+  "summary": {
+    "roundCount": 1,
+    "toolCount": 0,
+    "fallbackCount": 1,
+    "providerErrorCount": 1,
+    "prompt": {
+      "version": "system-prompt.v2",
+      "sectionIds": [
+        "role",
+        "daily-targets",
+        "intake-context",
+        "responsibilities",
+        "meal-itemization",
+        "protein-estimation",
+        "log-food-receipt",
+        "goal-updates",
+        "meal-corrections",
+        "historical-dates"
+      ]
+    },
+    "finalReply": {
+      "source": "fallback",
+      "shape": "fallback_text"
+    },
+    "latencyMs": 8
+  },
+  "timeline": [
+    {
+      "type": "llm_round_start",
+      "round": 1
+    },
+    {
+      "type": "llm_error",
+      "round": 1,
+      "providerMetadata": {
+        "provider": "openai",
+        "operation": "chat",
+        "model": "gpt-image-trace-fixture",
+        "aborted": false,
+        "status": 429,
+        "providerRequestId": "req_image_trace_fixture",
+        "errorName": "RateLimitError",
+        "errorType": "rate_limit_exceeded",
+        "errorCode": "rate_limit"
+      }
+    },
+    {
+      "type": "orchestrator_fallback",
+      "reason": "llm_error",
+      "round": 1,
+      "providerMetadata": {
+        "provider": "openai",
+        "operation": "chat",
+        "model": "gpt-image-trace-fixture",
+        "aborted": false,
+        "status": 429,
+        "providerRequestId": "req_image_trace_fixture",
+        "errorName": "RateLimitError",
+        "errorType": "rate_limit_exceeded",
+        "errorCode": "rate_limit"
+      }
+    },
+    {
+      "type": "route_fallback",
+      "transport": "sse",
+      "turnId": "694f7c46-515c-4d5a-94be-06b8a07da839",
+      "fallbackSource": "orchestrator",
+      "didLogMeal": false,
+      "didMutateMeal": false,
+      "reason": "llm_error",
+      "providerMetadata": {
+        "provider": "openai",
+        "operation": "chat",
+        "model": "gpt-image-trace-fixture",
+        "aborted": false,
+        "status": 429,
+        "providerRequestId": "req_image_trace_fixture",
+        "errorName": "RateLimitError",
+        "errorType": "rate_limit_exceeded",
+        "errorCode": "rate_limit"
+      },
+      "round": 1
+    }
+  ]
+}

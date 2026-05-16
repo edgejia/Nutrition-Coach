@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
-import { collectEventSequence, parseSSEEvents, readStreamThroughClose } from "../sse.js";
+import { assertSSETerminalProof, collectEventSequence, parseSSEEvents, readStreamThroughClose } from "../sse.js";
 import type { CollectedSSEStream } from "../sse.js";
 import { LLMProviderError } from "../../../server/llm/errors.js";
 import type { ProviderErrorMetadata } from "../../../server/llm/types.js";
@@ -346,36 +346,17 @@ async function runSubScenario(
       steps.push(stepFail(`${label}_sse_terminal_contract`, "missing SSE collection", {}));
       return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
     }
-    const terminalViolations = sseCollection.eventsAfterFirstDone
-      .filter((event) => event.event === "chunk" || event.event === "status");
-    const terminalEvidence = {
-      closed: sseCollection.closed,
-      firstDoneIndex: sseCollection.firstDoneIndex,
-      eventSequence: sseCollection.events.map((event) => event.event),
-      eventsAfterFirstDone: sseCollection.eventsAfterFirstDone.map((event) => event.event),
-      terminalViolationEvents: terminalViolations.map((event) => event.event),
-      nonEmptyChunkBeforeDone: sseCollection.nonEmptyChunkBeforeDone,
-      readCount: sseCollection.reads,
-      rawLength: sseCollection.raw.length,
-    };
-    artifacts[`${label}_sse_terminal_contract`] = terminalEvidence;
-    if (!sseCollection.closed) {
-      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE stream close was not observed", terminalEvidence));
-      return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
-    }
-    if (sseCollection.firstDoneIndex === -1) {
-      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE transcript did not include event: done", terminalEvidence));
+    const terminalProof = assertSSETerminalProof(sseCollection);
+    artifacts[`${label}_sse_terminal_contract`] = terminalProof.evidence;
+    if (!terminalProof.ok) {
+      steps.push(stepFail(`${label}_sse_terminal_contract`, terminalProof.error, terminalProof.evidence));
       return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
     }
     if (!sseCollection.nonEmptyChunkBeforeDone) {
-      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE transcript lacked a non-empty chunk before first done", terminalEvidence));
+      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE transcript lacked a non-empty chunk before first done", terminalProof.evidence));
       return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
     }
-    if (terminalViolations.length > 0) {
-      steps.push(stepFail(`${label}_sse_terminal_contract`, "SSE emitted chunk/status after first done", terminalEvidence));
-      return { steps, artifacts, ok: false, failedStep: `${label}_sse_terminal_contract` };
-    }
-    steps.push(stepOk(`${label}_sse_terminal_contract`, terminalEvidence));
+    steps.push(stepOk(`${label}_sse_terminal_contract`, terminalProof.evidence));
 
     const result = await assertions({
       rawSSE,
@@ -467,11 +448,12 @@ const scenario: VerificationScenario = {
 
         const evidence = {
           donePayload,
-          liveChunkText,
           liveChunkEvidence,
           falseLogChunkClaim,
           assistantCount: assistantMsgs.length,
-          fallbackContent,
+          fallbackMatchedFriendly: /抱歉/.test(fallbackContent),
+          fallbackTextLength: fallbackContent.length,
+          liveChunkTextLength: liveChunkText.length,
           mealCount: meals.length,
         };
 
@@ -495,9 +477,8 @@ const scenario: VerificationScenario = {
     Object.assign(allArtifacts, subA.artifacts);
     if (!subA.ok) return buildResult(false, subA.failedStep, allSteps, allArtifacts);
     const subALlmTrace = subARecorder.build({ scenario: "image-log-failure", status: "pass" });
-    const subATraceEvidence = subA.artifacts.sub_a_analysis_fail as { fallbackContent?: string } | undefined;
     const subATraceCheck = verifyFallbackTraceContract(subALlmTrace, [
-      { label: "final reply content", value: subATraceEvidence?.fallbackContent },
+      { label: "final reply content", value: "抱歉，目前無法處理您的請求，請稍後再試。" },
       { label: "raw provider error message", value: "LLM provider request failed" },
       { label: "raw provider payload", value: "providerPayload" },
       { label: "raw provider payload", value: "rawProviderPayload" },
@@ -578,11 +559,12 @@ const scenario: VerificationScenario = {
 
         const evidence = {
           donePayload,
-          liveChunkText,
           liveChunkEvidence,
           falseLogChunkClaim,
           assistantCount: assistantMsgs.length,
-          fallbackContent,
+          fallbackMatchedUnified: fallbackContent === UNIFIED_FALLBACK,
+          fallbackTextLength: fallbackContent.length,
+          liveChunkTextLength: liveChunkText.length,
           mealCount: meals.length,
         };
 
@@ -640,7 +622,8 @@ const scenario: VerificationScenario = {
         const evidence = {
           donePayload,
           assistantCount: assistantMsgs.length,
-          fallbackContent,
+          projectedReplyMatched: /已記錄測試餐點C/.test(fallbackContent),
+          projectedReplyTextLength: fallbackContent.length,
           mealKept,
           mealCount: meals.length,
         };

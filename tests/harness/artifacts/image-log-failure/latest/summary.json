@@ -1,0 +1,23 @@
+{
+  "scenarioName": "image-log-failure",
+  "ok": true,
+  "consoleSummary": "PASS image-log-failure 13/13",
+  "totalSteps": 13,
+  "passedSteps": 13,
+  "stepNames": [
+    "sub_a_analysis_fail_post_chat",
+    "sub_a_analysis_fail_sse_terminal_contract",
+    "sub_a_analysis_fail_route_upload_cleanup",
+    "sub_a_analysis_fail_assert",
+    "verify_llm_trace",
+    "sub_b_tool_fail_post_chat",
+    "sub_b_tool_fail_sse_terminal_contract",
+    "sub_b_tool_fail_route_upload_cleanup",
+    "sub_b_tool_fail_assert",
+    "sub_c_reply_fail_post_chat",
+    "sub_c_reply_fail_sse_terminal_contract",
+    "sub_c_reply_fail_route_upload_cleanup",
+    "sub_c_reply_fail_assert"
+  ],
+  "writtenAt": "2026-05-16T16:35:42.217Z"
+}

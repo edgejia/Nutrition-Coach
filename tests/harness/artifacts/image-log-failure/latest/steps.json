@@ -1,0 +1,301 @@
+[
+  {
+    "name": "sub_a_analysis_fail_post_chat",
+    "ok": true,
+    "actual": {
+      "status": 200
+    }
+  },
+  {
+    "name": "sub_a_analysis_fail_sse_terminal_contract",
+    "ok": true,
+    "actual": {
+      "closed": true,
+      "firstDoneObserved": true,
+      "firstDoneIndex": 4,
+      "noPostDoneChunkOrStatus": true,
+      "postDoneEventNames": [],
+      "terminalViolationEvents": [],
+      "nonEmptyChunkBeforeDone": true,
+      "readCount": 3,
+      "rawLength": 411
+    }
+  },
+  {
+    "name": "sub_a_analysis_fail_route_upload_cleanup",
+    "ok": true,
+    "actual": {
+      "filesAfterRouteCleanup": [],
+      "cleanupLogSeen": true,
+      "attempts": 1,
+      "checkedBeforeScenarioClose": true
+    }
+  },
+  {
+    "name": "sub_a_analysis_fail_assert",
+    "ok": true,
+    "actual": {
+      "donePayload": {
+        "turnId": "694f7c46-515c-4d5a-94be-06b8a07da839",
+        "didLogMeal": false,
+        "didMutateMeal": false
+      },
+      "liveChunkEvidence": {
+        "chunkCount": 1,
+        "nonEmptyChunkCount": 1,
+        "eventSequence": [
+          "start",
+          "status",
+          "status",
+          "chunk",
+          "done"
+        ],
+        "firstNonEmptyChunkIndex": 3,
+        "firstDoneIndex": 4,
+        "nonEmptyChunkBeforeDone": true
+      },
+      "falseLogChunkClaim": false,
+      "assistantCount": 1,
+      "fallbackMatchedFriendly": true,
+      "fallbackTextLength": 20,
+      "liveChunkTextLength": 20,
+      "mealCount": 0
+    }
+  },
+  {
+    "name": "verify_llm_trace",
+    "ok": true,
+    "actual": {
+      "schemaVersion": "llm-trace.v2",
+      "scenario": "image-log-failure",
+      "status": "pass",
+      "summary": {
+        "roundCount": 1,
+        "toolCount": 0,
+        "fallbackCount": 1,
+        "providerErrorCount": 1,
+        "prompt": {
+          "version": "system-prompt.v2",
+          "sectionIds": [
+            "role",
+            "daily-targets",
+            "intake-context",
+            "responsibilities",
+            "meal-itemization",
+            "protein-estimation",
+            "log-food-receipt",
+            "goal-updates",
+            "meal-corrections",
+            "historical-dates"
+          ]
+        },
+        "finalReply": {
+          "source": "fallback",
+          "shape": "fallback_text"
+        },
+        "latencyMs": 8
+      },
+      "timeline": [
+        {
+          "type": "llm_round_start",
+          "round": 1
+        },
+        {
+          "type": "llm_error",
+          "round": 1,
+          "providerMetadata": {
+            "provider": "openai",
+            "operation": "chat",
+            "model": "gpt-image-trace-fixture",
+            "aborted": false,
+            "status": 429,
+            "providerRequestId": "req_image_trace_fixture",
+            "errorName": "RateLimitError",
+            "errorType": "rate_limit_exceeded",
+            "errorCode": "rate_limit"
+          }
+        },
+        {
+          "type": "orchestrator_fallback",
+          "reason": "llm_error",
+          "round": 1,
+          "providerMetadata": {
+            "provider": "openai",
+            "operation": "chat",
+            "model": "gpt-image-trace-fixture",
+            "aborted": false,
+            "status": 429,
+            "providerRequestId": "req_image_trace_fixture",
+            "errorName": "RateLimitError",
+            "errorType": "rate_limit_exceeded",
+            "errorCode": "rate_limit"
+          }
+        },
+        {
+          "type": "route_fallback",
+          "transport": "sse",
+          "turnId": "694f7c46-515c-4d5a-94be-06b8a07da839",
+          "fallbackSource": "orchestrator",
+          "didLogMeal": false,
+          "didMutateMeal": false,
+          "reason": "llm_error",
+          "providerMetadata": {
+            "provider": "openai",
+            "operation": "chat",
+            "model": "gpt-image-trace-fixture",
+            "aborted": false,
+            "status": 429,
+            "providerRequestId": "req_image_trace_fixture",
+            "errorName": "RateLimitError",
+            "errorType": "rate_limit_exceeded",
+            "errorCode": "rate_limit"
+          },
+          "round": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "sub_b_tool_fail_post_chat",
+    "ok": true,
+    "actual": {
+      "status": 200
+    }
+  },
+  {
+    "name": "sub_b_tool_fail_sse_terminal_contract",
+    "ok": true,
+    "actual": {
+      "closed": true,
+      "firstDoneObserved": true,
+      "firstDoneIndex": 5,
+      "noPostDoneChunkOrStatus": true,
+      "postDoneEventNames": [],
+      "terminalViolationEvents": [],
+      "nonEmptyChunkBeforeDone": true,
+      "readCount": 3,
+      "rawLength": 504
+    }
+  },
+  {
+    "name": "sub_b_tool_fail_route_upload_cleanup",
+    "ok": true,
+    "actual": {
+      "filesAfterRouteCleanup": [],
+      "cleanupLogSeen": true,
+      "attempts": 1,
+      "checkedBeforeScenarioClose": true
+    }
+  },
+  {
+    "name": "sub_b_tool_fail_assert",
+    "ok": true,
+    "actual": {
+      "donePayload": {
+        "turnId": "a07846b1-257e-466e-a4d8-451b3049fc62",
+        "didLogMeal": false,
+        "didMutateMeal": false
+      },
+      "liveChunkEvidence": {
+        "chunkCount": 1,
+        "nonEmptyChunkCount": 1,
+        "eventSequence": [
+          "start",
+          "status",
+          "status",
+          "status",
+          "chunk",
+          "done"
+        ],
+        "firstNonEmptyChunkIndex": 4,
+        "firstDoneIndex": 5,
+        "nonEmptyChunkBeforeDone": true
+      },
+      "falseLogChunkClaim": false,
+      "assistantCount": 1,
+      "fallbackMatchedUnified": true,
+      "fallbackTextLength": 23,
+      "liveChunkTextLength": 23,
+      "mealCount": 0
+    }
+  },
+  {
+    "name": "sub_c_reply_fail_post_chat",
+    "ok": true,
+    "actual": {
+      "status": 200
+    }
+  },
+  {
+    "name": "sub_c_reply_fail_sse_terminal_contract",
+    "ok": true,
+    "actual": {
+      "closed": true,
+      "firstDoneObserved": true,
+      "firstDoneIndex": 5,
+      "noPostDoneChunkOrStatus": true,
+      "postDoneEventNames": [],
+      "terminalViolationEvents": [],
+      "nonEmptyChunkBeforeDone": true,
+      "readCount": 4,
+      "rawLength": 1039
+    }
+  },
+  {
+    "name": "sub_c_reply_fail_route_upload_cleanup",
+    "ok": true,
+    "actual": {
+      "filesAfterRouteCleanup": [],
+      "cleanupLogSeen": true,
+      "attempts": 1,
+      "checkedBeforeScenarioClose": true
+    }
+  },
+  {
+    "name": "sub_c_reply_fail_assert",
+    "ok": true,
+    "actual": {
+      "donePayload": {
+        "turnId": "96d28d14-c5e2-4f48-94f0-13e720f4c74a",
+        "didLogMeal": true,
+        "didMutateMeal": true,
+        "loggedMeal": {
+          "mealId": "f1d8e2f3-b9e5-4b0b-ad85-4a564d3a56fd",
+          "dateKey": "2026-05-17",
+          "loggedAt": "2026-05-16T16:35:42.210Z",
+          "imageAssetId": "c8fcfa81-3f83-41ea-8981-ccfdc51c76e5",
+          "imageUrl": "/api/assets/c8fcfa81-3f83-41ea-8981-ccfdc51c76e5",
+          "foodName": "測試餐點C",
+          "itemCount": 1,
+          "calories": 300,
+          "protein": 0,
+          "carbs": 40,
+          "fat": 8,
+          "items": [
+            {
+              "name": "測試餐點C",
+              "position": 1,
+              "calories": 300,
+              "protein": 0,
+              "carbs": 40,
+              "fat": 8
+            }
+          ]
+        },
+        "dailySummary": {
+          "totalCalories": 300,
+          "totalProtein": 0,
+          "totalCarbs": 40,
+          "totalFat": 8,
+          "mealCount": 1,
+          "date": "2026-05-17"
+        }
+      },
+      "assistantCount": 1,
+      "projectedReplyMatched": true,
+      "projectedReplyTextLength": 38,
+      "mealKept": true,
+      "mealCount": 1
+    }
+  }
+]
