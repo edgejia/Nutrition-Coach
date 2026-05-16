@@ -34,10 +34,17 @@
 **Plans:** 0/5 plans complete
 
 Plans:
+**Wave 1**
 - [ ] 59-01-PLAN.md — Shared deterministic summary/history renderer and advice guard
-- [ ] 59-02-PLAN.md — Orchestrator plain-reply composition from persisted facts
-- [ ] 59-03-PLAN.md — JSON, drained-stream, and live SSE route wiring
 - [ ] 59-04-PLAN.md — Through-close SSE terminal proof and structured artifacts
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 59-02-PLAN.md — Orchestrator plain-reply composition from persisted facts
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 59-03-PLAN.md — JSON, drained-stream, and live SSE route wiring
+
+**Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 59-05-PLAN.md — Local release-check closure gate with no promotion
 
 **Success Criteria** (what must be TRUE):
