@@ -71,3 +71,22 @@ No staging/main promotion, deployment, merge, push, fast-forward, or rebase occu
 ## Task 2 Status
 
 PASS. Structured-only artifact evidence and the local-only release boundary are documented.
+
+## Post-Review Fix Addendum
+
+After the required code review gate found two blocking issues, Phase 59 added scoped regression coverage and fixes for:
+
+- preserving safe summary/history advice already accepted by renderer-owned orchestrator replies in JSON and SSE direct-result route paths;
+- including the year in cross-year summary/history date labels.
+
+Commands rerun after those fixes:
+
+| Gate | Command | Result | Evidence |
+|------|---------|--------|----------|
+| Targeted review regressions | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/summary-history-renderer.test.ts tests/integration/chat-api.test.ts` | PASS | 79 tests, 2 suites, 0 failures. The new RED tests failed before implementation and passed after the fix. |
+| Targeted integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/chat-api.test.ts tests/integration/chat-streaming.test.ts` | PASS | 121 tests, 2 suites, 0 failures. |
+| TypeScript | `yarn tsc --noEmit` | PASS | `Done in 4.75s.` |
+| Code review re-check | `gsd-code-reviewer` standard review | PASS | `59-REVIEW.md` status is `clean` with 0 findings. |
+| Local release gate | `yarn release:check` | PASS | Release check ran TypeScript, full unit/integration suite, and frontend build; 998 tests passed; final line `[release-check] PASS`. |
+
+The post-review `yarn release:check` remains local proof only and is not permission to promote.

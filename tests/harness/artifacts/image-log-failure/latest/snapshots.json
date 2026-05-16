@@ -7,12 +7,12 @@
     "postDoneEventNames": [],
     "terminalViolationEvents": [],
     "nonEmptyChunkBeforeDone": true,
-    "readCount": 4,
+    "readCount": 3,
     "rawLength": 411
   },
   "sub_a_analysis_fail": {
     "donePayload": {
-      "turnId": "f0629212-cf3c-4668-91a1-7482d0e975c2",
+      "turnId": "9daf7d6e-e2b0-4220-8786-a76bd936dd17",
       "didLogMeal": false,
       "didMutateMeal": false
     },
@@ -51,12 +51,12 @@
     "postDoneEventNames": [],
     "terminalViolationEvents": [],
     "nonEmptyChunkBeforeDone": true,
-    "readCount": 4,
+    "readCount": 3,
     "rawLength": 504
   },
   "sub_b_tool_fail": {
     "donePayload": {
-      "turnId": "93aba47b-a5d8-434b-a9de-8d20a0cfd1d5",
+      "turnId": "3f8346f4-a53f-4211-ba93-b2de8b2eda01",
       "didLogMeal": false,
       "didMutateMeal": false
     },
@@ -101,15 +101,15 @@
   },
   "sub_c_reply_fail": {
     "donePayload": {
-      "turnId": "63a1cbcb-c212-4370-ac5a-676816d45531",
+      "turnId": "2376074c-e4e5-49b3-91a2-4cfb2c010142",
       "didLogMeal": true,
       "didMutateMeal": true,
       "loggedMeal": {
-        "mealId": "4343d7e3-781b-48e8-8bc3-fee524d3bac7",
+        "mealId": "750dbf33-c04b-4009-8123-ae0d64c40fb9",
         "dateKey": "2026-05-17",
-        "loggedAt": "2026-05-16T17:08:23.373Z",
-        "imageAssetId": "38641a64-5565-44bd-8d2b-9f1570410b92",
-        "imageUrl": "/api/assets/38641a64-5565-44bd-8d2b-9f1570410b92",
+        "loggedAt": "2026-05-16T17:09:59.609Z",
+        "imageAssetId": "60dfd1dc-2d6c-496b-aa4c-206a678abdc8",
+        "imageUrl": "/api/assets/60dfd1dc-2d6c-496b-aa4c-206a678abdc8",
         "foodName": "測試餐點C",
         "itemCount": 1,
         "calories": 300,
