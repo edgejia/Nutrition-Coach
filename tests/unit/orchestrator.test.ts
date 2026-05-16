@@ -262,6 +262,14 @@ describe("orchestrator shared patterns", () => {
       "今天已記錄 2 餐，共 900 kcal。",
     );
 
+    const dayTotalAsSingleMeal = guardNoMutationLoggingClaim(
+      "今天已記錄雞胸肉，900 kcal。",
+      false,
+      false,
+      facts,
+    );
+    assert.doesNotMatch(dayTotalAsSingleMeal, /已記錄雞胸肉|900 kcal/);
+
     const wrongCount = guardNoMutationLoggingClaim("今天已記錄 3 餐，共 900 kcal。", false, false, facts);
     assert.doesNotMatch(wrongCount, /今天已記錄 3 餐/);
 
@@ -275,6 +283,14 @@ describe("orchestrator shared patterns", () => {
       facts,
     );
     assert.doesNotMatch(aggregateWithWrongMeal, /牛肉飯/);
+
+    const aggregateWithMatchingMeal = guardNoMutationLoggingClaim(
+      "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉。",
+      false,
+      false,
+      facts,
+    );
+    assert.equal(aggregateWithMatchingMeal, "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉。");
   });
 });
 
