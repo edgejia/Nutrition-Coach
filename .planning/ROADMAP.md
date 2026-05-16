@@ -31,11 +31,11 @@
 
 **Requirements:** AUTH-01, AUTH-02, AUTH-03, AUTH-04, STREAM-01, STREAM-02, STREAM-03
 
-**Plans:** 0/5 plans complete
+**Plans:** 1/5 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 59-01-PLAN.md — Shared deterministic summary/history renderer and advice guard
+- [x] 59-01-PLAN.md — Shared deterministic summary/history renderer and advice guard
 - [ ] 59-04-PLAN.md — Through-close SSE terminal proof and structured artifacts
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -72,7 +72,7 @@ Plans:
 | 56. Provider Metadata and Orchestrator Hook Plumbing | v2.2 | 4/4 | Complete | 2026-05-14 |
 | 57. Fallback Event Semantics and Trace v2 Schema | v2.2 | 6/6 | Complete | 2026-05-15 |
 | 58. Localization Proof and Release Gate | v2.2 | 4/4 | Complete | 2026-05-15 |
-| 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 0/5 | Planned next | — |
+| 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 1/5 | In Progress|  |
 
 ## Future Milestone Candidates
 

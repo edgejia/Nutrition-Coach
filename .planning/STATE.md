@@ -3,32 +3,32 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: LLM Failure Localization Foundation
 status: executing
-stopped_at: Completed quick task 260516-ppf
-last_updated: "2026-05-16T16:21:03.453Z"
-last_activity: 2026-05-16 -- Phase 59 planning complete
+stopped_at: Completed 59-01-PLAN.md
+last_updated: "2026-05-16T16:30:37.461Z"
+last_activity: 2026-05-16
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 5
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 20
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: Milestone v2.2 complete
-Plan: —
+Phase: 59 (authoritative-summary-facts-and-sse-proof) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-05-16 -- Phase 59 planning complete
+Last activity: 2026-05-16
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-05-16)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Planning next milestone
+**Current focus:** Phase 59 — authoritative-summary-facts-and-sse-proof
 
 ## Decisions
 
@@ -60,6 +60,8 @@ See: .planning/PROJECT.md (updated 2026-05-16)
 - [Phase 58]: 58-04: auth fallback reply and SSE chunk text checks stay non-persisted; artifacts store only metadata counts and booleans.
 - [Phase 58]: 58-04: provider-auth-failure-localization uses scenario-local AbortController cleanup rather than changing the shared SSE helper contract.
 - [Phase 58]: 58-04: streamed fallback proof uses streamedFallbackTextLength to avoid ambiguous raw chunk text artifact keys.
+- [Phase 59]: 59-01: Summary/history visible meal count and kcal total are rendered from persisted meal rows when rows exist.
+- [Phase 59]: 59-01: Optional model advice is dropped wholesale when it contains concrete meal names, kcal, macro attribution, meal count, or day-total claims.
 
 ## Performance Metrics
 
@@ -75,6 +77,7 @@ See: .planning/PROJECT.md (updated 2026-05-16)
 | Phase 58 P02 | 5min | 2 tasks | 10 files |
 | Phase 58 P03 | 7min | 2 tasks | 15 files |
 | Phase 58 P04 | 6min | 3 tasks | 7 files |
+| Phase 59 P01 | 3min | 2 tasks | 2 files |
 
 ## Deferred Items
 
@@ -97,8 +100,8 @@ Items acknowledged and deferred at milestone close on 2026-05-15:
 
 ## Session
 
-Last session: 2026-05-16T10:58:52Z
-Stopped At: Completed quick task 260516-ppf
+Last session: 2026-05-16T16:30:34.325Z
+Stopped At: Completed 59-01-PLAN.md
 Resume File: None
 
 ## Operator Next Steps
