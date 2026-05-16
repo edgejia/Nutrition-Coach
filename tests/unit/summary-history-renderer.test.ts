@@ -81,6 +81,22 @@ describe("summary/history deterministic fact renderer", () => {
     );
   });
 
+  it("includes the year for cross-year summary/history dates", () => {
+    assert.equal(
+      renderSummaryHistoryFacts(
+        {
+          dailySummary: {
+            ...mismatchedSummary,
+            date: "2025-03-25",
+          },
+          meals: [{ foodName: "豆腐飯", calories: 520 }],
+        },
+        { currentDate: new Date("2026-05-17T12:00:00+08:00") },
+      ),
+      "2025/3/25已記錄 1 餐，共 520 kcal：豆腐飯 520 kcal。",
+    );
+  });
+
   it("uses persisted meal row count when aggregate meal count disagrees", () => {
     const text = renderSummaryHistoryFacts(twoMealFacts);
 
