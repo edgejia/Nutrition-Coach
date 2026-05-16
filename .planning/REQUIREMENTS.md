@@ -1,38 +1,105 @@
-# Requirements: Nutrition Coach v2.2 Promotion Blocker Reopen
+# Requirements: Nutrition Coach v2.3 Authoritative Mutation Outcomes and Fresh Meal State
 
-## Phase 59 Requirements
+**Defined:** 2026-05-17
+**Core Value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
 
-## Completion Tracking
+## v2.3 Requirements
 
-- [x] **AUTH-01** Backend summary/history replies use persisted meal records as the authoritative source.
-- [x] **AUTH-02** Aggregate daily totals cannot authorize invented meal names or wrong per-meal attribution.
-- [x] **AUTH-03** Summary/history replies are split into deterministic fact text plus optional advice.
-- [x] **AUTH-04** Optional LLM advice cannot introduce concrete persisted facts.
-- [x] **STREAM-01** SSE proof drains through stream close instead of stopping at the first `event: done`.
-- [x] **STREAM-02** SSE proof fails if any `chunk` or `status` frame appears after the first `done`.
-- [x] **STREAM-03** Harness artifacts store structured SSE proof metadata, not raw frame transcripts.
+Requirements for the v2.3 P1 data-integrity milestone. Each requirement must map to exactly one roadmap phase.
 
-| ID | Phase | Requirement | Acceptance |
-|----|-------|-------------|------------|
-| AUTH-01 | Phase 59 | Backend summary/history replies use persisted meal records as the authoritative source for meal names, meal count, day total kcal, and per-meal kcal. | Fake meal names such as `牛肉飯` or `滷肉飯` cannot appear in final replies unless they exist in persisted facts. |
-| AUTH-02 | Phase 59 | Aggregate daily totals cannot authorize invented meal names or assigning the full day total to one named meal. | With persisted `豆腐飯 520 kcal` and `鮭魚飯 380 kcal`, final replies cannot attribute `900 kcal` to `豆腐飯` as a single-meal value. |
-| AUTH-03 | Phase 59 | Summary/history replies are split into deterministic backend-rendered fact text plus optional LLM advice text. | Backend can deterministically render an equivalent of `今天已記錄 2 餐，共 900 kcal：豆腐飯 520 kcal、鮭魚飯 380 kcal。` from persisted facts. |
-| AUTH-04 | Phase 59 | Optional LLM advice cannot introduce concrete persisted meal names, per-meal kcal, macro attribution, meal count, or day total facts. | JSON, SSE, and non-SSE final reply paths use the same fact renderer and advice guard. |
-| STREAM-01 | Phase 59 | SSE proof drains through stream close instead of stopping at the first `event: done`. | The proof records that stream close was observed after `done`. |
-| STREAM-02 | Phase 59 | SSE proof fails if any `chunk` or `status` frame appears after the first `done`. | Targeted harness/test proof detects post-done frames as failures. |
-| STREAM-03 | Phase 59 | Harness artifacts store structured SSE proof metadata, not raw frame transcripts. | Artifacts include fields such as first done observed, stream closed, and no post-done frames, while omitting raw SSE frame transcripts. |
+### Goal Authority
 
-## Source Notes
+- [ ] **GOAL-01**: User can receive a concrete goal-change proposal without mutating daily targets until the backend persists a structured pending proposal.
+- [ ] **GOAL-02**: User confirmation text such as `好` can update goals only when it confirms a valid backend proposal id or includes explicit current-turn numeric target values.
+- [ ] **GOAL-03**: User cannot apply expired, consumed, mismatched, or missing goal proposals; the backend returns deterministic Traditional Chinese guidance instead.
+- [ ] **GOAL-04**: User sees deterministic backend failure copy after `update_goals` validation or guard rejection, with no target persistence, no `goals_update`, and no LLM-authored success-style text.
 
-- `.planning/todos/pending/v2-2-authoritative-summary-facts-sse-proof.md`
-- `.planning/notes/v2-2-authoritative-summary-facts-acceptance.md`
-- `.planning/notes/v2-2-post-review-blocker-reopened.md`
+### Mutation Outcomes
+
+- [ ] **MUT-01**: User receives a committed log receipt when meal logging persists even if daily summary recompute or publish fails.
+- [ ] **MUT-02**: User receives a committed update receipt when meal editing persists even if daily summary recompute or publish fails.
+- [ ] **MUT-03**: User receives a committed delete receipt when meal deletion persists even if daily summary recompute or publish fails.
+- [ ] **MUT-04**: Direct meal `PATCH` / `DELETE` routes distinguish committed mutation facts from degraded or failed summary refresh status.
+
+### Meal Freshness
+
+- [ ] **FRESH-01**: User-facing meal and chat receipt DTOs carry current meal revision identity for edit-capable receipts.
+- [ ] **FRESH-02**: User cannot overwrite newer meal facts from an older chat receipt; stale expected revisions are rejected without mutation.
+- [ ] **FRESH-03**: User sees deterministic stale-record guidance and the client refreshes or invalidates affected meal rows after a stale receipt conflict.
+
+### Realtime Consistency
+
+- [ ] **REAL-01**: Same-day `daily_summary` SSE events include enough freshness metadata for clients to refresh or invalidate meal rows.
+- [ ] **REAL-02**: Home/Summary state cannot accept newer daily totals while leaving visible same-day meal rows stale without marking or refreshing them.
+- [ ] **REAL-03**: Malformed, stale-date, or historical `daily_summary` events preserve existing date guards and do not overwrite current-day rows incorrectly.
+
+### Proof & Privacy
+
+- [ ] **PROOF-01**: Targeted unit and integration tests prove goal proposal authority, deterministic failed goal copy, summary-failure committed outcomes, stale receipt rejection, and SSE meal-row freshness.
+- [ ] **PROOF-02**: Integrity proof remains metadata-only and does not persist raw prompts, user text, assistant final text, tool payloads, provider bodies, image data, session material, or database snapshots.
+- [ ] **PROOF-03**: Local closure runs `yarn tsc --noEmit` and `yarn release:check`, with no staging or main promotion.
+
+## Future Requirements
+
+Deferred to future releases. Tracked but not in current roadmap.
+
+### Product Polish
+
+- **POLISH-01**: User can track water intake from the primary logging flow.
+- **POLISH-02**: User can browse monthly nutrition history beyond the current v2.3 freshness scope.
+- **POLISH-03**: User sees refined onboarding animation and motion polish after P1 integrity issues are closed.
+
+### Forensics and Metrics
+
+- **TRACE-01**: Maintainer can opt into user-flagged semantic failure capture after trigger, retention, storage, privacy, and access-control decisions are made.
+- **TRACE-02**: Maintainer can use local-only raw debugger tooling under the existing default-off raw debugger decision.
+- **TRACE-03**: Maintainer can review metadata-only production trace sampling and aggregate failure metrics after integrity fixes ship.
 
 ## Out of Scope
 
-- Goal proposal confirmation, failed `update_goals` outcome rendering, stale chat receipts, and cross-tab meal row invalidation.
-- Product polish backlog work such as water tracking, monthly history, onboarding animation, or motion system work.
-- Promotion to `staging` or `main`.
+Explicitly excluded from v2.3. Documented to prevent scope creep.
+
+| Feature | Reason |
+|---------|--------|
+| Staging or main promotion | Promotion requires explicit current-thread approval and belongs to ship workflow, not milestone initialization. |
+| Water tracking | Product-polish backlog item; not required to close P1 data-integrity bugs. |
+| Monthly history | Product-polish backlog item; v2.3 only protects current meal-state freshness and affected-date invalidation. |
+| Onboarding animation | Visual/motion polish; unrelated to mutation authority or stale write prevention. |
+| Motion system | Visual polish; deferred until integrity work is complete. |
+| Broad visual polish | Only deterministic success/failure/stale copy required for integrity closure is in scope. |
+| Raw forensic payload capture | Conflicts with metadata-only trace/privacy contract and is not needed for v2.3. |
+| Inferring goal confirmation from assistant prose | This is the core anti-feature v2.3 must eliminate. |
+| Client-only stale receipt protection | Server-side expected revision checks are required; client redaction alone is insufficient. |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| GOAL-01 | TBD | Pending |
+| GOAL-02 | TBD | Pending |
+| GOAL-03 | TBD | Pending |
+| GOAL-04 | TBD | Pending |
+| MUT-01 | TBD | Pending |
+| MUT-02 | TBD | Pending |
+| MUT-03 | TBD | Pending |
+| MUT-04 | TBD | Pending |
+| FRESH-01 | TBD | Pending |
+| FRESH-02 | TBD | Pending |
+| FRESH-03 | TBD | Pending |
+| REAL-01 | TBD | Pending |
+| REAL-02 | TBD | Pending |
+| REAL-03 | TBD | Pending |
+| PROOF-01 | TBD | Pending |
+| PROOF-02 | TBD | Pending |
+| PROOF-03 | TBD | Pending |
+
+**Coverage:**
+- v2.3 requirements: 17 total
+- Mapped to phases: 0
+- Unmapped: 17
 
 ---
-*Created: 2026-05-16 for reopened v2.2 promotion blocker planning*
+*Requirements defined: 2026-05-17*
+*Last updated: 2026-05-17 after v2.3 requirements definition*
