@@ -4,10 +4,10 @@
 
 ## Completion Tracking
 
-- [ ] **AUTH-01** Backend summary/history replies use persisted meal records as the authoritative source.
-- [ ] **AUTH-02** Aggregate daily totals cannot authorize invented meal names or wrong per-meal attribution.
-- [ ] **AUTH-03** Summary/history replies are split into deterministic fact text plus optional advice.
-- [ ] **AUTH-04** Optional LLM advice cannot introduce concrete persisted facts.
+- [x] **AUTH-01** Backend summary/history replies use persisted meal records as the authoritative source.
+- [x] **AUTH-02** Aggregate daily totals cannot authorize invented meal names or wrong per-meal attribution.
+- [x] **AUTH-03** Summary/history replies are split into deterministic fact text plus optional advice.
+- [x] **AUTH-04** Optional LLM advice cannot introduce concrete persisted facts.
 - [x] **STREAM-01** SSE proof drains through stream close instead of stopping at the first `event: done`.
 - [x] **STREAM-02** SSE proof fails if any `chunk` or `status` frame appears after the first `done`.
 - [x] **STREAM-03** Harness artifacts store structured SSE proof metadata, not raw frame transcripts.

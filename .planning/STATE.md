@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: LLM Failure Localization Foundation
 status: executing
-stopped_at: Completed 59-04-PLAN.md
-last_updated: "2026-05-16T16:37:47.959Z"
+stopped_at: Completed 59-02-PLAN.md
+last_updated: "2026-05-16T16:44:02.788Z"
 last_activity: 2026-05-16
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
-  percent: 40
+  completed_plans: 3
+  percent: 60
 ---
 
 # Project State
@@ -19,7 +19,7 @@ progress:
 ## Current Position
 
 Phase: 59 (authoritative-summary-facts-and-sse-proof) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-05-16
 
@@ -65,6 +65,8 @@ See: .planning/PROJECT.md (updated 2026-05-16)
 - [Phase 59]: 59-04: SSE terminal proof uses readStreamThroughClose plus assertSSETerminalProof as the promotion-blocking contract.
 - [Phase 59]: 59-04: Generated image-log-failure artifacts persist terminal proof booleans/counts/event names, not raw SSE frame transcripts or token text.
 - [Phase 59]: 59-04: Raw SSE artifact keys are omitted by normalized key matching, including rawSSE/rawSse variants.
+- [Phase 59]: Plain orchestrator replies after get_daily_summary are renderer-owned when summaryHistoryFacts are available. — Summary/history final text must come from persisted facts, with model text treated only as optional advice.
+- [Phase 59]: SummaryHistoryFacts remains re-exported from the orchestrator module to preserve existing route type imports. — This keeps Task 2 scoped to orchestrator files while preserving existing route compile-time contracts.
 
 ## Performance Metrics
 
@@ -82,6 +84,7 @@ See: .planning/PROJECT.md (updated 2026-05-16)
 | Phase 58 P04 | 6min | 3 tasks | 7 files |
 | Phase 59 P01 | 3min | 2 tasks | 2 files |
 | Phase 59 P04 | 5min | 3 tasks | 10 files |
+| Phase 59 P02 | 3min | 2 tasks | 2 files |
 
 ## Deferred Items
 
@@ -104,8 +107,8 @@ Items acknowledged and deferred at milestone close on 2026-05-15:
 
 ## Session
 
-Last session: 2026-05-16T16:37:47.951Z
-Stopped At: Completed 59-04-PLAN.md
+Last session: 2026-05-16T16:43:34.701Z
+Stopped At: Completed 59-02-PLAN.md
 Resume File: None
 
 ## Operator Next Steps
