@@ -118,6 +118,15 @@ const PROVIDER_METADATA_KEYS = [
   "status",
 ];
 
+const canonicalSummaryText = "今天已記錄 2 餐，共 900 kcal：豆腐飯 520 kcal、鮭魚飯 380 kcal。";
+const unsafeSummaryFactPattern = /牛肉飯|滷肉飯|豆腐飯 900 kcal/;
+
+async function* streamTokens(tokens: string[]): AsyncGenerator<string> {
+  for (const token of tokens) {
+    yield token;
+  }
+}
+
 class JsonHallucinationStreamProvider implements LLMProvider {
   public chatCalls: Array<{ messages: ChatMessage[]; tools: ToolDefinition[] }> = [];
 
@@ -383,6 +392,132 @@ describe("Chat API", () => {
     const assistant = [...history].reverse().find((message) => message.role === "assistant");
     assert.ok(assistant);
     assert.equal(assistant.content, "今天已記錄 2 餐，共 900 kcal。");
+  });
+
+  it("POST /api/chat JSON composes summary/history replies from persisted meal facts", async () => {
+    assert.ok(services, "expected app services");
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 380,
+      protein: 30,
+      carbs: 42,
+      fat: 12,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_route_summary_canonical_json",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯和滷肉飯，豆腐飯 900 kcal。" });
+
+    const form = new FormData();
+    form.append("message", "今天吃了什麼？");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: { mealCount?: number; totalCalories?: number };
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.dailySummary?.mealCount, 2);
+    assert.equal(body.dailySummary?.totalCalories, 900);
+    assert.equal(body.reply, canonicalSummaryText);
+    assert.doesNotMatch(body.reply ?? "", unsafeSummaryFactPattern);
+
+    const history = await services.chatService.getHistory(deviceId, 10);
+    const assistant = [...history].reverse().find((message) => message.role === "assistant");
+    assert.ok(assistant);
+    assert.equal(assistant.content, canonicalSummaryText);
+    assert.doesNotMatch(assistant.content, unsafeSummaryFactPattern);
+  });
+
+  it("POST /api/chat JSON drains stream summary/history replies through the shared composition boundary", async () => {
+    assert.ok(services, "expected app services");
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 380,
+      protein: 30,
+      carbs: 42,
+      fat: 12,
+    });
+    const dailySummary = await services.summaryService.getDailySummary(deviceId, new Date());
+    const originalHandleMessage = services.orchestrator.handleMessage.bind(services.orchestrator);
+    services.orchestrator.handleMessage = async (requestDeviceId, userMessage, _imageBase64, _assetRef, opts) => {
+      await services!.chatService.saveMessage(requestDeviceId, "user", userMessage);
+      opts?.onUserMessageSaved?.();
+      return {
+        streamGenerator: streamTokens(["今天已記錄 2 餐，", "共 900 kcal，", "其中包含牛肉飯和滷肉飯，豆腐飯 900 kcal。"]),
+        didLogMeal: false,
+        didMutateMeal: false,
+        dailySummary,
+        summaryHistoryFacts: {
+          dailySummary,
+          meals: [
+            { foodName: "豆腐飯", calories: 520 },
+            { foodName: "鮭魚飯", calories: 380 },
+          ],
+        },
+      };
+    };
+
+    try {
+      const form = new FormData();
+      form.append("message", "今天吃了什麼？");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        reply?: string;
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: { mealCount?: number; totalCalories?: number };
+      };
+      assert.equal(body.didLogMeal, false);
+      assert.equal(body.didMutateMeal, false);
+      assert.equal(body.dailySummary?.mealCount, 2);
+      assert.equal(body.dailySummary?.totalCalories, 900);
+      assert.equal(body.reply, canonicalSummaryText);
+      assert.doesNotMatch(body.reply ?? "", unsafeSummaryFactPattern);
+
+      const history = await services.chatService.getHistory(deviceId, 10);
+      const assistant = [...history].reverse().find((message) => message.role === "assistant");
+      assert.ok(assistant);
+      assert.equal(assistant.content, canonicalSummaryText);
+      assert.doesNotMatch(assistant.content, unsafeSummaryFactPattern);
+    } finally {
+      services.orchestrator.handleMessage = originalHandleMessage;
+    }
   });
 
   it("POST /api/chat JSON rejects assigning the daily summary total to one persisted meal", async () => {
