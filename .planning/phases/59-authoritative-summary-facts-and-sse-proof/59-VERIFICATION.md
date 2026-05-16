@@ -38,3 +38,36 @@ No staging/main promotion, deployment, merge, push, fast-forward, or rebase was 
 ## Task 1 Status
 
 PASS. Final local coverage, harness, TypeScript, and release-check commands all exited 0 and are recorded above verbatim.
+
+## Structured Artifact Boundary
+
+Command:
+
+```bash
+grep -R -E 'rawSSE|rawSse|sseTranscript|streamFrames|event: chunk|event: status|"token"' tests/harness/artifacts/image-log-failure/latest && exit 1 || exit 0
+```
+
+Result: PASS. The command exited 0 with no output, proving the latest generated `image-log-failure` artifacts contain no raw SSE transcript, raw frame, visible `event: chunk` / `event: status`, or `"token"` field matches.
+
+## Final Scope Check
+
+Command:
+
+```bash
+git status --short
+```
+
+Recorded output after Task 1 commit and before this Task 2 documentation append:
+
+```text
+```
+
+Result: PASS. The working tree was clean after the final local verification and generated evidence commit. This section is the only Task 2 follow-up edit.
+
+## No-Promotion Boundary
+
+No staging/main promotion, deployment, merge, push, fast-forward, or rebase occurred. `yarn release:check` remains local proof only and is not permission to promote.
+
+## Task 2 Status
+
+PASS. Structured-only artifact evidence and the local-only release boundary are documented.
