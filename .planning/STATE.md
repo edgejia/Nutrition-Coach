@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: LLM Failure Localization Foundation
 status: executing
-stopped_at: Completed 59-01-PLAN.md
-last_updated: "2026-05-16T16:30:37.461Z"
+stopped_at: Completed 59-04-PLAN.md
+last_updated: "2026-05-16T16:37:47.959Z"
 last_activity: 2026-05-16
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
-  percent: 20
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State
@@ -19,7 +19,7 @@ progress:
 ## Current Position
 
 Phase: 59 (authoritative-summary-facts-and-sse-proof) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-05-16
 
@@ -62,6 +62,9 @@ See: .planning/PROJECT.md (updated 2026-05-16)
 - [Phase 58]: 58-04: streamed fallback proof uses streamedFallbackTextLength to avoid ambiguous raw chunk text artifact keys.
 - [Phase 59]: 59-01: Summary/history visible meal count and kcal total are rendered from persisted meal rows when rows exist.
 - [Phase 59]: 59-01: Optional model advice is dropped wholesale when it contains concrete meal names, kcal, macro attribution, meal count, or day-total claims.
+- [Phase 59]: 59-04: SSE terminal proof uses readStreamThroughClose plus assertSSETerminalProof as the promotion-blocking contract.
+- [Phase 59]: 59-04: Generated image-log-failure artifacts persist terminal proof booleans/counts/event names, not raw SSE frame transcripts or token text.
+- [Phase 59]: 59-04: Raw SSE artifact keys are omitted by normalized key matching, including rawSSE/rawSse variants.
 
 ## Performance Metrics
 
@@ -78,6 +81,7 @@ See: .planning/PROJECT.md (updated 2026-05-16)
 | Phase 58 P03 | 7min | 2 tasks | 15 files |
 | Phase 58 P04 | 6min | 3 tasks | 7 files |
 | Phase 59 P01 | 3min | 2 tasks | 2 files |
+| Phase 59 P04 | 5min | 3 tasks | 10 files |
 
 ## Deferred Items
 
@@ -100,10 +104,10 @@ Items acknowledged and deferred at milestone close on 2026-05-15:
 
 ## Session
 
-Last session: 2026-05-16T16:30:34.325Z
-Stopped At: Completed 59-01-PLAN.md
+Last session: 2026-05-16T16:37:47.951Z
+Stopped At: Completed 59-04-PLAN.md
 Resume File: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Continue Phase 59 with 59-02-PLAN.md.
