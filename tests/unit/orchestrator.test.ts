@@ -1335,6 +1335,128 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.reply, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
   });
 
+  it("composes summary history replies from persisted meal facts instead of unsafe model facts", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 380,
+      protein: 28,
+      carbs: 42,
+      fat: 12,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_renderer_unsafe",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄牛肉飯，900 kcal。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "今天吃了什麼？");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.match(result.reply, /豆腐飯 520 kcal/);
+    assert.match(result.reply, /鮭魚飯 380 kcal/);
+    assert.match(result.reply, /今天已記錄 2 餐，共 900 kcal/);
+    assert.doesNotMatch(result.reply, /牛肉飯/);
+  });
+
+  it("appends safe generic advice after deterministic summary history facts", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 380,
+      protein: 28,
+      carbs: 42,
+      fat: 12,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_renderer_advice",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "可以保持清淡，晚餐多補水。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "今天記錄摘要");
+
+    assert.ok("reply" in result);
+    assert.equal(
+      result.reply,
+      "今天已記錄 2 餐，共 900 kcal：豆腐飯 520 kcal、鮭魚飯 380 kcal。\n\n可以保持清淡，晚餐多補水。",
+    );
+  });
+
+  it("renders empty summary history days without no-mutation fallback copy", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_renderer_empty",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄牛肉飯，900 kcal。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "今天有吃東西嗎？");
+
+    assert.ok("reply" in result);
+    assert.match(result.reply, /今天已記錄 0 餐，共 0 kcal/);
+    assert.doesNotMatch(result.reply, /我還沒有把這餐寫入紀錄/);
+    assert.doesNotMatch(result.reply, /牛肉飯|900 kcal/);
+  });
+
+  it("marks summary history plain replies as renderer owned", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐飯",
+      calories: 520,
+      protein: 24,
+      carbs: 70,
+      fat: 14,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_renderer_metadata",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "可以保持清淡。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "今天摘要");
+
+    assert.ok("reply" in result);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+  });
+
   it("returns a renderer goal receipt instead of streaming model prefix/suffix text", async () => {
     const streamingLLM = new StreamingLLMProvider();
     const db = createDb(":memory:");
