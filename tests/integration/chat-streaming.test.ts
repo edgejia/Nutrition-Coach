@@ -2163,7 +2163,7 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat summary-context stream replaces false no-mutation logging text before visible chunks", async () => {
+  it("POST /api/chat summary-context stream preserves empty-day summary semantics before visible chunks", async () => {
     mockLLM.queueRoundResponse({
       toolCalls: [{
         id: "call_streaming_summary_false_log",
@@ -2201,12 +2201,15 @@ describe("chat-streaming", () => {
       const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
         didLogMeal?: boolean;
         didMutateMeal?: boolean;
+        dailySummary?: { mealCount?: number; totalCalories?: number };
       };
 
       assert.equal(donePayload.didLogMeal, false);
       assert.equal(donePayload.didMutateMeal, false);
-      assert.equal(chunkText, "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。");
-      assert.doesNotMatch(chunkText, /今天已記錄牛肉飯|已記錄牛肉飯|牛肉飯，650 kcal|今天已記錄/);
+      assert.equal(donePayload.dailySummary?.mealCount, 0);
+      assert.equal(donePayload.dailySummary?.totalCalories, 0);
+      assert.equal(chunkText, "今天已記錄 0 餐，共 0 kcal。");
+      assert.doesNotMatch(chunkText, /今天已記錄牛肉飯|已記錄牛肉飯|牛肉飯，650 kcal/);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
@@ -2215,7 +2218,8 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
       assert.equal(assistantMsgs[0]!.content, chunkText);
-      assert.doesNotMatch(assistantMsgs[0]!.content, /今天已記錄牛肉飯|已記錄牛肉飯|牛肉飯，650 kcal|今天已記錄/);
+      assert.equal(assistantMsgs[0]!.content, "今天已記錄 0 餐，共 0 kcal。");
+      assert.doesNotMatch(assistantMsgs[0]!.content, /今天已記錄牛肉飯|已記錄牛肉飯|牛肉飯，650 kcal/);
     } finally {
       clearTimeout(timeout);
     }

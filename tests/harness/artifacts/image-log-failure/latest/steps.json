@@ -36,7 +36,7 @@
     "ok": true,
     "actual": {
       "donePayload": {
-        "turnId": "00c4dc75-46cc-4d58-bb41-eed136a7e983",
+        "turnId": "beeb9c8d-d728-47e8-a5e0-b27195e9f744",
         "didLogMeal": false,
         "didMutateMeal": false
       },
@@ -93,7 +93,7 @@
           "source": "fallback",
           "shape": "fallback_text"
         },
-        "latencyMs": 8
+        "latencyMs": 5
       },
       "timeline": [
         {
@@ -134,7 +134,7 @@
         {
           "type": "route_fallback",
           "transport": "sse",
-          "turnId": "00c4dc75-46cc-4d58-bb41-eed136a7e983",
+          "turnId": "beeb9c8d-d728-47e8-a5e0-b27195e9f744",
           "fallbackSource": "orchestrator",
           "didLogMeal": false,
           "didMutateMeal": false,
@@ -192,7 +192,7 @@
     "ok": true,
     "actual": {
       "donePayload": {
-        "turnId": "5ba8023f-d0e2-45a2-ae44-7bcaec5619c4",
+        "turnId": "9c6039b7-478a-4d3a-afac-daf11df0a84f",
         "didLogMeal": false,
         "didMutateMeal": false
       },
@@ -256,15 +256,15 @@
     "ok": true,
     "actual": {
       "donePayload": {
-        "turnId": "33c493f6-39ef-4d23-85b7-c6c35cf0f9c7",
+        "turnId": "63c90772-62b1-46b5-9a7d-60ab272552be",
         "didLogMeal": true,
         "didMutateMeal": true,
         "loggedMeal": {
-          "mealId": "a2121921-42bb-486c-bcb2-d3b68e66ed97",
+          "mealId": "17291396-6353-495f-8d99-fb521e95e86a",
           "dateKey": "2026-05-17",
-          "loggedAt": "2026-05-16T17:21:35.885Z",
-          "imageAssetId": "65c725be-af84-4593-9070-3de3c4ea23e3",
-          "imageUrl": "/api/assets/65c725be-af84-4593-9070-3de3c4ea23e3",
+          "loggedAt": "2026-05-16T17:41:18.829Z",
+          "imageAssetId": "8babc8ac-c2d0-4c76-b525-ba3f0c3240a0",
+          "imageUrl": "/api/assets/8babc8ac-c2d0-4c76-b525-ba3f0c3240a0",
           "foodName": "測試餐點C",
           "itemCount": 1,
           "calories": 300,

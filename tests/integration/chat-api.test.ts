@@ -690,7 +690,7 @@ describe("Chat API", () => {
     assert.doesNotMatch(assistant.content, /牛肉飯/);
   });
 
-  it("POST /api/chat JSON replaces false new-log claims after get_daily_summary", async () => {
+  it("POST /api/chat JSON preserves empty-day summary semantics after get_daily_summary", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_route_summary_false_log_json",
@@ -716,15 +716,19 @@ describe("Chat API", () => {
       reply?: string;
       didLogMeal?: boolean;
       didMutateMeal?: boolean;
+      dailySummary?: { mealCount?: number; totalCalories?: number };
     };
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, false);
+    assert.equal(body.dailySummary?.mealCount, 0);
+    assert.equal(body.dailySummary?.totalCalories, 0);
     assert.doesNotMatch(body.reply ?? "", /已記錄牛肉飯|650 kcal/);
-    assert.match(body.reply ?? "", /還沒有把這餐寫入紀錄/);
+    assert.equal(body.reply, "今天已記錄 0 餐，共 0 kcal。");
 
     const history = await services?.chatService.getHistory(deviceId, 10);
     const assistant = [...(history ?? [])].reverse().find((message) => message.role === "assistant");
     assert.ok(assistant);
+    assert.equal(assistant.content, "今天已記錄 0 餐，共 0 kcal。");
     assert.doesNotMatch(String(assistant.content), /已記錄牛肉飯|650 kcal/);
   });
 

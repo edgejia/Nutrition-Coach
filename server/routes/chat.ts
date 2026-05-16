@@ -199,13 +199,21 @@ function normalizeRouteFinalReply(
   didLogMeal: boolean,
   didMutateMeal: boolean,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
-  opts: { composeSummaryHistory?: boolean } = {},
+  opts: { composeSummaryHistory?: boolean; rendererOwnedSummaryHistory?: boolean } = {},
 ): { reply: string; composedSummaryHistory: boolean } {
   const composedSummaryHistory = opts.composeSummaryHistory !== false
+    && shouldComposeSummaryHistoryReply(didLogMeal, didMutateMeal, summaryHistoryFacts);
+  const rendererOwnedSummaryHistory = opts.rendererOwnedSummaryHistory === true
     && shouldComposeSummaryHistoryReply(didLogMeal, didMutateMeal, summaryHistoryFacts);
   const reply = composedSummaryHistory
     ? composeSummaryHistoryReply(summaryHistoryFacts, rawReply)
     : rawReply;
+  if (composedSummaryHistory || rendererOwnedSummaryHistory) {
+    return {
+      reply,
+      composedSummaryHistory: true,
+    };
+  }
   return {
     reply: guardNoMutationLoggingClaim(reply, didLogMeal, didMutateMeal, {
       summaryHistoryFacts,
@@ -993,7 +1001,10 @@ async function handleOrchestratorSSE(
         didLogMeal,
         streamDidMutateMeal,
         summaryHistoryFacts,
-        { composeSummaryHistory: shouldComposeSummaryHistory },
+        {
+          composeSummaryHistory: shouldComposeSummaryHistory,
+          rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
+        },
       ).reply;
       const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
         deps.chatService,
@@ -1364,7 +1375,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           didLogMeal,
           jsonDidMutateMeal,
           summaryHistoryFacts,
-          { composeSummaryHistory: shouldComposeSummaryHistory },
+          {
+            composeSummaryHistory: shouldComposeSummaryHistory,
+            rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
+          },
         ).reply;
         const { sanitized: sanitizedJson } = await finalizeAssistantReply(
           chatService,
