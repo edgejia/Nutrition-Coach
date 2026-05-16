@@ -384,17 +384,15 @@ All claims in this research were verified or cited; no `[ASSUMED]` claims are us
 |---|-------|---------|---------------|
 | — | — | — | — |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Exact deterministic date label for historical summary text**
+1. **RESOLVED: Exact deterministic date label for historical summary text**
    - What we know: Historical summary handling already carries `dailySummary.date` and `affectedDate`. [VERIFIED: `server/orchestrator/tools.ts`] [VERIFIED: `server/routes/chat.ts`]
-   - What's unclear: The acceptance checklist gives today-style copy but does not lock historical phrasing. [VERIFIED: `.planning/notes/v2-2-authoritative-summary-facts-acceptance.md`]
-   - Recommendation: Planner should require renderer tests for today and historical dates, using existing `appendHistoricalDateSuffixIfMissing()` semantics or replacing it with renderer-owned date labels for summary/history replies. [VERIFIED: `server/routes/chat.ts`]
+   - Resolution: The plan locks the current-day canonical copy from the acceptance checklist and requires renderer-owned date handling through `affectedDate`/`dailySummary.date` options without relying on route-only suffix repair. Historical phrasing is implementation-owned within `renderSummaryHistoryFacts()`/`composeSummaryHistoryReply()` and must stay deterministic; route helpers may not append separate fact text after composition. [RESOLVED: `59-01-PLAN.md`] [RESOLVED: `59-03-PLAN.md`]
 
-2. **Whether summary advice is worth keeping when suspicious**
+2. **RESOLVED: Whether summary advice is worth keeping when suspicious**
    - What we know: Advice is optional and can be stripped, replaced, or rejected when it introduces forbidden concrete facts. [VERIFIED: `59-CONTEXT.md`]
-   - What's unclear: The phase does not require salvaging partial advice. [VERIFIED: `.planning/REQUIREMENTS.md`]
-   - Recommendation: Plan the smallest safe behavior: drop the whole advice segment on any forbidden concrete fact, and test that safe generic advice can still append. [VERIFIED: `59-CONTEXT.md`]
+   - Resolution: The plan requires fail-closed advice handling: drop the whole advice segment on any forbidden concrete fact, and test that safe generic advice can still append. Partial advice salvage is not planned because D-05 and D-06 require fact/advice isolation, not recovery of suspicious model prose. [RESOLVED: `59-01-PLAN.md`]
 
 ## Environment Availability
 
