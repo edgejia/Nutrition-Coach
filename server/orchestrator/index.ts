@@ -28,6 +28,11 @@ import {
   assertNoForbiddenReceiptTerms,
   renderMutationReceipt,
 } from "./mutation-receipts.js";
+import {
+  composeSummaryHistoryReply,
+  type SummaryHistoryFacts,
+} from "./summary-history-renderer.js";
+export type { SummaryHistoryFacts } from "./summary-history-renderer.js";
 
 interface OrchestratorDeps {
   llmProvider: LLMProvider;
@@ -48,14 +53,6 @@ const NO_MUTATION_LOGGING_CLAIM_PATTERN = /已\s*(?:經\s*)?記錄|完成\s*記�
 const NO_MUTATION_LOGGING_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
 // Summary replies often use approximate wording after totals are rounded by the model.
 const SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL = 10;
-
-export interface SummaryHistoryFacts {
-  dailySummary?: DailySummary;
-  meals: Array<{
-    foodName: string;
-    calories: number;
-  }>;
-}
 
 interface NoMutationLoggingGuardContext {
   summaryHistoryFacts?: SummaryHistoryFacts;
@@ -841,10 +838,14 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
-          const reply = guardNoMutationLoggingClaim(response.content, didLogMeal, didMutateMeal, {
-            summaryHistoryFacts,
-          });
-          const finalReplySource = reply === response.content ? "model" : "fallback";
+          const reply = summaryHistoryFacts
+            ? composeSummaryHistoryReply(summaryHistoryFacts, response.content)
+            : guardNoMutationLoggingClaim(response.content, didLogMeal, didMutateMeal, {
+              summaryHistoryFacts,
+            });
+          const finalReplySource = summaryHistoryFacts
+            ? "renderer"
+            : reply === response.content ? "model" : "fallback";
           return {
             reply,
             didLogMeal,

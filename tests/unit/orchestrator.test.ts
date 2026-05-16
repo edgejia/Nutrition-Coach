@@ -1250,7 +1250,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.ok("reply" in result);
     assert.equal(result.didLogMeal, false);
     assert.equal(result.didMutateMeal, false);
-    assert.equal(result.reply, "今天已記錄 2 餐，共 900 kcal。");
+    assert.equal(result.reply, "今天已記錄 2 餐，共 900 kcal：雞胸肉 450 kcal、鮭魚飯 450 kcal。");
   });
 
   it("replaces false new-log claims after get_daily_summary without mutation", async () => {
@@ -1272,7 +1272,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.didLogMeal, false);
     assert.equal(result.didMutateMeal, false);
     assert.doesNotMatch(result.reply, /已記錄牛肉飯|650 kcal/);
-    assert.match(result.reply, /還沒有把這餐寫入紀錄/);
+    assert.equal(result.reply, "今天已記錄 0 餐，共 0 kcal。");
   });
 
   it("does not let broad summary words bypass the no-mutation false-log guard", async () => {
@@ -1303,7 +1303,7 @@ describe("Orchestrator - didLogMeal", () => {
       assert.equal(result.didLogMeal, false);
       assert.equal(result.didMutateMeal, false);
       assert.doesNotMatch(result.reply, /已記錄牛肉飯|650 kcal/);
-      assert.match(result.reply, /還沒有把這餐寫入紀錄/);
+      assert.equal(result.reply, "今天已記錄 0 餐，共 0 kcal。");
     }
   });
 
@@ -1332,7 +1332,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.ok("reply" in result);
     assert.equal(result.didLogMeal, false);
     assert.equal(result.didMutateMeal, false);
-    assert.equal(result.reply, "目前已記錄的餐點有豆腐飯，約 520 kcal。");
+    assert.equal(result.reply, "今天已記錄 1 餐，共 520 kcal：豆腐飯 520 kcal。");
   });
 
   it("composes summary history replies from persisted meal facts instead of unsafe model facts", async () => {
