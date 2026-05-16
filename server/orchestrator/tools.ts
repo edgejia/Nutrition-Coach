@@ -54,6 +54,13 @@ export interface ToolExecutionResult {
   publishedEvents?: string[];
   dailyTargets?: DailyTargets;
   dailySummary?: DailySummary;
+  summaryHistoryFacts?: {
+    dailySummary?: DailySummary;
+    meals: Array<{
+      foodName: string;
+      calories: number;
+    }>;
+  };
   affectedDate?: string;
   mealMutationKind?: "log" | "update" | "delete";
   deletedMeal?: DeletedMealSnapshot;
@@ -265,6 +272,10 @@ type GetDailySummaryResult =
   | {
       status: "summary";
       dailySummary: DailySummary;
+      meals: Array<{
+        foodName: string;
+        calories: number;
+      }>;
       affectedDate?: string;
     }
   | HistoricalToolClarification
@@ -1085,14 +1096,26 @@ const getDailySummaryContract: ToolContract<
       deviceId,
       buildLocalMidpointDate(dateIntent.dateKey),
     );
+    const meals = await deps.foodLoggingService.getMealsByDate(
+      deviceId,
+      buildLocalMidpointDate(dateIntent.dateKey),
+    );
+    const mealFacts = meals.map((meal) => ({
+      foodName: meal.foodName,
+      calories: meal.calories,
+    }));
     return {
       ok: true,
       result: {
         status: "summary",
         dailySummary: summary,
+        meals: mealFacts,
         affectedDate: dateIntent.isHistorical ? dateIntent.dateKey : undefined,
       },
-      toolMessage: JSON.stringify(summary),
+      toolMessage: JSON.stringify({
+        dailySummary: summary,
+        meals: mealFacts,
+      }),
     };
   },
 };
@@ -1533,6 +1556,10 @@ export async function executeTool(
       result: outcome.result,
       summary: `熱量 ${summary.dailySummary.totalCalories}kcal, P${summary.dailySummary.totalProtein}g, C${summary.dailySummary.totalCarbs}g, F${summary.dailySummary.totalFat}g`,
       dailySummary: summary.dailySummary,
+      summaryHistoryFacts: {
+        dailySummary: summary.dailySummary,
+        meals: summary.meals,
+      },
       affectedDate: summary.affectedDate,
     };
   }
