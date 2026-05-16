@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: LLM Failure Localization Foundation
 status: Awaiting next milestone
-stopped_at: Completed 58-04-PLAN.md
-last_updated: "2026-05-16T06:31:14+08:00"
-last_activity: 2026-05-16 — Completed quick task 260516-7tu: Fix remaining clean sub-agent review blockers
+stopped_at: Completed quick task 260516-nwi
+last_updated: "2026-05-16T17:37:43+08:00"
+last_activity: 2026-05-16 — Completed quick task 260516-nwi: Fix v2.2 pre-promotion blockers with fact-grounded summary/history validation
 progress:
   total_phases: 4
   completed_phases: 4
@@ -21,7 +21,7 @@ progress:
 Phase: Milestone v2.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-05-16 — Completed quick task 260516-7tu: Fix remaining clean sub-agent review blockers
+Last activity: 2026-05-16 — Completed quick task 260516-nwi: Fix v2.2 pre-promotion blockers with fact-grounded summary/history validation
 
 ## Project Reference
 
@@ -92,11 +92,12 @@ Items acknowledged and deferred at milestone close on 2026-05-15:
 | 260516-5ei | Fix code-review findings for v2.2 pre-promotion UAT patch: strengthened no-mutation false-log guards, removed stale reachable prompt copy, accepted grouped Chinese serving metadata as quantity evidence, and hardened image logging regression proof. | 2026-05-16 | 4678bf0 | Verified | [260516-5ei-fix-code-review-findings-for-v2-2-pre-pr](./quick/260516-5ei-fix-code-review-findings-for-v2-2-pre-pr/) |
 | 260516-6d2 | Fix remaining v2.2 pre-promotion review blockers: preserve legitimate summary/history 已記錄 replies across orchestrator and route paths, harden SSE chunk parsing, and prove image upload cleanup before teardown. | 2026-05-16 | cd76006 | Verified | [260516-6d2-fix-remaining-v2-2-pre-promotion-review-](./quick/260516-6d2-fix-remaining-v2-2-pre-promotion-review-/) |
 | 260516-7tu | Fix remaining clean sub-agent review blockers: narrow no-mutation summary/history allowance, prevent summary-context SSE false-log leakage, and prove image-log-failure chunk ordering plus route-level upload cleanup before teardown. | 2026-05-16 | ec11307 | Verified | [260516-7tu-fix-the-remaining-clean-sub-agent-review](./quick/260516-7tu-fix-the-remaining-clean-sub-agent-review/) |
+| 260516-nwi | Fix v2.2 pre-promotion blockers by replacing the no-mutation summary/history regex allowlist with fact-grounded validation across JSON, drained stream, SSE, and harness proof. | 2026-05-16 | 74bbf40 | Verified | [260516-nwi-fix-v2-2-pre-promotion-blockers-by-repla](./quick/260516-nwi-fix-v2-2-pre-promotion-blockers-by-repla/) |
 
 ## Session
 
-Last session: 2026-05-15T22:31:14Z
-Stopped At: Completed quick task 260516-7tu
+Last session: 2026-05-16T09:37:43Z
+Stopped At: Completed quick task 260516-nwi
 Resume File: None
 
 ## Operator Next Steps
