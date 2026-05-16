@@ -31,7 +31,7 @@
 
 **Requirements:** AUTH-01, AUTH-02, AUTH-03, AUTH-04, STREAM-01, STREAM-02, STREAM-03
 
-**Plans:** 3/5 plans executed
+**Plans:** 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -42,7 +42,7 @@ Plans:
 - [x] 59-02-PLAN.md — Orchestrator plain-reply composition from persisted facts
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 59-03-PLAN.md — JSON, drained-stream, and live SSE route wiring
+- [x] 59-03-PLAN.md — JSON, drained-stream, and live SSE route wiring
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 59-05-PLAN.md — Local release-check closure gate with no promotion
@@ -72,7 +72,7 @@ Plans:
 | 56. Provider Metadata and Orchestrator Hook Plumbing | v2.2 | 4/4 | Complete | 2026-05-14 |
 | 57. Fallback Event Semantics and Trace v2 Schema | v2.2 | 6/6 | Complete | 2026-05-15 |
 | 58. Localization Proof and Release Gate | v2.2 | 4/4 | Complete | 2026-05-15 |
-| 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 3/5 | In Progress|  |
+| 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 4/5 | In Progress|  |
 
 ## Future Milestone Candidates
 
