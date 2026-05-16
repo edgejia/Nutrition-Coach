@@ -385,6 +385,118 @@ describe("Chat API", () => {
     assert.equal(assistant.content, "今天已記錄 2 餐，共 900 kcal。");
   });
 
+  it("POST /api/chat JSON rejects assigning the daily summary total to one persisted meal", async () => {
+    assert.ok(services, "expected app services");
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 450,
+      protein: 45,
+      carbs: 30,
+      fat: 10,
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 450,
+      protein: 35,
+      carbs: 45,
+      fat: 14,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_route_summary_single_total_json",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄雞胸肉，900 kcal。" });
+
+    const form = new FormData();
+    form.append("message", "今天吃了什麼？");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: { mealCount?: number; totalCalories?: number };
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.dailySummary?.mealCount, 2);
+    assert.equal(body.dailySummary?.totalCalories, 900);
+    assert.doesNotMatch(body.reply ?? "", /已記錄雞胸肉|雞胸肉，900 kcal/);
+    assert.match(body.reply ?? "", /還沒有把這餐寫入紀錄/);
+
+    const history = await services.chatService.getHistory(deviceId, 10);
+    const assistant = [...history].reverse().find((message) => message.role === "assistant");
+    assert.ok(assistant);
+    assert.doesNotMatch(assistant.content, /已記錄雞胸肉|雞胸肉，900 kcal/);
+  });
+
+  it("POST /api/chat JSON rejects fake meal lists even when count and total match", async () => {
+    assert.ok(services, "expected app services");
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 450,
+      protein: 45,
+      carbs: 30,
+      fat: 10,
+    });
+    await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 450,
+      protein: 35,
+      carbs: 45,
+      fat: 14,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_route_summary_fake_list_json",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯。" });
+
+    const form = new FormData();
+    form.append("message", "今天吃了什麼？");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: { mealCount?: number; totalCalories?: number };
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.dailySummary?.mealCount, 2);
+    assert.equal(body.dailySummary?.totalCalories, 900);
+    assert.doesNotMatch(body.reply ?? "", /牛肉飯|今天已記錄 2 餐/);
+    assert.match(body.reply ?? "", /還沒有把這餐寫入紀錄/);
+
+    const history = await services.chatService.getHistory(deviceId, 10);
+    const assistant = [...history].reverse().find((message) => message.role === "assistant");
+    assert.ok(assistant);
+    assert.doesNotMatch(assistant.content, /牛肉飯|今天已記錄 2 餐/);
+  });
+
   it("POST /api/chat JSON replaces false new-log claims after get_daily_summary", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
