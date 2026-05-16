@@ -1,34 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.2
-milestone_name: LLM Failure Localization Foundation
-status: milestone_complete
-stopped_at: Completed Phase 59 UAT
-last_updated: "2026-05-16T17:27:20.000Z"
+milestone: v2.3
+milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
+status: planning
+last_updated: "2026-05-17T02:17:20.602+08:00"
 last_activity: 2026-05-17
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 59
-Plan: Not started
-Status: Phase 59 complete; all post-execute quality gates passed
-Last activity: 2026-05-17
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-17 — Milestone v2.3 started
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-16)
+See: .planning/PROJECT.md (updated 2026-05-17)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Phase 59 complete — all post-execute quality gates passed
+**Current focus:** v2.3 defining requirements — Authoritative Mutation Outcomes and Fresh Meal State
 
 ## Decisions
 
