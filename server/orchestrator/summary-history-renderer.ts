@@ -30,7 +30,12 @@ function formatSummaryDateLabel(
     return dateKey;
   }
 
-  return `${Number(match[2])}/${Number(match[3])}`;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return year === currentDate.getFullYear()
+    ? `${month}/${day}`
+    : `${year}/${month}/${day}`;
 }
 
 function persistedMealTotalCalories(facts: SummaryHistoryFacts): number {

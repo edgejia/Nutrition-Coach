@@ -986,12 +986,14 @@ async function handleOrchestratorSSE(
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
+      const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
+        && !result.fallbackOutcomeContext;
       const normalizedReply = normalizeRouteFinalReply(
         appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
         didLogMeal,
         streamDidMutateMeal,
         summaryHistoryFacts,
-        { composeSummaryHistory: !result.fallbackOutcomeContext },
+        { composeSummaryHistory: shouldComposeSummaryHistory },
       ).reply;
       const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
         deps.chatService,
@@ -1355,12 +1357,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         }
 
         const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
+        const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
+          && !result.fallbackOutcomeContext;
         const normalizedReply = normalizeRouteFinalReply(
           appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
           didLogMeal,
           jsonDidMutateMeal,
           summaryHistoryFacts,
-          { composeSummaryHistory: !result.fallbackOutcomeContext },
+          { composeSummaryHistory: shouldComposeSummaryHistory },
         ).reply;
         const { sanitized: sanitizedJson } = await finalizeAssistantReply(
           chatService,
