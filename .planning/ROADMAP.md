@@ -35,7 +35,11 @@ v2.3 closes the remaining P1 data-integrity risks before returning to product po
   2. User confirmation text such as `好` changes goals only when it confirms a valid unexpired backend proposal or includes explicit current-turn numeric target values.
   3. User cannot apply expired, consumed, mismatched, or missing proposals; the backend returns deterministic Traditional Chinese guidance and leaves targets unchanged.
   4. Failed `update_goals` validation or guard outcomes do not publish `goals_update`, do not persist targets, and do not show LLM-authored success-style copy.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 60-01-PLAN.md — Goal proposal service and deterministic backend copy foundation
+- [ ] 60-02-PLAN.md — `propose_goals` and explicit-mode `update_goals` tool contracts
+- [ ] 60-03-PLAN.md — Orchestrator short-circuiting and integration proof
 
 **Implementation Notes:**
 - Keep proposal state in the existing turn-state/SQLite pattern, likely through a thin `server/services/goal-proposals.ts` wrapper.
@@ -116,7 +120,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
-| 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 0/TBD | Not started | - |
+| 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 0/3 | Not started | - |
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 0/TBD | Not started | - |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 0/TBD | Not started | - |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 0/TBD | Not started | - |
