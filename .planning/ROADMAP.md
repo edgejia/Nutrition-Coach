@@ -31,7 +31,7 @@
 
 **Requirements:** AUTH-01, AUTH-02, AUTH-03, AUTH-04, STREAM-01, STREAM-02, STREAM-03
 
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 **Wave 1**
@@ -45,7 +45,7 @@ Plans:
 - [x] 59-03-PLAN.md — JSON, drained-stream, and live SSE route wiring
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 59-05-PLAN.md — Local release-check closure gate with no promotion
+- [x] 59-05-PLAN.md — Local release-check closure gate with no promotion
 
 **Success Criteria** (what must be TRUE):
 1. Persisted meal records are the authoritative backend source for meal names, meal count, day total kcal, and per-meal kcal in summary/history replies.
@@ -72,7 +72,7 @@ Plans:
 | 56. Provider Metadata and Orchestrator Hook Plumbing | v2.2 | 4/4 | Complete | 2026-05-14 |
 | 57. Fallback Event Semantics and Trace v2 Schema | v2.2 | 6/6 | Complete | 2026-05-15 |
 | 58. Localization Proof and Release Gate | v2.2 | 4/4 | Complete | 2026-05-15 |
-| 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 4/5 | In Progress|  |
+| 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete   | 2026-05-16 |
 
 ## Future Milestone Candidates
 
