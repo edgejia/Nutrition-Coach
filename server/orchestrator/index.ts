@@ -61,6 +61,11 @@ interface NoMutationLoggingGuardContext {
   summaryHistoryFacts?: SummaryHistoryFacts;
 }
 
+interface ClaimedMealFact {
+  name: string;
+  calories?: number;
+}
+
 export interface ProviderFallbackContext {
   reason: "llm_error";
   round: number;
@@ -397,9 +402,17 @@ function isFactGroundedSummaryHistoryReply(reply: string, facts: SummaryHistoryF
 
   const claimedMealCount = extractClaimedMealCount(reply);
   const claimedCalories = extractClaimedCalories(reply);
-  const claimedMealNames = extractClaimedMealNames(reply);
-  const matchedMeals = claimedMealNames.map((claim) => findMatchingFactMeal(claim, facts.meals));
-  if (matchedMeals.some((meal) => meal === undefined)) {
+  const claimedMealFacts = extractClaimedMealFacts(reply);
+  const matchedClaims = claimedMealFacts.map((claim) => ({
+    claim,
+    meal: findMatchingFactMeal(claim.name, facts.meals),
+  }));
+  if (matchedClaims.some(({ meal }) => meal === undefined)) {
+    return false;
+  }
+  if (matchedClaims.some(({ claim, meal }) => (
+    claim.calories !== undefined && !caloriesCloseEnough(claim.calories, meal?.calories ?? Number.NaN)
+  ))) {
     return false;
   }
 
@@ -412,7 +425,7 @@ function isFactGroundedSummaryHistoryReply(reply: string, facts: SummaryHistoryF
     return true;
   }
 
-  if (claimedMealNames.length === 0) {
+  if (claimedMealFacts.length === 0) {
     return false;
   }
 
@@ -420,7 +433,7 @@ function isFactGroundedSummaryHistoryReply(reply: string, facts: SummaryHistoryF
     return true;
   }
 
-  return matchedMeals.some((meal) => caloriesCloseEnough(claimedCalories, meal?.calories ?? Number.NaN));
+  return matchedClaims.some(({ meal }) => caloriesCloseEnough(claimedCalories, meal?.calories ?? Number.NaN));
 }
 
 function extractClaimedMealCount(reply: string): number | undefined {
@@ -433,8 +446,8 @@ function extractClaimedCalories(reply: string): number | undefined {
   return match?.[1] ? Number(match[1]) : undefined;
 }
 
-function extractClaimedMealNames(reply: string): string[] {
-  const names: string[] = [];
+function extractClaimedMealFacts(reply: string): ClaimedMealFact[] {
+  const claims: ClaimedMealFact[] = [];
   const patterns = [
     /已\s*(?:經\s*)?記錄(?:的餐點(?:有|包含)?|(?:的)?餐點有)?\s*([^，。,.;；]+)/g,
     /完成\s*記錄\s*([^，。,.;；]+)/g,
@@ -444,19 +457,25 @@ function extractClaimedMealNames(reply: string): string[] {
   for (const pattern of patterns) {
     for (const match of reply.matchAll(pattern)) {
       const raw = match[1]?.trim();
-      if (!raw || /^\d+\s*餐/.test(raw) || /\d+(?:\.\d+)?\s*(?:kcal|大卡|卡)/i.test(raw)) {
+      if (!raw || /^\d+\s*餐/.test(raw)) {
         continue;
       }
       for (const part of raw.split(/[、和與及]/)) {
-        const name = part.trim();
+        const calorieMatch = part.match(/(?:約\s*)?(\d+(?:\.\d+)?)\s*(?:kcal|大卡|卡)/i);
+        const name = part
+          .replace(/(?:約\s*)?\d+(?:\.\d+)?\s*(?:kcal|大卡|卡)/ig, "")
+          .trim();
         if (name && !/^(?:餐點|今天|目前|共|總共)$/.test(name) && !/^\d+\s*餐/.test(name)) {
-          names.push(name);
+          claims.push({
+            name,
+            calories: calorieMatch?.[1] ? Number(calorieMatch[1]) : undefined,
+          });
         }
       }
     }
   }
 
-  return [...new Set(names)];
+  return [...new Map(claims.map((claim) => [normalizeClaimText(claim.name), claim])).values()];
 }
 
 function findMatchingFactMeal(

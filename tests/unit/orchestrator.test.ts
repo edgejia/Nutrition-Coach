@@ -284,6 +284,22 @@ describe("orchestrator shared patterns", () => {
     );
     assert.doesNotMatch(aggregateWithWrongMeal, /牛肉飯/);
 
+    const aggregateWithWrongMealCalories = guardNoMutationLoggingClaim(
+      "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯 900 kcal。",
+      false,
+      false,
+      facts,
+    );
+    assert.doesNotMatch(aggregateWithWrongMealCalories, /牛肉飯|其中包含牛肉飯 900 kcal/);
+
+    const aggregateWithWrongMealAttribution = guardNoMutationLoggingClaim(
+      "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉 900 kcal。",
+      false,
+      false,
+      facts,
+    );
+    assert.doesNotMatch(aggregateWithWrongMealAttribution, /其中包含雞胸肉 900 kcal/);
+
     const aggregateWithMatchingMeal = guardNoMutationLoggingClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉。",
       false,

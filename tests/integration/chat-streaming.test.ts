@@ -2385,7 +2385,7 @@ describe("chat-streaming", () => {
         },
       }],
     });
-    mockLLM.queueChatStream(["今天已記錄", "雞胸肉", "，900 kcal。"]);
+    mockLLM.queueChatStream(["今天已記錄 2 餐，", "共 900 kcal，", "其中包含雞胸肉 900 kcal。"]);
 
     const form = new FormData();
     form.append("message", "今天吃了什麼？");
@@ -2420,7 +2420,7 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.dailySummary?.mealCount, 2);
       assert.equal(donePayload.dailySummary?.totalCalories, 900);
       assert.equal(chunkText, "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。");
-      assert.doesNotMatch(chunkText, /已記錄雞胸肉|雞胸肉，900 kcal/);
+      assert.doesNotMatch(chunkText, /其中包含雞胸肉 900 kcal|雞胸肉 900 kcal/);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
@@ -2429,7 +2429,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMsgs.length, 1);
       assert.equal(assistantMsgs[0]!.content, chunkText);
-      assert.doesNotMatch(assistantMsgs[0]!.content, /已記錄雞胸肉|雞胸肉，900 kcal/);
+      assert.doesNotMatch(assistantMsgs[0]!.content, /其中包含雞胸肉 900 kcal|雞胸肉 900 kcal/);
     } finally {
       clearTimeout(timeout);
     }
@@ -2461,7 +2461,7 @@ describe("chat-streaming", () => {
         },
       }],
     });
-    mockLLM.queueChatStream(["今天已記錄 2 餐，", "共 900 kcal，", "其中包含牛肉飯。"]);
+    mockLLM.queueChatStream(["今天已記錄 2 餐，", "共 900 kcal，", "其中包含牛肉飯 900 kcal。"]);
 
     const form = new FormData();
     form.append("message", "今天吃了什麼？");

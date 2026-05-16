@@ -411,7 +411,7 @@ describe("Chat API", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "今天已記錄雞胸肉，900 kcal。" });
+    mockLLM.queueChatResponse({ content: "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉 900 kcal。" });
 
     const form = new FormData();
     form.append("message", "今天吃了什麼？");
@@ -432,13 +432,13 @@ describe("Chat API", () => {
     assert.equal(body.didMutateMeal, false);
     assert.equal(body.dailySummary?.mealCount, 2);
     assert.equal(body.dailySummary?.totalCalories, 900);
-    assert.doesNotMatch(body.reply ?? "", /已記錄雞胸肉|雞胸肉，900 kcal/);
+    assert.doesNotMatch(body.reply ?? "", /其中包含雞胸肉 900 kcal|雞胸肉 900 kcal/);
     assert.match(body.reply ?? "", /還沒有把這餐寫入紀錄/);
 
     const history = await services.chatService.getHistory(deviceId, 10);
     const assistant = [...history].reverse().find((message) => message.role === "assistant");
     assert.ok(assistant);
-    assert.doesNotMatch(assistant.content, /已記錄雞胸肉|雞胸肉，900 kcal/);
+    assert.doesNotMatch(assistant.content, /其中包含雞胸肉 900 kcal|雞胸肉 900 kcal/);
   });
 
   it("POST /api/chat JSON rejects fake meal lists even when count and total match", async () => {
@@ -467,7 +467,7 @@ describe("Chat API", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯。" });
+    mockLLM.queueChatResponse({ content: "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯 900 kcal。" });
 
     const form = new FormData();
     form.append("message", "今天吃了什麼？");
