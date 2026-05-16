@@ -420,8 +420,7 @@ function isFactGroundedSummaryHistoryReply(reply: string, facts: SummaryHistoryF
     return true;
   }
 
-  return matchedMeals.some((meal) => caloriesCloseEnough(claimedCalories, meal?.calories ?? Number.NaN))
-    || caloriesCloseEnough(claimedCalories, facts.dailySummary.totalCalories);
+  return matchedMeals.some((meal) => caloriesCloseEnough(claimedCalories, meal?.calories ?? Number.NaN));
 }
 
 function extractClaimedMealCount(reply: string): number | undefined {
@@ -875,6 +874,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 affectedDate,
                 mealMutationKind,
                 deletedMeal,
+                summaryHistoryFacts: toolSummaryHistoryFacts,
               } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
@@ -922,7 +922,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               }
               if (toolCall.function.name === "get_daily_summary" && dailySummary) {
                 logMealSummary = dailySummary;
-                summaryHistoryFacts = await buildSummaryHistoryFacts(deps, deviceId, dailySummary);
+                summaryHistoryFacts = toolSummaryHistoryFacts
+                  ?? await buildSummaryHistoryFacts(deps, deviceId, dailySummary);
               }
               if (mealMutationKind === "update" || mealMutationKind === "delete") {
                 didMutateMeal = true;
