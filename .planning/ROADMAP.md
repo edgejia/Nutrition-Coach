@@ -5,81 +5,131 @@
 - **v2.0 Logging & Mobile Quality Foundation** - shipped 2026-05-07; archived in [`milestones/v2.0/ROADMAP.md`](milestones/v2.0/ROADMAP.md)
 - **v2.1 AI Trust Infrastructure & Logging Reliability** - shipped 2026-05-12; archived in [`milestones/v2.1/ROADMAP.md`](milestones/v2.1/ROADMAP.md)
 - **v2.2 LLM Failure Localization Foundation** - shipped 2026-05-15; archived in [`milestones/v2.2/ROADMAP.md`](milestones/v2.2/ROADMAP.md)
-- **v2.2 Promotion Blocker Reopen** - active
+- **v2.2 Promotion Blocker Reopen** - Phase 59 complete 2026-05-16; no staging/main promotion authorized
+- **v2.3 Authoritative Mutation Outcomes and Fresh Meal State** - active planning
+
+## Overview
+
+v2.3 closes the remaining P1 data-integrity risks before returning to product polish. The milestone makes backend-committed mutation facts authoritative across goal updates, meal log/update/delete receipts, stale chat receipt edits, and `daily_summary` SSE freshness, while preserving metadata-only proof and the existing Fastify, SQLite, orchestrator, realtime, and Zustand boundaries.
 
 ## Phases
 
-- [x] **Phase 59: Authoritative Summary Facts and SSE Proof** - Backend summary/history replies use persisted facts as the authoritative meal-fact source, and SSE proof drains through stream close before promotion. Completed 2026-05-16.
+**Phase Numbering:**
+- Integer phases (60, 61, 62): Planned milestone work
+- Decimal phases (60.1, 60.2): Urgent insertions, if needed later
 
-<details>
-<summary>v2.2 LLM Failure Localization Foundation (Phases 55-58) - SHIPPED 2026-05-15</summary>
-
-- [x] Phase 55: Turn Correlation Spine and Frontend Reference Code (4/4 plans) - completed 2026-05-14
-- [x] Phase 56: Provider Metadata and Orchestrator Hook Plumbing (4/4 plans) - completed 2026-05-14
-- [x] Phase 57: Fallback Event Semantics and Trace v2 Schema (6/6 plans) - completed 2026-05-15
-- [x] Phase 58: Localization Proof and Release Gate (4/4 plans) - completed 2026-05-15
-
-</details>
+- [ ] **Phase 60: Goal Proposal Authority and Rejected-Goal Copy** - Ambiguous goal confirmations can only mutate through backend-owned proposals or explicit current-turn numeric targets.
+- [ ] **Phase 61: Committed Mutation Outcome and Summary Contract** - Meal log/update/delete flows return committed mutation facts even when summary recompute or publish degrades.
+- [ ] **Phase 62: Meal Revision Tokens and Stale Receipt Protection** - Edit-capable receipts carry revision identity and stale receipt writes fail closed with refresh guidance.
+- [ ] **Phase 63: SSE Meal-Row Freshness and Affected-Date Invalidation** - Summary SSE updates cannot make totals fresher than visible meal rows.
+- [ ] **Phase 64: Verification and Release-Proof Hardening** - v2.3 integrity behavior is proven with targeted tests, metadata-only evidence, and local release gates.
 
 ## Phase Details
 
-### Phase 59: Authoritative Summary Facts and SSE Proof
-
-**Goal:** v2.2 promotion is unblocked by deterministic summary/history fact rendering plus machine-checkable SSE ordering proof.
-
-**Depends on:** Phase 58, quick task 260516-ppf
-
-**Requirements:** AUTH-01, AUTH-02, AUTH-03, AUTH-04, STREAM-01, STREAM-02, STREAM-03
-
-**Plans:** 5/5 plans complete
-
-Plans:
-**Wave 1**
-- [x] 59-01-PLAN.md — Shared deterministic summary/history renderer and advice guard
-- [x] 59-04-PLAN.md — Through-close SSE terminal proof and structured artifacts
-
-**Wave 2** *(blocked on Wave 1 completion)*
-- [x] 59-02-PLAN.md — Orchestrator plain-reply composition from persisted facts
-
-**Wave 3** *(blocked on Wave 2 completion)*
-- [x] 59-03-PLAN.md — JSON, drained-stream, and live SSE route wiring
-
-**Wave 4** *(blocked on Wave 3 completion)*
-- [x] 59-05-PLAN.md — Local release-check closure gate with no promotion
-
+### Phase 60: Goal Proposal Authority and Rejected-Goal Copy
+**Goal**: Users can only change daily targets through explicit current-turn numeric values or a valid backend-persisted goal proposal, and rejected goal updates produce deterministic backend copy.
+**Depends on**: Phase 59
+**Requirements**: GOAL-01, GOAL-02, GOAL-03, GOAL-04
 **Success Criteria** (what must be TRUE):
-1. Persisted meal records are the authoritative backend source for meal names, meal count, day total kcal, and per-meal kcal in summary/history replies.
-2. Summary/history final replies are split into a deterministic fact segment plus an optional LLM advice segment.
-3. Optional LLM advice cannot introduce concrete persisted meal names, per-meal kcal, macro attribution, meal count, or day total facts.
-4. JSON, SSE, and non-SSE final reply paths use the same fact renderer and advice guard.
-5. The existing final guard remains as defense-in-depth rather than the primary correctness mechanism.
-6. SSE proof drains through stream close and fails if any `chunk` or `status` frame appears after the first `done`.
-7. Harness artifacts store structured SSE proof metadata and do not persist raw SSE frame transcripts.
+  1. User can ask for a goal-change recommendation and receive a concrete proposal without daily targets changing yet.
+  2. User confirmation text such as `好` changes goals only when it confirms a valid unexpired backend proposal or includes explicit current-turn numeric target values.
+  3. User cannot apply expired, consumed, mismatched, or missing proposals; the backend returns deterministic Traditional Chinese guidance and leaves targets unchanged.
+  4. Failed `update_goals` validation or guard outcomes do not publish `goals_update`, do not persist targets, and do not show LLM-authored success-style copy.
+**Plans**: TBD
 
 **Implementation Notes:**
-- Do not promote to `staging` or `main` as part of this phase.
-- Keep product-polish and other authoritative state boundary work out of scope.
-- Use the pending blocker note and acceptance checklist as source context:
-  - `.planning/todos/pending/v2-2-authoritative-summary-facts-sse-proof.md`
-  - `.planning/notes/v2-2-authoritative-summary-facts-acceptance.md`
-  - `.planning/notes/v2-2-post-review-blocker-reopened.md`
+- Keep proposal state in the existing turn-state/SQLite pattern, likely through a thin `server/services/goal-proposals.ts` wrapper.
+- Preserve route-owned validation and orchestrator-owned tool outcome flow; do not authorize mutation from prior assistant prose.
+- Renderer-owned copy should live near `server/orchestrator/mutation-receipts.ts` or a close sibling.
+
+### Phase 61: Committed Mutation Outcome and Summary Contract
+**Goal**: Users receive authoritative committed outcomes for meal log, update, and delete mutations even when post-commit summary refresh fails or degrades.
+**Depends on**: Phase 60
+**Requirements**: MUT-01, MUT-02, MUT-03, MUT-04
+**Success Criteria** (what must be TRUE):
+  1. User receives a committed log receipt when meal logging persists, even if daily summary recompute or publish fails afterward.
+  2. User receives a committed update receipt when meal editing persists, even if daily summary recompute or publish fails afterward.
+  3. User receives a committed delete receipt when meal deletion persists, even if daily summary recompute or publish fails afterward.
+  4. Direct meal `PATCH` and `DELETE` responses distinguish committed mutation facts from degraded or failed summary refresh status.
+**Plans**: TBD
+
+**Implementation Notes:**
+- Add a shared summary-outcome contract rather than duplicating degraded-summary handling across chat tools and direct routes.
+- Keep SQLite mutation commit as the authority; summary recompute/publish is a post-commit freshness concern.
+- Route/service edits should plan integration coverage using real SQLite and existing Fastify `app.inject()` patterns.
+
+### Phase 62: Meal Revision Tokens and Stale Receipt Protection
+**Goal**: Users cannot overwrite newer meal facts from older chat receipts because every edit-capable receipt carries revision identity and stale writes fail closed.
+**Depends on**: Phase 61
+**Requirements**: FRESH-01, FRESH-02, FRESH-03
+**Success Criteria** (what must be TRUE):
+  1. User-facing meal and chat receipt DTOs expose current meal revision identity wherever the receipt can start an edit.
+  2. User edits from a current receipt can update the meal with the expected revision contract.
+  3. User edits from an older receipt are rejected without mutating the meal or creating a newer revision.
+  4. User sees deterministic stale-record guidance in the chat receipt view, and affected meal rows refresh or invalidate after the conflict.
+**Plans**: TBD
+**UI hint**: yes
+
+**Implementation Notes:**
+- Use `server/services/meal-transactions.ts` as the authoritative revision check boundary.
+- Extend DTO normalization through `client/src/api.ts` and `client/src/store.ts` without relying on client-only stale protection.
+- Prefer 409 or 412-style deterministic conflict behavior, aligned with existing route error conventions.
+
+### Phase 63: SSE Meal-Row Freshness and Affected-Date Invalidation
+**Goal**: Users cannot see fresher daily totals beside stale same-day meal rows after realtime summary updates.
+**Depends on**: Phase 62
+**Requirements**: REAL-01, REAL-02, REAL-03
+**Success Criteria** (what must be TRUE):
+  1. Same-day `daily_summary` SSE events include enough freshness metadata for the client to refresh or invalidate affected meal rows.
+  2. Home/Summary views do not accept newer daily totals while leaving visible same-day meal rows stale without marking or refreshing them.
+  3. Malformed or stale-date `daily_summary` events preserve existing guards and do not overwrite current-day rows incorrectly.
+  4. Historical affected-date events invalidate the right historical surface without incorrectly refreshing today's rows.
+**Plans**: TBD
+**UI hint**: yes
+
+**Implementation Notes:**
+- Preserve `server/routes/chat.ts` SSE ordering invariants around `status`, `chunk`, and `done`.
+- Keep `server/realtime/publisher.ts` as fan-out only; add metadata to events rather than DB reads in the publisher.
+- Centralize client SSE handling in `client/src/sse.ts` and state commits in `client/src/store.ts`.
+
+### Phase 64: Verification and Release-Proof Hardening
+**Goal**: v2.3 integrity behavior has targeted local proof, privacy-preserving evidence, and release-gate closure without staging or main promotion.
+**Depends on**: Phase 63
+**Requirements**: PROOF-01, PROOF-02, PROOF-03
+**Success Criteria** (what must be TRUE):
+  1. Targeted unit and integration tests prove goal proposal authority, deterministic failed goal copy, summary-failure committed outcomes, stale receipt rejection, and SSE meal-row freshness.
+  2. Any harness or artifact evidence remains metadata-only and excludes raw prompts, user text, assistant final text, tool payloads, provider bodies, image data, session material, and database snapshots.
+  3. Local closure runs `yarn tsc --noEmit` and `yarn release:check`.
+  4. No staging or main promotion occurs as part of v2.3 roadmap, verification, or release-proof work.
+**Plans**: TBD
+
+**Implementation Notes:**
+- Use `nutrition-gen-test` for route/service/orchestrator/store coverage planning and `nutrition-verify-change` for final gate selection.
+- Add a focused harness scenario only if unit/integration evidence cannot prove the boundary without false-pass risk.
+- Keep Railway smoke and branch promotion out of scope unless a later ship workflow receives explicit approval.
 
 ## Progress
 
+**Execution Order:**
+Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
+
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 55. Turn Correlation Spine and Frontend Reference Code | v2.2 | 4/4 | Complete | 2026-05-14 |
-| 56. Provider Metadata and Orchestrator Hook Plumbing | v2.2 | 4/4 | Complete | 2026-05-14 |
-| 57. Fallback Event Semantics and Trace v2 Schema | v2.2 | 6/6 | Complete | 2026-05-15 |
-| 58. Localization Proof and Release Gate | v2.2 | 4/4 | Complete | 2026-05-15 |
 | 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
+| 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 0/TBD | Not started | - |
+| 61. Committed Mutation Outcome and Summary Contract | v2.3 | 0/TBD | Not started | - |
+| 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 0/TBD | Not started | - |
+| 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 0/TBD | Not started | - |
+| 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
 
 ## Future Milestone Candidates
 
-- User-flagged semantic failure capture after trigger, retention, privacy, storage, and access-control decisions are made.
+- Water tracking from the primary logging flow.
+- Monthly nutrition history beyond the current affected-date freshness scope.
+- Onboarding animation, motion system, and unrelated visual polish.
+- User-flagged semantic failure capture after trigger, retention, privacy, storage, and access-control decisions.
 - Local-only raw debugger implementation under the sibling raw debugger contract.
 - Metadata-only production trace sampling and aggregate failure metrics.
-- Product polish beyond the v2.1 trust slice from `docs/research/product-improve.md`.
 
 ---
-*Last updated: 2026-05-16 after completing Phase 59 local verification*
+*Last updated: 2026-05-17 after creating v2.3 roadmap*

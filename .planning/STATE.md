@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
-status: planning
-last_updated: "2026-05-17T02:17:20.602+08:00"
+status: ready_to_plan
+last_updated: "2026-05-17T03:15:00+08:00"
 last_activity: 2026-05-17
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -15,108 +15,71 @@ progress:
 
 # Project State
 
-## Current Position
-
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-05-17 — Milestone v2.3 started
-
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-05-17)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** v2.3 defining requirements — Authoritative Mutation Outcomes and Fresh Meal State
+**Current focus:** v2.3 Phase 60 — Goal Proposal Authority and Rejected-Goal Copy
 
-## Decisions
+## Current Position
 
-- [Phase 57]: 57-01: chat_turn_completed requires full server turnId in structured observability events
-- [Phase 57]: 57-01: chat_route_fallback copies ProviderErrorMetadata through an explicit runtime allowlist
-- [Phase 57]: 57-01: route catch sanitizer omits unsafe thrown-message facts instead of redacting them into logs
-- [Phase 57]: 57-02: normal traces now emit only schemaVersion llm-trace.v2
-- [Phase 57]: 57-02: providerErrorCount is derived only from llm_error timeline events
-- [Phase 57]: 57-02: route fallback traces use route_fallback instead of route_completion.completed=false
-- [Phase 57]: 57-02: artifact redaction preserves providerMetadata while omitting raw provider payload keys
-- [Phase 57]: 57-03: JSON fallback classification reads fallbackOutcomeContext and only copies providerFallbackContext for verified llm_error metadata — Keeps provider metadata source control aligned with Phase 56 and prevents hook side channels from becoming route transport.
-- [Phase 57]: 57-03: JSON catch fallback uses route_catch/json_outer and never chat_turn_completed — Separates HTTP delivery success from chat-turn completion semantics and keeps catch error facts sanitized.
-- [Phase 57]: 57-04: SSE done delivery is classified separately from completion; fallback done paths record route_fallback.
-- [Phase 57]: 57-04: SSE catch fallback uses route_catch/sse_outer or sse_persist with sanitized error facts.
-- [Phase 57]: 57-05: text-log v2 evidence proves clean SSE route_completion with providerErrorCount 0 and no failure-only timeline facts.
-- [Phase 57]: 57-05: image-log-failure v2 evidence proves llm_error, orchestrator_fallback, and route_fallback as separate metadata-only facts.
-- [Phase 57]: 57-05: raw debugger documentation treats llm-trace.v1 as historical and names llm-trace.v2 as the current normal trace contract.
-- [Phase 57]: 57-06: chat_route_fallback provider metadata keeps the existing key allowlist but redacts unsafe allowed-key string values.
-- [Phase 57]: 57-06: stream continuation LLMProviderError classification comes only from the typed provider error object, not hook collectors or log inference.
-- [Phase 57]: 57-06: provider stream continuation fallbacks remain terminal route_fallback facts and never route_completion or chat_turn_completed facts.
-- [Phase 58]: 58-01: auth-style provider failure proof uses a synthetic LLMProviderError fixture instead of SDK subclasses or live OpenAI calls.
-- [Phase 58]: 58-01: provider metadata assertions stay allowlist-style and compare exact safe fields across hook logs, route logs, and llm-trace.v2 facts.
-- [Phase 58]: 58-02: route and hook log proof requires captured Pino lines, so createScenarioApp now accepts an optional logger passthrough while preserving silent defaults.
-- [Phase 58]: 58-02: provider-auth-failure-localization stores metadata-only proof summaries rather than raw SSE frames or full structured log transcripts.
-- [Phase 58]: 58-02: the privacy scanner treats the required synthetic provider code invalid_api_key as an allowlisted provider metadata value, not as a raw secret.
-- [Phase 58]: 58-03: Phase 58 release evidence is recorded in 58-VERIFICATION.md with command, path, and exact facts per VERIFY requirement.
-- [Phase 58]: 58-03: provider-auth-failure-localization remains a phase-local focused gate and is not added to yarn release:check.
-- [Phase 58]: 58-03: feature/* -> staging remains blocked unless machine-checkable Phase 58 evidence exists and passes.
-- [Phase 58]: 58-04: auth fallback reply and SSE chunk text checks stay non-persisted; artifacts store only metadata counts and booleans.
-- [Phase 58]: 58-04: provider-auth-failure-localization uses scenario-local AbortController cleanup rather than changing the shared SSE helper contract.
-- [Phase 58]: 58-04: streamed fallback proof uses streamedFallbackTextLength to avoid ambiguous raw chunk text artifact keys.
-- [Phase 59]: 59-01: Summary/history visible meal count and kcal total are rendered from persisted meal rows when rows exist.
-- [Phase 59]: 59-01: Optional model advice is dropped wholesale when it contains concrete meal names, kcal, macro attribution, meal count, or day-total claims.
-- [Phase 59]: 59-04: SSE terminal proof uses readStreamThroughClose plus assertSSETerminalProof as the promotion-blocking contract.
-- [Phase 59]: 59-04: Generated image-log-failure artifacts persist terminal proof booleans/counts/event names, not raw SSE frame transcripts or token text.
-- [Phase 59]: 59-04: Raw SSE artifact keys are omitted by normalized key matching, including rawSSE/rawSse variants.
-- [Phase 59]: Plain orchestrator replies after get_daily_summary are renderer-owned when summaryHistoryFacts are available. — Summary/history final text must come from persisted facts, with model text treated only as optional advice.
-- [Phase 59]: SummaryHistoryFacts remains re-exported from the orchestrator module to preserve existing route type imports. — This keeps Task 2 scoped to orchestrator files while preserving existing route compile-time contracts.
-- [Phase 59]: Route-owned summary/history output composes deterministic facts before finalizeAssistantReply and before visible SSE chunk emission. — Keeps JSON drained streams and live SSE aligned with the shared renderer contract.
-- [Phase 59]: Verifier image-log-failure tests assert 59-04 structured evidence instead of raw chunk or fallback text. — Preserves structured-only harness artifact privacy while clearing integration proof.
-- [Phase 59]: yarn release:check is local closure proof only and is not permission to promote.
-- [Phase 59]: Phase closure evidence records exact targeted unit, integration, harness, TypeScript, release-check, artifact-grep, and git-status commands.
+Phase: 60 of 64 (Goal Proposal Authority and Rejected-Goal Copy)
+Plan: —
+Status: Ready to plan
+Last activity: 2026-05-17 — v2.3 roadmap created with Phases 60-64
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
-| Plan | Duration | Tasks | Files |
-|------|----------|-------|-------|
-| Phase 57 P01 | 7min | 2 tasks | 3 files |
-| Phase 57 P02 | 5min | 2 tasks | 5 files |
-| Phase 57 P03 | 10min | 2 tasks | 5 files |
-| Phase 57 P04 | 10min | 2 tasks | 2 files |
-| Phase 57 P05 | 6min | 3 tasks | 11 files |
-| Phase 57 P06 | 6min | 3 tasks | 5 files |
-| Phase 58 P01 | 39min | 1 task | 4 files |
-| Phase 58 P02 | 5min | 2 tasks | 10 files |
-| Phase 58 P03 | 7min | 2 tasks | 15 files |
-| Phase 58 P04 | 6min | 3 tasks | 7 files |
-| Phase 59 P01 | 3min | 2 tasks | 2 files |
-| Phase 59 P04 | 5min | 3 tasks | 10 files |
-| Phase 59 P02 | 3min | 2 tasks | 2 files |
-| Phase 59 P03 | 6min | 3 tasks | 4 files |
-| Phase 59 P05 | 2min | 2 tasks | 7 files |
+**Velocity:**
+- Total plans completed in v2.3: 0
+- Average duration: —
+- Total execution time: —
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 60 | TBD | — | — |
+| 61 | TBD | — | — |
+| 62 | TBD | — | — |
+| 63 | TBD | — | — |
+| 64 | TBD | — | — |
+
+## Accumulated Context
+
+### Decisions
+
+Recent decisions affecting current work:
+
+- [Phase 59]: `yarn release:check` was local closure proof only and did not authorize staging or main promotion.
+- [v2.3]: Ambiguous goal confirmation must fail closed unless backed by a valid backend proposal id or explicit current-turn numeric targets.
+- [v2.3]: Meal mutation commits are authoritative; summary recompute/publish status is a separate freshness outcome.
+- [v2.3]: Stale receipt protection must be server-side via expected meal revision checks, with client refresh/redaction as UX support.
+- [v2.3]: Integrity proof remains metadata-only; no raw prompt, user text, assistant final text, tool payload, provider body, image data, session material, or database snapshots.
+
+### Pending Todos
+
+None yet for v2.3.
+
+### Blockers/Concerns
+
+- Phase 60 planning should decide whether one active pending goal proposal per device is sufficient, or whether proposal ids need explicit multi-proposal disambiguation.
+- Phase 62 planning should decide whether stale delete needs the same `expectedMealRevisionId` contract as stale edit.
+- Phase 64 must not include staging or main promotion without explicit current-thread approval.
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-05-15:
+| Category | Item | Status | Deferred At |
+|----------|------|--------|-------------|
+| proof_hardening | Phase 58 auth-detail denylist omits `401`, `Unauthorized`, and `invalid_request_error` in user-visible fallback assertions | accepted non-blocking debt | v2.2 close |
+| proof_hardening | Phase 58 provider-auth-failure-localization failure evidence can persist the matched forbidden snippet on a failing run | accepted non-blocking debt | v2.2 close |
+| dependency_review | High advisories in `drizzle-orm`, `fastify`, and transitive `fast-uri` | defer package upgrade and regression gates | v2.2 close |
 
-| Category | Item | Status |
-|----------|------|--------|
-| uat_gap | Phase 56: 56-UAT.md | resolved; 0 pending scenarios |
+## Session Continuity
 
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Status | Directory |
-|---|-------------|------|--------|--------|-----------|
-| 260516-4a1 | v2.2 pre-promotion UAT patch: based on Notion BUG FEATURE manual test report, fix the remaining promotion blockers without reopening archived v2.2. Scope: fix grouped log_food schema to accept/normalize top-level quantity and serving metadata from the exact text case 早餐吃雞胸肉150g和一碗白飯; add regression coverage for that incident; add a guard so failed/no-mutation follow-up turns cannot claim 已記錄; fix stale onboarding goal validation copy to include 維持; remove or neutralize remaining headline/先抓低/保守估算 user-facing copy if reachable. Do not promote to staging or main. Verify with targeted unit tests, image-log-failure harness, and release-relevant checks. | 2026-05-16 | 1b37eaf | Verified | [260516-4a1-v2-2-pre-promotion-uat-patch-based-on-no](./quick/260516-4a1-v2-2-pre-promotion-uat-patch-based-on-no/) |
-| 260516-5ei | Fix code-review findings for v2.2 pre-promotion UAT patch: strengthened no-mutation false-log guards, removed stale reachable prompt copy, accepted grouped Chinese serving metadata as quantity evidence, and hardened image logging regression proof. | 2026-05-16 | 4678bf0 | Verified | [260516-5ei-fix-code-review-findings-for-v2-2-pre-pr](./quick/260516-5ei-fix-code-review-findings-for-v2-2-pre-pr/) |
-| 260516-6d2 | Fix remaining v2.2 pre-promotion review blockers: preserve legitimate summary/history 已記錄 replies across orchestrator and route paths, harden SSE chunk parsing, and prove image upload cleanup before teardown. | 2026-05-16 | cd76006 | Verified | [260516-6d2-fix-remaining-v2-2-pre-promotion-review-](./quick/260516-6d2-fix-remaining-v2-2-pre-promotion-review-/) |
-| 260516-7tu | Fix remaining clean sub-agent review blockers: narrow no-mutation summary/history allowance, prevent summary-context SSE false-log leakage, and prove image-log-failure chunk ordering plus route-level upload cleanup before teardown. | 2026-05-16 | ec11307 | Verified | [260516-7tu-fix-the-remaining-clean-sub-agent-review](./quick/260516-7tu-fix-the-remaining-clean-sub-agent-review/) |
-| 260516-nwi | Fix v2.2 pre-promotion blockers by replacing the no-mutation summary/history regex allowlist with fact-grounded validation across JSON, drained stream, SSE, and harness proof. | 2026-05-16 | 74bbf40 | Verified | [260516-nwi-fix-v2-2-pre-promotion-blockers-by-repla](./quick/260516-nwi-fix-v2-2-pre-promotion-blockers-by-repla/) |
-| 260516-ppf | Fix v2.2 summary/history fact-grounding blocker: extend get_daily_summary with persisted meal facts, prevent aggregate totals from authorizing fake meal names or wrong per-meal kcal attribution, and add regression coverage for fake meal lists and daily-total-as-single-meal claims. | 2026-05-16 | 6113a67 | Verified | [260516-ppf-fix-v2-2-summary-history-fact-grounding-](./quick/260516-ppf-fix-v2-2-summary-history-fact-grounding-/) |
-| 260517-2a8 | Fix Phase 59 D-04 empty-day summary regression by preserving renderer-owned 0-meal summary/history replies while keeping no-mutation false-log protections for non-renderer replies. | 2026-05-16 | a6aab4c | Verified | [260517-2a8-fix-phase-59-d-04-empty-day-summary-regr](./quick/260517-2a8-fix-phase-59-d-04-empty-day-summary-regr/) |
-
-## Session
-
-Last session: 2026-05-16T16:58:29.950Z
-Stopped At: Completed Phase 59 UAT
-Resume File: None
-
-## Operator Next Steps
-
-- Phase 59 local workflow is complete. No staging/main promotion is authorized by this state update.
+Last session: 2026-05-17 03:15 Asia/Taipei
+Stopped at: v2.3 roadmap ready for `$gsd-plan-phase 60`
+Resume file: None

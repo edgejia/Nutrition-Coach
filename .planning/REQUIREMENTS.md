@@ -77,29 +77,29 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GOAL-01 | TBD | Pending |
-| GOAL-02 | TBD | Pending |
-| GOAL-03 | TBD | Pending |
-| GOAL-04 | TBD | Pending |
-| MUT-01 | TBD | Pending |
-| MUT-02 | TBD | Pending |
-| MUT-03 | TBD | Pending |
-| MUT-04 | TBD | Pending |
-| FRESH-01 | TBD | Pending |
-| FRESH-02 | TBD | Pending |
-| FRESH-03 | TBD | Pending |
-| REAL-01 | TBD | Pending |
-| REAL-02 | TBD | Pending |
-| REAL-03 | TBD | Pending |
-| PROOF-01 | TBD | Pending |
-| PROOF-02 | TBD | Pending |
-| PROOF-03 | TBD | Pending |
+| GOAL-01 | Phase 60 | Pending |
+| GOAL-02 | Phase 60 | Pending |
+| GOAL-03 | Phase 60 | Pending |
+| GOAL-04 | Phase 60 | Pending |
+| MUT-01 | Phase 61 | Pending |
+| MUT-02 | Phase 61 | Pending |
+| MUT-03 | Phase 61 | Pending |
+| MUT-04 | Phase 61 | Pending |
+| FRESH-01 | Phase 62 | Pending |
+| FRESH-02 | Phase 62 | Pending |
+| FRESH-03 | Phase 62 | Pending |
+| REAL-01 | Phase 63 | Pending |
+| REAL-02 | Phase 63 | Pending |
+| REAL-03 | Phase 63 | Pending |
+| PROOF-01 | Phase 64 | Pending |
+| PROOF-02 | Phase 64 | Pending |
+| PROOF-03 | Phase 64 | Pending |
 
 **Coverage:**
 - v2.3 requirements: 17 total
-- Mapped to phases: 0
-- Unmapped: 17
+- Mapped to phases: 17
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-17*
-*Last updated: 2026-05-17 after v2.3 requirements definition*
+*Last updated: 2026-05-17 after v2.3 roadmap creation*
