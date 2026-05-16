@@ -510,6 +510,108 @@ describe("verification-artifacts", () => {
     );
   });
 
+  test("structured SSE terminal proof metadata persists while raw SSE transcript keys are omitted", async () => {
+    const result = makePassResult("sse-terminal-proof-redaction") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.steps[0]!.actual = {
+      terminalProof: {
+        closed: true,
+        firstDoneObserved: true,
+        firstDoneIndex: 2,
+        noPostDoneChunkOrStatus: true,
+        terminalViolationEvents: [],
+        rawLength: 123,
+      },
+      rawSSE: "event: chunk\ndata: {\"token\":\"secret step token\"}\n\n",
+      rawSse: "event: status\ndata: secret status text\n\n",
+      sseTranscript: "event: chunk\ndata: secret transcript text\n\n",
+      streamFrames: [{ event: "chunk", data: "secret frame text" }],
+      token: "secret token text",
+    };
+    result.artifacts = {
+      terminalProof: {
+        closed: true,
+        firstDoneObserved: true,
+        firstDoneIndex: 2,
+        noPostDoneChunkOrStatus: true,
+        postDoneEventNames: [],
+        terminalViolationEvents: [],
+        nonEmptyChunkBeforeDone: true,
+        readCount: 4,
+        rawLength: 456,
+      },
+      rawSSE: "event: chunk\ndata: {\"token\":\"secret artifact token\"}\n\n",
+      rawSse: "event: status\ndata: secret artifact status\n\n",
+      sseTranscript: "event: chunk\ndata: secret artifact transcript\n\n",
+      streamFrames: [{ event: "chunk", data: "secret artifact frame" }],
+      token: "secret artifact token text",
+    };
+    result.llmTrace = {
+      summary: {
+        terminalProof: {
+          closed: true,
+          firstDoneObserved: true,
+          firstDoneIndex: 2,
+          noPostDoneChunkOrStatus: true,
+          terminalViolationEvents: [],
+          rawLength: 789,
+        },
+        rawSSE: "event: chunk\ndata: {\"token\":\"secret trace token\"}\n\n",
+      },
+      timeline: [
+        {
+          type: "sse_terminal_proof",
+          terminalProof: {
+            closed: true,
+            firstDoneObserved: true,
+            firstDoneIndex: 2,
+            noPostDoneChunkOrStatus: true,
+            terminalViolationEvents: [],
+            rawLength: 789,
+          },
+          rawSse: "event: status\ndata: secret trace status\n\n",
+          streamFrames: [{ event: "chunk", data: "secret trace frame" }],
+          token: "secret trace token text",
+        },
+      ],
+    };
+
+    await writeScenarioArtifacts("sse-terminal-proof-redaction", result);
+
+    const snapshotsRaw = readArtifact(tmpDir, "sse-terminal-proof-redaction", "snapshots.json");
+    const snapshots = JSON.parse(snapshotsRaw) as {
+      terminalProof: {
+        closed: boolean;
+        firstDoneObserved: boolean;
+        firstDoneIndex: number;
+        noPostDoneChunkOrStatus: boolean;
+        terminalViolationEvents: string[];
+        rawLength: number;
+      };
+    };
+    assert.deepEqual(snapshots.terminalProof, {
+      closed: true,
+      firstDoneObserved: true,
+      firstDoneIndex: 2,
+      noPostDoneChunkOrStatus: true,
+      postDoneEventNames: [],
+      terminalViolationEvents: [],
+      nonEmptyChunkBeforeDone: true,
+      readCount: 4,
+      rawLength: 456,
+    });
+
+    for (const fileName of ["summary.json", "steps.json", "snapshots.json", "scenario-result.json", "llm-trace.json"]) {
+      const raw = readArtifact(tmpDir, "sse-terminal-proof-redaction", fileName);
+      assert.doesNotMatch(raw, /rawSSE|rawSse|sseTranscript|streamFrames|token/);
+      assert.doesNotMatch(
+        raw,
+        /event: chunk|event: status|secret step token|secret status text|secret transcript text|secret frame text|secret token text|secret artifact token|secret artifact status|secret artifact transcript|secret artifact frame|secret artifact token text|secret trace token|secret trace status|secret trace frame|secret trace token text/,
+      );
+    }
+  });
+
   test("failed scenario produces ok=false and populated failedStep in summary.json", async () => {
     const result = makeFailResult("image-log-fail");
     await writeScenarioArtifacts("image-log-fail", result);
