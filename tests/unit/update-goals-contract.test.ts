@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService, type DailyTargets } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
-import { createGoalProposalService } from "../../server/services/goal-proposals.js";
+import {
+  GOAL_PROPOSAL_KIND,
+  createGoalProposalService,
+} from "../../server/services/goal-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import {
   executeTool,
@@ -59,6 +62,7 @@ async function readTargets(
 }
 
 describe("update_goals ToolContract", () => {
+  let db: ReturnType<typeof createDb>;
   let deviceId: string;
   let deviceService: ReturnType<typeof createDeviceService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
@@ -68,7 +72,7 @@ describe("update_goals ToolContract", () => {
   let deps: ToolDeps;
 
   beforeEach(async () => {
-    const db = createDb(":memory:");
+    db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     goalProposalService = createGoalProposalService(db);
@@ -246,7 +250,83 @@ describe("update_goals ToolContract", () => {
     assert.equal(published.length, 0);
   });
 
-  it("Test 7: latest_proposal applies active proposal with current-turn numeric overrides then clears state", async () => {
+  it("Test 7: expired proposals fail closed without mutation or publish", async () => {
+    await goalProposalService.putLatest(deviceId, { calories: 1850, protein: 135, carbs: 165, fat: 60 });
+    db.$client
+      .prepare("UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND kind = ?")
+      .run("2000-01-01T00:00:00.000Z", deviceId, GOAL_PROPOSAL_KIND);
+
+    const result = await executeTool(updateGoalsCall({ mode: "latest_proposal" }), deviceId, deps, {
+      currentUserMessage: "好",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.result, renderGoalAuthorityFailureCopy());
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "goal_authority_failure",
+      text: renderGoalAuthorityFailureCopy(),
+    });
+    assert.equal(await goalProposalService.getLatest(deviceId), undefined);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 8: stale or mismatched proposal identifiers fail closed without selecting replaced proposals", async () => {
+    const first = await goalProposalService.putLatest(deviceId, {
+      calories: 1850,
+      protein: 135,
+      carbs: 165,
+      fat: 60,
+    });
+    const replacement = await goalProposalService.putLatest(deviceId, {
+      calories: 1650,
+      protein: 125,
+      carbs: 145,
+      fat: 50,
+    });
+
+    const staleIdResult = await executeTool(
+      updateGoalsCall({ mode: "latest_proposal", proposal_id: first.proposalId }),
+      deviceId,
+      deps,
+      { currentUserMessage: "好" },
+    );
+    const mismatchedIdResult = await executeTool(
+      updateGoalsCall({ mode: "latest_proposal", proposal_id: "not-the-active-proposal" }),
+      deviceId,
+      deps,
+      { currentUserMessage: "好" },
+    );
+
+    for (const result of [staleIdResult, mismatchedIdResult]) {
+      assert.equal(result.success, false);
+      assert.equal(result.executed, false);
+      assert.equal(result.failureReason, "validation");
+      assert.equal(result.result, renderGoalAuthorityFailureCopy());
+      assert.deepEqual(result.controlledReply, {
+        source: "renderer",
+        reason: "goal_authority_failure",
+        text: renderGoalAuthorityFailureCopy(),
+      });
+    }
+    assert.deepEqual((await goalProposalService.getLatest(deviceId))?.targets, replacement.targets);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 9: latest_proposal applies active proposal with current-turn numeric overrides then clears state", async () => {
     await goalProposalService.putLatest(deviceId, { calories: 1850, protein: 135, carbs: 165, fat: 60 });
 
     const result = await executeTool(
@@ -275,7 +355,7 @@ describe("update_goals ToolContract", () => {
     });
   });
 
-  it("Test 8: cancel terms clear proposal without mutating or publishing and never count as consent", async () => {
+  it("Test 10: cancel terms clear proposal without mutating or publishing and never count as consent", async () => {
     for (const term of ["不要", "取消", "先不用", "不好", "不可以", "不行", "no"]) {
       await goalProposalService.putLatest(deviceId, { calories: 1850, protein: 135, carbs: 165, fat: 60 });
       published = [];
@@ -305,7 +385,7 @@ describe("update_goals ToolContract", () => {
     }
   });
 
-  it("Test 9: validation range failure returns field copy without mutation publish or proposal consumption", async () => {
+  it("Test 11: validation range failure returns field copy without mutation publish or proposal consumption", async () => {
     const proposed = { calories: 1850, protein: 135, carbs: 165, fat: 60 };
     await goalProposalService.putLatest(deviceId, proposed);
 
@@ -335,7 +415,7 @@ describe("update_goals ToolContract", () => {
     assert.equal(published.length, 0);
   });
 
-  it("Test 10: schemas preserve target ranges and explicit update_goals modes", async () => {
+  it("Test 12: schemas preserve target ranges and explicit update_goals modes", async () => {
     const contract = toolRegistry.get("update_goals");
     assert.ok(contract, "update_goals contract must be registered");
 
@@ -371,7 +451,7 @@ describe("update_goals ToolContract", () => {
     assert.equal(properties.fat.maximum, 300);
   });
 
-  it("Test 11: successful execute publishes goals_update and does not call summaryService.getDailySummary", async () => {
+  it("Test 13: successful execute publishes goals_update and does not call summaryService.getDailySummary", async () => {
     let getSummaryCalls = 0;
     const summarySpy = {
       getDailySummary: async (...args: Parameters<typeof summaryService.getDailySummary>) => {
@@ -393,7 +473,7 @@ describe("update_goals ToolContract", () => {
     });
   });
 
-  it("Test 12: summaries expose only tool names modes fields statuses and event names", async () => {
+  it("Test 14: summaries expose only tool names modes fields statuses and event names", async () => {
     const proposeContract = toolRegistry.get("propose_goals");
     const updateContract = toolRegistry.get("update_goals");
     assert.ok(proposeContract);
