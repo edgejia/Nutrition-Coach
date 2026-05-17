@@ -1,5 +1,6 @@
 import type { DailyTargets } from "../services/device.js";
 import type { DailySummary } from "../services/summary.js";
+import type { SummaryOutcome } from "../services/summary-outcome.js";
 
 export interface CommittedMealFacts {
   mealId: string;
@@ -27,26 +28,33 @@ export interface DeletedMealSnapshot {
 
 interface MutationEffectsBase {
   affectedDate: string;
-  committedSummary: DailySummary;
   committedTargets: DailyTargets;
 }
 
-export interface LogMutationEffects extends MutationEffectsBase {
+interface MealMutationEffectsBase extends MutationEffectsBase {
+  summaryOutcome: SummaryOutcome;
+}
+
+interface GoalsMutationEffectsBase extends MutationEffectsBase {
+  committedSummary: DailySummary;
+}
+
+export interface LogMutationEffects extends MealMutationEffectsBase {
   kind: "log";
   meal: CommittedMealFacts;
 }
 
-export interface UpdateMutationEffects extends MutationEffectsBase {
+export interface UpdateMutationEffects extends MealMutationEffectsBase {
   kind: "update";
   meal: CommittedMealFacts;
 }
 
-export interface DeleteMutationEffects extends MutationEffectsBase {
+export interface DeleteMutationEffects extends MealMutationEffectsBase {
   kind: "delete";
   deletedMeal: DeletedMealSnapshot;
 }
 
-export interface GoalsMutationEffects extends MutationEffectsBase {
+export interface GoalsMutationEffects extends GoalsMutationEffectsBase {
   kind: "goals";
   targets: DailyTargets;
   updatedFields: Array<keyof DailyTargets>;

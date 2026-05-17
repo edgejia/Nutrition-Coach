@@ -77,6 +77,7 @@ export interface ToolExecutionResult {
   publishedEvents?: string[];
   dailyTargets?: DailyTargets;
   dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
   summaryHistoryFacts?: {
     dailySummary?: DailySummary;
     meals: Array<{
@@ -1736,6 +1737,7 @@ export async function executeTool(
       summary: "成功",
       mealMutationKind: "update",
       dailySummary: contractResult.dailySummary,
+      summaryOutcome: contractResult.summaryOutcome,
       affectedDate: contractResult.affectedDate,
       loggedMeal: {
         ...projectMealIdentityFields(contractResult.updatedMeal),
@@ -1760,6 +1762,7 @@ export async function executeTool(
       summary: "成功",
       mealMutationKind: "delete",
       dailySummary: contractResult.dailySummary,
+      summaryOutcome: contractResult.summaryOutcome,
       affectedDate: contractResult.affectedDate,
       deletedMeal: contractResult.deletedMeal,
     };

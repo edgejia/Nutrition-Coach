@@ -2,6 +2,7 @@ import type { LLMProvider, ChatMessage, ProviderErrorMetadata } from "../llm/typ
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createChatService } from "../services/chat.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
+import type { SummaryOutcome } from "../services/summary-outcome.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService } from "../services/meal-correction.js";
@@ -132,6 +133,16 @@ function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined
   }
 
   return dailySummary;
+}
+
+function requireSummaryOutcomeForMealMutation(
+  summaryOutcome: SummaryOutcome | undefined,
+): SummaryOutcome {
+  if (!summaryOutcome) {
+    throw new Error("meal mutation succeeded without summaryOutcome");
+  }
+
+  return summaryOutcome;
 }
 
 function formatCalories(calories: number): string {
@@ -903,6 +914,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 result,
                 summary,
                 dailySummary,
+                summaryOutcome: toolSummaryOutcome,
                 loggedMeal: toolLoggedMeal,
                 success,
                 failureReason,
@@ -973,7 +985,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 mutationEffects = {
                   kind: "log",
                   affectedDate: affectedDate ?? toolLoggedMeal.dateKey,
-                  committedSummary: logMealSummary,
+                  summaryOutcome: toolSummaryOutcome ?? { status: "fresh", dailySummary: logMealSummary },
                   committedTargets: getDeviceTargets(device),
                   meal: toolLoggedMeal,
                 };
@@ -986,7 +998,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               }
               if (mealMutationKind === "update" || mealMutationKind === "delete") {
                 didMutateMeal = true;
-                logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
+                const mealSummaryOutcome = requireSummaryOutcomeForMealMutation(toolSummaryOutcome);
+                logMealSummary = dailySummary;
                 if (mealMutationKind === "update") {
                   loggedMeal = toolLoggedMeal;
                   if (!toolLoggedMeal) {
@@ -995,7 +1008,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   mutationEffects = {
                     kind: "update",
                     affectedDate: affectedDate ?? toolLoggedMeal.dateKey,
-                    committedSummary: logMealSummary,
+                    summaryOutcome: mealSummaryOutcome,
                     committedTargets: getDeviceTargets(device),
                     meal: toolLoggedMeal,
                   };
@@ -1007,7 +1020,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   mutationEffects = {
                     kind: "delete",
                     affectedDate: affectedDate ?? deletedMeal.dateKey,
-                    committedSummary: logMealSummary,
+                    summaryOutcome: mealSummaryOutcome,
                     committedTargets: getDeviceTargets(device),
                     deletedMeal,
                   };
