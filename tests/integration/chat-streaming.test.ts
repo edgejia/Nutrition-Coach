@@ -9,6 +9,7 @@ import type { AppServices } from "../../server/app.js";
 import { LLMProviderError } from "../../server/llm/errors.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
+import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
 import type { FastifyInstance } from "fastify";
 import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ProviderErrorMetadata, ToolCall, ToolDefinition } from "../../server/llm/types.js";
 
@@ -350,6 +351,14 @@ function observabilityEvents(logLines: string[], eventName: string) {
 
 function assertNoSuccessfulLogInternalCopy(text: string) {
   assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
+}
+
+function assertUnavailableSummaryOutcome(summaryOutcome: SummaryOutcome | undefined) {
+  assert.deepEqual(summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+}
+
+function assertNoPublishFailurePayload(payload: unknown) {
+  assert.doesNotMatch(JSON.stringify(payload), /publish_failed|summary_publish_failed/);
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1494,6 +1503,246 @@ describe("chat-streaming", () => {
     ]);
     assert.match(chunkText, /已更新(?:3\/25 )?半碗牛肉麵，360 kcal，蛋白質 20 g/);
     assert.doesNotMatch(chunkText, /蛋餅|330 kcal|14 g|5\/5|（5\/5）|可信蛋白/);
+  });
+
+  it("POST /api/chat stream done projects unavailable summaryOutcome for committed log mutations", async () => {
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after stream log");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("summary recovery failed after stream log");
+    };
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: { mealId?: string; foodName?: string };
+      dailySummary?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+
+    assert.equal(donePayload.didLogMeal, true);
+    assert.equal(donePayload.didMutateMeal, true);
+    assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
+    assertUnavailableSummaryOutcome(donePayload.summaryOutcome);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "dailySummary"), false);
+    assertNoPublishFailurePayload(donePayload);
+  });
+
+  it("POST /api/chat stream done projects unavailable summaryOutcome for committed update mutations", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "seed_update_unavailable_stream",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+            meal_period: "dinner",
+          }),
+        },
+      }],
+    });
+    const seedForm = new FormData();
+    seedForm.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    const seedText = await readStreamUntil(seedRes.body.getReader(), "event: done");
+    const seedPayload = JSON.parse(parseSSEEvents(seedText).find((event) => event.event === "done")!.data) as {
+      loggedMeal?: { mealId?: string };
+    };
+    const mealId = seedPayload.loggedMeal?.mealId;
+    assert.ok(mealId);
+
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after stream update");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("summary recovery failed after stream update");
+    };
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("update", "2026-03-25 晚餐牛肉麵"),
+        createUpdateMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueChatStream(["已更新半碗牛肉麵。"]);
+
+    const form = new FormData();
+    form.append("message", "把 2026-03-25 晚餐牛肉麵改成半碗");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      affectedDate?: string;
+      loggedMeal?: { mealId?: string; foodName?: string };
+      dailySummary?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+
+    assert.equal(donePayload.didLogMeal, false);
+    assert.equal(donePayload.didMutateMeal, true);
+    assert.equal(donePayload.affectedDate, "2026-03-25");
+    assert.equal(donePayload.loggedMeal?.mealId, mealId);
+    assert.equal(donePayload.loggedMeal?.foodName, "半碗牛肉麵");
+    assertUnavailableSummaryOutcome(donePayload.summaryOutcome);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "dailySummary"), false);
+    assertNoPublishFailurePayload(donePayload);
+  });
+
+  it("POST /api/chat stream done projects unavailable summaryOutcome for committed delete mutations", async () => {
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了雞腿便當");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: seedForm,
+    });
+    assert.ok(seedRes.body);
+    await readStreamUntil(seedRes.body.getReader(), "event: done");
+
+    const mealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsJson = await mealsRes.json() as { meals: Array<{ id: string }> };
+    const mealId = mealsJson.meals[0]?.id;
+    assert.ok(mealId);
+
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after stream delete");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("summary recovery failed after stream delete");
+    };
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("delete", "雞腿便當"),
+        createDeleteMealToolCall(mealId),
+      ],
+    });
+    mockLLM.queueChatStream(["已刪除雞腿便當。"]);
+
+    const form = new FormData();
+    form.append("message", "刪除雞腿便當");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      affectedDate?: string;
+      loggedMeal?: unknown;
+      dailySummary?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+
+    assert.equal(donePayload.didLogMeal, false);
+    assert.equal(donePayload.didMutateMeal, true);
+    assert.match(donePayload.affectedDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(donePayload.loggedMeal, undefined);
+    assertUnavailableSummaryOutcome(donePayload.summaryOutcome);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "dailySummary"), false);
+    assertNoPublishFailurePayload(donePayload);
+  });
+
+  it("POST /api/chat stopped stream projects summaryOutcome for committed mutations", async () => {
+    assert.ok(services, "expected app services");
+    const originalHandleMessage = services.orchestrator.handleMessage.bind(services.orchestrator);
+    services.orchestrator.handleMessage = async (_requestDeviceId, _userMessage, _imageBase64, _assetRef, opts) => {
+      opts?.onUserMessageSaved?.();
+      return {
+        streamGenerator: streamTokensUntilAbort(["已"], opts?.signal, () => {}),
+        didLogMeal: false,
+        didMutateMeal: true,
+        affectedDate: "2026-03-25",
+        summaryOutcome: { status: "unavailable", reason: "recompute_failed" },
+      };
+    };
+
+    const form = new FormData();
+    form.append("message", "刪除 2026-03-25 牛肉麵");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+    assert.ok(res.body);
+    const reader = res.body.getReader();
+    const startText = await readStreamUntil(reader, "event: chunk");
+    const startPayload = parseSSEEvents(startText).find((event) => event.event === "start");
+    assert.ok(startPayload);
+    const turnId = (JSON.parse(startPayload.data) as { turnId?: string }).turnId;
+    assert.ok(turnId);
+
+    const stopRes = await fetch(`${address}/api/chat/stop`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Content-Type": "application/json" },
+      body: JSON.stringify({ turnId }),
+    });
+    assert.equal(stopRes.status, 200);
+
+    try {
+      const stoppedText = startText + await readStreamUntil(reader, "event: stopped");
+      const stoppedPayload = JSON.parse(parseSSEEvents(stoppedText).find((event) => event.event === "stopped")!.data) as {
+        stopped?: boolean;
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        affectedDate?: string;
+        dailySummary?: unknown;
+        summaryOutcome?: SummaryOutcome;
+      };
+      assert.equal(stoppedPayload.stopped, true);
+      assert.equal(stoppedPayload.didLogMeal, false);
+      assert.equal(stoppedPayload.didMutateMeal, true);
+      assert.equal(stoppedPayload.affectedDate, "2026-03-25");
+      assertUnavailableSummaryOutcome(stoppedPayload.summaryOutcome);
+      assert.equal(Object.prototype.hasOwnProperty.call(stoppedPayload, "dailySummary"), false);
+      assertNoPublishFailurePayload(stoppedPayload);
+    } finally {
+      services.orchestrator.handleMessage = originalHandleMessage;
+      await reader.cancel().catch(() => {});
+    }
   });
 
   it("POST /api/chat stream done keeps delete_meal confirmations non-editable", async () => {

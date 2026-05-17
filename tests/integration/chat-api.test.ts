@@ -15,6 +15,7 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { ChatMessage, LLMProvider, LLMResponse, ProviderErrorMetadata, ToolDefinition } from "../../server/llm/types.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
+import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
 import type { FastifyInstance } from "fastify";
 
 interface SSEEvent {
@@ -67,6 +68,19 @@ function observabilityEvents(logLines: string[], eventName: string) {
 
 function assertNoSuccessfulLogInternalCopy(text: string) {
   assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
+}
+
+function assertUnavailableSummaryOutcome(summaryOutcome: SummaryOutcome | undefined) {
+  assert.deepEqual(summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+}
+
+function assertFreshSummaryOutcome(summaryOutcome: SummaryOutcome | undefined) {
+  assert.equal(summaryOutcome?.status, "fresh");
+  assert.ok(summaryOutcome && "dailySummary" in summaryOutcome);
+}
+
+function assertNoPublishFailurePayload(payload: unknown) {
+  assert.doesNotMatch(JSON.stringify(payload), /publish_failed|summary_publish_failed/);
 }
 
 function chatTurnCompletedMetadata(record: Record<string, unknown>) {
@@ -1420,6 +1434,61 @@ describe("Chat API", () => {
     assert.doesNotMatch(body.reply, /無法辨識|回覆生成失敗|這次無法完成請求|headline/);
   });
 
+  it("POST /api/chat JSON projects unavailable summaryOutcome for committed log responses", async () => {
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after persistence");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("summary recovery failed after persistence");
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_unavailable_summary_after_log",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: { mealId?: string; foodName?: string };
+      dailySummary?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.equal(body.loggedMeal?.foodName, "雞腿便當");
+    assertUnavailableSummaryOutcome(body.summaryOutcome);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assertNoPublishFailurePayload(body);
+  });
+
   it("POST /api/chat returns affectedDate for historical logging without changing the summary payload shape", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -2040,6 +2109,230 @@ describe("Chat API", () => {
     assert.deepEqual(updateBody.loggedMeal?.items, [
       { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
     ]);
+  });
+
+  it("POST /api/chat JSON projects unavailable summaryOutcome for committed update responses", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "seed_update_unavailable_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+          }),
+        },
+      }],
+    });
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了牛肉麵");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: seedForm,
+    });
+    assert.equal(seedRes.status, 200);
+    const seedBody = await seedRes.json() as { loggedMeal?: { mealId?: string } };
+    const mealId = seedBody.loggedMeal?.mealId;
+    assert.ok(mealId);
+
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after update");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("summary recovery failed after update");
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_update_unavailable_json",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "update", query: "牛肉麵" }),
+          },
+        },
+        {
+          id: "update_unavailable_json",
+          type: "function",
+          function: {
+            name: "update_meal",
+            arguments: JSON.stringify({
+              meal_id: mealId,
+              food_name: "半碗牛肉麵",
+              calories: 360,
+              protein: 20,
+              carbs: 45,
+              fat: 10,
+            }),
+          },
+        },
+      ],
+    });
+    mockLLM.queueChatResponse({ content: "已更新半碗牛肉麵。" });
+
+    const updateForm = new FormData();
+    updateForm.append("message", "把牛肉麵改成半碗");
+    const updateRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: updateForm,
+    });
+
+    assert.equal(updateRes.status, 200);
+    const body = await updateRes.json() as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      affectedDate?: string;
+      loggedMeal?: { mealId?: string; foodName?: string };
+      dailySummary?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.affectedDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(body.loggedMeal?.mealId, mealId);
+    assert.equal(body.loggedMeal?.foodName, "半碗牛肉麵");
+    assertUnavailableSummaryOutcome(body.summaryOutcome);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assertNoPublishFailurePayload(body);
+  });
+
+  it("POST /api/chat JSON projects unavailable summaryOutcome for committed delete responses", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "seed_delete_unavailable_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 24,
+            carbs: 70,
+            fat: 18,
+          }),
+        },
+      }],
+    });
+    const seedForm = new FormData();
+    seedForm.append("message", "我吃了雞腿便當");
+    const seedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: seedForm,
+    });
+    assert.equal(seedRes.status, 200);
+    const mealsBeforeRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsBeforeJson = await mealsBeforeRes.json() as { meals: Array<{ id: string }> };
+    const mealId = mealsBeforeJson.meals[0]?.id;
+    assert.ok(mealId);
+
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after delete");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("summary recovery failed after delete");
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_delete_unavailable_json",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "delete", query: "雞腿便當" }),
+          },
+        },
+        {
+          id: "delete_unavailable_json",
+          type: "function",
+          function: {
+            name: "delete_meal",
+            arguments: JSON.stringify({ meal_id: mealId }),
+          },
+        },
+      ],
+    });
+    mockLLM.queueChatResponse({ content: "已刪除雞腿便當。" });
+
+    const deleteForm = new FormData();
+    deleteForm.append("message", "刪除雞腿便當");
+    const deleteRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: deleteForm,
+    });
+
+    assert.equal(deleteRes.status, 200);
+    const body = await deleteRes.json() as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      affectedDate?: string;
+      loggedMeal?: unknown;
+      dailySummary?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.affectedDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(body.loggedMeal, undefined);
+    assertUnavailableSummaryOutcome(body.summaryOutcome);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assertNoPublishFailurePayload(body);
+  });
+
+  it("POST /api/chat JSON keeps publish failure out of summaryOutcome", async () => {
+    assert.ok(services, "expected app services");
+    services.publisher.publishDailySummary = () => {
+      throw new Error("publish failed after committed log");
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_publish_fail_after_log",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "豆漿",
+            quantity_ml: 300,
+            calories: 120,
+            protein: 8,
+            carbs: 10,
+            fat: 4,
+          }),
+        },
+      }],
+    });
+
+    const form = new FormData();
+    form.append("message", "一杯豆漿");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.didMutateMeal, true);
+    assertFreshSummaryOutcome(body.summaryOutcome);
+    assert.ok(body.dailySummary);
+    assertNoPublishFailurePayload(body);
   });
 
   it("POST /api/chat without SSE accept header still returns JSON", async () => {
