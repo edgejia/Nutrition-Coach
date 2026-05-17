@@ -147,9 +147,12 @@ describe("SummaryDetailScreen disclosure shell", () => {
   });
 
   it("refreshes shared today state after Summary Detail meal deletion", () => {
-    assert.match(summaryDetailSource, /recordMealMutation\(affectedDate\)/);
-    assert.match(summaryDetailSource, /setDailySummary\(dailySummary\)/);
-    assert.match(summaryDetailSource, /getMeals\(\{ refreshReason: "meal_mutation" \}\)/);
-    assert.match(summaryDetailSource, /setMeals\(meals\)/);
+    assert.match(summaryDetailSource, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
+    assert.match(summaryDetailSource, /const redactChatReceiptIdentity = useStore\(\(s\) => s\.redactChatReceiptIdentity\);/);
+    assert.match(summaryDetailSource, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
+    assert.doesNotMatch(
+      summaryDetailSource,
+      /if \(dailySummary\?\.date === todayKey\) \{\s*setDailySummary\(dailySummary\);\s*const \{ meals \} = await getMeals\(\{ refreshReason: "meal_mutation" \}\);\s*setMeals\(meals\);\s*\}/,
+    );
   });
 });

@@ -13,6 +13,7 @@ import {
 import { buildCalendarWeeks, getInitialSummaryDateKey, isHistoricalSummaryDate } from "../lib/summary-calendar.js";
 import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
+import { refreshAfterMealMutation } from "../meal-edit-refresh.js";
 import { useStore } from "../store.js";
 import type { DailySummary, DailyTargets, MealEntry } from "../types.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
@@ -387,6 +388,7 @@ export function SummaryDetailScreen() {
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setMeals = useStore((s) => s.setMeals);
+  const redactChatReceiptIdentity = useStore((s) => s.redactChatReceiptIdentity);
   const recordMealMutation = useStore((s) => s.recordMealMutation);
   const liveSummary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
@@ -515,12 +517,18 @@ export function SummaryDetailScreen() {
       const { affectedDate, dailySummary } = await deleteMeal(mealId, {
         expectedMealRevisionId: meal.mealRevisionId,
       });
-      recordMealMutation(affectedDate);
-      if (dailySummary?.date === todayKey) {
-        setDailySummary(dailySummary);
-        const { meals } = await getMeals({ refreshReason: "meal_mutation" });
-        setMeals(meals);
-      }
+      await refreshAfterMealMutation({
+        redactChatReceiptIdentity,
+        recordMealMutation,
+        setDailySummary,
+        getMeals,
+        setMeals,
+        todayKey: () => formatLocalDate(new Date()),
+      }, {
+        mealId,
+        affectedDate,
+        dailySummary,
+      });
       const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
       setSnapshot(refreshedSnapshot);
     } catch (err) {

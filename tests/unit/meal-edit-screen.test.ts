@@ -94,10 +94,12 @@ describe("Meal Edit source contract", () => {
     }
   });
 
-  it("keeps Summary Detail direct delete side effects guarded by a usable dailySummary", () => {
+  it("keeps Summary Detail direct delete side effects on the shared committed-mutation refresh path", () => {
     assert.match(summaryDetailSource, /const \{ affectedDate, dailySummary \} = await deleteMeal\(mealId, \{\s*expectedMealRevisionId: meal\.mealRevisionId,\s*\}\);/);
-    assert.match(summaryDetailSource, /recordMealMutation\(affectedDate\);/);
-    assert.match(summaryDetailSource, /if \(dailySummary\?\.date === todayKey\) \{/);
+    assert.match(summaryDetailSource, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
+    assert.match(summaryDetailSource, /redactChatReceiptIdentity,/);
+    assert.match(summaryDetailSource, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
+    assert.doesNotMatch(summaryDetailSource, /if \(dailySummary\?\.date === todayKey\) \{/);
 
     for (const rejected of [
       "summary unavailable",

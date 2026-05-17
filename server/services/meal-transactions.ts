@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   assetReferences,
@@ -84,6 +84,7 @@ export interface MealMutationGuard {
 }
 
 type AssetReferenceWriter = Pick<AppDatabase, "insert">;
+type MealTransactionReader = Pick<AppDatabase, "select">;
 
 export type MealRevisionPreconditionCode = "MEAL_REVISION_REQUIRED" | "MEAL_REVISION_STALE";
 
@@ -168,8 +169,36 @@ export function createMealTransactionsService(db: AppDatabase) {
       .get(deviceId, transactionId) as MealTransactionRow | undefined;
   }
 
-  async function loadDeletedMealSnapshot(existing: MealTransactionRow): Promise<DeletedMealSnapshot> {
-    const items = await db
+  function getActiveTransactionByDeviceAndIdFromReader(
+    reader: MealTransactionReader,
+    deviceId: string,
+    transactionId: string,
+  ): MealTransactionRow | undefined {
+    return reader
+      .select({
+        id: mealTransactions.id,
+        deviceId: mealTransactions.deviceId,
+        loggedAt: mealTransactions.loggedAt,
+        currentRevisionId: mealTransactions.currentRevisionId,
+        currentRevisionNumber: mealTransactions.currentRevisionNumber,
+        deletedAt: mealTransactions.deletedAt,
+        createdAt: mealTransactions.createdAt,
+      })
+      .from(mealTransactions)
+      .where(and(
+        eq(mealTransactions.deviceId, deviceId),
+        eq(mealTransactions.id, transactionId),
+        isNull(mealTransactions.deletedAt),
+      ))
+      .limit(1)
+      .get();
+  }
+
+  function loadDeletedMealSnapshotFromReader(
+    reader: MealTransactionReader,
+    existing: MealTransactionRow,
+  ): DeletedMealSnapshot {
+    const items = reader
       .select({
         foodName: mealRevisionItems.foodName,
         calories: mealRevisionItems.calories,
@@ -177,7 +206,8 @@ export function createMealTransactionsService(db: AppDatabase) {
       })
       .from(mealRevisionItems)
       .where(eq(mealRevisionItems.revisionId, existing.currentRevisionId))
-      .orderBy(asc(mealRevisionItems.position));
+      .orderBy(asc(mealRevisionItems.position))
+      .all();
     const dateKey = formatLocalDate(new Date(existing.loggedAt));
     const display = projectMealDisplay(items, "未知餐點");
     const calories = items.length > 0
@@ -372,19 +402,20 @@ export function createMealTransactionsService(db: AppDatabase) {
       transactionId: string,
       expectedMealRevisionId?: string | null,
     ): Promise<MealTransactionDeleteResult> {
-      const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
-
-      if (!existing) {
-        throw new Error("MEAL_NOT_FOUND");
-      }
-      assertExpectedMealRevision(existing, expectedMealRevisionId);
-
-      const deletedMeal = await loadDeletedMealSnapshot(existing);
       const deletedAt = new Date().toISOString();
-      const revisionNumber = existing.currentRevisionNumber + 1;
-      const revisionId = `${existing.id}:r${revisionNumber}`;
 
       return db.transaction((tx) => {
+        const existing = getActiveTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
+
+        if (!existing) {
+          throw new Error("MEAL_NOT_FOUND");
+        }
+        assertExpectedMealRevision(existing, expectedMealRevisionId);
+
+        const deletedMeal = loadDeletedMealSnapshotFromReader(tx, existing);
+        const revisionNumber = existing.currentRevisionNumber + 1;
+        const revisionId = `${existing.id}:r${revisionNumber}`;
+
         tx.insert(mealRevisions)
           .values({
             id: revisionId,
@@ -403,7 +434,11 @@ export function createMealTransactionsService(db: AppDatabase) {
             currentRevisionNumber: revisionNumber,
             deletedAt,
           })
-          .where(eq(mealTransactions.id, existing.id))
+          .where(and(
+            eq(mealTransactions.id, existing.id),
+            eq(mealTransactions.currentRevisionId, existing.currentRevisionId),
+            isNull(mealTransactions.deletedAt),
+          ))
           .run();
 
         return {
@@ -420,29 +455,30 @@ export function createMealTransactionsService(db: AppDatabase) {
       transactionId: string,
       input: MealTransactionUpdateInput,
     ): Promise<MealTransactionUpdateResult> {
-      const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
-
-      if (!existing) {
-        throw new Error("MEAL_NOT_FOUND");
-      }
-      assertExpectedMealRevision(existing, input.expectedMealRevisionId);
-
       const items = normalizeItems(input.items);
       const createdAt = new Date().toISOString();
-      const revisionNumber = existing.currentRevisionNumber + 1;
-      const revisionId = `${existing.id}:r${revisionNumber}`;
       const explicitImageAssetId = parseAssetRef(input.imagePath);
-      const currentRevision = db
-        .select({
-          imageAssetId: mealRevisions.imageAssetId,
-        })
-        .from(mealRevisions)
-        .where(eq(mealRevisions.id, existing.currentRevisionId))
-        .limit(1)
-        .get();
-      const imageAssetId = explicitImageAssetId ?? currentRevision?.imageAssetId ?? null;
 
       return db.transaction((tx) => {
+        const existing = getActiveTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
+
+        if (!existing) {
+          throw new Error("MEAL_NOT_FOUND");
+        }
+        assertExpectedMealRevision(existing, input.expectedMealRevisionId);
+
+        const revisionNumber = existing.currentRevisionNumber + 1;
+        const revisionId = `${existing.id}:r${revisionNumber}`;
+        const currentRevision = tx
+          .select({
+            imageAssetId: mealRevisions.imageAssetId,
+          })
+          .from(mealRevisions)
+          .where(eq(mealRevisions.id, existing.currentRevisionId))
+          .limit(1)
+          .get();
+        const imageAssetId = explicitImageAssetId ?? currentRevision?.imageAssetId ?? null;
+
         if (imageAssetId) {
           const existingAsset = tx
             .select({ id: assets.id })
@@ -496,7 +532,11 @@ export function createMealTransactionsService(db: AppDatabase) {
             currentRevisionId: revisionId,
             currentRevisionNumber: revisionNumber,
           })
-          .where(eq(mealTransactions.id, existing.id))
+          .where(and(
+            eq(mealTransactions.id, existing.id),
+            eq(mealTransactions.currentRevisionId, existing.currentRevisionId),
+            isNull(mealTransactions.deletedAt),
+          ))
           .run();
 
         if (imageAssetId) {
