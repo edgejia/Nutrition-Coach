@@ -1,4 +1,5 @@
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
+import type { DailyTargets } from "../services/device.js";
 import type { MutationEffects } from "./mutation-effects.js";
 
 export const FORBIDDEN_RECEIPT_TERMS = [
@@ -50,6 +51,52 @@ function formatReceiptDateLabel(dateKey: string, currentDate = currentAppDate())
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+}
+
+export function renderGoalProposalCopy(targets: DailyTargets): string {
+  return [
+    "我可以先幫你改成這組每日目標：",
+    `• 卡路里 ${formatNumber(targets.calories)} kcal`,
+    `• 蛋白質 ${formatNumber(targets.protein)} g`,
+    `• 碳水 ${formatNumber(targets.carbs)} g`,
+    `• 脂肪 ${formatNumber(targets.fat)} g`,
+    "如果要套用，請回覆「好」；如果要調整，請直接給新的數字。",
+  ].join("\n");
+}
+
+export function renderGoalAuthorityFailureCopy(): string {
+  return "這次沒有套用目標更新。請直接提供新的每日目標數字，或再請我產生一組建議。";
+}
+
+type GoalTargetField = keyof DailyTargets;
+
+const GOAL_FIELD_RANGE_COPY: Record<GoalTargetField, { label: string; range: string }> = {
+  calories: { label: "卡路里", range: "500-8000 kcal" },
+  protein: { label: "蛋白質", range: "0-400 g" },
+  carbs: { label: "碳水", range: "0-1000 g" },
+  fat: { label: "脂肪", range: "0-300 g" },
+};
+
+export function renderGoalValidationFailureCopy(fields: GoalTargetField[]): string {
+  if (fields.length === 1) {
+    const field = GOAL_FIELD_RANGE_COPY[fields[0]];
+    return `這次沒有套用目標更新。${field.label}需介於 ${field.range}，請提供範圍內的每日目標數字。`;
+  }
+
+  const ranges = fields.map((field) => {
+    const range = GOAL_FIELD_RANGE_COPY[field];
+    return `• ${range.label} ${range.range}`;
+  });
+
+  return [
+    "這次沒有套用目標更新。請確認以下每日目標範圍：",
+    ...ranges,
+    "請提供範圍內的每日目標數字。",
+  ].join("\n");
+}
+
+export function renderGoalCancelCopy(): string {
+  return "已取消這組目標提案，沒有套用任何更新。之後可以直接提供新的目標數字，或再請我產生一組建議。";
 }
 
 function formatDatePrefix(dateKey: string): string {
