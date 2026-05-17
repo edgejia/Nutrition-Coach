@@ -43,6 +43,7 @@ describe("Meal Edit source contract", () => {
       "updateMeal",
       "deleteMeal",
       "MealRevisionConflictError",
+      "refreshAfterMealMutation",
       "expectedMealRevisionId: payload.mealRevisionId",
       "confirm",
       "setDailySummary",
@@ -78,11 +79,10 @@ describe("Meal Edit source contract", () => {
   });
 
   it("preserves committed direct mutation side effects when dailySummary is absent", () => {
-    assert.match(source, /async function refreshAfterMealMutation\(mealId: string, affectedDate: string, dailySummary\?: DailySummary\)/);
-    assert.match(source, /redactChatReceiptIdentity\(mealId\);\s*recordMealMutation\(affectedDate\);/);
-    assert.match(source, /if \(!dailySummary \|\| dailySummary\.date !== formatLocalDate\(new Date\(\)\)\) \{/);
-    assert.match(source, /await refreshAfterMealMutation\(payload\.mealId, response\.affectedDate, response\.dailySummary\);/);
-    assert.match(source, /await refreshAfterMealMutation\(payload\.mealId, affectedDate, dailySummary\);/);
+    assert.match(source, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
+    assert.doesNotMatch(source, /if \(!dailySummary \|\| dailySummary\.date !== formatLocalDate\(new Date\(\)\)\) \{\s*return;\s*\}/);
+    assert.match(source, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId: payload\.mealId,\s*affectedDate: response\.affectedDate,\s*dailySummary: response\.dailySummary,\s*\}\);/);
+    assert.match(source, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId: payload\.mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
 
     for (const rejected of [
       "summary unavailable",
