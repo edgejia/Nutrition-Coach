@@ -1,40 +1,27 @@
 ---
 phase: 62-meal-revision-tokens-and-stale-receipt-protection
-verified: 2026-05-17T13:05:24Z
-status: gaps_found
-score: 5/7 must-haves verified
+verified: 2026-05-17T16:21:07Z
+status: passed
+score: 8/8 must-haves verified
 overrides_applied: 0
-gaps:
-  - truth: "Stale expected revisions return MEAL_REVISION_STALE before other mutation-shape guards and before any write, summary, or publish side effect."
-    status: failed
-    reason: "PATCH /api/meals/:id checks grouped item count before invoking the expected-revision guarded update path, so a stale single-item editor can receive MEAL_REQUIRES_GROUPED_UPDATE after another flow turns the meal into a grouped meal."
-    artifacts:
-      - path: "server/routes/meals.ts"
-        issue: "Lines 189-197 return MEAL_REQUIRES_GROUPED_UPDATE before foodLoggingService.updateMeal can throw MealRevisionPreconditionError."
-      - path: "tests/integration/meals-api.test.ts"
-        issue: "Tests cover stale single-item updates and current grouped updates separately, but not the stale-single-to-current-grouped transition."
-    missing:
-      - "Enforce the expected revision against current transaction state before grouped-shape rejection."
-      - "Add integration coverage where an editor opens a single-item revision, another flow commits a grouped revision, and the stale direct PATCH returns MEAL_REVISION_STALE with currentMealRevisionId."
-  - truth: "Successful today update/delete commits refresh or invalidate affected meal rows even when summary recovery is unavailable and dailySummary is omitted."
-    status: failed
-    reason: "MealEditScreen.refreshAfterMealMutation returns before getMeals when dailySummary is missing or not today, so a committed same-day mutation with summaryOutcome unavailable can close the editor while the visible meal list stays stale."
-    artifacts:
-      - path: "client/src/components/MealEditScreen.tsx"
-        issue: "Lines 130-139 return on missing/non-today dailySummary before fetching today's meals by affectedDate."
-      - path: "tests/unit/meal-edit-screen.test.ts"
-        issue: "The source-contract test asserts the early return pattern instead of proving getMeals runs for successful today mutations without dailySummary."
-    missing:
-      - "Record/redact mutation side effects, set dailySummary only when usable, and fetch today's meals whenever affectedDate equals today."
-      - "Add behavior-level client coverage for a successful today edit/delete response with summaryOutcome unavailable and no dailySummary."
+re_verification:
+  previous_status: gaps_found
+  previous_score: 5/7
+  gaps_closed:
+    - "Stale single-item direct PATCH to a now-grouped current meal returns MEAL_REVISION_STALE before grouped-shape rejection and before write, summary, or publish side effects."
+    - "Successful same-day edit/delete responses refresh or invalidate visible rows even when summaryOutcome is unavailable and dailySummary is omitted."
+    - "Deleted-target races return stable stale revision failures instead of MEAL_NOT_FOUND."
+    - "Post-commit refresh failures preserve committed mutation bookkeeping instead of surfacing as mutation failures."
+  gaps_remaining: []
+  regressions: []
 ---
 
 # Phase 62: Meal Revision Tokens and Stale Receipt Protection Verification Report
 
 **Phase Goal:** Users cannot overwrite newer meal facts from older chat receipts because every edit-capable receipt carries revision identity and stale writes fail closed.
-**Verified:** 2026-05-17T13:05:24Z
-**Status:** gaps_found
-**Re-verification:** No - initial verification
+**Verified:** 2026-05-17T16:21:07Z
+**Status:** passed
+**Re-verification:** Yes - after 62-05 gap closure through HEAD `6bbc8aa`
 
 ## Goal Achievement
 
@@ -42,97 +29,99 @@ gaps:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | User-facing meal and chat receipt DTOs expose current meal revision identity wherever the receipt can start an edit. | VERIFIED | `server/routes/meals.ts:146-164`, `server/routes/day-snapshot.ts:44`, `server/services/history-query.ts:409`, `server/routes/chat.ts:421-491`, `client/src/api.ts:829-845`, and `client/src/meal-edit-payload.ts:60-115` project or preserve public `mealRevisionId`; receipts missing it return `null` edit payloads. |
-| 2 | User edits from a current receipt can update/delete with the expected revision contract. | VERIFIED | Client writes serialize `expectedMealRevisionId` in `client/src/api.ts:868-894`; `MealEditScreen.tsx:196-201` and `:230-233` derive it from `payload.mealRevisionId`; transaction guards compare it in `server/services/meal-transactions.ts:191-215` before update/delete writes. |
-| 3 | Missing expected revisions fail closed with stable 409 errors and no mutation, summary, or publish side effects. | VERIFIED | `assertExpectedMealRevision` throws `MEAL_REVISION_REQUIRED` before writes at `server/services/meal-transactions.ts:198-205`; `server/routes/meals.ts:225-226` and `:293-294` return conflict bodies before summary recompute; integration assertions at `tests/integration/meals-api.test.ts:361-383` and `:442-456` prove no summary/publish side effects. |
-| 4 | Stale expected revisions fail closed with `MEAL_REVISION_STALE` before other mutation-shape guards and before new revisions. | FAILED | Non-grouped stale update/delete is covered, but `server/routes/meals.ts:189-197` returns `MEAL_REQUIRES_GROUPED_UPDATE` before the guarded update call. This masks stale conflicts when the current meal became grouped after a stale editor opened. |
-| 5 | Chat/tool update and delete mutations use backend-resolved expected revision identity, and stale tool races fail without success receipts or publish side effects. | VERIFIED | `server/orchestrator/tools.ts:1271-1305` and `:1348-1358` pass `resolvedTarget.mealRevisionId`; `server/services/meal-correction.ts:708-745` and `:760-773` pass it into transaction update/delete; tests assert stale tool failures at `tests/unit/tools.test.ts:1458-1465` and integration race coverage at `tests/integration/chat-meal-correction.integration.test.ts:791-933`. |
-| 6 | Receipts without `mealRevisionId` are display-only, and stale conflict UI shows deterministic Traditional Chinese guidance while blocking stale editor reuse. | VERIFIED | `client/src/meal-edit-payload.ts:84-97` fails closed for incomplete receipt identity; `client/src/components/MealEditScreen.tsx:154-166` sets stale copy and `staleBlocked`; tests assert copy and blocked controls in `tests/unit/meal-edit-screen.test.ts:60-78` and display-only receipts in `tests/unit/chat-bubble-contract.test.ts:175-319`. |
-| 7 | Successful same-day mutations refresh or invalidate affected rows even when committed outcome has no `dailySummary`. | FAILED | `client/src/components/MealEditScreen.tsx:130-139` returns before `getMeals` when `dailySummary` is absent, while API tests show successful updates can return `summaryOutcome: unavailable` with no `dailySummary` at `tests/unit/api-client.test.ts:822-839`. |
+| 1 | User-facing meal and chat receipt DTOs expose current meal revision identity wherever the receipt can start an edit. | VERIFIED | Direct `/api/meals` rows project `mealRevisionId` in `server/routes/meals.ts:146-164`; history/day/chat surfaces project or preserve it in `server/services/meal-history.ts`, `server/services/history-query.ts`, `server/services/chat.ts`, `server/routes/day-snapshot.ts:44`, and `server/routes/chat.ts:415-469`; client normalizers preserve it in `client/src/api.ts:829-845` and edit payload builders require it in `client/src/meal-edit-payload.ts:60-115`. |
+| 2 | User edits from a current receipt can update/delete with the expected revision contract. | VERIFIED | Client writes serialize `expectedMealRevisionId` in `client/src/api.ts:868-894`; `MealEditScreen` passes `payload.mealRevisionId` on save/delete at `client/src/components/MealEditScreen.tsx:185-236`; transaction update/delete compare expected revision before writes in `server/services/meal-transactions.ts:426-495`. |
+| 3 | User edits from an older receipt are rejected without mutating the meal or creating a newer revision. | VERIFIED | `MealRevisionPreconditionError` is thrown on missing/stale expected revisions in `server/services/meal-transactions.ts:220-244`; direct route conflict branches return before summary/publish in `server/routes/meals.ts:222-246` and `:290-314`; tests prove no side effects in `tests/integration/meals-api.test.ts:336-491`. |
+| 4 | Direct PATCH stale-single-to-current-grouped returns `MEAL_REVISION_STALE` before grouped-shape rejection and before write/summary/publish side effects. | VERIFIED | `server/routes/meals.ts:189-199` calls `getMealMutationGuard` with `expectedMealRevisionId` before grouped item-count rejection, asset validation, update, summary recompute, or publish; the guard asserts revision freshness in `server/services/meal-transactions.ts:294-331`; regression tests at `tests/integration/meals-api.test.ts:493-569` and `:571-657` pass. |
+| 5 | Same-day successful edit/delete refreshes or invalidates rows even when `summaryOutcome` is unavailable and `dailySummary` is omitted. | VERIFIED | `client/src/meal-edit-refresh.ts:18-37` always redacts receipt identity, records the affected date, and fetches `getMeals({ refreshReason: "meal_mutation" })` when `affectedDate` is today, independent of `dailySummary`; `MealEditScreen` save/delete call it at `client/src/components/MealEditScreen.tsx:190-206` and `:237-253`; behavior tests pass in `tests/unit/meal-edit-refresh.test.ts:51-116`. |
+| 6 | Deleted-target races in direct routes and chat update/delete paths return stale revision failure instead of `MEAL_NOT_FOUND`. | VERIFIED | Transaction lookup intentionally does not filter deleted rows in `server/services/meal-transactions.ts:147-168`; deleted rows then fail through `assertMutableExpectedRevision` with `MEAL_REVISION_STALE` at `:171-185`. Direct route coverage for PATCH and DELETE deleted-target races is in `tests/integration/meals-api.test.ts:659-746`; chat update/delete paths share `updateTransaction`/`softDeleteTransaction` through `server/services/meal-correction.ts:661-721` and tool mappings in `server/orchestrator/tools.ts:1271-1358`; targeted tool/service tests pass. |
+| 7 | Post-commit refresh failures do not report committed writes as mutation failures. | VERIFIED | `MealEditScreen` catches refresh-helper failures inside the success path and still records the mutation before navigating back at `client/src/components/MealEditScreen.tsx:190-206` and `:237-253`; `SummaryDetailScreen` uses the same pattern at `client/src/components/SummaryDetailScreen.tsx:516-537`; source-contract tests assert this wiring in `tests/unit/meal-edit-screen.test.ts:81-115`. |
+| 8 | Receipts without `mealRevisionId` are display-only, and stale conflict UI shows deterministic Traditional Chinese guidance while blocking stale editor reuse. | VERIFIED | `client/src/meal-edit-payload.ts:84-97` returns `null` for incomplete receipt identity; `MealEditScreen` sets exact stale copy and `staleBlocked` in `client/src/components/MealEditScreen.tsx:143-155`; tests assert copy, stale blocking, and display-only receipts in `tests/unit/meal-edit-screen.test.ts:61-79` and `tests/unit/chat-bubble-contract.test.ts`. |
 
-**Score:** 5/7 truths verified
+**Score:** 8/8 truths verified
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |---|---|---|---|
-| `server/services/meal-transactions.ts` | Authoritative expected revision comparison before update/delete writes | VERIFIED | `MealRevisionPreconditionError` and `assertExpectedMealRevision` exist; checks run before `normalizeItems`, revision id generation, transaction writes, and delete snapshot loading. |
-| `server/routes/meals.ts` | Direct DTO revision projection and 409 conflict bodies | PARTIAL | `mealRevisionId` is projected and conflicts are caught, but stale conflict ordering is wrong for current grouped rows. |
-| `server/services/food-logging.ts` | Pass-through for expected revisions on update/delete only | VERIFIED | `deleteMeal` and update inputs carry expected revisions; creation/logging paths remain outside expected revision enforcement. |
-| `server/services/meal-history.ts`, `server/services/history-query.ts`, `server/services/chat.ts`, `server/routes/day-snapshot.ts`, `server/routes/chat.ts` | Public read/receipt revision identity | VERIFIED | DTO and receipt surfaces expose `mealRevisionId` while stale/deleted restored receipts omit edit identity. |
-| `server/services/meal-correction.ts`, `server/orchestrator/tools.ts`, `server/orchestrator/index.ts` | Resolver-owned revision targets for chat tools | VERIFIED | Tool session uses resolved target objects and passes the resolved revision to update/delete services. |
-| `client/src/types.ts`, `client/src/api.ts`, `client/src/meal-edit-payload.ts`, `client/src/store.ts`, `client/src/components/MealEditScreen.tsx`, `client/src/components/MessageBubble.tsx` | Client revision payloads, typed conflicts, stale UI recovery | PARTIAL | Revision payload and stale UI pieces exist; success-without-summary row refresh remains broken in `MealEditScreen`. |
-| Phase 62 tests | Focused unit/integration proof | PARTIAL | Existing tests cover most paths, but omit the stale-single-to-current-grouped direct PATCH edge and assert the client early-return bug in a source-contract test. |
+| `server/services/meal-transactions.ts` | Authoritative revision preconditions for update/delete and read-only guard | VERIFIED | `assertExpectedMealRevision`, `getMealMutationGuard`, `updateTransaction`, and `softDeleteTransaction` all reuse the same `MealRevisionPreconditionError` contract before writes. |
+| `server/services/food-logging.ts` | Route/service wrapper for expected revision guard and update/delete pass-through | VERIFIED | `assertExpectedMealRevision`, `getMealMutationGuard`, `updateMeal`, and `deleteMeal` pass expected revision identity through without adding create/log enforcement. |
+| `server/routes/meals.ts` | Direct DTO revision projection and stable `409` conflict bodies before side effects | VERIFIED | Route sends `MealRevisionPreconditionError.code` via `sendMealRevisionConflict`; `gsd-sdk verify.artifacts` flagged a literal `MEAL_REVISION_STALE` pattern absence, but behavior and key-link checks prove the typed error is wired and returned. |
+| `server/services/meal-correction.ts` | Chat correction update/delete expected revision pass-through | VERIFIED | Resolver-owned `mealRevisionId` reaches `getCurrentItemsForMutation`, `updateTransaction`, and `softDeleteTransaction`; stale transaction errors stop before summary recompute. |
+| `server/orchestrator/tools.ts` | Tool-session resolved target identity for update/delete | VERIFIED | `resolvedMealTargets` stores `{ mealId, mealRevisionId }`; `update_meal`/`delete_meal` reject unresolved/id-only state and pass the resolved revision. |
+| `client/src/api.ts` | Client normalization, write serialization, and typed conflict errors | VERIFIED | Preserves `mealRevisionId`, serializes `expectedMealRevisionId`, and throws `MealRevisionConflictError` for stable 409 revision conflicts. |
+| `client/src/meal-edit-payload.ts` | Edit payload requires read-side revision identity | VERIFIED | History payloads throw on missing revision; receipt payloads return `null` unless `mealId`, `dateKey`, and `mealRevisionId` are present. |
+| `client/src/meal-edit-refresh.ts` | Behavior-testable same-day post-commit row refresh | VERIFIED | Pure helper records/redacts first, sets `dailySummary` only for usable same-day summaries, and refreshes rows by affected date. |
+| `client/src/components/MealEditScreen.tsx` | Save/delete expected revision wiring and stale recovery | VERIFIED | Save/delete success paths use the shared helper; stale conflict path blocks reuse and refreshes/invalidate affected rows. |
+| `client/src/components/SummaryDetailScreen.tsx` | Direct delete expected revision and post-commit refresh wiring | VERIFIED | Delete receives the full meal row, requires `mealRevisionId`, and uses `refreshAfterMealMutation` for success and conflict recovery. |
+| Phase 62 tests | Focused regression proof for stale route ordering, stale races, and client refresh | VERIFIED | Targeted integration/unit commands passed during this verification. |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |---|---|---|---|---|
-| `server/routes/meals.ts` | `server/services/meal-transactions.ts` | `foodLoggingService` update/delete pass-through | PARTIAL | DELETE reaches the guard directly; PATCH has a pre-guard grouped item-count branch that can return before revision comparison. |
-| `server/services/meal-transactions.ts` | `meal_transactions.currentRevisionId` | Compare expected revision before `meal_revisions` insert | VERIFIED | `assertExpectedMealRevision` compares expected against `existing.currentRevisionId` before update/delete writes. |
-| `server/routes/meals.ts` | summary recompute/publish | Post-commit only | VERIFIED | `MealRevisionPreconditionError` catch branches return before `buildSummaryOutcomeAfterMealCommit`; grouped guard also returns before side effects but with the wrong stale error. |
-| `server/orchestrator/tools.ts` | `server/services/meal-correction.ts` | Resolved target identity | VERIFIED | Tool update/delete pass `resolvedTarget.mealRevisionId` as the expected revision. |
-| `client/src/meal-edit-payload.ts` | `client/src/api.ts` | `MealEditPayload.mealRevisionId` mapped to `expectedMealRevisionId` | VERIFIED | Save/delete paths send expected revision from payload identity. |
-| `client/src/components/MealEditScreen.tsx` | `client/src/store.ts` | stale conflict redaction/invalidation | VERIFIED | Stale conflict path calls `redactChatReceiptIdentity`, `recordMealMutation`, and same-day `getMeals`. |
+| `server/routes/meals.ts` | `server/services/food-logging.ts` | `getMealMutationGuard(deviceId, id, expectedMealRevisionId)` before grouped guard | WIRED | `gsd-sdk verify.key-links` verified this link; route lines 189-199 show the ordering. |
+| `server/services/food-logging.ts` | `server/services/meal-transactions.ts` | Shared `MealRevisionPreconditionError` and guard wrappers | WIRED | `foodLoggingService.getMealMutationGuard` delegates to transaction service; transaction service compares against `currentRevisionId`. |
+| `server/orchestrator/tools.ts` | `server/services/meal-correction.ts` | Resolver-owned `resolvedTarget.mealRevisionId` | WIRED | Update/delete tools pass backend-resolved expected revisions at `server/orchestrator/tools.ts:1271-1301` and `:1348-1358`. |
+| `client/src/components/MealEditScreen.tsx` | `client/src/meal-edit-refresh.ts` | Save/delete success calls | WIRED | Both success paths call `refreshAfterMealMutation` and catch refresh failure without failing the committed mutation path. |
+| `client/src/meal-edit-payload.ts` | `client/src/api.ts` | Read `mealRevisionId` converted to write `expectedMealRevisionId` | WIRED | Payload builders require/copy revision identity; API helpers send expected revisions in PATCH/DELETE bodies. |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 |---|---|---|---|---|
 | `server/routes/meals.ts` | `meal.mealRevisionId` | `foodLoggingService.getMealsByDate` from `meal_transactions.currentRevisionId` | Yes | VERIFIED |
+| `server/routes/meals.ts` | `mutationGuard.currentMealRevisionId` / `itemCount` | SQL join/count in `mealTransactionsService.getMealMutationGuard` | Yes | VERIFIED |
 | `server/services/chat.ts` | restored `loggedMeal.mealRevisionId` | `chat_meal_receipts.mealRevisionId` joined to current transaction state | Yes | VERIFIED |
 | `server/orchestrator/tools.ts` | `resolvedMealTargets[].mealRevisionId` | `find_meals` result from meal correction resolver | Yes | VERIFIED |
-| `client/src/components/MealEditScreen.tsx` | `payload.mealRevisionId` | `secondaryScreen.payload` created by payload builders from meal rows/receipts | Yes | VERIFIED |
-| `client/src/components/MealEditScreen.tsx` | post-commit row refresh | `dailySummary` branch instead of `affectedDate` branch | No | FAILED - missing `dailySummary` disconnects successful mutation row refresh. |
+| `client/src/components/MealEditScreen.tsx` | `payload.mealRevisionId` | Payload builders from meal rows/receipts | Yes | VERIFIED |
+| `client/src/meal-edit-refresh.ts` | same-day refreshed rows | `getMeals({ refreshReason: "meal_mutation" })` after committed mutation response | Yes | VERIFIED |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |---|---|---|---|
-| PATCH conflict ordering should reach revision conflict before grouped guard | `rg -n "getMealItemCount|itemCount > 1|foodLoggingService.updateMeal|MealRevisionPreconditionError|sendMealRevisionConflict" server/routes/meals.ts` | Lines show `getMealItemCount` and `itemCount > 1` at 189-193 before `foodLoggingService.updateMeal` at 207 and the revision conflict catch at 225. | FAIL |
-| Successful current-day mutation with no dailySummary should still fetch current meals | `rg -n "if \\(!dailySummary|const \\{ meals \\} = await getMeals|setMeals\\(meals\\)" client/src/components/MealEditScreen.tsx` | Line 133 returns when `!dailySummary`; `getMeals` appears only after that guard in `refreshAfterMealMutation`. | FAIL |
-| Existing Meal Edit source-contract test quality | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/meal-edit-screen.test.ts` | Passed 9/9, but the test at lines 80-85 asserts the early-return pattern instead of behavior-level refresh. | WARNING |
+| Direct stale route ordering and deleted-target direct route races | `node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/meals-api.test.ts` | 23/23 tests passed, including stale single-to-grouped, guard-after-race, deleted-target PATCH/DELETE, and no side-effect assertions. | PASS |
+| Same-day refresh without `dailySummary` and Meal Edit wiring | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/meal-edit-refresh.test.ts tests/unit/meal-edit-screen.test.ts` | 13/13 tests passed. | PASS |
+| Chat/tool expected revision and stale/deleted target handling | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/meal-correction.test.ts` | 53/53 tests passed, including stale update/delete targets and deleted update target stable stale code. | PASS |
+| Previously orchestrated broader gates | User/orchestrator reported `yarn tsc --noEmit`, targeted unit/service/tool tests, `yarn test:unit`, `yarn test:integration`, and `yarn test` passed before this verifier. | Not counted as primary evidence; targeted verifier commands above were rerun. | INFO |
 
 ### Probe Execution
 
 | Probe | Command | Result | Status |
 |---|---|---|---|
-| Step 7c probe discovery | `find scripts -path '*/tests/probe-*.sh' -type f` and phase probe grep | No phase-declared or conventional probes found. | SKIPPED |
+| Probe discovery | `find scripts -path '*/tests/probe-*.sh' -type f` and phase plan/summary grep | No phase-declared or conventional probes found. | SKIPPED |
 
 ### Requirements Coverage
 
 | Requirement | Source Plan | Description | Status | Evidence |
 |---|---|---|---|---|
-| FRESH-01 | Plans 01, 02, 04 | User-facing meal and chat receipt DTOs carry current meal revision identity for edit-capable receipts. | SATISFIED | Server and client DTO paths preserve `mealRevisionId`; missing-revision receipts are display-only. |
-| FRESH-02 | Plans 01, 03 | User cannot overwrite newer meal facts from an older chat receipt; stale expected revisions are rejected without mutation. | BLOCKED | Core transaction guard prevents writes, but one stale direct route edge returns grouped-update instead of stale revision, so stale receipt handling can be bypassed for single-to-grouped races. |
-| FRESH-03 | Plan 04 | User sees deterministic stale-record guidance and the client refreshes or invalidates affected meal rows after a stale receipt conflict. | BLOCKED | Stale conflict UI exists, but CR-01 can prevent the stale code from reaching it; CR-02 leaves a committed same-day mutation row stale when no `dailySummary` is returned. |
+| FRESH-01 | Plans 01, 02, 04, 05 | User-facing meal and chat receipt DTOs carry current meal revision identity for edit-capable receipts. | SATISFIED | Direct/history/day/chat DTOs and client payload builders preserve `mealRevisionId`; missing revision receipts are display-only. |
+| FRESH-02 | Plans 01, 03, 05 | User cannot overwrite newer meal facts from an older chat receipt; stale expected revisions are rejected without mutation. | SATISFIED | Direct route and chat/tool update/delete paths pass expected revisions into transaction guards; stale and deleted-target races return stale failures before writes and side effects. |
+| FRESH-03 | Plans 04, 05 | User sees deterministic stale-record guidance and the client refreshes or invalidates affected meal rows after stale conflicts. | SATISFIED | Exact Traditional Chinese stale copy and stale blocking are wired; same-day success and stale recovery paths refresh rows by affected date and record mutation invalidation. |
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |---|---:|---|---|---|
-| `client/src/components/MealEditScreen.tsx` | 96 | `placeholder` CSS class/content | INFO | User-visible empty-image state, not an implementation stub. |
-| `server/orchestrator/index.ts` | 54 | `IMAGE_PLACEHOLDER` constant | INFO | Existing image-message sentinel, not a TODO/stub. |
-| Multiple source/test files | various | empty arrays/null returns | INFO | Normal validation defaults, test collectors, and control-flow sentinels; no unreferenced `TBD`, `FIXME`, or `XXX` markers found. |
+| `client/src/components/MealEditScreen.tsx` | 97 | `placeholder` CSS class/content | INFO | User-facing empty-image state, not an implementation stub. |
+| Multiple source/test files | various | empty arrays/null/undefined control-flow defaults | INFO | Normal validation defaults, test collectors, and optional fields; no UI-facing stub data flow found. |
+| Phase 62 modified files | n/a | `TBD`, `FIXME`, `XXX` | INFO | None found. |
 
 ### Human Verification Required
 
-None for the current verdict. The blocking gaps are directly observable in code and tests.
-
-### Deferred Items
-
-No blocking gap is deferred. Phase 63 covers SSE meal-row freshness metadata, not PATCH stale-versus-grouped ordering or direct mutation refresh after committed responses without `dailySummary`.
+None. The phase goal is a data-integrity and stale-write contract; targeted code and tests prove the observable behaviors without needing visual or external-service validation.
 
 ### Gaps Summary
 
-The phase is close but not achieved. The transaction-service revision guard exists and most DTO/client plumbing is wired, but two blocker review findings remain true in the codebase:
+No blocking gaps remain. The prior `62-VERIFICATION.md` blockers are closed in current code:
 
-1. `PATCH /api/meals/:id` can mask a stale revision as `MEAL_REQUIRES_GROUPED_UPDATE` before the expected revision is checked.
-2. `MealEditScreen` can close after a successful same-day mutation without refreshing visible meals when summary recovery is unavailable and no `dailySummary` is returned.
-
-These gaps prevent the phase from satisfying the full stale receipt protection and affected-row freshness contract.
+1. Stale direct PATCH requests are checked against current revision before grouped-shape rejection and before side effects.
+2. Same-day committed edit/delete responses refresh rows even without `dailySummary`.
+3. Deleted-target direct and chat/tool races fail stale instead of falling through as missing meals.
+4. Post-commit refresh failure is contained inside the success path and still records mutation invalidation.
 
 ---
 
-_Verified: 2026-05-17T13:05:24Z_
+_Verified: 2026-05-17T16:21:07Z_
 _Verifier: the agent (gsd-verifier)_
