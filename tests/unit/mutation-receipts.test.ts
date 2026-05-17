@@ -7,6 +7,10 @@ import type { MutationEffects } from "../../server/orchestrator/mutation-effects
 import {
   FORBIDDEN_RECEIPT_TERMS,
   assertNoForbiddenReceiptTerms,
+  renderGoalAuthorityFailureCopy,
+  renderGoalCancelCopy,
+  renderGoalProposalCopy,
+  renderGoalValidationFailureCopy,
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
 
@@ -25,6 +29,23 @@ const committedTargets: DailyTargets = {
   carbs: 150,
   fat: 50,
 };
+
+const GOAL_INTERNAL_TERMS = [
+  "proposalId",
+  "turn_states",
+  "update_goals",
+  "propose_goals",
+  "schema_validation",
+  "source_text_guard",
+  "API",
+  "/api",
+] as const;
+
+function assertNoGoalInternalTerms(text: string) {
+  const leaked = GOAL_INTERNAL_TERMS.filter((term) => text.includes(term));
+  assert.deepEqual(leaked, []);
+  assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+}
 
 describe("MutationEffects contract", () => {
   it("keeps mutation families as a discriminated committed-facts union", () => {
@@ -99,6 +120,68 @@ describe("MutationEffects contract", () => {
   it("keeps trace ownership and forbidden renderer terms out of the effect payload", () => {
     const source = readFileSync("server/orchestrator/mutation-effects.ts", "utf8");
     assert.doesNotMatch(source, /finalReplySource|source|renderer|model|fallback|tool_receipt|mixed/);
+  });
+});
+
+describe("goal proposal and rejection renderers", () => {
+  it("renders exact proposal copy with all four target values", () => {
+    const text = renderGoalProposalCopy({
+      calories: 1400,
+      protein: 120,
+      carbs: 130,
+      fat: 45,
+    });
+
+    assert.equal(
+      text,
+      "我可以先幫你改成這組每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 120 g\n• 碳水 130 g\n• 脂肪 45 g\n如果要套用，請回覆「好」；如果要調整，請直接給新的數字。",
+    );
+    assert.doesNotMatch(text, /已更新每日目標/);
+    assertNoGoalInternalTerms(text);
+  });
+
+  it("renders one generic authority failure copy for unavailable proposal states", () => {
+    const expected = "這次沒有套用目標更新。請直接提供新的每日目標數字，或再請我產生一組建議。";
+
+    for (const reason of ["missing", "expired", "consumed", "replaced", "mismatch", "unauthorized"]) {
+      const text = renderGoalAuthorityFailureCopy();
+      assert.equal(text, expected, reason);
+      assertNoGoalInternalTerms(text);
+    }
+  });
+
+  it("renders exact validation range copy for each target field", () => {
+    assert.equal(
+      renderGoalValidationFailureCopy(["calories"]),
+      "這次沒有套用目標更新。卡路里需介於 500-8000 kcal，請提供範圍內的每日目標數字。",
+    );
+    assert.equal(
+      renderGoalValidationFailureCopy(["protein"]),
+      "這次沒有套用目標更新。蛋白質需介於 0-400 g，請提供範圍內的每日目標數字。",
+    );
+    assert.equal(
+      renderGoalValidationFailureCopy(["carbs"]),
+      "這次沒有套用目標更新。碳水需介於 0-1000 g，請提供範圍內的每日目標數字。",
+    );
+    assert.equal(
+      renderGoalValidationFailureCopy(["fat"]),
+      "這次沒有套用目標更新。脂肪需介於 0-300 g，請提供範圍內的每日目標數字。",
+    );
+
+    for (const field of ["calories", "protein", "carbs", "fat"] as const) {
+      assertNoGoalInternalTerms(renderGoalValidationFailureCopy([field]));
+    }
+  });
+
+  it("renders exact neutral cancel copy without implying success", () => {
+    const text = renderGoalCancelCopy();
+
+    assert.equal(
+      text,
+      "已取消這組目標提案，沒有套用任何更新。之後可以直接提供新的目標數字，或再請我產生一組建議。",
+    );
+    assert.doesNotMatch(text, /已更新每日目標/);
+    assertNoGoalInternalTerms(text);
   });
 });
 
