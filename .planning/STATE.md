@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: executing
-stopped_at: Completed 62-02-PLAN.md
-last_updated: "2026-05-17T12:26:59.991Z"
+stopped_at: Completed 62-03-PLAN.md
+last_updated: "2026-05-17T12:36:56.419Z"
 last_activity: 2026-05-17
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 13
-  completed_plans: 11
-  percent: 85
+  completed_plans: 12
+  percent: 92
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-17)
 ## Current Position
 
 Phase: 62 (meal-revision-tokens-and-stale-receipt-protection) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-05-17
 
-Progress: [█████████░] 85%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [█████████░] 85%
 | Phase 61 P06 | 5 min | 3 tasks | 6 files |
 | Phase 62 P01 | 9 min | 2 tasks | 15 files |
 | Phase 62 P02 | 5min | 2 tasks | 12 files |
+| Phase 62 P03 | 7 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,8 @@ Recent decisions affecting current work:
 - [Phase 62]: Transaction-service update/delete writes compare expectedMealRevisionId before inserting meal_revisions; direct route conflict branches return before summary recompute or publish.
 - [Phase 62]: Server read and chat receipt DTOs expose public mealRevisionId while keeping internal currentRevisionId hidden.
 - [Phase 62]: Restored chat receipts expose edit identity only when the persisted receipt revision is still the current active meal revision.
+- [Phase 62]: Chat correction tools use resolver-owned resolvedMealTargets objects containing mealId and mealRevisionId; id-only resolved state is rejected.
+- [Phase 62]: Meal correction update/delete services no longer synthesize current expected revisions when callers omit expectedMealRevisionId.
 
 ### Pending Todos
 
@@ -114,6 +117,6 @@ None yet for v2.3.
 
 ## Session Continuity
 
-Last session: 2026-05-17T12:26:25.495Z
-Stopped at: Completed 62-02-PLAN.md
+Last session: 2026-05-17T12:36:56.410Z
+Stopped at: Completed 62-03-PLAN.md
 Resume file: None
