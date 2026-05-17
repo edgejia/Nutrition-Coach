@@ -162,6 +162,7 @@ describe("chat bubble source contract", () => {
     assert.match(bubble, /onOpenMealEdit\?\.\(editPayload\)/);
     assert.match(bubble, /SportChevronRightIcon/);
     assert.match(payloadBuilder, /Number\.isFinite/);
+    assert.match(payloadBuilder, /mealRevisionId/);
     assert.match(chatPanel, /PHASE40_INCOMPLETE_RECEIPT_FLAG/);
     assert.match(chatPanel, /phase40IncompleteReceipt/);
     assert.match(chatPanel, /createPhase40IncompleteReceiptMock/);
@@ -169,6 +170,39 @@ describe("chat bubble source contract", () => {
     assert.match(chatPanel, /content: ""/);
     assert.doesNotMatch(chatPanel, /缺少可編輯/);
     assert.doesNotMatch(chatPanel, /Incomplete receipt mock/);
+  });
+
+  it("keeps receipts without mealRevisionId display-only", () => {
+    const message: Message = {
+      id: "receipt-stale-1",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-05-11T10:00:00.000Z",
+      loggedMeal: {
+        mealId: "meal-1",
+        dateKey: "2026-05-11",
+        foodName: "雞胸便當",
+        calories: 640,
+        protein: 42,
+        carbs: 68,
+        fat: 18,
+        itemCount: 1,
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(MessageBubble, {
+        message,
+        onOpenMealEdit: () => {
+          throw new Error("stale receipt should not open Meal Edit");
+        },
+      }),
+    );
+
+    assert.doesNotMatch(html, /role="button"/);
+    assert.doesNotMatch(html, /tabindex="0"/i);
+    assert.doesNotMatch(html, /sp-receipt-chevron/);
+    assert.doesNotMatch(html, /aria-label="編輯 雞胸便當"/);
   });
 
   it("renders logged meal receipt thumbnails through the shared persisted asset primitive", async () => {
@@ -301,6 +335,7 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(chatPanel, /sp-chat-today-log/);
     for (const field of [
       "mealId",
+      "mealRevisionId",
       "dateKey",
       "foodName",
       "calories",

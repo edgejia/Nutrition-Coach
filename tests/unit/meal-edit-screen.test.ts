@@ -42,6 +42,8 @@ describe("Meal Edit source contract", () => {
     for (const expected of [
       "updateMeal",
       "deleteMeal",
+      "MealRevisionConflictError",
+      "expectedMealRevisionId: payload.mealRevisionId",
       "confirm",
       "setDailySummary",
       "redactChatReceiptIdentity",
@@ -53,6 +55,26 @@ describe("Meal Edit source contract", () => {
     ]) {
       assert.match(source, escapedPattern(expected));
     }
+  });
+
+  it("handles stale revision conflicts with deterministic copy and stale-editor blocking", () => {
+    for (const expected of [
+      "餐點已被更新，請重新載入最新餐點後再編輯。",
+      "餐點版本已失效，請重新載入最新餐點後再編輯。",
+      "餐點已被更新，未刪除。請重新載入最新餐點後再決定是否刪除。",
+      "重新載入餐點",
+      "MEAL_REVISION_STALE",
+      "MEAL_REVISION_REQUIRED",
+      "staleBlocked",
+      "setStaleBlocked(true)",
+      "handleReloadStaleMeal",
+      'getMeals({ refreshReason: "meal_mutation" })',
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(source, /if \(!payload \|\| staleBlocked/);
+    assert.match(source, /disabled=\{pending \|\| staleBlocked\}/);
   });
 
   it("preserves committed direct mutation side effects when dailySummary is absent", () => {

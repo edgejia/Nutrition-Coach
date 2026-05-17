@@ -74,6 +74,7 @@ describe("meal edit payload builders", () => {
   it("buildHistoryMealEditPayload preserves persisted image identity for History-origin edits", () => {
     const payload = buildHistoryMealEditPayload({
       id: "meal-1",
+      mealRevisionId: "meal-1:r1",
       foodName: "雞腿便當",
       calories: 720,
       protein: 42,
@@ -92,6 +93,7 @@ describe("meal edit payload builders", () => {
 
     assert.deepEqual(payload, {
       mealId: "meal-1",
+      mealRevisionId: "meal-1:r1",
       dateKey: "2026-05-06",
       foodName: "雞腿便當",
       calories: 720,
@@ -113,6 +115,7 @@ describe("meal edit payload builders", () => {
   it("buildReceiptMealEditPayload preserves chat receipt image identity and rejects incomplete receipts", () => {
     const payload = buildReceiptMealEditPayload({
       mealId: "meal-2",
+      mealRevisionId: "meal-2:r1",
       dateKey: "2026-05-06",
       loggedAt: "2026-05-06T13:00:00.000+08:00",
       foodName: "鮭魚飯糰",
@@ -131,6 +134,7 @@ describe("meal edit payload builders", () => {
 
     assert.deepEqual(payload, {
       mealId: "meal-2",
+      mealRevisionId: "meal-2:r1",
       dateKey: "2026-05-06",
       foodName: "鮭魚飯糰",
       calories: 280,
@@ -146,6 +150,15 @@ describe("meal edit payload builders", () => {
       imageUrl: "/api/assets/asset-chat",
       loggedAt: "2026-05-06T13:00:00.000+08:00",
     });
+    assert.equal(buildReceiptMealEditPayload({
+      mealId: "meal-missing-revision",
+      dateKey: "2026-05-06",
+      foodName: "缺少版本",
+      calories: 1,
+      protein: 1,
+      carbs: 1,
+      fat: 1,
+    } as any), null);
     assert.equal(buildReceiptMealEditPayload({
       foodName: "缺少 ID",
       calories: 1,
@@ -169,6 +182,7 @@ describe("meal edit payload builders", () => {
     } as any, "2026-05-06");
     const receiptPayload = buildReceiptMealEditPayload({
       mealId: "legacy-receipt",
+      mealRevisionId: "legacy-receipt:r1",
       dateKey: "2026-05-06",
       loggedAt: "2026-05-06T09:00:00.000+08:00",
       foodName: "香蕉",
@@ -180,5 +194,31 @@ describe("meal edit payload builders", () => {
 
     assert.equal((historyPayload as any).itemCount, 1);
     assert.equal((receiptPayload as any)?.itemCount, 1);
+    assert.equal((receiptPayload as any)?.mealRevisionId, "legacy-receipt:r1");
+  });
+
+  it("normalizeHistoryMeal and normalizeLoggedMealReceipt preserve mealRevisionId", () => {
+    const historyMeal = normalizeHistoryMeal({
+      id: "meal-history-revision",
+      mealRevisionId: "meal-history-revision:r1",
+      loggedAt: "2026-05-06T12:00:00.000+08:00",
+      display: { title: "雞腿便當" },
+      nutrition: { calories: 720, protein: 42, carbs: 88, fat: 24 },
+      itemCount: 1,
+    } as any);
+    const receipt = normalizeLoggedMealReceipt({
+      mealId: "meal-receipt-revision",
+      mealRevisionId: "meal-receipt-revision:r1",
+      dateKey: "2026-05-06",
+      foodName: "豆漿",
+      calories: 160,
+      protein: 10,
+      carbs: 14,
+      fat: 6,
+      itemCount: 1,
+    } as any);
+
+    assert.equal(historyMeal.mealRevisionId, "meal-history-revision:r1");
+    assert.equal(receipt.mealRevisionId, "meal-receipt-revision:r1");
   });
 });

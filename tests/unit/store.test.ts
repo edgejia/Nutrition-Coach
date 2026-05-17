@@ -267,6 +267,7 @@ describe("AppStore", () => {
         mealId: "meal-1",
         dateKey: "2026-04-30",
         foodName: "雞胸肉沙拉",
+        mealRevisionId: "meal-1:r1",
         calories: 420,
         protein: 32,
         carbs: 14,
@@ -313,6 +314,7 @@ describe("AppStore", () => {
         didLogMeal: true,
         loggedMeal: {
           mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
           dateKey: "2026-04-30",
           loggedAt: "2026-04-30T04:00:00.000Z",
           foodName: "雞腿便當",
@@ -333,6 +335,7 @@ describe("AppStore", () => {
         didLogMeal: true,
         loggedMeal: {
           mealId: "meal-2",
+          mealRevisionId: "meal-2:r1",
           dateKey: "2026-04-30",
           loggedAt: "2026-04-30T08:00:00.000Z",
           foodName: "鮭魚飯糰",
@@ -351,12 +354,15 @@ describe("AppStore", () => {
 
     const [redactedMessage, untouchedMessage] = useStore.getState().messages;
     assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.mealRevisionId, undefined);
     assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
     assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
     assert.equal(redactedMessage?.loggedMeal?.imageAssetId, "asset-lunch");
     assert.equal(buildReceiptMealEditPayload(redactedMessage?.loggedMeal), null);
     assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-2");
+    assert.equal(untouchedMessage?.loggedMeal?.mealRevisionId, "meal-2:r1");
     assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-2");
+    assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealRevisionId, "meal-2:r1");
   });
 
   it("stores and clears the pending home chat draft", () => {

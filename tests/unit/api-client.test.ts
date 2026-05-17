@@ -280,6 +280,7 @@ describe("API Client", () => {
       didLogMeal: true,
       loggedMeal: {
         mealId: "meal-1",
+        mealRevisionId: "meal-1:r1",
         foodName: "照片便當",
         calories: 640,
         protein: 32,
@@ -294,6 +295,7 @@ describe("API Client", () => {
 
     assert.equal(result.loggedMeal?.imageAssetId, "asset-1");
     assert.equal(result.loggedMeal?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.loggedMeal?.mealRevisionId, "meal-1:r1");
   });
 
   it("sendMessage throws UNAUTHORIZED on 401", async () => {
@@ -334,6 +336,7 @@ describe("API Client", () => {
           didLogMeal: true,
           loggedMeal: {
             mealId: "meal-1",
+            mealRevisionId: "meal-1:r1",
             foodName: "照片便當",
             calories: 640,
             protein: 32,
@@ -367,6 +370,7 @@ describe("API Client", () => {
 
     assert.equal(result.messages[0]?.loggedMeal?.imageAssetId, "asset-1");
     assert.equal(result.messages[0]?.loggedMeal?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.messages[0]?.loggedMeal?.mealRevisionId, "meal-1:r1");
     assert.equal(result.messages[1]?.loggedMeal?.imageAssetId, null);
     assert.equal(result.messages[1]?.loggedMeal?.imageUrl, null);
   });
@@ -377,6 +381,7 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "雞胸肉便當",
           calories: 520,
           protein: 42,
@@ -393,6 +398,7 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.deepEqual(fetchCalls[0].init.headers, {});
     assert.equal(result.meals.length, 1);
+    assert.equal(result.meals[0]?.mealRevisionId, "meal-1:r1");
   });
 
   it("getMeals leaves meal image urls on the cookie-backed path", async () => {
@@ -401,6 +407,7 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "雞胸肉便當",
           calories: 520,
           protein: 42,
@@ -416,6 +423,7 @@ describe("API Client", () => {
     const result = await api.getMeals();
 
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.meals[0]?.mealRevisionId, "meal-1:r1");
   });
 
   it("getMeals preserves explicit null meal image fields", async () => {
@@ -479,6 +487,7 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "雞胸肉便當",
           calories: 520,
           protein: 42,
@@ -494,6 +503,7 @@ describe("API Client", () => {
     const result = await api.getDaySnapshot("2026-03-25");
 
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.meals[0]?.mealRevisionId, "meal-1:r1");
   });
 
   it("getDaySnapshot preserves explicit null meal image fields", async () => {
@@ -568,6 +578,7 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           loggedAt: "2026-04-29T07:30:00.000Z",
           display: { title: "燕麥 + 香蕉 + 杏仁" },
           nutrition: { calories: 320, protein: 18, carbs: 45, fat: 9 },
@@ -582,6 +593,7 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.equal(result.meals[0]?.foodName, "燕麥 + 香蕉 + 杏仁");
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.meals[0]?.mealRevisionId, "meal-1:r1");
   });
 
   it("getHistoryDaySnapshot normalizes flat image fields and nested null asset fields", async () => {
@@ -629,7 +641,7 @@ describe("API Client", () => {
     await assert.rejects(() => api.getHistoryDaySnapshot("2026-04-29"), { message: "UNAUTHORIZED" });
   });
 
-  it("deleteMeal sends DELETE and returns affectedDate metadata", async () => {
+  it("deleteMeal sends expectedMealRevisionId in a JSON body and returns affectedDate metadata", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
       affectedDate: "2026-03-25",
@@ -643,7 +655,7 @@ describe("API Client", () => {
       },
     });
 
-    const result = await api.deleteMeal("meal-1");
+    const result = await api.deleteMeal("meal-1", { expectedMealRevisionId: "meal-1:r1" });
 
     assert.deepEqual(result, {
       affectedDate: "2026-03-25",
@@ -659,6 +671,10 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].url, "/api/meals/meal-1");
     assert.equal(fetchCalls[0].init.method, "DELETE");
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(fetchCalls[0].init.headers, { "content-type": "application/json" });
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), {
+      expectedMealRevisionId: "meal-1:r1",
+    });
   });
 
   it("deleteMeal resolves committed unavailable summary outcomes without dailySummary", async () => {
@@ -699,6 +715,7 @@ describe("API Client", () => {
       },
       meal: {
         id: "meal-1",
+        mealRevisionId: "meal-1:r2",
         foodName: "雞胸肉沙拉半份",
         calories: 260,
         protein: 20,
@@ -711,6 +728,7 @@ describe("API Client", () => {
     });
 
     const input = {
+      expectedMealRevisionId: "meal-1:r1",
       foodName: "雞胸肉沙拉半份",
       calories: 260,
       protein: 20,
@@ -727,6 +745,56 @@ describe("API Client", () => {
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), input);
     assert.equal(result.dailySummary?.totalCalories, 260);
     assert.equal(result.meal.foodName, "雞胸肉沙拉半份");
+    assert.equal(result.meal.mealRevisionId, "meal-1:r2");
+  });
+
+  it("preserves stable meal revision conflict metadata for update and delete errors", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(409, {
+      error: "MEAL_REVISION_STALE",
+      mealId: "meal-1",
+      affectedDate: "2026-04-30",
+      currentMealRevisionId: "meal-1:r2",
+    });
+
+    await assert.rejects(
+      () =>
+        api.updateMeal("meal-1", {
+          expectedMealRevisionId: "meal-1:r1",
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId: null,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof api.MealRevisionConflictError);
+        assert.equal(error.code, "MEAL_REVISION_STALE");
+        assert.equal(error.mealId, "meal-1");
+        assert.equal(error.affectedDate, "2026-04-30");
+        assert.equal(error.currentMealRevisionId, "meal-1:r2");
+        return true;
+      },
+    );
+
+    mockFetch(409, {
+      error: "MEAL_REVISION_REQUIRED",
+      mealId: "meal-1",
+      affectedDate: "2026-04-30",
+    });
+
+    await assert.rejects(
+      () => api.deleteMeal("meal-1", { expectedMealRevisionId: "meal-1:r1" }),
+      (error: unknown) => {
+        assert.ok(error instanceof api.MealRevisionConflictError);
+        assert.equal(error.code, "MEAL_REVISION_REQUIRED");
+        assert.equal(error.mealId, "meal-1");
+        assert.equal(error.affectedDate, "2026-04-30");
+        assert.equal(error.currentMealRevisionId, undefined);
+        return true;
+      },
+    );
   });
 
   it("updateMeal resolves committed unavailable summary outcomes without dailySummary", async () => {
@@ -1027,6 +1095,7 @@ describe("sendMessageStream", () => {
         didLogMeal: true,
         loggedMeal: {
           mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "照片便當",
           calories: 640,
           protein: 32,
@@ -1049,6 +1118,36 @@ describe("sendMessageStream", () => {
     });
 
     assert.equal(imageUrl, "/api/assets/asset-1");
+  });
+
+  it("dispatches done loggedMeal mealRevisionId", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
+          foodName: "照片便當",
+          calories: 640,
+          protein: 32,
+          carbs: 78,
+          fat: 21,
+        },
+      })}\n\n`,
+    ]);
+    let mealRevisionId: string | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        mealRevisionId = payload.loggedMeal?.mealRevisionId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealRevisionId, "meal-1:r1");
   });
 
   it("dispatches valid done summaryOutcome and omits malformed values", async () => {
@@ -1100,6 +1199,7 @@ describe("sendMessageStream", () => {
         didLogMeal: true,
         loggedMeal: {
           mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "照片便當",
           calories: 640,
           protein: 32,
@@ -1123,6 +1223,39 @@ describe("sendMessageStream", () => {
     });
 
     assert.equal(imageUrl, "/api/assets/asset-1");
+  });
+
+  it("dispatches stopped loggedMeal mealRevisionId", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 3,
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-2",
+          mealRevisionId: "meal-2:r1",
+          foodName: "飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+        },
+      })}\n\n`,
+    ]);
+    let mealRevisionId: string | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        mealRevisionId = payload.loggedMeal?.mealRevisionId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealRevisionId, "meal-2:r1");
   });
 
   it("dispatches valid stopped summaryOutcome and omits malformed values", async () => {
