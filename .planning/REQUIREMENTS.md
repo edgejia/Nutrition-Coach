@@ -23,7 +23,7 @@ Requirements for the v2.3 P1 data-integrity milestone. Each requirement must map
 
 ### Meal Freshness
 
-- [ ] **FRESH-01**: User-facing meal and chat receipt DTOs carry current meal revision identity for edit-capable receipts.
+- [x] **FRESH-01**: User-facing meal and chat receipt DTOs carry current meal revision identity for edit-capable receipts.
 - [ ] **FRESH-02**: User cannot overwrite newer meal facts from an older chat receipt; stale expected revisions are rejected without mutation.
 - [ ] **FRESH-03**: User sees deterministic stale-record guidance and the client refreshes or invalidates affected meal rows after a stale receipt conflict.
 
@@ -85,7 +85,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MUT-02 | Phase 61 | Complete |
 | MUT-03 | Phase 61 | Complete |
 | MUT-04 | Phase 61 | Complete |
-| FRESH-01 | Phase 62 | Pending |
+| FRESH-01 | Phase 62 | Complete |
 | FRESH-02 | Phase 62 | Pending |
 | FRESH-03 | Phase 62 | Pending |
 | REAL-01 | Phase 63 | Pending |
