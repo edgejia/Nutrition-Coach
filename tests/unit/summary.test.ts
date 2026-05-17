@@ -89,7 +89,7 @@ describe("SummaryService", () => {
       ],
     });
 
-    await foodService.deleteMeal(deviceId, deletedMeal.id);
+    await foodService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
 
     const summary = await summaryService.getDailySummary(deviceId, new Date("2026-03-25T12:00:00+08:00"));
 
