@@ -11,6 +11,12 @@ import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, LLMProvider } from "../../server/llm/types.js";
 import { createOrchestrator, guardNoMutationLoggingClaim } from "../../server/orchestrator/index.js";
+import {
+  renderGoalAuthorityFailureCopy,
+  renderGoalCancelCopy,
+  renderGoalProposalCopy,
+  renderGoalValidationFailureCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
 
 function assertString(value: unknown): asserts value is string {
@@ -1598,5 +1604,110 @@ describe("Orchestrator - didLogMeal", () => {
     assert.ok("reply" in result);
     assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
     assert.equal(result.finalReplySource, "renderer");
+  });
+
+  it("short-circuits propose_goals with exact proposal copy and no second model round", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "proposal_copy",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify({
+            calories: 1750,
+            protein: 125,
+            carbs: 180,
+            fat: 55,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型後續改寫：已經幫你更新好了。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "幫我建議一組減脂目標");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderGoalProposalCopy({
+      calories: 1750,
+      protein: 125,
+      carbs: 180,
+      fat: 55,
+    }));
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("short-circuits update_goals validation copy with unchanged targets and no second model round", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_validation_copy",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 100,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型後續改寫：更新好了。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "卡路里 100");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderGoalValidationFailureCopy(["calories"]));
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 1);
+    const device = await deviceService.getDevice(deviceId);
+    assert.equal(device?.dailyCalories, 2000);
+    assert.equal(device?.dailyProtein, 100);
+  });
+
+  it("short-circuits unavailable proposal confirmation with generic copy and no second model round", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "missing_goal_proposal",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "latest_proposal" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型後續改寫：已經幫你更新每日目標。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("clears an active proposal on cancel before any model call", async () => {
+    await goalProposalService.putLatest(deviceId, {
+      calories: 1750,
+      protein: 125,
+      carbs: 180,
+      fat: 55,
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該被呼叫" });
+
+    const result = await orchestrator.handleMessage(deviceId, "先不用");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderGoalCancelCopy());
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(await goalProposalService.getLatest(deviceId), undefined);
   });
 });
