@@ -258,6 +258,39 @@ export function createMealTransactionsService(db: AppDatabase) {
       assertMutableExpectedRevision(existing, expectedMealRevisionId);
     },
 
+    async getCurrentItemsForMutation(
+      deviceId: string,
+      transactionId: string,
+      expectedMealRevisionId?: string | null,
+    ): Promise<MealTransactionItemInput[]> {
+      const existing = getTransactionByDeviceAndIdFromReader(db, deviceId, transactionId);
+
+      if (!existing) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      assertMutableExpectedRevision(existing, expectedMealRevisionId);
+
+      const items = db
+        .select({
+          foodName: mealRevisionItems.foodName,
+          calories: mealRevisionItems.calories,
+          protein: mealRevisionItems.protein,
+          carbs: mealRevisionItems.carbs,
+          fat: mealRevisionItems.fat,
+        })
+        .from(mealRevisionItems)
+        .where(eq(mealRevisionItems.revisionId, existing.currentRevisionId))
+        .orderBy(asc(mealRevisionItems.position))
+        .all();
+
+      if (items.length === 0) {
+        throw new Error("MEAL_ITEMS_REQUIRED");
+      }
+
+      return items;
+    },
+
     async getMealMutationGuard(
       deviceId: string,
       transactionId: string,

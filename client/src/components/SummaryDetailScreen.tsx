@@ -517,22 +517,7 @@ export function SummaryDetailScreen() {
       const { affectedDate, dailySummary } = await deleteMeal(mealId, {
         expectedMealRevisionId: meal.mealRevisionId,
       });
-      await refreshAfterMealMutation({
-        redactChatReceiptIdentity,
-        recordMealMutation,
-        setDailySummary,
-        getMeals,
-        setMeals,
-        todayKey: () => formatLocalDate(new Date()),
-      }, {
-        mealId,
-        affectedDate,
-        dailySummary,
-      });
-      const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
-      setSnapshot(refreshedSnapshot);
-    } catch (err) {
-      if (err instanceof MealRevisionConflictError) {
+      try {
         await refreshAfterMealMutation({
           redactChatReceiptIdentity,
           recordMealMutation,
@@ -541,11 +526,34 @@ export function SummaryDetailScreen() {
           setMeals,
           todayKey: () => formatLocalDate(new Date()),
         }, {
-          mealId: err.mealId,
-          affectedDate: err.affectedDate,
+          mealId,
+          affectedDate,
+          dailySummary,
         });
         const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
         setSnapshot(refreshedSnapshot);
+      } catch {
+        recordMealMutation(affectedDate);
+      }
+    } catch (err) {
+      if (err instanceof MealRevisionConflictError) {
+        try {
+          await refreshAfterMealMutation({
+            redactChatReceiptIdentity,
+            recordMealMutation,
+            setDailySummary,
+            getMeals,
+            setMeals,
+            todayKey: () => formatLocalDate(new Date()),
+          }, {
+            mealId: err.mealId,
+            affectedDate: err.affectedDate,
+          });
+          const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
+          setSnapshot(refreshedSnapshot);
+        } catch {
+          recordMealMutation(err.affectedDate);
+        }
         alert("餐點已被更新，未刪除。請重新載入最新餐點後再決定是否刪除。");
         return;
       }

@@ -1469,6 +1469,56 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(deleteTransaction?.deletedAt, null);
   });
 
+  it("returns stable stale revision codes when update_meal target was deleted", async () => {
+    const updateTarget = await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 610,
+      protein: 34,
+      carbs: 58,
+      fat: 24,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const deleted = await foodLoggingService.deleteMeal(deviceId, updateTarget.id, updateTarget.mealRevisionId);
+
+    const staleUpdate = await executeTool({
+      id: "call_stale_deleted_update",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: updateTarget.id,
+          calories: 420,
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState: {
+        resolvedMealTargets: [{
+          mealId: updateTarget.id,
+          mealRevisionId: updateTarget.mealRevisionId,
+        }],
+      },
+    });
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, updateTarget.id))
+    )[0];
+
+    assert.equal(staleUpdate.success, false);
+    assert.equal(staleUpdate.executed, false);
+    assert.match(staleUpdate.result, /MEAL_REVISION_STALE/);
+    assert.equal(staleUpdate.mealMutationKind, undefined);
+    assert.equal(staleUpdate.summaryOutcome, undefined);
+    assert.equal(transaction?.currentRevisionId, `${updateTarget.id}:r2`);
+    assert.equal(transaction?.currentRevisionId, `${deleted.transactionId}:r2`);
+    assert.notEqual(transaction?.deletedAt, null);
+  });
+
   it("returns update_meal committed facts with unavailable summaryOutcome and no compatibility dailySummary", async () => {
     const created = await foodLoggingService.logFood(deviceId, {
       foodName: "蘋果",

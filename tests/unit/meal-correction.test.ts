@@ -8,6 +8,7 @@ import { mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+import { MealRevisionPreconditionError } from "../../server/services/meal-transactions.js";
 
 const REAL_DATE = Date;
 const FIXED_NOW = new REAL_DATE("2026-04-19T12:00:00+08:00");
@@ -598,5 +599,34 @@ describe("meal correction service", () => {
     assert.equal(deleteTransaction?.currentRevisionId, deleteTarget.mealRevisionId);
     assert.equal(deleteTransaction?.deletedAt, null);
     assert.equal(revisions.length, 2);
+  });
+
+  it("returns stale revision metadata when a patch update target was deleted", async () => {
+    const meal = await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 610,
+      protein: 34,
+      carbs: 58,
+      fat: 24,
+      loggedAt: "2026-04-19T12:00:00.000Z",
+    });
+    const deleted = await foodLoggingService.deleteMeal(deviceId, meal.id, meal.mealRevisionId);
+
+    await assert.rejects(
+      () => mealCorrectionService.updateMeal(
+        deviceId,
+        meal.id,
+        { patch: { calories: 420 } },
+        meal.mealRevisionId,
+      ),
+      (error) => {
+        assert.ok(error instanceof MealRevisionPreconditionError);
+        assert.equal(error.code, "MEAL_REVISION_STALE");
+        assert.equal(error.mealId, meal.id);
+        assert.equal(error.affectedDate, deleted.affectedDateKey);
+        assert.equal(error.currentMealRevisionId, `${meal.id}:r2`);
+        return true;
+      },
+    );
   });
 });

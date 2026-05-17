@@ -187,18 +187,22 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
         ...parsedDraft,
         imageAssetId: payload.imageAssetId ?? null,
       });
-      await refreshAfterMealMutation({
-        redactChatReceiptIdentity,
-        recordMealMutation,
-        setDailySummary,
-        getMeals,
-        setMeals,
-        todayKey: () => formatLocalDate(new Date()),
-      }, {
-        mealId: payload.mealId,
-        affectedDate: response.affectedDate,
-        dailySummary: response.dailySummary,
-      });
+      try {
+        await refreshAfterMealMutation({
+          redactChatReceiptIdentity,
+          recordMealMutation,
+          setDailySummary,
+          getMeals,
+          setMeals,
+          todayKey: () => formatLocalDate(new Date()),
+        }, {
+          mealId: payload.mealId,
+          affectedDate: response.affectedDate,
+          dailySummary: response.dailySummary,
+        });
+      } catch {
+        recordMealMutation(response.affectedDate);
+      }
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
@@ -230,18 +234,22 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
       const { affectedDate, dailySummary } = await deleteMeal(payload.mealId, {
         expectedMealRevisionId: payload.mealRevisionId,
       });
-      await refreshAfterMealMutation({
-        redactChatReceiptIdentity,
-        recordMealMutation,
-        setDailySummary,
-        getMeals,
-        setMeals,
-        todayKey: () => formatLocalDate(new Date()),
-      }, {
-        mealId: payload.mealId,
-        affectedDate,
-        dailySummary,
-      });
+      try {
+        await refreshAfterMealMutation({
+          redactChatReceiptIdentity,
+          recordMealMutation,
+          setDailySummary,
+          getMeals,
+          setMeals,
+          todayKey: () => formatLocalDate(new Date()),
+        }, {
+          mealId: payload.mealId,
+          affectedDate,
+          dailySummary,
+        });
+      } catch {
+        recordMealMutation(affectedDate);
+      }
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {

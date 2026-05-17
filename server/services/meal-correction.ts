@@ -403,49 +403,6 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     );
   }
 
-  async function loadCurrentRevisionId(deviceId: string, mealId: string): Promise<string> {
-    const transaction = await db
-      .select({
-        currentRevisionId: mealTransactions.currentRevisionId,
-      })
-      .from(mealTransactions)
-      .where(and(
-        eq(mealTransactions.deviceId, deviceId),
-        eq(mealTransactions.id, mealId),
-        isNull(mealTransactions.deletedAt),
-      ))
-      .limit(1);
-
-    const currentRevisionId = transaction[0]?.currentRevisionId;
-    if (!currentRevisionId) {
-      throw new Error("MEAL_NOT_FOUND");
-    }
-
-    return currentRevisionId;
-  }
-
-  async function loadCurrentItems(deviceId: string, mealId: string): Promise<MealTransactionItemInput[]> {
-    const currentRevisionId = await loadCurrentRevisionId(deviceId, mealId);
-
-    const items = await db
-      .select({
-        foodName: mealRevisionItems.foodName,
-        calories: mealRevisionItems.calories,
-        protein: mealRevisionItems.protein,
-        carbs: mealRevisionItems.carbs,
-        fat: mealRevisionItems.fat,
-      })
-      .from(mealRevisionItems)
-      .where(eq(mealRevisionItems.revisionId, currentRevisionId))
-      .orderBy(asc(mealRevisionItems.position));
-
-    if (items.length === 0) {
-      throw new Error("MEAL_ITEMS_REQUIRED");
-    }
-
-    return items;
-  }
-
   async function tryResolvePendingSelection(
     deviceId: string,
     action: "update" | "delete",
@@ -701,7 +658,11 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       if (Array.isArray(items)) {
         nextItems = items;
       } else {
-        const currentItems = await loadCurrentItems(deviceId, mealId);
+        const currentItems = await mealTransactionsService.getCurrentItemsForMutation(
+          deviceId,
+          mealId,
+          expectedMealRevisionId,
+        );
         nextItems = applyMealPatch(currentItems, items);
       }
 
