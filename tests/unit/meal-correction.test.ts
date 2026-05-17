@@ -372,6 +372,37 @@ describe("meal correction service", () => {
     assert.equal(result.updatedMeal.calories, 500);
   });
 
+  it("returns committed update facts with recovered summaryOutcome when recompute fails", async () => {
+    const localMealCorrectionService = createMealCorrectionService(db, {
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary recompute failed");
+        },
+      },
+    });
+    const original = await foodLoggingService.logFood(deviceId, {
+      foodName: "chicken rice",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-03-25T04:00:00.000Z",
+    });
+
+    const result = await localMealCorrectionService.updateMeal(deviceId, original.id, {
+      patch: { calories: 500 },
+    });
+
+    assert.equal(result.updatedMeal.id, original.id);
+    assert.equal(result.updatedMeal.calories, 500);
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.equal(result.summaryOutcome.status, "recovered");
+    assert.equal(result.summaryOutcome.reason, "recompute_failed");
+    assert.equal(result.summaryOutcome.dailySummary.date, result.affectedDate);
+    assert.equal(result.dailySummary, result.summaryOutcome.dailySummary);
+    assert.notEqual(result.summaryOutcome.status, "publish_failed");
+  });
+
   it("creates a pending clarification state when multiple meals match and resolves the next numbered reply", async () => {
     const first = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",
@@ -483,5 +514,37 @@ describe("meal correction service", () => {
       calories: 520,
       protein: 24,
     });
+  });
+
+  it("returns committed delete facts with unavailable summaryOutcome when recovery fails", async () => {
+    const localMealCorrectionService = createMealCorrectionService(db, {
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary recompute failed");
+        },
+      },
+      foodLoggingService: {
+        async getMealsByDate() {
+          throw new Error("persisted meal recovery failed");
+        },
+      },
+    });
+    const meal = await foodLoggingService.logFood(deviceId, {
+      foodName: "beef noodles",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-03-25T10:30:00.000Z",
+    });
+
+    const result = await localMealCorrectionService.deleteMeal(deviceId, meal.id);
+
+    assert.equal(result.deletedMealId, meal.id);
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.deepEqual(result.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.deletedMeal.mealId, meal.id);
+    assert.equal(result.deletedMeal.foodName, "beef noodles");
   });
 });
