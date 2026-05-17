@@ -215,6 +215,20 @@ export function createMealTransactionsService(db: AppDatabase) {
   }
 
   return {
+    async assertExpectedMealRevision(
+      deviceId: string,
+      transactionId: string,
+      expectedMealRevisionId?: string | null,
+    ): Promise<void> {
+      const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
+
+      if (!existing) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      assertExpectedMealRevision(existing, expectedMealRevisionId);
+    },
+
     async createTransaction(
       deviceId: string,
       input: CreateMealTransactionInput,

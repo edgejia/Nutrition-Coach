@@ -186,6 +186,8 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     let affectedDateKey: string;
     let updatedMeal: Awaited<ReturnType<typeof foodLoggingService.updateMeal>>;
     try {
+      await foodLoggingService.assertExpectedMealRevision(deviceId, id, update.expectedMealRevisionId);
+
       const itemCount = await foodLoggingService.getMealItemCount(deviceId, id);
       if (itemCount === null) {
         return reply.code(404).send({ error: "Meal not found" });

@@ -122,6 +122,10 @@ export function createFoodLoggingService(db: AppDatabase) {
       return mealTransactionsService.softDeleteTransaction(deviceId, mealId, expectedMealRevisionId);
     },
 
+    async assertExpectedMealRevision(deviceId: string, mealId: string, expectedMealRevisionId?: string | null) {
+      return mealTransactionsService.assertExpectedMealRevision(deviceId, mealId, expectedMealRevisionId);
+    },
+
     async getMealItemCount(deviceId: string, mealId: string): Promise<number | null> {
       const transaction = await db
         .select({ currentRevisionId: mealTransactions.currentRevisionId })
