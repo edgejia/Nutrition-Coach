@@ -9,10 +9,10 @@ Requirements for the v2.3 P1 data-integrity milestone. Each requirement must map
 
 ### Goal Authority
 
-- [ ] **GOAL-01**: User can receive a concrete goal-change proposal without mutating daily targets until the backend persists a structured pending proposal.
+- [x] **GOAL-01**: User can receive a concrete goal-change proposal without mutating daily targets until the backend persists a structured pending proposal.
 - [ ] **GOAL-02**: User confirmation text such as `好` can update goals only when it confirms a valid backend proposal id or includes explicit current-turn numeric target values.
-- [ ] **GOAL-03**: User cannot apply expired, consumed, mismatched, or missing goal proposals; the backend returns deterministic Traditional Chinese guidance instead.
-- [ ] **GOAL-04**: User sees deterministic backend failure copy after `update_goals` validation or guard rejection, with no target persistence, no `goals_update`, and no LLM-authored success-style text.
+- [x] **GOAL-03**: User cannot apply expired, consumed, mismatched, or missing goal proposals; the backend returns deterministic Traditional Chinese guidance instead.
+- [x] **GOAL-04**: User sees deterministic backend failure copy after `update_goals` validation or guard rejection, with no target persistence, no `goals_update`, and no LLM-authored success-style text.
 
 ### Mutation Outcomes
 
@@ -77,10 +77,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GOAL-01 | Phase 60 | Pending |
+| GOAL-01 | Phase 60 | Complete |
 | GOAL-02 | Phase 60 | Pending |
-| GOAL-03 | Phase 60 | Pending |
-| GOAL-04 | Phase 60 | Pending |
+| GOAL-03 | Phase 60 | Complete |
+| GOAL-04 | Phase 60 | Complete |
 | MUT-01 | Phase 61 | Pending |
 | MUT-02 | Phase 61 | Pending |
 | MUT-03 | Phase 61 | Pending |
