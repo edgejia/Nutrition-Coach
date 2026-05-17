@@ -37,6 +37,17 @@ function createDeps(todayKey = "2026-05-17") {
   };
 }
 
+function dailySummary(date: string) {
+  return {
+    date,
+    totalCalories: 100,
+    totalProtein: 20,
+    totalCarbs: 10,
+    totalFat: 5,
+    mealCount: 1,
+  };
+}
+
 describe("refreshAfterMealMutation", () => {
   it("refreshes today's meal rows after a same-day edit response without dailySummary", async () => {
     const { calls, deps } = createDeps();
@@ -76,7 +87,7 @@ describe("refreshAfterMealMutation", () => {
     await refreshAfterMealMutation(deps, {
       mealId: "meal-edit-2",
       affectedDate: "2026-05-17",
-      dailySummary: { date: "2026-05-17" },
+      dailySummary: dailySummary("2026-05-17"),
     });
 
     assert.deepEqual(calls, [
@@ -94,7 +105,7 @@ describe("refreshAfterMealMutation", () => {
     await refreshAfterMealMutation(deps, {
       mealId: "meal-history-1",
       affectedDate: "2026-05-16",
-      dailySummary: { date: "2026-05-16" },
+      dailySummary: dailySummary("2026-05-16"),
     });
 
     assert.deepEqual(calls, [
