@@ -20,7 +20,7 @@ v2.3 closes the remaining P1 data-integrity risks before returning to product po
 
 - [x] **Phase 60: Goal Proposal Authority and Rejected-Goal Copy** - Ambiguous goal confirmations can only mutate through backend-owned proposals or explicit current-turn numeric targets. (completed 2026-05-17)
 - [x] **Phase 61: Committed Mutation Outcome and Summary Contract** - Meal log/update/delete flows return committed mutation facts even when summary recompute or publish degrades. (completed 2026-05-17)
-- [ ] **Phase 62: Meal Revision Tokens and Stale Receipt Protection** - Edit-capable receipts carry revision identity and stale receipt writes fail closed with refresh guidance. (gap closure planned)
+- [x] **Phase 62: Meal Revision Tokens and Stale Receipt Protection** - Edit-capable receipts carry revision identity and stale receipt writes fail closed with refresh guidance. (completed 2026-05-17)
 - [ ] **Phase 63: SSE Meal-Row Freshness and Affected-Date Invalidation** - Summary SSE updates cannot make totals fresher than visible meal rows.
 - [ ] **Phase 64: Verification and Release-Proof Hardening** - v2.3 integrity behavior is proven with targeted tests, metadata-only evidence, and local release gates.
 
@@ -92,7 +92,7 @@ Plans:
   2. User edits from a current receipt can update the meal with the expected revision contract.
   3. User edits from an older receipt are rejected without mutating the meal or creating a newer revision.
   4. User sees deterministic stale-record guidance in the chat receipt view, and affected meal rows refresh or invalidate after the conflict.
-**Plans:** 4/5 plans complete
+**Plans:** 5/5 plans complete
 Plans:
 **Wave 1**
 - [x] 62-01-PLAN.md — Direct transaction preconditions and meal route conflict contract
@@ -105,7 +105,7 @@ Plans:
 - [x] 62-04-PLAN.md — Client edit payload, stale conflict guidance, and recovery
 
 **Wave 4** *(gap closure; blocked on Wave 3 completion)*
-- [ ] 62-05-PLAN.md — Stale PATCH ordering and same-day refresh without dailySummary
+- [x] 62-05-PLAN.md — Stale PATCH ordering and same-day refresh without dailySummary
 **UI hint**: yes
 
 **Implementation Notes:**
@@ -156,7 +156,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
-| 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 4/5 | Executing gap closure | - |
+| 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 5/5 | Complete   | 2026-05-17 |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 0/TBD | Not started | - |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
 
@@ -170,4 +170,4 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 - Metadata-only production trace sampling and aggregate failure metrics.
 
 ---
-*Last updated: 2026-05-17 after Phase 62 gap-closure planning*
+*Last updated: 2026-05-17 after Phase 62 gap-closure execution*
