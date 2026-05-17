@@ -21,8 +21,8 @@ This phase covers chat receipt edit affordances, direct meal edit/delete flows, 
 
 ### Expected Revision Enforcement
 - **D-03:** Require `expectedMealRevisionId` for every authoritative mutation of an existing meal: direct `PATCH`, direct `DELETE`, chat/tool `update_meal`, and chat/tool `delete_meal` after the target meal has been resolved.
-- **D-04:** Meal creation/logging is out of scope for expected revision enforcement because there is no prior revision to protect.
-- **D-05:** Apply the expected-revision contract to stale deletes as well as stale edits. A stale delete must not remove a newer meal state.
+- **D-04:** Meal creation/logging is out of scope for expected revision enforcement because there is no prior revision to protect. Creation/logging request bodies must not accept `expectedMealRevisionId`.
+- **D-05:** Apply the expected-revision contract to stale deletes as well as stale edits. A stale delete must not remove a newer meal state. This resolves the `STATE.md` stale-delete planning concern.
 
 ### Missing Or Stale Expected Revision Contract
 - **D-06:** Missing `expectedMealRevisionId` fails closed with the same deterministic stale/precondition family as stale mismatches: no mutation, no new revision, no summary recompute, and no publish.
@@ -30,14 +30,16 @@ This phase covers chat receipt edit affordances, direct meal edit/delete flows, 
 - **D-08:** Stale expected revisions must be rejected before the meal transaction write boundary creates a new revision.
 
 ### Stale Conflict HTTP Shape
-- **D-09:** Use `409 Conflict` with a structured deterministic error code such as `MEAL_REVISION_STALE` or `MEAL_REVISION_REQUIRED`.
-- **D-10:** Keep stale conflict responses stable enough for the client to branch on the code and show deterministic Traditional Chinese stale-record guidance. Exact copy is left for planning and tests.
-- **D-11:** Existing route conventions already use `409` for grouped meal edit conflicts, so Phase 62 should extend that conflict style rather than introduce a separate `412` public convention.
+- **D-09:** Missing `expectedMealRevisionId` must return `409 { error: "MEAL_REVISION_REQUIRED", ... }`.
+- **D-10:** Stale expected revision mismatch must return `409 { error: "MEAL_REVISION_STALE", ... }`.
+- **D-11:** The client must branch on the stable `error` string and show deterministic Traditional Chinese stale-record guidance. Exact user-facing copy is left for planning and tests.
+- **D-12:** Existing route conventions already use `409` with a stable `error` string, for example `server/routes/meals.ts` returns `error: "MEAL_REQUIRES_GROUPED_UPDATE"` for grouped meal edit conflicts. Phase 62 should extend that body shape rather than introduce a separate `412` public convention.
 
 ### Client Recovery Behavior
-- **D-12:** On stale conflict, the client should show deterministic Traditional Chinese stale-record guidance, close or block saving from the stale editor/receipt, and immediately refresh or invalidate the affected meal row/date.
-- **D-13:** If refreshed current facts are available, the user should reopen Meal Edit from the fresh row or receipt rather than continuing from stale form state.
-- **D-14:** Client-side refresh/redaction is UX support only. Server-side expected revision checks remain the authority.
+- **D-13:** On stale conflict, the client should show deterministic Traditional Chinese stale-record guidance, close or block saving from the stale editor/receipt, and immediately refresh or invalidate the affected meal row/date.
+- **D-14:** This recovery is a direct client reaction to the 409 response, via refetch or local invalidation; new SSE meal-row freshness behavior remains Phase 63.
+- **D-15:** If refreshed current facts are available, the user should reopen Meal Edit from the fresh row or receipt rather than continuing from stale form state.
+- **D-16:** Client-side refresh/redaction is UX support only. Server-side expected revision checks remain the authority.
 
 ### the agent's Discretion
 - Planner may choose exact field placement and type names as long as read/display identity stays `mealRevisionId` and write precondition stays `expectedMealRevisionId`.
@@ -71,11 +73,11 @@ This phase covers chat receipt edit affordances, direct meal edit/delete flows, 
 
 ### Reusable Assets
 - `server/services/meal-transactions.ts` - Authoritative transaction/revision write boundary. `meal_transactions.currentRevisionId` and `currentRevisionNumber` already provide the current revision identity needed for compare-and-write checks.
-- `server/services/food-logging.ts` - Compatibility projection already exposes `mealRevisionId` on meal entries returned from log/update paths.
+- `server/services/food-logging.ts` - Compatibility projection already exposes `mealRevisionId` on meal entries returned from log/update paths, but `server/routes/meals.ts` does not currently project that field into HTTP DTOs. Phase 62 must close the route/client surface gap.
 - `server/services/meal-correction.ts` - Chat/tool update/delete paths resolve target meals, apply patches, and call the transaction service. This is the key chat mutation integration point for `expectedMealRevisionId`.
 - `server/routes/meals.ts` - Direct `PATCH` and `DELETE` route boundary owns request parsing, 409 conflict shaping, summary recompute/publish timing, and response projection.
 - `server/db/schema.ts` - `meal_transactions`, `meal_revisions`, `meal_revision_items`, and `chat_meal_receipts` already store revision identity and receipt-to-revision associations.
-- `client/src/types.ts`, `client/src/api.ts`, `client/src/meal-edit-payload.ts`, and `client/src/store.ts` - Client DTO, normalization, edit payload, and state boundaries that need `mealRevisionId` read identity and `expectedMealRevisionId` write preconditions.
+- `client/src/types.ts`, `client/src/api.ts`, `client/src/meal-edit-payload.ts`, and `client/src/store.ts` - Client DTO, normalization, edit payload, and state boundaries that need `mealRevisionId` read identity and `expectedMealRevisionId` write preconditions. Existing `MealEditPayload`, `LoggedMealReceipt`, and `MealEntry` do not currently expose `mealRevisionId`.
 - `client/src/components/MessageBubble.tsx` - Receipt edit affordance currently opens Meal Edit from `message.loggedMeal`; stale receipt behavior should connect through this payload path.
 
 ### Established Patterns
@@ -87,10 +89,10 @@ This phase covers chat receipt edit affordances, direct meal edit/delete flows, 
 
 ### Integration Points
 - `server/services/meal-transactions.ts`: add expected revision comparison for update and soft delete before inserting the next revision.
-- `server/services/food-logging.ts`: thread optional expected revision parameters from public update/delete callers to transaction methods.
+- `server/services/food-logging.ts`: thread required expected revision values from public update/delete callers to transaction methods.
 - `server/services/meal-correction.ts`: require and pass expected revision for chat/tool update and delete mutations after target resolution.
 - `server/orchestrator/tools.ts`: extend `update_meal` and `delete_meal` tool schemas/results as needed so resolved meal targets carry expected revision identity.
-- `server/routes/meals.ts`: parse `expectedMealRevisionId`, fail closed when missing or stale, return `409` structured conflict bodies, and ensure no summary/publish side effects run on conflicts.
+- `server/routes/meals.ts`: parse `expectedMealRevisionId`, fail closed when missing or stale, return `409` structured conflict bodies with stable `error` strings, and ensure no summary/publish side effects run on conflicts. Successful delete responses do not need a meal revision field because there is no current meal row to edit after deletion.
 - `server/routes/chat.ts`: preserve chat JSON/SSE `loggedMeal` revision identity in terminal payloads and restored assistant receipts.
 - `client/src/api.ts`: normalize `mealRevisionId` on meals/receipts and send `expectedMealRevisionId` for update/delete requests.
 - `client/src/meal-edit-payload.ts`: include read-side `mealRevisionId` in edit payloads and map it to write-side `expectedMealRevisionId` when saving.
@@ -103,7 +105,9 @@ This phase covers chat receipt edit affordances, direct meal edit/delete flows, 
 
 - Prefer public read/display identity named `mealRevisionId`.
 - Prefer public write precondition named `expectedMealRevisionId`.
-- Preferred stale/missing conflict family: `409 Conflict` with codes similar to `MEAL_REVISION_STALE` and `MEAL_REVISION_REQUIRED`.
+- Required stale/missing conflict family:
+  - Missing `expectedMealRevisionId` -> `409 { error: "MEAL_REVISION_REQUIRED", ... }`
+  - Stale mismatch -> `409 { error: "MEAL_REVISION_STALE", ... }`
 - Deterministic stale guidance should be Traditional Chinese and should direct the user to refresh/use the latest meal row.
 
 </specifics>

@@ -59,7 +59,7 @@
 | Client-only guard | Let the frontend prevent missing expected revisions. | |
 
 **User's choice:** Approve proposed decision.
-**Notes:** Missing `expectedMealRevisionId` fails closed with the same deterministic stale/precondition family as stale mismatches: no mutation, no new revision, no summary recompute, no publish. No legacy compatibility exception unless a real rollout need is raised later.
+**Notes:** Missing `expectedMealRevisionId` fails closed with the same deterministic stale/precondition family as stale mismatches: no mutation, no new revision, no summary recompute, no publish. Final anchored response shape: `409 { error: "MEAL_REVISION_REQUIRED", ... }`. No legacy compatibility exception unless a real rollout need is raised later.
 
 ---
 
@@ -72,7 +72,7 @@
 | Hide stale edit affordances only | Client-only redaction is useful UX but insufficient as the protection boundary. | |
 
 **User's choice:** Approve proposed decision.
-**Notes:** On stale conflict, show deterministic Traditional Chinese stale-record guidance, close or block saving from the stale editor/receipt, and immediately refresh or invalidate the affected meal row/date. If refreshed current facts are available, reopen editing from the fresh row/receipt rather than continuing from stale form state.
+**Notes:** On stale conflict, show deterministic Traditional Chinese stale-record guidance, close or block saving from the stale editor/receipt, and immediately refresh or invalidate the affected meal row/date. This is a direct client reaction to the 409 response via refetch or local invalidation; new SSE meal-row freshness behavior remains Phase 63. If refreshed current facts are available, reopen editing from the fresh row/receipt rather than continuing from stale form state.
 
 ---
 
@@ -85,7 +85,7 @@
 | Generic non-OK error | Too vague for deterministic stale guidance and tests. | |
 
 **User's choice:** Approve proposed decision.
-**Notes:** Use `409 Conflict` with structured deterministic error codes such as `MEAL_REVISION_STALE` and `MEAL_REVISION_REQUIRED`.
+**Notes:** Use `409 Conflict` with stable `error` strings. Final anchored shapes: missing expected revision -> `409 { error: "MEAL_REVISION_REQUIRED", ... }`; stale mismatch -> `409 { error: "MEAL_REVISION_STALE", ... }`.
 
 ---
 
