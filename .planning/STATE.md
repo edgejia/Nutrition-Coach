@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: executing
-stopped_at: Phase 61 context gathered
-last_updated: "2026-05-17T06:58:21.003Z"
-last_activity: 2026-05-17 -- Phase 61 planning complete
+stopped_at: Completed 61-01-PLAN.md
+last_updated: "2026-05-17T07:08:20.381Z"
+last_activity: 2026-05-17
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 9
-  completed_plans: 3
-  percent: 33
+  completed_plans: 4
+  percent: 44
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-17)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Phase 61 — Committed Mutation Outcome and Summary Contract
+**Current focus:** Phase 61 — committed-mutation-outcome-and-summary-contract
 
 ## Current Position
 
-Phase: 61
-Plan: Not started
+Phase: 61 (committed-mutation-outcome-and-summary-contract) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-05-17 -- Phase 61 planning complete
+Last activity: 2026-05-17
 
-Progress: [████░░░░░░] 40%
+Progress: [████░░░░░░] 44%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [████░░░░░░] 40%
 | Phase 60 P01 | 215 | 2 tasks | 4 files |
 | Phase 60 P02 | 637s | 3 tasks | 9 files |
 | Phase 60 P03 | 535s | 3 tasks | 6 files |
+| Phase 61 P01 | 4 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,8 @@ Recent decisions affecting current work:
 - [Phase 60]: Return proposal, authority failure, validation failure, and cancel paths with renderer-owned controlledReply metadata.
 - [Phase 60]: Controlled goal replies terminate the orchestrator flow before any later model rewrite.
 - [Phase 60]: Fastify chat proof uses metadata-only llm-trace final reply facts for renderer-owned goal failures.
+- [Phase 61]: Summary availability is represented by the explicit SummaryOutcome union; update/delete services now return committed facts even when summary recompute is recovered or unavailable.
+- [Phase 61]: dailySummary compatibility fields are derived only from dailySummaryFromOutcome(summaryOutcome), and publish failure remains outside summaryOutcome.
 
 ### Pending Todos
 
@@ -90,6 +93,6 @@ None yet for v2.3.
 
 ## Session Continuity
 
-Last session: 2026-05-17T06:11:57.662Z
-Stopped at: Phase 61 context gathered
-Resume file: .planning/phases/61-committed-mutation-outcome-and-summary-contract/61-CONTEXT.md
+Last session: 2026-05-17T07:08:20.375Z
+Stopped at: Completed 61-01-PLAN.md
+Resume file: None
