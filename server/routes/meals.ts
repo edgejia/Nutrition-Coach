@@ -1,13 +1,18 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
-import type { createSummaryService } from "../services/summary.js";
+import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createAssetService } from "../services/assets.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import {
+  buildSummaryOutcomeAfterMealCommit,
+  dailySummaryFromOutcome,
+  type SummaryOutcome,
+} from "../services/summary-outcome.js";
 
 interface Deps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
@@ -64,6 +69,33 @@ function parseMealUpdateBody(body: unknown): MealUpdateBody | null {
     fat: input.fat,
     imageAssetId,
   };
+}
+
+function publishDailySummarySafe(input: {
+  publisher: RealtimePublisher;
+  deviceId: string;
+  dailySummary: DailySummary | undefined;
+  summaryOutcome: SummaryOutcome;
+  affectedDate: string;
+  log: FastifyBaseLogger;
+}): void {
+  const { publisher, deviceId, dailySummary, summaryOutcome, affectedDate, log } = input;
+  if (!dailySummary || dailySummary.date !== formatLocalDate(currentAppDate())) {
+    return;
+  }
+
+  try {
+    publisher.publishDailySummary(deviceId, dailySummary);
+    log.info(
+      { event: "summary_publish_success", affectedDate, summaryStatus: summaryOutcome.status },
+      "Summary publish success",
+    );
+  } catch {
+    log.warn(
+      { event: "summary_publish_failed", affectedDate, summaryStatus: summaryOutcome.status },
+      "Summary publish failed (non-fatal)",
+    );
+  }
 }
 
 export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
@@ -166,18 +198,27 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       throw error;
     }
 
-    const dailySummary = await summaryService.getDailySummary(
+    const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
       deviceId,
-      new Date(`${affectedDateKey}T12:00:00`),
-    );
-    if (dailySummary.date === formatLocalDate(currentAppDate())) {
-      publisher.publishDailySummary(deviceId, dailySummary);
-    }
+      affectedDate: affectedDateKey,
+      summaryService,
+      foodLoggingService,
+    });
+    const dailySummary = dailySummaryFromOutcome(summaryOutcome);
+    publishDailySummarySafe({
+      publisher,
+      deviceId,
+      dailySummary,
+      summaryOutcome,
+      affectedDate: affectedDateKey,
+      log: request.log,
+    });
 
     const imageAssetId = parseAssetRef(updatedMeal.imagePath);
     return {
       affectedDate: affectedDateKey,
-      dailySummary,
+      summaryOutcome,
+      ...(dailySummary ? { dailySummary } : {}),
       meal: {
         id: updatedMeal.id,
         foodName: updatedMeal.foodName,
@@ -208,8 +249,11 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
 
     const { id } = request.params as { id: string };
     let affectedDateKey: string;
+    let deletedMealId: string;
     try {
-      ({ affectedDateKey } = await foodLoggingService.deleteMeal(deviceId, id));
+      const deleted = await foodLoggingService.deleteMeal(deviceId, id);
+      affectedDateKey = deleted.affectedDateKey;
+      deletedMealId = deleted.transactionId;
     } catch (error) {
       if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
         return reply.code(404).send({ error: "Meal not found" });
@@ -217,16 +261,26 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       throw error;
     }
 
-    const dailySummary = await summaryService.getDailySummary(
+    const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
       deviceId,
-      new Date(`${affectedDateKey}T12:00:00`),
-    );
-    if (dailySummary.date === formatLocalDate(currentAppDate())) {
-      publisher.publishDailySummary(deviceId, dailySummary);
-    }
+      affectedDate: affectedDateKey,
+      summaryService,
+      foodLoggingService,
+    });
+    const dailySummary = dailySummaryFromOutcome(summaryOutcome);
+    publishDailySummarySafe({
+      publisher,
+      deviceId,
+      dailySummary,
+      summaryOutcome,
+      affectedDate: affectedDateKey,
+      log: request.log,
+    });
     return {
       affectedDate: affectedDateKey,
-      dailySummary,
+      deletedMealId,
+      summaryOutcome,
+      ...(dailySummary ? { dailySummary } : {}),
     };
   });
 }
