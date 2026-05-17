@@ -2,7 +2,11 @@ import { z } from "zod";
 import type { ToolDefinition, ToolCall } from "../llm/types.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
-import type { SummaryOutcome } from "../services/summary-outcome.js";
+import {
+  buildSummaryOutcomeAfterMealCommit,
+  dailySummaryFromOutcome,
+  type SummaryOutcome,
+} from "../services/summary-outcome.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
@@ -224,7 +228,8 @@ type HistoricalToolClarification = {
 
 interface LogFoodSuccessResult {
   status: "logged";
-  dailySummary: DailySummary;
+  dailySummary?: DailySummary;
+  summaryOutcome: SummaryOutcome;
   affectedDate?: string;
   loggedMeal: {
     mealId: string;
@@ -563,26 +568,6 @@ function extractPreviousHistoricalDateKey(
 
 function buildLocalMidpointDate(dateKey: string): Date {
   return new Date(`${dateKey}T12:00:00`);
-}
-
-async function recoverDailySummaryFromPersistedMeals(
-  deps: ToolDeps,
-  deviceId: string,
-  dateKey: string,
-): Promise<DailySummary> {
-  const meals = await deps.foodLoggingService.getMealsByDate(
-    deviceId,
-    buildLocalMidpointDate(dateKey),
-  );
-
-  return {
-    totalCalories: meals.reduce((sum, meal) => sum + meal.calories, 0),
-    totalProtein: meals.reduce((sum, meal) => sum + meal.protein, 0),
-    totalCarbs: meals.reduce((sum, meal) => sum + meal.carbs, 0),
-    totalFat: meals.reduce((sum, meal) => sum + meal.fat, 0),
-    mealCount: meals.length,
-    date: dateKey,
-  };
 }
 
 function roundProtein(value: number): number {
@@ -1048,25 +1033,20 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
 
     // Phase 8/9 invariant: persist the meal BEFORE recomputing the daily
     // summary so partial-success fallback paths still see the row in the DB.
-    let dailySummary: DailySummary;
-    try {
-      dailySummary = await deps.summaryService.getDailySummary(
-        deviceId,
-        buildLocalMidpointDate(dateIntent.dateKey),
-      );
-    } catch {
-      dailySummary = await recoverDailySummaryFromPersistedMeals(
-        deps,
-        deviceId,
-        dateIntent.dateKey,
-      );
-    }
+    const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
+      deviceId,
+      affectedDate: dateIntent.dateKey,
+      summaryService: deps.summaryService,
+      foodLoggingService: deps.foodLoggingService,
+    });
+    const dailySummary = dailySummaryFromOutcome(summaryOutcome);
 
     return {
       ok: true,
       result: {
         status: "logged",
-        dailySummary,
+        summaryOutcome,
+        ...(dailySummary ? { dailySummary } : {}),
         affectedDate: dateIntent.isHistorical ? dateIntent.dateKey : undefined,
         loggedMeal: {
           ...projectMealIdentityFields(loggedMeal),
@@ -1717,6 +1697,7 @@ export async function executeTool(
       summary: "成功",
       mealMutationKind: "log",
       dailySummary: contractResult.dailySummary,
+      summaryOutcome: contractResult.summaryOutcome,
       affectedDate: contractResult.affectedDate,
       loggedMeal: contractResult.loggedMeal,
     };

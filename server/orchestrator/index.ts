@@ -95,6 +95,7 @@ export type OrchestratorResult =
       didLogMeal: boolean;
       didMutateMeal?: boolean;
       dailySummary?: DailySummary;
+      summaryOutcome?: SummaryOutcome;
       summaryHistoryFacts?: SummaryHistoryFacts;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
@@ -106,6 +107,7 @@ export type OrchestratorResult =
       didLogMeal: boolean;
       didMutateMeal?: boolean;
       dailySummary?: DailySummary;
+      summaryOutcome?: SummaryOutcome;
       summaryHistoryFacts?: SummaryHistoryFacts;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
@@ -125,14 +127,6 @@ interface CorrectionToolResult {
   status: "resolved" | "needs_clarification" | "not_found";
   action: "update" | "delete";
   candidates?: CorrectionClarificationCandidate[];
-}
-
-function requireDailySummaryForLoggedMeal(dailySummary: DailySummary | undefined): DailySummary {
-  if (!dailySummary) {
-    throw new Error("log_food succeeded without dailySummary");
-  }
-
-  return dailySummary;
 }
 
 function requireSummaryOutcomeForMealMutation(
@@ -702,6 +696,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let didLogMeal = false;
       let didMutateMeal = false;
       let logMealSummary: DailySummary | undefined;
+      let mealSummaryOutcome: SummaryOutcome | undefined;
       let summaryHistoryFacts: SummaryHistoryFacts | undefined;
       let shouldStreamFinalReply = false;
       let successfulGoalTargets: DailyTargets | undefined;
@@ -742,6 +737,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 didLogMeal,
                 didMutateMeal,
                 dailySummary: logMealSummary,
+                summaryOutcome: mealSummaryOutcome,
                 summaryHistoryFacts,
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
@@ -768,6 +764,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 didLogMeal,
                 didMutateMeal,
                 dailySummary: logMealSummary,
+                summaryOutcome: mealSummaryOutcome,
                 summaryHistoryFacts,
                 dailyTargets: successfulGoalTargets,
                 affectedDate: resolvedAffectedDate,
@@ -821,6 +818,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
               dailyTargets: successfulGoalTargets,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
@@ -839,7 +837,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               reply: partialFallback,
               didLogMeal,
               didMutateMeal: true,
-              dailySummary: requireDailySummaryForLoggedMeal(logMealSummary),
+              dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
@@ -855,6 +854,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             didLogMeal,
             didMutateMeal,
             dailySummary: logMealSummary,
+            summaryOutcome: mealSummaryOutcome,
             affectedDate: resolvedAffectedDate,
             loggedMeal,
             loggedMealToolMessageId,
@@ -880,6 +880,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             didLogMeal,
             didMutateMeal,
             dailySummary: logMealSummary,
+            summaryOutcome: mealSummaryOutcome,
             summaryHistoryFacts,
             dailyTargets: successfulGoalTargets,
             affectedDate: resolvedAffectedDate,
@@ -977,7 +978,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (toolCall.function.name === "log_food") {
                 didLogMeal = true;
                 didMutateMeal = true;
-                logMealSummary = requireDailySummaryForLoggedMeal(dailySummary);
+                mealSummaryOutcome = requireSummaryOutcomeForMealMutation(toolSummaryOutcome);
+                logMealSummary = dailySummary;
                 loggedMeal = toolLoggedMeal;
                 if (!toolLoggedMeal) {
                   throw new Error("log_food succeeded without loggedMeal");
@@ -985,7 +987,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 mutationEffects = {
                   kind: "log",
                   affectedDate: affectedDate ?? toolLoggedMeal.dateKey,
-                  summaryOutcome: toolSummaryOutcome ?? { status: "fresh", dailySummary: logMealSummary },
+                  summaryOutcome: mealSummaryOutcome,
                   committedTargets: getDeviceTargets(device),
                   meal: toolLoggedMeal,
                 };
@@ -998,7 +1000,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               }
               if (mealMutationKind === "update" || mealMutationKind === "delete") {
                 didMutateMeal = true;
-                const mealSummaryOutcome = requireSummaryOutcomeForMealMutation(toolSummaryOutcome);
+                mealSummaryOutcome = requireSummaryOutcomeForMealMutation(toolSummaryOutcome);
                 logMealSummary = dailySummary;
                 if (mealMutationKind === "update") {
                   loggedMeal = toolLoggedMeal;
@@ -1078,6 +1080,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     didLogMeal,
                     didMutateMeal,
                     dailySummary: logMealSummary,
+                    summaryOutcome: mealSummaryOutcome,
                     dailyTargets: successfulGoalTargets,
                     affectedDate: resolvedAffectedDate,
                     loggedMeal,
@@ -1104,6 +1107,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
               dailyTargets: successfulGoalTargets,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
@@ -1120,6 +1124,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
@@ -1135,6 +1140,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
@@ -1150,6 +1156,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
@@ -1165,6 +1172,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
@@ -1179,6 +1187,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didLogMeal,
               didMutateMeal,
               dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
@@ -1204,6 +1213,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           didLogMeal,
           didMutateMeal,
           dailySummary: logMealSummary,
+          summaryOutcome: mealSummaryOutcome,
           dailyTargets: successfulGoalTargets,
           affectedDate: resolvedAffectedDate,
           loggedMeal,
@@ -1218,6 +1228,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         didLogMeal,
         didMutateMeal,
         dailySummary: logMealSummary,
+        summaryOutcome: mealSummaryOutcome,
         affectedDate: resolvedAffectedDate,
         loggedMeal,
         loggedMealToolMessageId,
