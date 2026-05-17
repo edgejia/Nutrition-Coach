@@ -144,32 +144,7 @@ export function createMealTransactionsService(db: AppDatabase) {
       .run();
   }
 
-  function getActiveTransactionByDeviceAndId(
-    deviceId: string,
-    transactionId: string,
-  ): MealTransactionRow | undefined {
-    // Keep the shared delete/correction lookup pinned to the composite
-    // device_id + id index so the hot path remains regression-testable.
-    return db.$client
-      .prepare(
-        `
-          SELECT
-            id,
-            device_id AS deviceId,
-            logged_at AS loggedAt,
-            current_revision_id AS currentRevisionId,
-            current_revision_number AS currentRevisionNumber,
-            deleted_at AS deletedAt,
-            created_at AS createdAt
-          FROM meal_transactions INDEXED BY meal_tx_device_id_id_idx
-          WHERE device_id = ? AND id = ? AND deleted_at IS NULL
-          LIMIT 1
-        `,
-      )
-      .get(deviceId, transactionId) as MealTransactionRow | undefined;
-  }
-
-  function getActiveTransactionByDeviceAndIdFromReader(
+  function getTransactionByDeviceAndIdFromReader(
     reader: MealTransactionReader,
     deviceId: string,
     transactionId: string,
@@ -188,10 +163,25 @@ export function createMealTransactionsService(db: AppDatabase) {
       .where(and(
         eq(mealTransactions.deviceId, deviceId),
         eq(mealTransactions.id, transactionId),
-        isNull(mealTransactions.deletedAt),
       ))
       .limit(1)
       .get();
+  }
+
+  function assertMutableExpectedRevision(
+    existing: MealTransactionRow,
+    expectedMealRevisionId: string | null | undefined,
+  ) {
+    assertExpectedMealRevision(existing, expectedMealRevisionId);
+
+    if (existing.deletedAt !== null) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_STALE",
+        mealId: existing.id,
+        affectedDate: formatLocalDate(new Date(existing.loggedAt)),
+        currentMealRevisionId: existing.currentRevisionId,
+      });
+    }
   }
 
   function loadDeletedMealSnapshotFromReader(
@@ -259,13 +249,13 @@ export function createMealTransactionsService(db: AppDatabase) {
       transactionId: string,
       expectedMealRevisionId?: string | null,
     ): Promise<void> {
-      const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
+      const existing = getTransactionByDeviceAndIdFromReader(db, deviceId, transactionId);
 
       if (!existing) {
         throw new Error("MEAL_NOT_FOUND");
       }
 
-      assertExpectedMealRevision(existing, expectedMealRevisionId);
+      assertMutableExpectedRevision(existing, expectedMealRevisionId);
     },
 
     async getMealMutationGuard(
@@ -280,22 +270,25 @@ export function createMealTransactionsService(db: AppDatabase) {
               mt.id,
               mt.logged_at AS loggedAt,
               mt.current_revision_id AS currentRevisionId,
+              mt.current_revision_number AS currentRevisionNumber,
+              mt.deleted_at AS deletedAt,
+              mt.created_at AS createdAt,
               COUNT(mri.revision_id) AS itemCount
             FROM meal_transactions AS mt INDEXED BY meal_tx_device_id_id_idx
             LEFT JOIN meal_revision_items AS mri
               ON mri.revision_id = mt.current_revision_id
-            WHERE mt.device_id = ? AND mt.id = ? AND mt.deleted_at IS NULL
-            GROUP BY mt.id, mt.logged_at, mt.current_revision_id
+            WHERE mt.device_id = ? AND mt.id = ?
+            GROUP BY mt.id, mt.logged_at, mt.current_revision_id, mt.current_revision_number, mt.deleted_at, mt.created_at
             LIMIT 1
           `,
         )
-        .get(deviceId, transactionId) as (MealRevisionAssertionTarget & { itemCount: number }) | undefined;
+        .get(deviceId, transactionId) as (MealTransactionRow & { itemCount: number }) | undefined;
 
       if (!existing) {
         throw new Error("MEAL_NOT_FOUND");
       }
 
-      assertExpectedMealRevision(existing, expectedMealRevisionId);
+      assertMutableExpectedRevision(existing, expectedMealRevisionId);
 
       return {
         mealId: existing.id,
@@ -405,12 +398,12 @@ export function createMealTransactionsService(db: AppDatabase) {
       const deletedAt = new Date().toISOString();
 
       return db.transaction((tx) => {
-        const existing = getActiveTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
+        const existing = getTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
 
         if (!existing) {
           throw new Error("MEAL_NOT_FOUND");
         }
-        assertExpectedMealRevision(existing, expectedMealRevisionId);
+        assertMutableExpectedRevision(existing, expectedMealRevisionId);
 
         const deletedMeal = loadDeletedMealSnapshotFromReader(tx, existing);
         const revisionNumber = existing.currentRevisionNumber + 1;
@@ -460,12 +453,12 @@ export function createMealTransactionsService(db: AppDatabase) {
       const explicitImageAssetId = parseAssetRef(input.imagePath);
 
       return db.transaction((tx) => {
-        const existing = getActiveTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
+        const existing = getTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
 
         if (!existing) {
           throw new Error("MEAL_NOT_FOUND");
         }
-        assertExpectedMealRevision(existing, input.expectedMealRevisionId);
+        assertMutableExpectedRevision(existing, input.expectedMealRevisionId);
 
         const revisionNumber = existing.currentRevisionNumber + 1;
         const revisionId = `${existing.id}:r${revisionNumber}`;

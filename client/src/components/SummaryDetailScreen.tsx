@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteMeal, getDaySnapshot, getMeals } from "../api.js";
+import { deleteMeal, getDaySnapshot, getMeals, MealRevisionConflictError } from "../api.js";
 import {
   browseSummaryCalendarMonth,
   closeSummaryCalendar,
@@ -532,6 +532,24 @@ export function SummaryDetailScreen() {
       const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
       setSnapshot(refreshedSnapshot);
     } catch (err) {
+      if (err instanceof MealRevisionConflictError) {
+        await refreshAfterMealMutation({
+          redactChatReceiptIdentity,
+          recordMealMutation,
+          setDailySummary,
+          getMeals,
+          setMeals,
+          todayKey: () => formatLocalDate(new Date()),
+        }, {
+          mealId: err.mealId,
+          affectedDate: err.affectedDate,
+        });
+        const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
+        setSnapshot(refreshedSnapshot);
+        alert("餐點已被更新，未刪除。請重新載入最新餐點後再決定是否刪除。");
+        return;
+      }
+
       setSnapshot(previousSnapshot);
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         void recoverGuestSession();

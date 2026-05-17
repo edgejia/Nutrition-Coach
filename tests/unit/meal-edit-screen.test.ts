@@ -97,8 +97,11 @@ describe("Meal Edit source contract", () => {
   it("keeps Summary Detail direct delete side effects on the shared committed-mutation refresh path", () => {
     assert.match(summaryDetailSource, /const \{ affectedDate, dailySummary \} = await deleteMeal\(mealId, \{\s*expectedMealRevisionId: meal\.mealRevisionId,\s*\}\);/);
     assert.match(summaryDetailSource, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
+    assert.match(summaryDetailSource, /MealRevisionConflictError/);
     assert.match(summaryDetailSource, /redactChatReceiptIdentity,/);
     assert.match(summaryDetailSource, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
+    assert.match(summaryDetailSource, /if \(err instanceof MealRevisionConflictError\) \{/);
+    assert.match(summaryDetailSource, /mealId: err\.mealId,\s*affectedDate: err\.affectedDate,/);
     assert.doesNotMatch(summaryDetailSource, /if \(dailySummary\?\.date === todayKey\) \{/);
 
     for (const rejected of [

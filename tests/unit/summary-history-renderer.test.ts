@@ -35,9 +35,11 @@ const twoMealFacts: SummaryHistoryFacts = {
 };
 
 describe("summary/history deterministic fact renderer", () => {
+  const currentDate = new Date("2026-05-17T12:00:00+08:00");
+
   it("renders the canonical current-day persisted meal facts exactly", () => {
     assert.equal(
-      renderSummaryHistoryFacts(twoMealFacts),
+      renderSummaryHistoryFacts(twoMealFacts, { currentDate }),
       "今天已記錄 2 餐，共 900 kcal：豆腐飯 520 kcal、鮭魚飯 380 kcal。",
     );
   });
@@ -76,7 +78,7 @@ describe("summary/history deterministic fact renderer", () => {
 
   it("appends generic advice after the deterministic fact segment", () => {
     assert.equal(
-      composeSummaryHistoryReply(twoMealFacts, "晚點可以補充蔬菜和水分。"),
+      composeSummaryHistoryReply(twoMealFacts, "晚點可以補充蔬菜和水分。", { currentDate }),
       "今天已記錄 2 餐，共 900 kcal：豆腐飯 520 kcal、鮭魚飯 380 kcal。\n\n晚點可以補充蔬菜和水分。",
     );
   });

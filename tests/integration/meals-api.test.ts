@@ -656,6 +656,95 @@ describe("Meals API", () => {
     }
   });
 
+  it("PATCH and DELETE /api/meals/:id return stale revision after another flow deletes the meal", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const patchMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 610,
+      protein: 34,
+      carbs: 58,
+      fat: 24,
+    });
+    const deleteMealTarget = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "豆腐餐",
+      calories: 390,
+      protein: 24,
+      carbs: 36,
+      fat: 16,
+    });
+    const deletedPatch = await services.foodLoggingService.deleteMeal(
+      deviceId,
+      patchMeal.id,
+      patchMeal.mealRevisionId,
+    );
+    const deletedDelete = await services.foodLoggingService.deleteMeal(
+      deviceId,
+      deleteMealTarget.id,
+      deleteMealTarget.mealRevisionId,
+    );
+    const patchDeleteRevisionId = `${deletedPatch.transactionId}:r2`;
+    const deleteDeleteRevisionId = `${deletedDelete.transactionId}:r2`;
+
+    let summaryCalls = 0;
+    let publishCalls = 0;
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.summaryService.getDailySummary = async (...args) => {
+      summaryCalls += 1;
+      return originalGetDailySummary(...args);
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
+    };
+
+    try {
+      const stalePatch = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${patchMeal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "鮭魚飯半份",
+          calories: 420,
+          protein: 24,
+          carbs: 38,
+          fat: 16,
+          imageAssetId: null,
+          expectedMealRevisionId: patchMeal.mealRevisionId,
+        },
+      });
+      assert.equal(stalePatch.statusCode, 409);
+      assert.deepEqual(stalePatch.json(), {
+        error: "MEAL_REVISION_STALE",
+        mealId: patchMeal.id,
+        affectedDate: deletedPatch.affectedDateKey,
+        currentMealRevisionId: patchDeleteRevisionId,
+      });
+      assertNoSummaryFields(stalePatch.json());
+
+      const staleDelete = await app.inject({
+        method: "DELETE",
+        url: `/api/meals/${deleteMealTarget.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: { expectedMealRevisionId: deleteMealTarget.mealRevisionId },
+      });
+      assert.equal(staleDelete.statusCode, 409);
+      assert.deepEqual(staleDelete.json(), {
+        error: "MEAL_REVISION_STALE",
+        mealId: deleteMealTarget.id,
+        affectedDate: deletedDelete.affectedDateKey,
+        currentMealRevisionId: deleteDeleteRevisionId,
+      });
+      assertNoSummaryFields(staleDelete.json());
+      assert.equal(summaryCalls, 0);
+      assert.equal(publishCalls, 0);
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
   it("PATCH /api/meals/:id returns committed facts with recovered summaryOutcome when recompute fails", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
