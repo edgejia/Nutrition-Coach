@@ -1015,6 +1015,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 }
               }
               if (toolCall.function.name === "update_goals") {
+                didMutateMeal = true;
                 successfulGoalTargets = dailyTargets;
                 if (!dailyTargets) {
                   throw new Error("update_goals succeeded without dailyTargets");
