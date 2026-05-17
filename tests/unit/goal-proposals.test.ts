@@ -3,6 +3,7 @@ process.env.TZ = "Asia/Taipei";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
+import { createDeviceService } from "../../server/services/device.js";
 import {
   GOAL_PROPOSAL_KIND,
   createGoalProposalService,
@@ -13,11 +14,31 @@ const FIXED_NOW = new REAL_DATE("2026-05-17T08:30:00+08:00");
 
 class FixedDate extends REAL_DATE {
   constructor(...args: any[]) {
-    if (args.length === 0) {
-      super(FIXED_NOW);
-      return;
+    switch (args.length) {
+      case 0:
+        super(FIXED_NOW);
+        break;
+      case 1:
+        super(args[0]);
+        break;
+      case 2:
+        super(args[0], args[1]);
+        break;
+      case 3:
+        super(args[0], args[1], args[2]);
+        break;
+      case 4:
+        super(args[0], args[1], args[2], args[3]);
+        break;
+      case 5:
+        super(args[0], args[1], args[2], args[3], args[4]);
+        break;
+      case 6:
+        super(args[0], args[1], args[2], args[3], args[4], args[5]);
+        break;
+      default:
+        super(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
     }
-    super(...(args as [any]));
   }
 
   static now(): number {
@@ -27,11 +48,13 @@ class FixedDate extends REAL_DATE {
 
 describe("goal proposal service", () => {
   let db: ReturnType<typeof createDb>;
+  let deviceId: string;
   let service: ReturnType<typeof createGoalProposalService>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     globalThis.Date = FixedDate as DateConstructor;
     db = createDb(":memory:");
+    deviceId = (await createDeviceService(db).createDevice("fat_loss")).deviceId;
     service = createGoalProposalService(db);
   });
 
@@ -40,7 +63,7 @@ describe("goal proposal service", () => {
   });
 
   it("creates a pending proposal with generated id, targets, and createdAt", async () => {
-    const proposal = await service.putLatest("device-goal-1", {
+    const proposal = await service.putLatest(deviceId, {
       calories: 1400,
       protein: 120,
       carbs: 130,
@@ -55,17 +78,17 @@ describe("goal proposal service", () => {
       fat: 45,
     });
     assert.equal(proposal.createdAt, FIXED_NOW.toISOString());
-    assert.deepEqual(await service.getLatest("device-goal-1"), proposal);
+    assert.deepEqual(await service.getLatest(deviceId), proposal);
   });
 
   it("overwrites the earlier proposal for the same device", async () => {
-    const first = await service.putLatest("device-goal-1", {
+    const first = await service.putLatest(deviceId, {
       calories: 1400,
       protein: 120,
       carbs: 130,
       fat: 45,
     });
-    const second = await service.putLatest("device-goal-1", {
+    const second = await service.putLatest(deviceId, {
       calories: 1500,
       protein: 130,
       carbs: 140,
@@ -73,16 +96,16 @@ describe("goal proposal service", () => {
     });
 
     assert.notEqual(second.proposalId, first.proposalId);
-    assert.deepEqual(await service.getLatest("device-goal-1"), second);
+    assert.deepEqual(await service.getLatest(deviceId), second);
 
     const count = db.$client
       .prepare("SELECT COUNT(*) AS count FROM turn_states WHERE device_id = ? AND kind = ?")
-      .get("device-goal-1", GOAL_PROPOSAL_KIND) as { count: number };
+      .get(deviceId, GOAL_PROPOSAL_KIND) as { count: number };
     assert.equal(count.count, 1);
   });
 
   it("returns undefined after the row expires", async () => {
-    await service.putLatest("device-goal-1", {
+    await service.putLatest(deviceId, {
       calories: 1400,
       protein: 120,
       carbs: 130,
@@ -91,21 +114,21 @@ describe("goal proposal service", () => {
 
     db.$client
       .prepare("UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND kind = ?")
-      .run("2026-05-16T00:00:00.000Z", "device-goal-1", GOAL_PROPOSAL_KIND);
+      .run("2026-05-16T00:00:00.000Z", deviceId, GOAL_PROPOSAL_KIND);
 
-    assert.equal(await service.getLatest("device-goal-1"), undefined);
+    assert.equal(await service.getLatest(deviceId), undefined);
   });
 
   it("clears the active proposal", async () => {
-    await service.putLatest("device-goal-1", {
+    await service.putLatest(deviceId, {
       calories: 1400,
       protein: 120,
       carbs: 130,
       fat: 45,
     });
 
-    await service.clear("device-goal-1");
+    await service.clear(deviceId);
 
-    assert.equal(await service.getLatest("device-goal-1"), undefined);
+    assert.equal(await service.getLatest(deviceId), undefined);
   });
 });
