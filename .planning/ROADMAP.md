@@ -92,13 +92,23 @@ Plans:
   2. User edits from a current receipt can update the meal with the expected revision contract.
   3. User edits from an older receipt are rejected without mutating the meal or creating a newer revision.
   4. User sees deterministic stale-record guidance in the chat receipt view, and affected meal rows refresh or invalidate after the conflict.
-**Plans**: TBD
+**Plans:** 4 plans
+Plans:
+**Wave 1**
+- [ ] 62-01-PLAN.md — Direct transaction preconditions and meal route conflict contract
+- [ ] 62-02-PLAN.md — Server read DTO and chat receipt revision identity projection
+
+**Wave 2** *(blocked on Wave 1 plan 62-01 completion)*
+- [ ] 62-03-PLAN.md — Chat/tool expected revision threading for update and delete
+
+**Wave 3** *(blocked on Wave 1 and Wave 2 completion)*
+- [ ] 62-04-PLAN.md — Client edit payload, stale conflict guidance, and recovery
 **UI hint**: yes
 
 **Implementation Notes:**
 - Use `server/services/meal-transactions.ts` as the authoritative revision check boundary.
 - Extend DTO normalization through `client/src/api.ts` and `client/src/store.ts` without relying on client-only stale protection.
-- Prefer 409 or 412-style deterministic conflict behavior, aligned with existing route error conventions.
+- Use `409` deterministic conflict behavior with stable error strings, aligned with existing route conventions.
 
 ### Phase 63: SSE Meal-Row Freshness and Affected-Date Invalidation
 **Goal**: Users cannot see fresher daily totals beside stale same-day meal rows after realtime summary updates.
@@ -143,7 +153,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
-| 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 0/TBD | Not started | - |
+| 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 0/4 | Not started | - |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 0/TBD | Not started | - |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
 
