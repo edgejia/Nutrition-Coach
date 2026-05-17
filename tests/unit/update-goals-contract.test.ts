@@ -274,7 +274,7 @@ describe("update_goals ToolContract", () => {
   });
 
   it("Test 8: cancel terms clear proposal without mutating or publishing and never count as consent", async () => {
-    for (const term of ["不要", "取消", "先不用", "no"]) {
+    for (const term of ["不要", "取消", "先不用", "不好", "不可以", "不行", "no"]) {
       await goalProposalService.putLatest(deviceId, { calories: 1850, protein: 135, carbs: 165, fat: 60 });
       published = [];
 

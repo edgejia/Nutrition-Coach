@@ -344,6 +344,36 @@ describe("chat goal update integration", () => {
     assert.equal(mockLLM.chatCalls.length, 1);
   });
 
+  it("treats negated consent as cancellation without applying the proposal", async () => {
+    for (const [index, term] of ["不好", "不可以", "不行"].entries()) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `goal_proposal_for_negated_consent_${index}`,
+          type: "function",
+          function: {
+            name: "propose_goals",
+            arguments: JSON.stringify(PROPOSAL_TARGETS),
+          },
+        }],
+      });
+      const proposal = await postChat("我想少吃一點，幫我建議一組目標");
+      assert.equal(proposal.status, 200);
+      assert.equal(proposal.body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS));
+
+      const cancelled = await postChat(term);
+
+      assert.equal(cancelled.status, 200);
+      assert.equal(cancelled.body.reply, renderGoalCancelCopy());
+      assert.equal(cancelled.body.didLogMeal, false);
+      assert.equal(cancelled.body.didMutateMeal, false);
+      assert.equal(cancelled.body.dailyTargets, undefined);
+      assert.doesNotMatch(cancelled.body.reply, SUCCESS_STYLE_COPY);
+      assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+      assert.deepEqual(publishCalls, []);
+      assert.equal(mockLLM.chatCalls.length, index + 1);
+    }
+  });
+
   it("returns validation range copy without mutation, publish, or final reply generation", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{

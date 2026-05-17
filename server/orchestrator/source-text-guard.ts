@@ -43,8 +43,13 @@ const CHINESE_DIGIT: Record<string, number> = {
 
 const APPROX_SUFFIX = "多";
 
-const GOAL_PROPOSAL_CONSENT_TERMS = ["好", "可以", "幫我更新", "就這樣", "用這組"] as const;
-const GOAL_PROPOSAL_CANCEL_TERMS = ["不要", "取消", "先不用", "no"] as const;
+const GOAL_PROPOSAL_CONSENT_PATTERNS = [
+  /^(好|可以|幫我更新|就這樣|用這組|ok|okay|yes|y|sure)(?:$|[，,。!！、]|但)/i,
+] as const;
+const GOAL_PROPOSAL_CANCEL_PATTERNS = [
+  /^(不要|取消|先不用|不用|不好|不可以|不行|不是|不對|no|nope|not)$/i,
+  /^(先)?不要/,
+] as const;
 
 function normalizeGoalProposalDecisionText(message: string): string {
   return message.trim().toLowerCase().replace(/\s+/g, "");
@@ -52,14 +57,14 @@ function normalizeGoalProposalDecisionText(message: string): string {
 
 export function isGoalProposalCancel(message: string): boolean {
   const normalized = normalizeGoalProposalDecisionText(message);
-  if (!normalized) return false;
-  return GOAL_PROPOSAL_CANCEL_TERMS.some((term) => normalized.includes(term));
+  return normalized.length > 0
+    && GOAL_PROPOSAL_CANCEL_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 export function isGoalProposalConsent(message: string): boolean {
   const normalized = normalizeGoalProposalDecisionText(message);
   if (!normalized || isGoalProposalCancel(message)) return false;
-  return GOAL_PROPOSAL_CONSENT_TERMS.some((term) => normalized.includes(term));
+  return GOAL_PROPOSAL_CONSENT_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function hasExplicitConfirmation(text: string): boolean {
