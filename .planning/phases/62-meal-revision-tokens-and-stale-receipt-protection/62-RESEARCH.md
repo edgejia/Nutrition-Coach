@@ -420,17 +420,19 @@ async function refreshAfterMealMutation(mealId: string, affectedDate: string, da
 | A2 | Prefer a minimal stale conflict body with `{ error, mealId, affectedDate, currentMealRevisionId }` plus client refetch before adding full refreshed meal facts to the response. [ASSUMED] | Open Questions | If client refetch is too slow or lacks enough row context, planner may choose refreshed facts in the 409 body. |
 | A3 | Resolver-owned `{ mealId, mealRevisionId }` in `toolSessionState` is safer than relying on the model to provide `expected_meal_revision_id`. [ASSUMED] | Open Questions | If tool contract visibility is required for traceability, planner may expose the field in schema while still validating against resolver-owned state. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should stale conflict bodies include refreshed meal facts or only invalidation metadata?**
    - What we know: Context explicitly allows either refreshed facts or enough affected-date metadata for the client to refetch. [VERIFIED: `62-CONTEXT.md`]
    - What's unclear: The exact response body is left to planning. [VERIFIED: `62-CONTEXT.md`]
    - Recommendation: Prefer `{ error, mealId, affectedDate, currentMealRevisionId }` plus client refetch first; include full refreshed meal facts only if tests show it materially simplifies deterministic UI. [ASSUMED]
+   - RESOLVED: Phase 62 plans use minimal conflict metadata plus client refetch/invalidation: stable `error`, `mealId`, `affectedDate`, and optional `currentMealRevisionId`. Full refreshed meal facts are not required in the 409 body.
 
 2. **Should the LLM tool schema expose `expected_meal_revision_id` or should backend resolver state supply it internally?**
    - What we know: Write inputs must carry `expectedMealRevisionId`, and `find_meals` is the backend resolver before tool mutation. [VERIFIED: `62-CONTEXT.md`, `server/orchestrator/tools.ts:1126`]
    - What's unclear: The planner may choose exact field placement and type names. [VERIFIED: `62-CONTEXT.md`]
    - Recommendation: Store resolver-owned `{ mealId, mealRevisionId }` in `toolSessionState` and pass it as `expectedMealRevisionId`; do not rely on the model to author the revision token. [VERIFIED: `server/orchestrator/tools.ts:1253`, ASSUMED]
+   - RESOLVED: Phase 62 plans use resolver-owned `{ mealId, mealRevisionId }` tool session state and pass that identity as `expectedMealRevisionId` after target resolution. The model is not trusted to author revision authority.
 
 ## Environment Availability
 

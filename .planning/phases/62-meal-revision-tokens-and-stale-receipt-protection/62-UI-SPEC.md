@@ -74,6 +74,12 @@ Accent reserved for: focused controls, current primary save action, receipt chev
 
 ---
 
+## Visual Contract
+
+Stale-state focal point: the stale conflict copy in the existing `role="alert"` error region is the primary visual anchor. The recovery CTA is secondary and receives the only lime accent in the stale state. Any optional warning border or label must remain subordinate to the alert text and must not compete with the recovery CTA.
+
+---
+
 ## Copywriting Contract
 
 All new user-visible copy must be deterministic Traditional Chinese and must not be LLM-authored.
@@ -81,8 +87,8 @@ All new user-visible copy must be deterministic Traditional Chinese and must not
 | Element | Copy |
 |---------|------|
 | Primary CTA | `重新載入餐點` |
-| Normal save CTA | Keep existing `儲存`; pending state stays `儲存中...` |
-| Normal delete CTA | Keep existing `刪除`; pending state stays `處理中...` |
+| Normal save CTA | `儲存餐點`; pending state `儲存餐點中...` |
+| Normal delete CTA | `刪除餐點`; pending state `刪除餐點中...` |
 | Empty state heading | `找不到要編輯的餐點。` |
 | Empty state body | No new body copy; keep the existing empty card compact. |
 | Stale edit error state | `餐點已被更新，請重新載入最新餐點後再編輯。` |
@@ -108,7 +114,7 @@ Copy source: `62-CONTEXT.md` D-11/D-13 require deterministic Traditional Chinese
 ### Meal Edit Save
 
 - `MealEditPayload.mealRevisionId` is read-only UI state and must be sent as `expectedMealRevisionId` on save.
-- While save is pending, keep current disabled inputs and `儲存中...` label.
+- While save is pending, keep current disabled inputs and `儲存餐點中...` label.
 - On `MEAL_REVISION_STALE` or `MEAL_REVISION_REQUIRED`, stop the stale save path, show the matching stale copy in the existing `role="alert"` error region, and trigger affected meal row refresh or invalidation.
 - After stale refresh/invalidation starts, block additional save/delete attempts from that stale editor instance. The user must reopen Meal Edit from a refreshed row or receipt.
 
