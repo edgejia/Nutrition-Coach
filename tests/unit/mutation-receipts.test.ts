@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { DailyTargets } from "../../server/services/device.js";
 import type { DailySummary } from "../../server/services/summary.js";
+import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
 import type { MutationEffects } from "../../server/orchestrator/mutation-effects.js";
 import {
   FORBIDDEN_RECEIPT_TERMS,
@@ -30,6 +31,27 @@ const committedTargets: DailyTargets = {
   fat: 50,
 };
 
+const recoveredSummary: DailySummary = {
+  ...committedSummary,
+  totalCalories: 521,
+};
+
+const summaryOutcomes = [
+  { status: "fresh", dailySummary: committedSummary },
+  { status: "recovered", reason: "recompute_failed", dailySummary: recoveredSummary },
+  { status: "unavailable", reason: "recompute_failed" },
+] satisfies SummaryOutcome[];
+
+const FORBIDDEN_SUMMARY_RECEIPT_TERMS = [
+  "summaryOutcome",
+  "dailySummary",
+  "recompute_failed",
+  "publish_failed",
+  "PATCH",
+  "DELETE",
+  "/api",
+] as const;
+
 const GOAL_INTERNAL_TERMS = [
   "proposalId",
   "turn_states",
@@ -53,7 +75,7 @@ describe("MutationEffects contract", () => {
       {
         kind: "log",
         affectedDate: "2026-05-10",
-        committedSummary,
+        summaryOutcome: summaryOutcomes[0],
         committedTargets,
         meal: {
           mealId: "meal-log",
@@ -71,7 +93,7 @@ describe("MutationEffects contract", () => {
       {
         kind: "update",
         affectedDate: "2026-05-10",
-        committedSummary,
+        summaryOutcome: summaryOutcomes[0],
         committedTargets,
         meal: {
           mealId: "meal-update",
@@ -89,7 +111,7 @@ describe("MutationEffects contract", () => {
       {
         kind: "delete",
         affectedDate: "2026-05-10",
-        committedSummary,
+        summaryOutcome: summaryOutcomes[0],
         committedTargets,
         deletedMeal: {
           mealId: "meal-delete",
@@ -190,7 +212,7 @@ describe("mutation receipt renderer", () => {
     const text = renderMutationReceipt({
       kind: "log",
       affectedDate: "2025-12-31",
-      committedSummary,
+      summaryOutcome: summaryOutcomes[0],
       committedTargets,
       meal: {
         mealId: "meal-log",
@@ -214,7 +236,7 @@ describe("mutation receipt renderer", () => {
     const text = renderMutationReceipt({
       kind: "log",
       affectedDate: "2026-05-10",
-      committedSummary,
+      summaryOutcome: summaryOutcomes[0],
       committedTargets,
       meal: {
         mealId: "meal-log",
@@ -240,7 +262,7 @@ describe("mutation receipt renderer", () => {
     const text = renderMutationReceipt({
       kind: "update",
       affectedDate: "2025-12-31",
-      committedSummary,
+      summaryOutcome: summaryOutcomes[0],
       committedTargets,
       meal: {
         mealId: "meal-update",
@@ -264,7 +286,7 @@ describe("mutation receipt renderer", () => {
     const text = renderMutationReceipt({
       kind: "delete",
       affectedDate: "2025-12-31",
-      committedSummary,
+      summaryOutcome: summaryOutcomes[0],
       committedTargets,
       deletedMeal: {
         mealId: "meal-delete",
@@ -278,6 +300,107 @@ describe("mutation receipt renderer", () => {
 
     assert.equal(text, "已刪除2025/12/31 拿鐵，已從當日紀錄移除。");
     assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+  });
+
+  it("renders identical log receipts for fresh recovered and unavailable summary outcomes", () => {
+    const rendered = summaryOutcomes.map((summaryOutcome) =>
+      renderMutationReceipt({
+        kind: "log",
+        affectedDate: "2025-12-31",
+        summaryOutcome,
+        committedTargets,
+        meal: {
+          mealId: "meal-log",
+          mealRevisionId: "rev-log",
+          dateKey: "2025-12-31",
+          loggedAt: "2025-12-31T04:30:00.000Z",
+          foodName: "雞胸便當",
+          calories: 520,
+          protein: 31,
+          carbs: 48,
+          fat: 18,
+          itemCount: 1,
+        },
+      }),
+    );
+
+    assert.deepEqual(rendered, [
+      "已記錄2025/12/31 雞胸便當，520 kcal，蛋白質 31 g。",
+      "已記錄2025/12/31 雞胸便當，520 kcal，蛋白質 31 g。",
+      "已記錄2025/12/31 雞胸便當，520 kcal，蛋白質 31 g。",
+    ]);
+    for (const text of rendered) {
+      assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+      for (const term of FORBIDDEN_SUMMARY_RECEIPT_TERMS) {
+        assert.equal(text.includes(term), false, term);
+      }
+    }
+  });
+
+  it("renders identical update receipts for fresh recovered and unavailable summary outcomes", () => {
+    const rendered = summaryOutcomes.map((summaryOutcome) =>
+      renderMutationReceipt({
+        kind: "update",
+        affectedDate: "2025-12-31",
+        summaryOutcome,
+        committedTargets,
+        meal: {
+          mealId: "meal-update",
+          mealRevisionId: "rev-update",
+          dateKey: "2025-12-31",
+          loggedAt: "2025-12-31T05:15:00.000Z",
+          foodName: "鮭魚飯",
+          calories: 610,
+          protein: 36,
+          carbs: 54,
+          fat: 22,
+          itemCount: 2,
+        },
+      }),
+    );
+
+    assert.deepEqual(rendered, [
+      "已更新2025/12/31 鮭魚飯，610 kcal，蛋白質 36 g。",
+      "已更新2025/12/31 鮭魚飯，610 kcal，蛋白質 36 g。",
+      "已更新2025/12/31 鮭魚飯，610 kcal，蛋白質 36 g。",
+    ]);
+    for (const text of rendered) {
+      assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+      for (const term of FORBIDDEN_SUMMARY_RECEIPT_TERMS) {
+        assert.equal(text.includes(term), false, term);
+      }
+    }
+  });
+
+  it("renders identical delete receipts for fresh recovered and unavailable summary outcomes", () => {
+    const rendered = summaryOutcomes.map((summaryOutcome) =>
+      renderMutationReceipt({
+        kind: "delete",
+        affectedDate: "2025-12-31",
+        summaryOutcome,
+        committedTargets,
+        deletedMeal: {
+          mealId: "meal-delete",
+          dateKey: "2025-12-31",
+          loggedAt: "2025-12-31T06:45:00.000Z",
+          foodName: "拿鐵",
+          calories: 180,
+          protein: 9,
+        },
+      }),
+    );
+
+    assert.deepEqual(rendered, [
+      "已刪除2025/12/31 拿鐵，已從當日紀錄移除。",
+      "已刪除2025/12/31 拿鐵，已從當日紀錄移除。",
+      "已刪除2025/12/31 拿鐵，已從當日紀錄移除。",
+    ]);
+    for (const text of rendered) {
+      assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+      for (const term of FORBIDDEN_SUMMARY_RECEIPT_TERMS) {
+        assert.equal(text.includes(term), false, term);
+      }
+    }
   });
 
   it("renders goal receipts with all four committed target rows", () => {
@@ -306,7 +429,10 @@ describe("mutation receipt renderer", () => {
       "revision",
       "deviceId",
       "mealMutationKind",
+      "summaryOutcome",
       "dailySummary",
+      "recompute_failed",
+      "publish_failed",
       "dailyTargets",
       "API",
       "endpoint",
