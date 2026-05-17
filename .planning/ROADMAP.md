@@ -37,8 +37,13 @@ v2.3 closes the remaining P1 data-integrity risks before returning to product po
   4. Failed `update_goals` validation or guard outcomes do not publish `goals_update`, do not persist targets, and do not show LLM-authored success-style copy.
 **Plans**: 3 plans
 Plans:
+**Wave 1**
 - [ ] 60-01-PLAN.md — Goal proposal service and deterministic backend copy foundation
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 60-02-PLAN.md — `propose_goals` and explicit-mode `update_goals` tool contracts
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 60-03-PLAN.md — Orchestrator short-circuiting and integration proof
 
 **Implementation Notes:**
