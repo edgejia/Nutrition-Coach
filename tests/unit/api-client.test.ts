@@ -661,6 +661,30 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
   });
 
+  it("deleteMeal resolves committed unavailable summary outcomes without dailySummary", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-03-25",
+      deletedMealId: "meal-1",
+      summaryOutcome: {
+        status: "unavailable",
+        reason: "recompute_failed",
+      },
+    });
+
+    const result = await api.deleteMeal("meal-1");
+
+    assert.deepEqual(result, {
+      affectedDate: "2026-03-25",
+      deletedMealId: "meal-1",
+      summaryOutcome: {
+        status: "unavailable",
+        reason: "recompute_failed",
+      },
+    });
+    assert.equal(result.dailySummary, undefined);
+  });
+
   it("updateMeal sends PATCH with same-origin JSON body and returns refreshed daily summary", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
@@ -702,6 +726,45 @@ describe("API Client", () => {
     assert.deepEqual(fetchCalls[0].init.headers, { "content-type": "application/json" });
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), input);
     assert.equal(result.dailySummary.totalCalories, 260);
+    assert.equal(result.meal.foodName, "雞胸肉沙拉半份");
+  });
+
+  it("updateMeal resolves committed unavailable summary outcomes without dailySummary", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      summaryOutcome: {
+        status: "unavailable",
+        reason: "recompute_failed",
+      },
+      meal: {
+        id: "meal-1",
+        foodName: "雞胸肉沙拉半份",
+        calories: 260,
+        protein: 20,
+        carbs: 8,
+        fat: 12,
+        imageAssetId: null,
+        imageUrl: null,
+        loggedAt: "2026-04-30T04:00:00.000Z",
+      },
+    });
+
+    const result = await api.updateMeal("meal-1", {
+      foodName: "雞胸肉沙拉半份",
+      calories: 260,
+      protein: 20,
+      carbs: 8,
+      fat: 12,
+      imageAssetId: null,
+    });
+
+    assert.equal(result.affectedDate, "2026-04-30");
+    assert.equal(result.dailySummary, undefined);
+    assert.deepEqual(result.summaryOutcome, {
+      status: "unavailable",
+      reason: "recompute_failed",
+    });
     assert.equal(result.meal.foodName, "雞胸肉沙拉半份");
   });
 
@@ -988,6 +1051,48 @@ describe("sendMessageStream", () => {
     assert.equal(imageUrl, "/api/assets/asset-1");
   });
 
+  it("dispatches valid done summaryOutcome and omits malformed values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":true,"didMutateMeal":true,"summaryOutcome":{"status":"unavailable","reason":"recompute_failed"},"dailySummary":{"date":"bad","totalCalories":"bad"},"turnId":"turn-1"}\n\n',
+    ]);
+    let donePayload:
+      | Parameters<Parameters<typeof api.sendMessageStream>[1]["onDone"]>[0]
+      | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        donePayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(donePayload?.didMutateMeal, true);
+    assert.equal(donePayload?.dailySummary, undefined);
+    assert.deepEqual(donePayload?.summaryOutcome, {
+      status: "unavailable",
+      reason: "recompute_failed",
+    });
+
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didMutateMeal":true,"summaryOutcome":{"status":"unavailable","reason":"publish_failed"}}\n\n',
+    ]);
+    donePayload = undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        donePayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(donePayload?.summaryOutcome, undefined);
+  });
+
   it("dispatches stopped loggedMeal image urls through withAuthorizedAssetUrl", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [
@@ -1020,6 +1125,57 @@ describe("sendMessageStream", () => {
     });
 
     assert.equal(imageUrl, "/api/assets/asset-1");
+  });
+
+  it("dispatches valid stopped summaryOutcome and omits malformed values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":2,"didMutateMeal":true,"summaryOutcome":{"status":"recovered","reason":"recompute_failed","dailySummary":{"date":"2026-04-30","totalCalories":260,"totalProtein":20,"totalCarbs":8,"totalFat":12,"mealCount":1}}}\n\n',
+    ]);
+    let stoppedPayload:
+      | Parameters<NonNullable<Parameters<typeof api.sendMessageStream>[1]["onStopped"]>>[0]
+      | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedPayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(stoppedPayload?.didMutateMeal, true);
+    assert.deepEqual(stoppedPayload?.summaryOutcome, {
+      status: "recovered",
+      reason: "recompute_failed",
+      dailySummary: {
+        date: "2026-04-30",
+        totalCalories: 260,
+        totalProtein: 20,
+        totalCarbs: 8,
+        totalFat: 12,
+        mealCount: 1,
+      },
+    });
+
+    mockStreamFetch(200, [
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":2,"summaryOutcome":{"status":"fresh"}}\n\n',
+    ]);
+    stoppedPayload = undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedPayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(stoppedPayload?.summaryOutcome, undefined);
   });
 
   it("handles SSE event split across two chunks", async () => {

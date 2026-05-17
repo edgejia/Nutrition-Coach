@@ -8,6 +8,7 @@ async function readSource(relativePath: string) {
 }
 
 const source = await readSource("../../client/src/components/MealEditScreen.tsx");
+const summaryDetailSource = await readSource("../../client/src/components/SummaryDetailScreen.tsx");
 
 function escapedPattern(text: string) {
   return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -51,6 +52,38 @@ describe("Meal Edit source contract", () => {
       "recoverGuestSession",
     ]) {
       assert.match(source, escapedPattern(expected));
+    }
+  });
+
+  it("preserves committed direct mutation side effects when dailySummary is absent", () => {
+    assert.match(source, /async function refreshAfterMealMutation\(mealId: string, affectedDate: string, dailySummary\?: DailySummary\)/);
+    assert.match(source, /redactChatReceiptIdentity\(mealId\);\s*recordMealMutation\(affectedDate\);/);
+    assert.match(source, /if \(!dailySummary \|\| dailySummary\.date !== formatLocalDate\(new Date\(\)\)\) \{/);
+    assert.match(source, /await refreshAfterMealMutation\(payload\.mealId, response\.affectedDate, response\.dailySummary\);/);
+    assert.match(source, /await refreshAfterMealMutation\(payload\.mealId, affectedDate, dailySummary\);/);
+
+    for (const rejected of [
+      "summary unavailable",
+      "summaryOutcome.status",
+      "摘要暫時無法更新",
+      "重新整理摘要",
+    ]) {
+      assert.doesNotMatch(source, escapedPattern(rejected));
+    }
+  });
+
+  it("keeps Summary Detail direct delete side effects guarded by a usable dailySummary", () => {
+    assert.match(summaryDetailSource, /const \{ affectedDate, dailySummary \} = await deleteMeal\(mealId\);/);
+    assert.match(summaryDetailSource, /recordMealMutation\(affectedDate\);/);
+    assert.match(summaryDetailSource, /if \(dailySummary\?\.date === todayKey\) \{/);
+
+    for (const rejected of [
+      "summary unavailable",
+      "summaryOutcome.status",
+      "摘要暫時無法更新",
+      "重新整理摘要",
+    ]) {
+      assert.doesNotMatch(summaryDetailSource, escapedPattern(rejected));
     }
   });
 
