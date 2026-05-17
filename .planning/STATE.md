@@ -4,14 +4,14 @@ milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: executing
 stopped_at: Phase 62 context gathered
-last_updated: "2026-05-17T12:06:32.538Z"
-last_activity: 2026-05-17 -- Phase 62 planning complete
+last_updated: "2026-05-17T12:19:08.727Z"
+last_activity: 2026-05-17
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 13
-  completed_plans: 9
-  percent: 69
+  completed_plans: 10
+  percent: 77
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-05-17)
 
 ## Current Position
 
-Phase: 62
-Plan: Not started
+Phase: 62 (meal-revision-tokens-and-stale-receipt-protection) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-05-17 -- Phase 62 planning complete
+Last activity: 2026-05-17
 
-Progress: [██████░░░░] 60%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [██████░░░░] 60%
 | Phase 61 P03 | 5 min | 2 tasks | 4 files |
 | Phase 61 P04 | 5 min | 2 tasks | 4 files |
 | Phase 61 P06 | 5 min | 3 tasks | 6 files |
+| Phase 62 P01 | 9 min | 2 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,8 @@ Recent decisions affecting current work:
 - [Phase 61]: Malformed client summaryOutcome payloads are omitted instead of thrown through parsing.
 - [Phase 61]: No visible degraded-summary UI indicator was added in Phase 61.
 - [Phase 61]: Client SummaryOutcome matches the public union and is guarded at the transport boundary.
+- [Phase 62]: Direct meal revision conflicts use 409 MEAL_REVISION_REQUIRED / MEAL_REVISION_STALE with mealId, affectedDate, and currentMealRevisionId only.
+- [Phase 62]: Transaction-service update/delete writes compare expectedMealRevisionId before inserting meal_revisions; direct route conflict branches return before summary recompute or publish.
 
 ### Pending Todos
 
@@ -96,7 +99,6 @@ None yet for v2.3.
 
 ### Blockers/Concerns
 
-- Phase 62 planning should decide whether stale delete needs the same `expectedMealRevisionId` contract as stale edit.
 - Phase 64 must not include staging or main promotion without explicit current-thread approval.
 
 ## Deferred Items
@@ -109,6 +111,6 @@ None yet for v2.3.
 
 ## Session Continuity
 
-Last session: 2026-05-17T11:00:28.437Z
-Stopped at: Phase 62 context gathered
-Resume file: .planning/phases/62-meal-revision-tokens-and-stale-receipt-protection/62-CONTEXT.md
+Last session: 2026-05-17T12:19:08.716Z
+Stopped at: Completed 62-01-PLAN.md
+Resume file: None

@@ -92,10 +92,10 @@ Plans:
   2. User edits from a current receipt can update the meal with the expected revision contract.
   3. User edits from an older receipt are rejected without mutating the meal or creating a newer revision.
   4. User sees deterministic stale-record guidance in the chat receipt view, and affected meal rows refresh or invalidate after the conflict.
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 Plans:
 **Wave 1**
-- [ ] 62-01-PLAN.md — Direct transaction preconditions and meal route conflict contract
+- [x] 62-01-PLAN.md — Direct transaction preconditions and meal route conflict contract
 - [ ] 62-02-PLAN.md — Server read DTO and chat receipt revision identity projection
 
 **Wave 2** *(blocked on Wave 1 plan 62-01 completion)*
@@ -153,7 +153,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
-| 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 0/4 | Not started | - |
+| 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 1/4 | In Progress|  |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 0/TBD | Not started | - |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
 
