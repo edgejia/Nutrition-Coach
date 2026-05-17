@@ -27,8 +27,10 @@ import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import type { MutationEffects } from "./mutation-effects.js";
 import {
   assertNoForbiddenReceiptTerms,
+  renderGoalCancelCopy,
   renderMutationReceipt,
 } from "./mutation-receipts.js";
+import { isGoalProposalCancel } from "./source-text-guard.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -631,6 +633,20 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           finalReplyShape: classifyFallbackReplyShape(hallucinatedChoiceRecovery),
         };
       }
+      if (isGoalProposalCancel(userMessage) && deps.goalProposalService) {
+        const proposal = await deps.goalProposalService.getLatest(deviceId);
+        if (proposal) {
+          await deps.goalProposalService.clear(deviceId);
+          const reply = renderGoalCancelCopy();
+          return {
+            reply,
+            didLogMeal: false,
+            didMutateMeal: false,
+            finalReplySource: "renderer",
+            finalReplyShape: classifyPlainReplyShape(reply),
+          };
+        }
+      }
       const systemMsg: ChatMessage = {
         role: "system",
         content: buildSystemPrompt(
@@ -897,6 +913,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 mealMutationKind,
                 deletedMeal,
                 summaryHistoryFacts: toolSummaryHistoryFacts,
+                controlledReply,
               } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
@@ -910,6 +927,25 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 currentUserMessage: userMessage,
                 previousAssistantMessage,
               });
+              if (controlledReply) {
+                opts?.hooks?.onToolResult?.({
+                  tool: toolCall.function.name,
+                  success: success !== false,
+                  executed: success !== false,
+                  failureReason,
+                  summary,
+                  updatedFields,
+                  publishedEvents,
+                });
+                opts?.hooks?.onLLMEnd?.(round + 1, true);
+                return {
+                  reply: controlledReply.text,
+                  didLogMeal: false,
+                  didMutateMeal: false,
+                  finalReplySource: controlledReply.source,
+                  finalReplyShape: classifyPlainReplyShape(controlledReply.text),
+                };
+              }
               if (success === false) {
                 opts?.hooks?.onToolResult?.({
                   tool: toolCall.function.name,

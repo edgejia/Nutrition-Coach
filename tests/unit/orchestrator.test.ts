@@ -355,6 +355,11 @@ describe("Orchestrator - didLogMeal", () => {
       mealCorrectionService,
       deviceService,
       goalProposalService,
+      publisher: {
+        publishGoalsUpdate() {
+          return { sent: 1 };
+        },
+      },
     });
 
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
@@ -1664,8 +1669,8 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.finalReplyShape, "plain_text");
     assert.equal(mockLLM.chatCalls.length, 1);
     const device = await deviceService.getDevice(deviceId);
-    assert.equal(device?.dailyCalories, 2000);
-    assert.equal(device?.dailyProtein, 100);
+    assert.equal(device?.dailyCalories, 1500);
+    assert.equal(device?.dailyProtein, 120);
   });
 
   it("short-circuits unavailable proposal confirmation with generic copy and no second model round", async () => {
