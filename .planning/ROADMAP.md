@@ -19,7 +19,7 @@ v2.3 closes the remaining P1 data-integrity risks before returning to product po
 - Decimal phases (60.1, 60.2): Urgent insertions, if needed later
 
 - [x] **Phase 60: Goal Proposal Authority and Rejected-Goal Copy** - Ambiguous goal confirmations can only mutate through backend-owned proposals or explicit current-turn numeric targets. (completed 2026-05-17)
-- [ ] **Phase 61: Committed Mutation Outcome and Summary Contract** - Meal log/update/delete flows return committed mutation facts even when summary recompute or publish degrades.
+- [x] **Phase 61: Committed Mutation Outcome and Summary Contract** - Meal log/update/delete flows return committed mutation facts even when summary recompute or publish degrades. (completed 2026-05-17)
 - [ ] **Phase 62: Meal Revision Tokens and Stale Receipt Protection** - Edit-capable receipts carry revision identity and stale receipt writes fail closed with refresh guidance.
 - [ ] **Phase 63: SSE Meal-Row Freshness and Affected-Date Invalidation** - Summary SSE updates cannot make totals fresher than visible meal rows.
 - [ ] **Phase 64: Verification and Release-Proof Hardening** - v2.3 integrity behavior is proven with targeted tests, metadata-only evidence, and local release gates.
@@ -76,7 +76,7 @@ Plans:
 - [x] 61-04-PLAN.md — Chat JSON/SSE response projection and integration proof
 
 **Wave 5** *(blocked on Wave 4 and plan 61-05 completion)*
-- [ ] 61-06-PLAN.md — Client parsing, direct mutation consumption, and final gate
+- [x] 61-06-PLAN.md — Client parsing, direct mutation consumption, and final gate
 
 **Implementation Notes:**
 - Add a shared summary-outcome contract rather than duplicating degraded-summary handling across chat tools and direct routes.
@@ -142,7 +142,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 |-------|-----------|----------------|--------|-----------|
 | 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
-| 61. Committed Mutation Outcome and Summary Contract | v2.3 | 5/6 | In Progress|  |
+| 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete   | 2026-05-17 |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 0/TBD | Not started | - |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 0/TBD | Not started | - |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
