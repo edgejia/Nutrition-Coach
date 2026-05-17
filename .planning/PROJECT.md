@@ -50,10 +50,10 @@ v2.2 completed the metadata-only failure-localization foundation for the chat/lo
 - ✓ Normal `llm-trace.json` can add metadata-only failure events while preserving the raw-debugger boundary documented in `docs/research/logger/llm-trace-raw-debugger-decision.md` — v2.2 Phase 57.
 - ✓ Auth-style provider failure localization has deterministic integration and harness proof without persisting user-visible fallback text — v2.2 Phase 58.
 - ✓ Backend-owned goal proposals gate ambiguous confirmation text, and rejected goal updates return deterministic backend copy without mutation or publish side effects — v2.3 Phase 60.
+- ✓ Meal log, update, delete, and direct meal PATCH/DELETE mutations return committed facts with an explicit summary freshness outcome even when summary recompute or publish degrades — v2.3 Phase 61.
 
 ### Active
 
-- [ ] **MUT-01** Meal update, delete, and log mutations return committed mutation outcomes even if summary recompute fails.
 - [ ] **FRESH-01** Chat receipt actions cannot PATCH stale meal facts over newer meal state.
 - [ ] **FRESH-02** Daily summary SSE events refresh or invalidate meal rows alongside summary totals.
 
@@ -107,6 +107,7 @@ v2.3 integrity context:
 | Keep user-visible fallback copy checks non-persisted | Release evidence should prove localization/privacy while keeping artifacts metadata-only. | Validated in Phase 58 |
 | Use backend-owned active proposal state for ambiguous goal confirmations | Short confirmation text is too ambiguous to trust model-authored assistant prose; mutation authority now requires explicit current-turn numeric values or the latest active backend proposal. | Validated in Phase 60 |
 | Treat renderer-owned goal rejection/cancel replies as terminal final replies | Failed goal updates, missing proposals, malformed calls, and cancel text must not be rewritten by a later LLM round into success-style prose. | Validated in Phase 60 |
+| Separate committed meal mutation facts from summary freshness | Persisted meal log/update/delete/direct route facts are authoritative even when summary recompute, recovery, or publish degrades; `summaryOutcome` carries freshness status. | Validated in Phase 61 |
 | Defer raw debugger/user-flagged capture | Those features require trigger, access-control, retention, privacy notice, content scope, and storage decisions first. | Still deferred |
 
 ## Archived Previous State
@@ -138,4 +139,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-17 after Phase 60 completion*
+*Last updated: 2026-05-17 after Phase 61 completion*
