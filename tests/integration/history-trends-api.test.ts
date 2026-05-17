@@ -228,7 +228,7 @@ describe("History trends API", () => {
       fat: 15,
       loggedAt: "2026-03-24T02:00:00.000Z",
     });
-    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id);
+    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
     await services.foodLoggingService.logFood(foreignDeviceId, {
       foodName: "外部裝置晚餐",
       calories: 700,
@@ -334,6 +334,7 @@ describe("History trends API", () => {
       loggedAt: "2026-03-25T04:00:00.000Z",
     });
     await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+      expectedMealRevisionId: updatedMeal.mealRevisionId,
       loggedAt: "2026-03-25T04:00:00.000Z",
       items: [
         { foodName: "修正雞胸便當", calories: 500, protein: 50, carbs: 40, fat: 12 },
@@ -347,7 +348,7 @@ describe("History trends API", () => {
       fat: 11,
       loggedAt: "2026-03-25T07:00:00.000Z",
     });
-    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id);
+    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
     await services.foodLoggingService.logFood(foreignDeviceId, {
       foodName: "外部裝置高熱量晚餐",
       calories: 999,

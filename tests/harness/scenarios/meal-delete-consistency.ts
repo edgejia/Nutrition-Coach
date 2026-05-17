@@ -30,6 +30,7 @@ interface DailySummary {
 
 interface MealDto {
   id: string;
+  mealRevisionId: string;
   foodName: string;
   calories: number;
   protein: number;
@@ -315,7 +316,8 @@ const scenario: VerificationScenario = {
       // DELETE /api/meals/:id is the transaction-level soft delete contract under test.
       const deleteRes = await fetch(`${fixture.address}/api/meals/${deletedMeal.id}`, {
         method: "DELETE",
-        headers: { cookie: fixture.cookieHeader },
+        headers: { cookie: fixture.cookieHeader, "content-type": "application/json" },
+        body: JSON.stringify({ expectedMealRevisionId: deletedMeal.mealRevisionId }),
       });
       const deleteBody = await deleteRes.json() as {
         affectedDate?: string;

@@ -321,7 +321,7 @@ describe("SSE API", () => {
         url: "/api/meals",
         headers: { cookie: sessionCookieHeader },
       });
-      const mealId = mealsRes.json().meals[0].id as string;
+      const meal = mealsRes.json().meals[0] as { id: string; mealRevisionId: string };
 
       const controller = new AbortController();
       timeout = setTimeout(() => controller.abort(), 2000);
@@ -334,9 +334,10 @@ describe("SSE API", () => {
 
       await reader.read(); // initial daily_summary
 
-      await fetch(`${address}/api/meals/${mealId}`, {
+      await fetch(`${address}/api/meals/${meal.id}`, {
         method: "DELETE",
-        headers: { cookie: sessionCookieHeader },
+        headers: { cookie: sessionCookieHeader, "content-type": "application/json" },
+        body: JSON.stringify({ expectedMealRevisionId: meal.mealRevisionId }),
       });
 
       const secondChunk = await reader.read();

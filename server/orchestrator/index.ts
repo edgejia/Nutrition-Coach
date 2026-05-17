@@ -691,7 +691,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       const messages: ChatMessage[] = [systemMsg, ...history, userContent];
       const toolDefinitions = getToolDefinitions();
       const safeToolNames = new Set(toolDefinitions.map((definition) => definition.function.name));
-      const toolSessionState = { resolvedMealIds: [] as string[] };
+      const toolSessionState = {
+        resolvedMealIds: [] as string[],
+        resolvedMealRevisions: {} as Record<string, string>,
+      };
 
       let didLogMeal = false;
       let didMutateMeal = false;

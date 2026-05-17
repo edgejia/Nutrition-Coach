@@ -1,6 +1,7 @@
-import type { FastifyBaseLogger, FastifyInstance } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply } from "fastify";
 import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
+import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
@@ -30,6 +31,7 @@ interface MealUpdateBody {
   carbs: number;
   fat: number;
   imageAssetId?: string | null;
+  expectedMealRevisionId?: string;
 }
 
 function isFiniteNonNegativeNumber(value: unknown): value is number {
@@ -68,7 +70,30 @@ function parseMealUpdateBody(body: unknown): MealUpdateBody | null {
     carbs: input.carbs,
     fat: input.fat,
     imageAssetId,
+    ...(typeof input.expectedMealRevisionId === "string" && input.expectedMealRevisionId.trim()
+      ? { expectedMealRevisionId: input.expectedMealRevisionId.trim() }
+      : {}),
   };
+}
+
+function parseExpectedMealRevisionId(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") {
+    return undefined;
+  }
+
+  const input = body as Record<string, unknown>;
+  return typeof input.expectedMealRevisionId === "string" && input.expectedMealRevisionId.trim()
+    ? input.expectedMealRevisionId.trim()
+    : undefined;
+}
+
+function sendMealRevisionConflict(reply: FastifyReply, error: MealRevisionPreconditionError) {
+  return reply.code(409).send({
+    error: error.code,
+    mealId: error.mealId,
+    affectedDate: error.affectedDate,
+    currentMealRevisionId: error.currentMealRevisionId,
+  });
 }
 
 function publishDailySummarySafe(input: {
@@ -124,6 +149,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
         const imageAssetId = parseAssetRef(meal.imagePath);
         return {
           id: meal.id,
+          mealRevisionId: meal.mealRevisionId,
           foodName: meal.foodName,
           itemCount: meal.itemCount ?? 1,
           calories: meal.calories,
@@ -179,6 +205,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       }
 
       updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
+        expectedMealRevisionId: update.expectedMealRevisionId,
         imagePath: update.imageAssetId ? `asset:${update.imageAssetId}` : null,
         items: [
           {
@@ -194,6 +221,9 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     } catch (error) {
       if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
         return reply.code(404).send({ error: "Meal not found" });
+      }
+      if (error instanceof MealRevisionPreconditionError) {
+        return sendMealRevisionConflict(reply, error);
       }
       throw error;
     }
@@ -221,6 +251,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
       ...(dailySummary ? { dailySummary } : {}),
       meal: {
         id: updatedMeal.id,
+        mealRevisionId: updatedMeal.mealRevisionId,
         foodName: updatedMeal.foodName,
         itemCount: updatedMeal.itemCount ?? 1,
         calories: updatedMeal.calories,
@@ -248,15 +279,19 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     }
 
     const { id } = request.params as { id: string };
+    const expectedMealRevisionId = parseExpectedMealRevisionId(request.body);
     let affectedDateKey: string;
     let deletedMealId: string;
     try {
-      const deleted = await foodLoggingService.deleteMeal(deviceId, id);
+      const deleted = await foodLoggingService.deleteMeal(deviceId, id, expectedMealRevisionId);
       affectedDateKey = deleted.affectedDateKey;
       deletedMealId = deleted.transactionId;
     } catch (error) {
       if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
         return reply.code(404).send({ error: "Meal not found" });
+      }
+      if (error instanceof MealRevisionPreconditionError) {
+        return sendMealRevisionConflict(reply, error);
       }
       throw error;
     }

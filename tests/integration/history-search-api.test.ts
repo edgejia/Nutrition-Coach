@@ -153,6 +153,7 @@ describe("History search API", () => {
       loggedAt: "2026-03-25T07:00:00.000Z",
     });
     await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+      expectedMealRevisionId: updatedMeal.mealRevisionId,
       loggedAt: "2026-03-25T07:00:00.000Z",
       items: [
         { foodName: "Current Tofu Bowl", calories: 520, protein: 28, carbs: 64, fat: 18 },
@@ -166,7 +167,7 @@ describe("History search API", () => {
       fat: 12,
       loggedAt: "2026-03-25T08:00:00.000Z",
     });
-    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id);
+    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
     await services.foodLoggingService.logFood(foreignDeviceId, {
       foodName: "Chicken Salad",
       calories: 999,

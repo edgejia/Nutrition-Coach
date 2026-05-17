@@ -50,6 +50,7 @@ export interface DeletedMealSnapshot {
 }
 
 export interface MealTransactionUpdateInput {
+  expectedMealRevisionId?: string | null;
   imagePath?: string | null;
   items: MealTransactionItemInput[];
 }
@@ -74,6 +75,29 @@ interface MealTransactionRow {
 }
 
 type AssetReferenceWriter = Pick<AppDatabase, "insert">;
+
+export type MealRevisionPreconditionCode = "MEAL_REVISION_REQUIRED" | "MEAL_REVISION_STALE";
+
+export class MealRevisionPreconditionError extends Error {
+  readonly code: MealRevisionPreconditionCode;
+  readonly mealId: string;
+  readonly affectedDate: string;
+  readonly currentMealRevisionId: string;
+
+  constructor(input: {
+    code: MealRevisionPreconditionCode;
+    mealId: string;
+    affectedDate: string;
+    currentMealRevisionId: string;
+  }) {
+    super(input.code);
+    this.name = "MealRevisionPreconditionError";
+    this.code = input.code;
+    this.mealId = input.mealId;
+    this.affectedDate = input.affectedDate;
+    this.currentMealRevisionId = input.currentMealRevisionId;
+  }
+}
 
 export function createMealTransactionsService(db: AppDatabase) {
   function normalizeItems(items: MealTransactionItemInput[]) {
@@ -162,6 +186,32 @@ export function createMealTransactionsService(db: AppDatabase) {
       ...(calories === undefined ? {} : { calories }),
       ...(protein === undefined ? {} : { protein }),
     };
+  }
+
+  function assertExpectedMealRevision(
+    existing: MealTransactionRow,
+    expectedMealRevisionId: string | null | undefined,
+  ) {
+    const expected = typeof expectedMealRevisionId === "string" ? expectedMealRevisionId.trim() : "";
+    const affectedDate = formatLocalDate(new Date(existing.loggedAt));
+
+    if (!expected) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_REQUIRED",
+        mealId: existing.id,
+        affectedDate,
+        currentMealRevisionId: existing.currentRevisionId,
+      });
+    }
+
+    if (expected !== existing.currentRevisionId) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_STALE",
+        mealId: existing.id,
+        affectedDate,
+        currentMealRevisionId: existing.currentRevisionId,
+      });
+    }
   }
 
   return {
@@ -260,12 +310,14 @@ export function createMealTransactionsService(db: AppDatabase) {
     async softDeleteTransaction(
       deviceId: string,
       transactionId: string,
+      expectedMealRevisionId?: string | null,
     ): Promise<MealTransactionDeleteResult> {
       const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
 
       if (!existing) {
         throw new Error("MEAL_NOT_FOUND");
       }
+      assertExpectedMealRevision(existing, expectedMealRevisionId);
 
       const deletedMeal = await loadDeletedMealSnapshot(existing);
       const deletedAt = new Date().toISOString();
@@ -313,6 +365,7 @@ export function createMealTransactionsService(db: AppDatabase) {
       if (!existing) {
         throw new Error("MEAL_NOT_FOUND");
       }
+      assertExpectedMealRevision(existing, input.expectedMealRevisionId);
 
       const items = normalizeItems(input.items);
       const createdAt = new Date().toISOString();

@@ -211,6 +211,7 @@ describe("History API", () => {
       loggedAt: "2026-03-25T08:00:00.000Z",
     });
     await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+      expectedMealRevisionId: updatedMeal.mealRevisionId,
       loggedAt: "2026-03-25T08:00:00.000Z",
       items: [
         { foodName: "修正雞腿便當", calories: 620, protein: 34, carbs: 70, fat: 22 },
@@ -224,7 +225,7 @@ describe("History API", () => {
       fat: 14,
       loggedAt: "2026-03-25T09:00:00.000Z",
     });
-    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id);
+    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
     await services.foodLoggingService.logFood(deviceId, {
       foodName: "隔天早餐",
       calories: 300,

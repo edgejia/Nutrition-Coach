@@ -39,6 +39,10 @@ export interface MealCompatibilityEntry {
 
 export interface GroupedMealData extends CreateMealTransactionInput {}
 
+export interface GroupedMealUpdateData extends GroupedMealData {
+  expectedMealRevisionId?: string | null;
+}
+
 export function createFoodLoggingService(db: AppDatabase) {
   const mealTransactionsService = createMealTransactionsService(db);
   const mealHistoryService = createMealHistoryService(db);
@@ -114,8 +118,8 @@ export function createFoodLoggingService(db: AppDatabase) {
       }));
     },
 
-    async deleteMeal(deviceId: string, mealId: string) {
-      return mealTransactionsService.softDeleteTransaction(deviceId, mealId);
+    async deleteMeal(deviceId: string, mealId: string, expectedMealRevisionId?: string | null) {
+      return mealTransactionsService.softDeleteTransaction(deviceId, mealId, expectedMealRevisionId);
     },
 
     async getMealItemCount(deviceId: string, mealId: string): Promise<number | null> {
@@ -142,7 +146,7 @@ export function createFoodLoggingService(db: AppDatabase) {
       return items.length;
     },
 
-    async updateMeal(deviceId: string, mealId: string, input: GroupedMealData) {
+    async updateMeal(deviceId: string, mealId: string, input: GroupedMealUpdateData) {
       const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, input);
       return projectCompatibilityEntry(
         deviceId,

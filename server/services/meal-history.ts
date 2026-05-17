@@ -11,6 +11,7 @@ import { projectMealDisplay } from "./meal-display.js";
 
 export interface MealHistoryEntry {
   id: string;
+  mealRevisionId: string;
   foodName: string;
   itemCount: number;
   calories: number;
@@ -88,6 +89,7 @@ export function createMealHistoryService(db: AppDatabase) {
 
         return {
           id: header.id,
+          mealRevisionId: header.currentRevisionId,
           foodName: display.foodName,
           itemCount: display.itemCount,
           calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),

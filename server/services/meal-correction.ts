@@ -27,6 +27,7 @@ const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
 
 export interface MealCorrectionCandidate {
   mealId: string;
+  mealRevisionId: string;
   foodName: string;
   itemCount: number;
   itemNames: string[];
@@ -373,6 +374,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
 
       return {
         mealId: header.id,
+        mealRevisionId: header.currentRevisionId,
         foodName: display.foodName,
         itemCount: display.itemCount,
         itemNames: revisionItems.map((item) => item.foodName),
@@ -400,7 +402,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     );
   }
 
-  async function loadCurrentItems(deviceId: string, mealId: string): Promise<MealTransactionItemInput[]> {
+  async function loadCurrentRevisionId(deviceId: string, mealId: string): Promise<string> {
     const transaction = await db
       .select({
         currentRevisionId: mealTransactions.currentRevisionId,
@@ -417,6 +419,12 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     if (!currentRevisionId) {
       throw new Error("MEAL_NOT_FOUND");
     }
+
+    return currentRevisionId;
+  }
+
+  async function loadCurrentItems(deviceId: string, mealId: string): Promise<MealTransactionItemInput[]> {
+    const currentRevisionId = await loadCurrentRevisionId(deviceId, mealId);
 
     const items = await db
       .select({
@@ -649,6 +657,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       deviceId: string,
       mealId: string,
       input: MealCorrectionUpdateInput,
+      expectedMealRevisionId?: string | null,
     ): Promise<{
       updatedMeal: {
         id: string;
@@ -689,7 +698,11 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         nextItems = applyMealPatch(currentItems, items);
       }
 
-      const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, { items: nextItems });
+      const expectedRevision = expectedMealRevisionId ?? await loadCurrentRevisionId(deviceId, mealId);
+      const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, {
+        expectedMealRevisionId: expectedRevision,
+        items: nextItems,
+      });
       const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
         deviceId,
         affectedDate: updated.affectedDateKey,
@@ -730,6 +743,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     async deleteMeal(
       deviceId: string,
       mealId: string,
+      expectedMealRevisionId?: string | null,
     ): Promise<{
       deletedMealId: string;
       affectedDate: string;
@@ -737,7 +751,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       dailySummary?: DailySummary;
       deletedMeal: DeletedMealSnapshot;
     }> {
-      const deleted = await mealTransactionsService.softDeleteTransaction(deviceId, mealId);
+      const expectedRevision = expectedMealRevisionId ?? await loadCurrentRevisionId(deviceId, mealId);
+      const deleted = await mealTransactionsService.softDeleteTransaction(deviceId, mealId, expectedRevision);
       const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
         deviceId,
         affectedDate: deleted.affectedDateKey,

@@ -59,6 +59,7 @@ export interface ToolDeps {
   imagePath?: string;
   toolSessionState?: {
     resolvedMealIds: string[];
+    resolvedMealRevisions?: Record<string, string>;
   };
 }
 
@@ -1111,8 +1112,9 @@ const findMealsContract: ToolContract<FindMealsArgs, FindMealsResult> = {
       },
     );
     if (deps.toolSessionState) {
-      deps.toolSessionState.resolvedMealIds =
-        result.status === "resolved" ? [result.resolvedMealId] : [];
+      deps.toolSessionState.resolvedMealIds = result.status === "resolved" ? [result.resolvedMealId] : [];
+      deps.toolSessionState.resolvedMealRevisions =
+        result.status === "resolved" ? { [result.resolvedMealId]: result.candidate.mealRevisionId } : {};
     }
 
     return {
@@ -1254,6 +1256,7 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
     if (!resolvedMealIds.includes(args.meal_id)) {
       throw new FatalToolError("meal target unresolved");
     }
+    const expectedMealRevisionId = deps.toolSessionState?.resolvedMealRevisions?.[args.meal_id];
 
     let updated: UpdateMealResult;
     try {
@@ -1279,6 +1282,7 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
                 ...(args.fat !== undefined ? { fat: args.fat } : {}),
               },
             },
+        expectedMealRevisionId,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "meal update failed";
@@ -1291,6 +1295,7 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
     await deps.mealCorrectionService.clearPendingSelection(deviceId);
     if (deps.toolSessionState) {
       deps.toolSessionState.resolvedMealIds = [];
+      deps.toolSessionState.resolvedMealRevisions = {};
     }
 
     return {
@@ -1327,12 +1332,14 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealResult> = {
     if (!resolvedMealIds.includes(args.meal_id)) {
       throw new FatalToolError("meal target unresolved");
     }
+    const expectedMealRevisionId = deps.toolSessionState?.resolvedMealRevisions?.[args.meal_id];
 
-    const deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id);
+    const deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id, expectedMealRevisionId);
 
     await deps.mealCorrectionService.clearPendingSelection(deviceId);
     if (deps.toolSessionState) {
       deps.toolSessionState.resolvedMealIds = [];
+      deps.toolSessionState.resolvedMealRevisions = {};
     }
 
     return {
