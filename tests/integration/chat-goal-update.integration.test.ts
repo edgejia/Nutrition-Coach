@@ -400,4 +400,52 @@ describe("chat goal update integration", () => {
     assert.deepEqual(publishCalls, []);
     assert.equal(mockLLM.chatCalls.length, 1);
   });
+
+  it("returns generic rejection copy for empty update_goals args without final reply generation", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_empty_args",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({}),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已經幫你更新每日目標。" });
+
+    const { status, body } = await postChat("好");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(body.dailyTargets, undefined);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("returns generic rejection copy for update_goals without mode without final reply generation", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_missing_mode",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已經幫你更新每日目標。" });
+
+    const { status, body } = await postChat("卡路里 1800");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(body.dailyTargets, undefined);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
 });

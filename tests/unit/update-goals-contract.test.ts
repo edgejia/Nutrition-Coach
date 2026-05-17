@@ -130,26 +130,28 @@ describe("update_goals ToolContract", () => {
   });
 
   it("Test 3: update_goals rejects empty args and any args without mode", async () => {
-    const empty = await executeTool(updateGoalsCall({}), deviceId, deps, {
-      currentUserMessage: "",
-    });
-    assert.equal(empty.success, false);
-    assert.equal(empty.executed, false);
-    assert.equal(empty.failureReason, "validation");
+    for (const args of [{}, { calories: 1800, sugar: 20 }, { calories: 1800 }]) {
+      const result = await executeTool(updateGoalsCall(args), deviceId, deps, {
+        currentUserMessage: "卡路里 1800",
+      });
 
-    const unknown = await executeTool(updateGoalsCall({ calories: 1800, sugar: 20 }), deviceId, deps, {
-      currentUserMessage: "卡路里 1800",
-    });
-    assert.equal(unknown.success, false);
-    assert.equal(unknown.executed, false);
-    assert.equal(unknown.failureReason, "validation");
-
-    const missingMode = await executeTool(updateGoalsCall({ calories: 1800 }), deviceId, deps, {
-      currentUserMessage: "卡路里 1800",
-    });
-    assert.equal(missingMode.success, false);
-    assert.equal(missingMode.executed, false);
-    assert.equal(missingMode.failureReason, "validation");
+      assert.equal(result.success, false);
+      assert.equal(result.executed, false);
+      assert.equal(result.failureReason, "validation");
+      assert.equal(result.result, renderGoalAuthorityFailureCopy());
+      assert.deepEqual(result.controlledReply, {
+        source: "renderer",
+        reason: "goal_authority_failure",
+        text: renderGoalAuthorityFailureCopy(),
+      });
+      assert.deepEqual(await readTargets(deviceService, deviceId), {
+        calories: 1500,
+        protein: 120,
+        carbs: 150,
+        fat: 50,
+      });
+      assert.equal(published.length, 0);
+    }
   });
 
   it("Test 4: current_turn_values uses only current-user numeric fields, clears proposals, and publishes once", async () => {

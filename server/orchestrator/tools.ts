@@ -1637,22 +1637,23 @@ export async function executeTool(
         const validationFields = outcome.failureReason === "validation"
           ? goalValidationFieldsFromFailure(outcome.result)
           : [];
-        if (validationFields.length > 0) {
-          const reply = renderGoalValidationFailureCopy(validationFields);
-          return {
-            result: reply,
-            summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
-            success: false,
-            executed: false,
-            failureReason: outcome.failureReason,
-            updatedFields,
-            controlledReply: {
-              source: "renderer",
-              reason: "goal_validation_failure",
-              text: reply,
-            },
-          };
-        }
+        const hasValidationFields = validationFields.length > 0;
+        const reply = hasValidationFields
+          ? renderGoalValidationFailureCopy(validationFields)
+          : renderGoalAuthorityFailureCopy();
+        return {
+          result: reply,
+          summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
+          success: false,
+          executed: false,
+          failureReason: outcome.failureReason,
+          updatedFields,
+          controlledReply: {
+            source: "renderer",
+            reason: hasValidationFields ? "goal_validation_failure" : "goal_authority_failure",
+            text: reply,
+          },
+        };
       }
       return {
         result: outcome.result,

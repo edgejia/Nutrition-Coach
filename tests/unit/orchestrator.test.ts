@@ -1673,6 +1673,56 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(device?.dailyProtein, 120);
   });
 
+  it("short-circuits empty update_goals args with generic rejection copy and no second model round", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_empty_args",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({}),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型後續改寫：已經幫你更新每日目標。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 1);
+    const device = await deviceService.getDevice(deviceId);
+    assert.equal(device?.dailyCalories, 1500);
+    assert.equal(device?.dailyProtein, 120);
+  });
+
+  it("short-circuits update_goals without mode with generic rejection copy and no second model round", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_missing_mode",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ calories: 1800 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型後續改寫：已經幫你更新每日目標。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "卡路里 1800");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 1);
+    const device = await deviceService.getDevice(deviceId);
+    assert.equal(device?.dailyCalories, 1500);
+    assert.equal(device?.dailyProtein, 120);
+  });
+
   it("short-circuits unavailable proposal confirmation with generic copy and no second model round", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
