@@ -19,6 +19,7 @@ export interface HistoryQueryIssue {
 
 export interface HistoryMealDto {
   id: string;
+  mealRevisionId: string;
   dateKey: string;
   loggedAt: string;
   display: { title: string };
@@ -405,6 +406,7 @@ async function projectHistoryMeals(
 
     return {
       id: header.id,
+      mealRevisionId: header.currentRevisionId,
       dateKey: formatLocalDate(new Date(header.loggedAt)),
       loggedAt: header.loggedAt,
       display: { title: display.foodName },

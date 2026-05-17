@@ -19,6 +19,7 @@ type ChatMessageStatus = "complete" | "stopped" | "error";
 interface LoggedMealReceipt {
   mealId?: string;
   dateKey?: string;
+  mealRevisionId?: string;
   loggedAt: string;
   imageAssetId: string | null;
   imageUrl: string | null;
@@ -118,6 +119,7 @@ export function createChatService(db: AppDatabase) {
         ? {
             mealId: receipt.mealTransactionId,
             dateKey: formatLocalDate(new Date(receipt.loggedAt)),
+            mealRevisionId: receipt.mealRevisionId,
           }
         : {}),
       loggedAt: receipt.loggedAt,

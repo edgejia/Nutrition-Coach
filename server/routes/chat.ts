@@ -418,6 +418,7 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
   const {
     mealId,
     dateKey,
+    mealRevisionId,
     loggedAt,
     imageAssetId,
     imageUrl,
@@ -465,6 +466,7 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
   return {
     ...(typeof mealId === "string" ? { mealId } : {}),
     ...(typeof dateKey === "string" ? { dateKey } : {}),
+    ...(typeof mealRevisionId === "string" ? { mealRevisionId } : {}),
     ...(typeof loggedAt === "string" ? { loggedAt } : {}),
     ...(typeof imageAssetId === "string" || imageAssetId === null ? { imageAssetId } : {}),
     ...(typeof imageUrl === "string" || imageUrl === null ? { imageUrl } : {}),
