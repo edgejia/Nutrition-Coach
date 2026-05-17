@@ -66,7 +66,7 @@ Plans:
 - [x] 61-01-PLAN.md — Shared summary outcome helper and service committed-facts foundation
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 61-02-PLAN.md — Meal mutation effect and receipt contract decoupling
+- [x] 61-02-PLAN.md — Meal mutation effect and receipt contract decoupling
 - [ ] 61-05-PLAN.md — Direct PATCH/DELETE summaryOutcome route contract
 
 **Wave 3** *(blocked on Wave 2 plan 61-02 completion)*
@@ -142,7 +142,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 |-------|-----------|----------------|--------|-----------|
 | 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
-| 61. Committed Mutation Outcome and Summary Contract | v2.3 | 1/6 | In Progress|  |
+| 61. Committed Mutation Outcome and Summary Contract | v2.3 | 2/6 | In Progress|  |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 0/TBD | Not started | - |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 0/TBD | Not started | - |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |

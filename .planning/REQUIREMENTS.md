@@ -16,9 +16,9 @@ Requirements for the v2.3 P1 data-integrity milestone. Each requirement must map
 
 ### Mutation Outcomes
 
-- [ ] **MUT-01**: User receives a committed log receipt when meal logging persists even if daily summary recompute or publish fails.
-- [ ] **MUT-02**: User receives a committed update receipt when meal editing persists even if daily summary recompute or publish fails.
-- [ ] **MUT-03**: User receives a committed delete receipt when meal deletion persists even if daily summary recompute or publish fails.
+- [x] **MUT-01**: User receives a committed log receipt when meal logging persists even if daily summary recompute or publish fails.
+- [x] **MUT-02**: User receives a committed update receipt when meal editing persists even if daily summary recompute or publish fails.
+- [x] **MUT-03**: User receives a committed delete receipt when meal deletion persists even if daily summary recompute or publish fails.
 - [ ] **MUT-04**: Direct meal `PATCH` / `DELETE` routes distinguish committed mutation facts from degraded or failed summary refresh status.
 
 ### Meal Freshness
@@ -81,9 +81,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GOAL-02 | Phase 60 | Complete |
 | GOAL-03 | Phase 60 | Complete |
 | GOAL-04 | Phase 60 | Complete |
-| MUT-01 | Phase 61 | Pending |
-| MUT-02 | Phase 61 | Pending |
-| MUT-03 | Phase 61 | Pending |
+| MUT-01 | Phase 61 | Complete |
+| MUT-02 | Phase 61 | Complete |
+| MUT-03 | Phase 61 | Complete |
 | MUT-04 | Phase 61 | Pending |
 | FRESH-01 | Phase 62 | Pending |
 | FRESH-02 | Phase 62 | Pending |

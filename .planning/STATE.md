@@ -4,14 +4,14 @@ milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: executing
 stopped_at: Completed 61-01-PLAN.md
-last_updated: "2026-05-17T07:08:20.381Z"
+last_updated: "2026-05-17T07:16:29.952Z"
 last_activity: 2026-05-17
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 9
-  completed_plans: 4
-  percent: 44
+  completed_plans: 5
+  percent: 56
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-17)
 ## Current Position
 
 Phase: 61 (committed-mutation-outcome-and-summary-contract) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-05-17
 
-Progress: [████░░░░░░] 44%
+Progress: [██████░░░░] 56%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [████░░░░░░] 44%
 | Phase 60 P02 | 637s | 3 tasks | 9 files |
 | Phase 60 P03 | 535s | 3 tasks | 6 files |
 | Phase 61 P01 | 4 min | 2 tasks | 5 files |
+| Phase 61 P02 | 4 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,8 @@ Recent decisions affecting current work:
 - [Phase 60]: Fastify chat proof uses metadata-only llm-trace final reply facts for renderer-owned goal failures.
 - [Phase 61]: Summary availability is represented by the explicit SummaryOutcome union; update/delete services now return committed facts even when summary recompute is recovered or unavailable.
 - [Phase 61]: dailySummary compatibility fields are derived only from dailySummaryFromOutcome(summaryOutcome), and publish failure remains outside summaryOutcome.
+- [Phase 61]: Meal log/update/delete mutation effects carry summaryOutcome instead of requiring committedSummary.
+- [Phase 61]: Goal mutation effects keep the Phase 60 committedSummary behavior and are not migrated to summaryOutcome.
 
 ### Pending Todos
 
@@ -93,6 +96,6 @@ None yet for v2.3.
 
 ## Session Continuity
 
-Last session: 2026-05-17T07:08:20.375Z
-Stopped at: Completed 61-01-PLAN.md
+Last session: 2026-05-17T07:16:18.466Z
+Stopped at: Completed 61-02-PLAN.md
 Resume file: None
