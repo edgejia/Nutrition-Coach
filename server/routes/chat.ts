@@ -404,8 +404,9 @@ function publishSummarySafe(
     publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
     log.info({ event: "summary_publish_success" }, "Summary publish success");
   } catch (publishErr) {
+    void publishErr;
     log.warn(
-      { event: "summary_publish_failed", err: publishErr instanceof Error ? publishErr.message : String(publishErr) },
+      { event: "summary_publish_failed", failureReason: "publisher_error" },
       "Summary publish failed (non-fatal)",
     );
   }

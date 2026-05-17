@@ -2335,6 +2335,81 @@ describe("Chat API", () => {
     assertNoPublishFailurePayload(body);
   });
 
+  it("POST /api/chat JSON logs publish failure without thrown error text", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const logLLM = new MockLLMProvider();
+    let logServices: AppServices | undefined;
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: logLLM,
+      logger: { level: "info", stream: logStream },
+      onServicesReady: (readyServices) => {
+        logServices = readyServices;
+      },
+    });
+    assert.ok(logServices);
+    const unsafeErrorMessage = "prompt 機密營養文字 provider body header tool payload assistant final text data:image guest_session";
+    logServices.publisher.publishDailySummary = () => {
+      throw new Error(unsafeErrorMessage);
+    };
+    logLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_publish_fail_redaction",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "豆漿",
+            quantity_ml: 300,
+            calories: 120,
+            protein: 8,
+            carbs: 10,
+            fat: 4,
+          }),
+        },
+      }],
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const logAddress = await logApp.listen({ port: 0 });
+
+    try {
+      const form = new FormData();
+      form.append("message", "一杯豆漿");
+      const res = await fetch(`${logAddress}/api/chat`, {
+        method: "POST",
+        headers: { cookie: logCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        didLogMeal: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: unknown;
+        summaryOutcome?: SummaryOutcome;
+      };
+      assert.equal(body.didLogMeal, true);
+      assert.equal(body.didMutateMeal, true);
+      assertFreshSummaryOutcome(body.summaryOutcome);
+      assert.ok(body.dailySummary);
+      assertNoPublishFailurePayload(body);
+
+      const publishFailures = observabilityEvents(logLines, "summary_publish_failed");
+      assert.equal(publishFailures.length, 1);
+      assert.equal(publishFailures[0]!.failureReason, "publisher_error");
+      assert.equal("err" in publishFailures[0]!, false);
+      assert.equal("errorMessage" in publishFailures[0]!, false);
+      assert.doesNotMatch(JSON.stringify(parseLogLines(logLines)), /機密營養文字|provider body|header|tool payload|assistant final text|data:image|guest_session/);
+    } finally {
+      await logApp.close();
+    }
+  });
+
   it("POST /api/chat without SSE accept header still returns JSON", async () => {
     mockLLM.queueChatResponse({ content: "純文字回覆" });
 
