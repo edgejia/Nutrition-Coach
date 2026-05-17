@@ -55,6 +55,7 @@ export interface FindMealsResolvedResult {
   status: "resolved";
   action: "update" | "delete";
   resolvedMealId: string;
+  mealRevisionId: string;
   candidate: MealCorrectionCandidate;
   fromPending: boolean;
 }
@@ -476,6 +477,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         status: "resolved",
         action: pending.action,
         resolvedMealId: candidate.mealId,
+        mealRevisionId: candidate.mealRevisionId,
         candidate,
         fromPending: true,
       };
@@ -492,6 +494,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         status: "resolved",
         action: pending.action,
         resolvedMealId: matchingCandidates[0]!.mealId,
+        mealRevisionId: matchingCandidates[0]!.mealRevisionId,
         candidate: matchingCandidates[0]!,
         fromPending: true,
       };
@@ -506,6 +509,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         status: "resolved",
         action: pending.action,
         resolvedMealId: pending.candidates[0]!.mealId,
+        mealRevisionId: pending.candidates[0]!.mealRevisionId,
         candidate: pending.candidates[0]!,
         fromPending: true,
       };
@@ -584,6 +588,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
             status: "resolved",
             action,
             resolvedMealId: positiveMatches[0]!.candidate.mealId,
+            mealRevisionId: positiveMatches[0]!.candidate.mealRevisionId,
             candidate: positiveMatches[0]!.candidate,
             fromPending: false,
           };
@@ -597,6 +602,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
             status: "resolved",
             action,
             resolvedMealId: candidates[0]!.mealId,
+            mealRevisionId: candidates[0]!.mealRevisionId,
             candidate: candidates[0]!,
             fromPending: false,
           };
@@ -628,6 +634,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
           status: "resolved",
           action,
           resolvedMealId: top[0]!.mealId,
+          mealRevisionId: top[0]!.mealRevisionId,
           candidate: top[0]!,
           fromPending: false,
         };
@@ -698,9 +705,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         nextItems = applyMealPatch(currentItems, items);
       }
 
-      const expectedRevision = expectedMealRevisionId ?? await loadCurrentRevisionId(deviceId, mealId);
       const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, {
-        expectedMealRevisionId: expectedRevision,
+        expectedMealRevisionId,
         items: nextItems,
       });
       const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
@@ -751,8 +757,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       dailySummary?: DailySummary;
       deletedMeal: DeletedMealSnapshot;
     }> {
-      const expectedRevision = expectedMealRevisionId ?? await loadCurrentRevisionId(deviceId, mealId);
-      const deleted = await mealTransactionsService.softDeleteTransaction(deviceId, mealId, expectedRevision);
+      const deleted = await mealTransactionsService.softDeleteTransaction(deviceId, mealId, expectedMealRevisionId);
       const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
         deviceId,
         affectedDate: deleted.affectedDateKey,

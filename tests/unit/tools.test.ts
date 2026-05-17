@@ -1204,7 +1204,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       summaryService,
       mealCorrectionService,
       toolSessionState: {
-        resolvedMealIds: [created.id],
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
     });
 
@@ -1298,7 +1298,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       toolSessionState: {
         resolvedMealIds: [created.id],
       },
-    });
+    } as unknown as ToolDeps);
     const transaction = (
       await db
         .select()
@@ -1343,7 +1343,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       toolSessionState: {
         resolvedMealIds: [created.id],
       },
-    });
+    } as unknown as ToolDeps);
     const transaction = (
       await db
         .select()
@@ -1358,6 +1358,115 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(transaction?.deletedAt, null);
     assert.equal(transaction?.currentRevisionId, created.mealRevisionId);
     assert.equal(revisions.length, 1);
+  });
+
+  it("returns stable stale revision codes for stale update_meal and delete_meal targets", async () => {
+    const updateTarget = await foodLoggingService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const deleteTarget = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-03-25T10:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const updated = await foodLoggingService.updateMeal(deviceId, updateTarget.id, {
+      expectedMealRevisionId: updateTarget.mealRevisionId,
+      items: [{
+        foodName: "新版蘋果",
+        calories: 100,
+        protein: 1,
+        carbs: 26,
+        fat: 0.3,
+      }],
+    });
+    const deleteAdvanced = await foodLoggingService.updateMeal(deviceId, deleteTarget.id, {
+      expectedMealRevisionId: deleteTarget.mealRevisionId,
+      items: [{
+        foodName: "新版牛肉麵",
+        calories: 500,
+        protein: 26,
+        carbs: 60,
+        fat: 15,
+      }],
+    });
+
+    const staleUpdate = await executeTool({
+      id: "call_stale_update",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: updateTarget.id,
+          calories: 48,
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState: {
+        resolvedMealTargets: [{
+          mealId: updateTarget.id,
+          mealRevisionId: updateTarget.mealRevisionId,
+        }],
+      },
+    });
+    const staleDelete = await executeTool({
+      id: "call_stale_delete",
+      type: "function",
+      function: {
+        name: "delete_meal",
+        arguments: JSON.stringify({
+          meal_id: deleteTarget.id,
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState: {
+        resolvedMealTargets: [{
+          mealId: deleteTarget.id,
+          mealRevisionId: deleteTarget.mealRevisionId,
+        }],
+      },
+    });
+    const updateTransaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, updateTarget.id))
+    )[0];
+    const deleteTransaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, deleteTarget.id))
+    )[0];
+
+    assert.equal(staleUpdate.success, false);
+    assert.equal(staleUpdate.executed, false);
+    assert.match(staleUpdate.result, /MEAL_REVISION_STALE/);
+    assert.equal(staleUpdate.mealMutationKind, undefined);
+    assert.equal(staleUpdate.summaryOutcome, undefined);
+    assert.equal(updateTransaction?.currentRevisionId, updated.mealRevisionId);
+
+    assert.equal(staleDelete.success, false);
+    assert.equal(staleDelete.executed, false);
+    assert.match(staleDelete.result, /MEAL_REVISION_STALE/);
+    assert.equal(staleDelete.mealMutationKind, undefined);
+    assert.equal(staleDelete.summaryOutcome, undefined);
+    assert.equal(deleteTransaction?.currentRevisionId, deleteAdvanced.mealRevisionId);
+    assert.equal(deleteTransaction?.deletedAt, null);
   });
 
   it("returns update_meal committed facts with unavailable summaryOutcome and no compatibility dailySummary", async () => {
@@ -1399,7 +1508,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       summaryService,
       mealCorrectionService: unavailableMealCorrectionService,
       toolSessionState: {
-        resolvedMealIds: [created.id],
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
     });
 
@@ -1440,7 +1549,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       summaryService,
       mealCorrectionService,
       toolSessionState: {
-        resolvedMealIds: [created.id],
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
     });
 
@@ -1491,7 +1600,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       summaryService,
       mealCorrectionService: recoveredMealCorrectionService,
       toolSessionState: {
-        resolvedMealIds: [created.id],
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
     });
 

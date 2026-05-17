@@ -9,6 +9,7 @@ import {
 } from "../services/summary-outcome.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
+import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
@@ -58,8 +59,10 @@ export interface ToolDeps {
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
   imagePath?: string;
   toolSessionState?: {
-    resolvedMealIds: string[];
-    resolvedMealRevisions?: Record<string, string>;
+    resolvedMealTargets: Array<{
+      mealId: string;
+      mealRevisionId: string;
+    }>;
   };
 }
 
@@ -886,6 +889,19 @@ function projectMealIdentityFields(meal: {
   };
 }
 
+function findResolvedMealTarget(
+  toolSessionState: ToolDeps["toolSessionState"] | undefined,
+  mealId: string,
+): { mealId: string; mealRevisionId: string } | undefined {
+  return toolSessionState?.resolvedMealTargets?.find(
+    (target) => target.mealId === mealId && target.mealRevisionId.trim().length > 0,
+  );
+}
+
+function revisionPreconditionFatalError(error: MealRevisionPreconditionError): FatalToolError {
+  return new FatalToolError(error.code);
+}
+
 // ---------------------------------------------------------------------------
 // Contracts. logSummary returns redacted shape (D-30); macros are part of
 // existing Phase 8 behavior for log_food (intentional, see plan).
@@ -1112,9 +1128,9 @@ const findMealsContract: ToolContract<FindMealsArgs, FindMealsResult> = {
       },
     );
     if (deps.toolSessionState) {
-      deps.toolSessionState.resolvedMealIds = result.status === "resolved" ? [result.resolvedMealId] : [];
-      deps.toolSessionState.resolvedMealRevisions =
-        result.status === "resolved" ? { [result.resolvedMealId]: result.candidate.mealRevisionId } : {};
+      deps.toolSessionState.resolvedMealTargets = result.status === "resolved"
+        ? [{ mealId: result.resolvedMealId, mealRevisionId: result.mealRevisionId }]
+        : [];
     }
 
     return {
@@ -1252,11 +1268,10 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
       throw new Error("update_meal contract missing mealCorrectionService/deviceId in context");
     }
 
-    const resolvedMealIds = deps.toolSessionState?.resolvedMealIds ?? [];
-    if (!resolvedMealIds.includes(args.meal_id)) {
+    const resolvedTarget = findResolvedMealTarget(deps.toolSessionState, args.meal_id);
+    if (!resolvedTarget) {
       throw new FatalToolError("meal target unresolved");
     }
-    const expectedMealRevisionId = deps.toolSessionState?.resolvedMealRevisions?.[args.meal_id];
 
     let updated: UpdateMealResult;
     try {
@@ -1282,9 +1297,12 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
                 ...(args.fat !== undefined ? { fat: args.fat } : {}),
               },
             },
-        expectedMealRevisionId,
+        resolvedTarget.mealRevisionId,
       );
     } catch (error) {
+      if (error instanceof MealRevisionPreconditionError) {
+        throw revisionPreconditionFatalError(error);
+      }
       const message = error instanceof Error ? error.message : "meal update failed";
       if (message === "MEAL_NAME_PATCH_REQUIRES_SINGLE_ITEM") {
         throw new FatalToolError("multi-item meal name changes require full items replacement");
@@ -1294,8 +1312,7 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
 
     await deps.mealCorrectionService.clearPendingSelection(deviceId);
     if (deps.toolSessionState) {
-      deps.toolSessionState.resolvedMealIds = [];
-      deps.toolSessionState.resolvedMealRevisions = {};
+      deps.toolSessionState.resolvedMealTargets = [];
     }
 
     return {
@@ -1328,18 +1345,24 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealResult> = {
       throw new Error("delete_meal contract missing mealCorrectionService/deviceId in context");
     }
 
-    const resolvedMealIds = deps.toolSessionState?.resolvedMealIds ?? [];
-    if (!resolvedMealIds.includes(args.meal_id)) {
+    const resolvedTarget = findResolvedMealTarget(deps.toolSessionState, args.meal_id);
+    if (!resolvedTarget) {
       throw new FatalToolError("meal target unresolved");
     }
-    const expectedMealRevisionId = deps.toolSessionState?.resolvedMealRevisions?.[args.meal_id];
 
-    const deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id, expectedMealRevisionId);
+    let deleted: DeleteMealResult;
+    try {
+      deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id, resolvedTarget.mealRevisionId);
+    } catch (error) {
+      if (error instanceof MealRevisionPreconditionError) {
+        throw revisionPreconditionFatalError(error);
+      }
+      throw error;
+    }
 
     await deps.mealCorrectionService.clearPendingSelection(deviceId);
     if (deps.toolSessionState) {
-      deps.toolSessionState.resolvedMealIds = [];
-      deps.toolSessionState.resolvedMealRevisions = {};
+      deps.toolSessionState.resolvedMealTargets = [];
     }
 
     return {

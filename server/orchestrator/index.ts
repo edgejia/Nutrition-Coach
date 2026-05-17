@@ -692,8 +692,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       const toolDefinitions = getToolDefinitions();
       const safeToolNames = new Set(toolDefinitions.map((definition) => definition.function.name));
       const toolSessionState = {
-        resolvedMealIds: [] as string[],
-        resolvedMealRevisions: {} as Record<string, string>,
+        resolvedMealTargets: [] as Array<{ mealId: string; mealRevisionId: string }>,
       };
 
       let didLogMeal = false;
