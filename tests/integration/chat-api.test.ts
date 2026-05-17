@@ -1748,9 +1748,16 @@ describe("Chat API", () => {
     });
     assert.equal(chatRes.status, 200);
     const chatBody = await chatRes.json() as {
-      loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null; itemCount?: number };
+      loggedMeal?: {
+        mealId?: string;
+        mealRevisionId?: string;
+        imageAssetId?: string | null;
+        imageUrl?: string | null;
+        itemCount?: number;
+      };
     };
     assert.match(chatBody.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.match(chatBody.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
     assert.ok(chatBody.loggedMeal?.imageAssetId);
     assert.equal(chatBody.loggedMeal?.imageUrl, `/api/assets/${chatBody.loggedMeal.imageAssetId}`);
     assert.equal(chatBody.loggedMeal?.itemCount, 1);
@@ -1762,6 +1769,7 @@ describe("Chat API", () => {
         .all() as Array<{ mealTransactionId: string; mealRevisionId: string }>;
       assert.equal(receiptRows.length, 1);
       assert.equal(receiptRows[0]!.mealTransactionId, chatBody.loggedMeal?.mealId);
+      assert.equal(receiptRows[0]!.mealRevisionId, chatBody.loggedMeal?.mealRevisionId);
       assert.match(receiptRows[0]!.mealRevisionId, /^[0-9a-f-]{36}:r\d+$/);
     } finally {
       sqlite.close();
@@ -1779,10 +1787,12 @@ describe("Chat API", () => {
     assert.equal(assistantMessage.didLogMeal, true);
     assert.match(assistantMessage.loggedMeal.mealId, /^[0-9a-f-]{36}$/);
     assert.match(assistantMessage.loggedMeal.dateKey, /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(assistantMessage.loggedMeal.mealRevisionId, chatBody.loggedMeal.mealRevisionId);
     assert.match(assistantMessage.loggedMeal.loggedAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.deepEqual(assistantMessage.loggedMeal, {
       mealId: assistantMessage.loggedMeal.mealId,
       dateKey: assistantMessage.loggedMeal.dateKey,
+      mealRevisionId: chatBody.loggedMeal.mealRevisionId,
       loggedAt: assistantMessage.loggedMeal.loggedAt,
       imageAssetId: chatBody.loggedMeal.imageAssetId,
       imageUrl: chatBody.loggedMeal.imageUrl,
@@ -1796,6 +1806,7 @@ describe("Chat API", () => {
         { name: "蘋果", position: 1, calories: 95, protein: 0, carbs: 25, fat: 0.3 },
       ],
     });
+    assert.equal("currentRevisionId" in assistantMessage.loggedMeal, false);
   });
 
   it("POST /api/chat JSON response returns grouped loggedMeal.itemCount", async () => {
@@ -1829,6 +1840,7 @@ describe("Chat API", () => {
     const body = await res.json() as {
       loggedMeal?: {
         mealId?: string;
+        mealRevisionId?: string;
         dateKey?: string;
         loggedAt?: string;
         foodName?: string;
@@ -1848,6 +1860,7 @@ describe("Chat API", () => {
       };
     };
     assert.match(body.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+    assert.match(body.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
     assert.match(body.loggedMeal?.dateKey ?? "", /^\d{4}-\d{2}-\d{2}$/);
     assert.match(body.loggedMeal?.loggedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(body.loggedMeal?.foodName, "雞腿、白飯、青菜");

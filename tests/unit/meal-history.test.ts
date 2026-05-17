@@ -118,6 +118,7 @@ describe("MealHistoryService", () => {
     assert.equal(meals[0]!.foodName, "黑咖啡");
     assert.deepEqual(meals[1], {
       id: grouped.id,
+      mealRevisionId: grouped.mealRevisionId,
       foodName: "蛋餅、豆漿、香蕉",
       itemCount: 3,
       calories: 590,
@@ -127,6 +128,7 @@ describe("MealHistoryService", () => {
       imagePath: null,
       loggedAt: "2026-03-25T05:00:00.000Z",
     });
+    assert.equal("currentRevisionId" in meals[1]!, false);
   });
 
   it("hides soft-deleted transactions from active history", async () => {
@@ -147,7 +149,7 @@ describe("MealHistoryService", () => {
       loggedAt: "2026-03-25T05:30:00.000Z",
     });
 
-    await foodService.deleteMeal(deviceId, breakfast.id);
+    await foodService.deleteMeal(deviceId, breakfast.id, breakfast.mealRevisionId);
 
     const meals = await historyService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
 

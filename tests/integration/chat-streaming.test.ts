@@ -731,6 +731,7 @@ describe("chat-streaming", () => {
         dailySummary?: unknown;
         loggedMeal?: {
           mealId?: string;
+          mealRevisionId?: string;
           dateKey?: string;
           loggedAt?: string;
           imageAssetId?: string | null;
@@ -746,6 +747,7 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didMutateMeal, true);
       assert.ok(donePayload.dailySummary);
       assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.match(donePayload.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
       assert.match(donePayload.loggedMeal?.dateKey ?? "", /^\d{4}-\d{2}-\d{2}$/);
       assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
       assert.ok(donePayload.loggedMeal?.imageAssetId);
@@ -764,12 +766,21 @@ describe("chat-streaming", () => {
         messages: Array<{
           role: string;
           content: string;
-          loggedMeal?: { mealId?: string; imageAssetId?: string | null; imageUrl?: string | null };
+          loggedMeal?: {
+            mealId?: string;
+            mealRevisionId?: string;
+            imageAssetId?: string | null;
+            imageUrl?: string | null;
+          };
         }>;
       };
       assert.equal(historyJson.messages.at(-1)?.role, "assistant");
       assert.match(historyJson.messages.at(-1)?.content ?? "", /已記錄雞腿便當/);
       assert.equal(historyJson.messages.at(-1)?.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
+      assert.equal(
+        historyJson.messages.at(-1)?.loggedMeal?.mealRevisionId,
+        donePayload.loggedMeal?.mealRevisionId,
+      );
       assert.equal(historyJson.messages.at(-1)?.loggedMeal?.imageAssetId, donePayload.loggedMeal?.imageAssetId);
       assert.equal(historyJson.messages.at(-1)?.loggedMeal?.imageUrl, donePayload.loggedMeal?.imageUrl);
     } finally {
@@ -1469,6 +1480,7 @@ describe("chat-streaming", () => {
       affectedDate?: string;
       loggedMeal?: {
         mealId?: string;
+        mealRevisionId?: string;
         dateKey?: string;
         loggedAt?: string;
         foodName?: string;
@@ -1491,6 +1503,7 @@ describe("chat-streaming", () => {
     assert.equal(donePayload.didMutateMeal, true);
     assert.equal(donePayload.affectedDate, "2026-03-25");
     assert.equal(donePayload.loggedMeal?.mealId, mealId);
+    assert.match(donePayload.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
     assert.equal(donePayload.loggedMeal?.dateKey, "2026-03-25");
     assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^2026-03-25T/);
     assert.equal(donePayload.loggedMeal?.foodName, "半碗牛肉麵");

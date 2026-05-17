@@ -52,7 +52,7 @@ describe("Day snapshot API", () => {
   it("GET /api/day-snapshot returns summary and meals for the same selected local day", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    await services.foodLoggingService.logFood(deviceId, {
+    const boundaryMeal = await services.foodLoggingService.logFood(deviceId, {
       foodName: "午夜點心",
       calories: 120,
       protein: 6,
@@ -60,7 +60,7 @@ describe("Day snapshot API", () => {
       fat: 4,
       loggedAt: "2026-03-24T16:30:00.000Z",
     });
-    await services.foodLoggingService.logGroupedMeal(deviceId, {
+    const groupedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: "asset:asset-1",
       loggedAt: "2026-03-25T04:00:00.000Z",
       items: [
@@ -97,6 +97,7 @@ describe("Day snapshot API", () => {
       };
       meals: Array<{
         id: string;
+        mealRevisionId: string;
         foodName: string;
         calories: number;
         protein: number;
@@ -124,6 +125,7 @@ describe("Day snapshot API", () => {
     assert.deepEqual(body.meals.map(({ id, ...meal }) => meal), [
       {
         foodName: "午夜點心",
+        mealRevisionId: boundaryMeal.mealRevisionId,
         calories: 120,
         protein: 6,
         carbs: 14,
@@ -135,6 +137,7 @@ describe("Day snapshot API", () => {
       },
       {
         foodName: "雞腿、白飯、青菜",
+        mealRevisionId: groupedMeal.mealRevisionId,
         calories: 640,
         protein: 32,
         carbs: 70,
@@ -145,6 +148,7 @@ describe("Day snapshot API", () => {
         loggedAt: "2026-03-25T04:00:00.000Z",
       },
     ]);
+    assert.doesNotMatch(JSON.stringify(body), /currentRevisionId/);
   });
 
   it("GET /api/day-snapshot rejects missing and malformed dates", async () => {

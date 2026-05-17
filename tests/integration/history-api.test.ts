@@ -11,6 +11,7 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 
 type HistoryMeal = {
   id: string;
+  mealRevisionId: string;
   dateKey: string;
   loggedAt: string;
   display: {
@@ -210,7 +211,7 @@ describe("History API", () => {
       fat: 18,
       loggedAt: "2026-03-25T08:00:00.000Z",
     });
-    await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+    const correctedMeal = await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
       expectedMealRevisionId: updatedMeal.mealRevisionId,
       loggedAt: "2026-03-25T08:00:00.000Z",
       items: [
@@ -265,6 +266,7 @@ describe("History API", () => {
     const assetProjection = body.meals.find((meal) => meal.id === assetMeal.id);
     assert.deepEqual(assetProjection, {
       id: assetMeal.id,
+      mealRevisionId: assetMeal.mealRevisionId,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
       display: { title: "雞胸、地瓜、青菜" },
@@ -296,6 +298,7 @@ describe("History API", () => {
     const correctedProjection = body.meals.find((meal) => meal.id === updatedMeal.id);
     assert.deepEqual(correctedProjection, {
       id: updatedMeal.id,
+      mealRevisionId: correctedMeal.mealRevisionId,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T08:00:00.000Z",
       display: { title: "修正雞腿便當" },
@@ -315,6 +318,10 @@ describe("History API", () => {
     });
 
     assert.equal(body.meals.find((meal) => meal.id === boundaryMeal.id)?.dateKey, "2026-03-25");
+    assert.equal(
+      body.meals.find((meal) => meal.id === boundaryMeal.id)?.mealRevisionId,
+      boundaryMeal.mealRevisionId,
+    );
     assertNoUnsafeHistoryFields(body);
   });
 
@@ -458,6 +465,7 @@ describe("History API", () => {
     );
     assert.deepEqual(body.meals[0], {
       id: seeded.assetMeal.id,
+      mealRevisionId: seeded.assetMeal.mealRevisionId,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
       display: { title: "鮭魚、白飯、青菜" },

@@ -11,6 +11,7 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 
 type HistoryMeal = {
   id: string;
+  mealRevisionId: string;
   dateKey: string;
   loggedAt: string;
   display: {
@@ -152,7 +153,7 @@ describe("History search API", () => {
       fat: 24,
       loggedAt: "2026-03-25T07:00:00.000Z",
     });
-    await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+    const currentMeal = await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
       expectedMealRevisionId: updatedMeal.mealRevisionId,
       loggedAt: "2026-03-25T07:00:00.000Z",
       items: [
@@ -177,7 +178,7 @@ describe("History search API", () => {
       loggedAt: "2026-03-25T09:00:00.000Z",
     });
 
-    return { chickenMeal, chineseMeal, updatedMeal, deletedMeal };
+    return { chickenMeal, chineseMeal, updatedMeal: currentMeal, deletedMeal };
   }
 
   async function seedNutritionBoundMeal() {
@@ -217,6 +218,7 @@ describe("History search API", () => {
       },
       meal: {
         id: seeded.chickenMeal.id,
+        mealRevisionId: seeded.chickenMeal.mealRevisionId,
         dateKey: "2026-03-25",
         loggedAt: "2026-03-25T04:00:00.000Z",
         display: { title: "Chicken Salad" },
@@ -280,6 +282,7 @@ describe("History search API", () => {
     assert.equal(currentRevisionRes.statusCode, 200);
     const currentRevisionBody = currentRevisionRes.json() as { results: HistorySearchResult[]; nextCursor: string | null };
     assert.deepEqual(currentRevisionBody.results.map((result) => result.meal.id), [seeded.updatedMeal.id]);
+    assert.equal(currentRevisionBody.results[0]?.meal.mealRevisionId, seeded.updatedMeal.mealRevisionId);
     assert.equal(currentRevisionBody.results[0]?.meal.revision.currentRevisionNumber, 2);
 
     const deletedRes = await app.inject({

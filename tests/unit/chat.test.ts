@@ -79,6 +79,7 @@ describe("ChatService", () => {
     assert.deepEqual(assistant.loggedMeal, {
       mealId: assistant.loggedMeal.mealId,
       dateKey: assistant.loggedMeal.dateKey,
+      mealRevisionId: loggedMeal.mealRevisionId,
       loggedAt: assistant.loggedMeal.loggedAt,
       imageAssetId: "lunch-image",
       imageUrl: "/api/assets/lunch-image",
@@ -98,6 +99,7 @@ describe("ChatService", () => {
     assert.equal("usedConservativeAssumption" in assistant.loggedMeal, false);
     assert.equal("confidence" in assistant.loggedMeal, false);
     assert.equal("estimate" in assistant.loggedMeal, false);
+    assert.equal("currentRevisionId" in assistant.loggedMeal, false);
   });
 
   it("uses stored mealRevisionId despite rapid log and edit collision", async () => {
@@ -136,6 +138,7 @@ describe("ChatService", () => {
       imagePath: "asset:newest-collision",
     });
     await foodLoggingService.updateMeal(deviceId, olderMeal.id, {
+      expectedMealRevisionId: olderMeal.mealRevisionId,
       items: [
         { foodName: "早餐蛋餅半份", calories: 210, protein: 8, carbs: 21, fat: 10 },
       ],
@@ -160,6 +163,7 @@ describe("ChatService", () => {
 
     assert.equal(restoredAssistant?.didLogMeal, true);
     assert.equal(restoredAssistant?.loggedMeal?.mealId, loggedMeal.id);
+    assert.equal(restoredAssistant?.loggedMeal?.mealRevisionId, loggedMeal.mealRevisionId);
     assert.equal(restoredAssistant?.loggedMeal?.imageAssetId, "collision-target");
     assert.equal(restoredAssistant?.loggedMeal?.foodName, "雞腿便當");
     assert.equal(restoredAssistant?.loggedMeal?.itemCount, 1);
@@ -187,6 +191,7 @@ describe("ChatService", () => {
     });
 
     await foodLoggingService.updateMeal(deviceId, loggedMeal.id, {
+      expectedMealRevisionId: loggedMeal.mealRevisionId,
       items: [
         { foodName: "雞腿便當半份", calories: 360, protein: 20, carbs: 45, fat: 10 },
       ],
@@ -200,6 +205,7 @@ describe("ChatService", () => {
     assert.ok(restoredAssistant?.loggedMeal);
     assert.equal(restoredAssistant.loggedMeal.mealId, undefined);
     assert.equal(restoredAssistant.loggedMeal.dateKey, undefined);
+    assert.equal(restoredAssistant.loggedMeal.mealRevisionId, undefined);
     assert.equal(restoredAssistant.loggedMeal.foodName, "雞腿便當");
     assert.equal(restoredAssistant.loggedMeal.itemCount, 1);
     assert.equal(restoredAssistant.loggedMeal.calories, 640);
@@ -227,7 +233,7 @@ describe("ChatService", () => {
       mealRevisionId: loggedMeal.mealRevisionId,
     });
 
-    await foodLoggingService.deleteMeal(deviceId, loggedMeal.id);
+    await foodLoggingService.deleteMeal(deviceId, loggedMeal.id, loggedMeal.mealRevisionId);
 
     const history = await chatService.getHistory(deviceId, 50);
     const restoredAssistant = history.find((message) => message.id === assistant.id);
@@ -236,6 +242,7 @@ describe("ChatService", () => {
     assert.ok(restoredAssistant?.loggedMeal);
     assert.equal(restoredAssistant.loggedMeal.mealId, undefined);
     assert.equal(restoredAssistant.loggedMeal.dateKey, undefined);
+    assert.equal(restoredAssistant.loggedMeal.mealRevisionId, undefined);
     assert.equal(restoredAssistant.loggedMeal.foodName, "鮭魚飯糰");
     assert.equal(restoredAssistant.loggedMeal.itemCount, 1);
     assert.equal(restoredAssistant.loggedMeal.calories, 280);
@@ -254,6 +261,7 @@ describe("ChatService", () => {
     });
     await chatService.saveMessage(deviceId, "user", "把 2026-03-25 的牛肉麵改成半碗");
     const updatedMeal = await foodLoggingService.updateMeal(deviceId, loggedMeal.id, {
+      expectedMealRevisionId: loggedMeal.mealRevisionId,
       items: [
         { foodName: "半碗牛肉麵", calories: 360, protein: 20, carbs: 45, fat: 10 },
       ],
@@ -276,6 +284,7 @@ describe("ChatService", () => {
     assert.deepEqual(assistant.loggedMeal, {
       mealId: updatedMeal.id,
       dateKey: "2026-03-25",
+      mealRevisionId: updatedMeal.mealRevisionId,
       loggedAt: updatedMeal.loggedAt,
       imageAssetId: null,
       imageUrl: null,
@@ -294,6 +303,7 @@ describe("ChatService", () => {
     assert.equal("usedConservativeAssumption" in assistant.loggedMeal, false);
     assert.equal("confidence" in assistant.loggedMeal, false);
     assert.equal("estimate" in assistant.loggedMeal, false);
+    assert.equal("currentRevisionId" in assistant.loggedMeal, false);
   });
 
   it("projects explicit loggedMeal receipts even when the tool row is outside the fetched history window", async () => {
@@ -328,6 +338,7 @@ describe("ChatService", () => {
     assert.deepEqual(assistant?.loggedMeal, {
       mealId: loggedMeal.id,
       dateKey: "2026-03-25",
+      mealRevisionId: loggedMeal.mealRevisionId,
       loggedAt: loggedMeal.loggedAt,
       imageAssetId: "salmon-rice",
       imageUrl: "/api/assets/salmon-rice",
@@ -364,6 +375,7 @@ describe("ChatService", () => {
       fat: 22,
     });
     await foodLoggingService.updateMeal(deviceId, mealToEdit.id, {
+      expectedMealRevisionId: mealToEdit.mealRevisionId,
       items: [{ foodName: "半份牛肉飯", calories: 380, protein: 18, carbs: 44, fat: 11 }],
     });
     await chatService.saveMessage(deviceId, "user", "把牛肉飯改成半份");
