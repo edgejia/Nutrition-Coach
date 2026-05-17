@@ -27,6 +27,7 @@ import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
+import type { SummaryOutcome } from "../services/summary-outcome.js";
 import {
   logChatRouteFallback,
   logChatTurnCompleted,
@@ -792,6 +793,7 @@ async function handleOrchestratorSSE(
   let streamDidLogMeal = false;
   let streamDidMutateMeal = false;
   let streamDailySummary: unknown;
+  let streamSummaryOutcome: SummaryOutcome | undefined;
   let streamDailyTargets: unknown;
   let streamAffectedDate: string | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
@@ -901,10 +903,11 @@ async function handleOrchestratorSSE(
     );
 
     if ("streamGenerator" in result) {
-      const { streamGenerator, didLogMeal, dailySummary, summaryHistoryFacts, affectedDate, loggedMeal } = result;
+      const { streamGenerator, didLogMeal, dailySummary, summaryOutcome, summaryHistoryFacts, affectedDate, loggedMeal } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
+      streamSummaryOutcome = summaryOutcome;
       streamDailyTargets = result.dailyTargets;
       streamAffectedDate = affectedDate;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
@@ -942,6 +945,7 @@ async function handleOrchestratorSSE(
           didMutateMeal: streamDidMutateMeal,
           ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
           ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
+          ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
           ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
           ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
         };
@@ -962,6 +966,7 @@ async function handleOrchestratorSSE(
         didMutateMeal: streamDidMutateMeal,
         ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
+        ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
       };
@@ -981,7 +986,7 @@ async function handleOrchestratorSSE(
       }
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
     } else {
-      const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate, loggedMeal } = result;
+      const { reply: replyText, didLogMeal, dailySummary, summaryOutcome, summaryHistoryFacts, dailyTargets, affectedDate, loggedMeal } = result;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
         shape: result.finalReplyShape ?? "empty_or_missing",
@@ -989,6 +994,7 @@ async function handleOrchestratorSSE(
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
+      streamSummaryOutcome = summaryOutcome;
       streamDailyTargets = dailyTargets;
       streamAffectedDate = affectedDate;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
@@ -1019,6 +1025,7 @@ async function handleOrchestratorSSE(
         didMutateMeal: streamDidMutateMeal,
         ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(dailySummary ? { dailySummary } : {}),
+        ...(summaryOutcome ? { summaryOutcome } : {}),
         ...(dailyTargets ? { dailyTargets } : {}),
         ...(affectedDate ? { affectedDate } : {}),
       };
@@ -1081,6 +1088,7 @@ async function handleOrchestratorSSE(
       didMutateMeal: streamDidMutateMeal,
       ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
+      ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
     };
@@ -1189,6 +1197,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonDidLogMeal = false;
       let jsonDidMutateMeal = false;
       let jsonDailySummary: unknown;
+      let jsonSummaryOutcome: SummaryOutcome | undefined;
       let jsonDailyTargets: unknown;
       let jsonAffectedDate: string | undefined;
       let jsonLoggedMealFallback: string | undefined;
@@ -1288,6 +1297,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonDidLogMeal = result.didLogMeal;
         jsonDidMutateMeal = result.didMutateMeal ?? result.didLogMeal;
         jsonDailySummary = result.dailySummary;
+        jsonSummaryOutcome = result.summaryOutcome;
         jsonDailyTargets = result.dailyTargets;
         jsonAffectedDate = result.affectedDate;
         jsonLoggedMealFallback = result.loggedMeal
@@ -1295,10 +1305,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           : undefined;
         jsonLoggedMealReceipt = projectLoggedMealReceipt(result.loggedMeal);
         jsonReceiptIdentity = buildReceiptIdentity(result.loggedMeal, result.loggedMealToolMessageId);
-
-        if (result.didLogMeal && !result.dailySummary) {
-          throw new Error("Invariant violated: didLogMeal response is missing dailySummary");
-        }
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
@@ -1362,6 +1368,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
             ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
             ...(dailySummary ? { dailySummary } : {}),
+            ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
             ...(affectedDate ? { affectedDate } : {}),
           };
@@ -1417,6 +1424,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
           ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(dailySummary ? { dailySummary } : {}),
+          ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
           ...(dailyTargets ? { dailyTargets } : {}),
           ...(affectedDate ? { affectedDate } : {}),
         };
@@ -1464,6 +1472,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonDidMutateMeal ? { didMutateMeal: true } : {}),
           ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}),
+          ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
           ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),
         };

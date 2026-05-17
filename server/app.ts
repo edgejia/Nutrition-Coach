@@ -97,7 +97,7 @@ export async function buildApp(opts: AppOptions) {
   const daySnapshotService = createDaySnapshotService({ summaryService, foodLoggingService });
   const chatService = createChatService(db);
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
-  const mealCorrectionService = createMealCorrectionService(db);
+  const mealCorrectionService = createMealCorrectionService(db, { summaryService, foodLoggingService });
   const goalProposalService = createGoalProposalService(db);
   const publisher = new RealtimePublisher();
 
