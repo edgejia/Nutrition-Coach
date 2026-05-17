@@ -126,6 +126,10 @@ export function createFoodLoggingService(db: AppDatabase) {
       return mealTransactionsService.assertExpectedMealRevision(deviceId, mealId, expectedMealRevisionId);
     },
 
+    async getMealMutationGuard(deviceId: string, mealId: string, expectedMealRevisionId?: string | null) {
+      return mealTransactionsService.getMealMutationGuard(deviceId, mealId, expectedMealRevisionId);
+    },
+
     async getMealItemCount(deviceId: string, mealId: string): Promise<number | null> {
       const transaction = await db
         .select({ currentRevisionId: mealTransactions.currentRevisionId })

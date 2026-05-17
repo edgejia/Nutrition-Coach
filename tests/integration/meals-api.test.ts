@@ -568,6 +568,94 @@ describe("Meals API", () => {
     }
   });
 
+  it("PATCH /api/meals/:id returns stale revision when grouping commits after the mutation guard", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉飯",
+      calories: 620,
+      protein: 31,
+      carbs: 70,
+      fat: 22,
+    });
+
+    let groupedCurrentMeal: Awaited<ReturnType<typeof services.foodLoggingService.updateMeal>> | undefined;
+    let summaryCalls = 0;
+    let publishCalls = 0;
+    const originalGuard = services.foodLoggingService.getMealMutationGuard.bind(services.foodLoggingService);
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.foodLoggingService.getMealMutationGuard = async (...args) => {
+      const guard = await originalGuard(...args);
+      const [, guardedMealId, expectedRevision] = args;
+      if (guardedMealId === meal.id && expectedRevision === meal.mealRevisionId && !groupedCurrentMeal) {
+        groupedCurrentMeal = await services!.foodLoggingService.updateMeal(deviceId, meal.id, {
+          expectedMealRevisionId: meal.mealRevisionId,
+          items: [
+            { foodName: "牛肉", calories: 330, protein: 29, carbs: 0, fat: 22 },
+            { foodName: "白飯", calories: 290, protein: 2, carbs: 70, fat: 0 },
+          ],
+        });
+      }
+      return guard;
+    };
+    services.summaryService.getDailySummary = async (...args) => {
+      summaryCalls += 1;
+      return originalGetDailySummary(...args);
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
+    };
+
+    try {
+      const stalePatch = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "牛肉飯少飯",
+          calories: 520,
+          protein: 31,
+          carbs: 48,
+          fat: 22,
+          imageAssetId: null,
+          expectedMealRevisionId: meal.mealRevisionId,
+        },
+      });
+
+      assert.ok(groupedCurrentMeal, "expected grouped update to commit during mutation guard");
+      assert.equal(stalePatch.statusCode, 409);
+      assert.deepEqual(stalePatch.json(), {
+        error: "MEAL_REVISION_STALE",
+        mealId: meal.id,
+        affectedDate: formatLocalDate(new Date(meal.loggedAt)),
+        currentMealRevisionId: groupedCurrentMeal.mealRevisionId,
+      });
+      assertNoSummaryFields(stalePatch.json());
+      assert.equal(summaryCalls, 0);
+      assert.equal(publishCalls, 0);
+
+      const currentMeals = await app.inject({
+        method: "GET",
+        url: "/api/meals",
+        headers: { cookie: deviceCookieHeader },
+      });
+      assert.deepEqual(
+        currentMeals.json().meals.map((entry: { id: string; mealRevisionId: string; itemCount: number }) => ({
+          id: entry.id,
+          mealRevisionId: entry.mealRevisionId,
+          itemCount: entry.itemCount,
+        })),
+        [{ id: meal.id, mealRevisionId: groupedCurrentMeal.mealRevisionId, itemCount: 2 }],
+      );
+    } finally {
+      services.foodLoggingService.getMealMutationGuard = originalGuard;
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
   it("PATCH /api/meals/:id returns committed facts with recovered summaryOutcome when recompute fails", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 

@@ -74,6 +74,15 @@ interface MealTransactionRow {
   createdAt: string;
 }
 
+type MealRevisionAssertionTarget = Pick<MealTransactionRow, "id" | "loggedAt" | "currentRevisionId">;
+
+export interface MealMutationGuard {
+  mealId: string;
+  affectedDate: string;
+  currentMealRevisionId: string;
+  itemCount: number;
+}
+
 type AssetReferenceWriter = Pick<AppDatabase, "insert">;
 
 export type MealRevisionPreconditionCode = "MEAL_REVISION_REQUIRED" | "MEAL_REVISION_STALE";
@@ -189,7 +198,7 @@ export function createMealTransactionsService(db: AppDatabase) {
   }
 
   function assertExpectedMealRevision(
-    existing: MealTransactionRow,
+    existing: MealRevisionAssertionTarget,
     expectedMealRevisionId: string | null | undefined,
   ) {
     const expected = typeof expectedMealRevisionId === "string" ? expectedMealRevisionId.trim() : "";
@@ -227,6 +236,43 @@ export function createMealTransactionsService(db: AppDatabase) {
       }
 
       assertExpectedMealRevision(existing, expectedMealRevisionId);
+    },
+
+    async getMealMutationGuard(
+      deviceId: string,
+      transactionId: string,
+      expectedMealRevisionId?: string | null,
+    ): Promise<MealMutationGuard> {
+      const existing = db.$client
+        .prepare(
+          `
+            SELECT
+              mt.id,
+              mt.logged_at AS loggedAt,
+              mt.current_revision_id AS currentRevisionId,
+              COUNT(mri.revision_id) AS itemCount
+            FROM meal_transactions AS mt INDEXED BY meal_tx_device_id_id_idx
+            LEFT JOIN meal_revision_items AS mri
+              ON mri.revision_id = mt.current_revision_id
+            WHERE mt.device_id = ? AND mt.id = ? AND mt.deleted_at IS NULL
+            GROUP BY mt.id, mt.logged_at, mt.current_revision_id
+            LIMIT 1
+          `,
+        )
+        .get(deviceId, transactionId) as (MealRevisionAssertionTarget & { itemCount: number }) | undefined;
+
+      if (!existing) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      assertExpectedMealRevision(existing, expectedMealRevisionId);
+
+      return {
+        mealId: existing.id,
+        affectedDate: formatLocalDate(new Date(existing.loggedAt)),
+        currentMealRevisionId: existing.currentRevisionId,
+        itemCount: existing.itemCount,
+      };
     },
 
     async createTransaction(
