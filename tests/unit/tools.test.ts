@@ -1228,6 +1228,138 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.loggedMeal.imageUrl, null);
   });
 
+  it("stores resolver-owned meal id and revision identity from find_meals", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const toolSessionState = {
+      resolvedMealTargets: [] as Array<{ mealId: string; mealRevisionId: string }>,
+    };
+
+    const call: ToolCall = {
+      id: "call_find_meal_revision_target",
+      type: "function",
+      function: {
+        name: "find_meals",
+        arguments: JSON.stringify({
+          action: "update",
+          query: "把 3/25 的雞腿飯改成 500 卡",
+        }),
+      },
+    };
+
+    const result = await executeTool(call, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState,
+    } as unknown as ToolDeps);
+
+    assert.equal(result.summary, "status: resolved");
+    assert.deepEqual(toolSessionState.resolvedMealTargets, [{
+      mealId: created.id,
+      mealRevisionId: created.mealRevisionId,
+    }]);
+  });
+
+  it("rejects update_meal when only id-only resolved state is present", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+
+    const call: ToolCall = {
+      id: "call_update_id_only_state",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          calories: 48,
+        }),
+      },
+    };
+
+    const result = await executeTool(call, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState: {
+        resolvedMealIds: [created.id],
+      },
+    });
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, created.id))
+    )[0];
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "execute");
+    assert.equal(transaction?.currentRevisionId, created.mealRevisionId);
+    assert.equal(revisions.length, 1);
+  });
+
+  it("rejects delete_meal when only id-only resolved state is present", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-03-25T10:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+
+    const call: ToolCall = {
+      id: "call_delete_id_only_state",
+      type: "function",
+      function: {
+        name: "delete_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+        }),
+      },
+    };
+
+    const result = await executeTool(call, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState: {
+        resolvedMealIds: [created.id],
+      },
+    });
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, created.id))
+    )[0];
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "execute");
+    assert.equal(transaction?.deletedAt, null);
+    assert.equal(transaction?.currentRevisionId, created.mealRevisionId);
+    assert.equal(revisions.length, 1);
+  });
+
   it("returns update_meal committed facts with unavailable summaryOutcome and no compatibility dailySummary", async () => {
     const created = await foodLoggingService.logFood(deviceId, {
       foodName: "蘋果",

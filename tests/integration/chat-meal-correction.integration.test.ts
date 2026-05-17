@@ -94,6 +94,7 @@ describe("chat meal correction integration", () => {
         mealCount: number;
         date: string;
       };
+      summaryOutcome?: unknown;
     };
   }> {
     const form = new FormData();
@@ -115,6 +116,7 @@ describe("chat meal correction integration", () => {
     assert.equal(res.status, 200);
     return (await res.json() as { meals: Array<{
       id: string;
+      mealRevisionId: string;
       foodName: string;
       calories: number;
       protein: number;
@@ -752,5 +754,184 @@ describe("chat meal correction integration", () => {
 
     const meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
     assert.equal(meals.length, 0);
+  });
+
+  it("fails closed when a resolved update target is stale before mutation", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_stale_update_target",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把雞腿飯蛋白質降低",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "我找到那筆雞腿飯，請告訴我要改成多少。",
+    });
+
+    const firstTurn = await postChat("把雞腿飯蛋白質降低");
+    assert.equal(firstTurn.status, 200);
+    assert.equal(firstTurn.body.didMutateMeal, false);
+
+    const externalUpdate = await services.foodLoggingService.updateMeal(deviceId, original.id, {
+      expectedMealRevisionId: original.mealRevisionId,
+      items: [{
+        foodName: "新版雞腿飯",
+        calories: 640,
+        protein: 31,
+        carbs: 78,
+        fat: 19,
+      }],
+    });
+    const publishCalls: unknown[] = [];
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls.push(args);
+      return { sent: 0 };
+    };
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "resolve_stale_update_from_pending",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "改成 22g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "apply_stale_update",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            protein: 22,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "這筆餐點已經有較新的紀錄，請重新整理後再修改。",
+    });
+
+    const staleTurn = await postChat("改成 22g");
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+
+    assert.equal(staleTurn.status, 200);
+    assert.equal(staleTurn.body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(staleTurn.body, "summaryOutcome"), false);
+    assert.doesNotMatch(staleTurn.body.reply, /已更新/);
+    assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
+    assert.equal(current?.protein, 31);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("fails closed when a resolved delete target is stale before mutation", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-04-19T10:30:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_stale_delete_target",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "delete",
+            query: "刪掉牛肉麵",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "我找到那筆牛肉麵，請確認是否刪除。",
+    });
+
+    const firstTurn = await postChat("刪掉牛肉麵");
+    assert.equal(firstTurn.status, 200);
+    assert.equal(firstTurn.body.didMutateMeal, false);
+
+    const externalUpdate = await services.foodLoggingService.updateMeal(deviceId, original.id, {
+      expectedMealRevisionId: original.mealRevisionId,
+      items: [{
+        foodName: "新版牛肉麵",
+        calories: 500,
+        protein: 26,
+        carbs: 60,
+        fat: 15,
+      }],
+    });
+    const publishCalls: unknown[] = [];
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls.push(args);
+      return { sent: 0 };
+    };
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "resolve_stale_delete_from_pending",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "delete",
+            query: "確認刪除",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "apply_stale_delete",
+        type: "function",
+        function: {
+          name: "delete_meal",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "這筆餐點已經有較新的紀錄，請重新整理後再刪除。",
+    });
+
+    const staleTurn = await postChat("確認刪除");
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+
+    assert.equal(staleTurn.status, 200);
+    assert.equal(staleTurn.body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(staleTurn.body, "summaryOutcome"), false);
+    assert.doesNotMatch(staleTurn.body.reply, /已刪除/);
+    assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
+    assert.equal(current?.foodName, "新版牛肉麵");
+    assert.deepEqual(publishCalls, []);
   });
 });

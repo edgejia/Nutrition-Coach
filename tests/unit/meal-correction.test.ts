@@ -3,6 +3,8 @@ process.env.TZ = "Asia/Taipei";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
+import { eq } from "drizzle-orm";
+import { mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
@@ -87,6 +89,7 @@ describe("meal correction service", () => {
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, latest.id);
+    assert.equal(result.mealRevisionId, latest.mealRevisionId);
     assert.equal(result.candidate.foodName, "雞腿飯");
     assert.equal(result.candidate.itemCount, 1);
   });
@@ -231,7 +234,7 @@ describe("meal correction service", () => {
 
     const result = await mealCorrectionService.updateMeal(deviceId, original.id, {
       patch: { protein: 22 },
-    });
+    }, original.mealRevisionId);
 
     assert.equal(result.updatedMeal.foodName, "雞腿");
     assert.equal(result.updatedMeal.calories, 220);
@@ -252,7 +255,7 @@ describe("meal correction service", () => {
 
     const result = await mealCorrectionService.updateMeal(deviceId, grouped.id, {
       patch: { protein: 22 },
-    });
+    }, grouped.mealRevisionId);
 
     assert.equal(result.updatedMeal.foodName, "雞胸肉、白飯、花椰菜");
     assert.equal(result.updatedMeal.itemCount, 3);
@@ -348,7 +351,7 @@ describe("meal correction service", () => {
     });
 
     await assert.rejects(
-      mealCorrectionService.updateMeal(deviceId, grouped.id, { patch: { foodName: "雞胸便當" } }),
+      mealCorrectionService.updateMeal(deviceId, grouped.id, { patch: { foodName: "雞胸便當" } }, grouped.mealRevisionId),
       /MEAL_NAME_PATCH_REQUIRES_SINGLE_ITEM/,
     );
   });
@@ -365,7 +368,7 @@ describe("meal correction service", () => {
 
     const result = await mealCorrectionService.updateMeal(deviceId, original.id, {
       patch: { calories: 500 },
-    });
+    }, original.mealRevisionId);
 
     assert.equal(result.affectedDate, "2026-03-25");
     assert.ok(result.dailySummary);
@@ -392,7 +395,7 @@ describe("meal correction service", () => {
 
     const result = await localMealCorrectionService.updateMeal(deviceId, original.id, {
       patch: { calories: 500 },
-    });
+    }, original.mealRevisionId);
 
     assert.equal(result.updatedMeal.id, original.id);
     assert.equal(result.updatedMeal.calories, 500);
@@ -501,7 +504,7 @@ describe("meal correction service", () => {
       /MEAL_NOT_FOUND/,
     );
 
-    const result = await mealCorrectionService.deleteMeal(deviceId, meal.id);
+    const result = await mealCorrectionService.deleteMeal(deviceId, meal.id, meal.mealRevisionId);
 
     assert.equal(result.deletedMealId, meal.id);
     assert.equal(result.affectedDate, "2026-03-25");
@@ -540,7 +543,7 @@ describe("meal correction service", () => {
       loggedAt: "2026-03-25T10:30:00.000Z",
     });
 
-    const result = await localMealCorrectionService.deleteMeal(deviceId, meal.id);
+    const result = await localMealCorrectionService.deleteMeal(deviceId, meal.id, meal.mealRevisionId);
 
     assert.equal(result.deletedMealId, meal.id);
     assert.equal(result.affectedDate, "2026-03-25");
@@ -548,5 +551,52 @@ describe("meal correction service", () => {
     assert.equal(result.dailySummary, undefined);
     assert.equal(result.deletedMeal.mealId, meal.id);
     assert.equal(result.deletedMeal.foodName, "beef noodles");
+  });
+
+  it("requires resolver-owned expected revisions for update and delete calls", async () => {
+    const updateTarget = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-04-19T12:00:00.000Z",
+    });
+    const deleteTarget = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-04-19T13:00:00.000Z",
+    });
+
+    await assert.rejects(
+      () => mealCorrectionService.updateMeal(deviceId, updateTarget.id, { patch: { protein: 22 } }),
+      /MEAL_REVISION_REQUIRED/,
+    );
+    await assert.rejects(
+      () => mealCorrectionService.deleteMeal(deviceId, deleteTarget.id),
+      /MEAL_REVISION_REQUIRED/,
+    );
+
+    const updateTransaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, updateTarget.id))
+    )[0];
+    const deleteTransaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, deleteTarget.id))
+    )[0];
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.equal(updateTransaction?.currentRevisionId, updateTarget.mealRevisionId);
+    assert.equal(deleteTransaction?.currentRevisionId, deleteTarget.mealRevisionId);
+    assert.equal(deleteTransaction?.deletedAt, null);
+    assert.equal(revisions.length, 2);
   });
 });
