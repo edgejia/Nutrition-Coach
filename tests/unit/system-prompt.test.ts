@@ -6,6 +6,12 @@ import {
   buildSystemPrompt,
 } from "../../server/orchestrator/system-prompt.js";
 
+function goalUpdateSection(prompt: string): string {
+  const match = /目標更新規則：[\s\S]*?(?=\n\n歷史餐點修正規則：)/.exec(prompt);
+  assert.ok(match, "goal update section must be present");
+  return match[0];
+}
+
 describe("buildSystemPrompt", () => {
   it("exports exact prompt metadata", () => {
     assert.equal(ACTIVE_SYSTEM_PROMPT_VERSION, "system-prompt.v2");
@@ -415,5 +421,42 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /find_meals 已解析出唯一目標.*update_meal 或 delete_meal/s);
     assert.match(prompt, /餐點拆分與記錄規則/);
     assert.match(prompt, /成功 log_food 回覆契約/);
+  });
+
+  it("routes vague goal changes through propose_goals", () => {
+    const section = goalUpdateSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /propose_goals/);
+    assert.match(section, /模糊目標變更意圖/);
+  });
+
+  it("requires explicit update_goals modes", () => {
+    const section = goalUpdateSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /update_goals/);
+    assert.match(section, /current_turn_values/);
+    assert.match(section, /latest_proposal/);
+  });
+
+  it("does not authorize target updates from previous assistant prose", () => {
+    const section = goalUpdateSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.doesNotMatch(section, /上一輪你已推薦具體數值/);
+    assert.doesNotMatch(section, /依上一輪推薦的數字更新目標/);
   });
 });
