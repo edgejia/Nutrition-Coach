@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: executing
-stopped_at: Completed 61-03-PLAN.md
-last_updated: "2026-05-17T07:28:40.776Z"
+stopped_at: Completed 61-04-PLAN.md
+last_updated: "2026-05-17T07:36:03.115Z"
 last_activity: 2026-05-17
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
-  percent: 78
+  completed_plans: 8
+  percent: 89
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-17)
 ## Current Position
 
 Phase: 61 (committed-mutation-outcome-and-summary-contract) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-05-17
 
-Progress: [████████░░] 78%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [████████░░] 78%
 | Phase 61 P02 | 4 min | 2 tasks | 5 files |
 | Phase 61 P05 | 7 min | 2 tasks | 2 files |
 | Phase 61 P03 | 5 min | 2 tasks | 4 files |
+| Phase 61 P04 | 5 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,8 @@ Recent decisions affecting current work:
 - [Phase 61]: Plan 05 direct route dailySummary compatibility fields are derived only from fresh or recovered summaryOutcome.
 - [Phase 61]: log_food now uses the shared buildSummaryOutcomeAfterMealCommit helper instead of a private log-only recovery path. — Keeps all meal mutation families on one post-commit summary availability policy.
 - [Phase 61]: OrchestratorResult exposes summaryOutcome for meal log/update/delete receipts while keeping update_goals on the Phase 60 committedSummary path. — Preserves the explicit Phase 61 scope boundary for goal mutations.
+- [Phase 61]: Chat JSON and SSE terminal payloads now expose summaryOutcome whenever the orchestrator result includes a committed meal mutation outcome. — Keeps JSON, done, and stopped chat payloads aligned with the Phase 61 public summaryOutcome contract.
+- [Phase 61]: Meal correction service now uses composition-root summary and food logging dependencies for shared degraded-summary test hooks. — Enables real Fastify update/delete integration proof for recompute and recovery failure without changing runtime policy.
 
 ### Pending Todos
 
@@ -102,6 +105,6 @@ None yet for v2.3.
 
 ## Session Continuity
 
-Last session: 2026-05-17T07:28:32.587Z
-Stopped at: Completed 61-03-PLAN.md
+Last session: 2026-05-17T07:35:50.234Z
+Stopped at: Completed 61-04-PLAN.md
 Resume file: None

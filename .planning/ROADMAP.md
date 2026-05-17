@@ -73,7 +73,7 @@ Plans:
 - [x] 61-03-PLAN.md — Chat tool and orchestrator summaryOutcome propagation
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 61-04-PLAN.md — Chat JSON/SSE response projection and integration proof
+- [x] 61-04-PLAN.md — Chat JSON/SSE response projection and integration proof
 
 **Wave 5** *(blocked on Wave 4 and plan 61-05 completion)*
 - [ ] 61-06-PLAN.md — Client parsing, direct mutation consumption, and final gate
@@ -142,7 +142,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 |-------|-----------|----------------|--------|-----------|
 | 59. Authoritative Summary Facts and SSE Proof | v2.2 blocker | 5/5 | Complete | 2026-05-16 |
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
-| 61. Committed Mutation Outcome and Summary Contract | v2.3 | 4/6 | In Progress|  |
+| 61. Committed Mutation Outcome and Summary Contract | v2.3 | 5/6 | In Progress|  |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 0/TBD | Not started | - |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 0/TBD | Not started | - |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
