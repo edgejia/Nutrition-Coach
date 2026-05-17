@@ -238,7 +238,7 @@ function createUpdateGoalsToolCall(): ToolCall {
     type: "function",
     function: {
       name: "update_goals",
-      arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+      arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
     },
   };
 }

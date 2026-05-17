@@ -6,12 +6,17 @@ import { createDb } from "../../server/db/client.js";
 import { chatMessages } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createGoalProposalService } from "../../server/services/goal-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { LLMProviderError } from "../../server/llm/errors.js";
 import { OpenAIProvider } from "../../server/llm/openai.js";
 import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
+import {
+  renderGoalAuthorityFailureCopy,
+  renderGoalValidationFailureCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createSpyHooks } from "../helpers/spy-hooks.js";
@@ -83,6 +88,7 @@ describe("Orchestrator", () => {
   let chatService: ReturnType<typeof createChatService>;
   let summaryService: ReturnType<typeof createSummaryService>;
   let deviceService: ReturnType<typeof createDeviceService>;
+  let goalProposalService: ReturnType<typeof createGoalProposalService>;
   let db: ReturnType<typeof createDb>;
   let deviceId: string;
   let spyHooks: ReturnType<typeof createSpyHooks>;
@@ -92,6 +98,7 @@ describe("Orchestrator", () => {
     db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
+    goalProposalService = createGoalProposalService(db);
     summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
@@ -103,6 +110,7 @@ describe("Orchestrator", () => {
       summaryService,
       foodLoggingService,
       deviceService,
+      goalProposalService,
       publisher: {
         publishGoalsUpdate(id: string, targets: DailyTargets) {
           publishedGoals.push({ deviceId: id, targets });
@@ -122,6 +130,7 @@ describe("Orchestrator", () => {
       summaryService,
       foodLoggingService,
       deviceService,
+      goalProposalService,
       publisher: {
         publishGoalsUpdate(id: string, targets: DailyTargets) {
           publishedGoals.push({ deviceId: id, targets });
@@ -207,7 +216,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
@@ -757,13 +766,13 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
     mockLLM.queueChatResponse({ content: "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g" });
 
-    const result = await orchestrator.handleMessage(deviceId, "卡路里改 1800，是", undefined, undefined, { hooks: spyHooks });
+    const result = await orchestrator.handleMessage(deviceId, "卡路里改 1800，蛋白質 130", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
     assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
     assert.equal(result.finalReplySource, "renderer");
@@ -774,14 +783,14 @@ describe("Orchestrator", () => {
     assert.equal(publishedGoals.length, 1);
   });
 
-  it("GOAL-05: controlled validation failure saves a tool message, returns to the LLM, and does not throw", async () => {
+  it("GOAL-05: controlled validation failure returns renderer copy without a later LLM round", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "goal_validation",
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 99999 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 99999 }),
         },
       }],
     });
@@ -790,7 +799,10 @@ describe("Orchestrator", () => {
     const result = await orchestrator.handleMessage(deviceId, "卡路里改 99999", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
     assert.equal(result.didLogMeal, false);
-    assert.equal(result.reply, "請提供 500 到 8000 之間的卡路里目標。");
+    assert.equal(result.reply, renderGoalValidationFailureCopy(["calories"]));
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 1);
 
     const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
     assert.equal(payload.tool, "update_goals");
@@ -798,13 +810,8 @@ describe("Orchestrator", () => {
     assert.equal(payload.executed, false);
     assert.match(payload.failureReason ?? "", /validation/);
 
-    const secondRoundMessages = mockLLM.chatCalls[1].messages;
-    const toolMessage = secondRoundMessages.find((message) => message.role === "tool");
-    assert.ok(toolMessage, "validation failure should be pushed into the next LLM round");
-    assert.match(String(toolMessage.content), /validation/);
-
     const storedMessages = await db.select().from(chatMessages).where(eq(chatMessages.deviceId, deviceId));
-    assert.equal(storedMessages.some((message) => message.role === "tool" && message.toolName === "update_goals"), true);
+    assert.equal(storedMessages.some((message) => message.role === "tool" && message.toolName === "update_goals"), false);
   });
 
   it("GOAL-06: controlled guard failure records failureReason:\"guard\" and keeps the fatal unknown-tool path unchanged", async () => {
@@ -814,7 +821,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800 }),
         },
       }],
     });
@@ -823,6 +830,8 @@ describe("Orchestrator", () => {
     const result = await orchestrator.handleMessage(deviceId, "少吃一點", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
     assert.equal(result.didLogMeal, false);
+    assert.equal(result.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(result.finalReplySource, "renderer");
     const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
     assert.equal(payload.tool, "update_goals");
     assert.equal(payload.success, false);
@@ -851,7 +860,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
