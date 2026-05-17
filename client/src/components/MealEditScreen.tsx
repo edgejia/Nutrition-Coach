@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteMeal, getMeals, updateMeal } from "../api.js";
+import { deleteMeal, getMeals, MealRevisionConflictError, updateMeal } from "../api.js";
 import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { DailySummary, MealEditPayload } from "../types.js";
@@ -26,6 +26,11 @@ const NUTRITION_FIELDS: Array<{ key: NutritionKey; label: string; unit: "kcal" |
 
 const MULTI_ITEM_UPDATE_ERROR_CODE = "MEAL_REQUIRES_" + "GROUP" + "ED_UPDATE";
 const MULTI_ITEM_UPDATE_ERROR_COPY = "這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。";
+const MEAL_REVISION_REQUIRED = "MEAL_REVISION_REQUIRED";
+const MEAL_REVISION_STALE = "MEAL_REVISION_STALE";
+const STALE_EDIT_ERROR_COPY = "餐點已被更新，請重新載入最新餐點後再編輯。";
+const MISSING_REVISION_ERROR_COPY = "餐點版本已失效，請重新載入最新餐點後再編輯。";
+const STALE_DELETE_ERROR_COPY = "餐點已被更新，未刪除。請重新載入最新餐點後再決定是否刪除。";
 
 function formatMealItemMacro(value: number, unit: "kcal" | "g") {
   return `${Math.round(value)} ${unit}`;
@@ -112,10 +117,14 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
   const [draft, setDraft] = useState<DraftState | null>(() => (payload && !isGroupedPayload ? createDraft(payload) : null));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [staleBlocked, setStaleBlocked] = useState(false);
+  const [staleAffectedDate, setStaleAffectedDate] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(payload && payload.itemCount <= 1 ? createDraft(payload) : null);
     setError(null);
+    setStaleBlocked(false);
+    setStaleAffectedDate(null);
   }, [payload]);
 
   async function refreshAfterMealMutation(mealId: string, affectedDate: string, dailySummary?: DailySummary) {
@@ -130,8 +139,48 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setMeals(meals);
   }
 
+  async function refreshAfterStaleConflict(mealId: string, affectedDate: string) {
+    redactChatReceiptIdentity(mealId);
+    recordMealMutation(affectedDate);
+    setStaleAffectedDate(affectedDate);
+    if (affectedDate !== formatLocalDate(new Date())) {
+      return;
+    }
+
+    const { meals } = await getMeals({ refreshReason: "meal_mutation" });
+    setMeals(meals);
+  }
+
+  async function handleMealRevisionConflict(error: MealRevisionConflictError, mode: "save" | "delete") {
+    setStaleBlocked(true);
+    setError(
+      mode === "delete"
+        ? STALE_DELETE_ERROR_COPY
+        : error.code === MEAL_REVISION_REQUIRED
+          ? MISSING_REVISION_ERROR_COPY
+          : error.code === MEAL_REVISION_STALE
+            ? STALE_EDIT_ERROR_COPY
+            : STALE_EDIT_ERROR_COPY,
+    );
+    await refreshAfterStaleConflict(error.mealId, error.affectedDate);
+  }
+
+  async function handleReloadStaleMeal() {
+    if (!staleAffectedDate) {
+      onBack();
+      return;
+    }
+
+    if (staleAffectedDate === formatLocalDate(new Date())) {
+      const { meals } = await getMeals({ refreshReason: "meal_mutation" });
+      setMeals(meals);
+    }
+
+    onBack();
+  }
+
   async function handleSave() {
-    if (!payload || payload.itemCount > 1 || !draft) {
+    if (!payload || staleBlocked || payload.itemCount > 1 || !draft) {
       return;
     }
 
@@ -145,6 +194,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setError(null);
     try {
       const response = await updateMeal(payload.mealId, {
+        expectedMealRevisionId: payload.mealRevisionId,
         ...parsedDraft,
         imageAssetId: payload.imageAssetId ?? null,
       });
@@ -155,6 +205,8 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
         void recoverGuestSession();
       } else if (err instanceof Error && err.message === MULTI_ITEM_UPDATE_ERROR_CODE) {
         setError(MULTI_ITEM_UPDATE_ERROR_COPY);
+      } else if (err instanceof MealRevisionConflictError) {
+        await handleMealRevisionConflict(err, "save");
       } else {
         setError("餐點暫時無法儲存，請稍後再試。");
       }
@@ -164,7 +216,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
   }
 
   async function handleDelete() {
-    if (!payload) {
+    if (!payload || staleBlocked) {
       return;
     }
 
@@ -175,12 +227,16 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setPending(true);
     setError(null);
     try {
-      const { affectedDate, dailySummary } = await deleteMeal(payload.mealId);
+      const { affectedDate, dailySummary } = await deleteMeal(payload.mealId, {
+        expectedMealRevisionId: payload.mealRevisionId,
+      });
       await refreshAfterMealMutation(payload.mealId, affectedDate, dailySummary);
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         void recoverGuestSession();
+      } else if (err instanceof MealRevisionConflictError) {
+        await handleMealRevisionConflict(err, "delete");
       } else {
         setError("餐點暫時無法刪除，請稍後再試。");
       }
@@ -354,8 +410,8 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
             </div>
 
             <div className="sp-meal-edit-delete-row">
-              <button type="button" onClick={handleDelete} disabled={pending}>
-                {pending ? "處理中..." : "刪除"}
+              <button type="button" onClick={handleDelete} disabled={pending || staleBlocked}>
+                {pending ? "刪除餐點中..." : "刪除餐點"}
               </button>
             </div>
 
@@ -365,6 +421,11 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
             {error ? (
               <div className="sp-meal-edit-error" role="alert">
                 {error}
+                {staleBlocked ? (
+                  <button type="button" onClick={handleReloadStaleMeal}>
+                    重新載入餐點
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </SportCard>
@@ -374,8 +435,8 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
           <button type="button" className="sp-meal-edit-cancel" onClick={onBack} disabled={pending}>
             取消
           </button>
-          <button type="button" className="sp-meal-edit-save" onClick={handleSave} disabled={pending}>
-            {pending ? "儲存中..." : "儲存"}
+          <button type="button" className="sp-meal-edit-save" onClick={handleSave} disabled={pending || staleBlocked}>
+            {pending ? "儲存餐點中..." : "儲存餐點"}
           </button>
         </footer>
       </SportScreen>

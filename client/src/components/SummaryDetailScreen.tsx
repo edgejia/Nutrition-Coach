@@ -14,7 +14,7 @@ import { buildCalendarWeeks, getInitialSummaryDateKey, isHistoricalSummaryDate }
 import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
-import type { DailySummary, DailyTargets } from "../types.js";
+import type { DailySummary, DailyTargets, MealEntry } from "../types.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportCard, SportChip, SportIconButton, SportProgressBar, SportScreen } from "./SportPrimitives.js";
 import { SportChevronLeftIcon } from "./SportIcons.js";
@@ -37,7 +37,7 @@ interface SummaryDetailScreenPresentationProps {
   onToggleCalendar: () => void;
   onBrowseMonth: (delta: -1 | 1) => void;
   onSelectDate: (dateKey: string) => void;
-  onDeleteMeal: (mealId: string) => void | Promise<void>;
+  onDeleteMeal: (meal: MealEntry) => void | Promise<void>;
 }
 
 function formatSummaryDateLabel(dateKey: string) {
@@ -89,7 +89,7 @@ function SummaryDetailMealRow({
 }: {
   meal: Awaited<ReturnType<typeof getDaySnapshot>>["meals"][number];
   isReadOnly: boolean;
-  onDelete: (mealId: string) => void | Promise<void>;
+  onDelete: (meal: MealEntry) => void | Promise<void>;
   deletingMealId: string | null;
 }) {
   return (
@@ -115,7 +115,7 @@ function SummaryDetailMealRow({
       {!isReadOnly && (
         <button
           type="button"
-          onClick={() => onDelete(meal.id)}
+          onClick={() => onDelete(meal)}
           disabled={deletingMealId === meal.id}
           className="sp-summary-delete-btn"
         >
@@ -494,7 +494,12 @@ export function SummaryDetailScreen() {
     setIsCalendarOpen(nextState.isCalendarOpen);
   }
 
-  async function handleDelete(mealId: string) {
+  async function handleDelete(meal: MealEntry) {
+    const mealId = meal.id;
+    if (!meal.mealRevisionId) {
+      alert("刪除失敗，請再試一次。");
+      return;
+    }
     const previousSnapshot = snapshot;
     setDeletingMealId(mealId);
     setSnapshot((currentSnapshot) =>
@@ -507,7 +512,9 @@ export function SummaryDetailScreen() {
     );
 
     try {
-      const { affectedDate, dailySummary } = await deleteMeal(mealId);
+      const { affectedDate, dailySummary } = await deleteMeal(mealId, {
+        expectedMealRevisionId: meal.mealRevisionId,
+      });
       recordMealMutation(affectedDate);
       if (dailySummary?.date === todayKey) {
         setDailySummary(dailySummary);

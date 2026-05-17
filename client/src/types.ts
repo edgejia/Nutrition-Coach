@@ -7,6 +7,7 @@ export interface DayDetailPayload {
 }
 export interface MealEditPayload {
   mealId: string;
+  mealRevisionId: string;
   dateKey: string;
   foodName: string;
   calories: number;
@@ -73,6 +74,7 @@ export interface LoggedMealReceipt {
   itemCount: number;
   items?: MealItemDetail[];
   mealId?: string;
+  mealRevisionId?: string;
   dateKey?: string;
   loggedAt?: string;
   imageAssetId?: string | null;
@@ -81,6 +83,7 @@ export interface LoggedMealReceipt {
 
 export interface MealEntry {
   id: string;
+  mealRevisionId?: string;
   foodName: string;
   calories: number;
   protein: number;
@@ -94,12 +97,17 @@ export interface MealEntry {
 }
 
 export interface UpdateMealInput {
+  expectedMealRevisionId: string;
   foodName: string;
   calories: number;
   protein: number;
   carbs: number;
   fat: number;
   imageAssetId?: string | null;
+}
+
+export interface DeleteMealOptions {
+  expectedMealRevisionId: string;
 }
 
 export interface UpdateMealResponse {

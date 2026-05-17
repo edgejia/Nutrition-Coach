@@ -171,6 +171,7 @@ describe("meal edit payload builders", () => {
   it("defaults legacy edit payloads without itemCount to single-item semantics", () => {
     const historyPayload = buildHistoryMealEditPayload({
       id: "legacy-history",
+      mealRevisionId: "legacy-history:r1",
       foodName: "蘋果",
       calories: 95,
       protein: 0,
@@ -193,6 +194,7 @@ describe("meal edit payload builders", () => {
     } as any);
 
     assert.equal((historyPayload as any).itemCount, 1);
+    assert.equal((historyPayload as any).mealRevisionId, "legacy-history:r1");
     assert.equal((receiptPayload as any)?.itemCount, 1);
     assert.equal((receiptPayload as any)?.mealRevisionId, "legacy-receipt:r1");
   });

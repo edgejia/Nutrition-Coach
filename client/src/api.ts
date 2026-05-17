@@ -13,6 +13,7 @@ import type {
   Message,
   CoachCTAIntentId,
   CoachCTAOptionId,
+  DeleteMealOptions,
   DeleteMealResponse,
   SummaryOutcome,
   UpdateMealInput,
@@ -36,6 +37,22 @@ export class IntakeValidationError extends Error {
   ) {
     super("Failed to submit intake");
     this.name = "IntakeValidationError";
+  }
+}
+
+export type MealRevisionConflictCode = "MEAL_REVISION_REQUIRED" | "MEAL_REVISION_STALE";
+
+export class MealRevisionConflictError extends Error {
+  readonly kind = "meal_revision_conflict";
+
+  constructor(
+    readonly code: MealRevisionConflictCode,
+    readonly mealId: string,
+    readonly affectedDate: string,
+    readonly currentMealRevisionId?: string,
+  ) {
+    super(code);
+    this.name = "MealRevisionConflictError";
   }
 }
 
@@ -130,6 +147,7 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
   ) {
     return (
       (value.mealId === undefined || typeof value.mealId === "string") &&
+      (value.mealRevisionId === undefined || typeof value.mealRevisionId === "string") &&
       (value.dateKey === undefined || typeof value.dateKey === "string") &&
       (value.loggedAt === undefined || typeof value.loggedAt === "string") &&
       (value.itemCount === undefined ||
@@ -208,6 +226,26 @@ function getResponseErrorMessage(body: unknown): string | null {
   }
 
   return body.error;
+}
+
+function getMealRevisionConflictError(status: number, body: unknown): MealRevisionConflictError | null {
+  if (status !== 409 || !isRecord(body)) {
+    return null;
+  }
+
+  const code = body.error;
+  if (code !== "MEAL_REVISION_REQUIRED" && code !== "MEAL_REVISION_STALE") {
+    return null;
+  }
+
+  if (typeof body.mealId !== "string" || typeof body.affectedDate !== "string") {
+    return null;
+  }
+
+  const currentMealRevisionId =
+    typeof body.currentMealRevisionId === "string" ? body.currentMealRevisionId : undefined;
+
+  return new MealRevisionConflictError(code, body.mealId, body.affectedDate, currentMealRevisionId);
 }
 
 function getImageExtension(filename: string): string {
@@ -772,6 +810,7 @@ export async function getDaySnapshot(
 
 interface HistoryMealDto {
   id: string;
+  mealRevisionId?: string;
   loggedAt: string;
   display?: { title?: string };
   nutrition?: { calories?: number; protein?: number; carbs?: number; fat?: number };
@@ -792,6 +831,7 @@ export function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
 
   return {
     id: meal.id,
+    ...(typeof meal.mealRevisionId === "string" ? { mealRevisionId: meal.mealRevisionId } : {}),
     foodName: meal.display?.title ?? meal.foodName ?? "未命名餐點",
     calories: meal.nutrition?.calories ?? meal.calories ?? 0,
     protein: meal.nutrition?.protein ?? meal.protein ?? 0,
@@ -825,13 +865,22 @@ export async function getHistoryDaySnapshot(dateKey: string): Promise<HistoryDay
   };
 }
 
-export async function deleteMeal(mealId: string): Promise<DeleteMealResponse> {
-  const res = await fetch(`/api/meals/${mealId}`, {
+export async function deleteMeal(mealId: string, options: DeleteMealOptions): Promise<DeleteMealResponse> {
+  const res = await fetch(`/api/meals/${encodeURIComponent(mealId)}`, {
     method: "DELETE",
     credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedMealRevisionId: options.expectedMealRevisionId }),
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) throw new Error("Failed to delete meal");
+  if (!res.ok) {
+    const body = await readJsonSafe(res);
+    const conflict = getMealRevisionConflictError(res.status, body);
+    if (conflict) {
+      throw conflict;
+    }
+    throw new Error("Failed to delete meal");
+  }
   const body = await res.json() as DeleteMealResponse;
   return normalizeSummaryOutcomeFields(body);
 }
@@ -845,7 +894,12 @@ export async function updateMeal(mealId: string, input: UpdateMealInput): Promis
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) {
-    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    const body = await readJsonSafe(res);
+    const conflict = getMealRevisionConflictError(res.status, body);
+    if (conflict) {
+      throw conflict;
+    }
+    const errorMessage = getResponseErrorMessage(body);
     throw new Error(errorMessage ?? "Failed to update meal");
   }
   const body = await res.json() as UpdateMealResponse;

@@ -58,10 +58,15 @@ function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
 }
 
 export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): MealEditPayload {
+  if (!meal.mealRevisionId) {
+    throw new Error("MEAL_REVISION_REQUIRED");
+  }
+
   const items = normalizeMealItems((meal as { items?: unknown }).items);
 
   return {
     mealId: meal.id,
+    mealRevisionId: meal.mealRevisionId,
     dateKey,
     foodName: meal.foodName,
     calories: meal.calories,
@@ -80,6 +85,7 @@ export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | unde
   if (
     !loggedMeal ||
     !loggedMeal.mealId ||
+    !loggedMeal.mealRevisionId ||
     !loggedMeal.dateKey ||
     loggedMeal.foodName.trim().length === 0 ||
     !Number.isFinite(loggedMeal.calories) ||
@@ -94,6 +100,7 @@ export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | unde
 
   return {
     mealId: loggedMeal.mealId,
+    mealRevisionId: loggedMeal.mealRevisionId,
     dateKey: loggedMeal.dateKey,
     foodName: loggedMeal.foodName,
     calories: loggedMeal.calories,

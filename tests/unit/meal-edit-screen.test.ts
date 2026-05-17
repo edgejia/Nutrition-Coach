@@ -95,7 +95,7 @@ describe("Meal Edit source contract", () => {
   });
 
   it("keeps Summary Detail direct delete side effects guarded by a usable dailySummary", () => {
-    assert.match(summaryDetailSource, /const \{ affectedDate, dailySummary \} = await deleteMeal\(mealId\);/);
+    assert.match(summaryDetailSource, /const \{ affectedDate, dailySummary \} = await deleteMeal\(mealId, \{\s*expectedMealRevisionId: meal\.mealRevisionId,\s*\}\);/);
     assert.match(summaryDetailSource, /recordMealMutation\(affectedDate\);/);
     assert.match(summaryDetailSource, /if \(dailySummary\?\.date === todayKey\) \{/);
 

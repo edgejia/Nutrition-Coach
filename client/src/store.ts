@@ -150,7 +150,12 @@ export const useStore = create<AppState>((set, get) => ({
           return message;
         }
 
-        const { mealId: _mealId, dateKey: _dateKey, ...displayOnlyReceipt } = message.loggedMeal;
+        const {
+          mealId: _mealId,
+          mealRevisionId: _mealRevisionId,
+          dateKey: _dateKey,
+          ...displayOnlyReceipt
+        } = message.loggedMeal;
         return { ...message, loggedMeal: displayOnlyReceipt };
       }),
     })),

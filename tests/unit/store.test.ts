@@ -280,11 +280,12 @@ describe("AppStore", () => {
     assert.deepEqual(useStore.getState().secondaryScreen, {
       screen: "mealEdit",
       origin: "chat",
-      payload: {
-        mealId: "meal-1",
-        dateKey: "2026-04-30",
-        foodName: "雞胸肉沙拉",
-        calories: 420,
+        payload: {
+          mealId: "meal-1",
+          dateKey: "2026-04-30",
+          foodName: "雞胸肉沙拉",
+          mealRevisionId: "meal-1:r1",
+          calories: 420,
         protein: 32,
         carbs: 14,
         fat: 22,

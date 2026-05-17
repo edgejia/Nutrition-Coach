@@ -688,7 +688,7 @@ describe("API Client", () => {
       },
     });
 
-    const result = await api.deleteMeal("meal-1");
+    const result = await api.deleteMeal("meal-1", { expectedMealRevisionId: "meal-1:r1" });
 
     assert.deepEqual(result, {
       affectedDate: "2026-03-25",
@@ -807,6 +807,7 @@ describe("API Client", () => {
       },
       meal: {
         id: "meal-1",
+        mealRevisionId: "meal-1:r2",
         foodName: "雞胸肉沙拉半份",
         calories: 260,
         protein: 20,
@@ -819,6 +820,7 @@ describe("API Client", () => {
     });
 
     const result = await api.updateMeal("meal-1", {
+      expectedMealRevisionId: "meal-1:r1",
       foodName: "雞胸肉沙拉半份",
       calories: 260,
       protein: 20,
@@ -850,6 +852,7 @@ describe("API Client", () => {
       },
       meal: {
         id: "meal-1",
+        mealRevisionId: "meal-1:r2",
         foodName: "照片便當更新",
         calories: 660,
         protein: 34,
@@ -862,6 +865,7 @@ describe("API Client", () => {
     });
 
     const result = await api.updateMeal("meal-1", {
+      expectedMealRevisionId: "meal-1:r1",
       foodName: "照片便當更新",
       calories: 660,
       protein: 34,
@@ -881,6 +885,7 @@ describe("API Client", () => {
     await assert.rejects(
       () =>
         api.updateMeal("meal 1/with slash", {
+          expectedMealRevisionId: "meal-1:r1",
           foodName: "雞胸肉沙拉半份",
           calories: 260,
           protein: 20,
