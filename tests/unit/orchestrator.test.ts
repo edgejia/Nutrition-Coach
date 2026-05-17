@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createGoalProposalService } from "../../server/services/goal-proposals.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
@@ -317,6 +318,7 @@ describe("Orchestrator - didLogMeal", () => {
   let deviceService: ReturnType<typeof createDeviceService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
+  let goalProposalService: ReturnType<typeof createGoalProposalService>;
   let chatService: ReturnType<typeof createChatService>;
   let shouldFailSummary = false;
 
@@ -325,6 +327,7 @@ describe("Orchestrator - didLogMeal", () => {
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
+    goalProposalService = createGoalProposalService(db);
     const summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
@@ -345,6 +348,7 @@ describe("Orchestrator - didLogMeal", () => {
       foodLoggingService,
       mealCorrectionService,
       deviceService,
+      goalProposalService,
     });
 
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
@@ -567,6 +571,7 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
+    const localGoalProposalService = createGoalProposalService(db);
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
     const localLLM = new MockLLMProvider();
 
@@ -576,6 +581,7 @@ describe("Orchestrator - didLogMeal", () => {
       summaryService: localSummaryService,
       foodLoggingService: localFoodLoggingService,
       deviceService: localDeviceService,
+      goalProposalService: localGoalProposalService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -589,7 +595,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
@@ -611,6 +617,7 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
+    const localGoalProposalService = createGoalProposalService(db);
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
     const localLLM = new MockLLMProvider();
 
@@ -620,6 +627,7 @@ describe("Orchestrator - didLogMeal", () => {
       summaryService: localSummaryService,
       foodLoggingService: localFoodLoggingService,
       deviceService: localDeviceService,
+      goalProposalService: localGoalProposalService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -634,7 +642,7 @@ describe("Orchestrator - didLogMeal", () => {
           type: "function",
           function: {
             name: "update_goals",
-            arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+            arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
           },
         },
         {
@@ -1125,6 +1133,7 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
+    const localGoalProposalService = createGoalProposalService(db);
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
 
     orchestrator = createOrchestrator({
@@ -1182,6 +1191,7 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
+    const localGoalProposalService = createGoalProposalService(db);
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
 
     orchestrator = createOrchestrator({
@@ -1464,6 +1474,7 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
+    const localGoalProposalService = createGoalProposalService(db);
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
 
     orchestrator = createOrchestrator({
@@ -1472,6 +1483,7 @@ describe("Orchestrator - didLogMeal", () => {
       summaryService: localSummaryService,
       foodLoggingService: localFoodLoggingService,
       deviceService: localDeviceService,
+      goalProposalService: localGoalProposalService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -1485,7 +1497,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
@@ -1509,6 +1521,7 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
+    const localGoalProposalService = createGoalProposalService(db);
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
 
     orchestrator = createOrchestrator({
@@ -1517,6 +1530,7 @@ describe("Orchestrator - didLogMeal", () => {
       summaryService: localSummaryService,
       foodLoggingService: localFoodLoggingService,
       deviceService: localDeviceService,
+      goalProposalService: localGoalProposalService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -1530,7 +1544,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
@@ -1550,6 +1564,7 @@ describe("Orchestrator - didLogMeal", () => {
     const localFoodLoggingService = createFoodLoggingService(db);
     const localSummaryService = createSummaryService(db);
     const localChatService = createChatService(db);
+    const localGoalProposalService = createGoalProposalService(db);
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
 
     orchestrator = createOrchestrator({
@@ -1558,6 +1573,7 @@ describe("Orchestrator - didLogMeal", () => {
       summaryService: localSummaryService,
       foodLoggingService: localFoodLoggingService,
       deviceService: localDeviceService,
+      goalProposalService: localGoalProposalService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -1571,7 +1587,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });

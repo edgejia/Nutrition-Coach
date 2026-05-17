@@ -22,6 +22,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         "find_meals",
         "get_daily_summary",
         "log_food",
+        "propose_goals",
         "update_goals",
         "update_meal",
       ]);
