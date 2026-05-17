@@ -4,6 +4,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
@@ -71,6 +72,7 @@ describe("chat goal update integration", () => {
   let address: string;
   let sessionCookieHeader: string;
   let publishCalls: Array<{ event: "goals_update" }>;
+  let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -80,9 +82,15 @@ describe("chat goal update integration", () => {
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
     publishCalls = [];
+    traceRecorders = [];
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: mockLLM,
+      llmTraceRecorderFactory() {
+        const recorder = createLlmTraceRecorder();
+        traceRecorders.push(recorder);
+        return recorder;
+      },
       onServicesReady(services: AppServices) {
         const originalPublishGoalsUpdate = services.publisher.publishGoalsUpdate.bind(services.publisher);
         services.publisher.publishGoalsUpdate = (deviceId, targets) => {
@@ -255,6 +263,56 @@ describe("chat goal update integration", () => {
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
     assert.deepEqual(publishCalls, []);
     assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("records rejected goal final reply metadata as renderer-owned without raw text evidence", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_trace_missing_proposal",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "latest_proposal" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已經幫你更新每日目標。" });
+
+    const { status, body } = await postChat("好");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, renderGoalAuthorityFailureCopy());
+    const trace = traceRecorders.at(-1)?.build({ scenario: "goal-missing-proposal", status: "pass" });
+    assert.ok(trace);
+    assert.deepEqual(trace.summary.finalReply, {
+      source: "renderer",
+      shape: "plain_text",
+    });
+    const toolResult = trace.timeline.find((event) => event.type === "tool_result");
+    assert.deepEqual(toolResult, {
+      type: "tool_result",
+      round: 1,
+      tool: "update_goals",
+      success: false,
+      executed: false,
+      failureReason: "guard",
+      updatedFields: [],
+    });
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "好",
+      renderGoalAuthorityFailureCopy(),
+      "latest_proposal",
+      "已經幫你更新每日目標",
+      sessionCookieHeader,
+      "guest_session",
+      "data:image",
+      "provider body",
+      "database",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
   });
 
   it("cancels an active proposal before the model runs and publishes nothing", async () => {
