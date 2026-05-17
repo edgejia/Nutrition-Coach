@@ -49,11 +49,10 @@ v2.2 completed the metadata-only failure-localization foundation for the chat/lo
 - ✓ Successful chat completions and fallback paths are represented by separate structured events, so operational summaries do not count fallback as completed — v2.2 Phase 57.
 - ✓ Normal `llm-trace.json` can add metadata-only failure events while preserving the raw-debugger boundary documented in `docs/research/logger/llm-trace-raw-debugger-decision.md` — v2.2 Phase 57.
 - ✓ Auth-style provider failure localization has deterministic integration and harness proof without persisting user-visible fallback text — v2.2 Phase 58.
+- ✓ Backend-owned goal proposals gate ambiguous confirmation text, and rejected goal updates return deterministic backend copy without mutation or publish side effects — v2.3 Phase 60.
 
 ### Active
 
-- [ ] **GOAL-01** Backend creates and persists structured pending goal proposals before ambiguous confirmation text can update goals.
-- [ ] **GOAL-02** Failed `update_goals` validation or guard outcomes render deterministic backend failure copy.
 - [ ] **MUT-01** Meal update, delete, and log mutations return committed mutation outcomes even if summary recompute fails.
 - [ ] **FRESH-01** Chat receipt actions cannot PATCH stale meal facts over newer meal state.
 - [ ] **FRESH-02** Daily summary SSE events refresh or invalidate meal rows alongside summary totals.
@@ -106,6 +105,8 @@ v2.3 integrity context:
 | Keep provider error logging in hooks/structured logs rather than raw provider logger calls | Existing architecture routes orchestration observability through hooks and keeps services/providers free of direct logger ownership. | Validated in Phase 56 |
 | Separate fallback and completion observability | HTTP delivery success is not the same as a completed chat turn; fallback paths need their own event and trace facts. | Validated in Phase 57 |
 | Keep user-visible fallback copy checks non-persisted | Release evidence should prove localization/privacy while keeping artifacts metadata-only. | Validated in Phase 58 |
+| Use backend-owned active proposal state for ambiguous goal confirmations | Short confirmation text is too ambiguous to trust model-authored assistant prose; mutation authority now requires explicit current-turn numeric values or the latest active backend proposal. | Validated in Phase 60 |
+| Treat renderer-owned goal rejection/cancel replies as terminal final replies | Failed goal updates, missing proposals, malformed calls, and cancel text must not be rewritten by a later LLM round into success-style prose. | Validated in Phase 60 |
 | Defer raw debugger/user-flagged capture | Those features require trigger, access-control, retention, privacy notice, content scope, and storage decisions first. | Still deferred |
 
 ## Archived Previous State
@@ -137,4 +138,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-17 after starting v2.3 milestone*
+*Last updated: 2026-05-17 after Phase 60 completion*
