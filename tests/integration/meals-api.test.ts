@@ -490,6 +490,84 @@ describe("Meals API", () => {
     }
   });
 
+  it("PATCH /api/meals/:id returns stale revision before grouped-shape rejection for single-to-current-grouped edits", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 540,
+      protein: 28,
+      carbs: 62,
+      fat: 12.5,
+    });
+
+    const groupedCurrentMeal = await services.foodLoggingService.updateMeal(deviceId, meal.id, {
+      expectedMealRevisionId: meal.mealRevisionId,
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+
+    let summaryCalls = 0;
+    let publishCalls = 0;
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.summaryService.getDailySummary = async (...args) => {
+      summaryCalls += 1;
+      return originalGetDailySummary(...args);
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
+    };
+
+    try {
+      const stalePatch = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞腿飯少飯",
+          calories: 460,
+          protein: 28,
+          carbs: 42,
+          fat: 12.5,
+          imageAssetId: null,
+          expectedMealRevisionId: meal.mealRevisionId,
+        },
+      });
+
+      assert.equal(stalePatch.statusCode, 409);
+      assert.deepEqual(stalePatch.json(), {
+        error: "MEAL_REVISION_STALE",
+        mealId: meal.id,
+        affectedDate: formatLocalDate(new Date(meal.loggedAt)),
+        currentMealRevisionId: groupedCurrentMeal.mealRevisionId,
+      });
+      assertNoSummaryFields(stalePatch.json());
+      assert.equal(summaryCalls, 0);
+      assert.equal(publishCalls, 0);
+
+      const currentMeals = await app.inject({
+        method: "GET",
+        url: "/api/meals",
+        headers: { cookie: deviceCookieHeader },
+      });
+      assert.deepEqual(
+        currentMeals.json().meals.map((entry: { id: string; mealRevisionId: string; itemCount: number }) => ({
+          id: entry.id,
+          mealRevisionId: entry.mealRevisionId,
+          itemCount: entry.itemCount,
+        })),
+        [{ id: meal.id, mealRevisionId: groupedCurrentMeal.mealRevisionId, itemCount: 2 }],
+      );
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
   it("PATCH /api/meals/:id returns committed facts with recovered summaryOutcome when recompute fails", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
