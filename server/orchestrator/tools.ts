@@ -20,6 +20,17 @@ import {
   type RunContractContext,
 } from "./tool-contract.js";
 import {
+  checkSourceFields,
+  isGoalProposalCancel,
+  isGoalProposalConsent,
+} from "./source-text-guard.js";
+import {
+  renderGoalAuthorityFailureCopy,
+  renderGoalCancelCopy,
+  renderGoalProposalCopy,
+  renderGoalValidationFailureCopy,
+} from "./mutation-receipts.js";
+import {
   classifyProteinSource,
   normalizeTrustedProteinEstimate,
   type ExcludedProteinSource,
@@ -52,6 +63,15 @@ export interface ToolExecutionResult {
   success?: boolean;
   executed?: boolean;
   failureReason?: "validation" | "guard" | "execute";
+  controlledReply?: {
+    source: "renderer";
+    reason:
+      | "goal_proposal"
+      | "goal_authority_failure"
+      | "goal_validation_failure"
+      | "goal_cancel";
+    text: string;
+  };
   updatedFields?: string[];
   publishedEvents?: string[];
   dailyTargets?: DailyTargets;
@@ -293,6 +313,22 @@ interface UpdateGoalsResult {
   publishedEvents: ["goals_update"];
 }
 
+interface GoalControlledResult {
+  status: "controlled_reply";
+  reason: NonNullable<ToolExecutionResult["controlledReply"]>["reason"];
+  reply: string;
+}
+
+type ProposeGoalsResult = GoalControlledResult & {
+  reason: "goal_proposal";
+};
+
+type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult;
+
+type UpdateGoalsArgs =
+  | ({ mode: "current_turn_values" } & Partial<DailyTargets>)
+  | ({ mode: "latest_proposal" } & Partial<DailyTargets>);
+
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
 const quantityToolProperties = {
   quantity: { type: "number" },
@@ -371,17 +407,45 @@ const getDailySummarySchema = z
   })
   .strict();
 
-const updateGoalsSchema = z
+const targetFieldSchemas = {
+  calories: z.number().min(500).max(8000),
+  protein: z.number().min(0).max(400),
+  carbs: z.number().min(0).max(1000),
+  fat: z.number().min(0).max(300),
+} as const;
+
+const proposeGoalsSchema = z
   .object({
-    calories: z.number().min(500).max(8000).optional(),
-    protein: z.number().min(0).max(400).optional(),
-    carbs: z.number().min(0).max(1000).optional(),
-    fat: z.number().min(0).max(300).optional(),
+    calories: targetFieldSchemas.calories,
+    protein: targetFieldSchemas.protein,
+    carbs: targetFieldSchemas.carbs,
+    fat: targetFieldSchemas.fat,
   })
-  .strict()
-  .refine((args) => Object.keys(args).length > 0, {
-    message: "at least one goal field is required",
-  });
+  .strict();
+
+const updateGoalsSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("current_turn_values"),
+      calories: targetFieldSchemas.calories.optional(),
+      protein: targetFieldSchemas.protein.optional(),
+      carbs: targetFieldSchemas.carbs.optional(),
+      fat: targetFieldSchemas.fat.optional(),
+    })
+    .strict()
+    .refine((args) => updatedGoalFields(args).length > 0, {
+      message: "at least one goal field is required",
+    }),
+  z
+    .object({
+      mode: z.literal("latest_proposal"),
+      calories: targetFieldSchemas.calories.optional(),
+      protein: targetFieldSchemas.protein.optional(),
+      carbs: targetFieldSchemas.carbs.optional(),
+      fat: targetFieldSchemas.fat.optional(),
+    })
+    .strict(),
+]);
 
 const updateMealSchema = z.union([
   z
@@ -417,6 +481,43 @@ function updatedGoalFields(args: Partial<DailyTargets>): UpdateGoalField[] {
     (field) => args[field] !== undefined,
   );
 }
+
+function pickTargetPatch(args: Partial<DailyTargets>): Partial<DailyTargets> {
+  const patch: Partial<DailyTargets> = {};
+  for (const field of updatedGoalFields(args)) {
+    patch[field] = args[field];
+  }
+  return patch;
+}
+
+function makeGoalControlledResult(
+  reason: NonNullable<ToolExecutionResult["controlledReply"]>["reason"],
+  reply: string,
+): GoalControlledResult {
+  return {
+    status: "controlled_reply",
+    reason,
+    reply,
+  };
+}
+
+function isGoalControlledResult(result: UpdateGoalsContractResult): result is GoalControlledResult {
+  return "status" in result && result.status === "controlled_reply";
+}
+
+function goalToolProperties(required = false) {
+  const properties = {
+    calories: { type: "number", minimum: 500, maximum: 8000 },
+    protein: { type: "number", minimum: 0, maximum: 400 },
+    carbs: { type: "number", minimum: 0, maximum: 1000 },
+    fat: { type: "number", minimum: 0, maximum: 300 },
+  };
+  return required
+    ? { properties, required: ["calories", "protein", "carbs", "fat"] }
+    : { properties };
+}
+
+const goalTargetProperties = goalToolProperties();
 
 function formatGoalsReceipt(targets: DailyTargets): string {
   return `已更新每日目標：\n• 卡路里 ${targets.calories} kcal\n• 蛋白質 ${targets.protein} g\n• 碳水 ${targets.carbs} g\n• 脂肪 ${targets.fat} g`;
@@ -1258,35 +1359,116 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealResult> = {
   },
 };
 
-const updateGoalsContract: ToolContract<Partial<DailyTargets>, UpdateGoalsResult> = {
+const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
+  name: "propose_goals",
+  description:
+    "建立一組待確認的每日營養目標提案，不會更新使用者目標。必須提供完整 calories/protein/carbs/fat 數字；使用者確認後才可由 update_goals 套用。",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    ...goalToolProperties(true),
+  },
+  zodSchema: proposeGoalsSchema,
+  logSummary: () => ({
+    tool: "propose_goals",
+    fields: ["calories", "protein", "carbs", "fat"],
+    status: "proposal",
+  }),
+  execute: async (args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.goalProposalService || !deviceId) {
+      throw new Error("propose_goals contract missing goalProposalService/deviceId in context");
+    }
+
+    await deps.goalProposalService.putLatest(deviceId, args);
+    const reply = renderGoalProposalCopy(args);
+
+    return {
+      ok: true,
+      result: {
+        ...makeGoalControlledResult("goal_proposal", reply),
+        reason: "goal_proposal",
+      },
+      toolMessage: reply,
+    };
+  },
+};
+
+const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResult> = {
   name: "update_goals",
   description:
-    "更新使用者每日營養目標。只有當使用者在目前訊息提供 calories/protein/carbs/fat 的具體數字，或明確同意上一輪助理推薦的具體數字時才可呼叫；模糊意圖必須先推薦具體目標值並請使用者確認。",
+    "更新使用者每日營養目標。必須提供 mode：current_turn_values 只用目前使用者訊息中的具體數字；latest_proposal 只套用目前有效的後端目標提案且需要使用者明確同意。空參數或沒有 mode 都無效。",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
-      calories: { type: "number", minimum: 500, maximum: 8000 },
-      protein: { type: "number", minimum: 0, maximum: 400 },
-      carbs: { type: "number", minimum: 0, maximum: 1000 },
-      fat: { type: "number", minimum: 0, maximum: 300 },
+      mode: { type: "string", enum: ["current_turn_values", "latest_proposal"] },
+      ...goalTargetProperties.properties,
     },
+    required: ["mode"],
   },
   zodSchema: updateGoalsSchema,
-  sourceFields: ["calories", "protein", "carbs", "fat"] as const,
   logSummary: (args) => ({
     tool: "update_goals",
+    mode: args.mode,
     updatedFields: updatedGoalFields(args),
   }),
   execute: async (args, context) => {
     const deps = context.deps?.toolDeps as ToolDeps | undefined;
     const deviceId = context.deps?.deviceId as string | undefined;
-    if (!deps?.deviceService || !deps.publisher || !deviceId) {
-      throw new Error("update_goals contract missing deviceService/publisher/deviceId in context");
+    if (!deps?.deviceService || !deps.goalProposalService || !deps.publisher || !deviceId) {
+      throw new Error("update_goals contract missing deviceService/goalProposalService/publisher/deviceId in context");
     }
 
-    const updatedFields = updatedGoalFields(args);
-    const targets = await deps.deviceService.updateGoals(deviceId, args);
+    if (args.mode === "latest_proposal" && isGoalProposalCancel(context.currentUserMessage)) {
+      await deps.goalProposalService.clear(deviceId);
+      const reply = renderGoalCancelCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult("goal_cancel", reply),
+        toolMessage: reply,
+      };
+    }
+
+    const overridePatch = pickTargetPatch(args);
+    const overrideFields = updatedGoalFields(overridePatch);
+    if (overrideFields.length > 0) {
+      const guardResult = checkSourceFields(overridePatch as Record<string, unknown>, overrideFields, {
+        currentUserMessage: context.currentUserMessage,
+      });
+      if (!guardResult.ok) {
+        const reply = renderGoalAuthorityFailureCopy();
+        return {
+          ok: true,
+          result: makeGoalControlledResult("goal_authority_failure", reply),
+          toolMessage: reply,
+        };
+      }
+    }
+
+    let updatePatch: Partial<DailyTargets>;
+    if (args.mode === "current_turn_values") {
+      updatePatch = overridePatch;
+    } else {
+      const proposal = await deps.goalProposalService.getLatest(deviceId);
+      if (!proposal || !isGoalProposalConsent(context.currentUserMessage)) {
+        const reply = renderGoalAuthorityFailureCopy();
+        return {
+          ok: true,
+          result: makeGoalControlledResult("goal_authority_failure", reply),
+          toolMessage: reply,
+        };
+      }
+      updatePatch = {
+        ...proposal.targets,
+        ...overridePatch,
+      };
+    }
+
+    const updatedFields = updatedGoalFields(updatePatch);
+    const targets = await deps.deviceService.updateGoals(deviceId, updatePatch);
+    await deps.goalProposalService.clear(deviceId);
     deps.publisher.publishGoalsUpdate(deviceId, targets);
 
     return {
@@ -1311,6 +1493,7 @@ export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [updateMealContract.name, updateMealContract as ToolContract<any, any>],
   [deleteMealContract.name, deleteMealContract as ToolContract<any, any>],
   [getDailySummaryContract.name, getDailySummaryContract as ToolContract<any, any>],
+  [proposeGoalsContract.name, proposeGoalsContract as ToolContract<any, any>],
   [updateGoalsContract.name, updateGoalsContract as ToolContract<any, any>],
 ]);
 
@@ -1359,15 +1542,38 @@ export function redactToolArgsForHook(toolName: string, rawArgs: string): string
     if (toolName === "delete_meal") {
       return "<delete_meal args>";
     }
+    if (toolName === "propose_goals") {
+      return "fields: calories,protein,carbs,fat";
+    }
     if (toolName === "update_goals") {
       const fields = Array.isArray(summary.updatedFields)
         ? summary.updatedFields.join(",")
         : "";
-      return `updatedFields: ${fields}`;
+      const mode = typeof summary.mode === "string" ? summary.mode : "unknown";
+      return `mode: ${mode}; updatedFields: ${fields}`;
     }
     return `<${toolName} args>`;
   }
   return `<${toolName} args>`;
+}
+
+function parseFailureFields(result: string): string[] {
+  try {
+    const parsed = JSON.parse(result) as Record<string, unknown>;
+    return Array.isArray(parsed.fields) && parsed.fields.every((field) => typeof field === "string")
+      ? parsed.fields as string[]
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function goalValidationFieldsFromFailure(result: string): UpdateGoalField[] {
+  const goalFields = new Set<UpdateGoalField>(["calories", "protein", "carbs", "fat"]);
+  const fields = parseFailureFields(result)
+    .map((field) => field.split(".").at(-1) ?? field)
+    .filter((field): field is UpdateGoalField => goalFields.has(field as UpdateGoalField));
+  return [...new Set(fields)];
 }
 
 // ---------------------------------------------------------------------------
@@ -1427,6 +1633,27 @@ export async function executeTool(
         Array.isArray(outcome.logSummary.updatedFields)
           ? (outcome.logSummary.updatedFields as string[])
           : undefined;
+      if (toolCall.function.name === "update_goals") {
+        const validationFields = outcome.failureReason === "validation"
+          ? goalValidationFieldsFromFailure(outcome.result)
+          : [];
+        if (validationFields.length > 0) {
+          const reply = renderGoalValidationFailureCopy(validationFields);
+          return {
+            result: reply,
+            summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
+            success: false,
+            executed: false,
+            failureReason: outcome.failureReason,
+            updatedFields,
+            controlledReply: {
+              source: "renderer",
+              reason: "goal_validation_failure",
+              text: reply,
+            },
+          };
+        }
+      }
       return {
         result: outcome.result,
         summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
@@ -1566,16 +1793,55 @@ export async function executeTool(
     };
   }
 
-  if (toolCall.function.name === "update_goals") {
-    const contractResult = outcome.contractResult as UpdateGoalsResult;
+  if (toolCall.function.name === "propose_goals") {
+    const contractResult = outcome.contractResult as ProposeGoalsResult;
     return {
-      result: outcome.result,
-      summary: `updatedFields: ${contractResult.updatedFields.join(",")}`,
+      result: contractResult.reply,
+      summary: "status: proposal",
       success: true,
       executed: true,
-      updatedFields: [...contractResult.updatedFields],
-      publishedEvents: [...contractResult.publishedEvents],
-      dailyTargets: contractResult.targets,
+      controlledReply: {
+        source: "renderer",
+        reason: contractResult.reason,
+        text: contractResult.reply,
+      },
+    };
+  }
+
+  if (toolCall.function.name === "update_goals") {
+    const contractResult = outcome.contractResult as UpdateGoalsContractResult;
+    if (isGoalControlledResult(contractResult)) {
+      const failureReason = contractResult.reason === "goal_validation_failure"
+        ? "validation"
+        : "guard";
+      return {
+        result: contractResult.reply,
+        summary: `failureReason: ${failureReason}`,
+        success: false,
+        executed: false,
+        failureReason,
+        updatedFields:
+          typeof outcome.logSummary === "object" &&
+          outcome.logSummary !== null &&
+          Array.isArray(outcome.logSummary.updatedFields)
+            ? [...(outcome.logSummary.updatedFields as UpdateGoalField[])]
+            : undefined,
+        controlledReply: {
+          source: "renderer",
+          reason: contractResult.reason,
+          text: contractResult.reply,
+        },
+      };
+    }
+    const updateResult = contractResult as UpdateGoalsResult;
+    return {
+      result: outcome.result,
+      summary: `updatedFields: ${updateResult.updatedFields.join(",")}`,
+      success: true,
+      executed: true,
+      updatedFields: [...updateResult.updatedFields],
+      publishedEvents: [...updateResult.publishedEvents],
+      dailyTargets: updateResult.targets,
     };
   }
 

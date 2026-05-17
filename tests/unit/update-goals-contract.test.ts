@@ -234,7 +234,7 @@ describe("update_goals ToolContract", () => {
     });
     assert.equal(published.length, 0);
 
-    const otherDeviceId = (await deviceService.createDevice("maintenance")).deviceId;
+    const otherDeviceId = (await deviceService.createDevice("maintain")).deviceId;
     const noProposal = await executeTool(updateGoalsCall({ mode: "latest_proposal" }), otherDeviceId, deps, {
       currentUserMessage: "好",
     });

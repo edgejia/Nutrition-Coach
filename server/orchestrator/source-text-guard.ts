@@ -43,6 +43,25 @@ const CHINESE_DIGIT: Record<string, number> = {
 
 const APPROX_SUFFIX = "多";
 
+const GOAL_PROPOSAL_CONSENT_TERMS = ["好", "可以", "幫我更新", "就這樣", "用這組"] as const;
+const GOAL_PROPOSAL_CANCEL_TERMS = ["不要", "取消", "先不用", "no"] as const;
+
+function normalizeGoalProposalDecisionText(message: string): string {
+  return message.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+export function isGoalProposalCancel(message: string): boolean {
+  const normalized = normalizeGoalProposalDecisionText(message);
+  if (!normalized) return false;
+  return GOAL_PROPOSAL_CANCEL_TERMS.some((term) => normalized.includes(term));
+}
+
+export function isGoalProposalConsent(message: string): boolean {
+  const normalized = normalizeGoalProposalDecisionText(message);
+  if (!normalized || isGoalProposalCancel(message)) return false;
+  return GOAL_PROPOSAL_CONSENT_TERMS.some((term) => normalized.includes(term));
+}
+
 function hasExplicitConfirmation(text: string): boolean {
   const normalized = text.trim().toLowerCase().replace(/\s+/g, "");
   if (!normalized) return false;
