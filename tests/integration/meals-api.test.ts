@@ -106,6 +106,11 @@ describe("Meals API", () => {
     assert.ok(!serialized.includes("publish_failed"), "publish failure must not appear in meal route response bodies");
   }
 
+  function assertNoSummaryFields(value: Record<string, unknown>) {
+    assert.equal(Object.prototype.hasOwnProperty.call(value, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(value, "dailySummary"), false);
+  }
+
   async function readOptionalSSEChunk(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     timeoutMs: number,
@@ -170,6 +175,7 @@ describe("Meals API", () => {
     assert.equal(res.statusCode, 200);
     const body = res.json();
     assert.deepEqual(body.meals.map((meal: { foodName: string }) => meal.foodName), ["早餐", "晚餐"]);
+    assert.ok(body.meals.every((meal: { mealRevisionId?: unknown }) => typeof meal.mealRevisionId === "string"));
   });
 
   it("GET /api/meals preserves grouped itemCount from meal history service rows", async () => {
@@ -194,6 +200,7 @@ describe("Meals API", () => {
     assert.deepEqual(body.meals, [
       {
         id: groupedMeal.id,
+        mealRevisionId: groupedMeal.mealRevisionId,
         foodName: "雞腿、白飯、青菜",
         itemCount: 3,
         calories: 580,
@@ -235,7 +242,8 @@ describe("Meals API", () => {
       url: "/api/meals",
       headers: { cookie: deviceCookieHeader },
     });
-    const mealId = mealsRes.json().meals[0].id as string;
+    const mealRow = mealsRes.json().meals[0] as { id: string; mealRevisionId: string };
+    const mealId = mealRow.id;
 
     const foreignDelete = await app.inject({
       method: "DELETE",
@@ -249,6 +257,7 @@ describe("Meals API", () => {
       method: "DELETE",
       url: `/api/meals/${mealId}`,
       headers: { cookie: deviceCookieHeader },
+      payload: { expectedMealRevisionId: mealRow.mealRevisionId },
     });
     assert.equal(ownDelete.statusCode, 200);
     assert.deepEqual(ownDelete.json(), {
@@ -306,6 +315,7 @@ describe("Meals API", () => {
         carbs: 8,
         fat: 12,
         imageAssetId: null,
+        expectedMealRevisionId: meal.mealRevisionId,
       },
     });
 
@@ -318,7 +328,166 @@ describe("Meals API", () => {
       dailySummary: body.dailySummary,
     });
     assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
+    assert.equal(typeof body.meal.mealRevisionId, "string");
+    assert.notEqual(body.meal.mealRevisionId, meal.mealRevisionId);
     assertNoPublishFailureFields(body);
+  });
+
+  it("PATCH and DELETE /api/meals/:id fail closed on missing or stale expected revisions", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+
+    let summaryCalls = 0;
+    let publishCalls = 0;
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.summaryService.getDailySummary = async (...args) => {
+      summaryCalls += 1;
+      return originalGetDailySummary(...args);
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
+    };
+
+    try {
+      const missingPatch = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId: null,
+        },
+      });
+      assert.equal(missingPatch.statusCode, 409);
+      assert.deepEqual(missingPatch.json(), {
+        error: "MEAL_REVISION_REQUIRED",
+        mealId: meal.id,
+        affectedDate: formatLocalDate(new Date(meal.loggedAt)),
+        currentMealRevisionId: meal.mealRevisionId,
+      });
+      assertNoSummaryFields(missingPatch.json());
+      assert.equal(summaryCalls, 0);
+      assert.equal(publishCalls, 0);
+
+      const afterMissingPatch = await app.inject({
+        method: "GET",
+        url: "/api/meals",
+        headers: { cookie: deviceCookieHeader },
+      });
+      const afterMissingPatchMeal = afterMissingPatch.json().meals[0] as {
+        foodName: string;
+        mealRevisionId: string;
+      };
+      assert.equal(afterMissingPatchMeal.foodName, "雞胸肉沙拉");
+      assert.equal(afterMissingPatchMeal.mealRevisionId, meal.mealRevisionId);
+
+      const currentPatch = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId: null,
+          expectedMealRevisionId: meal.mealRevisionId,
+        },
+      });
+      assert.equal(currentPatch.statusCode, 200);
+      const currentMealRevisionId = currentPatch.json().meal.mealRevisionId as string;
+      assert.notEqual(currentMealRevisionId, meal.mealRevisionId);
+      summaryCalls = 0;
+      publishCalls = 0;
+
+      const stalePatch = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞胸肉沙拉全份",
+          calories: 520,
+          protein: 40,
+          carbs: 18,
+          fat: 24,
+          imageAssetId: null,
+          expectedMealRevisionId: meal.mealRevisionId,
+        },
+      });
+      assert.equal(stalePatch.statusCode, 409);
+      assert.deepEqual(stalePatch.json(), {
+        error: "MEAL_REVISION_STALE",
+        mealId: meal.id,
+        affectedDate: formatLocalDate(new Date(meal.loggedAt)),
+        currentMealRevisionId,
+      });
+      assertNoSummaryFields(stalePatch.json());
+      assert.equal(summaryCalls, 0);
+      assert.equal(publishCalls, 0);
+
+      const missingDelete = await app.inject({
+        method: "DELETE",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+      });
+      assert.equal(missingDelete.statusCode, 409);
+      assert.deepEqual(missingDelete.json(), {
+        error: "MEAL_REVISION_REQUIRED",
+        mealId: meal.id,
+        affectedDate: formatLocalDate(new Date(meal.loggedAt)),
+        currentMealRevisionId,
+      });
+      assertNoSummaryFields(missingDelete.json());
+      assert.equal(summaryCalls, 0);
+      assert.equal(publishCalls, 0);
+
+      const staleDelete = await app.inject({
+        method: "DELETE",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: { expectedMealRevisionId: meal.mealRevisionId },
+      });
+      assert.equal(staleDelete.statusCode, 409);
+      assert.deepEqual(staleDelete.json(), {
+        error: "MEAL_REVISION_STALE",
+        mealId: meal.id,
+        affectedDate: formatLocalDate(new Date(meal.loggedAt)),
+        currentMealRevisionId,
+      });
+      assertNoSummaryFields(staleDelete.json());
+      assert.equal(summaryCalls, 0);
+      assert.equal(publishCalls, 0);
+
+      const remainingMeals = await app.inject({
+        method: "GET",
+        url: "/api/meals",
+        headers: { cookie: deviceCookieHeader },
+      });
+      assert.deepEqual(
+        remainingMeals.json().meals.map((entry: { foodName: string; mealRevisionId: string }) => ({
+          foodName: entry.foodName,
+          mealRevisionId: entry.mealRevisionId,
+        })),
+        [{ foodName: "雞胸肉沙拉半份", mealRevisionId: currentMealRevisionId }],
+      );
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
   });
 
   it("PATCH /api/meals/:id returns committed facts with recovered summaryOutcome when recompute fails", async () => {
@@ -348,6 +517,7 @@ describe("Meals API", () => {
           carbs: 8,
           fat: 12,
           imageAssetId: null,
+          expectedMealRevisionId: meal.mealRevisionId,
         },
       });
 
@@ -397,6 +567,7 @@ describe("Meals API", () => {
           carbs: 8,
           fat: 12,
           imageAssetId: null,
+          expectedMealRevisionId: meal.mealRevisionId,
         },
       });
 
@@ -438,6 +609,7 @@ describe("Meals API", () => {
         method: "DELETE",
         url: `/api/meals/${meal.id}`,
         headers: { cookie: deviceCookieHeader },
+        payload: { expectedMealRevisionId: meal.mealRevisionId },
       });
 
       assert.equal(deleteRes.statusCode, 200);
@@ -473,6 +645,7 @@ describe("Meals API", () => {
         method: "DELETE",
         url: `/api/meals/${meal.id}`,
         headers: { cookie: deviceCookieHeader },
+        payload: { expectedMealRevisionId: meal.mealRevisionId },
       });
 
       assert.equal(deleteRes.statusCode, 200);
@@ -508,6 +681,7 @@ describe("Meals API", () => {
         carbs: 8,
         fat: 12,
         imageAssetId: null,
+        expectedMealRevisionId: meal.mealRevisionId,
       },
     });
     assert.equal(updateRes.statusCode, 401);
@@ -515,6 +689,7 @@ describe("Meals API", () => {
     const deleteRes = await app.inject({
       method: "DELETE",
       url: `/api/meals/${meal.id}`,
+      payload: { expectedMealRevisionId: meal.mealRevisionId },
     });
     assert.equal(deleteRes.statusCode, 401);
   });
@@ -540,6 +715,7 @@ describe("Meals API", () => {
         carbs: 62,
         fat: 12.5,
         imageAssetId: null,
+        expectedMealRevisionId: meal.mealRevisionId,
       },
     });
 
@@ -572,6 +748,7 @@ describe("Meals API", () => {
         carbs: 8,
         fat: 12,
         imageAssetId: null,
+        expectedMealRevisionId: meal.mealRevisionId,
       },
     });
 
@@ -601,6 +778,7 @@ describe("Meals API", () => {
         carbs: 8,
         fat: 12,
         imageAssetId: null,
+        expectedMealRevisionId: meal.mealRevisionId,
       },
     });
 
@@ -632,6 +810,7 @@ describe("Meals API", () => {
           carbs: 8,
           fat: 12,
           imageAssetId,
+          expectedMealRevisionId: meal.mealRevisionId,
         },
       });
 
@@ -672,17 +851,20 @@ describe("Meals API", () => {
         carbs: 80,
         fat: 22,
         imageAssetId: imageAsset.id,
+        expectedMealRevisionId: imageMeal.mealRevisionId,
       },
     });
     assert.equal(updateRes.statusCode, 200);
     const updated = updateRes.json() as {
       meal: {
         id: string;
+        mealRevisionId: string;
         imageAssetId: string | null;
         imageUrl: string | null;
       };
     };
     assert.equal(updated.meal.id, imageMeal.id);
+    assert.notEqual(updated.meal.mealRevisionId, imageMeal.mealRevisionId);
     assert.equal(updated.meal.imageAssetId, imageAsset.id);
     assert.equal(updated.meal.imageUrl, `/api/assets/${imageAsset.id}`);
     assertNoRawImageStorageFields(updated);
@@ -700,6 +882,7 @@ describe("Meals API", () => {
     assert.ok(todayImageMeal, "expected today's records to include the image-backed meal.id");
     assert.equal(todayImageMeal.imageAssetId, imageAsset.id);
     assert.equal(todayImageMeal.imageUrl, `/api/assets/${imageAsset.id}`);
+    assert.equal((todayImageMeal as { mealRevisionId?: string }).mealRevisionId, updated.meal.mealRevisionId);
     const todayTextMeal = todayBody.meals.find((meal) => meal.id === textMeal.id);
     assert.ok(todayTextMeal, "expected today's records to include the text-only meal.id");
     assert.equal(todayTextMeal.imageAssetId, null);
@@ -786,6 +969,7 @@ describe("Meals API", () => {
         carbs: 8,
         fat: 12,
         imageAssetId: foreignAsset.id,
+        expectedMealRevisionId: meal.mealRevisionId,
       },
     });
     assert.equal(updateRes.statusCode, 400);
@@ -817,6 +1001,7 @@ describe("Meals API", () => {
         method: "DELETE",
         url: `/api/meals/${meal.id}`,
         headers: { cookie: deviceCookieHeader },
+        payload: { expectedMealRevisionId: meal.mealRevisionId },
       });
 
       assert.equal(deleteRes.statusCode, 200);
@@ -860,7 +1045,8 @@ describe("Meals API", () => {
 
       const deleteRes = await fetch(`${address}/api/meals/${meal.id}`, {
         method: "DELETE",
-        headers: { cookie: deviceCookieHeader },
+        headers: { cookie: deviceCookieHeader, "content-type": "application/json" },
+        body: JSON.stringify({ expectedMealRevisionId: meal.mealRevisionId }),
       });
       assert.equal(deleteRes.status, 200);
       assert.deepEqual(await deleteRes.json(), {

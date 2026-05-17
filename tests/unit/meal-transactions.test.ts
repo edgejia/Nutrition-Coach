@@ -12,7 +12,10 @@ import {
   mealTransactions,
 } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
-import { createMealTransactionsService } from "../../server/services/meal-transactions.js";
+import {
+  MealRevisionPreconditionError,
+  createMealTransactionsService,
+} from "../../server/services/meal-transactions.js";
 
 describe("MealTransactionsService", () => {
   let db: ReturnType<typeof createDb>;
@@ -37,6 +40,41 @@ describe("MealTransactionsService", () => {
       byteSize: 1234,
       createdAt: "2026-03-25T04:29:00.000Z",
     });
+  }
+
+  async function getTransactionState(transactionId: string) {
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, transactionId))
+    )[0];
+    const revisions = await db
+      .select()
+      .from(mealRevisions)
+      .where(eq(mealRevisions.transactionId, transactionId));
+
+    assert.ok(transaction);
+    return {
+      currentRevisionId: transaction.currentRevisionId,
+      currentRevisionNumber: transaction.currentRevisionNumber,
+      deletedAt: transaction.deletedAt,
+      revisionCount: revisions.length,
+    };
+  }
+
+  function assertMealRevisionPrecondition(
+    code: "MEAL_REVISION_REQUIRED" | "MEAL_REVISION_STALE",
+    mealId: string,
+    currentMealRevisionId: string,
+  ) {
+    return (error: unknown) => {
+      assert.ok(error instanceof MealRevisionPreconditionError);
+      assert.equal(error.code, code);
+      assert.equal(error.mealId, mealId);
+      assert.equal(error.currentMealRevisionId, currentMealRevisionId);
+      return true;
+    };
   }
 
   it("writes one transaction, revision, item, and asset reference for a single-item log", async () => {
@@ -220,7 +258,11 @@ describe("MealTransactionsService", () => {
       /MEAL_NOT_FOUND/,
     );
 
-    const deleted = await mealTransactionsService.softDeleteTransaction(deviceId, created.transactionId);
+    const deleted = await mealTransactionsService.softDeleteTransaction(
+      deviceId,
+      created.transactionId,
+      created.revisionId,
+    );
 
     const transaction = (
       await db
@@ -283,6 +325,7 @@ describe("MealTransactionsService", () => {
     });
 
     const updated = await mealTransactionsService.updateTransaction(deviceId, created.transactionId, {
+      expectedMealRevisionId: created.revisionId,
       items: [
         {
           foodName: "蘋果半顆",
@@ -310,5 +353,96 @@ describe("MealTransactionsService", () => {
     assert.equal(updated.transactionId, created.transactionId);
     assert.equal(updated.revisionId, transaction!.currentRevisionId);
     assert.notEqual(updated.revisionId, created.revisionId);
+  });
+
+  it("rejects missing and stale expected revisions before update writes", async () => {
+    const created = await mealTransactionsService.createTransaction(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        {
+          foodName: "蘋果",
+          calories: 95,
+          protein: 0.5,
+          carbs: 25,
+          fat: 0.3,
+        },
+      ],
+    });
+    const updateInput = {
+      items: [
+        {
+          foodName: "蘋果半顆",
+          calories: 48,
+          protein: 0.2,
+          carbs: 12,
+          fat: 0.1,
+        },
+      ],
+    };
+
+    const beforeMissing = await getTransactionState(created.transactionId);
+    await assert.rejects(
+      () => mealTransactionsService.updateTransaction(deviceId, created.transactionId, updateInput),
+      assertMealRevisionPrecondition("MEAL_REVISION_REQUIRED", created.transactionId, created.revisionId),
+    );
+    assert.deepEqual(await getTransactionState(created.transactionId), beforeMissing);
+
+    const updated = await mealTransactionsService.updateTransaction(deviceId, created.transactionId, {
+      ...updateInput,
+      expectedMealRevisionId: created.revisionId,
+    });
+
+    const beforeStale = await getTransactionState(created.transactionId);
+    await assert.rejects(
+      () =>
+        mealTransactionsService.updateTransaction(deviceId, created.transactionId, {
+          ...updateInput,
+          expectedMealRevisionId: created.revisionId,
+        }),
+      assertMealRevisionPrecondition("MEAL_REVISION_STALE", created.transactionId, updated.revisionId),
+    );
+    assert.deepEqual(await getTransactionState(created.transactionId), beforeStale);
+  });
+
+  it("rejects missing and stale expected revisions before delete writes", async () => {
+    const created = await mealTransactionsService.createTransaction(deviceId, {
+      loggedAt: "2026-03-25T11:00:00.000Z",
+      items: [
+        {
+          foodName: "雞胸肉",
+          calories: 320,
+          protein: 40,
+          carbs: 0,
+          fat: 12,
+        },
+      ],
+    });
+
+    const beforeMissing = await getTransactionState(created.transactionId);
+    await assert.rejects(
+      () => mealTransactionsService.softDeleteTransaction(deviceId, created.transactionId),
+      assertMealRevisionPrecondition("MEAL_REVISION_REQUIRED", created.transactionId, created.revisionId),
+    );
+    assert.deepEqual(await getTransactionState(created.transactionId), beforeMissing);
+
+    const updated = await mealTransactionsService.updateTransaction(deviceId, created.transactionId, {
+      expectedMealRevisionId: created.revisionId,
+      items: [
+        {
+          foodName: "雞胸肉半份",
+          calories: 160,
+          protein: 20,
+          carbs: 0,
+          fat: 6,
+        },
+      ],
+    });
+
+    const beforeStale = await getTransactionState(created.transactionId);
+    await assert.rejects(
+      () => mealTransactionsService.softDeleteTransaction(deviceId, created.transactionId, created.revisionId),
+      assertMealRevisionPrecondition("MEAL_REVISION_STALE", created.transactionId, updated.revisionId),
+    );
+    assert.deepEqual(await getTransactionState(created.transactionId), beforeStale);
   });
 });
