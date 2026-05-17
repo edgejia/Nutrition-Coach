@@ -2,8 +2,14 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { buildApp } from "../../server/app.js";
+import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import {
+  renderGoalAuthorityFailureCopy,
+  renderGoalCancelCopy,
+  renderGoalProposalCopy,
+  renderGoalValidationFailureCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 import type { FastifyInstance } from "fastify";
 
 interface DailyTargets {
@@ -13,11 +19,58 @@ interface DailyTargets {
   fat: number;
 }
 
+interface ChatBody {
+  reply: string;
+  didLogMeal: boolean;
+  didMutateMeal?: boolean;
+  dailyTargets?: DailyTargets;
+}
+
+const DEFAULT_TARGETS: DailyTargets = {
+  calories: 1500,
+  protein: 120,
+  carbs: 150,
+  fat: 50,
+};
+
+const SUCCESS_TARGETS: DailyTargets = {
+  calories: 1800,
+  protein: 130,
+  carbs: 150,
+  fat: 50,
+};
+
+const PROPOSAL_TARGETS: DailyTargets = {
+  calories: 1400,
+  protein: 125,
+  carbs: 130,
+  fat: 45,
+};
+
+const SUCCESS_RECEIPT = [
+  "已更新每日目標：",
+  "• 卡路里 1800 kcal",
+  "• 蛋白質 130 g",
+  "• 碳水 150 g",
+  "• 脂肪 50 g",
+].join("\n");
+
+const PROPOSAL_SUCCESS_RECEIPT = [
+  "已更新每日目標：",
+  "• 卡路里 1400 kcal",
+  "• 蛋白質 125 g",
+  "• 碳水 130 g",
+  "• 脂肪 45 g",
+].join("\n");
+
+const SUCCESS_STYLE_COPY = /已更新每日目標|已經幫你更新|更新好了/;
+
 describe("chat goal update integration", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
   let address: string;
   let sessionCookieHeader: string;
+  let publishCalls: Array<{ event: "goals_update" }>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -26,7 +79,18 @@ describe("chat goal update integration", () => {
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
-    app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
+    publishCalls = [];
+    app = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: mockLLM,
+      onServicesReady(services: AppServices) {
+        const originalPublishGoalsUpdate = services.publisher.publishGoalsUpdate.bind(services.publisher);
+        services.publisher.publishGoalsUpdate = (deviceId, targets) => {
+          publishCalls.push({ event: "goals_update" });
+          return originalPublishGoalsUpdate(deviceId, targets);
+        };
+      },
+    });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
     sessionCookieHeader = toCookieHeader(res.headers["set-cookie"]);
     address = await app.listen({ port: 0 });
@@ -38,10 +102,7 @@ describe("chat goal update integration", () => {
     }
   });
 
-  async function postChat(message: string): Promise<{
-    status: number;
-    body: { reply: string; didLogMeal: boolean; dailyTargets?: DailyTargets };
-  }> {
+  async function postChat(message: string): Promise<{ status: number; body: ChatBody }> {
     const form = new FormData();
     form.append("message", message);
 
@@ -51,17 +112,13 @@ describe("chat goal update integration", () => {
       body: form,
     });
 
-    return { status: res.status, body: await res.json() };
+    return { status: res.status, body: await res.json() as ChatBody };
   }
 
   async function readTargets(): Promise<DailyTargets> {
-    const res = await fetch(`${address}/api/device/goals`, {
-      method: "PUT",
-      headers: {
-        "content-type": "application/json",
-        cookie: sessionCookieHeader,
-      },
-      body: JSON.stringify({ fat: 50 }),
+    const res = await fetch(`${address}/api/device/session`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
     });
 
     assert.equal(res.status, 200);
@@ -69,51 +126,18 @@ describe("chat goal update integration", () => {
     return body.dailyTargets;
   }
 
-  it("persists explicit target numbers and returns the deterministic receipt", async () => {
+  it("persists explicit current-turn targets, returns receipt, and publishes goals_update", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "goal_success",
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
-        },
-      }],
-    });
-    mockLLM.queueChatResponse({
-      content: "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g",
-    });
-
-    const { status, body } = await postChat("卡路里改成 1800，蛋白質 130 克");
-
-    assert.equal(status, 200);
-    assert.equal(body.didLogMeal, false);
-    assert.match(body.reply, /已更新每日目標：/);
-    assert.match(body.reply, /卡路里 1800 kcal/);
-    assert.match(body.reply, /蛋白質 130 g/);
-    assert.deepEqual(body.dailyTargets, {
-      calories: 1800,
-      protein: 130,
-      carbs: 150,
-      fat: 50,
-    });
-
-    assert.deepEqual(await readTargets(), {
-      calories: 1800,
-      protein: 130,
-      carbs: 150,
-      fat: 50,
-    });
-  });
-
-  it("returns only the deterministic receipt when the final model reply tries to add prose", async () => {
-    mockLLM.queueChatResponse({
-      toolCalls: [{
-        id: "goal_success_omitted_receipt",
-        type: "function",
-        function: {
-          name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1800,
+            protein: 130,
+          }),
         },
       }],
     });
@@ -122,164 +146,170 @@ describe("chat goal update integration", () => {
     const { status, body } = await postChat("卡路里改成 1800，蛋白質 130 克");
 
     assert.equal(status, 200);
-    assert.equal(body.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
-    assert.doesNotMatch(body.reply, /已經幫你更新好了/);
-    assert.deepEqual(body.dailyTargets, {
-      calories: 1800,
-      protein: 130,
-      carbs: 150,
-      fat: 50,
-    });
-    assert.deepEqual(await readTargets(), {
-      calories: 1800,
-      protein: 130,
-      carbs: 150,
-      fat: 50,
-    });
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.reply, SUCCESS_RECEIPT);
+    assert.deepEqual(body.dailyTargets, SUCCESS_TARGETS);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
   });
 
-  it("returns the deterministic receipt without calling final reply generation after mutation", async () => {
+  it("creates a backend proposal for vague intent without mutating targets or publishing", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
-        id: "goal_success_reply_error",
+        id: "goal_proposal",
         type: "function",
         function: {
-          name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          name: "propose_goals",
+          arguments: JSON.stringify(PROPOSAL_TARGETS),
         },
       }],
     });
-    mockLLM.queueChatError(new Error("reply generation failed"));
+    mockLLM.queueChatResponse({ content: "模型不應該改寫提案。" });
 
-    const { status, body } = await postChat("卡路里改成 1800，蛋白質 130 克");
-
-    assert.equal(status, 200);
-    assert.equal(body.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
-    assert.equal(mockLLM.chatCalls.length, 1);
-    assert.deepEqual(body.dailyTargets, {
-      calories: 1800,
-      protein: 130,
-      carbs: 150,
-      fat: 50,
-    });
-    assert.deepEqual(await readTargets(), {
-      calories: 1800,
-      protein: 130,
-      carbs: 150,
-      fat: 50,
-    });
-  });
-
-  it("keeps targets unchanged when vague intent gets a recommendation without a tool call", async () => {
-    mockLLM.queueChatResponse({
-      content:
-        "如果你想少吃一點，我建議先調成：\n- 熱量：1400 kcal\n- 蛋白質：120 g\n- 碳水化合物：130 g\n- 脂肪：45 g\n\n要幫你套用這組目標嗎？",
-    });
-
-    const { status, body } = await postChat("我想少吃一點");
+    const { status, body } = await postChat("我想少吃一點，幫我建議一組目標");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
-    assert.match(body.reply, /建議/);
-    assert.match(body.reply, /1400 kcal/);
-    assert.match(body.reply, /要幫你套用/);
-    assert.doesNotMatch(body.reply, /已更新每日目標：/);
-    assert.deepEqual(await readTargets(), {
-      calories: 1500,
-      protein: 120,
-      carbs: 150,
-      fat: 50,
-    });
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS));
+    assert.equal(body.dailyTargets, undefined);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
   });
 
-  it("updates targets when the user confirms the previous assistant recommendation", async () => {
-    mockLLM.queueChatResponse({
-      content:
-        "如果你想少吃一點，我建議先調成：\n- 熱量：1400 kcal\n- 蛋白質：120 g\n- 碳水化合物：130 g\n- 脂肪：45 g\n\n要幫你套用這組目標嗎？",
-    });
-
-    const first = await postChat("我想少吃一點");
-    assert.equal(first.status, 200);
-    assert.doesNotMatch(first.body.reply, /已更新每日目標：/);
-
+  it("applies an active proposal once, then replayed consent fails closed without mutation", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
-        id: "goal_confirm_recommendation",
+        id: "goal_proposal_for_confirm",
         type: "function",
         function: {
-          name: "update_goals",
-          arguments: JSON.stringify({ calories: 1400, protein: 120, carbs: 130, fat: 45 }),
+          name: "propose_goals",
+          arguments: JSON.stringify(PROPOSAL_TARGETS),
         },
       }],
     });
+    const proposal = await postChat("我想少吃一點，幫我建議一組目標");
+    assert.equal(proposal.status, 200);
+    assert.equal(proposal.body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS));
+    assert.deepEqual(publishCalls, []);
+
     mockLLM.queueChatResponse({
-      content: "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 120 g\n• 碳水 130 g\n• 脂肪 45 g",
+      toolCalls: [{
+        id: "goal_confirm_latest",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "latest_proposal" }),
+        },
+      }],
     });
+    const confirmed = await postChat("好");
+
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.reply, PROPOSAL_SUCCESS_RECEIPT);
+    assert.deepEqual(confirmed.body.dailyTargets, PROPOSAL_TARGETS);
+    assert.deepEqual(await readTargets(), PROPOSAL_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_replay_latest",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "latest_proposal" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已經幫你更新每日目標。" });
+    const replayed = await postChat("好");
+
+    assert.equal(replayed.status, 200);
+    assert.equal(replayed.body.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(replayed.body.dailyTargets, undefined);
+    assert.doesNotMatch(replayed.body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), PROPOSAL_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+  });
+
+  it("fails closed for missing proposal confirmation without publishing or success prose", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_missing_proposal",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "latest_proposal" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已經幫你更新每日目標。" });
 
     const { status, body } = await postChat("好");
 
     assert.equal(status, 200);
-    assert.equal(body.didLogMeal, false);
-    assert.equal(body.reply, "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 120 g\n• 碳水 130 g\n• 脂肪 45 g");
-    assert.deepEqual(body.dailyTargets, {
-      calories: 1400,
-      protein: 120,
-      carbs: 130,
-      fat: 45,
-    });
+    assert.equal(body.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(body.dailyTargets, undefined);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
   });
 
-  it("turns source-guard rejection into clarification and does not mutate targets", async () => {
+  it("cancels an active proposal before the model runs and publishes nothing", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
-        id: "goal_guard",
+        id: "goal_proposal_for_cancel",
         type: "function",
         function: {
-          name: "update_goals",
-          arguments: JSON.stringify({ calories: 1700 }),
+          name: "propose_goals",
+          arguments: JSON.stringify(PROPOSAL_TARGETS),
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "你想把卡路里調整成多少？請提供具體數字。" });
+    const proposal = await postChat("我想少吃一點，幫我建議一組目標");
+    assert.equal(proposal.status, 200);
+    assert.equal(mockLLM.chatCalls.length, 1);
 
-    const { status, body } = await postChat("我想少吃一點");
+    mockLLM.queueChatResponse({ content: "模型不應該看到取消回合。" });
+    const cancelled = await postChat("先不用");
 
-    assert.equal(status, 200);
-    assert.equal(body.didLogMeal, false);
-    assert.match(body.reply, /具體數字|調整成多少/);
-    assert.doesNotMatch(body.reply, /已更新每日目標：/);
-    assert.deepEqual(await readTargets(), {
-      calories: 1500,
-      protein: 120,
-      carbs: 150,
-      fat: 50,
-    });
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.reply, renderGoalCancelCopy());
+    assert.equal(cancelled.body.didLogMeal, false);
+    assert.equal(cancelled.body.didMutateMeal, false);
+    assert.equal(cancelled.body.dailyTargets, undefined);
+    assert.doesNotMatch(cancelled.body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
   });
 
-  it("turns validation rejection into clarification and does not mutate targets", async () => {
+  it("returns validation range copy without mutation, publish, or final reply generation", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "goal_validation",
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 99999 }),
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 99999,
+          }),
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "請提供 500 到 8000 之間的每日卡路里目標。" });
+    mockLLM.queueChatResponse({ content: "更新好了。" });
 
     const { status, body } = await postChat("卡路里改成 99999");
 
     assert.equal(status, 200);
-    assert.equal(body.didLogMeal, false);
-    assert.match(body.reply, /500 到 8000/);
-    assert.doesNotMatch(body.reply, /已更新每日目標：/);
-    assert.deepEqual(await readTargets(), {
-      calories: 1500,
-      protein: 120,
-      carbs: 150,
-      fat: 50,
-    });
+    assert.equal(body.reply, renderGoalValidationFailureCopy(["calories"]));
+    assert.equal(body.dailyTargets, undefined);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
   });
 });
