@@ -1016,9 +1016,43 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       summaryService: throwingSummary,
     });
     assert.equal(result.summary, "成功");
+    assert.equal(result.summaryOutcome?.status, "recovered");
+    assert.equal(result.summaryOutcome?.reason, "recompute_failed");
+    assert.equal(result.summaryOutcome?.dailySummary.mealCount, 2);
     assert.equal(result.dailySummary?.mealCount, 2);
     assert.equal(result.dailySummary?.totalCalories, 200);
     assert.equal(result.loggedMeal?.foodName, "蘋果");
+  });
+
+  it("log_food returns unavailable summaryOutcome without dailySummary when recompute and recovery fail", async () => {
+    const throwingSummary = {
+      getDailySummary: async () => {
+        throw new Error("summary computation failed");
+      },
+    } as unknown as typeof summaryService;
+    const recoveryFailingFoodLoggingService = {
+      ...foodLoggingService,
+      getMealsByDate: async () => {
+        throw new Error("persisted meal recovery failed");
+      },
+    } as unknown as typeof foodLoggingService;
+
+    const result = await executeTool(logFoodCall, deviceId, {
+      foodLoggingService: recoveryFailingFoodLoggingService,
+      summaryService: throwingSummary,
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.deepEqual(result.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+    assert.equal(result.dailySummary, undefined);
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "蘋果");
+    assert.equal(result.loggedMeal.calories, 100);
+    assert.equal(result.loggedMeal.protein, 0);
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0].foodName, "蘋果");
   });
 
   it("Test 3: invalid log_food args do not persist a meal and return executed:false", async () => {
@@ -1194,6 +1228,59 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.loggedMeal.imageUrl, null);
   });
 
+  it("returns update_meal committed facts with unavailable summaryOutcome and no compatibility dailySummary", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const unavailableMealCorrectionService = createMealCorrectionService(db, {
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary computation failed");
+        },
+      },
+      foodLoggingService: {
+        async getMealsByDate() {
+          throw new Error("persisted meal recovery failed");
+        },
+      },
+    });
+
+    const call: ToolCall = {
+      id: "call_update_unavailable",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          calories: 48,
+        }),
+      },
+    };
+
+    const result = await executeTool(call, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: unavailableMealCorrectionService,
+      toolSessionState: {
+        resolvedMealIds: [created.id],
+      },
+    });
+
+    assert.equal(result.mealMutationKind, "update");
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.deepEqual(result.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+    assert.equal(result.dailySummary, undefined);
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.mealId, created.id);
+    assert.equal(result.loggedMeal.foodName, "蘋果");
+    assert.equal(result.loggedMeal.calories, 48);
+  });
+
   it("returns committed deleted meal facts from delete_meal", async () => {
     const created = await foodLoggingService.logFood(deviceId, {
       foodName: "牛肉麵",
@@ -1236,6 +1323,55 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(deletedMeal.dateKey, "2026-03-25");
     assert.equal(deletedMeal.mealId, created.id);
     assert.doesNotMatch(JSON.stringify(deletedMeal), /deviceId|revision|delete_meal/);
+  });
+
+  it("returns delete_meal service-provided recovered summaryOutcome with compatibility dailySummary", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-03-25T10:30:00.000Z",
+    });
+    const recoveredMealCorrectionService = createMealCorrectionService(db, {
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary computation failed");
+        },
+      },
+      foodLoggingService,
+    });
+
+    const call: ToolCall = {
+      id: "call_delete_recovered",
+      type: "function",
+      function: {
+        name: "delete_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+        }),
+      },
+    };
+
+    const result = await executeTool(call, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: recoveredMealCorrectionService,
+      toolSessionState: {
+        resolvedMealIds: [created.id],
+      },
+    });
+
+    assert.equal(result.mealMutationKind, "delete");
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.equal(result.summaryOutcome?.status, "recovered");
+    assert.equal(result.summaryOutcome?.reason, "recompute_failed");
+    assert.equal(result.summaryOutcome?.dailySummary.mealCount, 0);
+    assert.equal(result.dailySummary, result.summaryOutcome?.dailySummary);
+    assert.ok(result.deletedMeal);
+    assert.equal(result.deletedMeal.mealId, created.id);
+    assert.equal(result.deletedMeal.foodName, "牛肉麵");
   });
 
   it("returns affectedDate when log_food targets an explicit historical day", async () => {

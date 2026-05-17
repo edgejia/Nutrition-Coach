@@ -550,8 +550,67 @@ describe("Orchestrator - didLogMeal", () => {
     assert.match(result.reply, /蛋白質 0 g。/);
     assert.equal(result.dailySummary?.mealCount, 1);
     assert.equal(result.dailySummary?.totalCalories, 100);
+    assert.equal(result.summaryOutcome?.status, "recovered");
+    assert.equal(result.summaryOutcome?.reason, "recompute_failed");
+    assert.equal(result.summaryOutcome?.dailySummary.mealCount, 1);
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0]?.foodName, "蘋果");
+  });
+
+  it("handleMessage returns a renderer-owned log receipt when summaryOutcome is unavailable", async () => {
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const localLLM = new MockLLMProvider();
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    orchestrator = createOrchestrator({
+      llmProvider: localLLM,
+      chatService: localChatService,
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary recomputation failed");
+        },
+      },
+      foodLoggingService: {
+        ...localFoodLoggingService,
+        async getMealsByDate() {
+          throw new Error("persisted meal recovery failed");
+        },
+      },
+      mealCorrectionService: createMealCorrectionService(db),
+      deviceService: localDeviceService,
+    });
+
+    localLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_unavailable_log",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(localDeviceId, "我吃了蘋果");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已記錄蘋果，100 kcal，蛋白質 0 g。若份量不同，可以再調整。");
+    assert.equal(result.didLogMeal, true);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.deepEqual(result.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.loggedMeal?.foodName, "蘋果");
+    assert.doesNotMatch(result.reply, /summaryOutcome|recompute_failed|dailySummary|publish_failed/);
+
+    const meals = await localFoodLoggingService.getMealsByDate(localDeviceId, new Date());
     assert.equal(meals.length, 1);
     assert.equal(meals[0]?.foodName, "蘋果");
   });
@@ -771,6 +830,92 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.dailySummary?.totalProtein, 20);
   });
 
+  it("returns a renderer-owned update receipt when summaryOutcome is unavailable", async () => {
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localChatService = createChatService(db);
+    const localLLM = new MockLLMProvider();
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+    const seeded = await localFoodLoggingService.logFood(localDeviceId, {
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+    });
+
+    orchestrator = createOrchestrator({
+      llmProvider: localLLM,
+      chatService: localChatService,
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary recomputation failed");
+        },
+      },
+      foodLoggingService: {
+        ...localFoodLoggingService,
+        async getMealsByDate() {
+          throw new Error("persisted meal recovery failed");
+        },
+      },
+      mealCorrectionService: createMealCorrectionService(db, {
+        summaryService: {
+          async getDailySummary() {
+            throw new Error("summary recomputation failed");
+          },
+        },
+        foodLoggingService: {
+          async getMealsByDate() {
+            throw new Error("persisted meal recovery failed");
+          },
+        },
+      }),
+      deviceService: localDeviceService,
+    });
+
+    localLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_update_target_unavailable",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "update", query: "雞腿便當" }),
+          },
+        },
+        {
+          id: "update_unavailable",
+          type: "function",
+          function: {
+            name: "update_meal",
+            arguments: JSON.stringify({
+              meal_id: seeded.id,
+              food_name: "半份雞腿便當",
+              calories: 360,
+              protein: 20,
+              carbs: 45,
+              fat: 10,
+            }),
+          },
+        },
+      ],
+    });
+
+    const result = await orchestrator.handleMessage(localDeviceId, "把雞腿便當改成半份雞腿便當");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已更新半份雞腿便當，360 kcal，蛋白質 20 g。");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.deepEqual(result.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.loggedMeal?.mealId, seeded.id);
+    assert.equal(result.loggedMeal?.foodName, "半份雞腿便當");
+    assert.doesNotMatch(result.reply, /summaryOutcome|recompute_failed|dailySummary|publish_failed/);
+  });
+
   it("returns the delete receipt when a later tool in the same batch fails fatally", async () => {
     const seeded = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿便當",
@@ -816,6 +961,84 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.loggedMeal, undefined);
     assert.equal(result.dailySummary?.mealCount, 0);
     assert.equal(result.dailySummary?.totalCalories, 0);
+  });
+
+  it("returns a renderer-owned delete receipt when summaryOutcome is unavailable", async () => {
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localChatService = createChatService(db);
+    const localLLM = new MockLLMProvider();
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+    const seeded = await localFoodLoggingService.logFood(localDeviceId, {
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+    });
+
+    orchestrator = createOrchestrator({
+      llmProvider: localLLM,
+      chatService: localChatService,
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary recomputation failed");
+        },
+      },
+      foodLoggingService: {
+        ...localFoodLoggingService,
+        async getMealsByDate() {
+          throw new Error("persisted meal recovery failed");
+        },
+      },
+      mealCorrectionService: createMealCorrectionService(db, {
+        summaryService: {
+          async getDailySummary() {
+            throw new Error("summary recomputation failed");
+          },
+        },
+        foodLoggingService: {
+          async getMealsByDate() {
+            throw new Error("persisted meal recovery failed");
+          },
+        },
+      }),
+      deviceService: localDeviceService,
+    });
+
+    localLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_delete_target_unavailable",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "delete", query: "雞腿便當" }),
+          },
+        },
+        {
+          id: "delete_unavailable",
+          type: "function",
+          function: {
+            name: "delete_meal",
+            arguments: JSON.stringify({ meal_id: seeded.id }),
+          },
+        },
+      ],
+    });
+
+    const result = await orchestrator.handleMessage(localDeviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, "已刪除雞腿便當，已從當日紀錄移除。");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.deepEqual(result.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.loggedMeal, undefined);
+    assert.doesNotMatch(result.reply, /summaryOutcome|recompute_failed|dailySummary|publish_failed/);
   });
 
   it("returns a deterministic logged reply for image-only uploads after log_food succeeds", async () => {
