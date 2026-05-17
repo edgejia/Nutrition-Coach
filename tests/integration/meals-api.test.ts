@@ -101,6 +101,11 @@ describe("Meals API", () => {
     assert.ok(!serialized.includes("asset:"), "route DTO must not expose raw asset refs as URLs");
   }
 
+  function assertNoPublishFailureFields(value: unknown) {
+    const serialized = JSON.stringify(value);
+    assert.ok(!serialized.includes("publish_failed"), "publish failure must not appear in meal route response bodies");
+  }
+
   async function readOptionalSSEChunk(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     timeoutMs: number,
@@ -248,6 +253,7 @@ describe("Meals API", () => {
     assert.equal(ownDelete.statusCode, 200);
     assert.deepEqual(ownDelete.json(), {
       affectedDate: formatLocalDate(new Date()),
+      deletedMealId: mealId,
       dailySummary: {
         date: formatLocalDate(new Date()),
         totalCalories: 0,
@@ -256,7 +262,19 @@ describe("Meals API", () => {
         totalFat: 0,
         mealCount: 0,
       },
+      summaryOutcome: {
+        status: "fresh",
+        dailySummary: {
+          date: formatLocalDate(new Date()),
+          totalCalories: 0,
+          totalProtein: 0,
+          totalCarbs: 0,
+          totalFat: 0,
+          mealCount: 0,
+        },
+      },
     });
+    assertNoPublishFailureFields(ownDelete.json());
 
     const remainingMeals = await app.inject({
       method: "GET",
@@ -295,7 +313,210 @@ describe("Meals API", () => {
     const body = updateRes.json();
     assert.equal(body.affectedDate, formatLocalDate(new Date(meal.loggedAt)));
     assert.equal(body.dailySummary.totalCalories, 260);
+    assert.deepEqual(body.summaryOutcome, {
+      status: "fresh",
+      dailySummary: body.dailySummary,
+    });
     assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
+    assertNoPublishFailureFields(body);
+  });
+
+  it("PATCH /api/meals/:id returns committed facts with recovered summaryOutcome when recompute fails", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("planned summary recompute failure");
+    };
+
+    try {
+      const updateRes = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId: null,
+        },
+      });
+
+      assert.equal(updateRes.statusCode, 200);
+      const body = updateRes.json();
+      assert.equal(body.affectedDate, formatLocalDate(new Date(meal.loggedAt)));
+      assert.equal(body.meal.id, meal.id);
+      assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
+      assert.equal(body.summaryOutcome.status, "recovered");
+      assert.equal(body.summaryOutcome.reason, "recompute_failed");
+      assert.equal(body.summaryOutcome.dailySummary.totalCalories, 260);
+      assert.deepEqual(body.dailySummary, body.summaryOutcome.dailySummary);
+      assertNoPublishFailureFields(body);
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+    }
+  });
+
+  it("PATCH /api/meals/:id returns committed facts without dailySummary when recompute and recovery fail", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalGetMealsByDate = services.foodLoggingService.getMealsByDate.bind(services.foodLoggingService);
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("planned summary recompute failure");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("planned summary recovery failure");
+    };
+
+    try {
+      const updateRes = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId: null,
+        },
+      });
+
+      assert.equal(updateRes.statusCode, 200);
+      const body = updateRes.json();
+      assert.equal(body.affectedDate, formatLocalDate(new Date(meal.loggedAt)));
+      assert.equal(body.meal.id, meal.id);
+      assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
+      assert.deepEqual(body.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+      assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+      assertNoPublishFailureFields(body);
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      services.foodLoggingService.getMealsByDate = originalGetMealsByDate;
+    }
+  });
+
+  it("DELETE /api/meals/:id returns committed delete facts without dailySummary when recompute and recovery fail", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "午餐",
+      calories: 600,
+      protein: 35,
+      carbs: 55,
+      fat: 22,
+    });
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalGetMealsByDate = services.foodLoggingService.getMealsByDate.bind(services.foodLoggingService);
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("planned summary recompute failure");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("planned summary recovery failure");
+    };
+
+    try {
+      const deleteRes = await app.inject({
+        method: "DELETE",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+      });
+
+      assert.equal(deleteRes.statusCode, 200);
+      const body = deleteRes.json();
+      assert.equal(body.affectedDate, formatLocalDate(new Date(meal.loggedAt)));
+      assert.equal(body.deletedMealId, meal.id);
+      assert.deepEqual(body.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
+      assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+      assertNoPublishFailureFields(body);
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      services.foodLoggingService.getMealsByDate = originalGetMealsByDate;
+    }
+  });
+
+  it("DELETE /api/meals/:id keeps publish failures metadata-only outside the response body", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "午餐",
+      calories: 600,
+      protein: 35,
+      carbs: 55,
+      fat: 22,
+    });
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = () => {
+      throw new Error("planned publish failure");
+    };
+
+    try {
+      const deleteRes = await app.inject({
+        method: "DELETE",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+      });
+
+      assert.equal(deleteRes.statusCode, 200);
+      const body = deleteRes.json();
+      assert.equal(body.deletedMealId, meal.id);
+      assert.equal(body.summaryOutcome.status, "fresh");
+      assert.notEqual(body.summaryOutcome.status, "publish_failed");
+      assert.notEqual(body.summaryOutcome.reason, "publish_failed");
+      assertNoPublishFailureFields(body);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
+  it("PATCH and DELETE /api/meals/:id require signed guest-session cookies", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉沙拉",
+      calories: 420,
+      protein: 32,
+      carbs: 14,
+      fat: 22,
+    });
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${meal.id}`,
+      payload: {
+        foodName: "雞胸肉沙拉半份",
+        calories: 260,
+        protein: 20,
+        carbs: 8,
+        fat: 12,
+        imageAssetId: null,
+      },
+    });
+    assert.equal(updateRes.statusCode, 401);
+
+    const deleteRes = await app.inject({
+      method: "DELETE",
+      url: `/api/meals/${meal.id}`,
+    });
+    assert.equal(deleteRes.statusCode, 401);
   });
 
   it("PATCH /api/meals/:id returns 409 MEAL_REQUIRES_GROUPED_UPDATE for grouped direct edits", async () => {
@@ -644,6 +865,7 @@ describe("Meals API", () => {
       assert.equal(deleteRes.status, 200);
       assert.deepEqual(await deleteRes.json(), {
         affectedDate: "2026-03-25",
+        deletedMealId: meal.id,
         dailySummary: {
           date: "2026-03-25",
           totalCalories: 0,
@@ -651,6 +873,17 @@ describe("Meals API", () => {
           totalCarbs: 0,
           totalFat: 0,
           mealCount: 0,
+        },
+        summaryOutcome: {
+          status: "fresh",
+          dailySummary: {
+            date: "2026-03-25",
+            totalCalories: 0,
+            totalProtein: 0,
+            totalCarbs: 0,
+            totalFat: 0,
+            mealCount: 0,
+          },
         },
       });
 
