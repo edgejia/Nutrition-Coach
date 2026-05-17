@@ -50,6 +50,11 @@ export interface DailySummary {
   mealCount: number;
 }
 
+export type SummaryOutcome =
+  | { status: "fresh"; dailySummary: DailySummary }
+  | { status: "recovered"; dailySummary: DailySummary; reason: "recompute_failed" }
+  | { status: "unavailable"; reason: "recompute_failed" };
+
 export interface MealItemDetail {
   name: string;
   position: number;
@@ -99,8 +104,16 @@ export interface UpdateMealInput {
 
 export interface UpdateMealResponse {
   affectedDate: string;
-  dailySummary: DailySummary;
+  dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
   meal: MealEntry;
+}
+
+export interface DeleteMealResponse {
+  affectedDate: string;
+  dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
+  deletedMealId?: string;
 }
 
 export interface MealMutationNotice {
@@ -173,6 +186,7 @@ export interface ChatReply {
   didMutateMeal?: boolean;
   loggedMeal?: LoggedMealReceipt;
   dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
   dailyTargets?: DailyTargets;
   affectedDate?: string;
 }

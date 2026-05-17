@@ -13,6 +13,8 @@ import type {
   Message,
   CoachCTAIntentId,
   CoachCTAOptionId,
+  DeleteMealResponse,
+  SummaryOutcome,
   UpdateMealInput,
   UpdateMealResponse,
 } from "./types.js";
@@ -156,6 +158,26 @@ function isDailySummary(value: unknown): value is DailySummary {
     typeof value.mealCount === "number" &&
     Number.isFinite(value.mealCount)
   );
+}
+
+export function isSummaryOutcome(value: unknown): value is SummaryOutcome {
+  if (!isRecord(value) || typeof value.status !== "string") {
+    return false;
+  }
+
+  if (value.status === "fresh") {
+    return isDailySummary(value.dailySummary) && value.reason === undefined;
+  }
+
+  if (value.status === "recovered") {
+    return value.reason === "recompute_failed" && isDailySummary(value.dailySummary);
+  }
+
+  if (value.status === "unavailable") {
+    return value.reason === "recompute_failed" && value.dailySummary === undefined;
+  }
+
+  return false;
 }
 
 function isDailyTargets(value: unknown): value is DailyTargets {
@@ -374,15 +396,28 @@ export function formatTurnReference(turnId: string) {
   return `t-${turnId.slice(0, 8)}`;
 }
 
-function normalizeChatReply<T extends { loggedMeal?: LoggedMealReceipt }>(reply: T): T {
-  if (!reply.loggedMeal) {
-    return reply;
-  }
-
+function normalizeSummaryOutcomeFields<T extends { dailySummary?: unknown; summaryOutcome?: unknown }>(
+  body: T,
+): Omit<T, "dailySummary" | "summaryOutcome"> & {
+  dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
+} {
+  const { dailySummary, summaryOutcome, ...rest } = body;
   return {
-    ...reply,
-    loggedMeal: normalizeLoggedMealReceipt(reply.loggedMeal),
+    ...rest,
+    ...(isDailySummary(dailySummary) ? { dailySummary } : {}),
+    ...(isSummaryOutcome(summaryOutcome) ? { summaryOutcome } : {}),
   };
+}
+
+function normalizeChatReply<T extends { loggedMeal?: LoggedMealReceipt; dailySummary?: unknown; summaryOutcome?: unknown }>(
+  reply: T,
+): T {
+  const { loggedMeal, ...rest } = reply;
+  return {
+    ...normalizeSummaryOutcomeFields(rest),
+    ...(loggedMeal ? { loggedMeal: normalizeLoggedMealReceipt(loggedMeal) } : {}),
+  } as T;
 }
 
 export async function registerDevice(goal: string): Promise<{ deviceId: string; dailyTargets: DailyTargets }> {
@@ -508,6 +543,7 @@ export interface StreamCallbacks {
     didMutateMeal?: boolean;
     loggedMeal?: LoggedMealReceipt;
     dailySummary?: DailySummary;
+    summaryOutcome?: SummaryOutcome;
     dailyTargets?: DailyTargets;
     affectedDate?: string;
     turnId?: string;
@@ -520,6 +556,7 @@ export interface StreamCallbacks {
     didMutateMeal?: boolean;
     loggedMeal?: LoggedMealReceipt;
     dailySummary?: DailySummary;
+    summaryOutcome?: SummaryOutcome;
     dailyTargets?: DailyTargets;
     affectedDate?: string;
   }) => void;
@@ -635,6 +672,7 @@ export async function sendMessageStream(
               ? { loggedMeal: normalizeLoggedMealReceipt(parsed.loggedMeal) }
               : {}),
             ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
+            ...(isSummaryOutcome(parsed.summaryOutcome) ? { summaryOutcome: parsed.summaryOutcome } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
             ...(getValidTurnId(parsed.turnId) ? { turnId: getValidTurnId(parsed.turnId) } : {}),
@@ -654,6 +692,7 @@ export async function sendMessageStream(
               ? { loggedMeal: normalizeLoggedMealReceipt(parsed.loggedMeal) }
               : {}),
             ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
+            ...(isSummaryOutcome(parsed.summaryOutcome) ? { summaryOutcome: parsed.summaryOutcome } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
           });
@@ -786,11 +825,6 @@ export async function getHistoryDaySnapshot(dateKey: string): Promise<HistoryDay
   };
 }
 
-export interface DeleteMealResponse {
-  affectedDate: string;
-  dailySummary: DailySummary;
-}
-
 export async function deleteMeal(mealId: string): Promise<DeleteMealResponse> {
   const res = await fetch(`/api/meals/${mealId}`, {
     method: "DELETE",
@@ -798,7 +832,8 @@ export async function deleteMeal(mealId: string): Promise<DeleteMealResponse> {
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to delete meal");
-  return res.json() as Promise<DeleteMealResponse>;
+  const body = await res.json() as DeleteMealResponse;
+  return normalizeSummaryOutcomeFields(body);
 }
 
 export async function updateMeal(mealId: string, input: UpdateMealInput): Promise<UpdateMealResponse> {
@@ -814,12 +849,13 @@ export async function updateMeal(mealId: string, input: UpdateMealInput): Promis
     throw new Error(errorMessage ?? "Failed to update meal");
   }
   const body = await res.json() as UpdateMealResponse;
+  const normalizedBody = normalizeSummaryOutcomeFields(body);
   return {
-    ...body,
+    ...normalizedBody,
     meal: {
-      ...body.meal,
-      itemCount: normalizeItemCount(body.meal.itemCount),
-      imageUrl: withAuthorizedAssetUrl(body.meal.imageUrl) ?? null,
+      ...normalizedBody.meal,
+      itemCount: normalizeItemCount(normalizedBody.meal.itemCount),
+      imageUrl: withAuthorizedAssetUrl(normalizedBody.meal.imageUrl) ?? null,
     },
   };
 }

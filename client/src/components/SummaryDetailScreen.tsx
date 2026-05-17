@@ -509,7 +509,7 @@ export function SummaryDetailScreen() {
     try {
       const { affectedDate, dailySummary } = await deleteMeal(mealId);
       recordMealMutation(affectedDate);
-      if (dailySummary.date === todayKey) {
+      if (dailySummary?.date === todayKey) {
         setDailySummary(dailySummary);
         const { meals } = await getMeals({ refreshReason: "meal_mutation" });
         setMeals(meals);

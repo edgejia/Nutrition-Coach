@@ -118,10 +118,10 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setError(null);
   }, [payload]);
 
-  async function refreshAfterMealMutation(mealId: string, affectedDate: string, dailySummary: DailySummary) {
+  async function refreshAfterMealMutation(mealId: string, affectedDate: string, dailySummary?: DailySummary) {
     redactChatReceiptIdentity(mealId);
     recordMealMutation(affectedDate);
-    if (dailySummary.date !== formatLocalDate(new Date())) {
+    if (!dailySummary || dailySummary.date !== formatLocalDate(new Date())) {
       return;
     }
 

@@ -725,7 +725,7 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.deepEqual(fetchCalls[0].init.headers, { "content-type": "application/json" });
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), input);
-    assert.equal(result.dailySummary.totalCalories, 260);
+    assert.equal(result.dailySummary?.totalCalories, 260);
     assert.equal(result.meal.foodName, "雞胸肉沙拉半份");
   });
 
@@ -1056,9 +1056,7 @@ describe("sendMessageStream", () => {
     mockStreamFetch(200, [
       'event: done\ndata: {"didLogMeal":true,"didMutateMeal":true,"summaryOutcome":{"status":"unavailable","reason":"recompute_failed"},"dailySummary":{"date":"bad","totalCalories":"bad"},"turnId":"turn-1"}\n\n',
     ]);
-    let donePayload:
-      | Parameters<Parameters<typeof api.sendMessageStream>[1]["onDone"]>[0]
-      | undefined;
+    let donePayload: { summaryOutcome?: unknown; didMutateMeal?: boolean; dailySummary?: unknown } | undefined;
 
     await api.sendMessageStream("hello", {
       onStatus: () => {},
@@ -1090,7 +1088,7 @@ describe("sendMessageStream", () => {
       onError: () => {},
     });
 
-    assert.equal(donePayload?.summaryOutcome, undefined);
+    assert.equal((donePayload as { summaryOutcome?: unknown } | undefined)?.summaryOutcome, undefined);
   });
 
   it("dispatches stopped loggedMeal image urls through withAuthorizedAssetUrl", async () => {
@@ -1132,9 +1130,7 @@ describe("sendMessageStream", () => {
     mockStreamFetch(200, [
       'event: stopped\ndata: {"stopped":true,"tokensStreamed":2,"didMutateMeal":true,"summaryOutcome":{"status":"recovered","reason":"recompute_failed","dailySummary":{"date":"2026-04-30","totalCalories":260,"totalProtein":20,"totalCarbs":8,"totalFat":12,"mealCount":1}}}\n\n',
     ]);
-    let stoppedPayload:
-      | Parameters<NonNullable<Parameters<typeof api.sendMessageStream>[1]["onStopped"]>>[0]
-      | undefined;
+    let stoppedPayload: { summaryOutcome?: unknown; didMutateMeal?: boolean } | undefined;
 
     await api.sendMessageStream("hello", {
       onStatus: () => {},
@@ -1175,7 +1171,7 @@ describe("sendMessageStream", () => {
       onError: () => {},
     });
 
-    assert.equal(stoppedPayload?.summaryOutcome, undefined);
+    assert.equal((stoppedPayload as { summaryOutcome?: unknown } | undefined)?.summaryOutcome, undefined);
   });
 
   it("handles SSE event split across two chunks", async () => {
