@@ -60,7 +60,23 @@ Plans:
   2. User receives a committed update receipt when meal editing persists, even if daily summary recompute or publish fails afterward.
   3. User receives a committed delete receipt when meal deletion persists, even if daily summary recompute or publish fails afterward.
   4. Direct meal `PATCH` and `DELETE` responses distinguish committed mutation facts from degraded or failed summary refresh status.
-**Plans**: TBD
+**Plans**: 6 plans
+Plans:
+**Wave 1**
+- [ ] 61-01-PLAN.md — Shared summary outcome helper and service committed-facts foundation
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 61-02-PLAN.md — Meal mutation effect and receipt contract decoupling
+- [ ] 61-05-PLAN.md — Direct PATCH/DELETE summaryOutcome route contract
+
+**Wave 3** *(blocked on Wave 2 plan 61-02 completion)*
+- [ ] 61-03-PLAN.md — Chat tool and orchestrator summaryOutcome propagation
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 61-04-PLAN.md — Chat JSON/SSE response projection and integration proof
+
+**Wave 5** *(blocked on Wave 4 and plan 61-05 completion)*
+- [ ] 61-06-PLAN.md — Client parsing, direct mutation consumption, and final gate
 
 **Implementation Notes:**
 - Add a shared summary-outcome contract rather than duplicating degraded-summary handling across chat tools and direct routes.
