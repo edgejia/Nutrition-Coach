@@ -4,6 +4,7 @@ import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
+import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
@@ -37,6 +38,7 @@ export interface ToolDeps {
   summaryService: ReturnType<typeof createSummaryService>;
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
   deviceService?: ReturnType<typeof createDeviceService>;
+  goalProposalService?: ReturnType<typeof createGoalProposalService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
   imagePath?: string;
   toolSessionState?: {

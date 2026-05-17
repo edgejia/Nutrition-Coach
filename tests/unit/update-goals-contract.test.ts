@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService, type DailyTargets } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createGoalProposalService } from "../../server/services/goal-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import {
   executeTool,
@@ -26,6 +27,7 @@ describe("update_goals ToolContract", () => {
   let deviceId: string;
   let deviceService: ReturnType<typeof createDeviceService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  let goalProposalService: ReturnType<typeof createGoalProposalService>;
   let summaryService: ReturnType<typeof createSummaryService>;
   let published: Array<{ deviceId: string; targets: DailyTargets }>;
   let deps: ToolDeps;
@@ -34,6 +36,7 @@ describe("update_goals ToolContract", () => {
     const db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
+    goalProposalService = createGoalProposalService(db);
     summaryService = createSummaryService(db);
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
     published = [];
@@ -41,6 +44,7 @@ describe("update_goals ToolContract", () => {
       foodLoggingService,
       summaryService,
       deviceService,
+      goalProposalService,
       publisher: {
         publishGoalsUpdate(id: string, targets: DailyTargets) {
           published.push({ deviceId: id, targets });

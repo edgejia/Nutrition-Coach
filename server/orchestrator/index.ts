@@ -5,6 +5,7 @@ import type { createSummaryService, DailySummary } from "../services/summary.js"
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService } from "../services/meal-correction.js";
+import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -41,6 +42,7 @@ interface OrchestratorDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
   deviceService: ReturnType<typeof createDeviceService>;
+  goalProposalService?: ReturnType<typeof createGoalProposalService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
 
@@ -900,6 +902,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 summaryService: deps.summaryService,
                 mealCorrectionService: deps.mealCorrectionService,
                 deviceService: deps.deviceService,
+                goalProposalService: deps.goalProposalService,
                 publisher: deps.publisher,
                 imagePath,
                 toolSessionState,

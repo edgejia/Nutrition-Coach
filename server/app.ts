@@ -13,6 +13,7 @@ import { createHistoryQueryService } from "./services/history-query.js";
 import { createChatService } from "./services/chat.js";
 import { createAssetService } from "./services/assets.js";
 import { createMealCorrectionService } from "./services/meal-correction.js";
+import { createGoalProposalService } from "./services/goal-proposals.js";
 import { createGuestSessionService } from "./services/guest-session.js";
 import { createOrchestrator } from "./orchestrator/index.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
@@ -33,10 +34,12 @@ export interface AppServices {
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
+  goalProposalService: ReturnType<typeof createGoalProposalService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
   historyQueryService: ReturnType<typeof createHistoryQueryService>;
   mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   orchestrator: ReturnType<typeof createOrchestrator>;
+  publisher: RealtimePublisher;
   summaryService: ReturnType<typeof createSummaryService>;
 }
 
@@ -95,6 +98,7 @@ export async function buildApp(opts: AppOptions) {
   const chatService = createChatService(db);
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
   const mealCorrectionService = createMealCorrectionService(db);
+  const goalProposalService = createGoalProposalService(db);
   const publisher = new RealtimePublisher();
 
   const orchestrator = createOrchestrator({
@@ -104,6 +108,7 @@ export async function buildApp(opts: AppOptions) {
     foodLoggingService,
     mealCorrectionService,
     deviceService,
+    goalProposalService,
     publisher,
   });
 
@@ -111,10 +116,12 @@ export async function buildApp(opts: AppOptions) {
     assetService,
     chatService,
     foodLoggingService,
+    goalProposalService,
     guestSessionService,
     historyQueryService,
     mealCorrectionService,
     orchestrator,
+    publisher,
     summaryService,
   });
   await app.register(cors);
