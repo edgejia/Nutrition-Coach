@@ -430,21 +430,19 @@ try {
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | Recovery from persisted meals can be implemented by reusing or moving the existing `recoverDailySummaryFromPersistedMeals` logic without schema changes. [ASSUMED] | Architecture Patterns | Planner may need a small service helper with additional projection logic if the current helper is private or too coupled to tool types. |
-| A2 | Prefer `server/services/summary-outcome.ts` because both routes and orchestrator tools need the same policy. [ASSUMED] | Open Questions | Planner may choose a different placement if imports or domain boundaries make a service helper awkward. |
-| A3 | Direct `DELETE` should at minimum return `affectedDate` plus `summaryOutcome`, and should add `deletedMealId` or `deletedMeal` only if needed to make committed facts explicit without disrupting clients. [ASSUMED] | Open Questions | Planner may need to clarify response DTO shape if MUT-04 is interpreted as requiring richer delete facts. |
+| A2 | Shared helper placement is `server/services/summary-outcome.ts` because both direct routes and orchestrator tools need the same post-commit summary policy, and services own reusable domain logic in this repo. [RESOLVED] | Open Questions (RESOLVED) | Low; this matches AGENTS.md service ownership and avoids route/tool drift. |
+| A3 | Direct `DELETE` response facts include at least `affectedDate` and `deletedMealId`; include `deletedMeal` only where already available in service/chat paths or if doing so does not disrupt direct-route clients. [RESOLVED] | Open Questions (RESOLVED) | Low; MUT-04 remains explicit without broadening direct route payloads unnecessarily. |
 | A4 | Research validity through 2026-06-16 is sufficient for codebase-local architecture unless dependency upgrades enter scope. [ASSUMED] | Metadata | Planner may need to re-run docs/version checks if stack upgrades become part of the phase. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where should the shared helper live?**
    - What we know: Planner has discretion over helper/module placement, and services own reusable domain/persistence logic. [VERIFIED: `61-CONTEXT.md`, `AGENTS.md`]
-   - What's unclear: Whether the cleanest implementation is `server/services/summary-outcome.ts` or a sibling under `server/orchestrator/` plus direct-route adapter. [VERIFIED: `61-CONTEXT.md`]
-   - Recommendation: Prefer `server/services/summary-outcome.ts` because both routes and orchestrator tools need the same policy. [ASSUMED]
+   - Resolution: Use `server/services/summary-outcome.ts` because both direct routes and orchestrator tools need the same post-commit summary policy, and services own reusable domain logic in this repo. [RESOLVED: `AGENTS.md`]
 
 2. **Should direct `DELETE` include deleted meal facts?**
    - What we know: Chat delete already has `deletedMeal` facts for receipts; direct delete currently returns only `affectedDate` and `dailySummary`. [VERIFIED: `server/services/meal-correction.ts:719`, `server/routes/meals.ts:229`]
-   - What's unclear: MUT-04 requires distinction between committed facts and summary status, but does not explicitly require a direct deleted-meal DTO. [VERIFIED: `.planning/REQUIREMENTS.md`]
-   - Recommendation: At minimum return `affectedDate` plus `summaryOutcome`; add `deletedMealId` or `deletedMeal` only if it is needed to make committed facts explicit without disrupting clients. [ASSUMED]
+   - Resolution: Direct `DELETE` response facts must include at least `affectedDate` and `deletedMealId`; include `deletedMeal` only where already available in service/chat paths or if doing so does not disrupt direct-route clients. This keeps MUT-04 explicit without broadening direct route payloads unnecessarily. [RESOLVED: `.planning/REQUIREMENTS.md`]
 
 ## Environment Availability
 
