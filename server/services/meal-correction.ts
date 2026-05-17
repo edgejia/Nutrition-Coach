@@ -13,6 +13,12 @@ import {
 } from "./meal-transactions.js";
 import { createTurnStateService } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
+import { createFoodLoggingService } from "./food-logging.js";
+import {
+  buildSummaryOutcomeAfterMealCommit,
+  dailySummaryFromOutcome,
+  type SummaryOutcome,
+} from "./summary-outcome.js";
 import { makeAssetRef } from "./assets.js";
 import { projectMealDisplay } from "./meal-display.js";
 
@@ -83,6 +89,11 @@ interface CandidateHeaderRow {
 
 const NUMERIC_ITEM_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
 type NumericItemField = (typeof NUMERIC_ITEM_FIELDS)[number];
+
+interface MealCorrectionServiceDeps {
+  summaryService?: Pick<ReturnType<typeof createSummaryService>, "getDailySummary">;
+  foodLoggingService?: Pick<ReturnType<typeof createFoodLoggingService>, "getMealsByDate">;
+}
 
 function normalizeText(text: string): string {
   return text.toLowerCase().replace(/\s+/g, "");
@@ -320,10 +331,11 @@ function resolveFindMealsTargetDateKey(
   };
 }
 
-export function createMealCorrectionService(db: AppDatabase) {
+export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectionServiceDeps = {}) {
   const mealTransactionsService = createMealTransactionsService(db);
   const turnStateService = createTurnStateService(db);
-  const summaryService = createSummaryService(db);
+  const summaryService = deps.summaryService ?? createSummaryService(db);
+  const foodLoggingService = deps.foodLoggingService ?? createFoodLoggingService(db);
 
   async function loadActiveCandidates(deviceId: string, limit = 20): Promise<MealCorrectionCandidate[]> {
     const headers = await db
@@ -659,7 +671,8 @@ export function createMealCorrectionService(db: AppDatabase) {
         loggedAt: string;
       };
       affectedDate: string;
-      dailySummary: DailySummary;
+      summaryOutcome: SummaryOutcome;
+      dailySummary?: DailySummary;
     }> {
       const items = "items" in input
         ? input.items
@@ -677,10 +690,13 @@ export function createMealCorrectionService(db: AppDatabase) {
       }
 
       const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, { items: nextItems });
-      const dailySummary = await summaryService.getDailySummary(
+      const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
         deviceId,
-        new Date(`${updated.affectedDateKey}T12:00:00`),
-      );
+        affectedDate: updated.affectedDateKey,
+        summaryService,
+        foodLoggingService,
+      });
+      const dailySummary = dailySummaryFromOutcome(summaryOutcome);
 
       const display = projectMealDisplay(updated.items);
 
@@ -706,7 +722,8 @@ export function createMealCorrectionService(db: AppDatabase) {
           loggedAt: updated.loggedAt,
         },
         affectedDate: updated.affectedDateKey,
-        dailySummary,
+        summaryOutcome,
+        ...(dailySummary ? { dailySummary } : {}),
       };
     },
 
@@ -716,19 +733,24 @@ export function createMealCorrectionService(db: AppDatabase) {
     ): Promise<{
       deletedMealId: string;
       affectedDate: string;
-      dailySummary: DailySummary;
+      summaryOutcome: SummaryOutcome;
+      dailySummary?: DailySummary;
       deletedMeal: DeletedMealSnapshot;
     }> {
       const deleted = await mealTransactionsService.softDeleteTransaction(deviceId, mealId);
-      const dailySummary = await summaryService.getDailySummary(
+      const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
         deviceId,
-        new Date(`${deleted.affectedDateKey}T12:00:00`),
-      );
+        affectedDate: deleted.affectedDateKey,
+        summaryService,
+        foodLoggingService,
+      });
+      const dailySummary = dailySummaryFromOutcome(summaryOutcome);
 
       return {
         deletedMealId: deleted.deletedMeal.mealId,
         affectedDate: deleted.affectedDateKey,
-        dailySummary,
+        summaryOutcome,
+        ...(dailySummary ? { dailySummary } : {}),
         deletedMeal: deleted.deletedMeal,
       };
     },

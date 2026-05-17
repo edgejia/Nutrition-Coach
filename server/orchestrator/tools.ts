@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ToolDefinition, ToolCall } from "../llm/types.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
+import type { SummaryOutcome } from "../services/summary-outcome.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
@@ -255,7 +256,8 @@ interface LogFoodSuccessResult {
 type LogFoodResult = LogFoodSuccessResult | HistoricalToolClarification;
 
 interface UpdateMealResult {
-  dailySummary: DailySummary;
+  dailySummary?: DailySummary;
+  summaryOutcome: SummaryOutcome;
   affectedDate: string;
   updatedMeal: {
     id: string;
@@ -280,7 +282,8 @@ interface UpdateMealResult {
 }
 
 interface DeleteMealResult {
-  dailySummary: DailySummary;
+  dailySummary?: DailySummary;
+  summaryOutcome: SummaryOutcome;
   affectedDate: string;
   deletedMealId: string;
   deletedMeal: DeletedMealSnapshot;

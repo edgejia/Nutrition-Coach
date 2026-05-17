@@ -368,6 +368,7 @@ describe("meal correction service", () => {
     });
 
     assert.equal(result.affectedDate, "2026-03-25");
+    assert.ok(result.dailySummary);
     assert.equal(result.dailySummary.date, result.affectedDate);
     assert.equal(result.updatedMeal.calories, 500);
   });
@@ -504,6 +505,7 @@ describe("meal correction service", () => {
 
     assert.equal(result.deletedMealId, meal.id);
     assert.equal(result.affectedDate, "2026-03-25");
+    assert.ok(result.dailySummary);
     assert.equal(result.dailySummary.date, result.affectedDate);
     assert.equal(result.dailySummary.mealCount, 0);
     assert.deepEqual(result.deletedMeal, {
