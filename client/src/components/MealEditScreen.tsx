@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { deleteMeal, getMeals, MealRevisionConflictError, updateMeal } from "../api.js";
 import { formatLocalDate } from "../lib/time.js";
+import { refreshAfterMealMutation } from "../meal-edit-refresh.js";
 import { useStore } from "../store.js";
-import type { DailySummary, MealEditPayload } from "../types.js";
+import type { MealEditPayload } from "../types.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportChevronLeftIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportScreen } from "./SportPrimitives.js";
@@ -127,18 +128,6 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setStaleAffectedDate(null);
   }, [payload]);
 
-  async function refreshAfterMealMutation(mealId: string, affectedDate: string, dailySummary?: DailySummary) {
-    redactChatReceiptIdentity(mealId);
-    recordMealMutation(affectedDate);
-    if (!dailySummary || dailySummary.date !== formatLocalDate(new Date())) {
-      return;
-    }
-
-    setDailySummary(dailySummary);
-    const { meals } = await getMeals({ refreshReason: "meal_mutation" });
-    setMeals(meals);
-  }
-
   async function refreshAfterStaleConflict(mealId: string, affectedDate: string) {
     redactChatReceiptIdentity(mealId);
     recordMealMutation(affectedDate);
@@ -198,7 +187,18 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
         ...parsedDraft,
         imageAssetId: payload.imageAssetId ?? null,
       });
-      await refreshAfterMealMutation(payload.mealId, response.affectedDate, response.dailySummary);
+      await refreshAfterMealMutation({
+        redactChatReceiptIdentity,
+        recordMealMutation,
+        setDailySummary,
+        getMeals,
+        setMeals,
+        todayKey: () => formatLocalDate(new Date()),
+      }, {
+        mealId: payload.mealId,
+        affectedDate: response.affectedDate,
+        dailySummary: response.dailySummary,
+      });
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
@@ -230,7 +230,18 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
       const { affectedDate, dailySummary } = await deleteMeal(payload.mealId, {
         expectedMealRevisionId: payload.mealRevisionId,
       });
-      await refreshAfterMealMutation(payload.mealId, affectedDate, dailySummary);
+      await refreshAfterMealMutation({
+        redactChatReceiptIdentity,
+        recordMealMutation,
+        setDailySummary,
+        getMeals,
+        setMeals,
+        todayKey: () => formatLocalDate(new Date()),
+      }, {
+        mealId: payload.mealId,
+        affectedDate,
+        dailySummary,
+      });
       onBack();
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
