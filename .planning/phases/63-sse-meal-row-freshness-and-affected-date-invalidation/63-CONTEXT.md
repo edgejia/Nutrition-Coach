@@ -36,51 +36,52 @@ This phase covers the `daily_summary` SSE event envelope, client event validatio
 - **D-09:** Overlapping same-day mutation events use latest-event-wins by client receipt/coordinator request-token order, not server commit order. The envelope intentionally has no revision/high-watermark, so the client must treat the latest accepted event/token as authoritative for UI writes.
 - **D-10:** If a valid same-day `meal_mutation` event arrives while the initial meal-row load is still in flight, the mutation reconcile wins. Older initial row-load results must not overwrite rows or summary committed by the newer mutation event.
 - **D-11:** The same latest-wins token/guard must cover `MainLayout` initial `getMeals()` versus SSE same-day reconcile. Otherwise the initial load can overwrite fresher SSE rows after the coordinator already committed a newer summary/row pair.
-- **D-12:** First-mount `source: "initial"` events are allowed to run the existing today-date guarded summary commit when meal rows are not loaded yet. `MainLayout`'s initial `getMeals()` remains the row source.
+- **D-12:** First-mount and reconnect `source: "initial"` same-day handling is governed by the Initial/Reconnect State Matrix below; do not duplicate those conditions elsewhere.
 - **D-13:** Reconnect `source: "initial"` events are different when today meal rows are already loaded: treat them as reconnect snapshots and reconcile rows before showing a newer summary. If row refresh fails, keep prior visible summary and rows.
 - **D-14:** Server always sends `source: "initial"` on SSE connection. The client must classify first mount versus reconnect from row-load/coordinator state, not from `source` alone.
 
 ### Initial/Reconnect State Matrix
-- **D-15:** `source: "initial"` + no loaded today rows + first active coordinator connection: run existing guarded same-day summary commit; initial `getMeals()` remains the row source, with token protection against later stale overwrite.
+- **D-15:** `source: "initial"` + no loaded today rows + coordinator has not committed any same-day summary or row state yet: run existing guarded same-day summary commit; initial `getMeals()` remains the row source, with token protection against later stale overwrite.
 - **D-16:** `source: "initial"` + loaded today rows: treat as reconnect snapshot; refetch rows first, then commit summary, with latest-wins/drop-on-failure semantics.
 - **D-17:** `source: "initial"` + initial row load in flight but a newer same-day `meal_mutation` event is received: mutation reconcile wins; the older initial load result must be dropped if stale by token.
-- **D-18:** `source: "meal_mutation"` + same-day: always use the SSE reconcile path, independent of whether mount-time loading is still active.
+- **D-18:** `source: "initial"` + same-day + no loaded today rows because initial `getMeals()` failed or recovery reconnect happened before rows loaded: treat like the no-loaded-rows path. Allow guarded same-day summary commit, let the SSE-triggered/retry refetch become the row recovery path, and apply the same token guard against stale row overwrites.
+- **D-19:** `source: "meal_mutation"` + same-day: always use the SSE reconcile path, independent of whether mount-time loading is still active. If no today rows are loaded after initial load failure, the SSE reconcile refetch acts as recovery for the missing rows.
 
 ### Client Responsibility Boundary
-- **D-19:** `client/src/sse.ts` validates and parses the `daily_summary` envelope shape, recursively validates `summary`, validates calendar-real local date keys, then dispatches a richer callback. It must not perform meal refetches itself.
-- **D-20:** A small SSE reconcile coordinator/helper should own future-date ignore, today-versus-historical routing, refetch-first, latest-wins, and drop-on-failure behavior for SSE-driven same-day events.
-- **D-21:** `client/src/store.ts` remains the guarded state commit boundary. It should not own SSE event orchestration.
-- **D-22:** Existing non-transport async store actions such as guest-session bootstrap/recovery are not prohibited by this boundary.
-- **D-23:** Plan phase may evaluate whether `client/src/meal-edit-refresh.ts` should share primitives with the SSE coordinator or eventually adopt refetch-first ordering. If sharing would require flag-heavy parameterization, increase coupling, or materially change visible Phase 62 behavior, keep paths independent and apply the new coordinator only to the Phase 63 SSE path.
-- **D-24:** Phase 62 direct mutation success flows are not retroactively changed. Making direct mutation paths refetch-first is optional cleanup, not required by Phase 63.
+- **D-20:** `client/src/sse.ts` validates and parses the `daily_summary` envelope shape, recursively validates `summary`, validates calendar-real local date keys, then dispatches a richer callback. It must not perform meal refetches itself.
+- **D-21:** A small SSE reconcile coordinator/helper should own future-date ignore, today-versus-historical routing, refetch-first, latest-wins, and drop-on-failure behavior for SSE-driven same-day events.
+- **D-22:** `client/src/store.ts` remains the guarded state commit boundary. It should not own SSE event orchestration.
+- **D-23:** Existing non-transport async store actions such as guest-session bootstrap/recovery are not prohibited by this boundary.
+- **D-24:** Plan phase may evaluate whether `client/src/meal-edit-refresh.ts` should share primitives with the SSE coordinator or eventually adopt refetch-first ordering. If sharing would require flag-heavy parameterization, increase coupling, or materially change visible Phase 62 behavior, keep paths independent and apply the new coordinator only to the Phase 63 SSE path.
+- **D-25:** Phase 62 direct mutation success flows are not retroactively changed. Making direct mutation paths refetch-first is optional cleanup, not required by Phase 63.
 
 ### Historical Affected-Date Invalidation
-- **D-25:** For valid `affectedDate !== todayKey` events, the client must never update today's summary, refresh today's rows, or invoke the same-day reconcile path.
-- **D-26:** Historical events invalidate the affected historical date through `recordMealMutation(affectedDate)` / `lastMealMutation` nonce. This is the valid non-future historical SSE invalidation signal.
-- **D-27:** Same-day SSE reconcile should use its own coordinator token path rather than `recordMealMutation(affectedDate)`.
-- **D-28:** If the affected historical date is currently visible, refresh that visible surface; otherwise passive invalidation is enough.
-- **D-29:** "Currently visible" means an open Day Detail whose `dateKey` matches `affectedDate`, or the active History screen when `affectedDate` is the selected day or falls within the currently visible history week.
-- **D-30:** Do not refresh merely because the History tab exists. Non-visible historical dates remain passive invalidation only.
-- **D-31:** Historical event `summary` is validated but not consumed as the data source for historical surfaces in Phase 63. Historical surfaces refresh through affected-date invalidation/refetch.
-- **D-32:** Historical visible refreshes use latest-event-wins per `affectedDate` by client receipt/coordinator request-token order. Older in-flight refresh results must not overwrite newer refresh results for the same visible date.
-- **D-33:** Do not require explicit event coalescing in Phase 63.
+- **D-26:** For valid `affectedDate !== todayKey` events, the client must never update today's summary, refresh today's rows, or invoke the same-day reconcile path.
+- **D-27:** Historical events invalidate the affected historical date through `recordMealMutation(affectedDate)` / `lastMealMutation` nonce. This is the valid non-future historical SSE invalidation signal.
+- **D-28:** Same-day SSE reconcile should use its own coordinator token path rather than `recordMealMutation(affectedDate)`.
+- **D-29:** If the affected historical date is currently visible, refresh that visible surface; otherwise passive invalidation is enough.
+- **D-30:** "Currently visible" means an open Day Detail whose `dateKey` matches `affectedDate`, or the active History screen when `affectedDate` is the selected day or falls within the currently visible history week.
+- **D-31:** Do not refresh merely because the History tab exists. Non-visible historical dates remain passive invalidation only.
+- **D-32:** Historical event `summary` is validated but not consumed as the data source for historical surfaces in Phase 63. Historical surfaces refresh through affected-date invalidation/refetch.
+- **D-33:** Historical visible refreshes use latest-event-wins per `affectedDate` by client receipt/coordinator request-token order. Older in-flight refresh results must not overwrite newer refresh results for the same visible date.
+- **D-34:** Do not require explicit event coalescing in Phase 63.
 
 ### Validation And Date Guardrails
-- **D-34:** `daily_summary` SSE validation is strict and silent. JSON parse failures, envelope shape failures, recursive `DailySummary` validation failures, invalid `source`, invalid `affectedDate`, invalid `summary.date`, and `summary.date !== affectedDate` are ignored without throwing.
-- **D-35:** Invalid events mutate no app state: no `setDailySummary`, no meal-row refresh, no same-day reconcile, no `recordMealMutation`, no historical refresh, and no `lastMealMutation` nonce increment.
-- **D-36:** No dev/debug signal is introduced in Phase 63 for invalid frames. This follows the existing `goals_update` SSE precedent.
-- **D-37:** `affectedDate` and `summary.date` must be real local date keys. They must match `YYYY-MM-DD` and pass calendar round-trip validation. Impossible dates such as `2026-02-31` are invalid.
-- **D-38:** Route by date at the SSE coordinator boundary. Same-day valid events may call `setDailySummary` after required row reconciliation. Valid non-today events must not call `setDailySummary` because that store action triggers rollover refresh when `summary.date !== local today`.
-- **D-39:** The existing store-level date guard remains defense in depth, not the primary historical routing mechanism.
-- **D-40:** Future valid dates are valid calendar keys but out of current product scope. If `affectedDate > client todayKey`, silently ignore the event with no `setDailySummary`, no `recordMealMutation`, and no `lastMealMutation` increment.
-- **D-41:** Future-date ignore is coordinator responsibility after `sse.ts` validates envelope shape and calendar-real date keys. `sse.ts` should dispatch valid future-date envelopes to the coordinator rather than classify product-scope routing itself.
-- **D-42:** Phase 63 does not change server future-date mutation policy.
+- **D-35:** `daily_summary` SSE validation is strict and silent. JSON parse failures, envelope shape failures, recursive `DailySummary` validation failures, invalid `source`, invalid `affectedDate`, invalid `summary.date`, and `summary.date !== affectedDate` are ignored without throwing.
+- **D-36:** Invalid events mutate no app state: no `setDailySummary`, no meal-row refresh, no same-day reconcile, no `recordMealMutation`, no historical refresh, and no `lastMealMutation` nonce increment.
+- **D-37:** No dev/debug signal is introduced in Phase 63 for invalid frames. This follows the existing `goals_update` SSE precedent.
+- **D-38:** `affectedDate` and `summary.date` must be real local date keys. They must match `YYYY-MM-DD` and pass calendar round-trip validation. Impossible dates such as `2026-02-31` are invalid.
+- **D-39:** Route by date at the SSE coordinator boundary. Same-day valid events may call `setDailySummary` after required row reconciliation. Valid non-today events must not call `setDailySummary` because that store action triggers rollover refresh when `summary.date !== local today`.
+- **D-40:** The existing store-level date guard remains defense in depth, not the primary historical routing mechanism.
+- **D-41:** Future valid dates are valid calendar keys but out of current product scope. If `affectedDate > client todayKey`, silently ignore the event with no `setDailySummary`, no `recordMealMutation`, and no `lastMealMutation` increment.
+- **D-42:** Future-date ignore is coordinator responsibility after `sse.ts` validates envelope shape and calendar-real date keys. `sse.ts` should dispatch valid future-date envelopes to the coordinator rather than classify product-scope routing itself.
+- **D-43:** Phase 63 does not change server future-date mutation policy.
 
 ### Server Emission And Scope Assumptions
-- **D-43:** Server-side routes must emit historical affected-date `daily_summary` events when meal mutations affect historical dates.
-- **D-44:** Current `server/routes/chat.ts` and `server/routes/meals.ts` publish helpers hard-gate `daily_summary` fan-out to today. Phase 63 must remove or replace those today-only gates and add historical affected-date emission; this is not just metadata plumbing over existing historical emission.
-- **D-45:** `server/realtime/publisher.ts` remains fan-out only. Add metadata to events at route/service call sites rather than introducing DB reads into the publisher.
-- **D-46:** Date-moving meal mutations are out of current product scope. Current update/correction paths revise meal contents/image and preserve existing `loggedAt`, so each emitted meal-mutation `daily_summary` event can cover exactly one `affectedDate`. If date-moving meal mutations are introduced later, that feature must define multi-date emission semantics separately.
+- **D-44:** Server-side routes must emit historical affected-date `daily_summary` events when meal mutations affect historical dates.
+- **D-45:** Current `server/routes/chat.ts` and `server/routes/meals.ts` publish helpers hard-gate `daily_summary` fan-out to today. Phase 63 must remove or replace those today-only gates and add historical affected-date emission; this is not just metadata plumbing over existing historical emission.
+- **D-46:** `server/realtime/publisher.ts` remains fan-out only. Add metadata to events at route/service call sites rather than introducing DB reads into the publisher.
+- **D-47:** Date-moving meal mutations are out of current product scope. Current update/correction paths revise meal contents/image and preserve existing `loggedAt`, so each emitted meal-mutation `daily_summary` event can cover exactly one `affectedDate`. If date-moving meal mutations are introduced later, that feature must define multi-date emission semantics separately.
 
 ### Planner Discretion
 - Planner may choose the exact module name and placement for the SSE reconcile coordinator/helper.
