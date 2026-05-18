@@ -1,5 +1,5 @@
 ---
-status: resolved
+status: complete
 phase: 63-sse-meal-row-freshness-and-affected-date-invalidation
 source: [63-VERIFICATION.md]
 started: 2026-05-18T08:42:29Z
