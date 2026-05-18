@@ -83,6 +83,31 @@ function assertNoPublishFailurePayload(payload: unknown) {
   assert.doesNotMatch(JSON.stringify(payload), /publish_failed|summary_publish_failed/);
 }
 
+function assertMealMutationSummaryEnvelope(payload: unknown, affectedDate: string) {
+  assert.ok(payload && typeof payload === "object");
+  const envelope = payload as {
+    source?: unknown;
+    affectedDate?: unknown;
+    summary?: { date?: unknown };
+    summaryOutcome?: unknown;
+    mealId?: unknown;
+    mealRevisionId?: unknown;
+  };
+  assert.equal(envelope.source, "meal_mutation");
+  assert.equal(envelope.affectedDate, affectedDate);
+  assert.ok(envelope.summary && typeof envelope.summary === "object");
+  assert.equal(envelope.summary.date, affectedDate);
+  assert.equal(Object.prototype.hasOwnProperty.call(envelope, "summaryOutcome"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(envelope, "mealId"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(envelope, "mealRevisionId"), false);
+}
+
+function latestEventPayload(raw: string, eventName: string) {
+  const frames = parseSSEEvents(raw).filter((frame) => frame.event === eventName);
+  assert.ok(frames.length > 0, `expected ${eventName} frame in ${raw}`);
+  return JSON.parse(frames.at(-1)!.data);
+}
+
 function chatTurnCompletedMetadata(record: Record<string, unknown>) {
   return {
     event: record.event,
@@ -1306,6 +1331,14 @@ describe("Chat API", () => {
   });
 
   it("POST /api/chat returns dailySummary when didLogMeal is true", async () => {
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      assert.equal(publishDeviceId, deviceId);
+      publishedPayloads.push(payload);
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_1",
@@ -1318,25 +1351,32 @@ describe("Chat API", () => {
     });
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
-    const form = new FormData();
-    form.append("message", "我吃了蘋果");
-    const res = await fetch(`${address}/api/chat`, {
-      method: "POST",
-      headers: { cookie: sessionCookieHeader },
-      body: form,
-    });
+    try {
+      const form = new FormData();
+      form.append("message", "我吃了蘋果");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
 
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.didLogMeal, true);
-    assert.deepEqual(body.dailySummary, {
-      totalCalories: 95,
-      totalProtein: 0,
-      totalCarbs: 25,
-      totalFat: 0.3,
-      mealCount: 1,
-      date: formatLocalDate(new Date()),
-    });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      const affectedDate = formatLocalDate(new Date());
+      assert.equal(body.didLogMeal, true);
+      assert.deepEqual(body.dailySummary, {
+        totalCalories: 95,
+        totalProtein: 0,
+        totalCarbs: 25,
+        totalFat: 0.3,
+        mealCount: 1,
+        date: affectedDate,
+      });
+      assert.equal(publishedPayloads.length, 1);
+      assertMealMutationSummaryEnvelope(publishedPayloads[0], affectedDate);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
   });
 
   it("POST /api/chat dailySummary uses trusted protein for a mixed lunchbox log", async () => {
@@ -1436,11 +1476,17 @@ describe("Chat API", () => {
 
   it("POST /api/chat JSON projects unavailable summaryOutcome for committed log responses", async () => {
     assert.ok(services, "expected app services");
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    let publishCalls = 0;
     services.summaryService.getDailySummary = async () => {
       throw new Error("summary recomputation failed after persistence");
     };
     services.foodLoggingService.getMealsByDate = async () => {
       throw new Error("summary recovery failed after persistence");
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
     };
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -1487,9 +1533,18 @@ describe("Chat API", () => {
     assertUnavailableSummaryOutcome(body.summaryOutcome);
     assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
     assertNoPublishFailurePayload(body);
+    assert.equal(publishCalls, 0);
   });
 
   it("POST /api/chat returns affectedDate for historical logging without changing the summary payload shape", async () => {
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      assert.equal(publishDeviceId, deviceId);
+      publishedPayloads.push(payload);
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_historical_log",
@@ -1510,19 +1565,25 @@ describe("Chat API", () => {
     });
     mockLLM.queueChatResponse({ content: "已幫你記到 3/25。" });
 
-    const form = new FormData();
-    form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
-    const res = await fetch(`${address}/api/chat`, {
-      method: "POST",
-      headers: { cookie: sessionCookieHeader },
-      body: form,
-    });
+    try {
+      const form = new FormData();
+      form.append("message", "幫我補記 2026-03-25 晚餐吃牛肉麵");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
 
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.didLogMeal, true);
-    assert.equal(body.affectedDate, "2026-03-25");
-    assert.equal(body.dailySummary?.date, "2026-03-25");
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.didLogMeal, true);
+      assert.equal(body.affectedDate, "2026-03-25");
+      assert.equal(body.dailySummary?.date, "2026-03-25");
+      assert.equal(publishedPayloads.length, 1);
+      assertMealMutationSummaryEnvelope(publishedPayloads[0], "2026-03-25");
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
   });
 
   it("POST /api/chat appends a concrete date when a historical mutation reply only says relative time", async () => {
@@ -1560,7 +1621,7 @@ describe("Chat API", () => {
     assert.match(body.reply, /3\/25/);
   });
 
-  it("historical chat mutations do not publish a non-today summary into the SSE live loop", async () => {
+  it("historical chat mutations publish affected-date daily_summary envelopes into the SSE live loop", async () => {
     const sseController = new AbortController();
     const timeout = setTimeout(() => sseController.abort(), 3000);
     let sseReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -1609,11 +1670,10 @@ describe("Chat API", () => {
       assert.equal(body.affectedDate, "2026-03-25");
       assert.equal(body.dailySummary?.date, "2026-03-25");
 
-      const extraChunk = await readOptionalSSEChunk(sseReader, 250);
-      assert.ok(
-        extraChunk === null || !extraChunk.includes("event: daily_summary"),
-        `historical mutation must not emit a live SSE summary, got ${extraChunk ?? "<none>"}`,
-      );
+      const extraChunk = await readOptionalSSEChunk(sseReader, 500);
+      assert.ok(extraChunk, "historical mutation should emit a daily_summary frame");
+      const payload = latestEventPayload(extraChunk, "daily_summary");
+      assertMealMutationSummaryEnvelope(payload, "2026-03-25");
     } finally {
       clearTimeout(timeout);
       await sseReader?.cancel().catch(() => {});
@@ -2770,6 +2830,8 @@ describe("Chat API", () => {
         dailySummaryEvent.observedAt >= chatDoneEvent.observedAt,
         `daily_summary observed at ${dailySummaryEvent.observedAt}, before chat done at ${chatDoneEvent.observedAt}`,
       );
+      const mutationSummaryPayload = latestEventPayload(dailySummaryEvent.raw, "daily_summary");
+      assertMealMutationSummaryEnvelope(mutationSummaryPayload, formatLocalDate(new Date()));
 
       const doneFrame = parseSSEEvents(chatDoneEvent.raw).find((frame) => frame.event === "done");
       assert.ok(doneFrame);
