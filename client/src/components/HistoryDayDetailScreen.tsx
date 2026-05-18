@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getHistoryDaySnapshot } from "../api.js";
 import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
@@ -104,6 +104,7 @@ function MealDetailRow({
 export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
+  const lastMealMutation = useStore((s) => s.lastMealMutation);
   const todayKey = useMemo(() => formatLocalDate(new Date()), []);
   const payload = secondaryScreen?.screen === "dayDetail" ? secondaryScreen.payload : undefined;
   const dateKey = payload?.dateKey ?? todayKey;
@@ -114,33 +115,57 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [highlightedMealId, setHighlightedMealId] = useState<string | null>(targetMealId ?? null);
   const mealRefs = useRef(new Map<string, HTMLDivElement>());
+  const loadTokenRef = useRef(0);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const isToday = payloadLabel === "today-live" || dateKey === todayKey;
 
+  const loadSnapshot = useCallback(
+    (cancelledRef?: { current: boolean }) => {
+      const requestDateKey = dateKey;
+      const requestToken = loadTokenRef.current + 1;
+      loadTokenRef.current = requestToken;
+      const isCurrent = () => !cancelledRef?.current && loadTokenRef.current === requestToken;
+
+      setLoading(true);
+      setError(null);
+      setSnapshot(null);
+
+      return getHistoryDaySnapshot(requestDateKey)
+        .then((nextSnapshot) => {
+          if (isCurrent()) setSnapshot(nextSnapshot);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof Error && err.message === "UNAUTHORIZED") {
+            void recoverGuestSession();
+          }
+          if (isCurrent()) setError("當日詳情暫時載入失敗。請稍後再試。");
+        })
+        .finally(() => {
+          if (isCurrent()) setLoading(false);
+        });
+    },
+    [dateKey, recoverGuestSession],
+  );
+
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setSnapshot(null);
-
-    getHistoryDaySnapshot(dateKey)
-      .then((nextSnapshot) => {
-        if (!cancelled) setSnapshot(nextSnapshot);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.message === "UNAUTHORIZED") {
-          void recoverGuestSession();
-        }
-        if (!cancelled) setError("當日詳情暫時載入失敗。請稍後再試。");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
+    const cancelledRef = { current: false };
+    void loadSnapshot(cancelledRef);
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
-  }, [dateKey, recoverGuestSession]);
+  }, [loadSnapshot]);
+
+  useEffect(() => {
+    if (!lastMealMutation || lastMealMutation?.affectedDate !== dateKey) {
+      return;
+    }
+
+    const cancelledRef = { current: false };
+    void loadSnapshot(cancelledRef);
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, [dateKey, lastMealMutation?.affectedDate, lastMealMutation?.nonce, loadSnapshot]);
 
   useEffect(() => {
     if (!snapshot || !targetMealId) return;
