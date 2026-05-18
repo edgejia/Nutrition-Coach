@@ -402,17 +402,19 @@ All claims in this research were verified from project files, local commands, or
 |---|-------|---------|---------------|
 | — | — | — | — |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+The items below are resolved by the executable plan set. Baseline `release:check` status is execution-owned by `64-01`; artifact sweep findings are execution-owned by `64-02`.
 
 1. **Will baseline `yarn release:check` pass in the execution environment?**
    - What we know: The script sequence is known, and Phase 61 previously passed final `release:check`; Phase 64 context requires a fresh baseline run. [VERIFIED: scripts/release-check.mjs + 61-VERIFICATION.md + 64-CONTEXT.md]
    - What's unclear: Research did not run the expensive baseline gate because execution starts with that command by locked decision. [VERIFIED: 64-CONTEXT.md]
-   - Recommendation: Planner should make baseline `yarn release:check` the first execution task and classify failures A/B/C. [VERIFIED: 64-CONTEXT.md]
+   - Resolution: `64-01` owns the baseline `yarn release:check` run as the first execution gate and classifies failures A/B/C with command stage and suspected ownership metadata. [VERIFIED: 64-01-PLAN.md + 64-CONTEXT.md]
 
 2. **Will the on-disk artifact sweep find persisted denylist matches?**
    - What we know: There are 56 files under `tests/harness/artifacts/**`, including 6 PNG binaries; current redaction tests cover many forbidden keys and strings. [VERIFIED: find counts + tests/unit/verification-artifacts.test.ts]
    - What's unclear: Research enumerated files but did not run the full content denylist sweep. [VERIFIED: local find]
-   - Recommendation: Planner should add a metadata-only sweep task before behavior-test additions. [VERIFIED: 64-CONTEXT.md]
+   - Resolution: `64-02` owns the metadata-only artifact sweep before behavior-test additions, including persisted match classification, metadata-only reporting, and D-39 remediation if matches are found. [VERIFIED: 64-02-PLAN.md + 64-CONTEXT.md]
 
 ## Environment Availability
 
@@ -459,11 +461,11 @@ All claims in this research were verified from project files, local commands, or
 - **Per wave merge:** Run relevant targeted test group plus `yarn tsc --noEmit` after TypeScript edits. [VERIFIED: AGENTS.md]
 - **Phase gate:** Run `yarn tsc --noEmit` and `yarn release:check`; record metadata-only command results in `64-VERIFICATION.md`. [VERIFIED: 64-CONTEXT.md]
 
-### Wave 0 Gaps
+### Plan-Resolved Setup Items
 
-- [ ] Define a Phase 64 metadata-only sweep command or small test/script task for `tests/harness/artifacts/**`, structured logs, trace facts, and route/orchestrator evidence paths. [VERIFIED: 64-CONTEXT.md]
-- [ ] Define the denylist registry in the plan from Tier 1 plus existing operational Tier 2 coverage in `verification-artifacts.test.ts` and `llm-chat-trace.test.ts`. [VERIFIED: 64-CONTEXT.md + inspected tests]
-- [ ] Create `64-VERIFICATION.md` with tables for baseline gate, PROOF-01 coverage, PROOF-02 sweep, closure gates, and any escalations. [VERIFIED: 64-CONTEXT.md]
+- [x] `64-02` defines the Phase 64 metadata-only sweep command through `tests/unit/phase64-metadata-sweep.test.ts` for `tests/harness/artifacts/**`, structured logs, trace facts, and route/orchestrator evidence paths. [VERIFIED: 64-02-PLAN.md + 64-CONTEXT.md]
+- [x] `64-02` defines the denylist registry in the plan from Tier 1 plus existing operational Tier 2 coverage in `verification-artifacts.test.ts` and `llm-chat-trace.test.ts`. [VERIFIED: 64-02-PLAN.md + 64-CONTEXT.md + inspected tests]
+- [x] `64-01` through `64-04` create and update `64-VERIFICATION.md` with tables for baseline gate, PROOF-01 coverage, PROOF-02 sweep, closure gates, and any escalations. [VERIFIED: 64-01-PLAN.md + 64-02-PLAN.md + 64-03-PLAN.md + 64-04-PLAN.md + 64-CONTEXT.md]
 
 ## Security Domain
 
