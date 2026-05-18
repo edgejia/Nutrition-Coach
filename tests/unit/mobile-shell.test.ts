@@ -143,8 +143,8 @@ describe("mobile shell source contract", () => {
     assert.match(sources.mainLayout, /--app-bottom-occlusion/);
     assert.doesNotMatch(sources.mainLayout, /IOSDevice/);
     assert.doesNotMatch(sources.mainLayout, /document\.body\.style\.overflow/);
-    assert.match(sources.mainLayout, /getMeals\(\)/);
-    assert.match(sources.mainLayout, /setMeals\(meals\)/);
+    assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\)/);
+    assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\)/);
   });
 
   it("does not introduce sport demo device-frame chrome", () => {
