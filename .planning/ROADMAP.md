@@ -126,7 +126,7 @@ Plans:
 Plans:
 **Wave 1**
 - [x] 63-01-PLAN.md — Backend initial `daily_summary` envelope and fan-out contract
-- [ ] 63-03-PLAN.md — Client strict `daily_summary` envelope parsing and date validation
+- [x] 63-03-PLAN.md — Client strict `daily_summary` envelope parsing and date validation
 
 **Wave 2** *(blocked on Wave 1 dependencies)*
 - [ ] 63-02-PLAN.md — Chat and direct mutation affected-date envelope emission
@@ -168,7 +168,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 5/5 | Complete   | 2026-05-17 |
-| 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 1/5 | In Progress|  |
+| 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 2/5 | In Progress|  |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
 
 ## Future Milestone Candidates

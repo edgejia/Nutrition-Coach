@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: executing
-stopped_at: Completed 63-01-PLAN.md
-last_updated: "2026-05-18T07:47:05.750Z"
+stopped_at: Completed 63-03-PLAN.md
+last_updated: "2026-05-18T07:53:05.254Z"
 last_activity: 2026-05-18
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 19
-  completed_plans: 15
-  percent: 79
+  completed_plans: 16
+  percent: 84
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-17)
 ## Current Position
 
 Phase: 63 (sse-meal-row-freshness-and-affected-date-invalidation) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-05-18
 
-Progress: [████████░░] 79%
+Progress: [████████░░] 84%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [████████░░] 79%
 | Phase 62 P04 | 8m 39s | 3 tasks | 12 files |
 | Phase 62 P05 | 4m 14s | 3 tasks | 8 files |
 | Phase 63 P01 | 4 min | 2 tasks | 4 files |
+| Phase 63 P03 | 3m 21s | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -108,6 +109,9 @@ Recent decisions affecting current work:
 - [Phase 62]: 62-05: Meal Edit post-commit row refresh is keyed by affectedDate while dailySummary updates remain same-day only.
 - [Phase 63]: Plan 01 initial /api/sse daily_summary frames use the strict envelope with affectedDate derived from summary.date.
 - [Phase 63]: Plan 01 RealtimePublisher remains fan-out only and temporarily accepts raw DailySummary payloads until mutation publishers migrate in 63-02.
+- [Phase 63]: Plan 03 client daily_summary SSE parsing accepts only the strict summary/affectedDate/source envelope.
+- [Phase 63]: Plan 03 future calendar-real daily_summary dates pass transport validation and remain coordinator policy.
+- [Phase 63]: Plan 03 legacy onSummary remains a nested-summary fallback until MainLayout migrates to the envelope-aware coordinator.
 
 ### Pending Todos
 
@@ -127,6 +131,6 @@ None yet for v2.3.
 
 ## Session Continuity
 
-Last session: 2026-05-18T07:47:05.743Z
-Stopped at: Completed 63-01-PLAN.md
+Last session: 2026-05-18T07:52:49.370Z
+Stopped at: Completed 63-03-PLAN.md
 Resume file: None
