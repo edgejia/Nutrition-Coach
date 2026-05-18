@@ -101,6 +101,22 @@ async function readSSEFrame(
   throw new Error(`Expected SSE event ${expectedEvent}, got ${raw}`);
 }
 
+function assertInitialDailySummaryEnvelope(frame: SSEFrame) {
+  const payload = JSON.parse(frame.data) as Record<string, unknown>;
+
+  assert.deepEqual(Object.keys(payload).sort(), ["affectedDate", "source", "summary"].sort());
+  assert.equal(payload.source, "initial");
+  assert.equal(typeof payload.affectedDate, "string");
+
+  assert.ok(payload.summary && typeof payload.summary === "object" && !Array.isArray(payload.summary));
+  const summary = payload.summary as Record<string, unknown>;
+  assert.equal(payload.affectedDate, summary.date);
+  assert.match(summary.date as string, /^\d{4}-\d{2}-\d{2}$/);
+  for (const field of ["totalCalories", "totalProtein", "totalCarbs", "totalFat", "mealCount"]) {
+    assert.equal(typeof summary[field], "number", `Expected summary.${field} to be numeric`);
+  }
+}
+
 async function readOptionalSSEChunk(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   timeoutMs: number,
@@ -217,8 +233,9 @@ describe("SSE API", () => {
     // Use a real HTTP request since hijack() bypasses inject() response collection
     const address = await app.listen({ port: 0 });
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
-      const controller = new AbortController();
       timeout = setTimeout(() => controller.abort(), 1000);
       const res = await fetch(`${address}/api/sse`, {
         headers: { cookie: sessionCookieHeader },
@@ -226,17 +243,20 @@ describe("SSE API", () => {
       });
       if (timeout) clearTimeout(timeout);
       assert.equal(res.headers.get("content-type"), "text/event-stream");
-      const reader = res.body?.getReader();
+      reader = res.body?.getReader();
       assert.ok(reader);
       const firstChunk = await reader.read();
       const text = new TextDecoder().decode(firstChunk.value);
       assert.match(text, /event: daily_summary/);
       assert.match(text, /data: /);
-      // SUM-01: initial daily_summary payload carries date YYYY-MM-DD
-      assert.match(text, /"date":"\d{4}-\d{2}-\d{2}"/);
+      const initialFrame = parseSSEFrames(text).find((frame) => frame.event === "daily_summary");
+      assert.ok(initialFrame);
+      assertInitialDailySummaryEnvelope(initialFrame);
       controller.abort();
     } finally {
       if (timeout) clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
       if (app.server.listening) {
         await app.close();
       }
