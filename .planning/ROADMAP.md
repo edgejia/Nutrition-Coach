@@ -122,7 +122,18 @@ Plans:
   2. Home/Summary views do not accept newer daily totals while leaving visible same-day meal rows stale without marking or refreshing them.
   3. Malformed or stale-date `daily_summary` events preserve existing guards and do not overwrite current-day rows incorrectly.
   4. Historical affected-date events invalidate the right historical surface without incorrectly refreshing today's rows.
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+**Wave 1**
+- [ ] 63-01-PLAN.md — Backend initial `daily_summary` envelope and fan-out contract
+- [ ] 63-03-PLAN.md — Client strict `daily_summary` envelope parsing and date validation
+
+**Wave 2** *(blocked on Wave 1 dependencies)*
+- [ ] 63-02-PLAN.md — Chat and direct mutation affected-date envelope emission
+- [ ] 63-04-PLAN.md — Same-day SSE reconcile coordinator and MainLayout race guard
+
+**Wave 3** *(blocked on Wave 2 plan 63-04 completion)*
+- [ ] 63-05-PLAN.md — Historical visible-surface affected-date refresh
 **UI hint**: yes
 
 **Implementation Notes:**
