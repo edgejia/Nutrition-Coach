@@ -130,7 +130,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 dependencies)*
 - [x] 63-02-PLAN.md — Chat and direct mutation affected-date envelope emission
-- [ ] 63-04-PLAN.md — Same-day SSE reconcile coordinator and MainLayout race guard
+- [x] 63-04-PLAN.md — Same-day SSE reconcile coordinator and MainLayout race guard
 
 **Wave 3** *(blocked on Wave 2 plan 63-04 completion)*
 - [ ] 63-05-PLAN.md — Historical visible-surface affected-date refresh
@@ -168,7 +168,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 5/5 | Complete   | 2026-05-17 |
-| 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 3/5 | In Progress|  |
+| 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 4/5 | In Progress|  |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
 
 ## Future Milestone Candidates

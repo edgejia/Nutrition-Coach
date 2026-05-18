@@ -30,7 +30,7 @@ Requirements for the v2.3 P1 data-integrity milestone. Each requirement must map
 ### Realtime Consistency
 
 - [x] **REAL-01**: Same-day `daily_summary` SSE events include enough freshness metadata for clients to refresh or invalidate meal rows.
-- [ ] **REAL-02**: Home/Summary state cannot accept newer daily totals while leaving visible same-day meal rows stale without marking or refreshing them.
+- [x] **REAL-02**: Home/Summary state cannot accept newer daily totals while leaving visible same-day meal rows stale without marking or refreshing them.
 - [x] **REAL-03**: Malformed, stale-date, or historical `daily_summary` events preserve existing date guards and do not overwrite current-day rows incorrectly.
 
 ### Proof & Privacy
@@ -89,7 +89,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FRESH-02 | Phase 62 | Complete |
 | FRESH-03 | Phase 62 | Complete |
 | REAL-01 | Phase 63 | Complete |
-| REAL-02 | Phase 63 | Pending |
+| REAL-02 | Phase 63 | Complete |
 | REAL-03 | Phase 63 | Complete |
 | PROOF-01 | Phase 64 | Pending |
 | PROOF-02 | Phase 64 | Pending |

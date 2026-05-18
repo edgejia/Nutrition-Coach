@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: executing
-stopped_at: Completed 63-02-PLAN.md
-last_updated: "2026-05-18T08:03:06.480Z"
+stopped_at: Completed 63-04-PLAN.md
+last_updated: "2026-05-18T08:11:34.356Z"
 last_activity: 2026-05-18
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 19
-  completed_plans: 17
-  percent: 89
+  completed_plans: 18
+  percent: 95
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-17)
 ## Current Position
 
 Phase: 63 (sse-meal-row-freshness-and-affected-date-invalidation) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-05-18
 
-Progress: [█████████░] 89%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [█████████░] 89%
 | Phase 63 P01 | 4 min | 2 tasks | 4 files |
 | Phase 63 P03 | 3m 21s | 2 tasks | 6 files |
 | Phase 63 P02 | 7min | 3 tasks | 8 files |
+| Phase 63 P04 | 5m 17s | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,8 @@ Recent decisions affecting current work:
 - [Phase 63]: Plan 03 legacy onSummary remains a nested-summary fallback until MainLayout migrates to the envelope-aware coordinator.
 - [Phase 63]: Plan 02 meal mutation routes publish strict affected-date daily_summary envelopes and historical mutation summaries are no longer suppressed by today-only gates.
 - [Phase 63]: Plan 02 chat same-day mutation publish derives affectedDate from dailySummary.date when current-day log_food omits explicit affectedDate.
+- [Phase 63]: Plan 04 routes MainLayout daily_summary SSE through createSSESummaryCoordinator instead of raw setDailySummary callbacks.
+- [Phase 63]: Plan 04 uses one latest-token coordinator guard for same-day SSE reconcile and initial meal row loads.
 
 ### Pending Todos
 
@@ -134,6 +137,6 @@ None yet for v2.3.
 
 ## Session Continuity
 
-Last session: 2026-05-18T08:03:06.472Z
-Stopped at: Completed 63-02-PLAN.md
+Last session: 2026-05-18T08:11:34.349Z
+Stopped at: Completed 63-04-PLAN.md
 Resume file: None
