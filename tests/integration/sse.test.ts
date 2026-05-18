@@ -3,7 +3,7 @@ process.env.TZ = "Asia/Taipei";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
-import { buildApp } from "../../server/app.js";
+import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
 
@@ -101,6 +101,30 @@ async function readSSEFrame(
   throw new Error(`Expected SSE event ${expectedEvent}, got ${raw}`);
 }
 
+async function readSSEFrames(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  expectedEvent: string,
+  expectedCount: number,
+  maxReads = 20,
+): Promise<SSEFrame[]> {
+  const decoder = new TextDecoder();
+  let raw = "";
+
+  for (let i = 0; i < maxReads; i += 1) {
+    const chunk = await reader.read();
+    if (chunk.value) {
+      raw += decoder.decode(chunk.value, { stream: !chunk.done });
+    }
+    const frames = parseSSEFrames(raw).filter((candidate) => candidate.event === expectedEvent);
+    if (frames.length >= expectedCount) {
+      return frames;
+    }
+    if (chunk.done) break;
+  }
+
+  throw new Error(`Expected ${expectedCount} SSE event(s) ${expectedEvent}, got ${raw}`);
+}
+
 function assertInitialDailySummaryEnvelope(frame: SSEFrame) {
   const payload = JSON.parse(frame.data) as Record<string, unknown>;
 
@@ -131,11 +155,20 @@ describe("SSE API", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
   let sessionCookieHeader: string;
+  let deviceId: string;
+  let services: AppServices;
 
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
-    app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
+    app = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: mockLLM,
+      onServicesReady: (readyServices) => {
+        services = readyServices;
+      },
+    });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
+    deviceId = res.json().deviceId as string;
     sessionCookieHeader = toCookieHeader(res);
   });
 
@@ -257,6 +290,73 @@ describe("SSE API", () => {
       if (timeout) clearTimeout(timeout);
       await reader?.cancel().catch(() => {});
       controller.abort();
+      if (app.server.listening) {
+        await app.close();
+      }
+    }
+  });
+
+  it("subscribes before the initial daily_summary so pending connection mutations are not dropped", async () => {
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    let markSummaryRequested!: () => void;
+    let releaseSummary!: () => void;
+    const summaryRequested = new Promise<void>((resolve) => {
+      markSummaryRequested = resolve;
+    });
+    const summaryReleased = new Promise<void>((resolve) => {
+      releaseSummary = resolve;
+    });
+    services.summaryService.getDailySummary = async (...args) => {
+      markSummaryRequested();
+      await summaryReleased;
+      return originalGetDailySummary(...args);
+    };
+
+    const address = await app.listen({ port: 0 });
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      timeout = setTimeout(() => controller.abort(), 3000);
+      const sseResPromise = fetch(`${address}/api/sse`, {
+        headers: { cookie: sessionCookieHeader },
+        signal: controller.signal,
+      });
+
+      await summaryRequested;
+      const mutationSummary = {
+        date: "2026-05-18",
+        totalCalories: 95,
+        totalProtein: 0.5,
+        totalCarbs: 25,
+        totalFat: 0.3,
+        mealCount: 1,
+      };
+      services.publisher.publishDailySummary(deviceId, {
+        summary: mutationSummary,
+        affectedDate: mutationSummary.date,
+        source: "meal_mutation",
+      });
+      releaseSummary();
+
+      const sseRes = await sseResPromise;
+      assert.equal(sseRes.status, 200);
+      reader = sseRes.body?.getReader();
+      assert.ok(reader);
+      const frames = await readSSEFrames(reader, "daily_summary", 2);
+      const payloads = frames.map((frame) => JSON.parse(frame.data) as Record<string, unknown>);
+
+      assert.ok(
+        payloads.some((payload) => payload.source === "meal_mutation" && payload.affectedDate === mutationSummary.date),
+        `expected pending connection mutation envelope, got ${JSON.stringify(payloads)}`,
+      );
+      assert.ok(payloads.some((payload) => payload.source === "initial"));
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+      services.summaryService.getDailySummary = originalGetDailySummary;
       if (app.server.listening) {
         await app.close();
       }

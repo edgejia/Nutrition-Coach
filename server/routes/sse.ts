@@ -41,27 +41,45 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
     }
     reply.raw.writeHead(200, headers);
 
-    const summary = await summaryService.getDailySummary(deviceId, currentAppDate());
-    reply.raw.write(`event: daily_summary\ndata: ${JSON.stringify({
-      summary,
-      affectedDate: summary.date,
-      source: "initial",
-    })}\n\n`);
+    let closed = false;
+    let keepalive: ReturnType<typeof setInterval> | undefined;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (keepalive) {
+        clearInterval(keepalive);
+      }
+      publisher.unsubscribe(deviceId, reply);
+      logSseConnectionState(request.log, { state: "closed" });
+    };
 
-    // Subscribe for future updates
+    request.raw.on("close", cleanup);
     publisher.subscribe(deviceId, reply);
     logSseConnectionState(request.log, { state: "opened" });
 
-    // Keepalive every 30s
-    const keepalive = setInterval(() => {
-      reply.raw.write(": keepalive\n\n");
-    }, 30000);
+    try {
+      const summary = await summaryService.getDailySummary(deviceId, currentAppDate());
+      if (!closed && !reply.raw.destroyed) {
+        reply.raw.write(`event: daily_summary\ndata: ${JSON.stringify({
+          summary,
+          affectedDate: summary.date,
+          source: "initial",
+        })}\n\n`);
+      }
+    } catch (error) {
+      cleanup();
+      request.log.error({ event: "sse_initial_summary_failed", error }, "SSE initial summary failed");
+      if (!reply.raw.destroyed) {
+        reply.raw.end();
+      }
+      return;
+    }
 
-    // Cleanup on disconnect
-    request.raw.on("close", () => {
-      clearInterval(keepalive);
-      publisher.unsubscribe(deviceId, reply);
-      logSseConnectionState(request.log, { state: "closed" });
-    });
+    // Keepalive every 30s
+    keepalive = setInterval(() => {
+      if (!reply.raw.destroyed) {
+        reply.raw.write(": keepalive\n\n");
+      }
+    }, 30000);
   });
 }
