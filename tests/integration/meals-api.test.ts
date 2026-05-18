@@ -111,6 +111,31 @@ describe("Meals API", () => {
     assert.equal(Object.prototype.hasOwnProperty.call(value, "dailySummary"), false);
   }
 
+  function parseSSEData(chunk: string) {
+    const dataLine = chunk.split("\n").find((line) => line.startsWith("data: "));
+    assert.ok(dataLine, `expected SSE data line in chunk: ${chunk}`);
+    return JSON.parse(dataLine.slice("data: ".length));
+  }
+
+  function assertMealMutationSummaryEnvelope(payload: unknown, affectedDate: string) {
+    assert.ok(payload && typeof payload === "object");
+    const envelope = payload as {
+      source?: unknown;
+      affectedDate?: unknown;
+      summary?: { date?: unknown };
+      summaryOutcome?: unknown;
+      mealId?: unknown;
+      mealRevisionId?: unknown;
+    };
+    assert.equal(envelope.source, "meal_mutation");
+    assert.equal(envelope.affectedDate, affectedDate);
+    assert.ok(envelope.summary && typeof envelope.summary === "object");
+    assert.equal(envelope.summary.date, affectedDate);
+    assert.equal(Object.prototype.hasOwnProperty.call(envelope, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(envelope, "mealId"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(envelope, "mealRevisionId"), false);
+  }
+
   async function readOptionalSSEChunk(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     timeoutMs: number,
@@ -253,26 +278,25 @@ describe("Meals API", () => {
     assert.equal(foreignDelete.statusCode, 404);
     assert.deepEqual(foreignDelete.json(), { error: "Meal not found" });
 
-    const ownDelete = await app.inject({
-      method: "DELETE",
-      url: `/api/meals/${mealId}`,
-      headers: { cookie: deviceCookieHeader },
-      payload: { expectedMealRevisionId: mealRow.mealRevisionId },
-    });
-    assert.equal(ownDelete.statusCode, 200);
-    assert.deepEqual(ownDelete.json(), {
-      affectedDate: formatLocalDate(new Date()),
-      deletedMealId: mealId,
-      dailySummary: {
-        date: formatLocalDate(new Date()),
-        totalCalories: 0,
-        totalProtein: 0,
-        totalCarbs: 0,
-        totalFat: 0,
-        mealCount: 0,
-      },
-      summaryOutcome: {
-        status: "fresh",
+    assert.ok(services, "expected onServicesReady to capture app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      assert.equal(publishDeviceId, deviceId);
+      publishedPayloads.push(payload);
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    try {
+      const ownDelete = await app.inject({
+        method: "DELETE",
+        url: `/api/meals/${mealId}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: { expectedMealRevisionId: mealRow.mealRevisionId },
+      });
+      assert.equal(ownDelete.statusCode, 200);
+      assert.deepEqual(ownDelete.json(), {
+        affectedDate: formatLocalDate(new Date()),
+        deletedMealId: mealId,
         dailySummary: {
           date: formatLocalDate(new Date()),
           totalCalories: 0,
@@ -281,9 +305,24 @@ describe("Meals API", () => {
           totalFat: 0,
           mealCount: 0,
         },
-      },
-    });
-    assertNoPublishFailureFields(ownDelete.json());
+        summaryOutcome: {
+          status: "fresh",
+          dailySummary: {
+            date: formatLocalDate(new Date()),
+            totalCalories: 0,
+            totalProtein: 0,
+            totalCarbs: 0,
+            totalFat: 0,
+            mealCount: 0,
+          },
+        },
+      });
+      assertNoPublishFailureFields(ownDelete.json());
+      assert.equal(publishedPayloads.length, 1);
+      assertMealMutationSummaryEnvelope(publishedPayloads[0], formatLocalDate(new Date()));
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
 
     const remainingMeals = await app.inject({
       method: "GET",
@@ -304,33 +343,48 @@ describe("Meals API", () => {
       fat: 22,
     });
 
-    const updateRes = await app.inject({
-      method: "PATCH",
-      url: `/api/meals/${meal.id}`,
-      headers: { cookie: deviceCookieHeader },
-      payload: {
-        foodName: "雞胸肉沙拉半份",
-        calories: 260,
-        protein: 20,
-        carbs: 8,
-        fat: 12,
-        imageAssetId: null,
-        expectedMealRevisionId: meal.mealRevisionId,
-      },
-    });
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      assert.equal(publishDeviceId, deviceId);
+      publishedPayloads.push(payload);
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
 
-    assert.equal(updateRes.statusCode, 200);
-    const body = updateRes.json();
-    assert.equal(body.affectedDate, formatLocalDate(new Date(meal.loggedAt)));
-    assert.equal(body.dailySummary.totalCalories, 260);
-    assert.deepEqual(body.summaryOutcome, {
-      status: "fresh",
-      dailySummary: body.dailySummary,
-    });
-    assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
-    assert.equal(typeof body.meal.mealRevisionId, "string");
-    assert.notEqual(body.meal.mealRevisionId, meal.mealRevisionId);
-    assertNoPublishFailureFields(body);
+    try {
+      const updateRes = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId: null,
+          expectedMealRevisionId: meal.mealRevisionId,
+        },
+      });
+
+      assert.equal(updateRes.statusCode, 200);
+      const body = updateRes.json();
+      const affectedDate = formatLocalDate(new Date(meal.loggedAt));
+      assert.equal(body.affectedDate, affectedDate);
+      assert.equal(body.dailySummary.totalCalories, 260);
+      assert.deepEqual(body.summaryOutcome, {
+        status: "fresh",
+        dailySummary: body.dailySummary,
+      });
+      assert.equal(body.meal.foodName, "雞胸肉沙拉半份");
+      assert.equal(typeof body.meal.mealRevisionId, "string");
+      assert.notEqual(body.meal.mealRevisionId, meal.mealRevisionId);
+      assertNoPublishFailureFields(body);
+      assert.equal(publishedPayloads.length, 1);
+      assertMealMutationSummaryEnvelope(publishedPayloads[0], affectedDate);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
   });
 
   it("PATCH and DELETE /api/meals/:id fail closed on missing or stale expected revisions", async () => {
@@ -803,11 +857,17 @@ describe("Meals API", () => {
     });
     const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
     const originalGetMealsByDate = services.foodLoggingService.getMealsByDate.bind(services.foodLoggingService);
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    let publishCalls = 0;
     services.summaryService.getDailySummary = async () => {
       throw new Error("planned summary recompute failure");
     };
     services.foodLoggingService.getMealsByDate = async () => {
       throw new Error("planned summary recovery failure");
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
     };
 
     try {
@@ -834,9 +894,11 @@ describe("Meals API", () => {
       assert.deepEqual(body.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
       assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
       assertNoPublishFailureFields(body);
+      assert.equal(publishCalls, 0);
     } finally {
       services.summaryService.getDailySummary = originalGetDailySummary;
       services.foodLoggingService.getMealsByDate = originalGetMealsByDate;
+      services.publisher.publishDailySummary = originalPublishDailySummary;
     }
   });
 
@@ -852,11 +914,17 @@ describe("Meals API", () => {
     });
     const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
     const originalGetMealsByDate = services.foodLoggingService.getMealsByDate.bind(services.foodLoggingService);
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    let publishCalls = 0;
     services.summaryService.getDailySummary = async () => {
       throw new Error("planned summary recompute failure");
     };
     services.foodLoggingService.getMealsByDate = async () => {
       throw new Error("planned summary recovery failure");
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
     };
 
     try {
@@ -874,9 +942,11 @@ describe("Meals API", () => {
       assert.deepEqual(body.summaryOutcome, { status: "unavailable", reason: "recompute_failed" });
       assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
       assertNoPublishFailureFields(body);
+      assert.equal(publishCalls, 0);
     } finally {
       services.summaryService.getDailySummary = originalGetDailySummary;
       services.foodLoggingService.getMealsByDate = originalGetMealsByDate;
+      services.publisher.publishDailySummary = originalPublishDailySummary;
     }
   });
 
@@ -1271,7 +1341,7 @@ describe("Meals API", () => {
     }
   });
 
-  it("DELETE /api/meals/:id does not publish historical recomputes into the today SSE loop", async () => {
+  it("DELETE /api/meals/:id publishes historical affected-date daily_summary envelopes", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
     const meal = await services.foodLoggingService.logFood(deviceId, {
@@ -1328,11 +1398,11 @@ describe("Meals API", () => {
         },
       });
 
-      const extraChunk = await readOptionalSSEChunk(reader, 250);
-      assert.ok(
-        extraChunk === null || !extraChunk.includes("event: daily_summary"),
-        `historical delete must not emit a today SSE summary, got ${extraChunk ?? "<none>"}`,
-      );
+      const extraChunk = await readOptionalSSEChunk(reader, 500);
+      assert.ok(extraChunk, "historical delete should emit a daily_summary frame");
+      assert.ok(extraChunk.includes("event: daily_summary"), extraChunk);
+      const payload = parseSSEData(extraChunk);
+      assertMealMutationSummaryEnvelope(payload, "2026-03-25");
     } finally {
       clearTimeout(timeout);
       await reader?.cancel().catch(() => {});
