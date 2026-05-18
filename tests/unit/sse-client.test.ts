@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import type { DailySummary, DailyTargets } from "../../client/src/types.js";
+import type { DailySummary, DailySummarySSEPayload, DailyTargets } from "../../client/src/types.js";
 
 // -----------------------------------------------------------------------------
 // FakeEventSource — minimal EventSource shim that captures `addEventListener`
@@ -69,7 +69,48 @@ describe("connectSSE", () => {
     sse.disconnectSSE();
   });
 
-  it("fake EventSource daily_summary event still calls the summary callback", () => {
+  const summaryForDate = (date: string): DailySummary => ({
+    date,
+    totalCalories: 500,
+    totalProtein: 30,
+    totalCarbs: 60,
+    totalFat: 15,
+    mealCount: 2,
+  });
+
+  const envelopeForDate = (
+    date: string,
+    source: DailySummarySSEPayload["source"] = "meal_mutation",
+  ): DailySummarySSEPayload => ({
+    summary: summaryForDate(date),
+    affectedDate: date,
+    source,
+  });
+
+  it("dispatches a valid daily_summary envelope to the envelope-aware callback", () => {
+    const receivedEnvelopes: DailySummarySSEPayload[] = [];
+    const receivedSummaries: DailySummary[] = [];
+    const receivedTargets: DailyTargets[] = [];
+
+    sse.connectSSE("device-1", {
+      onDailySummaryEnvelope: (payload) => receivedEnvelopes.push(payload),
+      onSummary: (summary) => receivedSummaries.push(summary),
+      onGoalsUpdate: (targets) => receivedTargets.push(targets),
+    });
+
+    const es = FakeEventSource.instances[0];
+    assert.ok(es, "FakeEventSource should have been constructed");
+    assert.equal(es.url, "/api/sse");
+
+    const payload = envelopeForDate("2026-04-18", "initial");
+    es.emit("daily_summary", JSON.stringify(payload));
+
+    assert.deepEqual(receivedEnvelopes, [payload]);
+    assert.equal(receivedSummaries.length, 0);
+    assert.equal(receivedTargets.length, 0);
+  });
+
+  it("falls back to the nested raw summary when only the legacy summary callback is provided", () => {
     const receivedSummaries: DailySummary[] = [];
     const receivedTargets: DailyTargets[] = [];
 
@@ -80,20 +121,68 @@ describe("connectSSE", () => {
 
     const es = FakeEventSource.instances[0];
     assert.ok(es, "FakeEventSource should have been constructed");
-    assert.equal(es.url, "/api/sse");
 
-    const summary: DailySummary = {
-      date: "2026-04-18",
-      totalCalories: 500,
-      totalProtein: 30,
-      totalCarbs: 60,
-      totalFat: 15,
-      mealCount: 2,
-    };
-    es.emit("daily_summary", JSON.stringify(summary));
+    const payload = envelopeForDate("2026-04-18", "initial");
+    es.emit("daily_summary", JSON.stringify(payload));
 
     assert.equal(receivedSummaries.length, 1);
-    assert.deepEqual(receivedSummaries[0], summary);
+    assert.deepEqual(receivedSummaries[0], payload.summary);
+    assert.equal(receivedTargets.length, 0);
+  });
+
+  it("dispatches future valid daily_summary envelopes for coordinator routing", () => {
+    const receivedEnvelopes: DailySummarySSEPayload[] = [];
+    const receivedSummaries: DailySummary[] = [];
+
+    sse.connectSSE("device-1", {
+      onDailySummaryEnvelope: (payload) => receivedEnvelopes.push(payload),
+      onSummary: (summary) => receivedSummaries.push(summary),
+      onGoalsUpdate: () => undefined,
+    });
+
+    const es = FakeEventSource.instances[0];
+    assert.ok(es);
+
+    const payload = envelopeForDate("2099-12-31", "meal_mutation");
+    es.emit("daily_summary", JSON.stringify(payload));
+
+    assert.deepEqual(receivedEnvelopes, [payload]);
+    assert.equal(receivedSummaries.length, 0);
+  });
+
+  it("silently ignores invalid daily_summary frames without invoking callbacks", () => {
+    const receivedEnvelopes: DailySummarySSEPayload[] = [];
+    const receivedSummaries: DailySummary[] = [];
+    const receivedTargets: DailyTargets[] = [];
+
+    sse.connectSSE("device-1", {
+      onDailySummaryEnvelope: (payload) => receivedEnvelopes.push(payload),
+      onSummary: (summary) => receivedSummaries.push(summary),
+      onGoalsUpdate: (targets) => receivedTargets.push(targets),
+    });
+
+    const es = FakeEventSource.instances[0];
+    assert.ok(es);
+
+    const valid = envelopeForDate("2026-04-18", "meal_mutation");
+    const invalidFrames = [
+      "NOT_JSON",
+      JSON.stringify({ affectedDate: valid.affectedDate, source: valid.source }),
+      JSON.stringify({ summary: valid.summary, source: valid.source }),
+      JSON.stringify({ ...valid, source: "unknown" }),
+      JSON.stringify({ ...valid, affectedDate: "2026/04/18" }),
+      JSON.stringify({ ...valid, affectedDate: "2026-02-31" }),
+      JSON.stringify({ ...valid, summary: { ...valid.summary, date: "2026-02-31" } }),
+      JSON.stringify({ ...valid, summary: { ...valid.summary, totalCalories: null } }),
+      JSON.stringify({ ...valid, summary: { ...valid.summary, date: "2026-04-19" } }),
+    ];
+
+    for (const frame of invalidFrames) {
+      assert.doesNotThrow(() => es.emit("daily_summary", frame));
+    }
+
+    assert.equal(receivedEnvelopes.length, 0);
+    assert.equal(receivedSummaries.length, 0);
     assert.equal(receivedTargets.length, 0);
   });
 

@@ -6,6 +6,7 @@ import {
   getHistoryCalorieStatus,
   getHistorySportStatusMeta,
   getMondayWeekStart,
+  isRealDateKey,
   selectSameWeekdayOrClosestAvailable,
   shiftHistoryWeek,
   type HistoryWeekDay,
@@ -19,6 +20,17 @@ describe("history week helpers", () => {
   it("shifts week starts by whole weeks", () => {
     assert.equal(shiftHistoryWeek("2026-04-27", -1), "2026-04-20");
     assert.equal(shiftHistoryWeek("2026-04-27", 1), "2026-05-04");
+  });
+
+  it("validates real local date keys without throwing", () => {
+    assert.equal(isRealDateKey("2026-04-30"), true);
+    assert.equal(isRealDateKey("2026-02-28"), true);
+    assert.equal(isRealDateKey("2026-12-31"), true);
+
+    assert.equal(isRealDateKey("2026-4-30"), false);
+    assert.equal(isRealDateKey("not-a-date"), false);
+    assert.equal(isRealDateKey("2026-02-31"), false);
+    assert.equal(isRealDateKey("2026-13-01"), false);
   });
 
   it("builds seven Monday-first days with selected, today, future, and trend status", () => {
