@@ -51,6 +51,14 @@ export interface DailySummary {
   mealCount: number;
 }
 
+export type DailySummarySSESource = "initial" | "meal_mutation";
+
+export interface DailySummarySSEPayload {
+  summary: DailySummary;
+  affectedDate: string;
+  source: DailySummarySSESource;
+}
+
 export type SummaryOutcome =
   | { status: "fresh"; dailySummary: DailySummary }
   | { status: "recovered"; dailySummary: DailySummary; reason: "recompute_failed" }

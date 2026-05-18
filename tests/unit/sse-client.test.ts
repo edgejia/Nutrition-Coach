@@ -173,6 +173,7 @@ describe("connectSSE", () => {
       JSON.stringify({ ...valid, affectedDate: "2026/04/18" }),
       JSON.stringify({ ...valid, affectedDate: "2026-02-31" }),
       JSON.stringify({ ...valid, summary: { ...valid.summary, date: "2026-02-31" } }),
+      `{"summary":{"date":"2026-04-18","totalCalories":1e309,"totalProtein":30,"totalCarbs":60,"totalFat":15,"mealCount":2},"affectedDate":"2026-04-18","source":"meal_mutation"}`,
       JSON.stringify({ ...valid, summary: { ...valid.summary, totalCalories: null } }),
       JSON.stringify({ ...valid, summary: { ...valid.summary, date: "2026-04-19" } }),
     ];

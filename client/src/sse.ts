@@ -1,10 +1,22 @@
-import type { DailySummary, DailyTargets, GoalsUpdatePayload } from "./types.js";
+import { isRealDateKey } from "./lib/history-week.js";
+import type {
+  DailySummary,
+  DailySummarySSEPayload,
+  DailySummarySSESource,
+  DailyTargets,
+  GoalsUpdatePayload,
+} from "./types.js";
 
 let eventSource: EventSource | null = null;
 
 export interface SSEHandlers {
-  onSummary: (summary: DailySummary) => void;
+  onSummary?: (summary: DailySummary) => void;
+  onDailySummaryEnvelope?: (payload: DailySummarySSEPayload) => void;
   onGoalsUpdate: (targets: DailyTargets) => void;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 // Shape-check guard for `goals_update` payloads: the SSE boundary is untrusted
@@ -15,10 +27,40 @@ function isValidTargets(value: unknown): value is DailyTargets {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
   return (
-    typeof obj.calories === "number" && Number.isFinite(obj.calories) &&
-    typeof obj.protein === "number" && Number.isFinite(obj.protein) &&
-    typeof obj.carbs === "number" && Number.isFinite(obj.carbs) &&
-    typeof obj.fat === "number" && Number.isFinite(obj.fat)
+    isFiniteNumber(obj.calories) &&
+    isFiniteNumber(obj.protein) &&
+    isFiniteNumber(obj.carbs) &&
+    isFiniteNumber(obj.fat)
+  );
+}
+
+function isDailySummarySSESource(value: unknown): value is DailySummarySSESource {
+  return value === "initial" || value === "meal_mutation";
+}
+
+function isDailySummary(value: unknown): value is DailySummary {
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.date === "string" &&
+    isRealDateKey(obj.date) &&
+    isFiniteNumber(obj.totalCalories) &&
+    isFiniteNumber(obj.totalProtein) &&
+    isFiniteNumber(obj.totalCarbs) &&
+    isFiniteNumber(obj.totalFat) &&
+    isFiniteNumber(obj.mealCount)
+  );
+}
+
+function isDailySummarySSEPayload(value: unknown): value is DailySummarySSEPayload {
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    isDailySummary(obj.summary) &&
+    typeof obj.affectedDate === "string" &&
+    isRealDateKey(obj.affectedDate) &&
+    isDailySummarySSESource(obj.source) &&
+    obj.summary.date === obj.affectedDate
   );
 }
 
@@ -27,8 +69,19 @@ export function connectSSE(_deviceId: string, handlers: SSEHandlers) {
   eventSource = new EventSource("/api/sse");
 
   eventSource.addEventListener("daily_summary", (event) => {
-    const summary = JSON.parse((event as MessageEvent<string>).data) as DailySummary;
-    handlers.onSummary(summary);
+    try {
+      const raw = (event as MessageEvent<string>).data;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isDailySummarySSEPayload(parsed)) return;
+      if (handlers.onDailySummaryEnvelope) {
+        handlers.onDailySummaryEnvelope(parsed);
+        return;
+      }
+      handlers.onSummary?.(parsed.summary);
+    } catch {
+      // Malformed JSON or invalid shapes are ignored without propagating into
+      // the EventSource dispatcher, matching the goals_update precedent.
+    }
   });
 
   // `goals_update` event: Plan 10-04 wires the payload through the same
