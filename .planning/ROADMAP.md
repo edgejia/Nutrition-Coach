@@ -168,7 +168,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 60. Goal Proposal Authority and Rejected-Goal Copy | v2.3 | 3/3 | Complete    | 2026-05-17 |
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 5/5 | Complete   | 2026-05-17 |
-| 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 5/5 | Complete   | 2026-05-18 |
+| 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 5/5 | Complete    | 2026-05-18 |
 | 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
 
 ## Future Milestone Candidates
