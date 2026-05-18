@@ -150,7 +150,19 @@ Plans:
   2. Any harness or artifact evidence remains metadata-only and excludes raw prompts, user text, assistant final text, tool payloads, provider bodies, image data, session material, and database snapshots.
   3. Local closure runs `yarn tsc --noEmit` and `yarn release:check`.
   4. No staging or main promotion occurs as part of v2.3 roadmap, verification, or release-proof work.
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+**Wave 1**
+- [ ] 64-01-PLAN.md — Baseline release gate and A/B/C triage record
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 64-02-PLAN.md — PROOF-02 metadata-only sweep and artifact privacy proof
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 64-03-PLAN.md — PROOF-01 evidence coverage and false-pass gap decision
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 64-04-PLAN.md — Closure TypeScript/release gates and final verification status
 
 **Implementation Notes:**
 - Use `nutrition-gen-test` for route/service/orchestrator/store coverage planning and `nutrition-verify-change` for final gate selection.
@@ -169,7 +181,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 5/5 | Complete   | 2026-05-17 |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 5/5 | Complete    | 2026-05-18 |
-| 64. Verification and Release-Proof Hardening | v2.3 | 0/TBD | Not started | - |
+| 64. Verification and Release-Proof Hardening | v2.3 | 0/4 | Not started | - |
 
 ## Future Milestone Candidates
 
