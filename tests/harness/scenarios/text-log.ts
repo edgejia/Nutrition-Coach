@@ -32,6 +32,12 @@ interface DailySummary {
   mealCount: number;
 }
 
+interface DailySummaryEnvelope {
+  summary?: DailySummary;
+  affectedDate?: string;
+  source?: "initial" | "meal_mutation";
+}
+
 interface MealRecord {
   id: string;
   foodName: string;
@@ -108,6 +114,14 @@ function expectRecord(value: unknown, name: string): Record<string, unknown> {
     throw new Error(`Expected ${name} to be an object`);
   }
   return value;
+}
+
+function parseDailySummaryFrame(data: string): DailySummary {
+  const parsed = JSON.parse(data) as DailySummary | DailySummaryEnvelope;
+  if ("summary" in parsed && parsed.summary) {
+    return parsed.summary;
+  }
+  return parsed as DailySummary;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +252,7 @@ const textLogScenario: VerificationScenario = {
 
         let initialSummary: DailySummary | undefined;
         try {
-          initialSummary = JSON.parse(initialSummaryEvent.data) as DailySummary;
+          initialSummary = parseDailySummaryFrame(initialSummaryEvent.data);
         } catch {
           clearTimeout(sseTimeout);
           const stepResult = fail("subscribe_summary", "Failed to parse initial daily_summary JSON");
@@ -539,7 +553,7 @@ const textLogScenario: VerificationScenario = {
               const secondSummaryEvent = summaryEvents[summaryEvents.length - 1];
               if (secondSummaryEvent) {
                 try {
-                  updatedSummary = JSON.parse(secondSummaryEvent.data) as DailySummary;
+                  updatedSummary = parseDailySummaryFrame(secondSummaryEvent.data);
                 } catch {
                   // fall through to donePayload.dailySummary
                 }

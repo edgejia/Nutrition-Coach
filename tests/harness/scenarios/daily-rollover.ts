@@ -9,6 +9,12 @@ import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
+interface DailySummaryEnvelope {
+  summary?: { date?: unknown };
+  affectedDate?: string;
+  source?: "initial" | "meal_mutation";
+}
+
 function pass(name: string, actual?: unknown): ScenarioStepResult {
   return { name, ok: true, actual };
 }
@@ -37,6 +43,14 @@ const STEP_NAMES = [
 
 const beforeMidnightLoggedAt = "2026-03-25T15:59:00.000Z";
 const afterMidnightLoggedAt = "2026-03-25T16:01:00.000Z";
+
+function parseDailySummaryDate(data: string): { date?: unknown } {
+  const parsed = JSON.parse(data) as Record<string, unknown>;
+  if ("summary" in parsed && parsed.summary) {
+    return parsed.summary as { date?: unknown };
+  }
+  return { date: parsed.date };
+}
 
 const dailyRolloverScenario: VerificationScenario = {
   name: "daily-rollover",
@@ -153,7 +167,7 @@ const dailyRolloverScenario: VerificationScenario = {
           return failResult(scenarioName, steps, "subscribe_summary", artifacts);
         }
 
-        const initialSummary = JSON.parse(summaryEvent.data) as { date?: unknown };
+        const initialSummary = parseDailySummaryDate(summaryEvent.data);
         artifacts.initialSseSummary = initialSummary;
         if (typeof initialSummary.date !== "string") {
           steps.push(fail("subscribe_summary", "Initial SSE daily_summary did not include date", initialSummary));

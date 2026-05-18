@@ -1,6 +1,6 @@
 ---
 phase: 63-sse-meal-row-freshness-and-affected-date-invalidation
-reviewed: 2026-05-18T08:25:04Z
+reviewed: 2026-05-18T08:31:06Z
 depth: standard
 files_reviewed: 21
 files_reviewed_list:
@@ -35,65 +35,51 @@ status: issues_found
 
 # Phase 63: Code Review Report
 
-**Reviewed:** 2026-05-18T08:25:04Z
+**Reviewed:** 2026-05-18T08:31:06Z
 **Depth:** standard
 **Files Reviewed:** 21
 **Status:** issues_found
 
 ## Summary
 
-Reviewed the listed client SSE coordinator, SSE client, affected-date type changes, realtime publisher, chat/meals/SSE routes, integration coverage, and the boundary harness. One blocker remains in the `/api/sse` route: the route has a subscription race that can drop exactly the meal-mutation event this phase depends on for freshness.
+Reviewed the listed client SSE coordinator, SSE client, affected-date type changes, realtime publisher, chat/meals/SSE routes, integration coverage, and the boundary harness. The prior blocker is fixed: `/api/sse` now subscribes before awaiting the initial summary, and `tests/integration/sse.test.ts` includes a regression that publishes while `getDailySummary()` is still blocked.
+
+One blocker remains: the SSE `daily_summary` payload migration to `{ summary, affectedDate, source }` did not update all deterministic harness consumers. The integration gate currently fails because existing harness scenarios still parse `event: daily_summary` data as a raw `DailySummary`.
 
 ## Critical Issues
 
-### CR-01: [BLOCKER] `/api/sse` can miss meal mutations before subscription
+### CR-01: [BLOCKER] Existing harness scenarios still parse `daily_summary` as the old raw summary shape
 
-**File:** `server/routes/sse.ts:44`
+**File:** `server/routes/sse.ts:63`
 
-**Issue:** The route writes the initial `daily_summary` frame at lines 44-49 and only subscribes the reply at line 52. Any meal mutation that commits and calls `publishDailySummary()` while `getDailySummary()` is running or while the initial frame is being written publishes to zero subscribers, so the client never receives the affected-date invalidation. The current tests mutate only after reading the initial frame, so they do not cover this blind window. This breaks the phase's core freshness contract: an EventSource connection can look established while missing the first post-connect meal update.
+**Issue:** The `/api/sse` route now emits an envelope (`{ summary, affectedDate, source }`) for the initial `daily_summary` event, and `RealtimePublisher.publishDailySummary()` emits the same envelope for mutation pushes. The changed integration tests cover the new envelope, but existing deterministic harness scenarios still parse `JSON.parse(frame.data)` directly as `DailySummary` and then read `.date` / `.mealCount`. That makes the release gate fail even though the new regression for the previous subscription race passes. Running `yarn test:integration --test-name-pattern "subscribes before the initial daily_summary"` still executed the integration suite and failed four tests:
+
+- `tests/integration/meal-delete-consistency.test.ts`: `subscribe_summary` fails because the parsed payload has `summary.mealCount`, not top-level `mealCount`.
+- `tests/integration/verification-text.test.ts`: `verify_summary` fails because the post-log SSE payload is the envelope, not a raw summary.
+
+The same stale parsing pattern is visible in direct harness sources such as `tests/harness/scenarios/text-log.ts` and `tests/harness/scenarios/meal-delete-consistency.ts`, and `tests/harness/scenarios/daily-rollover.ts` has the same top-level `date` expectation. This blocks shipping because the repo-native integration/harness proof suite no longer passes after the wire-shape change.
 
 **Fix:**
 ```ts
-let closed = false;
-let keepalive: ReturnType<typeof setInterval> | undefined;
-
-const cleanup = () => {
-  if (closed) return;
-  closed = true;
-  if (keepalive) clearInterval(keepalive);
-  publisher.unsubscribe(deviceId, reply);
-  logSseConnectionState(request.log, { state: "closed" });
+type DailySummaryEnvelope = {
+  summary?: DailySummary;
+  affectedDate?: string;
+  source?: "initial" | "meal_mutation";
 };
 
-request.raw.on("close", cleanup);
-publisher.subscribe(deviceId, reply);
-logSseConnectionState(request.log, { state: "opened" });
-
-try {
-  const summary = await summaryService.getDailySummary(deviceId, currentAppDate());
-  if (!closed) {
-    reply.raw.write(`event: daily_summary\ndata: ${JSON.stringify({
-      summary,
-      affectedDate: summary.date,
-      source: "initial",
-    })}\n\n`);
+function parseDailySummaryFrame(data: string): DailySummary | undefined {
+  const parsed = JSON.parse(data) as DailySummary | DailySummaryEnvelope;
+  if ("summary" in parsed && parsed.summary) {
+    return parsed.summary;
   }
-} catch (error) {
-  cleanup();
-  if (!reply.raw.destroyed) reply.raw.end();
-  request.log.error({ event: "sse_initial_summary_failed" }, "SSE initial summary failed");
-  return;
+  return parsed as DailySummary;
 }
-
-keepalive = setInterval(() => {
-  if (!reply.raw.destroyed) reply.raw.write(": keepalive\n\n");
-}, 30000);
 ```
 
-Also add an integration test that holds `summaryService.getDailySummary()` open, mutates a meal while the connection is pending, then releases the initial summary and asserts the client receives the mutation `daily_summary` envelope.
+Use that helper in the direct harness SSE readers before asserting `date` or `mealCount`, or update each affected scenario to assert the envelope and then inspect `payload.summary`. Re-run `yarn test:integration` afterward; the current failures are direct evidence that this is not just stale documentation.
 
 ---
 
-_Reviewed: 2026-05-18T08:25:04Z_
+_Reviewed: 2026-05-18T08:31:06Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_

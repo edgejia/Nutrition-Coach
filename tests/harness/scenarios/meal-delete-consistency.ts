@@ -28,6 +28,12 @@ interface DailySummary {
   mealCount: number;
 }
 
+interface DailySummaryEnvelope {
+  summary?: DailySummary;
+  affectedDate?: string;
+  source?: "initial" | "meal_mutation";
+}
+
 interface MealDto {
   id: string;
   mealRevisionId: string;
@@ -87,6 +93,14 @@ function makeJpegBytes(): ArrayBuffer {
   return bytes.buffer as ArrayBuffer;
 }
 
+function parseDailySummaryFrame(data: string): DailySummary {
+  const parsed = JSON.parse(data) as DailySummary | DailySummaryEnvelope;
+  if ("summary" in parsed && parsed.summary) {
+    return parsed.summary;
+  }
+  return parsed as DailySummary;
+}
+
 async function waitForDailySummaryCount(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   currentText: string,
@@ -98,7 +112,7 @@ async function waitForDailySummaryCount(
     const events = parseSSEEvents(collectedText);
     const dailySummaryEvents = events.filter((event) => event.event === "daily_summary");
     if (dailySummaryEvents.length >= targetCount) {
-      const summary = JSON.parse(dailySummaryEvents[targetCount - 1]!.data) as DailySummary;
+      const summary = parseDailySummaryFrame(dailySummaryEvents[targetCount - 1]!.data);
       return { collectedText, events, summary, dailySummaryEvents };
     }
 
