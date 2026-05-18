@@ -41,9 +41,12 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
     }
     reply.raw.writeHead(200, headers);
 
-    // Send initial daily summary
     const summary = await summaryService.getDailySummary(deviceId, currentAppDate());
-    reply.raw.write(`event: daily_summary\ndata: ${JSON.stringify(summary)}\n\n`);
+    reply.raw.write(`event: daily_summary\ndata: ${JSON.stringify({
+      summary,
+      affectedDate: summary.date,
+      source: "initial",
+    })}\n\n`);
 
     // Subscribe for future updates
     publisher.subscribe(deviceId, reply);
