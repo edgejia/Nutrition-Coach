@@ -16,6 +16,41 @@ function escapedPattern(value: string) {
 }
 
 describe("History Day Detail source contract", () => {
+  it("refreshes an open detail view only for matching historical meal mutations", async () => {
+    const dayDetail = await readSource("../../client/src/components/HistoryDayDetailScreen.tsx");
+
+    assert.match(dayDetail, /const lastMealMutation = useStore\(\(s\) => s\.lastMealMutation\)/);
+    assert.match(dayDetail, /lastMealMutation\?\.affectedDate !== dateKey/);
+    assert.match(dayDetail, /lastMealMutation\?\.nonce/);
+    assert.match(dayDetail, /getHistoryDaySnapshot\(requestDateKey\)/);
+    assert.match(dayDetail, /const requestDateKey = dateKey/);
+    assert.match(dayDetail, /cancelledRef\?\.current/);
+    assert.match(dayDetail, /return \(\) => \{\s*cancelledRef\.current = true;\s*\}/);
+
+    assert.doesNotMatch(dayDetail, /setDailySummary/);
+    assert.doesNotMatch(dayDetail, /setMeals/);
+    assert.doesNotMatch(dayDetail, /\bgetMeals\(/);
+    assert.doesNotMatch(dayDetail, /summaryOutcome|onDailySummaryEnvelope|runInitialMealsLoad/);
+  });
+
+  it("does not add stale or freshness indicators to the read-only detail UI", async () => {
+    const dayDetail = await readSource("../../client/src/components/HistoryDayDetailScreen.tsx");
+
+    for (const rejected of [
+      "stale",
+      "freshness",
+      "fresh",
+      "過期",
+      "不同步",
+      "重新整理中",
+      "即時同步",
+      "資料已更新",
+      "資料可能不是最新",
+    ]) {
+      assert.doesNotMatch(dayDetail, escapedPattern(rejected));
+    }
+  });
+
   it("keeps sport detail structure while retaining read-only snapshot behavior", async () => {
     const [dayDetail] = await Promise.all([readSource("../../client/src/components/HistoryDayDetailScreen.tsx")]);
 

@@ -165,6 +165,19 @@ describe("History screen source contract", () => {
     );
   });
 
+  it("refreshes History only when the selected day or visible week matches the mutation date", () => {
+    assert.match(source, /const shouldRefreshDay = affectedDate === selectedDateKey/);
+    assert.match(source, /const shouldRefreshWeek = affectedWeekStartKey === weekStartKey/);
+    assert.match(source, /if \(!shouldRefreshDay && !shouldRefreshWeek\) \{\s*return;\s*\}/);
+    assert.match(source, /shouldRefreshDay \? loadSelectedDay\(cancelledRef\) : Promise\.resolve\(\)/);
+    assert.match(source, /shouldRefreshWeek \? loadTrends\(cancelledRef\) : Promise\.resolve\(\)/);
+
+    assert.doesNotMatch(source, /activeScreen === "history"[\s\S]*loadSelectedDay/);
+    assert.doesNotMatch(source, /activeScreen === "history"[\s\S]*loadTrends/);
+    assert.doesNotMatch(source, /secondaryScreen[\s\S]*loadSelectedDay/);
+    assert.doesNotMatch(source, /secondaryScreen[\s\S]*loadTrends/);
+  });
+
   it("preserves visible selected-day display from same-date week cache during day revalidation", () => {
     assert.match(source, /const selectedWeekDay = weekDays\.find\(\(day\) => day\.dateKey === selectedDateKey\)/);
     assert.match(
