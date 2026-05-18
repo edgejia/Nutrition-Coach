@@ -466,12 +466,12 @@ useEffect(() => {
 
 All claims in this research were verified against phase context, codebase files, local package metadata, npm registry checks, or cited official docs; no `[ASSUMED]` claims are used. [VERIFIED: codebase grep, npm registry, cited docs]
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Coordinator module placement**
    - What we know: Phase context leaves exact helper name and placement to the planner. [VERIFIED: 63-CONTEXT.md]
-   - What's unclear: Whether `MainLayout.tsx` should hold the coordinator hook directly or delegate to `client/src/sse-summary-coordinator.ts`. [VERIFIED: 63-CONTEXT.md]
-   - Recommendation: Use a separate helper/hook if it keeps `MainLayout` from accumulating token and routing logic; keep it local to client SSE concerns rather than moving orchestration into the store. [VERIFIED: 63-CONTEXT.md, AGENTS.md:56]
+   - RESOLVED: Phase 63 plans use `client/src/sse-summary-coordinator.ts` as the dedicated coordinator module, with `MainLayout.tsx` wiring both `connectSSE` call sites and initial `getMeals()` commits through that helper. [VERIFIED: 63-04-PLAN.md]
+   - Rationale: This keeps request-token, today-versus-historical routing, future-date ignore, refetch-first, and drop-on-failure behavior local to client SSE orchestration instead of accumulating that logic in `MainLayout.tsx` or moving orchestration into `client/src/store.ts`. [VERIFIED: 63-CONTEXT.md, AGENTS.md:56]
 
 ## Environment Availability
 
