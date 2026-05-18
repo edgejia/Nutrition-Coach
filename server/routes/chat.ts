@@ -389,6 +389,7 @@ function publishSummarySafe(
   deviceId: string,
   didMutateMeal: boolean,
   dailySummary: unknown,
+  affectedDate: unknown,
   log: FastifyBaseLogger,
 ): void {
   const summaryDate = (
@@ -399,14 +400,28 @@ function publishSummarySafe(
   )
     ? (dailySummary as DailySummary).date
     : undefined;
-  if (!didMutateMeal || !summaryDate || summaryDate !== formatLocalDate(currentAppDate())) return;
+  const publishAffectedDate = typeof affectedDate === "string" && affectedDate
+    ? affectedDate
+    : summaryDate;
+  if (
+    !didMutateMeal
+    || !publishAffectedDate
+    || !summaryDate
+    || summaryDate !== publishAffectedDate
+  ) {
+    return;
+  }
   try {
-    publisher.publishDailySummary(deviceId, dailySummary as DailySummary);
-    log.info({ event: "summary_publish_success" }, "Summary publish success");
+    publisher.publishDailySummary(deviceId, {
+      summary: dailySummary as DailySummary,
+      affectedDate: publishAffectedDate,
+      source: "meal_mutation",
+    });
+    log.info({ event: "summary_publish_success", affectedDate: publishAffectedDate }, "Summary publish success");
   } catch (publishErr) {
     void publishErr;
     log.warn(
-      { event: "summary_publish_failed", failureReason: "publisher_error" },
+      { event: "summary_publish_failed", failureReason: "publisher_error", affectedDate: publishAffectedDate },
       "Summary publish failed (non-fatal)",
     );
   }
@@ -959,7 +974,7 @@ async function handleOrchestratorSSE(
           stopped: true,
           tokensStreamed: streamResult.tokensStreamed,
         });
-        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
+        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
         return;
       }
 
@@ -987,7 +1002,7 @@ async function handleOrchestratorSSE(
           didMutateMeal: streamDidMutateMeal,
         });
       }
-      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
+      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
     } else {
       const { reply: replyText, didLogMeal, dailySummary, summaryOutcome, summaryHistoryFacts, dailyTargets, affectedDate, loggedMeal } = result;
       recorder?.recordFinalReply({
@@ -1050,7 +1065,7 @@ async function handleOrchestratorSSE(
       } else {
         recordSseCompletion({ didLogMeal, didMutateMeal: streamDidMutateMeal });
       }
-      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, deps.log);
+      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, affectedDate, deps.log);
     }
   } catch (error) {
     const fallback = streamDidLogMeal
@@ -1106,7 +1121,7 @@ async function handleOrchestratorSSE(
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
     });
-    publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, deps.log);
+    publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
   } finally {
     await cleanupDurableAssetSafe(
       deps.assetService,
@@ -1352,6 +1367,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             deviceId,
             didMutateMeal,
             dailySummary,
+            affectedDate,
             turnLog,
           );
           if (hallucinationDetected) {
@@ -1402,7 +1418,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         });
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, turnLog);
+        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, affectedDate, turnLog);
         if (result.fallbackOutcomeContext) {
           const providerMetadata = result.providerFallbackContext?.reason === "llm_error"
             && result.fallbackOutcomeContext.reason === "llm_error"
@@ -1456,7 +1472,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         );
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, turnLog);
+        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, jsonAffectedDate, turnLog);
         traceRecorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
         recordJsonFallback({
           ...(providerFallback ?? {

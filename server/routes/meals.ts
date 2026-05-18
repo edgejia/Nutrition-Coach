@@ -7,7 +7,7 @@ import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createAssetService } from "../services/assets.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
-import { currentAppDate, formatLocalDate } from "../lib/time.js";
+import { formatLocalDate } from "../lib/time.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import {
   buildSummaryOutcomeAfterMealCommit,
@@ -105,12 +105,16 @@ function publishDailySummarySafe(input: {
   log: FastifyBaseLogger;
 }): void {
   const { publisher, deviceId, dailySummary, summaryOutcome, affectedDate, log } = input;
-  if (!dailySummary || dailySummary.date !== formatLocalDate(currentAppDate())) {
+  if (!dailySummary || dailySummary.date !== affectedDate) {
     return;
   }
 
   try {
-    publisher.publishDailySummary(deviceId, dailySummary);
+    publisher.publishDailySummary(deviceId, {
+      summary: dailySummary,
+      affectedDate,
+      source: "meal_mutation",
+    });
     log.info(
       { event: "summary_publish_success", affectedDate, summaryStatus: summaryOutcome.status },
       "Summary publish success",

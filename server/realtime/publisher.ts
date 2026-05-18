@@ -1,6 +1,6 @@
-import type { DailySummary } from "../services/summary.js";
 import type { DailyTargets } from "../services/device.js";
 import type { FastifyReply } from "fastify";
+import type { DailySummary } from "../services/summary.js";
 
 export type DailySummarySSESource = "initial" | "meal_mutation";
 
@@ -55,7 +55,7 @@ export class RealtimePublisher {
     return { sent };
   }
 
-  publishDailySummary(deviceId: string, payload: DailySummary | DailySummarySSEPayload) {
+  publishDailySummary(deviceId: string, payload: DailySummarySSEPayload) {
     return this.publish(deviceId, "daily_summary", payload);
   }
 

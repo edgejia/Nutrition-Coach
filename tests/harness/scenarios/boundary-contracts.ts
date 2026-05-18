@@ -426,6 +426,11 @@ async function runStalePublisher(): Promise<ScenarioResult> {
     mealCount: 0,
     date: "2026-03-25",
   };
+  const summaryPayload = {
+    summary,
+    affectedDate: summary.date,
+    source: "meal_mutation" as const,
+  };
 
   const publisher = new RealtimePublisher();
   steps.push(pass("create_publisher"));
@@ -454,7 +459,7 @@ async function runStalePublisher(): Promise<ScenarioResult> {
   steps.push(pass("subscribe_connections", { subscribed: 2 }));
 
   try {
-    publisher.publishDailySummary(deviceId, summary);
+    publisher.publishDailySummary(deviceId, summaryPayload);
   } catch (err) {
     steps.push(fail("publish_with_stale", `publishDailySummary threw: ${err instanceof Error ? err.message : String(err)}`));
     return failResult(scenarioName, steps, "publish_with_stale", artifacts);
@@ -466,7 +471,7 @@ async function runStalePublisher(): Promise<ScenarioResult> {
   steps.push(pass("publish_with_stale", { writesAfterFirst: writeLog.length }));
 
   try {
-    publisher.publishDailySummary(deviceId, summary);
+    publisher.publishDailySummary(deviceId, summaryPayload);
   } catch (err) {
     steps.push(fail("verify_stale_removed", `Second publishDailySummary threw: ${err instanceof Error ? err.message : String(err)}`));
     return failResult(scenarioName, steps, "verify_stale_removed", artifacts);
