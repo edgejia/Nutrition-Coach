@@ -141,3 +141,35 @@ No new PROOF-01 behavior tests added. The baseline gate, PROOF-02 sweep, source 
 No harness scenario was created, updated, or cited as current behavior proof. D-33 through D-35 remain closed because no D-34 trigger was present: the remaining PROOF-01 proof need is not a multi-turn persisted evidence path, an uncovered SSE timing/artifact-emission boundary, or a stale harness scenario. Mid-phase verification used the targeted command groups from `64-VALIDATION.md` per D-43, and no harness command entered scope under D-44.
 
 Scope remained limited to metadata-only verification. No product feature, UI polish, staging/main promotion, broad coverage expansion, or default release-proof harness bundle was planned or performed.
+
+## Closure Gates
+
+Phase 64 closure followed D-46 by explicitly running the TypeScript gate and the full local release gate after PROOF-01 and PROOF-02 proof records were in place. This section remains metadata-only per D-30 and T-64-12: it records command, status, stage facts, and closeout policy only; it excludes raw command output, stack traces, raw request or response bodies, prompt text, user text, assistant final text, tool payloads, provider bodies, image data, session material, database snapshots, raw matches, and raw file diffs.
+
+| Command | Run Timestamp | Result | Status | Facts Proven |
+|---|---|---|---|---|
+| `yarn tsc --noEmit` | 2026-05-19T05:07:28Z | pass | PASS | Repository TypeScript compiled without errors at closure. |
+| `yarn release:check` | 2026-05-19T05:07:28Z | pass | PASS | Timezone contract, TypeScript gate, full Node test suite, and frontend build all completed through the local release gate. |
+
+### Closure Stage Results
+
+| Stage | Status | Suspected Ownership | Notes |
+|---|---|---|---|
+| Timezone contract | PASS | release script / local environment | Asia/Taipei timezone contract satisfied through `yarn release:check`. |
+| TypeScript gate | PASS | repository-wide TypeScript | `tsc --noEmit` passed standalone and inside `release:check`. |
+| Full test suite | PASS | repository-wide unit and integration tests | Full Node test suite passed through `release:check`. |
+| Frontend build | PASS | client build | Vite production build completed through `release:check`. |
+
+### Closure A/B/C Triage
+
+| Bucket | Meaning | Closure Count | Closure Action |
+|---|---|---:|---|
+| Bucket A | True v2.3 integrity regression | 0 | None required at closure. |
+| Bucket B | Phase 64 proof-work failure | 0 | None required at closure. |
+| Bucket C | Unrelated pre-existing or external failure | 0 | No current-thread exception approval or `64-deferred-items.md` row required. |
+
+D-47 is satisfied because closure `release:check` is green. No deferred or escalated Bucket C exception is needed, and no red release gate is being used to close Phase 64.
+
+### Closure Promotion Boundary
+
+Closure ran only local verification commands. No `git push`, merge, deploy, Railway smoke, staging promotion, main promotion, production promotion, or staging/main verification command was run or authorized by this closure record.
