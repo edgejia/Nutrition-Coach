@@ -6,11 +6,13 @@
 - **v2.1 AI Trust Infrastructure & Logging Reliability** - shipped 2026-05-12; archived in [`milestones/v2.1/ROADMAP.md`](milestones/v2.1/ROADMAP.md)
 - **v2.2 LLM Failure Localization Foundation** - shipped 2026-05-15; archived in [`milestones/v2.2/ROADMAP.md`](milestones/v2.2/ROADMAP.md)
 - **v2.2 Promotion Blocker Reopen** - Phase 59 complete 2026-05-16; no staging/main promotion authorized
-- **v2.3 Authoritative Mutation Outcomes and Fresh Meal State** - active planning
+- **v2.3 Authoritative Mutation Outcomes and Fresh Meal State** - local milestone complete 2026-05-19; no staging/main promotion performed
 
 ## Overview
 
 v2.3 closes the remaining P1 data-integrity risks before returning to product polish. The milestone makes backend-committed mutation facts authoritative across goal updates, meal log/update/delete receipts, stale chat receipt edits, and `daily_summary` SSE freshness, while preserving metadata-only proof and the existing Fastify, SQLite, orchestrator, realtime, and Zustand boundaries.
+
+Local execution, UAT, security, validation, and release-proof gates are complete as of 2026-05-19. Staging or main promotion remains outside this roadmap execution and requires a separate ship workflow with explicit approval.
 
 ## Phases
 
@@ -181,7 +183,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 5/5 | Complete   | 2026-05-17 |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 5/5 | Complete    | 2026-05-18 |
-| 64. Verification and Release-Proof Hardening | v2.3 | 4/4 | Complete   | 2026-05-19 |
+| 64. Verification and Release-Proof Hardening | v2.3 | 4/4 | Complete    | 2026-05-19 |
 
 ## Future Milestone Candidates
 
@@ -193,4 +195,4 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 - Metadata-only production trace sampling and aggregate failure metrics.
 
 ---
-*Last updated: 2026-05-17 after Phase 62 gap-closure execution*
+*Last updated: 2026-05-19 after Phase 64 completion*

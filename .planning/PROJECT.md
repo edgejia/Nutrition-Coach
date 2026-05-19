@@ -11,6 +11,7 @@ Nutrition Coach is a chat-first nutrition logging app for personal beta use. Use
 ## Current State
 
 **Shipped version:** v2.2 LLM Failure Localization Foundation on 2026-05-15.
+**Locally completed milestone:** v2.3 Authoritative Mutation Outcomes and Fresh Meal State on 2026-05-19; staging/main promotion still requires a separate ship workflow and explicit approval.
 
 v2.2 completed the metadata-only failure-localization foundation for the chat/logging LLM path. User-visible fallback/error bubbles can now carry a short reference code derived from a server-generated `turnId`, and maintainers can trace that turn through SSE/JSON route payloads, Fastify child logs, orchestrator hook facts, safe provider metadata, `chat_route_fallback`, and `llm-trace.v2` harness evidence.
 
@@ -25,6 +26,8 @@ v2.2 completed the metadata-only failure-localization foundation for the chat/lo
 ## Current Milestone: v2.3 Authoritative Mutation Outcomes and Fresh Meal State
 
 **Goal:** Close the remaining P1 data-integrity issues from the Notion BUG / FEATURE board before returning to product-polish backlog.
+
+**Status:** Locally complete. All v2.3 phases are executed, UAT is passed, local release proof is green, and no staging/main promotion has been performed.
 
 **Target features:**
 - Backend-owned structured pending goal proposals, so confirmation text like `好` can only confirm a proposal id or explicit numeric values.
@@ -51,11 +54,13 @@ v2.2 completed the metadata-only failure-localization foundation for the chat/lo
 - ✓ Auth-style provider failure localization has deterministic integration and harness proof without persisting user-visible fallback text — v2.2 Phase 58.
 - ✓ Backend-owned goal proposals gate ambiguous confirmation text, and rejected goal updates return deterministic backend copy without mutation or publish side effects — v2.3 Phase 60.
 - ✓ Meal log, update, delete, and direct meal PATCH/DELETE mutations return committed facts with an explicit summary freshness outcome even when summary recompute or publish degrades — v2.3 Phase 61.
+- ✓ Chat receipt actions cannot PATCH stale meal facts over newer meal state; stale expected revisions fail closed with deterministic guidance and refresh support — v2.3 Phase 62.
+- ✓ Daily summary SSE events refresh or invalidate affected meal rows so visible rows cannot remain stale beside fresher totals — v2.3 Phase 63.
+- ✓ v2.3 integrity behavior has targeted local proof, metadata-only evidence, local release gates, and no staging/main promotion — v2.3 Phase 64.
 
 ### Active
 
-- [ ] **FRESH-01** Chat receipt actions cannot PATCH stale meal facts over newer meal state.
-- [ ] **FRESH-02** Daily summary SSE events refresh or invalidate meal rows alongside summary totals.
+No active v2.3 requirements remain. Next active work should start from a new milestone or an explicit ship workflow.
 
 ### Out of Scope
 
@@ -108,6 +113,9 @@ v2.3 integrity context:
 | Use backend-owned active proposal state for ambiguous goal confirmations | Short confirmation text is too ambiguous to trust model-authored assistant prose; mutation authority now requires explicit current-turn numeric values or the latest active backend proposal. | Validated in Phase 60 |
 | Treat renderer-owned goal rejection/cancel replies as terminal final replies | Failed goal updates, missing proposals, malformed calls, and cancel text must not be rewritten by a later LLM round into success-style prose. | Validated in Phase 60 |
 | Separate committed meal mutation facts from summary freshness | Persisted meal log/update/delete/direct route facts are authoritative even when summary recompute, recovery, or publish degrades; `summaryOutcome` carries freshness status. | Validated in Phase 61 |
+| Use expected meal revision checks for stale receipt protection | Server-side precondition checks are authoritative; client refresh/redaction is UX support only. | Validated in Phase 62 |
+| Route daily summary SSE through affected-date row freshness coordination | Same-day summary updates refresh rows before committing totals; historical affected dates invalidate the matching surface only. | Validated in Phase 63 |
+| Keep v2.3 release proof local until ship workflow approval | Phase 64 proves integrity behavior and local gates without push, deploy, staging promotion, or main promotion. | Validated in Phase 64 |
 | Defer raw debugger/user-flagged capture | Those features require trigger, access-control, retention, privacy notice, content scope, and storage decisions first. | Still deferred |
 
 ## Archived Previous State
@@ -139,4 +147,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-17 after Phase 61 completion*
+*Last updated: 2026-05-19 after Phase 64 completion*
