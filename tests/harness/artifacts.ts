@@ -11,7 +11,7 @@
  *   - Paths containing `/uploads/` or upload staging directories  → "[REDACTED_PATH]"
  *   - Image data URIs, bearer tokens, and OpenAI-style API keys  → "[REDACTED]"
  *   - Object keys containing `deviceId` in camelCase, snake_case, or kebab-case  → "[REDACTED]"
- *   - Raw prompt/message/provider/tool/final-assistant payload keys are omitted
+ *   - Raw prompt/message/provider/tool/final-assistant/database snapshot payload keys are omitted
  */
 
 import fs from "node:fs";
@@ -124,6 +124,7 @@ const OMITTED_KEYS = new Set([
   "imagedata",
   "imagedatauri",
   "messages",
+  "mealssnapshot",
   "openaiapikey",
   "providerpayload",
   "prompttext",

@@ -265,6 +265,24 @@ describe("verification-artifacts", () => {
     assert.doesNotMatch(raw, /secret-device-id-xyz/, "all occurrences of deviceId value must be redacted");
   });
 
+  test("database snapshot evidence keys are omitted from saved artifact files", async () => {
+    const result = makeFailResult("omit-database-snapshots");
+    result.artifacts.historySnapshot = [{ role: "user", content: "raw user meal text should not persist" }];
+
+    await writeScenarioArtifacts("omit-database-snapshots", result);
+
+    const latestDir = path.join(tmpDir, "omit-database-snapshots", "latest");
+    for (const fileName of ["snapshots.json", "scenario-result.json"]) {
+      const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
+      assert.doesNotMatch(raw, /mealsSnapshot|historySnapshot/, `${fileName} must omit database snapshot keys`);
+      assert.doesNotMatch(
+        raw,
+        /raw user meal text should not persist|secret-device-id-xyz/,
+        `${fileName} must not persist database snapshot values`,
+      );
+    }
+  });
+
   test("camelCase device id evidence keys are redacted across all artifact files", async () => {
     const result = makeFailResult("redact-camel-device-ids");
     result.steps[0]!.actual = {

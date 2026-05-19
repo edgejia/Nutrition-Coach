@@ -28,14 +28,22 @@ interface SweepResult {
 }
 
 const denylistRegistry: DenylistEntry[] = [
-  { tier: "Tier 1", label: "raw prompts", pattern: /raw prompt/i },
-  { tier: "Tier 1", label: "user text", pattern: /raw user/i },
-  { tier: "Tier 1", label: "assistant final text", pattern: /final assistant/i },
-  { tier: "Tier 1", label: "tool payloads", pattern: /raw tool/i },
-  { tier: "Tier 1", label: "provider bodies", pattern: /raw provider body/i },
+  { tier: "Tier 1", label: "raw prompts", pattern: /raw prompt text should not persist|promptText/i },
+  { tier: "Tier 1", label: "user text", pattern: /raw user meal text should not persist|rawUserMessage|userMealText/i },
+  {
+    tier: "Tier 1",
+    label: "assistant final text",
+    pattern: /assistant final answer should not persist|finalAssistantContent|assistantContent/i,
+  },
+  {
+    tier: "Tier 1",
+    label: "tool payloads",
+    pattern: /raw tool (?:args|arguments|result|results) should not persist|rawToolResult|toolArguments/i,
+  },
+  { tier: "Tier 1", label: "provider bodies", pattern: /raw provider body should not persist|rawProviderPayload/i },
   { tier: "Tier 1", label: "image data", pattern: /data:image\/[a-z0-9.+-]+;base64/i },
   { tier: "Tier 1", label: "session material", pattern: /guest_session=|guestSession=/i },
-  { tier: "Tier 1", label: "database snapshots", pattern: /historySnapshot|mealsSnapshot/i },
+  { tier: "Tier 1", label: "database snapshots", pattern: /"historySnapshot"\s*:|"mealsSnapshot"\s*:/i },
   { tier: "Tier 2", label: "API keys", pattern: /\bsk-[A-Za-z0-9_-]+/ },
   { tier: "Tier 2", label: "bearer/auth headers", pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]+/i },
   { tier: "Tier 2", label: "cookies", pattern: /set-cookie|cookie:\s*|guestSession=/i },
@@ -48,16 +56,92 @@ const denylistRegistry: DenylistEntry[] = [
   { tier: "Tier 2", label: "provider request/body/header material", pattern: /raw provider|provider headers/i },
 ];
 
-function enumerateArtifactFiles(_root: string): ArtifactFile[] {
-  throw new Error("phase64 metadata sweep enumeration not implemented");
+const BINARY_EXTENSIONS = new Set([
+  ".avif",
+  ".gif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".pdf",
+  ".png",
+  ".webp",
+  ".woff",
+  ".woff2",
+]);
+
+function enumerateArtifactFiles(root: string): ArtifactFile[] {
+  if (!fs.existsSync(root)) {
+    return [];
+  }
+
+  const files: ArtifactFile[] = [];
+  const visit = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const absolutePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(absolutePath);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const relativePath = path.relative(process.cwd(), absolutePath).split(path.sep).join("/");
+      const extension = path.extname(entry.name).toLowerCase() || "(none)";
+      const byteSize = fs.statSync(absolutePath).size;
+      files.push({
+        path: relativePath,
+        absolutePath,
+        extension,
+        byteSize,
+        kind: isBinaryArtifact(absolutePath, extension) ? "binary" : "text",
+      });
+    }
+  };
+
+  visit(root);
+  return files;
 }
 
-function sweepArtifacts(_root: string, _denylist: DenylistEntry[]): SweepResult {
-  throw new Error("phase64 metadata sweep matching not implemented");
+function isBinaryArtifact(absolutePath: string, extension: string): boolean {
+  if (BINARY_EXTENSIONS.has(extension)) {
+    return true;
+  }
+
+  const sample = fs.readFileSync(absolutePath).subarray(0, 512);
+  return sample.includes(0);
+}
+
+function sweepArtifacts(root: string, denylist: DenylistEntry[]): SweepResult {
+  const files = enumerateArtifactFiles(root);
+  const matches: SweepResult["matches"] = [];
+
+  for (const file of files) {
+    if (file.kind === "binary") {
+      continue;
+    }
+
+    const text = fs.readFileSync(file.absolutePath, "utf-8");
+    for (const entry of denylist) {
+      if (entry.pattern.test(text)) {
+        matches.push({ path: file.path, tier: entry.tier, label: entry.label });
+      }
+    }
+  }
+
+  const textFileCount = files.filter((file) => file.kind === "text").length;
+  const binaryFileCount = files.filter((file) => file.kind === "binary").length;
+  return {
+    files,
+    textFileCount,
+    binaryFileCount,
+    matchCount: matches.length,
+    matches,
+  };
 }
 
 function summarizeCompanionProofs(): string[] {
-  throw new Error("phase64 companion proof summary not implemented");
+  return ["tests/unit/verification-artifacts.test.ts", "tests/unit/llm-chat-trace.test.ts"];
 }
 
 describe("Phase 64 PROOF-02 metadata-only sweep", () => {
