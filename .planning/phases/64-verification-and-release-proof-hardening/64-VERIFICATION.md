@@ -133,3 +133,11 @@ PROOF-01 follows D-05a by mapping each required behavior family to passing local
 ### PROOF-01 Privacy Boundary
 
 The PROOF-01 coverage record stores only command names, file paths, pass counts, behavior-family names, status, decision references, and facts proven. It does not store raw user text, prompt text, assistant copy, provider bodies, tool payloads, image data, session material, database snapshots, raw route bodies, raw logs, or raw command output.
+
+### PROOF-01 Behavior-Test Gap Decision
+
+No new PROOF-01 behavior tests added. The baseline gate, PROOF-02 sweep, source review, and targeted command groups show all five required behavior families are covered by existing passing unit/integration evidence, so D-03, D-04, D-05, and D-05b do not justify broad or duplicate tests for completeness. No false-pass gap was found.
+
+No harness scenario was created, updated, or cited as current behavior proof. D-33 through D-35 remain closed because no D-34 trigger was present: the remaining PROOF-01 proof need is not a multi-turn persisted evidence path, an uncovered SSE timing/artifact-emission boundary, or a stale harness scenario. Mid-phase verification used the targeted command groups from `64-VALIDATION.md` per D-43, and no harness command entered scope under D-44.
+
+Scope remained limited to metadata-only verification. No product feature, UI polish, staging/main promotion, broad coverage expansion, or default release-proof harness bundle was planned or performed.
