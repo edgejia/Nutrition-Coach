@@ -159,7 +159,7 @@ Plans:
 - [x] 64-02-PLAN.md — PROOF-02 metadata-only sweep and artifact privacy proof
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 64-03-PLAN.md — PROOF-01 evidence coverage and false-pass gap decision
+- [x] 64-03-PLAN.md — PROOF-01 evidence coverage and false-pass gap decision
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 64-04-PLAN.md — Closure TypeScript/release gates and final verification status
@@ -181,7 +181,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 5/5 | Complete   | 2026-05-17 |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 5/5 | Complete    | 2026-05-18 |
-| 64. Verification and Release-Proof Hardening | v2.3 | 2/4 | In Progress|  |
+| 64. Verification and Release-Proof Hardening | v2.3 | 3/4 | In Progress|  |
 
 ## Future Milestone Candidates
 

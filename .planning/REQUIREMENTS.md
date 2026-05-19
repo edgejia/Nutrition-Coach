@@ -35,7 +35,7 @@ Requirements for the v2.3 P1 data-integrity milestone. Each requirement must map
 
 ### Proof & Privacy
 
-- [ ] **PROOF-01**: Targeted unit and integration tests prove goal proposal authority, deterministic failed goal copy, summary-failure committed outcomes, stale receipt rejection, and SSE meal-row freshness.
+- [x] **PROOF-01**: Targeted unit and integration tests prove goal proposal authority, deterministic failed goal copy, summary-failure committed outcomes, stale receipt rejection, and SSE meal-row freshness.
 - [x] **PROOF-02**: Integrity proof remains metadata-only and does not persist raw prompts, user text, assistant final text, tool payloads, provider bodies, image data, session material, or database snapshots.
 - [ ] **PROOF-03**: Local closure runs `yarn tsc --noEmit` and `yarn release:check`, with no staging or main promotion.
 
@@ -91,7 +91,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REAL-01 | Phase 63 | Complete |
 | REAL-02 | Phase 63 | Complete |
 | REAL-03 | Phase 63 | Complete |
-| PROOF-01 | Phase 64 | Pending |
+| PROOF-01 | Phase 64 | Complete |
 | PROOF-02 | Phase 64 | Complete |
 | PROOF-03 | Phase 64 | Pending |
 
