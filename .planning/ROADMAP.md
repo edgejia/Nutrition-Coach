@@ -153,7 +153,7 @@ Plans:
 **Plans**: 4 plans
 Plans:
 **Wave 1**
-- [ ] 64-01-PLAN.md — Baseline release gate and A/B/C triage record
+- [x] 64-01-PLAN.md — Baseline release gate and A/B/C triage record
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 64-02-PLAN.md — PROOF-02 metadata-only sweep and artifact privacy proof
@@ -181,7 +181,7 @@ Phases execute in numeric order: 60 -> 61 -> 62 -> 63 -> 64
 | 61. Committed Mutation Outcome and Summary Contract | v2.3 | 6/6 | Complete    | 2026-05-17 |
 | 62. Meal Revision Tokens and Stale Receipt Protection | v2.3 | 5/5 | Complete   | 2026-05-17 |
 | 63. SSE Meal-Row Freshness and Affected-Date Invalidation | v2.3 | 5/5 | Complete    | 2026-05-18 |
-| 64. Verification and Release-Proof Hardening | v2.3 | 0/4 | Not started | - |
+| 64. Verification and Release-Proof Hardening | v2.3 | 1/4 | In Progress|  |
 
 ## Future Milestone Candidates
 
