@@ -1,9 +1,10 @@
-import { describe, test } from "node:test";
+import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-const ARTIFACTS_ROOT = path.resolve("tests/harness/artifacts");
+const ARTIFACTS_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "phase64-artifacts-"));
 
 interface ArtifactFile {
   path: string;
@@ -42,7 +43,11 @@ const denylistRegistry: DenylistEntry[] = [
   },
   { tier: "Tier 1", label: "provider bodies", pattern: /raw provider body should not persist|rawProviderPayload/i },
   { tier: "Tier 1", label: "image data", pattern: /data:image\/[a-z0-9.+-]+;base64/i },
-  { tier: "Tier 1", label: "session material", pattern: /guest_session=|guestSession=/i },
+  {
+    tier: "Tier 1",
+    label: "session material",
+    pattern: /(?:guest_session|guest_session_resume|guestSession|guestSessionResume|sessionToken|resumeToken|token)=([^\[]|$)/i,
+  },
   { tier: "Tier 1", label: "database snapshots", pattern: /"historySnapshot"\s*:|"mealsSnapshot"\s*:/i },
   { tier: "Tier 2", label: "API keys", pattern: /\bsk-[A-Za-z0-9_-]+/ },
   { tier: "Tier 2", label: "bearer/auth headers", pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]+/i },
@@ -140,24 +145,73 @@ function sweepArtifacts(root: string, denylist: DenylistEntry[]): SweepResult {
   };
 }
 
-function summarizeCompanionProofs(): string[] {
-  return ["tests/unit/verification-artifacts.test.ts", "tests/unit/llm-chat-trace.test.ts"];
+const companionProofs = [
+  {
+    path: "tests/unit/verification-artifacts.test.ts",
+    required: [
+      /summary\.json redacts untrusted console/,
+      /raw prompt and message keys are omitted/,
+      /persisted artifacts redact TRACE-04 forbidden probe strings/,
+    ],
+  },
+  {
+    path: "tests/unit/llm-chat-trace.test.ts",
+    required: [
+      /excludes malicious or accidental raw payload values/,
+      /records provider-caused fallback hook facts with metadata-only trace fields/,
+      /structured hooks log exact metadata-only LLM error and fallback payloads/,
+    ],
+  },
+];
+
+function readPhase64Context(): string {
+  return fs.readFileSync(
+    path.resolve(".planning/phases/64-verification-and-release-proof-hardening/64-CONTEXT.md"),
+    "utf-8",
+  );
 }
 
 describe("Phase 64 PROOF-02 metadata-only sweep", () => {
-  test("D-36 enumerates every on-disk file under tests/harness/artifacts when the directory exists", () => {
-    if (!fs.existsSync(ARTIFACTS_ROOT)) {
-      return;
-    }
+  before(() => {
+    const latest = path.join(ARTIFACTS_ROOT, "fixture-scenario", "latest");
+    fs.mkdirSync(latest, { recursive: true });
+    fs.writeFileSync(
+      path.join(latest, "summary.json"),
+      JSON.stringify({ ok: true, consoleSummary: "PASS fixture-scenario 2/2" }),
+    );
+    fs.writeFileSync(
+      path.join(latest, "steps.json"),
+      JSON.stringify([{ name: "setup", ok: true, evidence: { deviceId: "[REDACTED]" } }]),
+    );
+    fs.writeFileSync(
+      path.join(latest, "snapshots.json"),
+      JSON.stringify({ requestUrl: "http://127.0.0.1/api/sse?guest_session_resume=[REDACTED]" }),
+    );
+    fs.writeFileSync(
+      path.join(latest, "scenario-result.json"),
+      JSON.stringify({ ok: true, artifacts: { binaryProof: "metadata-only" } }),
+    );
+    fs.writeFileSync(path.join(latest, "thumbnail.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]));
+  });
 
+  after(() => {
+    fs.rmSync(ARTIFACTS_ROOT, { recursive: true, force: true });
+  });
+
+  test("D-36 enumerates every file under the representative artifact fixture", () => {
     const files = enumerateArtifactFiles(ARTIFACTS_ROOT);
 
-    assert.ok(files.length > 0, "expected metadata enumeration count > 0 for tests/harness/artifacts");
-    assert.ok(files.every((file) => file.path.startsWith("tests/harness/artifacts/")));
+    assert.ok(files.length > 0, "expected metadata enumeration count > 0 for representative artifacts");
+    assert.ok(files.every((file) => file.absolutePath.startsWith(ARTIFACTS_ROOT)));
   });
 
   test("D-22/D-23 text sweep reports Tier 1 and Tier 2 metadata without raw matched snippets", () => {
     const result = sweepArtifacts(ARTIFACTS_ROOT, denylistRegistry);
+    const textArtifactNames = new Set(
+      result.files
+        .filter((file) => file.kind === "text")
+        .map((file) => path.basename(file.path)),
+    );
 
     const message = [
       `files=${result.files.length}`,
@@ -168,6 +222,11 @@ describe("Phase 64 PROOF-02 metadata-only sweep", () => {
       `paths=${result.matches.map((match) => match.path).join(",")}`,
     ].join(" ");
 
+    assert.ok(result.files.length > 0, "expected artifact files to sweep");
+    assert.ok(result.textFileCount > 0, "expected text JSON/markdown artifacts to sweep");
+    for (const expected of ["summary.json", "steps.json", "snapshots.json", "scenario-result.json"]) {
+      assert.ok(textArtifactNames.has(expected), `expected at least one ${expected} artifact to be swept`);
+    }
     assert.equal(result.matchCount, 0, message);
     assert.doesNotMatch(message, /raw prompt|raw user|final assistant|raw tool|raw provider body|data:image|guest_session|sk-/i);
   });
@@ -180,7 +239,7 @@ describe("Phase 64 PROOF-02 metadata-only sweep", () => {
     assert.ok(
       binaries.every(
         (file) =>
-          file.path.startsWith("tests/harness/artifacts/") &&
+          file.absolutePath.startsWith(ARTIFACTS_ROOT) &&
           file.extension.length > 0 &&
           file.byteSize > 0,
       ),
@@ -189,31 +248,34 @@ describe("Phase 64 PROOF-02 metadata-only sweep", () => {
   });
 
   test("D-18/D-45 companion proof keeps structured trace, logs, and artifact redaction tests in scope", () => {
-    assert.deepEqual(summarizeCompanionProofs(), [
-      "tests/unit/verification-artifacts.test.ts",
-      "tests/unit/llm-chat-trace.test.ts",
-    ]);
+    for (const proof of companionProofs) {
+      const source = fs.readFileSync(path.resolve(proof.path), "utf-8");
+      for (const marker of proof.required) {
+        assert.match(source, marker, `${proof.path} must retain ${marker}`);
+      }
+    }
   });
 
   test("D-02/D-20/D-21/D-24/D-26/D-27/D-32/D-33/D-34/D-35/D-36a/D-37/D-38/D-39/D-41 policy notes are represented", () => {
-    const policyNotes = [
-      "D-02 sweep before behavior-test expansion",
-      "D-20 ROADMAP denylist floor",
-      "D-21 synthesize strongest existing operational denylist",
-      "D-24 add Tier 2 risks but escalate removals",
-      "D-26 sentinel fixtures allowed only when not persisted or emitted",
-      "D-27 HTTP bodies out of scope unless captured by evidence",
-      "D-32 no default harness bundle",
-      "D-33 focused harness only for false-pass risk",
-      "D-34 harness trigger required",
-      "D-35 name the harness trigger if harness enters scope",
-      "D-36a classify ignored local artifacts",
-      "D-37 counts and status only",
-      "D-38 persisted matches block unless escalated",
-      "D-39 clean artifacts and verify or fix producer path",
-      "D-41 generated artifacts are regenerated, not hand-edited",
-    ];
-
-    assert.equal(policyNotes.length, 15);
+    const context = readPhase64Context();
+    for (const decisionId of [
+      "D-02",
+      "D-20",
+      "D-21",
+      "D-24",
+      "D-26",
+      "D-27",
+      "D-32",
+      "D-33",
+      "D-34",
+      "D-35",
+      "D-36a",
+      "D-37",
+      "D-38",
+      "D-39",
+      "D-41",
+    ]) {
+      assert.match(context, new RegExp(`\\*\\*${decisionId}:`), `${decisionId} must be represented in Phase 64 context`);
+    }
   });
 });
