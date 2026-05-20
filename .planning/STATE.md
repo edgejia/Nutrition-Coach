@@ -4,8 +4,8 @@ milestone: v2.3
 milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
 status: milestone_complete
 stopped_at: Phase 64 complete, v2.3 milestone ready for closeout
-last_updated: "2026-05-19T13:10:23.690Z"
-last_activity: 2026-05-19
+last_updated: "2026-05-20T21:26:31+0800"
+last_activity: 2026-05-20
 progress:
   total_phases: 5
   completed_phases: 5
@@ -142,6 +142,12 @@ Recent decisions affecting current work:
 
 None yet for v2.3.
 
+### Quick Tasks Completed
+
+| Date | Quick Task | Summary |
+|------|------------|---------|
+| 2026-05-20 | 260520-tqd update_goals post-commit outcome asymmetry | Closed CR-01 by preserving committed goal receipts when post-commit cleanup, `goals_update` publish, or summary lookup fails. |
+
 ### Blockers/Concerns
 
 - No current v2.3 implementation blockers. Staging/main promotion still requires a separate ship workflow and explicit current-thread approval.
@@ -153,6 +159,8 @@ None yet for v2.3.
 | proof_hardening | Phase 58 auth-detail denylist omits `401`, `Unauthorized`, and `invalid_request_error` in user-visible fallback assertions | accepted non-blocking debt | v2.2 close |
 | proof_hardening | Phase 58 provider-auth-failure-localization failure evidence can persist the matched forbidden snippet on a failing run | accepted non-blocking debt | v2.2 close |
 | dependency_review | High advisories in `drizzle-orm`, `fastify`, and transitive `fast-uri` | defer package upgrade and regression gates | v2.2 close |
+| mutation_outcome | CR-01: committed goal updates can still become failed chat outcomes if post-commit `goals_update` publish or summary lookup throws; Phase 61 left `update_goals` outside the public `summaryOutcome` contract | closed by quick 260520-tqd | v2.3 audit |
+| tool_schema | WR-01: `log_food` JSON schema still marks `protein_sources` as required while the Zod/executor contract accepts it as optional | accepted advisory debt for v2.4 planning | v2.3 audit |
 
 ## Session Continuity
 

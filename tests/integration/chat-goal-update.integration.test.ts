@@ -71,6 +71,7 @@ describe("chat goal update integration", () => {
   let mockLLM: MockLLMProvider;
   let address: string;
   let sessionCookieHeader: string;
+  let services: AppServices;
   let publishCalls: Array<{ event: "goals_update" }>;
   let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
 
@@ -91,12 +92,14 @@ describe("chat goal update integration", () => {
         traceRecorders.push(recorder);
         return recorder;
       },
-      onServicesReady(services: AppServices) {
-        const originalPublishGoalsUpdate = services.publisher.publishGoalsUpdate.bind(services.publisher);
-        services.publisher.publishGoalsUpdate = (deviceId, targets) => {
+      onServicesReady(appServices: AppServices) {
+        const readyServices = appServices;
+        const originalPublishGoalsUpdate = readyServices.publisher.publishGoalsUpdate.bind(readyServices.publisher);
+        readyServices.publisher.publishGoalsUpdate = (deviceId, targets) => {
           publishCalls.push({ event: "goals_update" });
           return originalPublishGoalsUpdate(deviceId, targets);
         };
+        services = readyServices;
       },
     });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
@@ -160,6 +163,70 @@ describe("chat goal update integration", () => {
     assert.deepEqual(body.dailyTargets, SUCCESS_TARGETS);
     assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
     assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+  });
+
+  it("returns the committed goal receipt when goals_update publish throws after persistence", async () => {
+    services.publisher.publishGoalsUpdate = () => {
+      throw new Error("goals_update publish failed after commit");
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_success_publish_failure",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1800,
+            protein: 130,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型不應改寫已提交結果。" });
+
+    const { status, body } = await postChat("卡路里改成 1800，蛋白質 130 克");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.reply, SUCCESS_RECEIPT);
+    assert.deepEqual(body.dailyTargets, SUCCESS_TARGETS);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("returns the committed goal receipt when post-commit summary lookup throws", async () => {
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("goal summary lookup failed after commit");
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_success_summary_lookup_failure",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1800,
+            protein: 130,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型不應改寫已提交結果。" });
+
+    const { status, body } = await postChat("卡路里改成 1800，蛋白質 130 克");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.reply, SUCCESS_RECEIPT);
+    assert.deepEqual(body.dailyTargets, SUCCESS_TARGETS);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+    assert.equal(mockLLM.chatCalls.length, 1);
   });
 
   it("creates a backend proposal for vague intent without mutating targets or publishing", async () => {

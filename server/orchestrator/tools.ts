@@ -323,7 +323,7 @@ type UpdateGoalField = keyof DailyTargets;
 interface UpdateGoalsResult {
   targets: DailyTargets;
   updatedFields: UpdateGoalField[];
-  publishedEvents: ["goals_update"];
+  publishedEvents?: Array<"goals_update">;
 }
 
 interface GoalControlledResult {
@@ -1482,15 +1482,26 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
 
     const updatedFields = updatedGoalFields(updatePatch);
     const targets = await deps.deviceService.updateGoals(deviceId, updatePatch);
-    await deps.goalProposalService.clear(deviceId);
-    deps.publisher.publishGoalsUpdate(deviceId, targets);
+    try {
+      await deps.goalProposalService.clear(deviceId);
+    } catch {
+      // Targets are already committed; cleanup failure must not alter the user-visible outcome.
+    }
+
+    let publishedEvents: Array<"goals_update"> = [];
+    try {
+      deps.publisher.publishGoalsUpdate(deviceId, targets);
+      publishedEvents = ["goals_update"];
+    } catch {
+      // SSE fan-out is a post-commit side effect; keep the committed receipt authoritative.
+    }
 
     return {
       ok: true,
       result: {
         targets,
         updatedFields,
-        publishedEvents: ["goals_update"],
+        publishedEvents,
       },
       toolMessage: formatGoalsReceipt(targets),
     };
@@ -1858,7 +1869,7 @@ export async function executeTool(
       success: true,
       executed: true,
       updatedFields: [...updateResult.updatedFields],
-      publishedEvents: [...updateResult.publishedEvents],
+      publishedEvents: [...(updateResult.publishedEvents ?? [])],
       dailyTargets: updateResult.targets,
     };
   }

@@ -36,7 +36,7 @@ interface MealMutationEffectsBase extends MutationEffectsBase {
 }
 
 interface GoalsMutationEffectsBase extends MutationEffectsBase {
-  committedSummary: DailySummary;
+  committedSummary?: DailySummary;
 }
 
 export interface LogMutationEffects extends MealMutationEffectsBase {

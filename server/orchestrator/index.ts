@@ -1037,10 +1037,16 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 if (!dailyTargets) {
                   throw new Error("update_goals succeeded without dailyTargets");
                 }
+                let committedSummary: DailySummary | undefined;
+                try {
+                  committedSummary = await deps.summaryService.getDailySummary(deviceId, currentAppDate());
+                } catch {
+                  // Goal targets are already committed; summary lookup is only receipt context.
+                }
                 mutationEffects = {
                   kind: "goals",
                   affectedDate: formatLocalDate(currentAppDate()),
-                  committedSummary: await deps.summaryService.getDailySummary(deviceId, currentAppDate()),
+                  ...(committedSummary ? { committedSummary } : {}),
                   committedTargets: dailyTargets,
                   targets: dailyTargets,
                   updatedFields: updatedFields as Array<keyof DailyTargets>,
