@@ -1,5 +1,5 @@
 ---
-status: passed
+status: complete
 phase: 61-committed-mutation-outcome-and-summary-contract
 source:
   - 61-01-SUMMARY.md

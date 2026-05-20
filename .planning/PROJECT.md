@@ -10,10 +10,10 @@ Nutrition Coach is a chat-first nutrition logging app for personal beta use. Use
 
 ## Current State
 
-**Shipped version:** v2.2 LLM Failure Localization Foundation on 2026-05-15.
-**Locally completed milestone:** v2.3 Authoritative Mutation Outcomes and Fresh Meal State on 2026-05-19; staging/main promotion still requires a separate ship workflow and explicit approval.
+**Shipped version:** v2.3 Authoritative Mutation Outcomes and Fresh Meal State on 2026-05-20.
+**Active milestone:** None selected. Staging/main promotion still requires a separate ship workflow and explicit approval.
 
-v2.2 completed the metadata-only failure-localization foundation for the chat/logging LLM path. User-visible fallback/error bubbles can now carry a short reference code derived from a server-generated `turnId`, and maintainers can trace that turn through SSE/JSON route payloads, Fastify child logs, orchestrator hook facts, safe provider metadata, `chat_route_fallback`, and `llm-trace.v2` harness evidence.
+v2.3 closed the P1 data-integrity risks that remained after the metadata-only failure-localization foundation. Backend-committed mutation facts are now authoritative across goal updates, meal log/update/delete receipts, stale chat receipt edits, and `daily_summary` SSE freshness.
 
 **Recent shipped capabilities:**
 - Server-generated `turnId` correlation across SSE, JSON, route logs, orchestrator logs, trace facts, and frontend fallback reference display.
@@ -22,12 +22,16 @@ v2.2 completed the metadata-only failure-localization foundation for the chat/lo
 - Separate `chat_turn_completed` and `chat_route_fallback` observability paths so hard fallback turns are not counted as completions.
 - `llm-trace.v2` metadata-only failure evidence with provider error counts, route fallback facts, redaction checks, and raw-debugger boundaries preserved.
 - Deterministic release proof for auth-style provider failure localization, SSE start ordering, JSON parity, fallback/completion exclusivity, and generic Traditional Chinese fallback copy.
+- Backend-owned structured pending goal proposals, so confirmation text like `好` can only confirm a proposal id or explicit numeric values.
+- Committed mutation receipts for meal log, update, delete, and direct meal routes even when daily summary recompute or publish degrades.
+- Server-side stale receipt protection with expected meal revision checks and deterministic recovery guidance.
+- Strict `daily_summary` SSE envelopes that refresh same-day rows before committing fresher totals and invalidate matching historical surfaces.
 
-## Current Milestone: v2.3 Authoritative Mutation Outcomes and Fresh Meal State
+## Last Completed Milestone: v2.3 Authoritative Mutation Outcomes and Fresh Meal State
 
 **Goal:** Close the remaining P1 data-integrity issues from the Notion BUG / FEATURE board before returning to product-polish backlog.
 
-**Status:** Locally complete. All v2.3 phases are executed, UAT is passed, local release proof is green, and no staging/main promotion has been performed.
+**Status:** Archived locally. All v2.3 phases are executed, UAT is passed, local release proof is green, and no staging/main promotion has been performed.
 
 **Target features:**
 - Backend-owned structured pending goal proposals, so confirmation text like `好` can only confirm a proposal id or explicit numeric values.
@@ -60,7 +64,7 @@ v2.2 completed the metadata-only failure-localization foundation for the chat/lo
 
 ### Active
 
-No active v2.3 requirements remain. Next active work should start from a new milestone or an explicit ship workflow.
+No active milestone requirements are selected. Next active work should start from a new milestone or an explicit ship workflow.
 
 ### Out of Scope
 
@@ -71,15 +75,15 @@ No active v2.3 requirements remain. Next active work should start from a new mil
 - Prompt, transcript, user input, tool raw args, provider raw body/headers, final reply text, image data, session material, or database snapshots in routine logs/traces — excluded to preserve the normal trace contract.
 - Metrics, sampling strategy, and production trace productization — useful later, but not required for v2.2 hard failure localization.
 - `deviceId` as admin or forensic access control — explicitly rejected for future raw/forensic work.
-- Water tracking, monthly history, onboarding animation, motion system, and visual polish not required for P1 integrity closure — deferred until this data-integrity milestone is complete.
+- Water tracking, monthly history, onboarding animation, motion system, and visual polish not required for P1 integrity closure — deferred to future milestone planning.
 
 ## Context
 
-Current codebase state after v2.2:
+Current codebase state after v2.3:
 - The backend remains Fastify + SQLite + TypeScript with route-owned HTTP/SSE boundaries and OpenAI access isolated behind the LLM provider boundary.
 - The frontend remains the Sport UI React/Vite client with Zustand as the state boundary.
-- Active planning history for v2.2 is archived under `.planning/milestones/v2.2/`.
-- Pre-existing generated harness artifact diffs under `tests/harness/artifacts/text-log/latest/` and `tests/harness/artifacts/image-log-failure/latest/` were inspected during closeout. They contained only regenerated UUID, timestamp, and latency noise, so they were restored instead of included in the v2.2 tag.
+- Active planning history for v2.3 is archived under `.planning/milestones/v2.3-*.md` and `.planning/milestones/v2.3-phases/`.
+- v2.3 local closeout ran `yarn release:check` successfully and did not perform staging or main promotion.
 
 Known non-blocking debt accepted at v2.2 close:
 - Phase 58 proof-hardening warning: auth-detail denylist omits `401`, `Unauthorized`, and `invalid_request_error` in user-visible fallback assertions.
@@ -89,7 +93,8 @@ Known non-blocking debt accepted at v2.2 close:
 v2.3 integrity context:
 - The Notion BUG / FEATURE board surfaced remaining P1 risks around ambiguous goal confirmations, failed mutation outcomes, post-commit summary recompute failure handling, stale chat receipt edits, and cross-tab/device meal freshness after daily summary SSE events.
 - Success for this milestone means no user-visible success claim can be authored only by LLM prose after a failed mutation or guard rejection.
-- Verification must include targeted unit/integration coverage, relevant SSE/client state coverage, `yarn tsc --noEmit`, and `yarn release:check`.
+- Verification included targeted unit/integration coverage, relevant SSE/client state coverage, `yarn tsc --noEmit`, and `yarn release:check`.
+- Accepted v2.3 advisory debt: `log_food` JSON tool schema still marks `protein_sources` as required while the Zod/executor contract accepts it as optional.
 
 ## Constraints
 
@@ -129,6 +134,15 @@ Target features included a server-generated `turnId` correlation spine, safe Ope
 
 </details>
 
+<details>
+<summary>v2.3 active milestone brief</summary>
+
+v2.3 made backend-committed mutation facts authoritative across goal proposals, meal mutation receipts, stale receipt writes, and daily summary SSE freshness.
+
+Target features included backend-owned goal proposal state, deterministic rejected-goal copy, committed meal mutation receipts with `summaryOutcome`, expected meal revision checks, strict `daily_summary` envelopes, same-day row freshness coordination, historical affected-date invalidation, and metadata-only local release proof.
+
+</details>
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -147,4 +161,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-19 after Phase 64 completion*
+*Last updated: 2026-05-20 after v2.3 closeout*
