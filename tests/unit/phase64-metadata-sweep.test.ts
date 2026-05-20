@@ -165,10 +165,19 @@ const companionProofs = [
 ];
 
 function readPhase64Context(): string {
-  return fs.readFileSync(
-    path.resolve(".planning/phases/64-verification-and-release-proof-hardening/64-CONTEXT.md"),
-    "utf-8",
-  );
+  const candidates = [
+    ".planning/phases/64-verification-and-release-proof-hardening/64-CONTEXT.md",
+    ".planning/milestones/v2.3-phases/64-verification-and-release-proof-hardening/64-CONTEXT.md",
+  ];
+
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    if (fs.existsSync(resolved)) {
+      return fs.readFileSync(resolved, "utf-8");
+    }
+  }
+
+  throw new Error(`Phase 64 context not found in expected locations: ${candidates.join(", ")}`);
 }
 
 describe("Phase 64 PROOF-02 metadata-only sweep", () => {
