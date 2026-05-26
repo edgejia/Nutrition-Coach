@@ -59,14 +59,25 @@ Archived phase execution files:
   4. Correction candidate scoring can use persisted meal-period facts without treating `loggedAt` hour as higher authority than user intent.
 **Plans**: 8 plans
 Plans:
+**Wave 1**
 - [ ] 65-01-PLAN.md — Persistence and service foundation for explicit meal-period authority.
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 65-02-PLAN.md — Blocking Drizzle migration generation and nullable SQL verification.
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 65-03-PLAN.md — `log_food` contract alignment, prompt update, and source-text period persistence.
 - [ ] 65-04-PLAN.md — Backend current-day, day snapshot, and history meal row projection.
-- [ ] 65-05-PLAN.md — Chat JSON/SSE and restored logged-meal receipt projection.
-- [ ] 65-06-PLAN.md — Client DTO normalization and edit payload preservation.
-- [ ] 65-07-PLAN.md — UI meal-period label preference on touched meal row surfaces.
 - [ ] 65-08-PLAN.md — Correction candidate effective meal period plus explicit/inferred source handoff.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 65-05-PLAN.md — Chat JSON/SSE and restored logged-meal receipt projection.
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 65-06-PLAN.md — Client DTO normalization and edit payload preservation.
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 65-07-PLAN.md — UI meal-period label preference on touched meal row surfaces.
 **Implementation Notes:**
 - Keep changes scoped to existing Fastify/SQLite/orchestrator boundaries.
 - Prefer additive persistence/DTO changes that preserve existing `loggedAt` date semantics.
