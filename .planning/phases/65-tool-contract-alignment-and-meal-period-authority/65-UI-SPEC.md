@@ -41,7 +41,7 @@ Declared values (must be multiples of 4):
 | 2xl | 48px | Major section breaks |
 | 3xl | 64px | Page-level spacing |
 
-Exceptions: Preserve existing row-level CSS values already in `client/src/app.css` (`10px`, `12px`, `14px`, `18px`) when touching meal rows. Do not resize cards, rows, media thumbnails, bottom bars, or page padding for this phase.
+Exceptions: Do not change existing row spacing in this phase when touching meal rows. Do not resize cards, rows, media thumbnails, bottom bars, or page padding for this phase.
 
 ---
 
@@ -100,6 +100,8 @@ Label mapping:
 Fallback labels from `loggedAt` must preserve current legacy behavior: `05:00-10:59` maps to `早餐`, `11:00-13:59` maps to `午餐`, `14:00-16:59` maps to `點心`, `17:00-22:59` maps to `晚餐`, and all invalid/missing/outside-hour values map to `餐點`.
 
 Interaction rule: explicit `mealPeriod` always wins over hour inference. A meal logged at breakfast hour with `mealPeriod: "lunch"` must display `午餐` everywhere that Phase 65 touches.
+
+Visual hierarchy: meal rows keep time and resolved meal-period metadata as secondary information under the food name; no new visual focal point is introduced.
 
 ---
 
