@@ -1,34 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.3
-milestone_name: Authoritative Mutation Outcomes and Fresh Meal State
-status: Awaiting next milestone
-stopped_at: Phase 64 complete, v2.3 milestone ready for closeout
-last_updated: "2026-05-20T15:39:03.180Z"
-last_activity: 2026-05-20 — Milestone v2.3 completed and archived
+milestone: v2.4
+milestone_name: Correction Authority and Meal Intent Fidelity
+status: planning
+last_updated: "2026-05-26T15:07:11.051Z"
+last_activity: 2026-05-26
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 23
-  completed_plans: 23
-  percent: 100
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-19)
+See: .planning/PROJECT.md (updated 2026-05-26)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** v2.3 milestone complete — ready for closeout / ship workflow
+**Current focus:** v2.4 Correction Authority and Meal Intent Fidelity — requirements and roadmap initialized
 
 ## Current Position
 
-Phase: Milestone v2.3 complete
+Phase: 65 — Tool Contract Alignment and Meal-Period Authority
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-05-20 — Milestone v2.3 completed and archived
+Status: Ready for phase discussion/planning
+Last activity: 2026-05-26 — Milestone v2.4 initialized from Notion BUG / FEATURE board
 
 ## Performance Metrics
 
@@ -138,7 +137,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet for v2.3.
+None yet for v2.4.
 
 ### Quick Tasks Completed
 
@@ -148,7 +147,7 @@ None yet for v2.3.
 
 ### Blockers/Concerns
 
-- No current v2.3 implementation blockers. Staging/main promotion still requires a separate ship workflow and explicit current-thread approval.
+- No current v2.4 planning blockers. Staging/main promotion still requires a separate ship workflow and explicit current-thread approval.
 
 ## Deferred Items
 
@@ -158,14 +157,17 @@ None yet for v2.3.
 | proof_hardening | Phase 58 provider-auth-failure-localization failure evidence can persist the matched forbidden snippet on a failing run | accepted non-blocking debt | v2.2 close |
 | dependency_review | High advisories in `drizzle-orm`, `fastify`, and transitive `fast-uri` | defer package upgrade and regression gates | v2.2 close |
 | mutation_outcome | CR-01: committed goal updates can still become failed chat outcomes if post-commit `goals_update` publish or summary lookup throws; Phase 61 left `update_goals` outside the public `summaryOutcome` contract | closed by quick 260520-tqd | v2.3 audit |
-| tool_schema | WR-01: `log_food` JSON schema still marks `protein_sources` as required while the Zod/executor contract accepts it as optional | accepted advisory debt for v2.4 planning | v2.3 audit |
+| tool_schema | WR-01: `log_food` JSON schema still marks `protein_sources` as required while the Zod/executor contract accepts it as optional | planned in Phase 65 | v2.4 |
+| correction_authority | Vague numeric meal corrections can be committed from model estimates without explicit user numeric evidence | planned in Phase 66 | v2.4 |
+| meal_intent | Explicit meal-period text can be overridden by `loggedAt` hour heuristics | planned in Phase 65 | v2.4 |
+| correction_targeting | Ambiguous correction candidates and clarification copy can be weak or misleading | planned in Phase 67 | v2.4 |
 
 ## Session Continuity
 
-Last session: 2026-05-19T13:10:23.690Z
-Stopped at: Phase 64 complete, v2.3 milestone ready for closeout
+Last session: 2026-05-26T15:07:11.051Z
+Stopped at: v2.4 milestone initialized, Phase 65 ready for discussion/planning
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Start Phase 65 with `$gsd-discuss-phase 65` or `$gsd-plan-phase 65`

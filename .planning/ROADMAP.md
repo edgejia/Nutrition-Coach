@@ -7,12 +7,15 @@
 - **v2.2 LLM Failure Localization Foundation** - shipped 2026-05-15; archived in [`milestones/v2.2/ROADMAP.md`](milestones/v2.2/ROADMAP.md)
 - **v2.2 Promotion Blocker Reopen** - Phase 59 complete 2026-05-16; no staging/main promotion authorized
 - **v2.3 Authoritative Mutation Outcomes and Fresh Meal State** - shipped locally 2026-05-20; archived in [`milestones/v2.3-ROADMAP.md`](milestones/v2.3-ROADMAP.md); no staging/main promotion performed
+- **v2.4 Correction Authority and Meal Intent Fidelity** - active; planned from Notion BUG / FEATURE board on 2026-05-26; no staging/main promotion authorized
 
 ## Current Status
 
-No active milestone is selected.
+Active milestone: **v2.4 Correction Authority and Meal Intent Fidelity**.
 
-v2.3 closed the P1 data-integrity risks around backend-owned goal proposal authority, committed mutation receipts, stale meal revision protection, strict `daily_summary` SSE freshness, and metadata-only local release proof. Staging or main promotion remains outside milestone closeout and requires a separate ship workflow with explicit approval.
+v2.4 extends the v2.3 authoritative-boundary work into correction safety and meal intent fidelity. The milestone closes the remaining P2 Notion board risks where model-authored estimates or clock-derived heuristics can still influence committed meal facts: numeric chat corrections without explicit evidence, explicit meal-period intent being overwritten by `loggedAt` hour, weak correction candidate ranking, backend clarification rendering gaps, and serialized tool-result parsing.
+
+Planning is based on `feature/v2-4-dev`, which matches `origin/staging` as of 2026-05-26. `origin/staging` is ahead of `origin/main`; staging/main promotion remains outside this roadmap and requires a separate ship workflow with explicit approval.
 
 ## Completed v2.3 Scope
 
@@ -32,6 +35,91 @@ Archived phase execution files:
 - `.planning/milestones/v2.3-phases/63-sse-meal-row-freshness-and-affected-date-invalidation/`
 - `.planning/milestones/v2.3-phases/64-verification-and-release-proof-hardening/`
 
+## Active v2.4 Scope
+
+**Phase Numbering:**
+- Integer phases continue from the previous milestone: 65, 66, 67, 68.
+- Decimal phases are reserved for urgent insertions, if needed later.
+
+- [ ] **Phase 65: Tool Contract Alignment and Meal-Period Authority** - Align `log_food` schema/runtime contracts and persist explicit meal-period intent as structured meal fact authority.
+- [ ] **Phase 66: Numeric Correction Provenance Guard** - Prevent chat corrections from committing model-estimated calories/macros unless backed by explicit user numeric evidence or an approved backend-owned estimate/proposal.
+- [ ] **Phase 67: Correction Targeting and Backend Clarification Rendering** - Improve correction candidate ranking and canonical clarification copy so ambiguous edits surface stable numbered options instead of silently choosing weak targets.
+- [ ] **Phase 68: Structured Tool Results and Release-Proof Gate** - Remove serialized clarification-result parsing, prove v2.4 behavior with targeted tests and metadata-only evidence, and close local release gates.
+
+## Phase Details
+
+### Phase 65: Tool Contract Alignment and Meal-Period Authority
+**Goal**: Meal logging tool contracts are internally consistent, and explicit user meal-period intent becomes persisted structured authority instead of display-only wording.
+**Depends on**: v2.3 closeout
+**Requirements**: TOOL-01, TOOL-02, TOOL-03, INTENT-01, INTENT-02, INTENT-03
+**Success Criteria** (what must be TRUE):
+  1. `log_food` JSON schema and Zod executor agree on `protein_sources` required/optional behavior, with trusted-protein regressions still green.
+  2. A user logging `午餐我吃了雞腿便當` in the morning sees the meal stored and projected as lunch rather than breakfast.
+  3. Current-day and historical meal row DTOs expose meal period from persisted structured facts when available.
+  4. Correction candidate scoring can use persisted meal-period facts without treating `loggedAt` hour as higher authority than user intent.
+**Plans**: TBD during `$gsd-plan-phase 65`
+**Implementation Notes:**
+- Keep changes scoped to existing Fastify/SQLite/orchestrator boundaries.
+- Prefer additive persistence/DTO changes that preserve existing `loggedAt` date semantics.
+- Use `nutrition-gen-test` for unit/integration coverage and `nutrition-verify-change` for final command selection.
+
+### Phase 66: Numeric Correction Provenance Guard
+**Goal**: Users cannot have meal calories or macros changed by model-estimated chat patches unless the current turn supplies explicit numeric evidence or the backend owns an approved estimate/proposal.
+**Depends on**: Phase 65
+**Requirements**: CORR-01, CORR-02, CORR-03
+**Success Criteria** (what must be TRUE):
+  1. Explicit numeric correction text such as `蛋白質改成 28g` can update the resolved meal through existing revision checks.
+  2. Vague requests such as `蛋白質怪怪的，幫我改合理一點` do not mutate meal calories/macros directly.
+  3. Rejected or clarification-required numeric corrections do not create a new meal revision, do not publish `daily_summary`, and do not show success-style text.
+  4. Backend-rendered guidance explains the needed numeric input or proposal step in concise Traditional Chinese.
+**Plans**: TBD during `$gsd-plan-phase 66`
+**Implementation Notes:**
+- Treat server-side provenance as authoritative; prompts and client UI can support but cannot enforce the boundary alone.
+- Keep expected meal revision checks from v2.3 intact.
+- If a backend-owned estimator/proposal is introduced, define its approval lifecycle explicitly before allowing commit.
+
+### Phase 67: Correction Targeting and Backend Clarification Rendering
+**Goal**: Ambiguous correction requests surface the right candidate set and use stable backend-rendered clarification copy.
+**Depends on**: Phase 66
+**Requirements**: TARGET-01, TARGET-02
+**Success Criteria** (what must be TRUE):
+  1. `那餐` / `那筆` style correction requests prefer current-turn and today-recency evidence before older historical candidates.
+  2. Explicit food-label evidence outranks weak meal-period-only hints when selecting or narrowing candidates.
+  3. Multi-candidate clarification always includes stable numbered options that match the instruction to reply with a number.
+  4. Clarification labels use concise meal labels or `餐點`, not the entire user correction request.
+**Plans**: TBD during `$gsd-plan-phase 67`
+**Implementation Notes:**
+- Build on `server/services/meal-correction.ts` candidate scoring and pending selection state.
+- Preserve deterministic no-mutation behavior for unresolved targets.
+- Add route-level integration coverage with real SQLite and `MockLLMProvider`.
+
+### Phase 68: Structured Tool Results and Release-Proof Gate
+**Goal**: Tool clarification results flow through structured orchestrator fields, and v2.4 closes with targeted local proof plus metadata-only artifact discipline.
+**Depends on**: Phase 67
+**Requirements**: TARGET-03, PROOF-01, PROOF-02, PROOF-03
+**Success Criteria** (what must be TRUE):
+  1. `find_meals`, historical `log_food`, and historical `get_daily_summary` clarification paths no longer require reparsing serialized tool-message JSON in the orchestrator.
+  2. Targeted tests cover tool schema alignment, explicit meal-period logging, numeric correction authority, target ranking, clarification rendering, and structured tool-result plumbing.
+  3. Any generated harness or proof artifacts remain metadata-only and exclude raw sensitive payloads.
+  4. Local closure runs `yarn tsc --noEmit` and `yarn release:check` with no staging or main promotion.
+**Plans**: TBD during `$gsd-plan-phase 68`
+**Implementation Notes:**
+- Prefer typed `ToolExecutionResult` fields over ad hoc parsing.
+- Add harness coverage only if unit/integration tests cannot prove a boundary without false-pass risk.
+- Keep Railway smoke and branch promotion out of scope unless a later ship workflow receives explicit approval.
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 0/TBD | Pending | — |
+| 66. Numeric Correction Provenance Guard | v2.4 | 0/TBD | Pending | — |
+| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
+| 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
+
 ## Future Milestone Candidates
 
 - Water tracking from the primary logging flow.
@@ -40,7 +128,8 @@ Archived phase execution files:
 - User-flagged semantic failure capture after trigger, retention, privacy, storage, and access-control decisions.
 - Local-only raw debugger implementation under the sibling raw debugger contract.
 - Metadata-only production trace sampling and aggregate failure metrics.
-- Accepted v2.3 advisory cleanup: align `log_food` JSON tool schema required fields with the optional `protein_sources` executor contract.
+- Richer Markdown/coaching copy after correction authority is safe.
+- Broader Meal Edit grouped-item and item-photo workflows.
 
 ---
-*Last updated: 2026-05-20 after v2.3 closeout*
+*Last updated: 2026-05-26 after v2.4 milestone initialization*
