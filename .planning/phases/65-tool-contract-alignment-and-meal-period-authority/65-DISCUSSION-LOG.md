@@ -57,7 +57,7 @@
 | Implement ranking boost now | Start preferring persisted period in candidate scoring immediately. | |
 | Hard-match by period now | Only consider matching period candidates. | |
 
-**User's choice:** Phase 65 should expose the clean authority fact and update candidate projection at the fact-authority boundary, without Phase 67 ranking redesign.
+**User's choice:** The initial "expose fact only" framing was contested. Final arbitration: Phase 65 owns INTENT-03 candidate projection at the fact-authority boundary, while Phase 67 owns weights, tie-breaking, hard/soft matching, food-label precedence, and clarification behavior.
 **Notes:** `MealCorrectionCandidate.mealPeriod` should use persisted explicit `mealPeriod` when available and fall back to `inferMealPeriod(loggedAt)` only for legacy/no-authority rows. Carry an additional source field with values `explicit` / `inferred`. Tests should prove effective period and source; ranking weights, tie-breaking, hard/soft matching, food-label precedence, and clarification behavior remain Phase 67.
 
 ---

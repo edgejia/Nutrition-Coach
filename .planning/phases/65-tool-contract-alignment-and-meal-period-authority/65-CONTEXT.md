@@ -15,36 +15,40 @@ Phase 65 aligns `log_food` tool contracts around trusted-protein evidence and pe
 
 ### Trusted Protein Contract
 - **D-01:** `protein_sources` is parse-time optional, execution-time guarded, and server-owned. The model may omit it; only backend-normalized facts decide whether trusted protein is persisted or surfaced.
-- **D-02:** The prompt contract must stop saying `protein_sources` is always required. It should tell the model to provide `protein_sources` only when credible anchors exist, not to invent weak anchors, not to treat trace foods or generic ingredients as trusted protein, and to omit `protein_sources` when no credible anchor exists.
-- **D-03:** Successful log reply copy should mention trusted protein sources only when the backend has counted trusted sources. Raw model `protein_sources` must not drive reply copy.
-- **D-04:** Unsupported positive trusted-protein claims should default to commit-and-strip/normalize. Rejection is a rare escape hatch for structural contradictions that cannot be repaired or mapped coherently to the submitted meal.
-- **D-05:** Weak anchors, vague names, low-confidence sources, or missing sources are not rejection reasons by themselves. If planning starts enumerating many rejection classes, it is drifting toward the rejected "required and fail closed" policy.
-- **D-06:** Downstream code must read trusted-protein authority only from backend-normalized facts. Raw model `protein_sources` is parse-time evidence only; if exposed for debugging, it must be redacted metadata and never authority for reply copy, ranking, or correction reasoning.
+- **D-02:** Carry-forward prompt guidance remains in force: trace foods, generic ingredients, and weak anchors must not be treated as trusted protein sources.
+- **D-03:** New Phase 65 prompt decision: the prompt contract must stop saying `protein_sources` is always required. It should tell the model to provide `protein_sources` only when credible anchors exist and to omit it when credible anchors are missing.
+- **D-04:** Successful log reply copy should mention trusted protein sources only when the backend has counted trusted sources. Raw model `protein_sources` must not drive reply copy.
+- **D-05:** Unsupported positive trusted-protein claims should default to commit-and-strip/normalize. Rejection is a rare escape hatch for structural contradictions that cannot be repaired or mapped coherently to the submitted meal.
+- **D-06:** Weak anchors, vague names, low-confidence sources, or missing sources are not rejection reasons by themselves. If planning starts enumerating many rejection classes, it is drifting toward the rejected "required and fail closed" policy.
+- **D-07:** Downstream code must read trusted-protein authority only from backend-normalized facts. Raw model `protein_sources` is parse-time evidence only; if exposed for debugging, it must be redacted metadata and never authority for reply copy, ranking, or correction reasoning.
 
 ### Meal-Period Authority
-- **D-07:** `loggedAt` and `mealPeriod` are separate authorities. `loggedAt` remains actual/historical timestamp and date-placement authority; `mealPeriod` carries explicit user meal-category intent for display and correction targeting.
-- **D-08:** Missing/null `mealPeriod` means no explicit period authority. Hour-based inference from `loggedAt` is allowed only as legacy/no-authority fallback.
-- **D-09:** Historical log synthetic midpoint behavior can continue for `loggedAt` date placement, but explicit meal-period intent must still persist beside it so downstream code does not re-derive intent from synthetic hour.
-- **D-10:** Authoritative `mealPeriod` must be grounded in original user/source text with direct meal-category words, such as supported equivalents for `早餐/早飯`, `午餐/午飯`, `晚餐/晚飯`, and `宵夜`.
-- **D-11:** Time-of-day phrases such as `早上`, `中午`, or `晚上` may support timestamp/date parsing or fallback inference, but must not become persisted explicit period authority by themselves.
-- **D-12:** Tool-provided `meal_period` is parse-time evidence only. If model args conflict with direct source text, source text wins and the backend should normalize rather than fail the log.
-- **D-13:** A single `log_food` call represents one meal-level record and can carry at most one authoritative `mealPeriod`. Multi-period user text should be represented by separate meal logs; if one tool call cannot coherently map period to meal, reject or clarify instead of silently applying first-period-wins or nulling the period.
-- **D-14:** Meal-category words inside `food_name` or item labels can help map evidence, but cannot create authority unless grounded in original user/source text. Model-authored labels must not manufacture persisted period intent.
+- **D-08:** `loggedAt` and `mealPeriod` are separate authorities. `loggedAt` remains actual/historical timestamp and date-placement authority; `mealPeriod` carries explicit user meal-category intent for display and correction targeting.
+- **D-09:** Missing/null `mealPeriod` means no explicit period authority. Hour-based inference from `loggedAt` is allowed only as legacy/no-authority fallback.
+- **D-10:** Historical log synthetic midpoint behavior can continue for `loggedAt` date placement, but explicit meal-period intent must still persist beside it so downstream code does not re-derive intent from synthetic hour.
+- **D-11:** Authoritative `mealPeriod` must be grounded in original user/source text with direct meal-category words, such as supported equivalents for `早餐/早飯`, `午餐/午飯`, `晚餐/晚飯`, and `宵夜`.
+- **D-12:** Time-of-day phrases such as `早上`, `中午`, or `晚上` may support timestamp/date parsing or fallback inference, but must not become persisted explicit period authority by themselves.
+- **D-13:** Tool-provided `meal_period` is parse-time evidence only. If model args conflict with direct source text, source text wins and the backend should normalize rather than fail the log.
+- **D-14:** A single `log_food` call represents one meal-level record and can carry at most one authoritative `mealPeriod`. Multi-period user text should be represented by separate meal logs; if one tool call cannot coherently map period to meal, the reject-or-clarify path is only about meal-logging/tool coherence and not Phase 67 correction-target clarification rendering.
+- **D-15:** Meal-category words inside `food_name` or item labels can help map evidence, but cannot create authority unless grounded in original user/source text. Model-authored labels must not manufacture persisted period intent.
 
 ### DTO and UI Projection
-- **D-15:** Phase 65 should project one backend period field anywhere a meal row or logged-meal receipt is represented: current-day meals, history/day snapshot meals, `loggedMeal` receipts, mutation/update responses, and edit payloads.
-- **D-16:** Public client-facing field: `mealPeriod?: "breakfast" | "lunch" | "dinner" | "late_night"`. The enum is authority; Traditional Chinese labels are frontend presentation.
-- **D-17:** Do not backfill inferred values into `mealPeriod`, and do not add `inferredMealPeriod` in Phase 65. `mealPeriod` present means explicit backend authority; missing/null means clients may use `loggedAt` fallback for display.
-- **D-18:** Home, History, Day Detail, and Summary meal row labels should prefer `mealPeriod` when present and fall back to existing hour-based inference only when missing.
-- **D-19:** Direct edit/PATCH flows should carry `mealPeriod` in payloads/responses for projection, but ordinary numeric, name, macro, image, or meal-content edits must preserve existing explicit period when the edit omits it. Changing or clearing period requires an explicit grounded period correction.
-- **D-20:** Tests should prove DTO/receipt projection, UI helper preference over `loggedAt`, legacy fallback inference, and edit preservation on omitted `mealPeriod`. Keep proof focused on projection behavior, not summary redesign or exhaustive screen coverage.
+- **D-16:** Phase 65 should project one backend period field anywhere a meal row or logged-meal receipt is represented: current-day meals, history/day snapshot meals, `loggedMeal` receipts, mutation/update responses, and edit payloads.
+- **D-17:** Public client-facing field: `mealPeriod?: "breakfast" | "lunch" | "dinner" | "late_night"`. The enum is authority; Traditional Chinese labels are frontend presentation.
+- **D-18:** Do not backfill inferred values into `mealPeriod`, and do not add `inferredMealPeriod` in Phase 65. `mealPeriod` present means explicit backend authority; missing/null means clients may use `loggedAt` fallback for display.
+- **D-19:** Any surface that renders meal-period labels should prefer `mealPeriod` when present and fall back to `loggedAt` hour inference only when missing. Timestamp-only rows may either remain time-only or intentionally add period labels during planning; this decision does not claim every listed UI surface already renders hour-based meal-period labels.
+- **D-20:** Direct edit/PATCH flows should carry `mealPeriod` in payloads/responses for projection, but ordinary numeric, name, macro, image, or meal-content edits must preserve existing explicit period when the edit omits it. Changing or clearing period requires an explicit grounded period correction.
+- **D-21:** Tests should prove DTO/receipt projection, UI helper preference over `loggedAt`, legacy fallback inference, and edit preservation on omitted `mealPeriod`. Keep proof focused on projection behavior, not summary redesign or exhaustive screen coverage.
 
 ### Correction Candidate Handoff
-- **D-21:** Phase 65 should expose explicit source-text-backed `mealPeriod` as a clean authority fact distinguishable from `loggedAt` fallback. Phase 67 owns ranking weights, tie-breaking, hard/soft matching, food-label precedence, and clarification behavior.
-- **D-22:** Phase 65 should update correction candidate projection at the fact-authority boundary: `MealCorrectionCandidate.mealPeriod` should use persisted explicit `mealPeriod` when available and fall back to `inferMealPeriod(loggedAt)` only for legacy/no-authority rows.
-- **D-23:** Correction candidates should carry effective period plus source. `candidate.mealPeriod` can remain the compatibility/effective value, while a companion source field distinguishes explicit authority from inferred fallback.
-- **D-24:** Use domain labels `explicit` and `inferred` for the source field. `explicit` means persisted source-text-backed user intent; `inferred` means no explicit authority, effective period came from `loggedAt` fallback.
-- **D-25:** Candidate tests should prove explicit lunch with breakfast-hour `loggedAt` yields `mealPeriod="lunch"` and source `"explicit"`, while legacy/no-authority rows infer from `loggedAt` with source `"inferred"`. Full ranking, tie-breaking, hard/soft matching, and clarification tests stay Phase 67.
+- **D-22:** Phase 65 should expose explicit source-text-backed `mealPeriod` as a clean authority fact distinguishable from `loggedAt` fallback. Phase 67 owns ranking weights, tie-breaking, hard/soft matching, food-label precedence, and clarification behavior.
+- **D-23:** Phase 65 owns INTENT-03 candidate projection at the fact-authority boundary: `MealCorrectionCandidate.mealPeriod` should use persisted explicit `mealPeriod` when available and fall back to `inferMealPeriod(loggedAt)` only for legacy/no-authority rows.
+- **D-24:** Correction candidates should carry effective period plus source. `candidate.mealPeriod` can remain the compatibility/effective value, while a companion source field distinguishes explicit authority from inferred fallback.
+- **D-25:** Use domain labels `explicit` and `inferred` for the source field. `explicit` means persisted source-text-backed user intent; `inferred` means no explicit authority, effective period came from `loggedAt` fallback.
+- **D-26:** Candidate tests should prove explicit lunch with breakfast-hour `loggedAt` yields `mealPeriod="lunch"` and source `"explicit"`, while legacy/no-authority rows infer from `loggedAt` with source `"inferred"`. Full ranking, tie-breaking, hard/soft matching, and clarification tests stay Phase 67.
+
+### Metadata and Proof Guardrails
+- **D-27:** New `mealPeriod` and candidate source fields are structured facts. Normal proof and trace artifacts must remain metadata-only and must not persist raw prompts, user text, assistant final text, raw tool payloads, image data, session material, or database snapshots.
 
 ### the agent's Discretion
 - Exact persistence shape is for plan-phase calibration: it may live in meal transaction headers, revisions, projected meal facts, or another additive schema shape as long as the logical authority contract above holds.
@@ -77,6 +81,7 @@ Phase 65 aligns `log_food` tool contracts around trusted-protein evidence and pe
 - `server/lib/historical-date.ts` — historical date intent and `HistoricalMealPeriod` enum.
 - `server/routes/meals.ts` — direct PATCH/DELETE response projection and edit preservation behavior.
 - `server/routes/history.ts` — history/day row DTO projection.
+- `server/services/history-query.ts` — historical meal row DTO projection owner behind history/day snapshot reads.
 - `server/routes/day-snapshot.ts` — day snapshot DTO projection.
 
 ### Client DTOs and Labels
@@ -108,6 +113,7 @@ Phase 65 aligns `log_food` tool contracts around trusted-protein evidence and pe
 - Keep TypeScript imports explicit with `.js` specifiers.
 - Tests use Node built-in `node:test`, real SQLite, and injected mock/harness LLM providers.
 - Existing v2.3 mutation contracts separate committed mutation facts from summary freshness; Phase 65 should preserve `summaryOutcome` behavior and not reintroduce LLM-authored mutation facts.
+- Normal proof and traces remain metadata-only even though `mealPeriod` and candidate source are structured facts.
 
 ### Integration Points
 - Persistence likely needs an additive `mealPeriod` field on meal transaction/revision facts so legacy rows can remain null.
