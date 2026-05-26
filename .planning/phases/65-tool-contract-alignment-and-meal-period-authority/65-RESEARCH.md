@@ -398,17 +398,17 @@ Planner should let `drizzle-kit` generate the actual migration or adjust generat
 |---|-------|---------|---------------|
 | A1 | No new package installation is needed. [ASSUMED] | Standard Stack / Package Audit | If planner decides to add a JSON-schema generator or migration helper, it must run the package legitimacy gate and human-verify package provenance before install. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should `點心/下午茶` ever map to `late_night` explicit authority?**
+1. **RESOLVED: Should `點心/下午茶` ever map to `late_night` explicit authority?**
    - What we know: Current query/time extractors map snack words to `late_night`, but locked D-11 examples only name breakfast/lunch/dinner/late-night equivalents and D-12 forbids time phrases as authority. [VERIFIED: server/orchestrator/tools.ts] [VERIFIED: server/services/meal-correction.ts] [VERIFIED: 65-CONTEXT.md]
-   - What's unclear: Whether product wants a future snack/afternoon-tea category or to map those labels to `late_night`. [ASSUMED]
-   - Recommendation: Do not persist `點心/下午茶` as explicit authority in Phase 65; leave existing correction query hints alone unless they conflict with the new explicit/source model. [VERIFIED: 65-CONTEXT.md]
+   - Resolution: `點心/下午茶` must not map to explicit `late_night` in Phase 65. Only direct meal-category words listed in CONTEXT.md create persisted authority; snack/afternoon-tea taxonomy stays out of scope for this phase. [RESOLVED] [VERIFIED: 65-CONTEXT.md]
+   - Plan implication: Do not persist `點心/下午茶` as explicit authority in Phase 65; leave existing correction query hints alone unless they conflict with the new explicit/source model. [RESOLVED] [VERIFIED: 65-CONTEXT.md]
 
-2. **Should explicit period correction be implemented now?**
+2. **RESOLVED: Should explicit period correction be implemented now?**
    - What we know: D-20 says changing/clearing period requires explicit grounded period correction, but success criteria focus on logging, projection, edit preservation, and candidate handoff. [VERIFIED: 65-CONTEXT.md] [VERIFIED: .planning/ROADMAP.md]
-   - What's unclear: Whether a chat correction like `那筆是午餐不是早餐` should be in this phase. [ASSUMED]
-   - Recommendation: Preserve on ordinary edits and defer period-changing correction UX unless the planner can fit a very narrow backend-grounded update without ranking/clarification expansion. [VERIFIED: 65-CONTEXT.md]
+   - Resolution: Explicit period correction is not implemented broadly in Phase 65. Ordinary edits preserve existing `mealPeriod`, and any period-changing behavior remains deferred/narrow unless explicitly grounded. [RESOLVED] [VERIFIED: 65-CONTEXT.md]
+   - Plan implication: Preserve on ordinary edits and defer broad period-changing correction UX; do not expand ranking, clarification, or correction-target policy in this phase. [RESOLVED] [VERIFIED: 65-CONTEXT.md]
 
 ## Environment Availability
 
