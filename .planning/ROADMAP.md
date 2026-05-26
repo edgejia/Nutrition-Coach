@@ -57,7 +57,16 @@ Archived phase execution files:
   2. A user logging `午餐我吃了雞腿便當` in the morning sees the meal stored and projected as lunch rather than breakfast.
   3. Current-day and historical meal row DTOs expose meal period from persisted structured facts when available.
   4. Correction candidate scoring can use persisted meal-period facts without treating `loggedAt` hour as higher authority than user intent.
-**Plans**: TBD during `$gsd-plan-phase 65`
+**Plans**: 8 plans
+Plans:
+- [ ] 65-01-PLAN.md — Persistence and service foundation for explicit meal-period authority.
+- [ ] 65-02-PLAN.md — Blocking Drizzle migration generation and nullable SQL verification.
+- [ ] 65-03-PLAN.md — `log_food` contract alignment, prompt update, and source-text period persistence.
+- [ ] 65-04-PLAN.md — Backend current-day, day snapshot, and history meal row projection.
+- [ ] 65-05-PLAN.md — Chat JSON/SSE and restored logged-meal receipt projection.
+- [ ] 65-06-PLAN.md — Client DTO normalization and edit payload preservation.
+- [ ] 65-07-PLAN.md — UI meal-period label preference on touched meal row surfaces.
+- [ ] 65-08-PLAN.md — Correction candidate effective meal period plus explicit/inferred source handoff.
 **Implementation Notes:**
 - Keep changes scoped to existing Fastify/SQLite/orchestrator boundaries.
 - Prefer additive persistence/DTO changes that preserve existing `loggedAt` date semantics.
@@ -115,7 +124,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 0/TBD | Pending | — |
+| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 0/8 | Pending | — |
 | 66. Numeric Correction Provenance Guard | v2.4 | 0/TBD | Pending | — |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
