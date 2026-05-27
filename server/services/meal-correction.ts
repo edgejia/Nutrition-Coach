@@ -21,6 +21,7 @@ import {
 } from "./summary-outcome.js";
 import { makeAssetRef } from "./assets.js";
 import { projectMealDisplay } from "./meal-display.js";
+import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
 
 const PENDING_SELECTION_KIND = "meal_target_selection";
 const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
@@ -37,7 +38,8 @@ export interface MealCorrectionCandidate {
   fat: number;
   loggedAt: string;
   dateKey: string;
-  mealPeriod: "breakfast" | "lunch" | "dinner" | "late_night";
+  mealPeriod: MealPeriod;
+  mealPeriodSource: "explicit" | "inferred";
 }
 
 export interface PendingMealSelectionState {
@@ -86,6 +88,7 @@ interface FindMealsOptions {
 interface CandidateHeaderRow {
   id: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   currentRevisionId: string;
 }
 
@@ -101,7 +104,7 @@ function normalizeText(text: string): string {
   return text.toLowerCase().replace(/\s+/g, "");
 }
 
-function inferMealPeriod(loggedAt: string): "breakfast" | "lunch" | "dinner" | "late_night" {
+function inferMealPeriod(loggedAt: string): MealPeriod {
   const hour = new Date(loggedAt).getHours();
   if (hour < 11) return "breakfast";
   if (hour < 15) return "lunch";
@@ -344,6 +347,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       .select({
         id: mealTransactions.id,
         loggedAt: mealTransactions.loggedAt,
+        mealPeriod: mealTransactions.mealPeriod,
         currentRevisionId: mealTransactions.currentRevisionId,
       })
       .from(mealTransactions)
@@ -372,6 +376,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     return limitedHeaders.map((header) => {
       const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
       const display = projectMealDisplay(revisionItems, "未知餐點");
+      const explicitMealPeriod = normalizeMealPeriod(header.mealPeriod);
 
       return {
         mealId: header.id,
@@ -385,7 +390,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         fat: revisionItems.reduce((sum, item) => sum + item.fat, 0),
         loggedAt: header.loggedAt,
         dateKey: formatLocalDate(new Date(header.loggedAt)),
-        mealPeriod: inferMealPeriod(header.loggedAt),
+        mealPeriod: explicitMealPeriod ?? inferMealPeriod(header.loggedAt),
+        mealPeriodSource: explicitMealPeriod ? "explicit" : "inferred",
       };
     });
   }
