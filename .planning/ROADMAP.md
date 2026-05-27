@@ -92,7 +92,13 @@ Plans:
   2. Vague requests such as `蛋白質怪怪的，幫我改合理一點` do not mutate meal calories/macros directly.
   3. Rejected or clarification-required numeric corrections do not create a new meal revision, do not publish `daily_summary`, and do not show success-style text.
   4. Backend-rendered guidance explains the needed numeric input or proposal step in concise Traditional Chinese.
-**Plans**: TBD during `$gsd-plan-phase 66`
+**Plans**: 5 plans
+Plans:
+- [ ] 66-01-PLAN.md — Wave 0 meal numeric authority helper and explicit evidence proof.
+- [ ] 66-02-PLAN.md — Wave 0 backend-owned meal proposal state and renderer copy.
+- [ ] 66-03-PLAN.md — Tool-boundary update_meal enforcement and proposal creation.
+- [ ] 66-04-PLAN.md — Pre-model proposal approval, cancel, and cross-kind ambiguity routing.
+- [ ] 66-05-PLAN.md — Chat integration proof and prompt contract cleanup.
 **Implementation Notes:**
 - Treat server-side provenance as authoritative; prompts and client UI can support but cannot enforce the boundary alone.
 - Keep expected meal revision checks from v2.3 intact.
