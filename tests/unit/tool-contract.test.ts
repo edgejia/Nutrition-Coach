@@ -7,7 +7,7 @@ import {
   type ToolContract,
   type RunContractContext,
 } from "../../server/orchestrator/tool-contract.js";
-import { FatalToolError } from "../../server/orchestrator/tools.js";
+import { FatalToolError, getToolDefinitions } from "../../server/orchestrator/tools.js";
 import type { ToolCall } from "../../server/llm/types.js";
 
 interface FakeGoalArgs {
@@ -68,6 +68,15 @@ function emptyContext(): RunContractContext {
 }
 
 describe("runContract wrapper", () => {
+  it("log_food JSON schema treats protein_sources as optional evidence", () => {
+    const logFood = getToolDefinitions().find((definition) => definition.function.name === "log_food");
+    assert.ok(logFood, "log_food definition must exist");
+
+    const required = logFood.function.parameters.required;
+    assert.ok(Array.isArray(required) || required === undefined);
+    assert.ok(!required?.includes("protein_sources"));
+  });
+
   it("Test 1: invalid JSON returns validation failure with structured JSON result", async () => {
     const contract = makeFakeGoalContract();
     const call = makeCall(null, "fake_goal", "not-json");

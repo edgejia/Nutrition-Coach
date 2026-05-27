@@ -88,6 +88,19 @@ describe("buildSystemPrompt", () => {
     }
   });
 
+  it("describes protein_sources as conditional credible-anchor evidence", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+
+    assert.doesNotMatch(prompt, /必須提供 protein_sources 陣列/);
+    assert.match(prompt, /可信蛋白來源/);
+    assert.match(prompt, /沒有可信蛋白來源/);
+  });
+
   it("renders the no-intake legacy fat_loss prompt byte-for-byte", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1500,
