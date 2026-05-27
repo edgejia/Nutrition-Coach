@@ -1183,6 +1183,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       protein: 0.5,
       carbs: 25,
       fat: 0.3,
+      mealPeriod: "lunch",
       loggedAt: "2026-03-25T04:30:00.000Z",
     });
     const mealCorrectionService = createMealCorrectionService(db);
@@ -1224,6 +1225,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.notEqual(result.loggedMeal.mealRevisionId, created.mealRevisionId);
     assert.equal(result.loggedMeal.dateKey, "2026-03-25");
     assert.equal(result.loggedMeal.loggedAt, "2026-03-25T04:30:00.000Z");
+    assert.equal(result.loggedMeal.mealPeriod, "lunch");
     assert.equal(result.loggedMeal.imageAssetId, null);
     assert.equal(result.loggedMeal.imageUrl, null);
   });

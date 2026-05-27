@@ -120,8 +120,12 @@ function extractMealPeriod(query: string): MealCorrectionCandidate["mealPeriod"]
   if (/(早餐|早上|早飯)/.test(query)) return "breakfast";
   if (/(午餐|中午)/.test(query)) return "lunch";
   if (/(晚餐|晚上)/.test(query)) return "dinner";
-  if (/(宵夜|點心|下午茶)/.test(query)) return "late_night";
+  if (/宵夜/.test(query)) return "late_night";
   return undefined;
+}
+
+function hasUnsupportedMealPeriodReference(query: string): boolean {
+  return /(點心|下午茶)/.test(query);
 }
 
 function extractSelectionIndex(query: string): number | undefined {
@@ -515,6 +519,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
 
       const targetDateKey = dateResolution.targetDateKey;
       const targetMealPeriod = extractMealPeriod(query);
+      const unsupportedMealPeriodReference = targetMealPeriod === undefined
+        && hasUnsupportedMealPeriodReference(query);
       const normalizedQuery = normalizeText(extractTargetEvidenceText(query));
 
       let scored = candidates
@@ -540,6 +546,28 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
           action,
           prompt: buildNotFoundPrompt(action),
           candidates: [],
+        };
+      }
+
+      if (unsupportedMealPeriodReference && !hasLabelMatch) {
+        const narrowed = scored
+          .filter((entry) => entry.score > 0)
+          .slice(0, 5)
+          .map((entry) => entry.candidate);
+        if (narrowed.length > 0) {
+          await turnStateService.putState(
+            deviceId,
+            PENDING_SELECTION_KIND,
+            { action, candidates: narrowed },
+            PENDING_SELECTION_TTL_MS,
+          );
+        }
+
+        return {
+          status: "needs_clarification",
+          action,
+          prompt: narrowed.length > 0 ? buildClarificationPrompt(action, narrowed) : buildNotFoundPrompt(action),
+          candidates: narrowed,
         };
       }
 
@@ -648,6 +676,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         }>;
         imagePath: string | null;
         loggedAt: string;
+        mealPeriod: MealPeriod | null;
       };
       affectedDate: string;
       summaryOutcome: SummaryOutcome;
@@ -706,6 +735,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
           })),
           imagePath: updated.imageAssetId ? makeAssetRef(updated.imageAssetId) : null,
           loggedAt: updated.loggedAt,
+          mealPeriod: updated.mealPeriod,
         },
         affectedDate: updated.affectedDateKey,
         summaryOutcome,

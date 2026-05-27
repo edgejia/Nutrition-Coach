@@ -2234,7 +2234,7 @@ describe("Chat API", () => {
       }],
     });
     const seedForm = new FormData();
-    seedForm.append("message", "我吃了牛肉麵");
+    seedForm.append("message", "午餐我吃了牛肉麵");
     const seedRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
@@ -2292,6 +2292,7 @@ describe("Chat API", () => {
         protein?: number;
         carbs?: number;
         fat?: number;
+        mealPeriod?: string;
         items?: Array<{
           name: string;
           position: number;
@@ -2310,6 +2311,7 @@ describe("Chat API", () => {
     assert.equal(updateBody.loggedMeal?.protein, 20);
     assert.equal(updateBody.loggedMeal?.carbs, 45);
     assert.equal(updateBody.loggedMeal?.fat, 10);
+    assert.equal(updateBody.loggedMeal?.mealPeriod, "lunch");
     assert.deepEqual(updateBody.loggedMeal?.items, [
       { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
     ]);

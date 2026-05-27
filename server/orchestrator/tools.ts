@@ -294,6 +294,7 @@ interface UpdateMealResult {
     }>;
     imagePath: string | null;
     loggedAt: string;
+    mealPeriod?: MealPeriod | null;
   };
 }
 

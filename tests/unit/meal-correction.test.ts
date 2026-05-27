@@ -377,6 +377,30 @@ describe("meal correction service", () => {
     assert.equal(result.candidate.mealPeriodSource, "inferred");
   });
 
+  it("does not coerce snack wording to a late-night correction target", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "鬆餅",
+      calories: 320,
+      protein: 7,
+      carbs: 48,
+      fat: 10,
+      loggedAt: "2026-04-19T15:30:00+08:00",
+    });
+    const lateNight = await foodLoggingService.logFood(deviceId, {
+      foodName: "鹽酥雞",
+      calories: 520,
+      protein: 24,
+      carbs: 38,
+      fat: 28,
+      loggedAt: "2026-04-19T23:30:00+08:00",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天下午茶那餐刪掉");
+
+    assert.notEqual(result.status === "resolved" ? result.resolvedMealId : undefined, lateNight.id);
+    assert.equal(result.status, "needs_clarification");
+  });
+
   it("rejects direct food_name patches for grouped meals", async () => {
     const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
