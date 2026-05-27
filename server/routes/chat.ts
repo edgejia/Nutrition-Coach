@@ -24,6 +24,7 @@ import type {
 import type { ToolExecutionResult } from "../orchestrator/tools.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
+import { normalizeMealPeriod } from "../lib/meal-period.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
@@ -444,6 +445,7 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     carbs,
     fat,
   } = loggedMeal;
+  const mealPeriod = normalizeMealPeriod(loggedMeal.mealPeriod);
   const items = Array.isArray(loggedMeal.items)
     ? loggedMeal.items
         .filter((item) => (
@@ -483,6 +485,7 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     ...(typeof dateKey === "string" ? { dateKey } : {}),
     ...(typeof mealRevisionId === "string" ? { mealRevisionId } : {}),
     ...(typeof loggedAt === "string" ? { loggedAt } : {}),
+    ...(mealPeriod ? { mealPeriod } : {}),
     ...(typeof imageAssetId === "string" || imageAssetId === null ? { imageAssetId } : {}),
     ...(typeof imageUrl === "string" || imageUrl === null ? { imageUrl } : {}),
     foodName,
