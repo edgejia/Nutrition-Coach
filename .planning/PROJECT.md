@@ -11,7 +11,7 @@ Nutrition Coach is a chat-first nutrition logging app for personal beta use. Use
 ## Current State
 
 **Shipped version:** v2.3 Authoritative Mutation Outcomes and Fresh Meal State on 2026-05-20.
-**Active milestone:** v2.4 Correction Authority and Meal Intent Fidelity. Staging/main promotion still requires a separate ship workflow and explicit approval.
+**Active milestone:** v2.4 Correction Authority and Meal Intent Fidelity. Phase 65 is complete locally; Phase 66 is ready to plan. Staging/main promotion still requires a separate ship workflow and explicit approval.
 
 v2.3 closed the P1 data-integrity risks that remained after the metadata-only failure-localization foundation. Backend-committed mutation facts are now authoritative across goal updates, meal log/update/delete receipts, stale chat receipt edits, and `daily_summary` SSE freshness.
 
@@ -28,6 +28,7 @@ v2.4 focuses on the remaining P2 correction-authority and intent-fidelity issues
 - Committed mutation receipts for meal log, update, delete, and direct meal routes even when daily summary recompute or publish degrades.
 - Server-side stale receipt protection with expected meal revision checks and deterministic recovery guidance.
 - Strict `daily_summary` SSE envelopes that refresh same-day rows before committing fresher totals and invalidate matching historical surfaces.
+- `log_food` JSON schema and runtime contracts now agree on optional `protein_sources`, and explicit meal-period intent persists as structured authority across logging, DTOs, receipts, client state, UI labels, and correction candidates.
 
 ## Last Completed Milestone: v2.3 Authoritative Mutation Outcomes and Fresh Meal State
 
@@ -74,11 +75,11 @@ v2.4 focuses on the remaining P2 correction-authority and intent-fidelity issues
 - ✓ Chat receipt actions cannot PATCH stale meal facts over newer meal state; stale expected revisions fail closed with deterministic guidance and refresh support — v2.3 Phase 62.
 - ✓ Daily summary SSE events refresh or invalidate affected meal rows so visible rows cannot remain stale beside fresher totals — v2.3 Phase 63.
 - ✓ v2.3 integrity behavior has targeted local proof, metadata-only evidence, local release gates, and no staging/main promotion — v2.3 Phase 64.
+- ✓ `log_food` schema and executor contracts agree on optional `protein_sources` without regressing trusted-protein behavior — v2.4 Phase 65.
+- ✓ Explicit meal-period intent is persisted, projected, preserved through client/edit flows, preferred by touched UI labels, and exposed to correction candidate authority — v2.4 Phase 65.
 
 ### Active
 
-- [ ] Align `log_food` schema and executor contracts without regressing trusted-protein behavior.
-- [ ] Persist and project explicit meal-period intent from meal logging and correction flows.
 - [ ] Require explicit user numeric evidence or backend-owned approval before chat corrections can mutate meal calories or macros.
 - [ ] Render correction clarification from backend-owned structured candidates with stable numbered options.
 - [ ] Carry correction and historical clarification results through structured tool fields instead of serialized JSON parsing.
@@ -115,7 +116,7 @@ v2.3 integrity context:
 - The Notion BUG / FEATURE board surfaced remaining P1 risks around ambiguous goal confirmations, failed mutation outcomes, post-commit summary recompute failure handling, stale chat receipt edits, and cross-tab/device meal freshness after daily summary SSE events.
 - Success for this milestone means no user-visible success claim can be authored only by LLM prose after a failed mutation or guard rejection.
 - Verification included targeted unit/integration coverage, relevant SSE/client state coverage, `yarn tsc --noEmit`, and `yarn release:check`.
-- Accepted v2.3 advisory debt: `log_food` JSON tool schema still marks `protein_sources` as required while the Zod/executor contract accepts it as optional.
+- Resolved v2.3 advisory debt in v2.4 Phase 65: `log_food` JSON tool schema and Zod/executor contract now agree that `protein_sources` is optional evidence.
 
 v2.4 integrity context:
 - The Notion BUG / FEATURE board still has P2 repros where vague numeric corrections can become committed meal facts, explicit meal period intent can be overwritten by `loggedAt` hour heuristics, and correction candidate clarification can be weak or misleading.
@@ -149,7 +150,7 @@ v2.4 integrity context:
 | Keep v2.3 release proof local until ship workflow approval | Phase 64 proves integrity behavior and local gates without push, deploy, staging promotion, or main promotion. | Validated in Phase 64 |
 | Defer raw debugger/user-flagged capture | Those features require trigger, access-control, retention, privacy notice, content scope, and storage decisions first. | Still deferred |
 | Treat vague numeric meal corrections as non-authoritative | Model-estimated macro patches can silently rewrite persisted meal facts without user evidence; v2.4 requires explicit numeric evidence or backend-owned approval before commit. | Pending v2.4 |
-| Treat explicit meal-period text as higher authority than clock heuristics | A user saying `午餐` is stronger evidence than the hour they logged it; persisted structured facts should preserve that intent across display and correction. | Pending v2.4 |
+| Treat explicit meal-period text as higher authority than clock heuristics | A user saying `午餐` is stronger evidence than the hour they logged it; persisted structured facts should preserve that intent across display and correction. | Validated in Phase 65 |
 | Move clarification plumbing toward structured tool results | Re-parsing serialized tool messages makes correction/historical clarification brittle; typed fields should carry backend-owned clarification facts. | Pending v2.4 |
 
 ## Archived Previous State
@@ -197,4 +198,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-26 after v2.4 milestone initialization*
+*Last updated: 2026-05-27 after Phase 65 completion*
