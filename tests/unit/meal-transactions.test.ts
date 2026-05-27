@@ -183,6 +183,59 @@ describe("MealTransactionsService", () => {
     );
   });
 
+  it("stores and returns explicit mealPeriod without changing loggedAt", async () => {
+    const result = await mealTransactionsService.createTransaction(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      mealPeriod: "lunch",
+      items: [
+        {
+          foodName: "雞腿便當",
+          calories: 720,
+          protein: 38,
+          carbs: 82,
+          fat: 24,
+        },
+      ],
+    });
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, result.transactionId))
+    )[0];
+
+    assert.equal(result.loggedAt, "2026-03-25T04:30:00.000Z");
+    assert.equal(result.mealPeriod, "lunch");
+    assert.equal(transaction?.loggedAt, "2026-03-25T04:30:00.000Z");
+    assert.equal(transaction?.mealPeriod, "lunch");
+  });
+
+  it("keeps mealPeriod null when create input has no explicit authority", async () => {
+    const result = await mealTransactionsService.createTransaction(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        {
+          foodName: "蘋果",
+          calories: 95,
+          protein: 0.5,
+          carbs: 25,
+          fat: 0.3,
+        },
+      ],
+    });
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, result.transactionId))
+    )[0];
+
+    assert.equal(result.mealPeriod, null);
+    assert.equal(transaction?.mealPeriod, null);
+  });
+
   it("keeps grouped items under one stable transaction id and rolls back the whole write on failure", async () => {
     await createOwnedAsset("asset-breakfast");
 
@@ -394,6 +447,45 @@ describe("MealTransactionsService", () => {
     assert.equal(updated.transactionId, created.transactionId);
     assert.equal(updated.revisionId, transaction!.currentRevisionId);
     assert.notEqual(updated.revisionId, created.revisionId);
+  });
+
+  it("preserves existing mealPeriod when ordinary updates omit period changes", async () => {
+    const created = await mealTransactionsService.createTransaction(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      mealPeriod: "dinner",
+      items: [
+        {
+          foodName: "雞胸肉",
+          calories: 320,
+          protein: 40,
+          carbs: 0,
+          fat: 12,
+        },
+      ],
+    });
+
+    const updated = await mealTransactionsService.updateTransaction(deviceId, created.transactionId, {
+      expectedMealRevisionId: created.revisionId,
+      items: [
+        {
+          foodName: "雞胸肉半份",
+          calories: 160,
+          protein: 20,
+          carbs: 0,
+          fat: 6,
+        },
+      ],
+    });
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, created.transactionId))
+    )[0];
+
+    assert.equal(updated.mealPeriod, "dinner");
+    assert.equal(transaction?.mealPeriod, "dinner");
   });
 
   it("rejects missing and stale expected revisions before update writes", async () => {

@@ -135,6 +135,46 @@ describe("FoodLoggingService", () => {
     assert.equal(legacyMeals.length, 0);
   });
 
+  it("exposes explicit mealPeriod on compatibility entries", async () => {
+    const meal = await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      mealPeriod: "lunch",
+      items: [
+        {
+          foodName: "雞腿便當",
+          calories: 720,
+          protein: 38,
+          carbs: 82,
+          fat: 24,
+        },
+      ],
+    });
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, meal.id))
+    )[0];
+
+    assert.equal(meal.loggedAt, "2026-03-25T04:30:00.000Z");
+    assert.equal(meal.mealPeriod, "lunch");
+    assert.equal(transaction?.mealPeriod, "lunch");
+  });
+
+  it("exposes null mealPeriod on compatibility entries without explicit authority", async () => {
+    const meal = await foodService.logFood(deviceId, {
+      foodName: "蘋果",
+      calories: 95,
+      protein: 0.5,
+      carbs: 25,
+      fat: 0.3,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+
+    assert.equal(meal.mealPeriod, null);
+  });
+
   it("returns the current revision identity when updating a compatibility meal entry", async () => {
     const created = await foodService.logFood(deviceId, {
       foodName: "蘋果",
