@@ -163,6 +163,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
           imageAssetId,
           imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
           loggedAt: meal.loggedAt,
+          ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
         };
       }),
     };
@@ -266,6 +267,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
         imageAssetId,
         imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
         loggedAt: updatedMeal.loggedAt,
+        ...(updatedMeal.mealPeriod ? { mealPeriod: updatedMeal.mealPeriod } : {}),
       },
     };
   });

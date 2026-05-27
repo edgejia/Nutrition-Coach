@@ -51,6 +51,7 @@ export function registerDaySnapshotRoutes(app: FastifyInstance, deps: Deps) {
             imageAssetId,
             imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
             loggedAt: meal.loggedAt,
+            ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
           };
         }),
       };
