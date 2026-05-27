@@ -16,7 +16,7 @@ Requirements for the v2.4 correction-authority milestone. Each requirement must 
 ### Meal Intent Fidelity
 
 - [x] **INTENT-01**: User-explicit meal period intent such as `早餐`, `午餐`, `晚餐`, or `宵夜` is persisted as the meal period authority for new logs, even when the current clock hour would infer a different period.
-- [ ] **INTENT-02**: Current-day and historical meal rows expose period information from persisted structured facts instead of deriving display period only from `loggedAt` hour.
+- [x] **INTENT-02**: Current-day and historical meal rows expose period information from persisted structured facts instead of deriving display period only from `loggedAt` hour.
 - [ ] **INTENT-03**: Meal correction candidate scoring uses persisted meal period facts when available and does not let clock-derived period heuristics override explicit user intent.
 
 ### Correction Authority
@@ -83,7 +83,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TOOL-02 | Phase 65 | Complete |
 | TOOL-03 | Phase 65 | Complete |
 | INTENT-01 | Phase 65 | Complete |
-| INTENT-02 | Phase 65 | Pending |
+| INTENT-02 | Phase 65 | Complete |
 | INTENT-03 | Phase 65 | Pending |
 | CORR-01 | Phase 66 | Pending |
 | CORR-02 | Phase 66 | Pending |
