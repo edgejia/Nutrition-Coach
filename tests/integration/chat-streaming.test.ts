@@ -701,7 +701,7 @@ describe("chat-streaming", () => {
     mockLLM.queueChatStream(["測試", "回覆"]);
 
     const form = new FormData();
-    form.append("message", "我吃了雞腿便當");
+    form.append("message", "午餐我吃了雞腿便當");
     form.append("image", new Blob(["fake image"], { type: "image/png" }), "lunch.png");
 
     const controller = new AbortController();
@@ -734,6 +734,7 @@ describe("chat-streaming", () => {
           mealRevisionId?: string;
           dateKey?: string;
           loggedAt?: string;
+          mealPeriod?: string;
           imageAssetId?: string | null;
           imageUrl?: string | null;
           foodName?: string;
@@ -750,6 +751,8 @@ describe("chat-streaming", () => {
       assert.match(donePayload.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
       assert.match(donePayload.loggedMeal?.dateKey ?? "", /^\d{4}-\d{2}-\d{2}$/);
       assert.match(donePayload.loggedMeal?.loggedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+      assert.equal(donePayload.loggedMeal?.mealPeriod, "lunch");
+      assert.equal(Object.prototype.hasOwnProperty.call(donePayload.loggedMeal ?? {}, "inferredMealPeriod"), false);
       assert.ok(donePayload.loggedMeal?.imageAssetId);
       assert.equal(donePayload.loggedMeal?.imageUrl, `/api/assets/${donePayload.loggedMeal.imageAssetId}`);
       assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");

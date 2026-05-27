@@ -1419,6 +1419,53 @@ describe("Chat API", () => {
     assert.equal(body.dailySummary?.totalCalories, 640);
   });
 
+  it("POST /api/chat JSON projects explicit loggedMeal mealPeriod for committed lunch logs", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_json_lunch_receipt",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 640,
+            protein: 30,
+            carbs: 78,
+            fat: 20,
+            protein_sources: [
+              { name: "雞腿", protein: 18, is_primary: true, certainty: "clear" },
+              { name: "滷蛋", protein: 6, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄雞腿便當！" });
+
+    const form = new FormData();
+    form.append("message", "午餐我吃了雞腿便當");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: { mealPeriod?: string };
+      summaryOutcome?: SummaryOutcome;
+    };
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.loggedMeal?.mealPeriod, "lunch");
+    assert.equal(Object.prototype.hasOwnProperty.call(body.loggedMeal ?? {}, "inferredMealPeriod"), false);
+    assertFreshSummaryOutcome(body.summaryOutcome);
+  });
+
   it("POST /api/chat JSON returns a committed receipt when summary recomputation fails after log_food persistence", async () => {
     assert.ok(services, "expected app services");
     services.summaryService.getDailySummary = async () => {
