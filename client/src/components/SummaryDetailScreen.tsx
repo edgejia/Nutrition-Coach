@@ -16,6 +16,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { refreshAfterMealMutation } from "../meal-edit-refresh.js";
 import { useStore } from "../store.js";
 import type { DailySummary, DailyTargets, MealEntry } from "../types.js";
+import { formatMealRowTime, getDisplayMealLabel } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportCard, SportChip, SportIconButton, SportProgressBar, SportScreen } from "./SportPrimitives.js";
 import { SportChevronLeftIcon } from "./SportIcons.js";
@@ -70,14 +71,6 @@ function getProgressVariant(barTone: ReturnType<typeof getHistorySportStatusMeta
   return "default";
 }
 
-function formatSummaryTime(loggedAt: string) {
-  return new Intl.DateTimeFormat("zh-TW", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(loggedAt));
-}
-
 function formatMacroLine(calories: number, protein: number, carbs: number, fat: number) {
   return `${Math.round(calories).toLocaleString("en-US")} kcal · P${Math.round(protein)} · C${Math.round(carbs)} · F${Math.round(fat)}`;
 }
@@ -109,7 +102,9 @@ function SummaryDetailMealRow({
         />
         <div className="sp-summary-meal-copy">
           <h3>{meal.foodName}</h3>
-          <div className="sp-summary-meal-time">{formatSummaryTime(meal.loggedAt)}</div>
+          <div className="sp-summary-meal-time">
+            {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}
+          </div>
           <div className="sp-summary-meal-macro-line">{formatMacroLine(meal.calories, meal.protein, meal.carbs, meal.fat)}</div>
         </div>
       </div>
@@ -119,6 +114,7 @@ function SummaryDetailMealRow({
           onClick={() => onDelete(meal)}
           disabled={deletingMealId === meal.id}
           className="sp-summary-delete-btn"
+          aria-label={`刪除 ${getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)} ${meal.foodName}`}
         >
           刪除
         </button>

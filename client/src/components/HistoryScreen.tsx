@@ -14,7 +14,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { buildHistoryMealEditPayload } from "../meal-edit-payload.js";
 import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, HistoryTrendResponse, MealEntry } from "../types.js";
-import { formatMealRowTime, getMealMacroSummary } from "./HomeScreen.js";
+import { formatMealRowTime, getDisplayMealLabel, getMealMacroSummary } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportScreen } from "./SportPrimitives.js";
@@ -270,7 +270,7 @@ function TimelineRows({
           <button
             type="button"
             className="sp-history-meal-row"
-            aria-label={`編輯 ${meal.foodName}`}
+            aria-label={`編輯 ${getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)} ${meal.foodName}`}
             onClick={(event) => {
               event.stopPropagation();
               onMealOpen(meal);
@@ -292,7 +292,7 @@ function TimelineRows({
             </span>
             <span className="sp-history-meal-copy">
               <span className="sp-history-meal-meta">
-                {formatMealRowTime(meal.loggedAt)}
+                {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}
               </span>
               <span className="sp-history-meal-name">{meal.foodName}</span>
               <span className="sp-history-meal-macros">{getMealMacroSummary(meal)}</span>

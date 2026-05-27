@@ -4,6 +4,7 @@ import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/histo
 import { formatLocalDate } from "../lib/time.js";
 import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, MealEntry } from "../types.js";
+import { formatMealRowTime, getDisplayMealLabel } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportChevronLeftIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportProgressBar, SportScreen } from "./SportPrimitives.js";
@@ -73,9 +74,7 @@ function MealDetailRow({
         <div className="sp-history-detail-meal-copy">
           <h3>{meal.foodName}</h3>
           <div className="sp-history-detail-meal-time">
-            {new Intl.DateTimeFormat("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false }).format(
-              new Date(meal.loggedAt),
-            )}
+            {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}
           </div>
         </div>
         <div className="sp-history-detail-meal-energy">
