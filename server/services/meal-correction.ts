@@ -428,6 +428,11 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       return undefined;
     }
 
+    if (hasUnsupportedMealPeriodReference(query) && extractMealPeriod(query) === undefined) {
+      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+      return undefined;
+    }
+
     const index = extractSelectionIndex(query);
     if (index !== undefined) {
       const candidate = pending.candidates[index];
@@ -539,18 +544,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         });
 
       const hasLabelMatch = scored.some((entry) => entry.labelMatched);
-      if (hasLabelMatch) {
-        scored = scored.filter((entry) => entry.labelMatched);
-      } else if (hasLikelyFoodReference(query)) {
-        return {
-          status: "needs_clarification",
-          action,
-          prompt: buildNotFoundPrompt(action),
-          candidates: [],
-        };
-      }
-
-      if (unsupportedMealPeriodReference && !hasLabelMatch) {
+      if (unsupportedMealPeriodReference) {
         const narrowed = scored
           .filter((entry) => entry.score > 0)
           .slice(0, 5)
@@ -569,6 +563,17 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
           action,
           prompt: narrowed.length > 0 ? buildClarificationPrompt(action, narrowed) : buildNotFoundPrompt(action),
           candidates: narrowed,
+        };
+      }
+
+      if (hasLabelMatch) {
+        scored = scored.filter((entry) => entry.labelMatched);
+      } else if (hasLikelyFoodReference(query)) {
+        return {
+          status: "needs_clarification",
+          action,
+          prompt: buildNotFoundPrompt(action),
+          candidates: [],
         };
       }
 
