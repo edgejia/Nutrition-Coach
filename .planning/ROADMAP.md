@@ -135,7 +135,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete | 2026-05-27 |
+| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 0/TBD | Pending | — |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
