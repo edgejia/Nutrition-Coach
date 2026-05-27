@@ -78,6 +78,7 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
     imageAssetId: meal.imageAssetId ?? null,
     imageUrl: meal.imageUrl ?? null,
     loggedAt: meal.loggedAt,
+    ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
   };
 }
 
@@ -112,5 +113,6 @@ export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | unde
     imageAssetId: loggedMeal.imageAssetId ?? null,
     imageUrl: loggedMeal.imageUrl ?? null,
     loggedAt: loggedMeal.loggedAt,
+    ...(loggedMeal.mealPeriod ? { mealPeriod: loggedMeal.mealPeriod } : {}),
   };
 }
