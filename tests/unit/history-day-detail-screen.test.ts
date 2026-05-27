@@ -69,6 +69,12 @@ describe("History Day Detail source contract", () => {
     assert.match(detailSource, /alt=\{`\$\{meal\.foodName\} 縮圖`\}/);
   });
 
+  it("renders Day Detail meal metadata with resolved meal-period labels", () => {
+    assert.match(detailSource, /import \{ formatMealRowTime, getDisplayMealLabel \} from "\.\/HomeScreen\.js";/);
+    assert.match(detailSource, /\{formatMealRowTime\(meal\.loggedAt\)\} · \{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\}/);
+    assert.doesNotMatch(detailSource, /new Intl\.DateTimeFormat\("zh-TW", \{ hour: "2-digit", minute: "2-digit", hour12: false \}\)\.format\(\s*new Date\(meal\.loggedAt\),\s*\)/);
+  });
+
   it("does not expose edit, delete, save, correction, or live-summary mutation controls", () => {
     for (const rejected of [
       "deleteMeal",

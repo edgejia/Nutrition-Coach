@@ -146,6 +146,84 @@ describe("SummaryDetailScreen disclosure shell", () => {
     assert.match(html, /今天的即時更新不會覆蓋這個畫面。/);
   });
 
+  it("renders meal metadata with resolved explicit meal-period labels and fallback labels", () => {
+    const todayKey = "2026-04-22";
+    const html = renderToStaticMarkup(createElement(SummaryDetailScreenPresentation, {
+      todayKey,
+      selectedDateKey: todayKey,
+      visibleMonthKey: todayKey.slice(0, 7),
+      isCalendarOpen: false,
+      loading: false,
+      deletingMealId: null,
+      error: null,
+      sending: false,
+      liveSummary: {
+        date: todayKey,
+        totalCalories: 920,
+        totalProtein: 54,
+        totalCarbs: 88,
+        totalFat: 34,
+        mealCount: 2,
+      },
+      targets: {
+        calories: 1800,
+        protein: 140,
+        carbs: 180,
+        fat: 60,
+      },
+      snapshot: {
+        date: todayKey,
+        summary: {
+          date: todayKey,
+          totalCalories: 920,
+          totalProtein: 54,
+          totalCarbs: 88,
+          totalFat: 34,
+          mealCount: 2,
+        },
+        meals: [
+          {
+            id: "meal-1",
+            mealRevisionId: "rev-1",
+            foodName: "雞腿便當",
+            calories: 620,
+            protein: 38,
+            carbs: 72,
+            fat: 18,
+            itemCount: 1,
+            loggedAt: "2026-04-22T07:30:00+08:00",
+            mealPeriod: "lunch",
+          },
+          {
+            id: "meal-2",
+            mealRevisionId: "rev-2",
+            foodName: "優格",
+            calories: 300,
+            protein: 16,
+            carbs: 20,
+            fat: 16,
+            itemCount: 1,
+            loggedAt: "2026-04-22T15:00:00+08:00",
+          },
+        ],
+      },
+      onBack: () => undefined,
+      onToggleCalendar: () => undefined,
+      onBrowseMonth: () => undefined,
+      onSelectDate: () => undefined,
+      onDeleteMeal: () => undefined,
+    }));
+
+    assert.match(html, /07:30 · 午餐/);
+    assert.match(html, /15:00 · 點心/);
+  });
+
+  it("uses shared meal-row label helpers without adding meal-period controls", () => {
+    assert.match(summaryDetailSource, /import \{ formatMealRowTime, getDisplayMealLabel \} from "\.\/HomeScreen\.js";/);
+    assert.match(summaryDetailSource, /\{formatMealRowTime\(meal\.loggedAt\)\} · \{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\}/);
+    assert.doesNotMatch(summaryDetailSource, /mealPeriod.*(?:select|picker|toast|modal|snackbar)|(?:select|picker).*mealPeriod/i);
+  });
+
   it("refreshes shared today state after Summary Detail meal deletion", () => {
     assert.match(summaryDetailSource, /MealRevisionConflictError/);
     assert.match(summaryDetailSource, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);

@@ -103,7 +103,9 @@ describe("History screen source contract", () => {
   it("sorts timeline meals from morning to night and hides meal-period tags", () => {
     assert.match(source, /\[\.\.\.meals\]\.sort\(\s*\(\s*left,\s*right\s*\) => new Date\(left\.loggedAt\)\.getTime\(\) - new Date\(right\.loggedAt\)\.getTime\(\)/);
     assert.match(source, /sortedMeals\.map\(\(meal\) =>/);
-    assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\}/);
+    assert.match(source, /import \{ formatMealRowTime, getDisplayMealLabel, getMealMacroSummary \} from "\.\/HomeScreen\.js";/);
+    assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\} · \{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\}/);
+    assert.match(source, /aria-label=\{`編輯 \$\{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\} \$\{meal\.foodName\}`\}/);
     assert.doesNotMatch(source, /getDisplayMealLabel\(meal\.loggedAt\)/);
     assert.match(source, /\{displayMealCount === null \? "--" : displayMealCount\}筆/);
     assert.doesNotMatch(source, /\{meals\.length\} entries/);
