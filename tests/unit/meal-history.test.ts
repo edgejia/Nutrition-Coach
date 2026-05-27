@@ -127,6 +127,7 @@ describe("MealHistoryService", () => {
       fat: 24.3,
       imagePath: null,
       loggedAt: "2026-03-25T05:00:00.000Z",
+      mealPeriod: null,
     });
     assert.equal("currentRevisionId" in meals[1]!, false);
   });

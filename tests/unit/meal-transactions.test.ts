@@ -383,11 +383,13 @@ describe("MealTransactionsService", () => {
     assert.deepEqual(deleted, {
       transactionId: created.transactionId,
       loggedAt: "2026-03-25T11:00:00.000Z",
+      mealPeriod: null,
       affectedDateKey: "2026-03-25",
       deletedMeal: {
         mealId: created.transactionId,
         dateKey: "2026-03-25",
         loggedAt: "2026-03-25T11:00:00.000Z",
+        mealPeriod: null,
         foodName: "雞胸肉",
         calories: 320,
         protein: 40,

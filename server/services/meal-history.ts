@@ -5,6 +5,7 @@ import {
   mealRevisions,
   mealTransactions,
 } from "../db/schema.js";
+import type { MealPeriod } from "../lib/meal-period.js";
 import { getLocalDayBounds } from "../lib/time.js";
 import { makeAssetRef } from "./assets.js";
 import { projectMealDisplay } from "./meal-display.js";
@@ -20,6 +21,7 @@ export interface MealHistoryEntry {
   fat: number;
   imagePath: string | null;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
 }
 
 export function createMealHistoryService(db: AppDatabase) {
@@ -30,6 +32,7 @@ export function createMealHistoryService(db: AppDatabase) {
         .select({
           id: mealTransactions.id,
           loggedAt: mealTransactions.loggedAt,
+          mealPeriod: mealTransactions.mealPeriod,
           currentRevisionId: mealTransactions.currentRevisionId,
         })
         .from(mealTransactions)
@@ -98,6 +101,7 @@ export function createMealHistoryService(db: AppDatabase) {
           fat: revisionItems.reduce((sum, item) => sum + item.fat, 0),
           imagePath: revision?.imageAssetId ? makeAssetRef(revision.imageAssetId) : null,
           loggedAt: header.loggedAt,
+          mealPeriod: header.mealPeriod,
         };
       });
     },

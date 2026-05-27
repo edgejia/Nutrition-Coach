@@ -8,6 +8,7 @@ import {
   mealTransactions,
 } from "../db/schema.js";
 import { parseAssetRef } from "./assets.js";
+import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
 import { formatLocalDate } from "../lib/time.js";
 import { projectMealDisplay } from "./meal-display.js";
 
@@ -21,6 +22,7 @@ export interface MealTransactionItemInput {
 
 export interface CreateMealTransactionInput {
   loggedAt?: string;
+  mealPeriod?: MealPeriod | null;
   imagePath?: string | null;
   items: MealTransactionItemInput[];
 }
@@ -29,6 +31,7 @@ export interface MealTransactionWriteResult {
   transactionId: string;
   revisionId: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   imagePath: string | null;
   items: MealTransactionItemInput[];
 }
@@ -36,6 +39,7 @@ export interface MealTransactionWriteResult {
 export interface MealTransactionDeleteResult {
   transactionId: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   affectedDateKey: string;
   deletedMeal: DeletedMealSnapshot;
 }
@@ -44,6 +48,7 @@ export interface DeletedMealSnapshot {
   mealId: string;
   dateKey: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   foodName: string;
   calories?: number;
   protein?: number;
@@ -59,6 +64,7 @@ export interface MealTransactionUpdateResult {
   transactionId: string;
   revisionId: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   affectedDateKey: string;
   imageAssetId: string | null;
   items: MealTransactionItemInput[];
@@ -68,6 +74,7 @@ interface MealTransactionRow {
   id: string;
   deviceId: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   currentRevisionId: string;
   currentRevisionNumber: number;
   deletedAt: string | null;
@@ -154,6 +161,7 @@ export function createMealTransactionsService(db: AppDatabase) {
         id: mealTransactions.id,
         deviceId: mealTransactions.deviceId,
         loggedAt: mealTransactions.loggedAt,
+        mealPeriod: mealTransactions.mealPeriod,
         currentRevisionId: mealTransactions.currentRevisionId,
         currentRevisionNumber: mealTransactions.currentRevisionNumber,
         deletedAt: mealTransactions.deletedAt,
@@ -211,6 +219,7 @@ export function createMealTransactionsService(db: AppDatabase) {
       mealId: existing.id,
       dateKey,
       loggedAt: existing.loggedAt,
+      mealPeriod: existing.mealPeriod,
       foodName: display.foodName,
       ...(calories === undefined ? {} : { calories }),
       ...(protein === undefined ? {} : { protein }),
@@ -338,6 +347,7 @@ export function createMealTransactionsService(db: AppDatabase) {
       const items = normalizeItems(input.items);
       const transactionId = crypto.randomUUID();
       const loggedAt = input.loggedAt ?? new Date().toISOString();
+      const mealPeriod = normalizeMealPeriod(input.mealPeriod) ?? null;
       const revisionNumber = 1;
       const revisionId = `${transactionId}:r${revisionNumber}`;
       const createdAt = new Date().toISOString();
@@ -376,6 +386,7 @@ export function createMealTransactionsService(db: AppDatabase) {
             id: transactionId,
             deviceId,
             loggedAt,
+            mealPeriod,
             currentRevisionId: revisionId,
             currentRevisionNumber: revisionNumber,
             deletedAt: null,
@@ -417,6 +428,7 @@ export function createMealTransactionsService(db: AppDatabase) {
           transactionId,
           revisionId,
           loggedAt,
+          mealPeriod,
           imagePath,
           items,
         };
@@ -470,6 +482,7 @@ export function createMealTransactionsService(db: AppDatabase) {
         return {
           transactionId: existing.id,
           loggedAt: existing.loggedAt,
+          mealPeriod: existing.mealPeriod,
           affectedDateKey: deletedMeal.dateKey,
           deletedMeal,
         };
@@ -573,6 +586,7 @@ export function createMealTransactionsService(db: AppDatabase) {
           transactionId: existing.id,
           revisionId,
           loggedAt: existing.loggedAt,
+          mealPeriod: existing.mealPeriod,
           affectedDateKey: formatLocalDate(new Date(existing.loggedAt)),
           imageAssetId,
           items,

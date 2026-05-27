@@ -10,6 +10,7 @@ import {
   type CreateMealTransactionInput,
   type MealTransactionItemInput,
 } from "./meal-transactions.js";
+import type { MealPeriod } from "../lib/meal-period.js";
 import { createMealHistoryService } from "./meal-history.js";
 import { projectMealDisplay } from "./meal-display.js";
 
@@ -21,6 +22,7 @@ export interface FoodData {
   fat: number;
   imagePath?: string | null;
   loggedAt?: string;
+  mealPeriod?: MealPeriod | null;
 }
 
 export interface MealCompatibilityEntry {
@@ -35,6 +37,7 @@ export interface MealCompatibilityEntry {
   fat: number;
   imagePath: string | null;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
 }
 
 export interface GroupedMealData extends CreateMealTransactionInput {}
@@ -52,6 +55,7 @@ export function createFoodLoggingService(db: AppDatabase) {
     transactionId: string,
     revisionId: string,
     loggedAt: string,
+    mealPeriod: MealPeriod | null,
     imagePath: string | null | undefined,
     items: MealTransactionItemInput[],
   ): MealCompatibilityEntry {
@@ -69,6 +73,7 @@ export function createFoodLoggingService(db: AppDatabase) {
       fat: items.reduce((sum, item) => sum + item.fat, 0),
       imagePath: imagePath ?? null,
       loggedAt,
+      mealPeriod,
     };
   }
 
@@ -76,6 +81,7 @@ export function createFoodLoggingService(db: AppDatabase) {
     async logFood(deviceId: string, food: FoodData) {
       const created = await mealTransactionsService.createTransaction(deviceId, {
         loggedAt: food.loggedAt,
+        mealPeriod: food.mealPeriod,
         imagePath: food.imagePath ?? null,
         items: [
           {
@@ -93,6 +99,7 @@ export function createFoodLoggingService(db: AppDatabase) {
         created.transactionId,
         created.revisionId,
         created.loggedAt,
+        created.mealPeriod,
         created.imagePath,
         created.items,
       );
@@ -105,6 +112,7 @@ export function createFoodLoggingService(db: AppDatabase) {
         created.transactionId,
         created.revisionId,
         created.loggedAt,
+        created.mealPeriod,
         created.imagePath,
         created.items,
       );
@@ -161,6 +169,7 @@ export function createFoodLoggingService(db: AppDatabase) {
         updated.transactionId,
         updated.revisionId,
         updated.loggedAt,
+        updated.mealPeriod,
         updated.imageAssetId ? `asset:${updated.imageAssetId}` : null,
         updated.items,
       );

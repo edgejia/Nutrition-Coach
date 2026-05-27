@@ -516,6 +516,7 @@ describe("meal correction service", () => {
       mealId: meal.id,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T10:30:00.000Z",
+      mealPeriod: null,
       foodName: "牛肉麵",
       calories: 520,
       protein: 24,

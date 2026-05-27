@@ -160,6 +160,12 @@ describe("FoodLoggingService", () => {
     assert.equal(meal.loggedAt, "2026-03-25T04:30:00.000Z");
     assert.equal(meal.mealPeriod, "lunch");
     assert.equal(transaction?.mealPeriod, "lunch");
+
+    const [byDate] = await foodService.getMealsByDate(
+      deviceId,
+      new Date("2026-03-25T04:00:00.000Z"),
+    );
+    assert.equal(byDate?.mealPeriod, "lunch");
   });
 
   it("exposes null mealPeriod on compatibility entries without explicit authority", async () => {
