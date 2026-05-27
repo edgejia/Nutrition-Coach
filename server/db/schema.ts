@@ -69,6 +69,7 @@ export const mealTransactions = sqliteTable(
       .notNull()
       .references(() => devices.id),
     loggedAt: text("logged_at").notNull(),
+    mealPeriod: text("meal_period", { enum: ["breakfast", "lunch", "dinner", "late_night"] }),
     currentRevisionId: text("current_revision_id").notNull(),
     currentRevisionNumber: integer("current_revision_number").notNull(),
     deletedAt: text("deleted_at"),

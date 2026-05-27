@@ -50,6 +50,13 @@
       "when": 1777996719981,
       "tag": "0006_colossal_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1779885876635,
+      "tag": "0007_violet_living_lightning",
+      "breakpoints": true
     }
   ]
 }

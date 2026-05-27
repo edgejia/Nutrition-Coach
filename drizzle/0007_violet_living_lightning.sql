@@ -1,0 +1,1 @@
+ALTER TABLE `meal_transactions` ADD `meal_period` text;
