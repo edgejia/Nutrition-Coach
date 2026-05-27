@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-27T12:51:29.607Z"
+last_updated: "2026-05-27T13:00:29.286Z"
 last_activity: 2026-05-27
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 8
-  completed_plans: 1
-  percent: 12
+  completed_plans: 2
+  percent: 25
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-26)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Phase 65 — Tool Contract Alignment and Meal-Period Authority; next plan is 65-02 migration verification
+**Current focus:** Phase 65 — Tool Contract Alignment and Meal-Period Authority; next plan is 65-03 log_food contract alignment and source-text period persistence
 
 ## Current Position
 
 Phase: 65 (Tool Contract Alignment and Meal-Period Authority) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
-Last activity: 2026-05-27 -- Completed 65-01 persistence and service foundation
+Last activity: 2026-05-27 -- Completed 65-02 migration verification gate
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Last activity: 2026-05-27 -- Completed 65-01 persistence and service foundation
 | Phase 64 P03 | 18 min | 2 tasks | 2 files |
 | Phase 64 P04 | 3 min | 2 tasks | 2 files |
 | Phase 65 P01 | 8min | 2 tasks | 12 files |
+| Phase 65 P02 | 3min | 1 task | 5 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,8 @@ Recent decisions affecting current work:
 
 - [Phase 65 Plan 01]: Persist explicit meal period as nullable `meal_transactions.meal_period`, separate from `loggedAt`.
 - [Phase 65 Plan 01]: Only direct source-text meal-category words can become explicit meal-period authority.
+- [Phase 65 Plan 02]: Keep 0007 additive and nullable even though Drizzle's table-level check generation would rebuild meal_transactions.
+- [Phase 65 Plan 02]: Represent the enum constraint in Drizzle schema metadata while using safe column-level SQLite CHECK SQL for the migration.
 - [Phase 59]: `yarn release:check` was local closure proof only and did not authorize staging or main promotion.
 - [v2.3]: Ambiguous goal confirmation must fail closed unless backed by a valid backend proposal id or explicit current-turn numeric targets.
 - [v2.3]: Meal mutation commits are authoritative; summary recompute/publish status is a separate freshness outcome.
@@ -167,10 +170,10 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-27T12:51:29.600Z
-Stopped at: Completed 65-01-PLAN.md
+Last session: 2026-05-27T13:00:29.278Z
+Stopped at: Completed 65-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Continue Phase 65 wave 2 with `65-02-PLAN.md`.
+- Continue Phase 65 wave 3 with `65-03-PLAN.md`.
