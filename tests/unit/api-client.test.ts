@@ -298,6 +298,46 @@ describe("API Client", () => {
     assert.equal(result.loggedMeal?.mealRevisionId, "meal-1:r1");
   });
 
+  it("sendMessage preserves explicit loggedMeal mealPeriod and omits invalid values", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      reply: "已記錄",
+      didLogMeal: true,
+      loggedMeal: {
+        mealId: "meal-1",
+        mealRevisionId: "meal-1:r1",
+        foodName: "午餐便當",
+        calories: 640,
+        protein: 32,
+        carbs: 78,
+        fat: 21,
+        mealPeriod: "lunch",
+      },
+    });
+
+    const validResult = await api.sendMessage("午餐我吃了便當");
+
+    assert.equal(validResult.loggedMeal?.mealPeriod, "lunch");
+
+    mockFetch(200, {
+      reply: "已記錄",
+      didLogMeal: true,
+      loggedMeal: {
+        mealId: "meal-2",
+        foodName: "早餐時間的午餐",
+        calories: 520,
+        protein: 28,
+        carbs: 64,
+        fat: 16,
+        mealPeriod: "brunch",
+      },
+    });
+
+    const invalidResult = await api.sendMessage("午餐我吃了飯糰");
+
+    assert.equal(invalidResult.loggedMeal?.mealPeriod, undefined);
+  });
+
   it("sendMessage throws UNAUTHORIZED on 401", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
@@ -450,6 +490,39 @@ describe("API Client", () => {
     assert.equal(result.meals[0]?.imageUrl, null);
   });
 
+  it("getMeals preserves only public mealPeriod enum values", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      meals: [
+        {
+          id: "meal-1",
+          foodName: "午餐便當",
+          calories: 520,
+          protein: 42,
+          carbs: 48,
+          fat: 18,
+          mealPeriod: "lunch",
+          loggedAt: "2026-04-01T00:30:00.000Z",
+        },
+        {
+          id: "meal-2",
+          foodName: "不明餐別",
+          calories: 320,
+          protein: 20,
+          carbs: 42,
+          fat: 8,
+          mealPeriod: "snack",
+          loggedAt: "2026-04-01T06:30:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.getMeals();
+
+    assert.equal(result.meals[0]?.mealPeriod, "lunch");
+    assert.equal(result.meals[1]?.mealPeriod, undefined);
+  });
+
   it("getDaySnapshot requests the explicit day with same-origin credentials", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
@@ -537,6 +610,58 @@ describe("API Client", () => {
 
     assert.equal(result.meals[0]?.imageAssetId, null);
     assert.equal(result.meals[0]?.imageUrl, null);
+  });
+
+  it("getDaySnapshot preserves valid mealPeriod and omits invalid or missing values", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      date: "2026-03-25",
+      summary: {
+        date: "2026-03-25",
+        totalCalories: 920,
+        totalProtein: 54,
+        totalCarbs: 106,
+        totalFat: 28,
+        mealCount: 3,
+      },
+      meals: [
+        {
+          id: "meal-1",
+          foodName: "午餐便當",
+          calories: 520,
+          protein: 32,
+          carbs: 64,
+          fat: 18,
+          mealPeriod: "lunch",
+          loggedAt: "2026-03-25T00:30:00.000Z",
+        },
+        {
+          id: "meal-2",
+          foodName: "未知餐別",
+          calories: 280,
+          protein: 16,
+          carbs: 36,
+          fat: 8,
+          mealPeriod: "afternoon_tea",
+          loggedAt: "2026-03-25T06:30:00.000Z",
+        },
+        {
+          id: "meal-3",
+          foodName: "未帶餐別",
+          calories: 120,
+          protein: 6,
+          carbs: 14,
+          fat: 2,
+          loggedAt: "2026-03-25T21:30:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.getDaySnapshot("2026-03-25");
+
+    assert.equal(result.meals[0]?.mealPeriod, "lunch");
+    assert.equal(result.meals[1]?.mealPeriod, undefined);
+    assert.equal(result.meals[2]?.mealPeriod, undefined);
   });
 
   it("getDaySnapshot throws UNAUTHORIZED on 401", async () => {
@@ -633,6 +758,26 @@ describe("API Client", () => {
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-flat");
     assert.equal(result.meals[1]?.imageAssetId, null);
     assert.equal(result.meals[1]?.imageUrl, null);
+  });
+
+  it("normalizeHistoryMeal preserves only public mealPeriod enum values", () => {
+    const valid = api.normalizeHistoryMeal({
+      id: "meal-1",
+      loggedAt: "2026-04-29T00:30:00.000Z",
+      display: { title: "午餐便當" },
+      nutrition: { calories: 520, protein: 32, carbs: 64, fat: 18 },
+      mealPeriod: "lunch",
+    });
+    const invalid = api.normalizeHistoryMeal({
+      id: "meal-2",
+      loggedAt: "2026-04-29T21:30:00.000Z",
+      display: { title: "未知餐別" },
+      nutrition: { calories: 120, protein: 6, carbs: 14, fat: 2 },
+      mealPeriod: "midnight_snack",
+    });
+
+    assert.equal(valid.mealPeriod, "lunch");
+    assert.equal(invalid.mealPeriod, undefined);
   });
 
   it("getHistoryDaySnapshot throws UNAUTHORIZED on 401", async () => {
@@ -876,6 +1021,63 @@ describe("API Client", () => {
 
     assert.equal(result.meal.imageAssetId, "asset-1");
     assert.equal(result.meal.imageUrl, "/api/assets/asset-1");
+  });
+
+  it("updateMeal response preserves valid mealPeriod and omits invalid values", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      meal: {
+        id: "meal-1",
+        mealRevisionId: "meal-1:r2",
+        foodName: "午餐便當更新",
+        calories: 660,
+        protein: 34,
+        carbs: 80,
+        fat: 22,
+        mealPeriod: "lunch",
+        loggedAt: "2026-04-30T00:00:00.000Z",
+      },
+    });
+
+    const valid = await api.updateMeal("meal-1", {
+      expectedMealRevisionId: "meal-1:r1",
+      foodName: "午餐便當更新",
+      calories: 660,
+      protein: 34,
+      carbs: 80,
+      fat: 22,
+      imageAssetId: null,
+    });
+
+    assert.equal(valid.meal.mealPeriod, "lunch");
+
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      meal: {
+        id: "meal-1",
+        mealRevisionId: "meal-1:r3",
+        foodName: "不明餐別更新",
+        calories: 600,
+        protein: 30,
+        carbs: 72,
+        fat: 20,
+        mealPeriod: "brunch",
+        loggedAt: "2026-04-30T00:00:00.000Z",
+      },
+    });
+
+    const invalid = await api.updateMeal("meal-1", {
+      expectedMealRevisionId: "meal-1:r2",
+      foodName: "不明餐別更新",
+      calories: 600,
+      protein: 30,
+      carbs: 72,
+      fat: 20,
+      imageAssetId: null,
+    });
+
+    assert.equal(invalid.meal.mealPeriod, undefined);
   });
 
   it("updateMeal URL-encodes meal id and throws UNAUTHORIZED on 401", async () => {
@@ -1155,6 +1357,65 @@ describe("sendMessageStream", () => {
     assert.equal(mealRevisionId, "meal-1:r1");
   });
 
+  it("dispatches done loggedMeal mealPeriod only for public enum values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
+          foodName: "宵夜飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+          mealPeriod: "late_night",
+        },
+      })}\n\n`,
+    ]);
+    let mealPeriod: unknown;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        mealPeriod = payload.loggedMeal?.mealPeriod;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealPeriod, "late_night");
+
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-2",
+          mealRevisionId: "meal-2:r1",
+          foodName: "不明餐別",
+          calories: 180,
+          protein: 8,
+          carbs: 24,
+          fat: 6,
+          mealPeriod: "midnight_snack",
+        },
+      })}\n\n`,
+    ]);
+    mealPeriod = "not-reset";
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        mealPeriod = payload.loggedMeal?.mealPeriod;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealPeriod, undefined);
+  });
+
   it("dispatches valid done summaryOutcome and omits malformed values", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [
@@ -1261,6 +1522,70 @@ describe("sendMessageStream", () => {
     });
 
     assert.equal(mealRevisionId, "meal-2:r1");
+  });
+
+  it("dispatches stopped loggedMeal mealPeriod only for public enum values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 3,
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-2",
+          mealRevisionId: "meal-2:r1",
+          foodName: "午餐飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+          mealPeriod: "lunch",
+        },
+      })}\n\n`,
+    ]);
+    let mealPeriod: unknown;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        mealPeriod = payload.loggedMeal?.mealPeriod;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealPeriod, "lunch");
+
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 1,
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-3",
+          foodName: "未知餐別",
+          calories: 180,
+          protein: 8,
+          carbs: 24,
+          fat: 6,
+          mealPeriod: "snack",
+        },
+      })}\n\n`,
+    ]);
+    mealPeriod = "not-reset";
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        mealPeriod = payload.loggedMeal?.mealPeriod;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealPeriod, undefined);
   });
 
   it("dispatches valid stopped summaryOutcome and omits malformed values", async () => {
