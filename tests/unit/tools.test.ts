@@ -1782,6 +1782,40 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(transaction?.mealPeriod, null);
   });
 
+  it("does not map snack source text to a late-night historical loggedAt", async () => {
+    const snackText: ToolCall = {
+      id: "call_snack_historical_word",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "蛋餅",
+          calories: 320,
+          protein: 7,
+          carbs: 48,
+          fat: 10,
+          date_text: "2026-03-25",
+          protein_sources: [
+            { name: "蛋餅", protein: 7, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(
+      snackText,
+      deviceId,
+      { foodLoggingService, summaryService },
+      { currentUserMessage: "幫我補記 2026-03-25 下午茶吃蛋餅" },
+    );
+
+    assert.equal(result.summary, "成功");
+    assert.ok(result.loggedMeal);
+    assert.equal((result.loggedMeal as { mealPeriod?: string | null }).mealPeriod, undefined);
+    assert.equal(new Date(result.loggedMeal.loggedAt).getHours(), 12);
+    assert.equal(new Date(result.loggedMeal.loggedAt).getMinutes(), 0);
+  });
+
   it("returns a controlled multiple_targets outcome for multi-date summary requests", async () => {
     const call: ToolCall = {
       id: "call_multi_summary",

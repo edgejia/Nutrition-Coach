@@ -553,7 +553,7 @@ function extractHistoricalMealPeriod(input: string): HistoricalMealPeriod | unde
   if (/(早餐|早上|早飯)/.test(input)) return "breakfast";
   if (/(午餐|中午)/.test(input)) return "lunch";
   if (/(晚餐|晚上)/.test(input)) return "dinner";
-  if (/(宵夜|點心|下午茶)/.test(input)) return "late_night";
+  if (/宵夜/.test(input)) return "late_night";
   return undefined;
 }
 

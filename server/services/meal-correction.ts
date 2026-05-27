@@ -470,7 +470,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     if (
       pending.candidates.length === 1 &&
       !hasLikelyFoodReference(query) &&
-      extractMealPeriod(query) === undefined
+      extractMealPeriod(query) === undefined &&
+      !hasUnsupportedMealPeriodReference(query)
     ) {
       return {
         status: "resolved",
