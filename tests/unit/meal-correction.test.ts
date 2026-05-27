@@ -342,6 +342,41 @@ describe("meal correction service", () => {
     assert.equal(result.resolvedMealId, lunch.id);
   });
 
+  it("projects explicit persisted mealPeriod and source for correction candidates", async () => {
+    const lunch = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T00:30:00.000Z",
+      mealPeriod: "lunch",
+      items: [
+        { foodName: "雞腿便當", calories: 680, protein: 32, carbs: 84, fat: 22 },
+      ],
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把午餐那餐改成 600 卡");
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, lunch.id);
+    assert.equal(result.candidate.mealPeriod, "lunch");
+    assert.equal(result.candidate.mealPeriodSource, "explicit");
+  });
+
+  it("projects inferred mealPeriod source for legacy correction candidates", async () => {
+    const breakfast = await foodLoggingService.logFood(deviceId, {
+      foodName: "燕麥",
+      calories: 220,
+      protein: 10,
+      carbs: 35,
+      fat: 4,
+      loggedAt: "2026-04-19T00:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把早餐那餐刪掉");
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, breakfast.id);
+    assert.equal(result.candidate.mealPeriod, "breakfast");
+    assert.equal(result.candidate.mealPeriodSource, "inferred");
+  });
+
   it("rejects direct food_name patches for grouped meals", async () => {
     const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
