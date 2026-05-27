@@ -13,6 +13,7 @@ import type { AppDatabase } from "../db/client.js";
 import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
 import { projectMealDisplay } from "./meal-display.js";
+import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
 
 type ChatMessageStatus = "complete" | "stopped" | "error";
 
@@ -21,6 +22,7 @@ interface LoggedMealReceipt {
   dateKey?: string;
   mealRevisionId?: string;
   loggedAt: string;
+  mealPeriod?: MealPeriod;
   imageAssetId: string | null;
   imageUrl: string | null;
   foodName: string;
@@ -71,6 +73,7 @@ export function createChatService(db: AppDatabase) {
         deletedAt: mealTransactions.deletedAt,
         mealRevisionId: mealRevisions.id,
         loggedAt: mealTransactions.loggedAt,
+        mealPeriod: mealTransactions.mealPeriod,
         imageAssetId: mealRevisions.imageAssetId,
       })
       .from(chatMealReceipts)
@@ -112,6 +115,7 @@ export function createChatService(db: AppDatabase) {
 
     const isCurrentActiveReceipt =
       receipt.deletedAt === null && receipt.mealRevisionId === receipt.currentRevisionId;
+    const mealPeriod = normalizeMealPeriod(receipt.mealPeriod);
     const display = projectMealDisplay(items);
 
     return {
@@ -123,6 +127,7 @@ export function createChatService(db: AppDatabase) {
           }
         : {}),
       loggedAt: receipt.loggedAt,
+      ...(mealPeriod ? { mealPeriod } : {}),
       imageAssetId: receipt.imageAssetId ?? null,
       imageUrl: receipt.imageAssetId ? buildAssetUrl(receipt.imageAssetId) : null,
       foodName: display.foodName,
