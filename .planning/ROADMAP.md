@@ -71,7 +71,7 @@ Plans:
 - [x] 65-08-PLAN.md — Correction candidate effective meal period plus explicit/inferred source handoff.
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 65-05-PLAN.md — Chat JSON/SSE and restored logged-meal receipt projection.
+- [x] 65-05-PLAN.md — Chat JSON/SSE and restored logged-meal receipt projection.
 
 **Wave 5** *(blocked on Wave 4 completion)*
 - [ ] 65-06-PLAN.md — Client DTO normalization and edit payload preservation.
@@ -135,7 +135,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 5/8 | In Progress|  |
+| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 6/8 | In Progress|  |
 | 66. Numeric Correction Provenance Guard | v2.4 | 0/TBD | Pending | — |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |

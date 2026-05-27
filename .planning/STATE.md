@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-27T13:34:13.982Z"
+last_updated: "2026-05-27T13:49:22.762Z"
 last_activity: 2026-05-27
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 8
-  completed_plans: 5
-  percent: 63
+  completed_plans: 6
+  percent: 0
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-26)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Phase 65 — Tool Contract Alignment and Meal-Period Authority; next plan is 65-05 chat JSON/SSE and restored logged-meal receipt projection
+**Current focus:** Phase 65 — Tool Contract Alignment and Meal-Period Authority; next plan is 65-06 client DTO normalization and edit payload preservation
 
 ## Current Position
 
 Phase: 65 (Tool Contract Alignment and Meal-Period Authority) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-05-27
 
@@ -74,6 +74,7 @@ Last activity: 2026-05-27
 | Phase 65 P03 | 8min | 2 tasks | 6 files |
 | Phase 65 P04 | 5min | 2 tasks | 7 files |
 | Phase 65 P08 | 2m 41s | 1 task | 3 files |
+| Phase 65 P05 | 9min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -147,6 +148,8 @@ Recent decisions affecting current work:
 - [Phase 65]: log_food persists mealPeriod only from explicit source text, while raw meal_period remains historical loggedAt evidence. — Plan 65-03 kept raw model meal_period out of persisted authority and used source-text extraction for mealPeriod.
 - [Phase 65]: Backend meal row APIs project public mealPeriod only from persisted explicit enum values. — Plan 65-04 omits the field for legacy/no-authority rows instead of deriving from loggedAt.
 - [Phase 65]: History routes stay pass-through while history-query owns mealPeriod selection, normalization, and DTO projection. — Plan 65-04 kept route behavior unchanged and updated the service DTO boundary.
+- [Phase 65]: Chat JSON/SSE receipts project mealPeriod only from backend loggedMeal authority after enum normalization. — Plan 65-05 keeps public receipt period authority explicit-only and rejects fabricated inferredMealPeriod fields.
+- [Phase 65]: Restored chat receipts expose mealPeriod as a display-safe fact even when stale receipts omit edit identity. — Plan 65-05 preserves Phase 62 stale receipt edit protection while allowing structured display facts to restore.
 - [Phase 65]: Correction candidates keep mealPeriod as the effective compatibility field and add mealPeriodSource for provenance. — Plan 65-08 completed the INTENT-03 handoff without changing Phase 67 ranking policy.
 - [Phase 65]: Explicit persisted mealPeriod is selected from meal_transactions and normalized before falling back to loggedAt inference. — Legacy/no-authority candidates remain available as inferred fallback facts.
 
@@ -179,10 +182,10 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-27T13:34:13.975Z
-Stopped at: Completed 65-08-PLAN.md
+Last session: 2026-05-27T13:49:22.755Z
+Stopped at: Completed 65-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Continue Phase 65 with `65-05-PLAN.md`.
+- Continue Phase 65 with `65-06-PLAN.md`.
