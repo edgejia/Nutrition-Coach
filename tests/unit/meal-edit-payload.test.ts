@@ -112,6 +112,43 @@ describe("meal edit payload builders", () => {
     });
   });
 
+  it("buildHistoryMealEditPayload preserves explicit mealPeriod from history rows", () => {
+    const payload = buildHistoryMealEditPayload({
+      id: "meal-period-history",
+      mealRevisionId: "meal-period-history:r1",
+      foodName: "午餐便當",
+      calories: 520,
+      protein: 32,
+      carbs: 64,
+      fat: 18,
+      itemCount: 1,
+      imageAssetId: null,
+      imageUrl: null,
+      loggedAt: "2026-05-06T07:00:00.000+08:00",
+      mealPeriod: "lunch",
+    }, "2026-05-06");
+
+    assert.equal(payload.mealPeriod, "lunch");
+  });
+
+  it("buildHistoryMealEditPayload omits mealPeriod when history rows lack explicit authority", () => {
+    const payload = buildHistoryMealEditPayload({
+      id: "legacy-history",
+      mealRevisionId: "legacy-history:r1",
+      foodName: "早餐時間的餐點",
+      calories: 320,
+      protein: 18,
+      carbs: 42,
+      fat: 8,
+      itemCount: 1,
+      imageAssetId: null,
+      imageUrl: null,
+      loggedAt: "2026-05-06T07:00:00.000+08:00",
+    }, "2026-05-06");
+
+    assert.equal(payload.mealPeriod, undefined);
+  });
+
   it("buildReceiptMealEditPayload preserves chat receipt image identity and rejects incomplete receipts", () => {
     const payload = buildReceiptMealEditPayload({
       mealId: "meal-2",
@@ -166,6 +203,41 @@ describe("meal edit payload builders", () => {
       carbs: 1,
       fat: 1,
     } as any), null);
+  });
+
+  it("buildReceiptMealEditPayload preserves explicit mealPeriod from chat receipts", () => {
+    const payload = buildReceiptMealEditPayload({
+      mealId: "meal-period-receipt",
+      mealRevisionId: "meal-period-receipt:r1",
+      dateKey: "2026-05-06",
+      loggedAt: "2026-05-06T07:00:00.000+08:00",
+      foodName: "宵夜飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      itemCount: 1,
+      mealPeriod: "late_night",
+    });
+
+    assert.equal(payload?.mealPeriod, "late_night");
+  });
+
+  it("buildReceiptMealEditPayload omits mealPeriod when receipts lack explicit authority", () => {
+    const payload = buildReceiptMealEditPayload({
+      mealId: "legacy-receipt-period",
+      mealRevisionId: "legacy-receipt-period:r1",
+      dateKey: "2026-05-06",
+      loggedAt: "2026-05-06T22:30:00.000+08:00",
+      foodName: "深夜餐點",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      itemCount: 1,
+    });
+
+    assert.equal(payload?.mealPeriod, undefined);
   });
 
   it("defaults legacy edit payloads without itemCount to single-item semantics", () => {
