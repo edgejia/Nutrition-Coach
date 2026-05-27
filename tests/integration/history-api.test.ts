@@ -40,6 +40,7 @@ type HistoryMeal = {
   };
   imageAssetId: string | null;
   imageUrl: string | null;
+  mealPeriod?: "breakfast" | "lunch" | "dinner" | "late_night";
   revision: {
     currentRevisionNumber: number;
   };
@@ -323,6 +324,65 @@ describe("History API", () => {
       boundaryMeal.mealRevisionId,
     );
     assertNoUnsafeHistoryFields(body);
+  });
+
+  it("projects explicit mealPeriod through history list, search, and day detail without inferring legacy rows", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const explicitLunch = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 650,
+      protein: 36,
+      carbs: 72,
+      fat: 24,
+      loggedAt: "2026-03-25T00:30:00.000Z",
+      mealPeriod: "lunch",
+    });
+    const legacyBreakfastHour = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 360,
+      protein: 18,
+      carbs: 42,
+      fat: 14,
+      loggedAt: "2026-03-25T00:45:00.000Z",
+    });
+
+    const listRes = await app.inject({
+      method: "GET",
+      url: "/api/history/meals?from=2026-03-25&to=2026-03-25&limit=10",
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(listRes.statusCode, 200);
+    const listBody = listRes.json() as { meals: HistoryMeal[] };
+    const listExplicitMeal = listBody.meals.find((meal) => meal.id === explicitLunch.id);
+    assert.ok(listExplicitMeal, "expected history list to include explicit lunch meal");
+    assert.equal(listExplicitMeal.mealPeriod, "lunch");
+    const listLegacyMeal = listBody.meals.find((meal) => meal.id === legacyBreakfastHour.id);
+    assert.ok(listLegacyMeal, "expected history list to include legacy breakfast-hour meal");
+    assert.equal(Object.prototype.hasOwnProperty.call(listLegacyMeal, "mealPeriod"), false);
+
+    const searchRes = await app.inject({
+      method: "GET",
+      url: "/api/history/search?q=%E9%9B%9E%E8%85%BF&from=2026-03-25&to=2026-03-25&limit=10",
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(searchRes.statusCode, 200);
+    const searchBody = searchRes.json() as { results: Array<{ meal: HistoryMeal }> };
+    assert.equal(searchBody.results.find((result) => result.meal.id === explicitLunch.id)?.meal.mealPeriod, "lunch");
+
+    const dayRes = await app.inject({
+      method: "GET",
+      url: "/api/history/days/2026-03-25",
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(dayRes.statusCode, 200);
+    const dayBody = dayRes.json() as { meals: HistoryMeal[] };
+    const dayExplicitMeal = dayBody.meals.find((meal) => meal.id === explicitLunch.id);
+    assert.ok(dayExplicitMeal, "expected history day detail to include explicit lunch meal");
+    assert.equal(dayExplicitMeal.mealPeriod, "lunch");
+    const dayLegacyMeal = dayBody.meals.find((meal) => meal.id === legacyBreakfastHour.id);
+    assert.ok(dayLegacyMeal, "expected history day detail to include legacy breakfast-hour meal");
+    assert.equal(Object.prototype.hasOwnProperty.call(dayLegacyMeal, "mealPeriod"), false);
   });
 
   it("GET /api/history/meals returns opaque cursor pages without duplicate meals", async () => {
