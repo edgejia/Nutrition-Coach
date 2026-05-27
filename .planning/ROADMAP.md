@@ -94,10 +94,15 @@ Plans:
   4. Backend-rendered guidance explains the needed numeric input or proposal step in concise Traditional Chinese.
 **Plans**: 5 plans
 Plans:
+**Wave 1**
 - [ ] 66-01-PLAN.md — Wave 0 meal numeric authority helper and explicit evidence proof.
 - [ ] 66-02-PLAN.md — Wave 0 backend-owned meal proposal state and renderer copy.
 - [ ] 66-03-PLAN.md — Tool-boundary update_meal enforcement and proposal creation.
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 66-04-PLAN.md — Pre-model proposal approval, cancel, and cross-kind ambiguity routing.
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 66-05-PLAN.md — Chat integration proof and prompt contract cleanup.
 **Implementation Notes:**
 - Treat server-side provenance as authoritative; prompts and client UI can support but cannot enforce the boundary alone.
