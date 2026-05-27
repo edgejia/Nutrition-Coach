@@ -32,12 +32,17 @@ async function readSource(relativePath: string) {
 }
 
 describe("Home dashboard display contracts", () => {
-  it("derives display-only meal labels from loggedAt", () => {
-    assert.equal(getDisplayMealLabel("2026-04-29T07:30:00+08:00"), "早餐");
-    assert.equal(getDisplayMealLabel("2026-04-29T12:30:00+08:00"), "午餐");
-    assert.equal(getDisplayMealLabel("2026-04-29T15:00:00+08:00"), "點心");
-    assert.equal(getDisplayMealLabel("2026-04-29T19:00:00+08:00"), "晚餐");
-    assert.equal(getDisplayMealLabel("not-a-date"), "餐點");
+  it("prefers explicit mealPeriod before falling back to loggedAt labels", () => {
+    assert.equal(getDisplayMealLabel("lunch", "2026-04-29T07:30:00+08:00"), "午餐");
+    assert.equal(getDisplayMealLabel("breakfast", "2026-04-29T12:30:00+08:00"), "早餐");
+    assert.equal(getDisplayMealLabel("dinner", "2026-04-29T15:00:00+08:00"), "晚餐");
+    assert.equal(getDisplayMealLabel("late_night", "2026-04-29T19:00:00+08:00"), "宵夜");
+    assert.equal(getDisplayMealLabel(null, "2026-04-29T07:30:00+08:00"), "早餐");
+    assert.equal(getDisplayMealLabel(undefined, "2026-04-29T12:30:00+08:00"), "午餐");
+    assert.equal(getDisplayMealLabel(undefined, "2026-04-29T15:00:00+08:00"), "點心");
+    assert.equal(getDisplayMealLabel(undefined, "2026-04-29T19:00:00+08:00"), "晚餐");
+    assert.equal(getDisplayMealLabel("invalid" as never, "2026-04-29T15:00:00+08:00"), "點心");
+    assert.equal(getDisplayMealLabel(null, "not-a-date"), "餐點");
     assert.equal(getDisplayMealLabel(), "餐點");
   });
 
@@ -106,11 +111,12 @@ describe("Home dashboard display contracts", () => {
     }
 
     assert.equal(getMealMacroSummary({ protein: 18, carbs: 42, fat: 8 }), "P 18 · C 42 · F 8");
-    assert.equal(getMealBadge("2026-04-29T07:30:00+08:00"), "B");
-    assert.equal(getMealBadge("2026-04-29T12:30:00+08:00"), "L");
-    assert.equal(getMealBadge("2026-04-29T15:00:00+08:00"), "S");
-    assert.equal(getMealBadge("2026-04-29T19:00:00+08:00"), "D");
-    assert.equal(getMealBadge("not-a-date"), "M");
+    assert.equal(getMealBadge("breakfast", "2026-04-29T12:30:00+08:00"), "B");
+    assert.equal(getMealBadge("lunch", "2026-04-29T07:30:00+08:00"), "L");
+    assert.equal(getMealBadge("late_night", "2026-04-29T19:00:00+08:00"), "N");
+    assert.equal(getMealBadge(undefined, "2026-04-29T15:00:00+08:00"), "S");
+    assert.equal(getMealBadge(undefined, "2026-04-29T19:00:00+08:00"), "D");
+    assert.equal(getMealBadge(undefined, "not-a-date"), "M");
   });
 
   it("provides empty coach handoff copy", () => {
@@ -180,9 +186,9 @@ describe("Home dashboard display contracts", () => {
     const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
 
     assert.match(homeSource, /<article key=\{meal\.id\} className="home-sport-meal-row">/);
-    assert.match(homeSource, /getMealBadge\(meal\.loggedAt\)/);
+    assert.match(homeSource, /getMealBadge\(meal\.mealPeriod, meal\.loggedAt\)/);
     assert.match(homeSource, /formatMealRowTime\(meal\.loggedAt\)/);
-    assert.match(homeSource, /getDisplayMealLabel\(meal\.loggedAt\)/);
+    assert.match(homeSource, /getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)/);
     assert.match(homeSource, /getMealMacroSummary\(meal\)/);
     assert.match(homeSource, /Math\.max\(0, Math\.round\(meal\.calories\)\)/);
     assert.match(homeSource, /stageHomeTaskOptionPrompt\(prompt, setPendingHomeChatDraft, setActiveScreen\)/);
