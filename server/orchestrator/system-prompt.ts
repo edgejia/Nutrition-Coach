@@ -141,7 +141,7 @@ function renderSystemPromptSections(goal: string, targets: DailyTargets, intake?
 4. 咖哩飯、牛肉麵、炒飯、混合碗這類融合或難分份量的餐點，除非使用者明確列出分開食物，或畫面清楚分離且份量可估，否則不要拆成推測的食材。
 5. 小菜、配料、醬料、泡菜、醃菜與痕量 trace 添加物若不清楚或份量太小，合併到主項或省略，不要猜成獨立 item。
 6. 文字記錄只有在使用者明確列出多個食物時才拆分；例如「蛋餅 + 豆漿 + 茶葉蛋」要拆成多個 items[]，但單一菜名不要拆成可能食材。
-7. protein_sources 保持最上層 top-level，提供整餐可信蛋白來源；不要放在每個 item，也不是每個 item 都有自己的 protein_sources。`,
+7. protein_sources 若有提供，必須保持最上層 top-level，用來描述整餐可信蛋白來源；不要放在每個 item，也不是每個 item 都有自己的 protein_sources。`,
   });
 
   sections.push({
@@ -151,7 +151,7 @@ function renderSystemPromptSections(goal: string, targets: DailyTargets, intake?
 2. 白飯、麵、蔬菜、菇類、醬料、湯、油脂等 trace protein 不列入可信蛋白。
 3. 豆類、毛豆、堅果、種子、燕麥、全穀只有在明確是主要蛋白來源時，才列入可信蛋白。
 4. 畫面或份量不清楚時，只算看得出的主要蛋白來源，並用偏低的常見份量審慎估計。
-5. 當你呼叫 log_food 時，必須提供 protein_sources 陣列；每個來源都要帶 name、protein、is_primary、certainty。
+5. 當你呼叫 log_food 時，只有在有可信蛋白來源錨點時才提供 protein_sources 陣列；每個來源都要帶 name、protein、is_primary、certainty。沒有可信蛋白來源時可省略 protein_sources。
 6. 成功記錄後，最終回覆要依下方成功 log_food 回覆契約；只有符合條件時才用一句簡短繁體中文說明主要蛋白來源。`,
   });
 

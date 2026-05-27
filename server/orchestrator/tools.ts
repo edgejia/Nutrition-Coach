@@ -921,7 +921,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       ...quantityToolProperties,
       protein_sources: {
         type: "array",
-        description: "Required. List visually identifiable protein-bearing ingredients; mark uncertain when estimated from an image.",
+        description: "Optional parse-time evidence. Provide only when credible protein-source anchors exist; omit when no credible anchors are available.",
         items: {
           type: "object",
           additionalProperties: false,
@@ -960,7 +960,6 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       },
     },
     additionalProperties: false,
-    required: ["protein_sources"],
   },
   zodSchema: logFoodSchema,
   // No sourceFields per D-11: log_food calorie estimates need not appear in
