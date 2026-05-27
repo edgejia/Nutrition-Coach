@@ -407,17 +407,17 @@ if (expected !== existing.currentRevisionId) {
 | A1 | A pre-model proposal decision router is the cleanest way to enforce broad cancel and cross-kind bare approval ambiguity. [ASSUMED] | Architecture Patterns | Planner could instead put all proposal decisions into tool contracts, but must still prevent both-active bare approval before any commit. |
 | A2 | A new dedicated `meal-numeric-authority.ts` helper is preferable to expanding `source-text-guard.ts` with all meal-specific policy. [ASSUMED] | Recommended Project Structure | Planner may choose a different file split; risk is only organization if tests cover the same behavior. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact meal numeric proposal TTL**
    - What we know: goal proposals use 30 minutes. [VERIFIED: server/services/goal-proposals.ts:6]
-   - What's unclear: Phase 66 context leaves exact TTL to planning calibration. [CITED: .planning/phases/66-numeric-correction-provenance-guard/66-CONTEXT.md]
-   - Recommendation: use 30 minutes unless planner finds UX evidence for shorter, because it matches the existing active proposal precedent. [ASSUMED]
+   - Selected answer: meal numeric proposals use a 30-minute TTL, matching the Phase 60 goal proposal precedent while remaining short-lived. [RESOLVED]
+   - Planning implication: `MEAL_NUMERIC_PROPOSAL_TTL_MS` should be `30 * 60 * 1000`, stored through `turn_states`, and covered by service expiry tests. [RESOLVED]
 
 2. **How much of goal approval should move into the pre-model proposal router**
    - What we know: goal cancel is pre-model, while goal approval is currently tool-loop mediated. [VERIFIED: server/orchestrator/index.ts:641, server/orchestrator/tools.ts:1478]
-   - What's unclear: Phase 66 only requires cross-kind fail-closed behavior, not a full goal proposal refactor. [CITED: .planning/phases/66-numeric-correction-provenance-guard/66-CONTEXT.md]
-   - Recommendation: implement the minimum router needed for cross-kind ambiguity, broad cancel, kind-specific meal approval, and kind-specific meal cancel; leave goal-only approval on existing path unless the planner can keep the change smaller by centralizing all proposal decisions. [ASSUMED]
+   - Selected answer: the minimum pre-model router scope is active proposal decisions only: broad cancel, bare approval ambiguity, kind-specific meal approval/cancel, and kind-specific goal approval/cancel where needed for disambiguation. [RESOLVED]
+   - Planning implication: do not move general meal-correction intent handling out of the model/tool loop; the router should only decide active backend proposal approval/cancel/ambiguity cases before the model can rewrite or choose a mutation path. [RESOLVED]
 
 ## Environment Availability
 
