@@ -20,6 +20,10 @@ import {
   type HistoricalMealPeriod,
 } from "../lib/historical-date.js";
 import {
+  extractExplicitMealPeriodFromSourceText,
+  type MealPeriod,
+} from "../lib/meal-period.js";
+import {
   runContract,
   summarizeContractArgsForLog,
   type ToolContract,
@@ -101,6 +105,7 @@ export interface ToolExecutionResult {
     mealRevisionId: string;
     dateKey: string;
     loggedAt: string;
+    mealPeriod?: MealPeriod;
     imageAssetId: string | null;
     imageUrl: string | null;
     foodName: string;
@@ -240,6 +245,7 @@ interface LogFoodSuccessResult {
     mealRevisionId: string;
     dateKey: string;
     loggedAt: string;
+    mealPeriod?: MealPeriod;
     imageAssetId: string | null;
     imageUrl: string | null;
     foodName: string;
@@ -876,6 +882,7 @@ function projectMealIdentityFields(meal: {
   id: string;
   mealRevisionId: string;
   loggedAt: string;
+  mealPeriod?: MealPeriod | null;
   imagePath: string | null;
 }) {
   const imageAssetId = parseAssetRef(meal.imagePath);
@@ -884,6 +891,7 @@ function projectMealIdentityFields(meal: {
     mealRevisionId: meal.mealRevisionId,
     dateKey: formatLocalDate(new Date(meal.loggedAt)),
     loggedAt: meal.loggedAt,
+    ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
     imageAssetId,
     imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
   };
@@ -1020,6 +1028,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         })
       : undefined;
 
+    const mealPeriod = extractExplicitMealPeriodFromSourceText(context.currentUserMessage);
     const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
     const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(
       normalized,
@@ -1044,6 +1053,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
     const loggedMeal = await deps.foodLoggingService.logGroupedMeal(deviceId, {
         imagePath: deps.imagePath,
         loggedAt,
+        ...(mealPeriod ? { mealPeriod } : {}),
         items: normalizedItems,
       });
 
