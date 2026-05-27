@@ -298,7 +298,7 @@ describe("Chat API", () => {
 
   it("POST /api/chat accepts multipart text-only requests", async () => {
     const form = new FormData();
-    form.append("message", "我吃了蘋果");
+    form.append("message", "午餐我吃了蘋果");
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
@@ -1318,7 +1318,7 @@ describe("Chat API", () => {
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
     const form = new FormData();
-    form.append("message", "我吃了蘋果");
+    form.append("message", "午餐我吃了蘋果");
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
@@ -1846,7 +1846,7 @@ describe("Chat API", () => {
     mockLLM.queueChatResponse({ content: "已幫你記錄蘋果！" });
 
     const form = new FormData();
-    form.append("message", "我吃了蘋果");
+    form.append("message", "午餐我吃了蘋果");
     form.append("image", new Blob(["fake image"], { type: "image/png" }), "apple.png");
     const chatRes = await fetch(`${address}/api/chat`, {
       method: "POST",
@@ -1858,6 +1858,7 @@ describe("Chat API", () => {
       loggedMeal?: {
         mealId?: string;
         mealRevisionId?: string;
+        mealPeriod?: string;
         imageAssetId?: string | null;
         imageUrl?: string | null;
         itemCount?: number;
@@ -1865,6 +1866,7 @@ describe("Chat API", () => {
     };
     assert.match(chatBody.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
     assert.match(chatBody.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
+    assert.equal(chatBody.loggedMeal?.mealPeriod, "lunch");
     assert.ok(chatBody.loggedMeal?.imageAssetId);
     assert.equal(chatBody.loggedMeal?.imageUrl, `/api/assets/${chatBody.loggedMeal.imageAssetId}`);
     assert.equal(chatBody.loggedMeal?.itemCount, 1);
@@ -1901,6 +1903,7 @@ describe("Chat API", () => {
       dateKey: assistantMessage.loggedMeal.dateKey,
       mealRevisionId: chatBody.loggedMeal.mealRevisionId,
       loggedAt: assistantMessage.loggedMeal.loggedAt,
+      mealPeriod: "lunch",
       imageAssetId: chatBody.loggedMeal.imageAssetId,
       imageUrl: chatBody.loggedMeal.imageUrl,
       foodName: "蘋果",
@@ -1914,6 +1917,87 @@ describe("Chat API", () => {
       ],
     });
     assert.equal("currentRevisionId" in assistantMessage.loggedMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(assistantMessage.loggedMeal, "inferredMealPeriod"), false);
+  });
+
+  it("GET /api/chat/history keeps stale loggedMeal receipts display-only with explicit mealPeriod", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_stale_lunch_receipt",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄雞腿便當！" });
+
+    const form = new FormData();
+    form.append("message", "午餐我吃了雞腿便當");
+    const chatRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+    assert.equal(chatRes.status, 200);
+    const chatBody = await chatRes.json() as {
+      loggedMeal?: {
+        mealId?: string;
+        mealRevisionId?: string;
+      };
+    };
+    assert.ok(chatBody.loggedMeal?.mealId);
+    assert.ok(chatBody.loggedMeal?.mealRevisionId);
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${chatBody.loggedMeal.mealId}`,
+      headers: { cookie: sessionCookieHeader },
+      payload: {
+        foodName: "半份雞腿便當",
+        calories: 360,
+        protein: 18,
+        carbs: 38,
+        fat: 10,
+        imageAssetId: null,
+        expectedMealRevisionId: chatBody.loggedMeal.mealRevisionId,
+      },
+    });
+    assert.equal(updateRes.statusCode, 200);
+
+    const historyRes = await app.inject({
+      method: "GET",
+      url: "/api/chat/history?limit=50",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(historyRes.statusCode, 200);
+    const historyBody = historyRes.json();
+    const assistantMessage = historyBody.messages.find((message: { role: string }) => message.role === "assistant");
+    assert.equal(assistantMessage.didLogMeal, true);
+    assert.equal(assistantMessage.loggedMeal.mealId, undefined);
+    assert.equal(assistantMessage.loggedMeal.dateKey, undefined);
+    assert.equal(assistantMessage.loggedMeal.mealRevisionId, undefined);
+    assert.equal(assistantMessage.loggedMeal.mealPeriod, "lunch");
+    assert.equal(assistantMessage.loggedMeal.foodName, "雞腿便當");
+    assert.equal(assistantMessage.loggedMeal.itemCount, 1);
+    assert.deepEqual(assistantMessage.loggedMeal.items, [
+      { name: "雞腿便當", position: 1, calories: 620, protein: 24, carbs: 70, fat: 18 },
+    ]);
+    assert.equal(Object.prototype.hasOwnProperty.call(assistantMessage.loggedMeal, "currentRevisionId"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(assistantMessage.loggedMeal, "inferredMealPeriod"), false);
   });
 
   it("POST /api/chat JSON response returns grouped loggedMeal.itemCount", async () => {
