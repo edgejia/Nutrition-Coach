@@ -16,8 +16,8 @@ Phase 66 makes server-side provenance authoritative for chat meal numeric correc
 ### Numeric Evidence Boundary
 - **D-01:** Direct `update_meal` numeric mutation authority comes only from explicit current-turn final target values or explicit approval of an active backend-owned numeric correction proposal.
 - **D-02:** Ordinary prior assistant prose is not authoritative. If the previous assistant text contains a number, it can authorize mutation only when that value was also stored as a valid backend-owned proposal and the user approves that proposal.
-- **D-03:** Explicit final target values may be written as Arabic numerals, decimals, common Chinese numerals, and unit variants such as `28g`, `28 克`, `500 卡`, or `500 kcal`. Units are normalized; the value must express the final target.
-- **D-04:** Relative or broad quantity phrases do not directly authorize numeric patches. Computable phrases such as `半份`, `減半`, `少 20%`, `加 10g`, or `少 10g` may only create deterministic backend proposals from current persisted facts and require later approval.
+- **D-03:** Explicit final target values may be written as Arabic integers, Arabic decimals, common Chinese numeral compounds, bare Chinese digits when they clearly express the target value, and unit variants such as `28g`, `28 克`, `500 卡`, or `500 kcal`. Units are normalized; the value must express the final target. Planner note: the current `source-text-guard` only emits Arabic integer digit runs and Chinese numeral compounds, so Phase 66 must explicitly cover decimals and bare Chinese-digit cases if they remain accepted.
+- **D-04:** Relative or broad quantity phrases do not directly authorize numeric patches. The only Phase 66 proposal-trigger operators are the locked deterministic math cases from current persisted facts: half / reduce by percentage / add N units / subtract N units. Do not expand this operator set in Phase 66.
 - **D-05:** Non-computable vague phrases such as `合理一點` or `蛋白質怪怪的` must ask for clarification unless a separately defined deterministic backend estimator exists.
 - **D-06:** The guard applies to every numeric nutrition field written by `update_meal`, including top-level `calories` / `protein` / `carbs` / `fat` patch fields and numeric values inside `items[]` replacement payloads. `items[]` must not become a bypass.
 - **D-07:** A current-turn explicit meal-level number authorizes a grouped meal total for that field. Phase 66 may keep the existing deterministic proportional distribution across current items. This is a provenance decision only, not a claim that the current protein distribution semantics are nutritionally ideal.
@@ -39,12 +39,13 @@ Phase 66 makes server-side provenance authoritative for chat meal numeric correc
 - **D-19:** The proposal should carry proposal id, meal id, expected revision, backend-computed numeric patch or `items[]` result, affected fields, source operator, created time, and expiry.
 - **D-20:** Approval commits only if the active proposal still exists, the user explicitly approves it, and the expected meal revision is still current. Stale proposal approval should reuse the existing Phase 62 meal revision precondition path, not a new proposal-specific stale mechanism.
 - **D-21:** Creating a new same-kind numeric correction proposal replaces the previous active meal correction proposal for that device. Successful approval, cancel text, expiry, or replacement clears the proposal.
-- **D-22:** Reuse Phase 60-style short approval/cancel wording for numeric correction proposals. Short affirmatives such as `好`, `可以`, `用這個`, `就這樣`, `套用`, or `ok` may commit only when approval rules identify exactly one active backend-owned proposal.
+- **D-22:** Reuse Phase 60-style short approval/cancel wording for numeric correction proposals. Exact vocabulary should follow or reuse the existing `isGoalProposalConsent` / `isGoalProposalCancel` helpers: short affirmatives such as `好`, `可以`, `用這組`, `就這樣`, `套用`, or `ok` may commit only when approval rules identify exactly one active backend-owned proposal.
 - **D-23:** Cancel phrases such as `不要`, `取消`, `先不用`, `不用`, `不可以`, or `no` take precedence over approval matching.
 - **D-24:** Proposal copy should show the target meal, every affected field, before/after numbers, and renderer-owned approval/adjust prompt in concise Traditional Chinese. Use `kcal` for calories and `g` for macros.
 - **D-25:** Single-field proposals should show the specific before/after delta. Multi-field proposals should list all affected fields' before/after values so the user knows exactly what approval commits.
 - **D-26:** Meal labels in proposal copy must be identifiable, using a single item name or concise combined label for grouped meals when item names are available. Avoid generic labels when item names exist.
 - **D-27:** Do not show calculation formulas by default. A short natural operator label such as `減半` is acceptable; formula detail such as `40 x 0.5 = 20` should be omitted unless the user asks how it was calculated.
+- **D-27a:** Proposal creation copy should disclose when another proposal kind is also active, so users know bare approval will require kind-specific disambiguation.
 
 ### Cross-Kind Proposal Ambiguity
 - **D-28:** Bare approval can commit only when exactly one active approvable proposal exists for the device. If both a goal proposal and a meal correction proposal are active, bare approval such as `好`, `可以`, `ok`, or `就這樣` must fail closed and mutate neither.
@@ -73,15 +74,26 @@ Phase 66 makes server-side provenance authoritative for chat meal numeric correc
 
 ### Numeric Guard and Tool Contracts
 - `server/orchestrator/tools.ts` — `find_meals`, `update_meal`, `update_goals`, proposal precedent, tool schemas, result adapters, and current lack of `update_meal` numeric source guard.
+- `server/orchestrator/tools.ts:1238` — `update_meal` contract definition; currently requires a resolved target and writes through `mealCorrectionService.updateMeal`.
+- `server/orchestrator/tools.ts:1281` — current `update_meal` precondition depends on `toolSessionState.resolvedMealTargets` seeded by `find_meals`.
 - `server/orchestrator/tool-contract.ts` — source-field guard hook, controlled validation/guard failures, and redacted tool summaries.
-- `server/orchestrator/source-text-guard.ts` — current exact numeric source authorization behavior for goals, Chinese numeral normalization, assistant-proposal confirmation handling, and Phase 60 approval/cancel helpers.
+- `server/orchestrator/source-text-guard.ts:46` — existing Phase 60 consent/cancel vocabulary, including `用這組`, that Phase 66 should follow or reuse.
+- `server/orchestrator/source-text-guard.ts:248` — current numeric source normalization emits Arabic integer runs and Chinese numeral compounds; decimals and bare Chinese digits need explicit Phase 66 work.
+- `server/orchestrator/system-prompt.ts:181` — meal correction prompt section. Current wording still allows model-chosen reasonable numbers and direct application; Phase 66 must update this contract.
 - `server/orchestrator/index.ts` — controlled reply short-circuit behavior, tool loop, mutation receipt handling, and prevention point for later LLM rewrite.
+- `server/orchestrator/index.ts:945` — `controlledReply` short-circuits as terminal renderer-owned output before later model rewrite.
+- `server/orchestrator/mutation-receipts.ts:59` — `renderGoalProposalCopy` shape for concrete proposal values plus approval/adjust prompt.
 - `server/orchestrator/mutation-receipts.ts` — renderer-owned meal mutation receipt style and mutation-kind handling.
 
 ### Meal Correction and Revision Behavior
 - `server/services/meal-correction.ts` — current `findMeals`, `updateMeal`, candidate state, grouped meal proportional distribution, summary outcome after update/delete, and pending target selection state.
 - `server/services/meal-transactions.ts` — revisioned meal writes, current revision preconditions, and stale update/delete behavior.
-- `server/services/turn-state.ts` — existing active state storage pattern for proposal-like workflows.
+- `server/db/schema.ts:179` — `turn_states` table backing per-device/per-kind active state.
+- `server/db/schema.ts:193` — unique `(device_id, kind)` index that enables same-kind replacement while allowing cross-kind coexistence.
+- `server/services/turn-state.ts:15` — `putState` upsert semantics with TTL for active proposal-like state.
+- `server/services/turn-state.ts:56` — `getState` expiry handling.
+- `server/services/goal-proposals.ts:5` — existing goal proposal kind and TTL precedent.
+- `server/services/goal-proposals.ts:8` — existing proposal payload shape.
 
 ### Proof Surfaces
 - `tests/unit/tools.test.ts` — tool contract proof for `find_meals`, `update_meal`, revision identity, stale revision behavior, and summary outcomes.
@@ -95,10 +107,11 @@ Phase 66 makes server-side provenance authoritative for chat meal numeric correc
 ## Existing Code Insights
 
 ### Reusable Assets
-- `server/orchestrator/source-text-guard.ts` already normalizes Arabic integer runs, common Chinese numerals, and approval/cancel-style phrases for backend-owned goal proposals. Planner must verify or extend decimal handling because Phase 66 decisions accept decimal target values.
+- `server/orchestrator/source-text-guard.ts` already normalizes Arabic integer runs, common Chinese numeral compounds, and approval/cancel-style phrases for backend-owned goal proposals. Planner must verify or extend decimal and bare Chinese-digit handling because Phase 66 decisions accept those target values.
 - `server/orchestrator/tool-contract.ts` already supports `sourceFields` and controlled guard failure before tool execution, but `update_meal` currently does not declare guarded fields.
 - `server/services/meal-correction.ts` already applies top-level numeric meal patches deterministically, including proportional distribution across grouped items.
 - `server/services/turn-state.ts` and Phase 60 goal proposal behavior provide the precedent for one active backend-owned proposal per device/kind.
+- `server/orchestrator/mutation-receipts.ts` already has renderer-owned proposal and failure copy helpers; Phase 66 should add meal-correction equivalents rather than relying on prompt prose.
 
 ### Established Patterns
 - Tool calls are untrusted model output and should run through Zod validation, source/provenance guards, and redacted logging summaries before execution.
@@ -108,9 +121,11 @@ Phase 66 makes server-side provenance authoritative for chat meal numeric correc
 
 ### Integration Points
 - Add numeric provenance enforcement at the `update_meal` contract boundary before `mealCorrectionService.updateMeal()` can write a revision.
+- Update `server/orchestrator/system-prompt.ts` so the model is no longer instructed to choose a reasonable meal-correction number and directly apply it. Prompt changes are support only; backend guards remain authoritative.
+- Proposal approval must resolve the current `update_meal` precondition path. Today `update_meal` depends on `find_meals` seeding `toolSessionState.resolvedMealTargets`; plan-phase must decide how approved stored proposals enter the write path without bypassing expected revision checks.
 - Extend tool session or backend state to recognize active numeric correction proposals, approval/cancel text, and cross-kind proposal ambiguity before the model tool loop can produce unsafe mutation claims.
 - Renderer copy for blocked corrections and proposals likely belongs near existing mutation/goal renderer helpers, not in prompt text.
-- Tests should cover top-level patch, `items[]` replacement, direct explicit numeric updates, relative proposal creation/approval, stale proposal approval, cross-kind ambiguity, broad cancel, and no-mutation side effects.
+- Tests should cover the accepted numeric evidence matrix, including Arabic integers, Arabic decimals, common Chinese numeral compounds, bare Chinese digits, and unit variants; top-level patch and `items[]` replacement; direct explicit numeric updates; relative proposal creation/approval from only the locked D-04 operators; stale proposal approval through the existing meal revision precondition path; cross-kind ambiguity; broad cancel; and no-mutation side effects.
 
 </code_context>
 
