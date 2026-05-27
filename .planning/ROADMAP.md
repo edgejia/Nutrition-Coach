@@ -66,7 +66,7 @@ Plans:
 - [x] 65-02-PLAN.md — Blocking Drizzle migration generation and nullable SQL verification.
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 65-03-PLAN.md — `log_food` contract alignment, prompt update, and source-text period persistence.
+- [x] 65-03-PLAN.md — `log_food` contract alignment, prompt update, and source-text period persistence.
 - [ ] 65-04-PLAN.md — Backend current-day, day snapshot, and history meal row projection.
 - [ ] 65-08-PLAN.md — Correction candidate effective meal period plus explicit/inferred source handoff.
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 2/8 | In Progress|  |
+| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 3/8 | In Progress|  |
 | 66. Numeric Correction Provenance Guard | v2.4 | 0/TBD | Pending | — |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |

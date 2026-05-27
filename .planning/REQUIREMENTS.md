@@ -9,9 +9,9 @@ Requirements for the v2.4 correction-authority milestone. Each requirement must 
 
 ### Tool Contract Alignment
 
-- [ ] **TOOL-01**: The `log_food` LLM-facing JSON schema and runtime Zod executor contract agree on whether `protein_sources` is required, so local tests and model tool calls enforce the same shape.
-- [ ] **TOOL-02**: Existing trusted-protein behavior remains protected after the schema alignment, including counted anchors, excluded trace sources, and conservative handling for uncertain inputs.
-- [ ] **TOOL-03**: Successful text and image meal logging still return committed meal receipts and `summaryOutcome` without reintroducing LLM-authored mutation facts.
+- [x] **TOOL-01**: The `log_food` LLM-facing JSON schema and runtime Zod executor contract agree on whether `protein_sources` is required, so local tests and model tool calls enforce the same shape.
+- [x] **TOOL-02**: Existing trusted-protein behavior remains protected after the schema alignment, including counted anchors, excluded trace sources, and conservative handling for uncertain inputs.
+- [x] **TOOL-03**: Successful text and image meal logging still return committed meal receipts and `summaryOutcome` without reintroducing LLM-authored mutation facts.
 
 ### Meal Intent Fidelity
 
@@ -79,9 +79,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TOOL-01 | Phase 65 | Pending |
-| TOOL-02 | Phase 65 | Pending |
-| TOOL-03 | Phase 65 | Pending |
+| TOOL-01 | Phase 65 | Complete |
+| TOOL-02 | Phase 65 | Complete |
+| TOOL-03 | Phase 65 | Complete |
 | INTENT-01 | Phase 65 | Complete |
 | INTENT-02 | Phase 65 | Pending |
 | INTENT-03 | Phase 65 | Pending |
