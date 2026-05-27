@@ -11,11 +11,52 @@ import {
   mealRevisions,
   mealTransactions,
 } from "../../server/db/schema.js";
+import {
+  MEAL_PERIODS,
+  extractExplicitMealPeriodFromSourceText,
+  normalizeMealPeriod,
+} from "../../server/lib/meal-period.js";
 import { createDeviceService } from "../../server/services/device.js";
 import {
   MealRevisionPreconditionError,
   createMealTransactionsService,
 } from "../../server/services/meal-transactions.js";
+
+describe("meal period authority helper", () => {
+  it("normalizes only supported explicit meal period enum values", () => {
+    assert.deepEqual(MEAL_PERIODS, ["breakfast", "lunch", "dinner", "late_night"]);
+
+    assert.equal(normalizeMealPeriod("breakfast"), "breakfast");
+    assert.equal(normalizeMealPeriod("lunch"), "lunch");
+    assert.equal(normalizeMealPeriod("dinner"), "dinner");
+    assert.equal(normalizeMealPeriod("late_night"), "late_night");
+
+    assert.equal(normalizeMealPeriod("snack"), undefined);
+    assert.equal(normalizeMealPeriod("晚上"), undefined);
+    assert.equal(normalizeMealPeriod(null), undefined);
+  });
+
+  it("extracts explicit meal category words while ignoring time-of-day phrases", () => {
+    assert.equal(extractExplicitMealPeriodFromSourceText("早餐我吃蛋餅"), "breakfast");
+    assert.equal(extractExplicitMealPeriodFromSourceText("早飯是飯糰"), "breakfast");
+    assert.equal(extractExplicitMealPeriodFromSourceText("午餐是雞腿便當"), "lunch");
+    assert.equal(extractExplicitMealPeriodFromSourceText("午飯吃牛肉麵"), "lunch");
+    assert.equal(extractExplicitMealPeriodFromSourceText("晚餐吃沙拉"), "dinner");
+    assert.equal(extractExplicitMealPeriodFromSourceText("晚飯是水餃"), "dinner");
+    assert.equal(extractExplicitMealPeriodFromSourceText("宵夜吃茶葉蛋"), "late_night");
+
+    assert.equal(extractExplicitMealPeriodFromSourceText("早上吃蛋餅"), undefined);
+    assert.equal(extractExplicitMealPeriodFromSourceText("中午吃雞腿便當"), undefined);
+    assert.equal(extractExplicitMealPeriodFromSourceText("晚上吃沙拉"), undefined);
+  });
+
+  it("does not manufacture one authority from source text with multiple distinct meal periods", () => {
+    assert.equal(
+      extractExplicitMealPeriodFromSourceText("午餐是雞腿便當，晚餐是沙拉"),
+      undefined,
+    );
+  });
+});
 
 describe("MealTransactionsService", () => {
   let db: ReturnType<typeof createDb>;
