@@ -1,5 +1,6 @@
 export type PrimaryTab = "home" | "chat" | "history";
 export type SecondaryScreen = "settings" | "dayDetail" | "mealEdit";
+export type MealPeriod = "breakfast" | "lunch" | "dinner" | "late_night";
 export interface DayDetailPayload {
   dateKey: string;
   targetMealId?: string;
@@ -19,6 +20,7 @@ export interface MealEditPayload {
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt?: string;
+  mealPeriod?: MealPeriod;
 }
 export type SecondaryScreenState =
   | { screen: "dayDetail"; origin: PrimaryTab; payload?: DayDetailPayload }
@@ -87,6 +89,7 @@ export interface LoggedMealReceipt {
   loggedAt?: string;
   imageAssetId?: string | null;
   imageUrl?: string | null;
+  mealPeriod?: MealPeriod;
 }
 
 export interface MealEntry {
@@ -102,6 +105,7 @@ export interface MealEntry {
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt: string;
+  mealPeriod?: MealPeriod;
 }
 
 export interface UpdateMealInput {

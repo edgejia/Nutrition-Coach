@@ -9,6 +9,7 @@ import type {
   IntakeValidationIssue,
   LoggedMealReceipt,
   MealEntry,
+  MealPeriod,
   MealItemDetail,
   Message,
   CoachCTAIntentId,
@@ -66,6 +67,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeItemCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+}
+
+function normalizeMealPeriod(value: unknown): MealPeriod | undefined {
+  return value === "breakfast" || value === "lunch" || value === "dinner" || value === "late_night"
+    ? value
+    : undefined;
 }
 
 function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
@@ -418,15 +425,22 @@ export function withAuthorizedAssetUrl(
 }
 
 export function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMealReceipt {
+  const { mealPeriod: rawMealPeriod, items: _items, imageUrl: rawImageUrl, ...rest } = receipt as LoggedMealReceipt & {
+    mealPeriod?: unknown;
+    items?: unknown;
+    imageUrl?: string | null;
+  };
   const items = normalizeMealItems((receipt as { items?: unknown }).items);
+  const mealPeriod = normalizeMealPeriod(rawMealPeriod);
 
   return {
-    ...receipt,
+    ...rest,
     itemCount: normalizeItemCount(receipt.itemCount),
     ...(items ? { items } : {}),
-    ...(receipt.imageUrl === undefined
+    ...(mealPeriod ? { mealPeriod } : {}),
+    ...(rawImageUrl === undefined
       ? {}
-      : { imageUrl: withAuthorizedAssetUrl(receipt.imageUrl) ?? null }),
+      : { imageUrl: withAuthorizedAssetUrl(rawImageUrl) ?? null }),
   };
 }
 
@@ -775,15 +789,7 @@ export async function getMeals(options?: { refreshReason?: "day_rollover" | "mea
   if (!res.ok) throw new Error("Failed to load meals");
   const body = await res.json() as { meals: MealEntry[] };
   return {
-    meals: body.meals.map((meal) => ({
-      ...meal,
-      itemCount: normalizeItemCount(meal.itemCount),
-      ...(() => {
-        const items = normalizeMealItems((meal as { items?: unknown }).items);
-        return items ? { items } : {};
-      })(),
-      imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
-    })),
+    meals: body.meals.map(normalizeMealEntry),
   };
 }
 
@@ -796,15 +802,7 @@ export async function getDaySnapshot(
   const body = await res.json() as { date: string; summary: DailySummary; meals: MealEntry[] };
   return {
     ...body,
-    meals: body.meals.map((meal) => ({
-      ...meal,
-      itemCount: normalizeItemCount(meal.itemCount),
-      ...(() => {
-        const items = normalizeMealItems((meal as { items?: unknown }).items);
-        return items ? { items } : {};
-      })(),
-      imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
-    })),
+    meals: body.meals.map(normalizeMealEntry),
   };
 }
 
@@ -824,10 +822,35 @@ interface HistoryMealDto {
   items?: unknown;
   imageAssetId?: string | null;
   imageUrl?: string | null;
+  mealPeriod?: unknown;
+}
+
+function normalizeMealEntry(meal: MealEntry): MealEntry {
+  const {
+    mealPeriod: rawMealPeriod,
+    items: rawItems,
+    imageUrl: rawImageUrl,
+    ...rest
+  } = meal as MealEntry & {
+    mealPeriod?: unknown;
+    items?: unknown;
+    imageUrl?: string | null;
+  };
+  const items = normalizeMealItems(rawItems);
+  const mealPeriod = normalizeMealPeriod(rawMealPeriod);
+
+  return {
+    ...rest,
+    itemCount: normalizeItemCount(meal.itemCount),
+    ...(items ? { items } : {}),
+    imageUrl: withAuthorizedAssetUrl(rawImageUrl),
+    ...(mealPeriod ? { mealPeriod } : {}),
+  };
 }
 
 export function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
   const items = normalizeMealItems(meal.items);
+  const mealPeriod = normalizeMealPeriod(meal.mealPeriod);
 
   return {
     id: meal.id,
@@ -842,6 +865,7 @@ export function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
     imageAssetId: meal.asset?.imageAssetId ?? meal.imageAssetId ?? null,
     imageUrl: withAuthorizedAssetUrl(meal.asset?.imageUrl ?? meal.imageUrl ?? null) ?? null,
     loggedAt: meal.loggedAt,
+    ...(mealPeriod ? { mealPeriod } : {}),
   };
 }
 
@@ -906,10 +930,6 @@ export async function updateMeal(mealId: string, input: UpdateMealInput): Promis
   const normalizedBody = normalizeSummaryOutcomeFields(body);
   return {
     ...normalizedBody,
-    meal: {
-      ...normalizedBody.meal,
-      itemCount: normalizeItemCount(normalizedBody.meal.itemCount),
-      imageUrl: withAuthorizedAssetUrl(normalizedBody.meal.imageUrl) ?? null,
-    },
+    meal: normalizeMealEntry(normalizedBody.meal),
   };
 }
