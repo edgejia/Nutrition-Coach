@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-27T13:25:37.510Z"
+last_updated: "2026-05-27T13:34:13.982Z"
 last_activity: 2026-05-27
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 8
-  completed_plans: 4
-  percent: 50
+  completed_plans: 5
+  percent: 63
 ---
 
 # Project State
@@ -73,6 +73,7 @@ Last activity: 2026-05-27
 | Phase 65 P02 | 3min | 1 task | 5 files |
 | Phase 65 P03 | 8min | 2 tasks | 6 files |
 | Phase 65 P04 | 5min | 2 tasks | 7 files |
+| Phase 65 P08 | 2m 41s | 1 task | 3 files |
 
 ## Accumulated Context
 
@@ -146,6 +147,8 @@ Recent decisions affecting current work:
 - [Phase 65]: log_food persists mealPeriod only from explicit source text, while raw meal_period remains historical loggedAt evidence. — Plan 65-03 kept raw model meal_period out of persisted authority and used source-text extraction for mealPeriod.
 - [Phase 65]: Backend meal row APIs project public mealPeriod only from persisted explicit enum values. — Plan 65-04 omits the field for legacy/no-authority rows instead of deriving from loggedAt.
 - [Phase 65]: History routes stay pass-through while history-query owns mealPeriod selection, normalization, and DTO projection. — Plan 65-04 kept route behavior unchanged and updated the service DTO boundary.
+- [Phase 65]: Correction candidates keep mealPeriod as the effective compatibility field and add mealPeriodSource for provenance. — Plan 65-08 completed the INTENT-03 handoff without changing Phase 67 ranking policy.
+- [Phase 65]: Explicit persisted mealPeriod is selected from meal_transactions and normalized before falling back to loggedAt inference. — Legacy/no-authority candidates remain available as inferred fallback facts.
 
 ### Pending Todos
 
@@ -176,8 +179,8 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-27T13:25:37.503Z
-Stopped at: Completed 65-04-PLAN.md
+Last session: 2026-05-27T13:34:13.975Z
+Stopped at: Completed 65-08-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
