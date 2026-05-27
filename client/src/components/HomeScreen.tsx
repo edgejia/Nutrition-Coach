@@ -16,6 +16,7 @@ import type {
   DailySummary,
   DailyTargets,
   MealEntry,
+  MealPeriod,
 } from "../types.js";
 
 export function getDisplayedCoachAdvice(
@@ -47,7 +48,21 @@ export function getHomeGreeting(now: Date = new Date()): "早安" | "午安" | "
   return "晚安";
 }
 
-export function getDisplayMealLabel(loggedAt?: string | null): "早餐" | "午餐" | "點心" | "晚餐" | "餐點" {
+export function getDisplayMealLabel(
+  mealPeriod?: MealPeriod | null,
+  loggedAt?: string | null,
+): "早餐" | "午餐" | "點心" | "晚餐" | "宵夜" | "餐點" {
+  switch (mealPeriod) {
+    case "breakfast":
+      return "早餐";
+    case "lunch":
+      return "午餐";
+    case "dinner":
+      return "晚餐";
+    case "late_night":
+      return "宵夜";
+  }
+
   if (!loggedAt) return "餐點";
   const date = new Date(loggedAt);
   if (Number.isNaN(date.getTime())) return "餐點";
@@ -196,8 +211,8 @@ export function getMealMacroSummary(meal: Pick<MealEntry, "protein" | "carbs" | 
   return `P ${Math.max(0, Math.round(meal.protein ?? 0))} · C ${Math.max(0, Math.round(meal.carbs ?? 0))} · F ${Math.max(0, Math.round(meal.fat ?? 0))}`;
 }
 
-export function getMealBadge(loggedAt?: string | null): "B" | "L" | "S" | "D" | "M" {
-  switch (getDisplayMealLabel(loggedAt)) {
+export function getMealBadge(mealPeriod?: MealPeriod | null, loggedAt?: string | null): "B" | "L" | "S" | "D" | "N" | "M" {
+  switch (getDisplayMealLabel(mealPeriod, loggedAt)) {
     case "早餐":
       return "B";
     case "午餐":
@@ -206,6 +221,8 @@ export function getMealBadge(loggedAt?: string | null): "B" | "L" | "S" | "D" | 
       return "S";
     case "晚餐":
       return "D";
+    case "宵夜":
+      return "N";
     default:
       return "M";
   }
@@ -400,8 +417,8 @@ function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChat
               <div className="home-sport-meal-main">
                 <div className="home-sport-meal-meta">
                   <span>{formatMealRowTime(meal.loggedAt)}</span>
-                  <span>{getDisplayMealLabel(meal.loggedAt)}</span>
-                  <span>{getMealBadge(meal.loggedAt)}</span>
+                  <span>{getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}</span>
+                  <span>{getMealBadge(meal.mealPeriod, meal.loggedAt)}</span>
                 </div>
                 <div className="home-sport-meal-title">{meal.foodName}</div>
                 <div className="home-sport-meal-macros">{getMealMacroSummary(meal)}</div>
