@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "71c2ceec-d609-4a41-9704-779b234e5c34",
+  "id": "1f1ae3bb-83ec-4b8a-9679-b9276a0ac9e8",
   "prevId": "8e754b5a-fb79-4e24-9481-d9ae3c407455",
   "tables": {
     "asset_references": {
@@ -832,7 +832,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "meal_tx_meal_period_check": {
+          "name": "meal_tx_meal_period_check",
+          "value": "\"meal_transactions\".\"meal_period\" in ('breakfast','lunch','dinner','late_night')"
+        }
+      }
     },
     "meals": {
       "name": "meals",
