@@ -41,7 +41,7 @@ Archived phase execution files:
 - Integer phases continue from the previous milestone: 65, 66, 67, 68.
 - Decimal phases are reserved for urgent insertions, if needed later.
 
-- [ ] **Phase 65: Tool Contract Alignment and Meal-Period Authority** - Align `log_food` schema/runtime contracts and persist explicit meal-period intent as structured meal fact authority.
+- [x] **Phase 65: Tool Contract Alignment and Meal-Period Authority** - Align `log_food` schema/runtime contracts and persist explicit meal-period intent as structured meal fact authority.
 - [ ] **Phase 66: Numeric Correction Provenance Guard** - Prevent chat corrections from committing model-estimated calories/macros unless backed by explicit user numeric evidence or an approved backend-owned estimate/proposal.
 - [ ] **Phase 67: Correction Targeting and Backend Clarification Rendering** - Improve correction candidate ranking and canonical clarification copy so ambiguous edits surface stable numbered options instead of silently choosing weak targets.
 - [ ] **Phase 68: Structured Tool Results and Release-Proof Gate** - Remove serialized clarification-result parsing, prove v2.4 behavior with targeted tests and metadata-only evidence, and close local release gates.
@@ -77,7 +77,7 @@ Plans:
 - [x] 65-06-PLAN.md — Client DTO normalization and edit payload preservation.
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 65-07-PLAN.md — UI meal-period label preference on touched meal row surfaces.
+- [x] 65-07-PLAN.md — UI meal-period label preference on touched meal row surfaces.
 **Implementation Notes:**
 - Keep changes scoped to existing Fastify/SQLite/orchestrator boundaries.
 - Prefer additive persistence/DTO changes that preserve existing `loggedAt` date semantics.
@@ -135,7 +135,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 7/8 | In Progress|  |
+| 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 0/TBD | Pending | — |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
