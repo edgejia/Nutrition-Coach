@@ -1695,6 +1695,91 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.dailySummary?.date, "2026-03-25");
   });
 
+  it("persists source-text explicit mealPeriod over raw model meal_period", async () => {
+    const lunchTextWithBreakfastArg: ToolCall = {
+      id: "call_source_text_lunch_raw_breakfast",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "雞腿便當",
+          calories: 640,
+          protein: 30,
+          carbs: 78,
+          fat: 20,
+          date_text: "2026-03-25",
+          meal_period: "breakfast",
+          protein_sources: [
+            { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(
+      lunchTextWithBreakfastArg,
+      deviceId,
+      { foodLoggingService, summaryService },
+      { currentUserMessage: "幫我補記 2026-03-25 午餐我吃了雞腿便當" },
+    );
+
+    assert.equal(result.summary, "成功");
+    assert.ok(result.loggedMeal);
+    assert.equal((result.loggedMeal as { mealPeriod?: string | null }).mealPeriod, "lunch");
+    assert.equal(new Date(result.loggedMeal.loggedAt).getHours(), 8);
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, result.loggedMeal.mealId))
+    )[0];
+    assert.equal(transaction?.mealPeriod, "lunch");
+  });
+
+  it("does not persist time-of-day words as explicit mealPeriod while preserving historical midpoint", async () => {
+    const noonTextWithLunchArg: ToolCall = {
+      id: "call_noon_time_word",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "雞腿便當",
+          calories: 640,
+          protein: 30,
+          carbs: 78,
+          fat: 20,
+          date_text: "2026-03-25",
+          meal_period: "lunch",
+          protein_sources: [
+            { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(
+      noonTextWithLunchArg,
+      deviceId,
+      { foodLoggingService, summaryService },
+      { currentUserMessage: "幫我補記 2026-03-25 中午吃了雞腿便當" },
+    );
+
+    assert.equal(result.summary, "成功");
+    assert.ok(result.loggedMeal);
+    assert.equal((result.loggedMeal as { mealPeriod?: string | null }).mealPeriod, undefined);
+    assert.equal(new Date(result.loggedMeal.loggedAt).getHours(), 12);
+    assert.equal(new Date(result.loggedMeal.loggedAt).getMinutes(), 30);
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, result.loggedMeal.mealId))
+    )[0];
+    assert.equal(transaction?.mealPeriod, null);
+  });
+
   it("returns a controlled multiple_targets outcome for multi-date summary requests", async () => {
     const call: ToolCall = {
       id: "call_multi_summary",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type OpenAI from "openai";
 import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
-import { chatMessages } from "../../server/db/schema.js";
+import { chatMessages, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createGoalProposalService } from "../../server/services/goal-proposals.js";
@@ -178,6 +178,50 @@ describe("Orchestrator", () => {
     assertReplyResult(result);
     assert.equal(result.finalReplySource, "renderer");
     assert.equal(result.finalReplyShape, "plain_text");
+  });
+
+  it("projects source-text explicit mealPeriod on successful log_food receipts", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "intent_lunch_raw_breakfast",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 640,
+            protein: 30,
+            carbs: 78,
+            fat: 20,
+            date_text: "2026-03-25",
+            meal_period: "breakfast",
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "幫我補記 2026-03-25 午餐我吃了雞腿便當",
+    );
+
+    assertReplyResult(result);
+    assert.equal(result.didLogMeal, true);
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.ok(result.loggedMeal);
+    assert.equal((result.loggedMeal as { mealPeriod?: string | null }).mealPeriod, "lunch");
+    assert.equal(new Date(result.loggedMeal.loggedAt).getHours(), 8);
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, result.loggedMeal.mealId))
+    )[0];
+    assert.equal(transaction?.mealPeriod, "lunch");
   });
 
   it("classifies orchestrator fallback replies for route tracing", async () => {
