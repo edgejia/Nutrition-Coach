@@ -239,6 +239,46 @@ describe("Meals API", () => {
     ]);
   });
 
+  it("GET /api/meals projects explicit mealPeriod without inferring legacy rows", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const todayKey = formatLocalDate(new Date());
+    const breakfastHourLoggedAt = `${todayKey}T00:30:00.000Z`;
+    const explicitLunch = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 650,
+      protein: 36,
+      carbs: 72,
+      fat: 24,
+      loggedAt: breakfastHourLoggedAt,
+      mealPeriod: "lunch",
+    });
+    const legacyBreakfastHour = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 360,
+      protein: 18,
+      carbs: 42,
+      fat: 14,
+      loggedAt: breakfastHourLoggedAt,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/meals",
+      headers: { cookie: deviceCookieHeader },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { meals: Array<{ id: string; mealPeriod?: unknown }> };
+    const explicitMeal = body.meals.find((meal) => meal.id === explicitLunch.id);
+    assert.ok(explicitMeal, "expected explicit lunch meal in today's meals");
+    assert.equal(explicitMeal.mealPeriod, "lunch");
+
+    const legacyMeal = body.meals.find((meal) => meal.id === legacyBreakfastHour.id);
+    assert.ok(legacyMeal, "expected legacy breakfast-hour meal in today's meals");
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyMeal, "mealPeriod"), false);
+  });
+
   it("DELETE /api/meals/:id removes the meal for the owner and returns 404 for another device", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -385,6 +425,50 @@ describe("Meals API", () => {
     } finally {
       services.publisher.publishDailySummary = originalPublishDailySummary;
     }
+  });
+
+  it("PATCH /api/meals/:id preserves and returns existing explicit mealPeriod when ordinary edits omit it", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "午餐便當",
+      calories: 620,
+      protein: 34,
+      carbs: 70,
+      fat: 22,
+      mealPeriod: "lunch",
+    });
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: `/api/meals/${meal.id}`,
+      headers: { cookie: deviceCookieHeader },
+      payload: {
+        foodName: "午餐便當半份",
+        calories: 360,
+        protein: 22,
+        carbs: 38,
+        fat: 12,
+        imageAssetId: null,
+        expectedMealRevisionId: meal.mealRevisionId,
+      },
+    });
+
+    assert.equal(updateRes.statusCode, 200);
+    const body = updateRes.json() as {
+      meal: { mealPeriod?: unknown; mealRevisionId: string };
+    };
+    assert.equal(body.meal.mealPeriod, "lunch");
+    assert.notEqual(body.meal.mealRevisionId, meal.mealRevisionId);
+
+    const afterUpdateRes = await app.inject({
+      method: "GET",
+      url: "/api/meals",
+      headers: { cookie: deviceCookieHeader },
+    });
+    assert.equal(afterUpdateRes.statusCode, 200);
+    const afterUpdateBody = afterUpdateRes.json() as { meals: Array<{ id: string; mealPeriod?: unknown }> };
+    assert.equal(afterUpdateBody.meals.find((row) => row.id === meal.id)?.mealPeriod, "lunch");
   });
 
   it("PATCH and DELETE /api/meals/:id fail closed on missing or stale expected revisions", async () => {

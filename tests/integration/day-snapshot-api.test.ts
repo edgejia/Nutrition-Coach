@@ -151,6 +151,44 @@ describe("Day snapshot API", () => {
     assert.doesNotMatch(JSON.stringify(body), /currentRevisionId/);
   });
 
+  it("GET /api/day-snapshot projects explicit mealPeriod without inferring legacy rows", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const explicitLunch = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 650,
+      protein: 36,
+      carbs: 72,
+      fat: 24,
+      loggedAt: "2026-03-25T00:30:00.000Z",
+      mealPeriod: "lunch",
+    });
+    const legacyBreakfastHour = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 360,
+      protein: 18,
+      carbs: 42,
+      fat: 14,
+      loggedAt: "2026-03-25T00:45:00.000Z",
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/day-snapshot?date=2026-03-25",
+      headers: { cookie: sessionCookieHeader },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { meals: Array<{ id: string; mealPeriod?: unknown }> };
+    const explicitMeal = body.meals.find((meal) => meal.id === explicitLunch.id);
+    assert.ok(explicitMeal, "expected day snapshot to include explicit lunch meal");
+    assert.equal(explicitMeal.mealPeriod, "lunch");
+
+    const legacyMeal = body.meals.find((meal) => meal.id === legacyBreakfastHour.id);
+    assert.ok(legacyMeal, "expected day snapshot to include legacy breakfast-hour meal");
+    assert.equal(Object.prototype.hasOwnProperty.call(legacyMeal, "mealPeriod"), false);
+  });
+
   it("GET /api/day-snapshot rejects missing and malformed dates", async () => {
     const missingDate = await app.inject({
       method: "GET",
