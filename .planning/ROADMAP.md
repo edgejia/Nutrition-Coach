@@ -127,7 +127,7 @@ Plans:
 - [x] 67-02-PLAN.md — Evidence-tier resolver ranking and exact rendered-option pending selection.
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 67-03-PLAN.md — Backend correction clarification renderer and controlled `find_meals` tool replies.
+- [x] 67-03-PLAN.md — Backend correction clarification renderer and controlled `find_meals` tool replies.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 67-04-PLAN.md — Orchestrator terminal renderer wiring and support-only prompt alignment.
@@ -166,7 +166,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 |-------|-----------|----------------|--------|-----------|
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete    | 2026-05-28 |
-| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 2/6 | In Progress|  |
+| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 3/6 | In Progress|  |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
 
 ## Future Milestone Candidates

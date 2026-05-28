@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-28T20:09:21.746Z"
+last_updated: "2026-05-28T20:17:11.166Z"
 last_activity: 2026-05-28
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 19
-  completed_plans: 15
+  completed_plans: 16
   percent: 50
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-26)
 ## Current Position
 
 Phase: 67 (correction-targeting-and-backend-clarification-rendering) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-05-28
 
@@ -86,6 +86,7 @@ Last activity: 2026-05-28
 | 66 | 5 | - | - |
 | Phase 67 P01 | 7min | 3 tasks | 4 files |
 | Phase 67 P02 | 7min | 2 tasks | 1 files |
+| Phase 67 P03 | 4min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,8 @@ Recent decisions affecting current work:
 - [Phase 67 Plan 01]: Renderer-owned correction clarification tests reject raw correction request text, calories/macros in options, mutation metadata, summaryOutcome, and daily_summary publish on unresolved paths.
 - [Phase 67]: [Phase 67 Plan 02]: Correction target selection now uses locked evidence tiers instead of additive scoring. — Phase 67 service resolver now enforces explicit date, label, period-source, and recency precedence in code.
 - [Phase 67]: [Phase 67 Plan 02]: Pending meal target selections store exact rendered options with action and scope metadata. — Follow-up resolution is constrained to the options actually shown to the user.
+- [Phase 67]: [Phase 67 Plan 03]: Correction target clarification copy is rendered from typed MealCorrectionCandidate facts, not model/user correction text.
+- [Phase 67]: [Phase 67 Plan 03]: Non-resolved find_meals results now return renderer-owned meal_target_clarification controlled replies and clear resolved targets.
 
 ### Pending Todos
 
@@ -212,8 +215,8 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-28T20:09:14.180Z
-Stopped at: Completed 67-02-PLAN.md
+Last session: 2026-05-28T20:17:11.158Z
+Stopped at: Completed 67-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
