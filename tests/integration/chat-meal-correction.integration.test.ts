@@ -165,7 +165,7 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    const { status, body } = await postChat("把今天早餐的雞腿飯改成雞胸飯 500 卡");
+    const { status, body } = await postChat("把今天早餐的雞腿飯改成雞胸飯 500 卡，蛋白質 42g，碳水 48g，脂肪 12g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
@@ -225,7 +225,7 @@ describe("chat meal correction integration", () => {
       content: "已幫你更新 3/25 的那筆紀錄。",
     });
 
-    const { status, body } = await postChat("把 3/25 的雞腿飯改成雞胸飯 500 卡");
+    const { status, body } = await postChat("把 3/25 的雞腿飯改成雞胸飯 500 卡，蛋白質 42g，碳水 48g，脂肪 12g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
@@ -347,7 +347,7 @@ describe("chat meal correction integration", () => {
       content: "已幫你更新剛剛那筆雞腿的蛋白質。",
     });
 
-    const { status, body } = await postChat("幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高");
+    const { status, body } = await postChat("幫我把剛剛的雞腿蛋白質改成 18g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
@@ -440,7 +440,7 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    const { status, body } = await postChat("正常平均幾g就幾g");
+    const { status, body } = await postChat("蛋白質改成 22g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
@@ -559,7 +559,7 @@ describe("chat meal correction integration", () => {
       }],
     });
 
-    const { status, body } = await postChat("滷蛋改成兩顆水煮蛋");
+    const { status, body } = await postChat("滷蛋改成兩顆水煮蛋，熱量 150 卡，蛋白質 13g，碳水 1g，脂肪 10g");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);

@@ -11,6 +11,11 @@ import {
   type DeletedMealSnapshot,
   type MealTransactionItemInput,
 } from "./meal-transactions.js";
+import type {
+  MealNumericAffectedField,
+  MealNumericField,
+  MealNumericUpdateInput,
+} from "./meal-numeric-proposals.js";
 import { createTurnStateService } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
 import { createFoodLoggingService } from "./food-logging.js";
@@ -98,6 +103,30 @@ type NumericItemField = (typeof NUMERIC_ITEM_FIELDS)[number];
 interface MealCorrectionServiceDeps {
   summaryService?: Pick<ReturnType<typeof createSummaryService>, "getDailySummary">;
   foodLoggingService?: Pick<ReturnType<typeof createFoodLoggingService>, "getMealsByDate">;
+}
+
+export interface CurrentMealFacts {
+  mealId: string;
+  currentMealRevisionId: string;
+  mealLabel: string;
+  items: MealTransactionItemInput[];
+  totals: Record<NumericItemField, number>;
+}
+
+export type MealNumericOperatorIntent =
+  | { fields: MealNumericField[]; operator: "half" }
+  | { fields: MealNumericField[]; operator: "subtract_percent"; value: number }
+  | { fields: MealNumericField[]; operator: "add_amount"; value: number }
+  | { fields: MealNumericField[]; operator: "subtract_amount"; value: number };
+
+export interface MealNumericCorrectionPreview {
+  mealId: string;
+  expectedMealRevisionId: string;
+  mealLabel: string;
+  updateInput: MealNumericUpdateInput;
+  items?: MealTransactionItemInput[];
+  affectedFields: MealNumericAffectedField[];
+  sourceOperator: MealNumericOperatorIntent["operator"];
 }
 
 function normalizeText(text: string): string {
@@ -190,6 +219,10 @@ function buildDateClarificationPrompt(
 
 function roundPatchValue(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function roundNonNegativePatchValue(value: number): number {
+  return roundPatchValue(Math.max(value, 0));
 }
 
 function matchesCandidateLabel(candidate: MealCorrectionCandidate, normalizedQuery: string): boolean {
@@ -492,6 +525,48 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     return undefined;
   }
 
+  function previewFieldValue(before: number, intent: MealNumericOperatorIntent): number {
+    switch (intent.operator) {
+      case "half":
+        return roundNonNegativePatchValue(before / 2);
+      case "subtract_percent":
+        return roundNonNegativePatchValue(before * (1 - intent.value / 100));
+      case "add_amount":
+        return roundNonNegativePatchValue(before + intent.value);
+      case "subtract_amount":
+        return roundNonNegativePatchValue(before - intent.value);
+      default:
+        throw new Error("unsupported meal numeric correction operator");
+    }
+  }
+
+  function previewMealNumericCorrection(
+    currentFacts: CurrentMealFacts,
+    operatorIntent: MealNumericOperatorIntent,
+  ): MealNumericCorrectionPreview {
+    if (operatorIntent.fields.length === 0) {
+      throw new Error("meal numeric correction requires at least one field");
+    }
+
+    const updateInput: MealNumericUpdateInput = {};
+    const affectedFields: MealNumericAffectedField[] = [];
+    for (const field of operatorIntent.fields) {
+      const before = currentFacts.totals[field];
+      const after = previewFieldValue(before, operatorIntent);
+      updateInput[field] = after;
+      affectedFields.push({ field, before, after });
+    }
+
+    return {
+      mealId: currentFacts.mealId,
+      expectedMealRevisionId: currentFacts.currentMealRevisionId,
+      mealLabel: currentFacts.mealLabel,
+      updateInput,
+      affectedFields,
+      sourceOperator: operatorIntent.operator,
+    };
+  }
+
   return {
     async findMeals(
       deviceId: string,
@@ -656,6 +731,46 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     async clearPendingSelection(deviceId: string): Promise<void> {
       await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
     },
+
+    async loadCurrentMealFacts(
+      deviceId: string,
+      mealId: string,
+      expectedMealRevisionId: string,
+    ): Promise<CurrentMealFacts> {
+      const items = await mealTransactionsService.getCurrentItemsForMutation(
+        deviceId,
+        mealId,
+        expectedMealRevisionId,
+      );
+      const header = await db
+        .select({
+          id: mealTransactions.id,
+          currentRevisionId: mealTransactions.currentRevisionId,
+        })
+        .from(mealTransactions)
+        .where(and(eq(mealTransactions.deviceId, deviceId), eq(mealTransactions.id, mealId)))
+        .limit(1);
+      const current = header[0];
+      if (!current) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+      const display = projectMealDisplay(items, "未知餐點");
+
+      return {
+        mealId: current.id,
+        currentMealRevisionId: current.currentRevisionId,
+        mealLabel: display.foodName,
+        items,
+        totals: {
+          calories: items.reduce((sum, item) => sum + item.calories, 0),
+          protein: items.reduce((sum, item) => sum + item.protein, 0),
+          carbs: items.reduce((sum, item) => sum + item.carbs, 0),
+          fat: items.reduce((sum, item) => sum + item.fat, 0),
+        },
+      };
+    },
+
+    previewMealNumericCorrection,
 
     async updateMeal(
       deviceId: string,

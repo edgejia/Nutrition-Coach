@@ -902,7 +902,10 @@ describe("Orchestrator - didLogMeal", () => {
       ],
     });
 
-    const result = await orchestrator.handleMessage(localDeviceId, "把雞腿便當改成半份雞腿便當");
+    const result = await orchestrator.handleMessage(
+      localDeviceId,
+      "把雞腿便當改成半份雞腿便當，360 kcal，蛋白質 20 g，碳水 45 g，脂肪 10 g",
+    );
 
     assert.ok("reply" in result);
     assert.equal(result.reply, "已更新半份雞腿便當，360 kcal，蛋白質 20 g。");

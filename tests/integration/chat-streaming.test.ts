@@ -1459,7 +1459,7 @@ describe("chat-streaming", () => {
     mockLLM.queueChatStream(["已更新蛋餅，330 kcal，可信蛋白 14 g。（5/5）"]);
 
     const form = new FormData();
-    form.append("message", "把 2026-03-25 晚餐牛肉麵改成半碗");
+    form.append("message", "把 2026-03-25 晚餐牛肉麵改成半碗，熱量 360 卡，蛋白質 20g，碳水 45g，脂肪 10g");
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
@@ -1609,7 +1609,7 @@ describe("chat-streaming", () => {
     mockLLM.queueChatStream(["已更新半碗牛肉麵。"]);
 
     const form = new FormData();
-    form.append("message", "把 2026-03-25 晚餐牛肉麵改成半碗");
+    form.append("message", "把 2026-03-25 晚餐牛肉麵改成半碗，熱量 360 卡，蛋白質 20g，碳水 45g，脂肪 10g");
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",

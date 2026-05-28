@@ -9,6 +9,11 @@ import {
 } from "../services/summary-outcome.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
+import {
+  MEAL_NUMERIC_FIELDS,
+  type MealNumericField,
+  type createMealNumericProposalService,
+} from "../services/meal-numeric-proposals.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
@@ -35,10 +40,19 @@ import {
   isGoalProposalConsent,
 } from "./source-text-guard.js";
 import {
+  authorizeMealNumericUpdate,
+  classifyMealNumericAdjustment,
+  type MealNumericAdjustmentClassification,
+  type MealNumericUpdate,
+} from "./meal-numeric-authority.js";
+import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderMealNumericAuthorityFailureCopy,
+  renderMealNumericClarificationCopy,
+  renderMealNumericProposalCopy,
 } from "./mutation-receipts.js";
 import {
   classifyProteinSource,
@@ -58,6 +72,7 @@ export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
+  mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
   deviceService?: ReturnType<typeof createDeviceService>;
   goalProposalService?: ReturnType<typeof createGoalProposalService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
@@ -82,7 +97,10 @@ export interface ToolExecutionResult {
       | "goal_proposal"
       | "goal_authority_failure"
       | "goal_validation_failure"
-      | "goal_cancel";
+      | "goal_cancel"
+      | "meal_numeric_authority_failure"
+      | "meal_numeric_clarification"
+      | "meal_numeric_proposal";
     text: string;
   };
   updatedFields?: string[];
@@ -225,6 +243,13 @@ interface UpdateMealPatchArgs {
 
 type UpdateMealArgs = UpdateMealPatchArgs | { meal_id: string; items: LogFoodItemArgs[] };
 
+interface ProposeMealNumericCorrectionArgs {
+  meal_id: string;
+  fields: MealNumericField[];
+  operator: "half" | "subtract_percent" | "add_amount" | "subtract_amount";
+  value?: number;
+}
+
 interface DeleteMealArgs {
   meal_id: string;
 }
@@ -343,7 +368,17 @@ type ProposeGoalsResult = GoalControlledResult & {
   reason: "goal_proposal";
 };
 
+interface MealNumericControlledResult {
+  status: "controlled_reply";
+  reason: "meal_numeric_authority_failure" | "meal_numeric_clarification" | "meal_numeric_proposal";
+  reply: string;
+}
+
 type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult;
+type UpdateMealContractResult = UpdateMealResult | MealNumericControlledResult;
+type ProposeMealNumericCorrectionResult = MealNumericControlledResult & {
+  reason: "meal_numeric_proposal";
+};
 
 type UpdateGoalsArgs =
   | ({ mode: "current_turn_values" } & Partial<DailyTargets>)
@@ -490,6 +525,24 @@ const updateMealSchema = z.union([
     .strict(),
 ]);
 
+const mealNumericFieldSchema = z.enum(MEAL_NUMERIC_FIELDS);
+const proposeMealNumericCorrectionSchema = z
+  .object({
+    meal_id: z.string().uuid("meal_id must be a uuid"),
+    fields: z.array(mealNumericFieldSchema).min(1, "fields must contain at least one field"),
+    operator: z.enum(["half", "subtract_percent", "add_amount", "subtract_amount"]),
+    value: finiteNumber.optional(),
+  })
+  .strict()
+  .refine((args) => new Set(args.fields).size === args.fields.length, {
+    message: "fields must be unique",
+    path: ["fields"],
+  })
+  .refine((args) => args.operator === "half" ? args.value === undefined : args.value !== undefined, {
+    message: "value is required only for non-half operators",
+    path: ["value"],
+  });
+
 const deleteMealSchema = z
   .object({
     meal_id: z.string().uuid("meal_id must be a uuid"),
@@ -522,6 +575,12 @@ function makeGoalControlledResult(
 }
 
 function isGoalControlledResult(result: UpdateGoalsContractResult): result is GoalControlledResult {
+  return "status" in result && result.status === "controlled_reply";
+}
+
+function isMealNumericControlledResult(
+  result: UpdateMealContractResult | ProposeMealNumericCorrectionResult,
+): result is MealNumericControlledResult {
   return "status" in result && result.status === "controlled_reply";
 }
 
@@ -911,6 +970,127 @@ function revisionPreconditionFatalError(error: MealRevisionPreconditionError): F
   return new FatalToolError(error.code);
 }
 
+function normalizeUpdateMealInput(args: UpdateMealArgs): {
+  serviceInput:
+    | { items: Array<{ foodName: string; calories: number; protein: number; carbs: number; fat: number }> }
+    | { patch: { foodName?: string; calories?: number; protein?: number; carbs?: number; fat?: number } };
+  numericUpdate?: MealNumericUpdate;
+} {
+  if ("items" in args) {
+    const items = args.items.map((item) => ({
+      foodName: item.food_name.trim(),
+      calories: item.calories,
+      protein: item.protein,
+      carbs: item.carbs,
+      fat: item.fat,
+    }));
+    return {
+      serviceInput: { items },
+      numericUpdate: { items },
+    };
+  }
+
+  const patch = {
+    ...(args.food_name !== undefined ? { foodName: args.food_name.trim() } : {}),
+    ...(args.calories !== undefined ? { calories: args.calories } : {}),
+    ...(args.protein !== undefined ? { protein: args.protein } : {}),
+    ...(args.carbs !== undefined ? { carbs: args.carbs } : {}),
+    ...(args.fat !== undefined ? { fat: args.fat } : {}),
+  };
+  const numericPatch = {
+    ...(args.calories !== undefined ? { calories: args.calories } : {}),
+    ...(args.protein !== undefined ? { protein: args.protein } : {}),
+    ...(args.carbs !== undefined ? { carbs: args.carbs } : {}),
+    ...(args.fat !== undefined ? { fat: args.fat } : {}),
+  };
+
+  return {
+    serviceInput: { patch },
+    ...(Object.keys(numericPatch).length > 0 ? { numericUpdate: { patch: numericPatch } } : {}),
+  };
+}
+
+function firstMealNumericField(paths: readonly string[]): MealNumericField | undefined {
+  for (const path of paths) {
+    const match = path.match(/(?:^|\.)(calories|protein|carbs|fat)$/);
+    if (match) {
+      return match[1] as MealNumericField;
+    }
+  }
+  return undefined;
+}
+
+function roundComparableMealNumeric(value: number): number {
+  return Number(Number(value).toFixed(3));
+}
+
+function filterUnchangedMealNumericPatch(
+  update: MealNumericUpdate,
+  currentTotals: Record<MealNumericField, number>,
+): MealNumericUpdate | undefined {
+  if ("items" in update) {
+    return update;
+  }
+
+  const patch: Partial<Record<MealNumericField, number>> = {};
+  for (const field of MEAL_NUMERIC_FIELDS) {
+    const value = update.patch[field];
+    if (value === undefined) continue;
+    if (roundComparableMealNumeric(currentTotals[field]) === roundComparableMealNumeric(value)) continue;
+    patch[field] = value;
+  }
+
+  return Object.keys(patch).length > 0 ? { patch } : undefined;
+}
+
+function makeMealNumericControlledResult(
+  reason: MealNumericControlledResult["reason"],
+  reply: string,
+): MealNumericControlledResult {
+  return {
+    status: "controlled_reply",
+    reason,
+    reply,
+  };
+}
+
+function classificationMatchesOperator(
+  classification: MealNumericAdjustmentClassification,
+  args: ProposeMealNumericCorrectionArgs,
+): boolean {
+  if (classification.kind !== "proposal_candidate" || classification.operator !== args.operator) {
+    return false;
+  }
+  if (args.operator === "half") {
+    return true;
+  }
+  return "value" in classification && classification.value === args.value;
+}
+
+function toMealNumericOperatorIntent(args: ProposeMealNumericCorrectionArgs) {
+  switch (args.operator) {
+    case "half":
+      return { fields: args.fields, operator: args.operator } as const;
+    case "subtract_percent":
+    case "add_amount":
+    case "subtract_amount":
+      return { fields: args.fields, operator: args.operator, value: args.value ?? 0 } as const;
+  }
+}
+
+function mealNumericRendererOperator(operator: string): string {
+  switch (operator) {
+    case "subtract_percent":
+      return "reduce_percent";
+    case "add_amount":
+      return "add";
+    case "subtract_amount":
+      return "subtract";
+    default:
+      return operator;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Contracts. logSummary returns redacted shape (D-30); macros are part of
 // existing Phase 8 behavior for log_food (intentional, see plan).
@@ -1235,7 +1415,7 @@ const getDailySummaryContract: ToolContract<
   },
 };
 
-const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
+const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealContractResult> = {
   name: "update_meal",
   description: "更新已解析出的歷史餐點內容。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。若只調整單一欄位，可只提供該欄位，其餘沿用原紀錄；對多項餐點，數字欄位會視為整餐總量 patch 並由系統按原比例分配到 items。items 只用於整筆多項餐點 replacement。",
   parameters: {
@@ -1283,30 +1463,42 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
       throw new FatalToolError("meal target unresolved");
     }
 
+    const { serviceInput, numericUpdate } = normalizeUpdateMealInput(args);
+
     let updated: UpdateMealResult;
     try {
+      const currentFacts = await deps.mealCorrectionService.loadCurrentMealFacts(
+        deviceId,
+        args.meal_id,
+        resolvedTarget.mealRevisionId,
+      );
+      const changedNumericUpdate = numericUpdate
+        ? filterUnchangedMealNumericPatch(numericUpdate, currentFacts.totals)
+        : undefined;
+      if (changedNumericUpdate) {
+        const authority = authorizeMealNumericUpdate({
+          currentUserMessage: context.currentUserMessage,
+          currentMeal: {
+            ...currentFacts.totals,
+            items: currentFacts.items,
+          },
+          update: changedNumericUpdate,
+        });
+        if (!authority.ok) {
+          const field = firstMealNumericField(authority.unauthorizedFields);
+          const reply = renderMealNumericAuthorityFailureCopy({ field });
+          return {
+            ok: true,
+            result: makeMealNumericControlledResult("meal_numeric_authority_failure", reply),
+            toolMessage: reply,
+          };
+        }
+      }
+
       updated = await deps.mealCorrectionService.updateMeal(
         deviceId,
         args.meal_id,
-        "items" in args
-          ? {
-              items: args.items.map((item) => ({
-                foodName: item.food_name.trim(),
-                calories: item.calories,
-                protein: item.protein,
-                carbs: item.carbs,
-                fat: item.fat,
-              })),
-            }
-          : {
-              patch: {
-                ...(args.food_name !== undefined ? { foodName: args.food_name.trim() } : {}),
-                ...(args.calories !== undefined ? { calories: args.calories } : {}),
-                ...(args.protein !== undefined ? { protein: args.protein } : {}),
-                ...(args.carbs !== undefined ? { carbs: args.carbs } : {}),
-                ...(args.fat !== undefined ? { fat: args.fat } : {}),
-              },
-            },
+        serviceInput,
         resolvedTarget.mealRevisionId,
       );
     } catch (error) {
@@ -1330,6 +1522,102 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealResult> = {
       result: updated,
       toolMessage: "已更新餐點",
     };
+  },
+};
+
+const proposeMealNumericCorrectionContract: ToolContract<
+  ProposeMealNumericCorrectionArgs,
+  ProposeMealNumericCorrectionResult
+> = {
+  name: "propose_meal_numeric_correction",
+  description:
+    "建立一組待確認的餐點數字修正提案，不會更新餐點。只接受已解析 meal_id、受影響欄位和可計算操作；具體 before/after 由後端從目前餐點資料計算。",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      meal_id: { type: "string" },
+      fields: {
+        type: "array",
+        items: { type: "string", enum: [...MEAL_NUMERIC_FIELDS] },
+      },
+      operator: {
+        type: "string",
+        enum: ["half", "subtract_percent", "add_amount", "subtract_amount"],
+      },
+      value: { type: "number" },
+    },
+    required: ["meal_id", "fields", "operator"],
+  },
+  zodSchema: proposeMealNumericCorrectionSchema,
+  logSummary: (args) => ({
+    tool: "propose_meal_numeric_correction",
+    fields: [...args.fields],
+    operator: args.operator,
+    hasValue: args.value !== undefined,
+  }),
+  execute: async (args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.mealCorrectionService || !deps.mealNumericProposalService || !deviceId) {
+      throw new Error("propose_meal_numeric_correction contract missing mealCorrectionService/mealNumericProposalService/deviceId in context");
+    }
+
+    const resolvedTarget = findResolvedMealTarget(deps.toolSessionState, args.meal_id);
+    if (!resolvedTarget) {
+      throw new FatalToolError("meal target unresolved");
+    }
+
+    const classification = classifyMealNumericAdjustment(context.currentUserMessage);
+    if (!classificationMatchesOperator(classification, args)) {
+      const reply = renderMealNumericClarificationCopy({ field: args.fields[0] });
+      return {
+        ok: true,
+        result: makeMealNumericControlledResult("meal_numeric_clarification", reply) as ProposeMealNumericCorrectionResult,
+        toolMessage: reply,
+      };
+    }
+
+    try {
+      const currentFacts = await deps.mealCorrectionService.loadCurrentMealFacts(
+        deviceId,
+        args.meal_id,
+        resolvedTarget.mealRevisionId,
+      );
+      const preview = deps.mealCorrectionService.previewMealNumericCorrection(
+        currentFacts,
+        toMealNumericOperatorIntent(args),
+      );
+      const proposal = await deps.mealNumericProposalService.putLatest(deviceId, {
+        mealId: preview.mealId,
+        expectedMealRevisionId: preview.expectedMealRevisionId,
+        updateInput: preview.updateInput,
+        affectedFields: preview.affectedFields,
+        sourceOperator: preview.sourceOperator,
+      });
+      const otherProposalKindActive = deps.goalProposalService
+        ? Boolean(await deps.goalProposalService.getLatest(deviceId))
+        : false;
+      const reply = renderMealNumericProposalCopy({
+        mealLabel: preview.mealLabel,
+        affectedFields: proposal.affectedFields,
+        sourceOperator: mealNumericRendererOperator(proposal.sourceOperator),
+        otherProposalKindActive,
+      });
+      return {
+        ok: true,
+        result: {
+          ...makeMealNumericControlledResult("meal_numeric_proposal", reply),
+          reason: "meal_numeric_proposal",
+        },
+        toolMessage: reply,
+      };
+    } catch (error) {
+      if (error instanceof MealRevisionPreconditionError) {
+        throw revisionPreconditionFatalError(error);
+      }
+      throw error;
+    }
   },
 };
 
@@ -1528,6 +1816,7 @@ export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [updateMealContract.name, updateMealContract as ToolContract<any, any>],
   [deleteMealContract.name, deleteMealContract as ToolContract<any, any>],
   [getDailySummaryContract.name, getDailySummaryContract as ToolContract<any, any>],
+  [proposeMealNumericCorrectionContract.name, proposeMealNumericCorrectionContract as ToolContract<any, any>],
   [proposeGoalsContract.name, proposeGoalsContract as ToolContract<any, any>],
   [updateGoalsContract.name, updateGoalsContract as ToolContract<any, any>],
 ]);
@@ -1573,6 +1862,13 @@ export function redactToolArgsForHook(toolName: string, rawArgs: string): string
     }
     if (toolName === "update_meal") {
       return `itemCount: ${summary.itemCount ?? "?"}`;
+    }
+    if (toolName === "propose_meal_numeric_correction") {
+      const fields = Array.isArray(summary.fields)
+        ? summary.fields.join(",")
+        : "";
+      const operator = typeof summary.operator === "string" ? summary.operator : "unknown";
+      return `fields: ${fields}; operator: ${operator}`;
     }
     if (toolName === "delete_meal") {
       return "<delete_meal args>";
@@ -1763,7 +2059,21 @@ export async function executeTool(
   }
 
   if (toolCall.function.name === "update_meal") {
-    const contractResult = outcome.contractResult as UpdateMealResult;
+    const contractResult = outcome.contractResult as UpdateMealContractResult;
+    if (isMealNumericControlledResult(contractResult)) {
+      return {
+        result: contractResult.reply,
+        summary: "failureReason: guard",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        controlledReply: {
+          source: "renderer",
+          reason: contractResult.reason,
+          text: contractResult.reply,
+        },
+      };
+    }
     return {
       result: outcome.result,
       summary: "成功",
@@ -1839,6 +2149,23 @@ export async function executeTool(
       summary: "status: proposal",
       success: true,
       executed: true,
+      controlledReply: {
+        source: "renderer",
+        reason: contractResult.reason,
+        text: contractResult.reply,
+      },
+    };
+  }
+
+  if (toolCall.function.name === "propose_meal_numeric_correction") {
+    const contractResult = outcome.contractResult as ProposeMealNumericCorrectionResult;
+    const isProposal = contractResult.reason === "meal_numeric_proposal";
+    return {
+      result: contractResult.reply,
+      summary: isProposal ? "status: proposal" : "failureReason: guard",
+      success: isProposal,
+      executed: isProposal,
+      ...(isProposal ? {} : { failureReason: "guard" as const }),
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,

@@ -2275,7 +2275,7 @@ describe("Chat API", () => {
     mockLLM.queueChatResponse({ content: "已更新蛋餅，330 kcal，可信蛋白 14 g。（5/5）" });
 
     const updateForm = new FormData();
-    updateForm.append("message", "把牛肉麵改成半碗");
+    updateForm.append("message", "把牛肉麵改成半碗，熱量 360 卡，蛋白質 20g，碳水 45g，脂肪 10g");
     const updateRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
@@ -2383,7 +2383,7 @@ describe("Chat API", () => {
     mockLLM.queueChatResponse({ content: "已更新半碗牛肉麵。" });
 
     const updateForm = new FormData();
-    updateForm.append("message", "把牛肉麵改成半碗");
+    updateForm.append("message", "把牛肉麵改成半碗，熱量 360 卡，蛋白質 20g，碳水 45g，脂肪 10g");
     const updateRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
