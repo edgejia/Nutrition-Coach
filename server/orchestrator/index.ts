@@ -125,18 +125,6 @@ export type OrchestratorResult =
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
 
-interface CorrectionClarificationCandidate {
-  foodName: string;
-  loggedAt: string;
-  dateKey: string;
-}
-
-interface CorrectionToolResult {
-  status: "resolved" | "needs_clarification" | "not_found";
-  action: "update" | "delete";
-  candidates?: CorrectionClarificationCandidate[];
-}
-
 function requireSummaryOutcomeForMealMutation(
   summaryOutcome: SummaryOutcome | undefined,
 ): SummaryOutcome {
@@ -392,59 +380,6 @@ function buildLoggedMealFromMealProposalUpdate(
 
 function renderMealProposalStaleCopy(): string {
   return "這筆餐點已經有較新的紀錄，請重新整理後再修改。";
-}
-
-function extractUserCorrectionTarget(userMessage: string): string {
-  const targetSide = userMessage.match(/^(.*?)(?:改成|改為|改到|變成|換成|調成)/)?.[1] ?? userMessage;
-  return targetSide
-    .replace(/^(?:請|麻煩|幫我)?把?/, "")
-    .replace(/(?:的)?$/, "")
-    .trim();
-}
-
-function formatCorrectionCandidate(candidate: CorrectionClarificationCandidate, index: number): string {
-  const local = new Date(candidate.loggedAt);
-  const hour = `${local.getHours()}`.padStart(2, "0");
-  const minute = `${local.getMinutes()}`.padStart(2, "0");
-  return `${index + 1}. ${candidate.dateKey} ${hour}:${minute} ${candidate.foodName}`;
-}
-
-function buildCorrectionClarificationReply(result: CorrectionToolResult, userMessage: string): string | undefined {
-  if (result.status === "resolved") {
-    return undefined;
-  }
-
-  const verb = result.action === "update" ? "修改" : "刪除";
-  const userTarget = extractUserCorrectionTarget(userMessage);
-  const targetLabel = userTarget ? `「${userTarget}」` : "這筆餐點";
-  const candidates = result.candidates ?? [];
-
-  if (result.status === "needs_clarification" && candidates.length > 0) {
-    const lines = candidates.map((candidate, index) => formatCorrectionCandidate(candidate, index));
-    return `我找到多筆可能要${verb}的${targetLabel}，請直接回覆編號：\n${lines.join("\n")}`;
-  }
-
-  return `我還不能確定你要${verb}哪一筆${targetLabel}，請補充日期、餐別或食物名稱。`;
-}
-
-function parseCorrectionToolResult(toolName: string, result: string): CorrectionToolResult | undefined {
-  if (toolName !== "find_meals") {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(result) as CorrectionToolResult;
-    if (
-      (parsed.status === "resolved" || parsed.status === "needs_clarification" || parsed.status === "not_found")
-      && (parsed.action === "update" || parsed.action === "delete")
-    ) {
-      return parsed;
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
 }
 
 export function buildPartialSuccessLoggedReply(loggedMeal: LoggedMealReceipt): string {
@@ -896,7 +831,6 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         | LoggedMealReceipt
         | undefined;
       let loggedMealToolMessageId: string | undefined;
-      let correctionClarificationReply: string | undefined;
       let lastTool: string | undefined;
 
       // The orchestrator may use tools in the first completion, then produce the
@@ -1241,10 +1175,6 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 };
                 mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
               }
-              const correctionResult = parseCorrectionToolResult(toolCall.function.name, result);
-              if (correctionResult) {
-                correctionClarificationReply = buildCorrectionClarificationReply(correctionResult, userMessage);
-              }
               opts?.hooks?.onToolResult?.({
                 tool: toolCall.function.name,
                 success: true,
@@ -1374,21 +1304,6 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMealToolMessageId,
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
-            };
-          }
-          if (correctionClarificationReply) {
-            opts?.hooks?.onLLMEnd?.(round + 1, true);
-            return {
-              reply: correctionClarificationReply,
-              didLogMeal,
-              didMutateMeal,
-              dailySummary: logMealSummary,
-              summaryOutcome: mealSummaryOutcome,
-              affectedDate: resolvedAffectedDate,
-              loggedMeal,
-              loggedMealToolMessageId,
-              finalReplySource: "renderer",
-              finalReplyShape: classifyPlainReplyShape(correctionClarificationReply),
             };
           }
           shouldStreamFinalReply = true;
