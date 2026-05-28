@@ -457,6 +457,197 @@ describe("meal correction service", () => {
     assert.equal(result.status, "needs_clarification");
   });
 
+  it("Phase 67 D-01/D-09 hard-scopes an explicit date before considering newer matching candidates", async () => {
+    const scopedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-18T04:00:00.000Z",
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 28,
+      carbs: 76,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把 4/18 的雞腿飯改成 500 卡");
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, scopedMeal.id);
+    assert.equal(result.candidate.dateKey, "2026-04-18");
+  });
+
+  it("Phase 67 D-07/D-08 explicit persisted mealPeriod outranks inferred loggedAt period", async () => {
+    const explicitLunch = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 680,
+      protein: 32,
+      carbs: 84,
+      fat: 22,
+      loggedAt: "2026-04-19T00:30:00.000Z",
+      mealPeriod: "lunch",
+    });
+    const inferredLunch = await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐改成 600 卡");
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, explicitLunch.id);
+    assert.notEqual(result.resolvedMealId, inferredLunch.id);
+    assert.equal(result.candidate.mealPeriod, "lunch");
+    assert.equal(result.candidate.mealPeriodSource, "explicit");
+  });
+
+  it("Phase 67 D-16 resolves 午餐那餐 inside the lunch set instead of the newest non-matching meal", async () => {
+    const lunch = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 680,
+      protein: 32,
+      carbs: 84,
+      fat: 22,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+    const dinner = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-04-19T11:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐那餐刪掉");
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, lunch.id);
+    assert.notEqual(result.resolvedMealId, dinner.id);
+  });
+
+  it("Phase 67 D-18/D-20 narrows multiple item-label matches before period or recency and renders at most five numbered options", async () => {
+    const matchedIds: string[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+        loggedAt: `2026-04-19T0${index}:30:00.000Z`,
+        items: [
+          { foodName: `主菜${index + 1}`, calories: 260, protein: 24, carbs: 0, fat: 12 },
+          { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        ],
+      });
+      matchedIds.push(meal.id);
+    }
+    const unrelatedLunch = await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-19T04:45:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐滷蛋改成兩顆水煮蛋");
+
+    assert.equal(result.status, "needs_clarification");
+    assert.equal(result.candidates.length, 5);
+    assert.ok(result.candidates.every((candidate) => matchedIds.includes(candidate.mealId)));
+    assert.ok(result.candidates.every((candidate) => candidate.itemNames.includes("滷蛋")));
+    assert.equal(result.candidates.some((candidate) => candidate.mealId === unrelatedLunch.id), false);
+    assert.match(result.prompt, /1\./);
+    assert.match(result.prompt, /5\./);
+    assert.doesNotMatch(result.prompt, /6\./);
+    assert.doesNotMatch(result.prompt, /蛋餅/);
+  });
+
+  it("Phase 67 D-19 does not fall back to a period-only candidate when a likely food label is unmatched", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐鴨腿便當改成 500 卡");
+
+    assert.equal(result.status, "needs_clarification");
+    assert.equal("resolvedMealId" in result, false);
+    assert.match(result.prompt, /補充日期、餐別或食物名稱|不能確定/);
+  });
+
+  it("Phase 67 D-30/D-31 reuses clear single-date scope for same-date recovery choices without cross-date candidates", async () => {
+    const sameDateLunch = await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-18T04:30:00.000Z",
+    });
+    const sameDateDinner = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-04-18T11:30:00.000Z",
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "鴨胸飯",
+      calories: 610,
+      protein: 31,
+      carbs: 72,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把 4/18 的鴨腿便當改成 500 卡");
+
+    assert.equal(result.status, "needs_clarification");
+    assert.deepEqual(
+      result.candidates.map((candidate) => candidate.mealId).sort(),
+      [sameDateLunch.id, sameDateDinner.id].sort(),
+    );
+    assert.ok(result.candidates.every((candidate) => candidate.dateKey === "2026-04-18"));
+    assert.match(result.prompt, /請直接回覆編號/);
+    assert.match(result.prompt, /蛋餅/);
+    assert.match(result.prompt, /牛肉麵/);
+    assert.doesNotMatch(result.prompt, /鴨胸飯/);
+    assert.doesNotMatch(result.prompt, /已更新|已刪除|成功/);
+  });
+
+  it("Phase 67 D-30 returns deterministic date-specific no-meals copy when a clear explicit date has no meals", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把 4/17 的鴨腿便當刪掉");
+
+    assert.equal(result.status, "needs_clarification");
+    assert.deepEqual(result.candidates, []);
+    assert.equal("resolvedMealId" in result, false);
+    assert.match(result.prompt, /4\/17|2026-04-17/);
+    assert.match(result.prompt, /沒有.*餐點|沒有紀錄/);
+    assert.doesNotMatch(result.prompt, /雞腿飯/);
+    assert.doesNotMatch(result.prompt, /已更新|已刪除|成功/);
+  });
+
   it("rejects direct food_name patches for grouped meals", async () => {
     const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
