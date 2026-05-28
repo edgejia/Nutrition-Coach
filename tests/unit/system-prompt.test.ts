@@ -466,6 +466,53 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /成功 log_food 回覆契約/);
   });
 
+  it("Phase 67 D-10/D-11/D-12/D-18/D-19 keeps correction target authority backend-owned", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /後端.*目標選擇/);
+    assert.match(section, /不要.*候選.*選/);
+    assert.match(section, /最強.*證據.*唯一/);
+    assert.match(section, /多筆.*候選.*編號/);
+    assert.match(section, /食物.*item.*保留|item.*食物.*保留/s);
+    assert.match(section, /找不到.*不要.*餐別.*recency|找不到.*不要.*餐別.*最近/s);
+    assert.match(section, /find_meals 已解析出唯一目標.*update_meal 或 delete_meal/s);
+  });
+
+  it("Phase 67 D-32/D-33 tells the model not to rewrite backend-rendered correction clarification", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /後端.*澄清文字/);
+    assert.match(section, /不要.*改寫.*後端/);
+    assert.match(section, /不要.*補上.*已更新|不得.*補上.*已更新/);
+    assert.match(section, /修改或刪除/);
+    assert.doesNotMatch(section, /用簡短繁體中文向使用者追問澄清/);
+  });
+
+  it("Phase 67 D-42/D-43 keeps mixed selection target resolution separate from numeric mutation authority", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /選候選編號.*明確目標數字|明確目標數字.*選候選編號/s);
+    assert.match(section, /目標解析.*數字授權.*分開|數字授權.*目標解析.*分開/s);
+    assert.match(section, /合理一點/);
+    assert.match(section, /不得直接.*update_meal|不要直接.*update_meal/);
+    assert.match(section, /非突變.*提案|不突變.*提案|待確認提案/);
+  });
+
   it("does not tell the model to estimate and directly commit meal numeric corrections", () => {
     const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
       calories: 1500,
