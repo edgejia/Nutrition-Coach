@@ -3,6 +3,7 @@ import type {
   MealNumericAffectedField,
   MealNumericField,
 } from "../services/meal-numeric-proposals.js";
+import type { MealCorrectionCandidate } from "../services/meal-correction.js";
 import type { DailyTargets } from "../services/device.js";
 import type { MutationEffects } from "./mutation-effects.js";
 
@@ -74,6 +75,25 @@ const MEAL_NUMERIC_OPERATOR_COPY: Record<string, string> = {
   subtract: "減少固定數值",
 };
 
+type CorrectionTargetAction = "update" | "delete";
+
+export interface CorrectionTargetClarificationCopyInput {
+  action: CorrectionTargetAction;
+  candidates: MealCorrectionCandidate[];
+  matchedLabel?: string;
+}
+
+export interface CorrectionTargetSameDateRecoveryCopyInput {
+  action: CorrectionTargetAction;
+  dateKey: string;
+  candidates: MealCorrectionCandidate[];
+}
+
+export interface CorrectionTargetNoMealsForDateCopyInput {
+  action: CorrectionTargetAction;
+  dateKey: string;
+}
+
 export interface MealNumericProposalCopyInput {
   mealLabel?: string;
   items?: Array<{ foodName: string }>;
@@ -93,6 +113,76 @@ function formatMealNumericValue(field: MealNumericField, value: number): string 
 
 function mealNumericFieldLabel(field: MealNumericField): string {
   return MEAL_NUMERIC_FIELD_COPY[field].label;
+}
+
+function correctionTargetActionVerb(action: CorrectionTargetAction): string {
+  return action === "update" ? "修改" : "刪除";
+}
+
+function formatCorrectionTargetTime(loggedAt: string): string {
+  const local = new Date(loggedAt);
+  const hour = `${local.getHours()}`.padStart(2, "0");
+  const minute = `${local.getMinutes()}`.padStart(2, "0");
+  return `${hour}:${minute}`;
+}
+
+function formatCorrectionTargetMealPeriod(candidate: MealCorrectionCandidate): string {
+  if (candidate.mealPeriodSource !== "explicit") {
+    return "";
+  }
+
+  switch (candidate.mealPeriod) {
+    case "breakfast":
+      return " 早餐";
+    case "lunch":
+      return " 午餐";
+    case "dinner":
+      return " 晚餐";
+    case "late_night":
+      return " 宵夜";
+    default:
+      return "";
+  }
+}
+
+function formatCorrectionTargetOption(
+  candidate: MealCorrectionCandidate,
+  index: number,
+): string {
+  return `${index + 1}. ${candidate.dateKey} ${formatCorrectionTargetTime(candidate.loggedAt)}${formatCorrectionTargetMealPeriod(candidate)} ${candidate.foodName}`;
+}
+
+function formatCorrectionTargetOptions(candidates: MealCorrectionCandidate[]): string[] {
+  return candidates.slice(0, 5).map((candidate, index) => formatCorrectionTargetOption(candidate, index));
+}
+
+export function renderCorrectionTargetClarificationCopy(
+  input: CorrectionTargetClarificationCopyInput,
+): string {
+  const safeLabel = input.matchedLabel?.trim();
+  const verb = correctionTargetActionVerb(input.action);
+  const leadIn = safeLabel
+    ? `我找到多筆可能符合「${safeLabel}」的餐點，請直接回覆編號：`
+    : `我找到多筆可能要${verb}的餐點，請直接回覆編號：`;
+
+  return [leadIn, ...formatCorrectionTargetOptions(input.candidates)].join("\n");
+}
+
+export function renderCorrectionTargetSameDateRecoveryCopy(
+  input: CorrectionTargetSameDateRecoveryCopyInput,
+): string {
+  const sameDateCandidates = input.candidates.filter((candidate) => candidate.dateKey === input.dateKey);
+  return [
+    `${input.dateKey} 有幾筆餐點，請直接回覆編號：`,
+    ...formatCorrectionTargetOptions(sameDateCandidates),
+  ].join("\n");
+}
+
+export function renderCorrectionTargetNoMealsForDateCopy(
+  input: CorrectionTargetNoMealsForDateCopyInput,
+): string {
+  const verb = correctionTargetActionVerb(input.action);
+  return `${input.dateKey} 沒有記錄餐點，所以我還不能${verb}那一天的餐點。請提供另一個日期或食物名稱。`;
 }
 
 function formatMealProposalLabel(input: Pick<MealNumericProposalCopyInput, "mealLabel" | "items">): string {
