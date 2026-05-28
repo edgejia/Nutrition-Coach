@@ -1155,6 +1155,75 @@ describe("Orchestrator - didLogMeal", () => {
     assert.doesNotMatch(result.reply, /中午雞腿便當/);
   });
 
+  it("Phase 67 D-28/D-32 returns backend-rendered correction clarification after one model call without raw correction echo", async () => {
+    const db = createDb(":memory:");
+    const localDeviceService = createDeviceService(db);
+    const localFoodLoggingService = createFoodLoggingService(db);
+    const localSummaryService = createSummaryService(db);
+    const localChatService = createChatService(db);
+    const localMealCorrectionService = createMealCorrectionService(db);
+    const localLLM = new MockLLMProvider();
+    const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
+
+    await localFoodLoggingService.logGroupedMeal(localDeviceId, {
+      loggedAt: "2026-04-19T09:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+    await localFoodLoggingService.logGroupedMeal(localDeviceId, {
+      loggedAt: "2026-04-19T10:00:00.000Z",
+      items: [
+        { foodName: "排骨", calories: 300, protein: 26, carbs: 8, fat: 18 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+
+    orchestrator = createOrchestrator({
+      llmProvider: localLLM,
+      chatService: localChatService,
+      summaryService: localSummaryService,
+      foodLoggingService: localFoodLoggingService,
+      mealCorrectionService: localMealCorrectionService,
+      deviceService: localDeviceService,
+    });
+
+    localLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_renderer_owned_target",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
+          }),
+        },
+      }],
+    });
+    localLLM.queueChatResponse({
+      content: "已更新中午雞腿便當的滷蛋。",
+    });
+
+    const result = await orchestrator.handleMessage(localDeviceId, "把中午雞腿便當的滷蛋改成兩顆水煮蛋");
+
+    if (!("reply" in result)) throw new Error("expected reply result");
+    assert.equal(localLLM.chatCalls.length, 1, "renderer-owned clarification must not ask the model to rewrite it");
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.match(result.reply, /請直接回覆編號/);
+    assert.match(result.reply, /1\./);
+    assert.match(result.reply, /2\./);
+    assert.match(result.reply, /雞腿、白飯、滷蛋、青菜/);
+    assert.match(result.reply, /排骨、白飯、滷蛋、青菜/);
+    assert.doesNotMatch(result.reply, /中午雞腿便當|滷蛋改成|已更新|已套用|蛋白質|kcal|calories|protein/);
+  });
+
   it("renders missing-quantity successful logs from committed facts without implementation copy", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{

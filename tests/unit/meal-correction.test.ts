@@ -745,6 +745,41 @@ describe("meal correction service", () => {
     assert.equal(secondPass.fromPending, true);
   });
 
+  it("Phase 67 D-22/D-23/D-24/D-38 re-shows the same rendered options with valid numbers for an invalid selection", async () => {
+    const first = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const second = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 29,
+      carbs: 78,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
+    assert.equal(firstPass.status, "needs_clarification");
+    assert.deepEqual(firstPass.candidates.map((candidate) => candidate.mealId), [second.id, first.id]);
+
+    const invalidSelection = await mealCorrectionService.findMeals(deviceId, "delete", "3");
+
+    assert.equal(invalidSelection.status, "needs_clarification");
+    assert.deepEqual(invalidSelection.candidates.map((candidate) => candidate.mealId), [second.id, first.id]);
+    assert.match(invalidSelection.prompt, /請直接回覆編號/);
+    assert.match(invalidSelection.prompt, /1\..*雞腿飯/);
+    assert.match(invalidSelection.prompt, /2\..*雞腿飯/);
+    assert.match(invalidSelection.prompt, /有效編號.*1.*2|只能回覆.*1.*2|請回覆 1 或 2/);
+    assert.doesNotMatch(invalidSelection.prompt, /3\./);
+    assert.doesNotMatch(invalidSelection.prompt, /650|620|30\s*g|29\s*g|午餐/);
+    assert.equal("resolvedMealId" in invalidSelection, false);
+  });
+
   it("does not reuse a pending selection for a different mutation action", async () => {
     const first = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

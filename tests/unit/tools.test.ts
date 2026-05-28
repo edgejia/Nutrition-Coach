@@ -1277,6 +1277,116 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     }]);
   });
 
+  it("Phase 67 D-30/D-32 returns renderer-owned controlled find_meals clarification without resolved targets", async () => {
+    const sameDateLunch = await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-18T04:30:00.000Z",
+    });
+    const sameDateDinner = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+      loggedAt: "2026-04-18T11:30:00.000Z",
+    });
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "鴨胸飯",
+      calories: 610,
+      protein: 31,
+      carbs: 72,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const toolSessionState = {
+      resolvedMealTargets: [{ mealId: "stale", mealRevisionId: "stale-rev" }],
+    };
+
+    const result = await executeTool({
+      id: "call_find_meals_renderer_clarification",
+      type: "function",
+      function: {
+        name: "find_meals",
+        arguments: JSON.stringify({
+          action: "update",
+          query: "把 4/18 的鴨腿便當改成 500 卡",
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState,
+    } as unknown as ToolDeps);
+
+    assert.equal(result.summary, "status: needs_clarification");
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_target_clarification",
+      text: result.result,
+    });
+    assert.match(result.result, /請直接回覆編號/);
+    assert.match(result.result, /1\./);
+    assert.match(result.result, /2\./);
+    assert.match(result.result, /蛋餅/);
+    assert.match(result.result, /牛肉麵/);
+    assert.doesNotMatch(result.result, /鴨胸飯|鴨腿便當/);
+    assert.doesNotMatch(result.result, /330|520|12\s*g|24\s*g|已更新|已刪除/);
+    assert.deepEqual(toolSessionState.resolvedMealTargets, []);
+    assert.ok([sameDateLunch.id, sameDateDinner.id].every((id) => !toolSessionState.resolvedMealTargets.some((target) => target.mealId === id)));
+  });
+
+  it("Phase 67 D-30 returns renderer-owned date-specific no-meals copy for clear single-date find_meals misses", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const toolSessionState = {
+      resolvedMealTargets: [{ mealId: "stale", mealRevisionId: "stale-rev" }],
+    };
+
+    const result = await executeTool({
+      id: "call_find_meals_no_meals_for_date",
+      type: "function",
+      function: {
+        name: "find_meals",
+        arguments: JSON.stringify({
+          action: "delete",
+          query: "把 4/17 的鴨腿便當刪掉",
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState,
+    } as unknown as ToolDeps);
+
+    assert.equal(result.summary, "status: needs_clarification");
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_target_clarification",
+      text: result.result,
+    });
+    assert.match(result.result, /4\/17|2026-04-17/);
+    assert.match(result.result, /沒有.*餐點|沒有紀錄/);
+    assert.doesNotMatch(result.result, /雞腿飯|已刪除|成功/);
+    assert.deepEqual(toolSessionState.resolvedMealTargets, []);
+  });
+
   it("rejects update_meal when only id-only resolved state is present", async () => {
     const created = await foodLoggingService.logFood(deviceId, {
       foodName: "蘋果",
