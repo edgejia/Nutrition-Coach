@@ -97,6 +97,22 @@ interface CandidateHeaderRow {
   currentRevisionId: string;
 }
 
+type DateResolution =
+  | {
+      status: "resolved";
+      targetDateKey?: string;
+      hasExplicitDate: boolean;
+      canUseDateRecovery: boolean;
+    }
+  | { status: "needs_clarification"; prompt: string };
+
+interface EvidenceTierResolution {
+  status: "resolved" | "needs_clarification" | "not_found";
+  candidates: MealCorrectionCandidate[];
+  rememberResolved: boolean;
+  prompt?: string;
+}
+
 const NUMERIC_ITEM_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
 type NumericItemField = (typeof NUMERIC_ITEM_FIELDS)[number];
 
@@ -188,7 +204,25 @@ function formatCandidate(candidate: MealCorrectionCandidate, index: number): str
   const local = new Date(candidate.loggedAt);
   const hour = `${local.getHours()}`.padStart(2, "0");
   const minute = `${local.getMinutes()}`.padStart(2, "0");
-  return `${index + 1}. ${candidate.dateKey} ${hour}:${minute} ${candidate.foodName}`;
+  const explicitPeriodLabel = candidate.mealPeriodSource === "explicit"
+    ? ` ${formatMealPeriodLabel(candidate.mealPeriod)}`
+    : "";
+  return `${index + 1}. ${candidate.dateKey} ${hour}:${minute}${explicitPeriodLabel} ${candidate.foodName}`;
+}
+
+function formatMealPeriodLabel(period: MealPeriod): string {
+  switch (period) {
+    case "breakfast":
+      return "早餐";
+    case "lunch":
+      return "午餐";
+    case "dinner":
+      return "晚餐";
+    case "late_night":
+      return "宵夜";
+    default:
+      return "餐別";
+  }
 }
 
 function buildClarificationPrompt(
@@ -203,6 +237,11 @@ function buildClarificationPrompt(
 function buildNotFoundPrompt(action: "update" | "delete"): string {
   const verb = action === "update" ? "修改" : "刪除";
   return `我還不能確定你要${verb}哪一筆餐點，請補充日期、餐別或食物名稱。`;
+}
+
+function buildDateNoMealsPrompt(action: "update" | "delete", dateKey: string): string {
+  const verb = action === "update" ? "修改" : "刪除";
+  return `${dateKey} 沒有記錄餐點，所以我還不能${verb}那一天的餐點。請提供另一個日期或食物名稱。`;
 }
 
 function buildDateClarificationPrompt(
@@ -310,41 +349,119 @@ function applyMealPatch(
   return nextItems;
 }
 
-function scoreCandidate(
-  candidate: MealCorrectionCandidate,
-  query: string,
-  targetDateKey: string | undefined,
-  targetMealPeriod: MealCorrectionCandidate["mealPeriod"] | undefined,
-): number {
-  const normalizedQuery = normalizeText(extractTargetEvidenceText(query));
-  let score = 0;
+function sortNewestFirst(candidates: MealCorrectionCandidate[]): MealCorrectionCandidate[] {
+  return [...candidates].sort((left, right) => right.loggedAt.localeCompare(left.loggedAt));
+}
 
-  if (targetDateKey) {
-    if (candidate.dateKey !== targetDateKey) {
-      return -1;
+function chooseUniqueOrClarify(
+  candidates: MealCorrectionCandidate[],
+  query: string,
+  allowRecentTieBreak: boolean,
+): EvidenceTierResolution {
+  const sorted = sortNewestFirst(candidates);
+  if (sorted.length === 0) {
+    return { status: "not_found", candidates: [], rememberResolved: false };
+  }
+
+  if (sorted.length === 1 || (allowRecentTieBreak && hasRecentReference(query))) {
+    return {
+      status: "resolved",
+      candidates: [sorted[0]!],
+      rememberResolved: true,
+    };
+  }
+
+  return {
+    status: "needs_clarification",
+    candidates: sorted.slice(0, 5),
+    rememberResolved: false,
+  };
+}
+
+function resolveByEvidenceTier(
+  candidates: MealCorrectionCandidate[],
+  action: "update" | "delete",
+  query: string,
+  dateResolution: Extract<DateResolution, { status: "resolved" }>,
+): EvidenceTierResolution {
+  const scopedCandidates = dateResolution.targetDateKey
+    ? candidates.filter((candidate) => candidate.dateKey === dateResolution.targetDateKey)
+    : candidates;
+  const targetMealPeriod = extractMealPeriod(query);
+  const unsupportedMealPeriodReference = targetMealPeriod === undefined
+    && hasUnsupportedMealPeriodReference(query);
+  const normalizedQuery = normalizeText(extractTargetEvidenceText(query));
+  const labelMatches = scopedCandidates.filter((candidate) => matchesCandidateLabel(candidate, normalizedQuery));
+
+  if (labelMatches.length > 0) {
+    return chooseUniqueOrClarify(labelMatches, query, true);
+  }
+
+  if (hasLikelyFoodReference(query)) {
+    if (dateResolution.targetDateKey && dateResolution.canUseDateRecovery) {
+      const sameDate = sortNewestFirst(scopedCandidates).slice(0, 5);
+      return sameDate.length > 0
+        ? { status: "needs_clarification", candidates: sameDate, rememberResolved: false }
+        : {
+            status: "needs_clarification",
+            candidates: [],
+            rememberResolved: false,
+            prompt: buildDateNoMealsPrompt(action, dateResolution.targetDateKey),
+          };
     }
-    score += 4;
+
+    return { status: "needs_clarification", candidates: [], rememberResolved: false };
+  }
+
+  if (unsupportedMealPeriodReference) {
+    const sameScope = sortNewestFirst(scopedCandidates).slice(0, 5);
+    return sameScope.length > 0
+      ? { status: "needs_clarification", candidates: sameScope, rememberResolved: false }
+      : { status: "needs_clarification", candidates: [], rememberResolved: false };
   }
 
   if (targetMealPeriod) {
-    if (candidate.mealPeriod === targetMealPeriod) {
-      score += 2;
+    const periodMatches = scopedCandidates.filter((candidate) => candidate.mealPeriod === targetMealPeriod);
+    const explicitMatches = periodMatches.filter((candidate) => candidate.mealPeriodSource === "explicit");
+    if (explicitMatches.length > 0) {
+      return chooseUniqueOrClarify(explicitMatches, query, true);
+    }
+
+    const inferredMatches = periodMatches.filter((candidate) => candidate.mealPeriodSource === "inferred");
+    if (inferredMatches.length > 0) {
+      return chooseUniqueOrClarify(inferredMatches, query, true);
     }
   }
 
-  const matched = matchesCandidateLabel(candidate, normalizedQuery);
-  if (matched) {
-    score += 5;
+  if (hasRecentReference(query) && scopedCandidates.length > 0) {
+    return {
+      status: "resolved",
+      candidates: [sortNewestFirst(scopedCandidates)[0]!],
+      rememberResolved: true,
+    };
   }
 
-  return score;
+  if (dateResolution.targetDateKey && dateResolution.canUseDateRecovery) {
+    if (scopedCandidates.length === 0) {
+      return {
+        status: "needs_clarification",
+        candidates: [],
+        rememberResolved: false,
+        prompt: buildDateNoMealsPrompt(action, dateResolution.targetDateKey),
+      };
+    }
+
+    return chooseUniqueOrClarify(scopedCandidates, query, false);
+  }
+
+  return { status: "not_found", candidates: [], rememberResolved: false };
 }
 
 function resolveFindMealsTargetDateKey(
   query: string,
   action: "update" | "delete",
   options?: FindMealsOptions,
-): { status: "resolved"; targetDateKey?: string } | { status: "needs_clarification"; prompt: string } {
+): DateResolution {
   const currentDate = options?.currentDate ?? currentAppDate();
   const dateIntent = resolveHistoricalDateIntent({
     input: query,
@@ -370,6 +487,8 @@ function resolveFindMealsTargetDateKey(
   return {
     status: "resolved",
     targetDateKey: dateIntent.source === "default_today" ? undefined : dateIntent.dateKey,
+    hasExplicitDate: dateIntent.source === "explicit",
+    canUseDateRecovery: dateIntent.source === "explicit" && dateIntent.isHistorical,
   };
 }
 
@@ -598,132 +717,47 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         };
       }
 
-      const targetDateKey = dateResolution.targetDateKey;
-      const targetMealPeriod = extractMealPeriod(query);
-      const unsupportedMealPeriodReference = targetMealPeriod === undefined
-        && hasUnsupportedMealPeriodReference(query);
-      const normalizedQuery = normalizeText(extractTargetEvidenceText(query));
+      const tierResult = resolveByEvidenceTier(candidates, action, query, dateResolution);
 
-      let scored = candidates
-        .map((candidate) => ({
-          candidate,
-          score: scoreCandidate(candidate, query, targetDateKey, targetMealPeriod),
-          labelMatched: matchesCandidateLabel(candidate, normalizedQuery),
-        }))
-        .filter((entry) => entry.score >= 0)
-        .sort((left, right) => {
-          if (right.score !== left.score) {
-            return right.score - left.score;
-          }
-          return right.candidate.loggedAt.localeCompare(left.candidate.loggedAt);
-        });
-
-      const hasLabelMatch = scored.some((entry) => entry.labelMatched);
-      if (unsupportedMealPeriodReference) {
-        const narrowed = scored
-          .filter((entry) => entry.score > 0)
-          .slice(0, 5)
-          .map((entry) => entry.candidate);
-        if (narrowed.length > 0) {
-          await turnStateService.putState(
-            deviceId,
-            PENDING_SELECTION_KIND,
-            { action, candidates: narrowed },
-            PENDING_SELECTION_TTL_MS,
-          );
-        }
-
-        return {
-          status: "needs_clarification",
-          action,
-          prompt: narrowed.length > 0 ? buildClarificationPrompt(action, narrowed) : buildNotFoundPrompt(action),
-          candidates: narrowed,
-        };
-      }
-
-      if (hasLabelMatch) {
-        scored = scored.filter((entry) => entry.labelMatched);
-      } else if (hasLikelyFoodReference(query)) {
-        return {
-          status: "needs_clarification",
-          action,
-          prompt: buildNotFoundPrompt(action),
-          candidates: [],
-        };
-      }
-
-      if (hasRecentReference(query)) {
-        const positiveMatches = scored.filter((entry) => entry.score > 0);
-        if (positiveMatches.length > 0) {
-          await rememberResolvedCandidate(deviceId, action, positiveMatches[0]!.candidate);
-          return {
-            status: "resolved",
-            action,
-            resolvedMealId: positiveMatches[0]!.candidate.mealId,
-            mealRevisionId: positiveMatches[0]!.candidate.mealRevisionId,
-            candidate: positiveMatches[0]!.candidate,
-            fromPending: false,
-          };
-        }
-
-        const hasStructuredHint = targetDateKey !== undefined || targetMealPeriod !== undefined;
-        const hasLabelHint = scored.some((entry) => entry.labelMatched);
-        if (!hasStructuredHint && !hasLabelHint) {
-          await rememberResolvedCandidate(deviceId, action, candidates[0]!);
-          return {
-            status: "resolved",
-            action,
-            resolvedMealId: candidates[0]!.mealId,
-            mealRevisionId: candidates[0]!.mealRevisionId,
-            candidate: candidates[0]!,
-            fromPending: false,
-          };
-        }
-      }
-
-      if (scored.length === 0) {
+      if (tierResult.status === "not_found") {
         return {
           status: "not_found",
           action,
-          prompt: buildNotFoundPrompt(action),
+          prompt: tierResult.prompt ?? buildNotFoundPrompt(action),
         };
       }
 
-      const bestScore = scored[0]!.score;
-      const top = scored.filter((entry) => entry.score === bestScore).map((entry) => entry.candidate);
-
-      if (bestScore <= 0) {
-        return {
-          status: "not_found",
-          action,
-          prompt: buildNotFoundPrompt(action),
-        };
-      }
-
-      if (top.length === 1) {
-        await rememberResolvedCandidate(deviceId, action, top[0]!);
+      if (tierResult.status === "resolved") {
+        const candidate = tierResult.candidates[0]!;
+        if (tierResult.rememberResolved) {
+          await rememberResolvedCandidate(deviceId, action, candidate);
+        }
         return {
           status: "resolved",
           action,
-          resolvedMealId: top[0]!.mealId,
-          mealRevisionId: top[0]!.mealRevisionId,
-          candidate: top[0]!,
+          resolvedMealId: candidate.mealId,
+          mealRevisionId: candidate.mealRevisionId,
+          candidate,
           fromPending: false,
         };
       }
 
-      const narrowed = top.slice(0, 5);
-      await turnStateService.putState(
-        deviceId,
-        PENDING_SELECTION_KIND,
-        { action, candidates: narrowed },
-        PENDING_SELECTION_TTL_MS,
-      );
+      const narrowed = tierResult.candidates.slice(0, 5);
+      if (narrowed.length > 0) {
+        await turnStateService.putState(
+          deviceId,
+          PENDING_SELECTION_KIND,
+          { action, candidates: narrowed },
+          PENDING_SELECTION_TTL_MS,
+        );
+      }
 
       return {
         status: "needs_clarification",
         action,
-        prompt: buildClarificationPrompt(action, narrowed),
+        prompt: tierResult.prompt ?? (
+          narrowed.length > 0 ? buildClarificationPrompt(action, narrowed) : buildNotFoundPrompt(action)
+        ),
         candidates: narrowed,
       };
     },
