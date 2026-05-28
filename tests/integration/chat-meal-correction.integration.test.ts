@@ -5,9 +5,16 @@ import assert from "node:assert/strict";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import {
+  renderMealNumericAuthorityFailureCopy,
+  renderMealNumericCancelCopy,
+  renderMealNumericProposalCopy,
+  renderProposalKindAmbiguityCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 
 const REAL_DATE = Date;
 const FIXED_NOW = new REAL_DATE("2026-04-19T12:00:00+08:00");
+const SUCCESS_STYLE_COPY = /已更新|更新好了|已經幫你更新|已套用/;
 
 class FixedDate extends REAL_DATE {
   constructor(...args: any[]) {
@@ -50,6 +57,7 @@ describe("chat meal correction integration", () => {
   let deviceId: string;
   let sessionCookieHeader: string;
   let services: AppServices;
+  let publishDailySummaryCalls: unknown[];
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -59,10 +67,16 @@ describe("chat meal correction integration", () => {
   beforeEach(async () => {
     globalThis.Date = FixedDate as DateConstructor;
     mockLLM = new MockLLMProvider();
+    publishDailySummaryCalls = [];
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: mockLLM,
       onServicesReady: (ready) => {
+        const originalPublishDailySummary = ready.publisher.publishDailySummary.bind(ready.publisher);
+        ready.publisher.publishDailySummary = (...args) => {
+          publishDailySummaryCalls.push(args);
+          return originalPublishDailySummary(...args);
+        };
         services = ready;
       },
     });
@@ -124,6 +138,276 @@ describe("chat meal correction integration", () => {
       fat: number;
     }> }).meals;
   }
+
+  it("updates a resolved meal only when the current turn supplies the explicit numeric target", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_explicit_numeric_meal",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "雞腿飯蛋白質改成 28g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "apply_explicit_numeric_meal",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            protein: 28,
+          }),
+        },
+      }],
+    });
+
+    const { status, body } = await postChat("雞腿飯蛋白質改成 28g");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.reply, /已更新.*雞腿飯.*蛋白質 28 g/);
+    assert.equal(body.dailySummary?.totalProtein, 28);
+
+    const meals = await getMeals();
+    const updated = meals.find((meal) => meal.id === original.id);
+    assert.ok(updated);
+    assert.notEqual(updated.mealRevisionId, original.mealRevisionId);
+    assert.equal(updated.protein, 28);
+    assert.equal(updated.calories, 650);
+  });
+
+  it("blocks vague model-estimated numeric updates without revision or daily_summary publish", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_vague_numeric_meal",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "雞腿飯蛋白質怪怪的，幫我改合理一點",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unsafe_model_estimated_numeric_update",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            protein: 24,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已更新雞腿飯，蛋白質 24 g。" });
+
+    const { status, body } = await postChat("雞腿飯蛋白質怪怪的，幫我改合理一點");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderMealNumericAuthorityFailureCopy({ field: "protein" }));
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.ok(current);
+    assert.equal(current.mealRevisionId, original.mealRevisionId);
+    assert.equal(current.protein, 30);
+  });
+
+  it("creates a relative numeric proposal without mutating the meal", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_relative_numeric_meal",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "雞腿飯蛋白質減半",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "propose_relative_numeric_meal",
+        type: "function",
+        function: {
+          name: "propose_meal_numeric_correction",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            fields: ["protein"],
+            operator: "half",
+          }),
+        },
+      }],
+    });
+
+    const { status, body } = await postChat("雞腿飯蛋白質減半");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderMealNumericProposalCopy({
+      mealLabel: "雞腿飯",
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    }));
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const proposal = await services.mealNumericProposalService.getLatest(deviceId);
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, original.id);
+    assert.equal(proposal.expectedMealRevisionId, original.mealRevisionId);
+    assert.deepEqual(proposal.updateInput, { protein: 15 });
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, original.mealRevisionId);
+    assert.equal(current?.protein, 30);
+  });
+
+  it("rejects stale meal proposal approval without revision or daily_summary publish", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await services.mealNumericProposalService.putLatest(deviceId, {
+      mealId: original.id,
+      expectedMealRevisionId: original.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+    const externalUpdate = await services.foodLoggingService.updateMeal(deviceId, original.id, {
+      expectedMealRevisionId: original.mealRevisionId,
+      items: [{
+        foodName: "新版雞腿飯",
+        calories: 640,
+        protein: 31,
+        carbs: 78,
+        fat: 19,
+      }],
+    });
+
+    const { status, body } = await postChat("套用餐點修改");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
+    assert.equal(current?.protein, 31);
+    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+  });
+
+  it("fails closed for cross-kind bare approval and broad cancel clears active proposals", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await services.goalProposalService.putLatest(deviceId, {
+      calories: 1400,
+      protein: 125,
+      carbs: 130,
+      fat: 45,
+    });
+    await services.mealNumericProposalService.putLatest(deviceId, {
+      mealId: original.id,
+      expectedMealRevisionId: original.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該選擇提案。" });
+
+    const ambiguous = await postChat("好");
+
+    assert.equal(ambiguous.status, 200);
+    assert.equal(ambiguous.body.reply, renderProposalKindAmbiguityCopy());
+    assert.equal(ambiguous.body.didLogMeal, false);
+    assert.equal(ambiguous.body.didMutateMeal, false);
+    assert.doesNotMatch(ambiguous.body.reply, SUCCESS_STYLE_COPY);
+    assert.ok(await services.goalProposalService.getLatest(deviceId));
+    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.deepEqual(publishDailySummaryCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const cancelled = await postChat("取消");
+
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.reply, renderMealNumericCancelCopy());
+    assert.equal(cancelled.body.didLogMeal, false);
+    assert.equal(cancelled.body.didMutateMeal, false);
+    assert.doesNotMatch(cancelled.body.reply, SUCCESS_STYLE_COPY);
+    assert.equal(await services.goalProposalService.getLatest(deviceId), undefined);
+    assert.equal(await services.mealNumericProposalService.getLatest(deviceId), undefined);
+    assert.deepEqual(publishDailySummaryCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, original.mealRevisionId);
+    assert.equal(current?.protein, 30);
+  });
 
   it("updates the original meal transaction instead of appending a duplicate", async () => {
     const original = await services.foodLoggingService.logFood(deviceId, {

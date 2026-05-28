@@ -9,6 +9,7 @@ import type { AppServices } from "../../server/app.js";
 import { LLMProviderError } from "../../server/llm/errors.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
+import { renderMealNumericAuthorityFailureCopy } from "../../server/orchestrator/mutation-receipts.js";
 import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
 import type { FastifyInstance } from "fastify";
 import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ProviderErrorMetadata, ToolCall, ToolDefinition } from "../../server/llm/types.js";
@@ -268,6 +269,20 @@ function createUpdateMealToolCall(mealId: string): ToolCall {
         protein: 20,
         carbs: 45,
         fat: 10,
+      }),
+    },
+  };
+}
+
+function createProteinUpdateMealToolCall(mealId: string, protein: number): ToolCall {
+  return {
+    id: "update_meal_protein",
+    type: "function",
+    function: {
+      name: "update_meal",
+      arguments: JSON.stringify({
+        meal_id: mealId,
+        protein,
       }),
     },
   };
@@ -1636,6 +1651,66 @@ describe("chat-streaming", () => {
     assertUnavailableSummaryOutcome(donePayload.summaryOutcome);
     assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "dailySummary"), false);
     assertNoPublishFailurePayload(donePayload);
+  });
+
+  it("POST /api/chat SSE blocked numeric correction emits renderer no-update terminal payload", async () => {
+    assert.ok(services, "expected app services");
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("update", "雞腿飯蛋白質怪怪的，幫我改合理一點"),
+        createProteinUpdateMealToolCall(original.id, 24),
+      ],
+    });
+    mockLLM.queueChatStream(["已更新雞腿飯，蛋白質 24 g。"]);
+
+    const form = new FormData();
+    form.append("message", "雞腿飯蛋白質怪怪的，幫我改合理一點");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const events = parseSSEEvents(text);
+    const chunkText = events
+      .filter((event) => event.event === "chunk")
+      .map((event) => JSON.parse(event.data) as { token: string })
+      .map((payload) => payload.token)
+      .join("");
+    const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: unknown;
+      summaryOutcome?: unknown;
+      loggedMeal?: unknown;
+    };
+
+    assert.equal(chunkText, renderMealNumericAuthorityFailureCopy({ field: "protein" }));
+    assert.doesNotMatch(chunkText, /已更新|更新好了|已經幫你更新|蛋白質 24 g/);
+    assert.equal(donePayload.didLogMeal, false);
+    assert.equal(donePayload.didMutateMeal, false);
+    assert.equal(donePayload.loggedMeal, undefined);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "dailySummary"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "summaryOutcome"), false);
+
+    const meals = await services.foodLoggingService.getMealsByDate(
+      deviceId,
+      new Date("2026-04-19T12:00:00+08:00"),
+    );
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, original.mealRevisionId);
+    assert.equal(current?.protein, 30);
   });
 
   it("POST /api/chat stream done projects unavailable summaryOutcome for committed delete mutations", async () => {
