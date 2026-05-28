@@ -42,7 +42,7 @@ Archived phase execution files:
 - Decimal phases are reserved for urgent insertions, if needed later.
 
 - [x] **Phase 65: Tool Contract Alignment and Meal-Period Authority** - Align `log_food` schema/runtime contracts and persist explicit meal-period intent as structured meal fact authority.
-- [ ] **Phase 66: Numeric Correction Provenance Guard** - Prevent chat corrections from committing model-estimated calories/macros unless backed by explicit user numeric evidence or an approved backend-owned estimate/proposal.
+- [x] **Phase 66: Numeric Correction Provenance Guard** - Prevent chat corrections from committing model-estimated calories/macros unless backed by explicit user numeric evidence or an approved backend-owned estimate/proposal. (completed 2026-05-28)
 - [ ] **Phase 67: Correction Targeting and Backend Clarification Rendering** - Improve correction candidate ranking and canonical clarification copy so ambiguous edits surface stable numbered options instead of silently choosing weak targets.
 - [ ] **Phase 68: Structured Tool Results and Release-Proof Gate** - Remove serialized clarification-result parsing, prove v2.4 behavior with targeted tests and metadata-only evidence, and close local release gates.
 
@@ -103,7 +103,7 @@ Plans:
 - [x] 66-04-PLAN.md — Pre-model proposal approval, cancel, and cross-kind ambiguity routing.
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 66-05-PLAN.md — Chat integration proof and prompt contract cleanup.
+- [x] 66-05-PLAN.md — Chat integration proof and prompt contract cleanup.
 **Implementation Notes:**
 - Treat server-side provenance as authoritative; prompts and client UI can support but cannot enforce the boundary alone.
 - Keep expected meal revision checks from v2.3 intact.
@@ -147,7 +147,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
-| 66. Numeric Correction Provenance Guard | v2.4 | 4/5 | In Progress|  |
+| 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete   | 2026-05-28 |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
 
