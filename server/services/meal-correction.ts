@@ -49,7 +49,25 @@ export interface MealCorrectionCandidate {
 
 export interface PendingMealSelectionState {
   action: "update" | "delete";
-  candidates: MealCorrectionCandidate[];
+  renderedOptions: PendingMealSelectionOption[];
+  scope: PendingMealSelectionScope;
+}
+
+export interface PendingMealSelectionOption {
+  number: number;
+  renderedText: string;
+  candidate: MealCorrectionCandidate;
+  attributes: {
+    dateKey: string;
+    time: string;
+    explicitMealPeriod?: MealPeriod;
+  };
+}
+
+export interface PendingMealSelectionScope {
+  evidenceTier: "resolved" | "label" | "explicit_period" | "inferred_period" | "recent" | "date_recovery";
+  targetDateKey?: string;
+  targetMealPeriod?: MealPeriod;
 }
 
 type MealCorrectionUpdateInput =
@@ -175,7 +193,7 @@ function hasUnsupportedMealPeriodReference(query: string): boolean {
 
 function extractSelectionIndex(query: string): number | undefined {
   const trimmed = normalizeText(query);
-  const directDigit = trimmed.match(/^(?:第)?([1-9])(?:個|筆|份|條)?$/);
+  const directDigit = trimmed.match(/^(?:第)?([1-9])(?:個|筆|份|條)?(?:[，,、\s].*)?$/);
   if (directDigit) {
     return Number(directDigit[1]) - 1;
   }
@@ -192,7 +210,7 @@ function extractSelectionIndex(query: string): number | undefined {
     八: 7,
     九: 8,
   };
-  const chinese = trimmed.match(/^第?([一二兩三四五六七八九])(?:個|筆|份|條)?$/);
+  const chinese = trimmed.match(/^第?([一二兩三四五六七八九])(?:個|筆|份|條)?(?:[，,、\s].*)?$/);
   if (chinese) {
     return chineseMap[chinese[1]];
   }
@@ -201,13 +219,50 @@ function extractSelectionIndex(query: string): number | undefined {
 }
 
 function formatCandidate(candidate: MealCorrectionCandidate, index: number): string {
+  return formatRenderedOption(createPendingSelectionOption(candidate, index + 1));
+}
+
+function createPendingSelectionOption(
+  candidate: MealCorrectionCandidate,
+  number: number,
+): PendingMealSelectionOption {
   const local = new Date(candidate.loggedAt);
   const hour = `${local.getHours()}`.padStart(2, "0");
   const minute = `${local.getMinutes()}`.padStart(2, "0");
-  const explicitPeriodLabel = candidate.mealPeriodSource === "explicit"
-    ? ` ${formatMealPeriodLabel(candidate.mealPeriod)}`
+  const time = `${hour}:${minute}`;
+  const explicitMealPeriod = candidate.mealPeriodSource === "explicit" ? candidate.mealPeriod : undefined;
+
+  return {
+    number,
+    candidate,
+    renderedText: "",
+    attributes: {
+      dateKey: candidate.dateKey,
+      time,
+      ...(explicitMealPeriod ? { explicitMealPeriod } : {}),
+    },
+  };
+}
+
+function formatRenderedOption(option: PendingMealSelectionOption): string {
+  const explicitPeriodLabel = option.candidate.mealPeriodSource === "explicit"
+    ? ` ${formatMealPeriodLabel(option.candidate.mealPeriod)}`
     : "";
-  return `${index + 1}. ${candidate.dateKey} ${hour}:${minute}${explicitPeriodLabel} ${candidate.foodName}`;
+  return `${option.number}. ${option.attributes.dateKey} ${option.attributes.time}${explicitPeriodLabel} ${option.candidate.foodName}`;
+}
+
+function createRenderedOptions(candidates: MealCorrectionCandidate[]): PendingMealSelectionOption[] {
+  return candidates.map((candidate, index) => {
+    const option = createPendingSelectionOption(candidate, index + 1);
+    return {
+      ...option,
+      renderedText: formatRenderedOption(option),
+    };
+  });
+}
+
+function candidatesFromRenderedOptions(options: PendingMealSelectionOption[]): MealCorrectionCandidate[] {
+  return options.map((option) => option.candidate);
 }
 
 function formatMealPeriodLabel(period: MealPeriod): string {
@@ -229,9 +284,21 @@ function buildClarificationPrompt(
   action: "update" | "delete",
   candidates: MealCorrectionCandidate[],
 ): string {
+  return buildClarificationPromptFromOptions(action, createRenderedOptions(candidates));
+}
+
+function buildClarificationPromptFromOptions(
+  action: "update" | "delete",
+  options: PendingMealSelectionOption[],
+  invalidSelection = false,
+): string {
   const verb = action === "update" ? "修改" : "刪除";
-  const lines = candidates.map((candidate, index) => formatCandidate(candidate, index));
-  return `我找到多筆可能要${verb}的餐點，請直接回覆編號：\n${lines.join("\n")}`;
+  const lines = options.map((option) => option.renderedText || formatRenderedOption(option));
+  const validNumbers = options.map((option) => String(option.number));
+  const suffix = invalidSelection && validNumbers.length > 0
+    ? `\n有效編號是 ${validNumbers.join(" 或 ")}。`
+    : "";
+  return `我找到多筆可能要${verb}的餐點，請直接回覆編號：\n${lines.join("\n")}${suffix}`;
 }
 
 function buildNotFoundPrompt(action: "update" | "delete"): string {
@@ -560,15 +627,29 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     await turnStateService.putState(
       deviceId,
       PENDING_SELECTION_KIND,
-      { action, candidates: [candidate] },
+      {
+        action,
+        renderedOptions: createRenderedOptions([candidate]),
+        scope: { evidenceTier: "resolved" },
+      } satisfies PendingMealSelectionState,
       PENDING_SELECTION_TTL_MS,
     );
+  }
+
+  function getPendingRenderedOptions(pending: PendingMealSelectionState): PendingMealSelectionOption[] {
+    if (Array.isArray(pending.renderedOptions)) {
+      return pending.renderedOptions;
+    }
+
+    const legacy = pending as unknown as { candidates?: MealCorrectionCandidate[] };
+    return Array.isArray(legacy.candidates) ? createRenderedOptions(legacy.candidates) : [];
   }
 
   async function tryResolvePendingSelection(
     deviceId: string,
     action: "update" | "delete",
     query: string,
+    options?: FindMealsOptions,
   ): Promise<FindMealsResolvedResult | FindMealsClarificationResult | undefined> {
     const pending = await turnStateService.getState<PendingMealSelectionState>(deviceId, PENDING_SELECTION_KIND);
     if (!pending) {
@@ -580,68 +661,91 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       return undefined;
     }
 
-    if (hasUnsupportedMealPeriodReference(query) && extractMealPeriod(query) === undefined) {
+    const renderedOptions = getPendingRenderedOptions(pending);
+    const candidates = candidatesFromRenderedOptions(renderedOptions);
+    const reShow = (invalidSelection = false): FindMealsClarificationResult => ({
+      status: "needs_clarification",
+      action: pending.action,
+      prompt: buildClarificationPromptFromOptions(pending.action, renderedOptions, invalidSelection),
+      candidates,
+    });
+    const resolveOption = (option: PendingMealSelectionOption): FindMealsResolvedResult => ({
+      status: "resolved",
+      action: pending.action,
+      resolvedMealId: option.candidate.mealId,
+      mealRevisionId: option.candidate.mealRevisionId,
+      candidate: option.candidate,
+      fromPending: true,
+    });
+
+    const index = extractSelectionIndex(query);
+    if (index !== undefined) {
+      const option = renderedOptions[index];
+      if (!option) {
+        return reShow(true);
+      }
+
+      return resolveOption(option);
+    }
+
+    const normalized = normalizeText(extractTargetEvidenceText(query));
+    const matchingOptions = renderedOptions.filter((option) => {
+      const labels = [option.candidate.foodName, ...option.candidate.itemNames].map(normalizeText);
+      return labels.some((label) => label.length > 0 && normalized === label);
+    });
+
+    if (matchingOptions.length === 1) {
+      return resolveOption(matchingOptions[0]!);
+    }
+
+    if (matchingOptions.length > 1) {
+      return reShow(false);
+    }
+
+    const attributeMatches = renderedOptions.filter((option) => {
+      if (normalized === normalizeText(option.attributes.dateKey)) {
+        return true;
+      }
+      if (normalized === normalizeText(option.attributes.time)) {
+        return true;
+      }
+      return option.attributes.explicitMealPeriod !== undefined
+        && extractMealPeriod(query) === option.attributes.explicitMealPeriod;
+    });
+
+    if (attributeMatches.length === 1) {
+      return resolveOption(attributeMatches[0]!);
+    }
+
+    if (attributeMatches.length > 1) {
+      return reShow(false);
+    }
+
+    const dateResolution = resolveFindMealsTargetDateKey(query, action, options);
+    if (
+      renderedOptions.length === 1 &&
+      !hasLikelyFoodReference(query) &&
+      extractMealPeriod(query) === undefined &&
+      !hasUnsupportedMealPeriodReference(query) &&
+      dateResolution.status === "resolved" &&
+      !dateResolution.hasExplicitDate
+    ) {
+      return resolveOption(renderedOptions[0]!);
+    }
+
+    const hasNewDateEvidence = dateResolution.status === "needs_clarification"
+      || (dateResolution.status === "resolved" && dateResolution.hasExplicitDate);
+    if (
+      hasNewDateEvidence ||
+      hasLikelyFoodReference(query) ||
+      extractMealPeriod(query) !== undefined ||
+      hasUnsupportedMealPeriodReference(query)
+    ) {
       await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
       return undefined;
     }
 
-    const index = extractSelectionIndex(query);
-    if (index !== undefined) {
-      const candidate = pending.candidates[index];
-      if (!candidate) {
-        return {
-          status: "needs_clarification",
-          action: pending.action,
-          prompt: buildClarificationPrompt(pending.action, pending.candidates),
-          candidates: pending.candidates,
-        };
-      }
-
-      return {
-        status: "resolved",
-        action: pending.action,
-        resolvedMealId: candidate.mealId,
-        mealRevisionId: candidate.mealRevisionId,
-        candidate,
-        fromPending: true,
-      };
-    }
-
-    const normalized = normalizeText(extractTargetEvidenceText(query));
-    const matchingCandidates = pending.candidates.filter((candidate) => {
-      const labels = [candidate.foodName, ...candidate.itemNames].map(normalizeText);
-      return labels.some((label) => label.length > 0 && normalized.includes(label));
-    });
-
-    if (matchingCandidates.length === 1) {
-      return {
-        status: "resolved",
-        action: pending.action,
-        resolvedMealId: matchingCandidates[0]!.mealId,
-        mealRevisionId: matchingCandidates[0]!.mealRevisionId,
-        candidate: matchingCandidates[0]!,
-        fromPending: true,
-      };
-    }
-
-    if (
-      pending.candidates.length === 1 &&
-      !hasLikelyFoodReference(query) &&
-      extractMealPeriod(query) === undefined &&
-      !hasUnsupportedMealPeriodReference(query)
-    ) {
-      return {
-        status: "resolved",
-        action: pending.action,
-        resolvedMealId: pending.candidates[0]!.mealId,
-        mealRevisionId: pending.candidates[0]!.mealRevisionId,
-        candidate: pending.candidates[0]!,
-        fromPending: true,
-      };
-    }
-
-    await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
-    return undefined;
+    return reShow(false);
   }
 
   function previewFieldValue(before: number, intent: MealNumericOperatorIntent): number {
@@ -693,7 +797,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       query: string,
       options?: FindMealsOptions,
     ): Promise<FindMealsResult> {
-      const pendingSelection = await tryResolvePendingSelection(deviceId, action, query);
+      const pendingSelection = await tryResolvePendingSelection(deviceId, action, query, options);
       if (pendingSelection) {
         return pendingSelection;
       }
@@ -743,11 +847,27 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       }
 
       const narrowed = tierResult.candidates.slice(0, 5);
+      const renderedOptions = createRenderedOptions(narrowed);
       if (narrowed.length > 0) {
+        const targetMealPeriod = extractMealPeriod(query);
         await turnStateService.putState(
           deviceId,
           PENDING_SELECTION_KIND,
-          { action, candidates: narrowed },
+          {
+            action,
+            renderedOptions,
+            scope: {
+              evidenceTier: targetMealPeriod
+                ? "explicit_period"
+                : dateResolution.canUseDateRecovery
+                  ? "date_recovery"
+                  : hasRecentReference(query)
+                    ? "recent"
+                    : "label",
+              ...(dateResolution.targetDateKey ? { targetDateKey: dateResolution.targetDateKey } : {}),
+              ...(targetMealPeriod ? { targetMealPeriod } : {}),
+            },
+          } satisfies PendingMealSelectionState,
           PENDING_SELECTION_TTL_MS,
         );
       }
@@ -756,7 +876,9 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         status: "needs_clarification",
         action,
         prompt: tierResult.prompt ?? (
-          narrowed.length > 0 ? buildClarificationPrompt(action, narrowed) : buildNotFoundPrompt(action)
+          renderedOptions.length > 0
+            ? buildClarificationPromptFromOptions(action, renderedOptions)
+            : buildNotFoundPrompt(action)
         ),
         candidates: narrowed,
       };
