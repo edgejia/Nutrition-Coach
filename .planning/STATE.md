@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-28T20:17:11.166Z"
+last_updated: "2026-05-28T20:26:47.128Z"
 last_activity: 2026-05-28
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 19
-  completed_plans: 16
+  completed_plans: 17
   percent: 50
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-26)
 ## Current Position
 
 Phase: 67 (correction-targeting-and-backend-clarification-rendering) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-05-28
 
@@ -87,6 +87,7 @@ Last activity: 2026-05-28
 | Phase 67 P01 | 7min | 3 tasks | 4 files |
 | Phase 67 P02 | 7min | 2 tasks | 1 files |
 | Phase 67 P03 | 4min | 2 tasks | 3 files |
+| Phase 67 P04 | 4m50s | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -185,6 +186,9 @@ Recent decisions affecting current work:
 - [Phase 67]: [Phase 67 Plan 02]: Pending meal target selections store exact rendered options with action and scope metadata. — Follow-up resolution is constrained to the options actually shown to the user.
 - [Phase 67]: [Phase 67 Plan 03]: Correction target clarification copy is rendered from typed MealCorrectionCandidate facts, not model/user correction text.
 - [Phase 67]: [Phase 67 Plan 03]: Non-resolved find_meals results now return renderer-owned meal_target_clarification controlled replies and clear resolved targets.
+- [Phase 67]: [Phase 67 Plan 04]: Correction target clarification is final only through find_meals controlledReply; the orchestrator no longer reparses serialized find_meals JSON or derives target labels from userMessage.
+- [Phase 67]: [Phase 67 Plan 04]: The meal correction prompt is support-only: it routes update/delete targeting through find_meals, preserves user target terms in query, and forbids model candidate selection or backend clarification rewrites.
+- [Phase 67]: [Phase 67 Plan 04]: Mixed numbered selections and numeric edits keep target resolution separate from numeric authority; vague numeric text such as 合理一點 still cannot directly call update_meal.
 
 ### Pending Todos
 
@@ -215,7 +219,7 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-28T20:17:11.158Z
+Last session: 2026-05-28T20:26:47.021Z
 Stopped at: Completed 67-03-PLAN.md
 Resume file: None
 
