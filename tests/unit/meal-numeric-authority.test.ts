@@ -31,6 +31,17 @@ describe("extractMealNumericEvidence", () => {
     const decimalEvidence = extractMealNumericEvidence("脂肪改成 9.5g，熱量 500 卡");
     assert.deepEqual(decimalEvidence.fat, [9.5]);
     assert.deepEqual(decimalEvidence.calories, [500]);
+
+    const bareVerbEvidence = extractMealNumericEvidence("脂肪改成五，蛋白質改為八");
+    assert.deepEqual(bareVerbEvidence.fat, [5]);
+    assert.deepEqual(bareVerbEvidence.protein, [8]);
+  });
+
+  it("excludes explicitly negated numeric values from meal authority evidence", () => {
+    const evidence = extractMealNumericEvidence("蛋白質不是 30g，改成 28g；熱量不要 500 卡，改 450 卡");
+
+    assert.deepEqual(evidence.protein, [28]);
+    assert.deepEqual(evidence.calories, [450]);
   });
 
   it("does not treat prior assistant numbers as current-turn meal numeric authority", () => {
@@ -100,6 +111,32 @@ describe("authorizeMealNumericUpdate", () => {
     assert.equal(blocked.ok, false);
     assert.equal(blocked.reason, "unauthorized_numeric_values");
     assert.deepEqual(blocked.unauthorizedFields, ["calories"]);
+  });
+
+  it("rejects numeric patch values that the current turn explicitly negates", () => {
+    const rejectedProtein = authorizeMealNumericUpdate({
+      currentUserMessage: "蛋白質不是 30g，改成 28g",
+      currentMeal,
+      update: { patch: { protein: 30 } },
+    });
+    assert.equal(rejectedProtein.ok, false);
+    assert.equal(rejectedProtein.reason, "unauthorized_numeric_values");
+    assert.deepEqual(rejectedProtein.unauthorizedFields, ["protein"]);
+
+    const acceptedProtein = authorizeMealNumericUpdate({
+      currentUserMessage: "蛋白質不是 30g，改成 28g",
+      currentMeal,
+      update: { patch: { protein: 28 } },
+    });
+    assert.deepEqual(acceptedProtein, { ok: true, authorizedFields: ["protein"] });
+
+    const rejectedCalories = authorizeMealNumericUpdate({
+      currentUserMessage: "熱量不要 500 卡，改 450 卡",
+      currentMeal,
+      update: { patch: { calories: 500 } },
+    });
+    assert.equal(rejectedCalories.ok, false);
+    assert.deepEqual(rejectedCalories.unauthorizedFields, ["calories"]);
   });
 
   it("rejects vague, direction-only, and relative text as direct write authority", () => {

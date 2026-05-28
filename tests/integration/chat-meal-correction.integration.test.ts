@@ -355,6 +355,94 @@ describe("chat meal correction integration", () => {
     assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
   });
 
+  it("clears stale resolved meal selection after stored proposal approval", async () => {
+    const original = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_relative_for_follow_up",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "雞腿飯蛋白質減半",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "propose_relative_for_follow_up",
+        type: "function",
+        function: {
+          name: "propose_meal_numeric_correction",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            fields: ["protein"],
+            operator: "half",
+          }),
+        },
+      }],
+    });
+
+    const proposed = await postChat("雞腿飯蛋白質減半");
+    assert.equal(proposed.status, 200);
+    assert.equal(proposed.body.didMutateMeal, false);
+    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+
+    const approved = await postChat("套用餐點修改");
+    assert.equal(approved.status, 200);
+    assert.equal(approved.body.didMutateMeal, true);
+    assert.equal(await services.mealNumericProposalService.getLatest(deviceId), undefined);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_follow_up_after_proposal",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "上一筆蛋白質改成 22g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "apply_follow_up_after_proposal",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            protein: 22,
+          }),
+        },
+      }],
+    });
+
+    const followUp = await postChat("上一筆蛋白質改成 22g");
+
+    assert.equal(followUp.status, 200);
+    assert.equal(followUp.body.didMutateMeal, true);
+    assert.match(followUp.body.reply, /已更新.*雞腿飯.*蛋白質 22 g/);
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.ok(current);
+    assert.notEqual(current.mealRevisionId, original.mealRevisionId);
+    assert.equal(current.protein, 22);
+  });
+
   it("fails closed for cross-kind bare approval and broad cancel clears active proposals", async () => {
     const original = await services.foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

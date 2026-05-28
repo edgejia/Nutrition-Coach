@@ -65,6 +65,8 @@ const HALF_RE = /(減半|半份|一半)/;
 const SUBTRACT_PERCENT_RE = /(少|減|降低|降|扣)\s*(\d+(?:\.\d+)?)\s*%/;
 const ADD_AMOUNT_RE = /(加|增加|提高|多)\s*(\d+(?:\.\d+)?)\s*(?:g|克|卡|kcal)?/i;
 const SUBTRACT_AMOUNT_RE = /(少|減|降低|降|扣)\s*(\d+(?:\.\d+)?)\s*(?:g|克|卡|kcal)?/i;
+const TARGET_BARE_CHINESE_DIGIT_RE = /(?:改成|改為|改到|變成|換成|調成)([零一二兩三四五六七八九])(?![十百千])/g;
+const NEGATED_VALUE_RE = /(?:不是|不要|別|非)\s*(\d+(?:\.\d+)?|[零一二兩三四五六七八九十百千]+)/g;
 const BARE_CHINESE_DIGIT: Record<string, number> = {
   零: 0,
   一: 1,
@@ -103,13 +105,13 @@ function normalizeValue(value: number): number {
   return Number(Number(value).toFixed(3));
 }
 
-function numbersFromText(text: string): number[] {
-  const values = normalizeNumericSourceText(text)
+function valuesFromNumericToken(token: string): number[] {
+  const values = normalizeNumericSourceText(token)
     .map((candidate) => Number(candidate))
     .filter((candidate) => Number.isFinite(candidate))
     .map(normalizeValue);
 
-  const compact = text.replace(/\s+/g, "");
+  const compact = token.replace(/\s+/g, "");
   const bareDigit = BARE_CHINESE_DIGIT[compact[0] ?? ""];
   const nextChar = compact[1];
   if (bareDigit !== undefined && nextChar !== "十" && nextChar !== "百" && nextChar !== "千" && !values.includes(bareDigit)) {
@@ -119,9 +121,34 @@ function numbersFromText(text: string): number[] {
   return values;
 }
 
+function negatedValuesFromText(text: string): number[] {
+  const values: number[] = [];
+  for (const match of text.matchAll(NEGATED_VALUE_RE)) {
+    for (const value of valuesFromNumericToken(match[1] ?? "")) {
+      pushUnique(values, value);
+    }
+  }
+  return values;
+}
+
+function numbersFromText(text: string): number[] {
+  const negatedValues = negatedValuesFromText(text);
+  const values = valuesFromNumericToken(text).filter((value) => !negatedValues.includes(value));
+
+  for (const match of text.matchAll(TARGET_BARE_CHINESE_DIGIT_RE)) {
+    const value = BARE_CHINESE_DIGIT[match[1] ?? ""];
+    if (value !== undefined && !negatedValues.includes(value)) {
+      pushUnique(values, value);
+    }
+  }
+
+  return values;
+}
+
 export function extractMealNumericEvidence(text: string): MealNumericEvidence {
   const evidence = emptyEvidence();
   const matches = [...text.matchAll(FIELD_LABEL_RE)];
+  const globalNegatedValues = negatedValuesFromText(text);
 
   for (let index = 0; index < matches.length; index += 1) {
     const match = matches[index]!;
@@ -139,7 +166,9 @@ export function extractMealNumericEvidence(text: string): MealNumericEvidence {
 
   for (const match of text.matchAll(CALORIE_UNIT_RE)) {
     const value = Number(match[1]);
-    if (Number.isFinite(value)) pushUnique(evidence.calories, normalizeValue(value));
+    if (Number.isFinite(value) && !globalNegatedValues.includes(normalizeValue(value))) {
+      pushUnique(evidence.calories, normalizeValue(value));
+    }
   }
 
   return evidence;

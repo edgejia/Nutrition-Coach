@@ -803,6 +803,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             buildMealNumericProposalUpdateInput(activeMealProposal),
             activeMealProposal.expectedMealRevisionId,
           );
+          await deps.mealCorrectionService.clearPendingSelection(deviceId);
           await deps.mealNumericProposalService?.clear(deviceId);
           const loggedMeal = buildLoggedMealFromMealProposalUpdate(updated.updatedMeal);
           const mutationEffects: MutationEffects = {
