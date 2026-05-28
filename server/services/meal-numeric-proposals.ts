@@ -1,0 +1,93 @@
+import type { AppDatabase } from "../db/client.js";
+import { createTurnStateService } from "./turn-state.js";
+
+export const MEAL_NUMERIC_PROPOSAL_KIND = "meal_numeric_correction_proposal";
+export const MEAL_NUMERIC_PROPOSAL_TTL_MS = 30 * 60 * 1000;
+
+export const MEAL_NUMERIC_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
+export type MealNumericField = (typeof MEAL_NUMERIC_FIELDS)[number];
+
+export interface MealNumericAffectedField {
+  field: MealNumericField;
+  before: number;
+  after: number;
+}
+
+export interface MealNumericProposalItem {
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
+export type MealNumericUpdateInput = Partial<Record<MealNumericField, number>>;
+
+export interface MealNumericProposalInput {
+  mealId: string;
+  expectedMealRevisionId: string;
+  updateInput?: MealNumericUpdateInput;
+  items?: MealNumericProposalItem[];
+  affectedFields: MealNumericAffectedField[];
+  sourceOperator: string;
+}
+
+export interface MealNumericProposalPayload extends MealNumericProposalInput {
+  proposalId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+function assertValidProposalInput(input: MealNumericProposalInput): void {
+  const hasUpdateInput = input.updateInput !== undefined;
+  const hasItems = input.items !== undefined;
+  if (hasUpdateInput === hasItems) {
+    throw new Error("meal numeric proposal requires exactly one backend-computed update shape");
+  }
+}
+
+export function createMealNumericProposalService(db: AppDatabase) {
+  const turnStateService = createTurnStateService(db);
+
+  return {
+    async putLatest(
+      deviceId: string,
+      input: MealNumericProposalInput,
+    ): Promise<MealNumericProposalPayload> {
+      assertValidProposalInput(input);
+
+      const now = new Date();
+      const proposal: MealNumericProposalPayload = {
+        proposalId: crypto.randomUUID(),
+        mealId: input.mealId,
+        expectedMealRevisionId: input.expectedMealRevisionId,
+        ...(input.updateInput ? { updateInput: { ...input.updateInput } } : {}),
+        ...(input.items ? { items: input.items.map((item) => ({ ...item })) } : {}),
+        affectedFields: input.affectedFields.map((field) => ({ ...field })),
+        sourceOperator: input.sourceOperator,
+        createdAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + MEAL_NUMERIC_PROPOSAL_TTL_MS).toISOString(),
+      };
+
+      await turnStateService.putState(
+        deviceId,
+        MEAL_NUMERIC_PROPOSAL_KIND,
+        proposal,
+        MEAL_NUMERIC_PROPOSAL_TTL_MS,
+      );
+
+      return proposal;
+    },
+
+    async getLatest(deviceId: string): Promise<MealNumericProposalPayload | undefined> {
+      return turnStateService.getState<MealNumericProposalPayload>(
+        deviceId,
+        MEAL_NUMERIC_PROPOSAL_KIND,
+      );
+    },
+
+    async clear(deviceId: string): Promise<void> {
+      await turnStateService.clearState(deviceId, MEAL_NUMERIC_PROPOSAL_KIND);
+    },
+  };
+}

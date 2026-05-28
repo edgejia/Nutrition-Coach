@@ -12,6 +12,11 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderMealNumericAuthorityFailureCopy,
+  renderMealNumericCancelCopy,
+  renderMealNumericClarificationCopy,
+  renderMealNumericProposalCopy,
+  renderProposalKindAmbiguityCopy,
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
 
@@ -63,8 +68,28 @@ const GOAL_INTERNAL_TERMS = [
   "/api",
 ] as const;
 
+const MEAL_NUMERIC_INTERNAL_TERMS = [
+  "proposalId",
+  "mealId",
+  "expectedMealRevisionId",
+  "turn_states",
+  "update_meal",
+  "revision",
+  "summaryOutcome",
+  "dailySummary",
+  "API",
+  "tool",
+  "payload",
+] as const;
+
 function assertNoGoalInternalTerms(text: string) {
   const leaked = GOAL_INTERNAL_TERMS.filter((term) => text.includes(term));
+  assert.deepEqual(leaked, []);
+  assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+}
+
+function assertNoMealNumericInternalTerms(text: string) {
+  const leaked = MEAL_NUMERIC_INTERNAL_TERMS.filter((term) => text.includes(term));
   assert.deepEqual(leaked, []);
   assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
 }
@@ -204,6 +229,81 @@ describe("goal proposal and rejection renderers", () => {
     );
     assert.doesNotMatch(text, /已更新每日目標/);
     assertNoGoalInternalTerms(text);
+  });
+});
+
+describe("meal numeric proposal and rejection renderers", () => {
+  it("renders proposal copy with meal label, every field, before and after values", () => {
+    const text = renderMealNumericProposalCopy({
+      mealLabel: "雞腿、白飯",
+      affectedFields: [
+        { field: "calories", before: 700, after: 520 },
+        { field: "protein", before: 40, after: 20 },
+        { field: "carbs", before: 80, after: 60 },
+        { field: "fat", before: 22, after: 18 },
+      ],
+      sourceOperator: "half",
+    });
+
+    assert.equal(
+      text,
+      "我可以幫你把雞腿、白飯這樣調整（減半）：\n• 卡路里：700 kcal 改為 520 kcal\n• 蛋白質：40 g 改為 20 g\n• 碳水：80 g 改為 60 g\n• 脂肪：22 g 改為 18 g\n如果要套用，請回覆「好」；如果要調整，請直接給新的目標數字。",
+    );
+    assert.doesNotMatch(text, /40\s*[x×*]\s*0\.5|公式|計算式/);
+    assertNoMealNumericInternalTerms(text);
+  });
+
+  it("uses item names when an explicit meal label is unavailable", () => {
+    const text = renderMealNumericProposalCopy({
+      items: [{ foodName: "鮭魚" }, { foodName: "地瓜" }],
+      affectedFields: [{ field: "protein", before: 36, after: 30 }],
+    });
+
+    assert.match(text, /鮭魚、地瓜/);
+    assert.match(text, /蛋白質：36 g 改為 30 g/);
+    assertNoMealNumericInternalTerms(text);
+  });
+
+  it("discloses another active proposal kind without allowing bare approval ambiguity", () => {
+    const text = renderMealNumericProposalCopy({
+      mealLabel: "雞胸便當",
+      affectedFields: [{ field: "calories", before: 620, after: 500 }],
+      otherProposalKindActive: true,
+    });
+
+    assert.match(text, /雞胸便當/);
+    assert.match(text, /卡路里：620 kcal 改為 500 kcal/);
+    assert.match(text, /套用餐點修正/);
+    assertNoMealNumericInternalTerms(text);
+  });
+
+  it("renders blocked and clarification copy as no-update Traditional Chinese guidance", () => {
+    const blocked = renderMealNumericAuthorityFailureCopy({ field: "protein" });
+    const clarification = renderMealNumericClarificationCopy({ field: "calories" });
+
+    assert.match(blocked, /^這次沒有更新/);
+    assert.match(blocked, /蛋白質/);
+    assert.match(blocked, /減半|少 20%/);
+    assert.match(clarification, /^這次沒有更新/);
+    assert.match(clarification, /卡路里/);
+    assert.match(clarification, /偏高/);
+    assertNoMealNumericInternalTerms(blocked);
+    assertNoMealNumericInternalTerms(clarification);
+  });
+
+  it("renders cancel and cross-kind ambiguity copy without success wording", () => {
+    const cancel = renderMealNumericCancelCopy();
+    const ambiguity = renderProposalKindAmbiguityCopy();
+
+    assert.equal(cancel, "已取消這組餐點修正提案，沒有更新任何餐點紀錄。");
+    assert.equal(
+      ambiguity,
+      "這次沒有更新任何內容。你同時有餐點修正和每日目標提案，請回覆「套用餐點修正」或「套用每日目標」。",
+    );
+    assert.doesNotMatch(cancel, /已更新餐點|已更新每日目標/);
+    assert.doesNotMatch(ambiguity, /已更新餐點|已更新每日目標/);
+    assertNoMealNumericInternalTerms(cancel);
+    assertNoMealNumericInternalTerms(ambiguity);
   });
 });
 

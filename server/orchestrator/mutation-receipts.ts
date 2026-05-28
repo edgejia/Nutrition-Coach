@@ -1,4 +1,8 @@
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
+import type {
+  MealNumericAffectedField,
+  MealNumericField,
+} from "../services/meal-numeric-proposals.js";
 import type { DailyTargets } from "../services/device.js";
 import type { MutationEffects } from "./mutation-effects.js";
 
@@ -54,6 +58,109 @@ function formatReceiptDateLabel(dateKey: string, currentDate = currentAppDate())
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+}
+
+const MEAL_NUMERIC_FIELD_COPY: Record<MealNumericField, { label: string; unit: string }> = {
+  calories: { label: "卡路里", unit: "kcal" },
+  protein: { label: "蛋白質", unit: "g" },
+  carbs: { label: "碳水", unit: "g" },
+  fat: { label: "脂肪", unit: "g" },
+};
+
+const MEAL_NUMERIC_OPERATOR_COPY: Record<string, string> = {
+  half: "減半",
+  reduce_percent: "按比例減少",
+  add: "增加固定數值",
+  subtract: "減少固定數值",
+};
+
+export interface MealNumericProposalCopyInput {
+  mealLabel?: string;
+  items?: Array<{ foodName: string }>;
+  affectedFields: MealNumericAffectedField[];
+  sourceOperator?: string;
+  otherProposalKindActive?: boolean;
+}
+
+export interface MealNumericFieldAwareCopyInput {
+  field?: MealNumericField;
+}
+
+function formatMealNumericValue(field: MealNumericField, value: number): string {
+  const copy = MEAL_NUMERIC_FIELD_COPY[field];
+  return `${formatNumber(value)} ${copy.unit}`;
+}
+
+function mealNumericFieldLabel(field: MealNumericField): string {
+  return MEAL_NUMERIC_FIELD_COPY[field].label;
+}
+
+function formatMealProposalLabel(input: Pick<MealNumericProposalCopyInput, "mealLabel" | "items">): string {
+  const explicit = input.mealLabel?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const itemNames = input.items
+    ?.map((item) => item.foodName.trim())
+    .filter((name) => name.length > 0);
+  if (itemNames && itemNames.length > 0) {
+    return itemNames.join("、");
+  }
+
+  return "這筆餐點";
+}
+
+function formatAffectedMealNumericField(affected: MealNumericAffectedField): string {
+  return `${mealNumericFieldLabel(affected.field)}：${formatMealNumericValue(
+    affected.field,
+    affected.before,
+  )} 改為 ${formatMealNumericValue(affected.field, affected.after)}`;
+}
+
+export function renderMealNumericProposalCopy(input: MealNumericProposalCopyInput): string {
+  const mealLabel = formatMealProposalLabel(input);
+  const operatorCopy = input.sourceOperator ? MEAL_NUMERIC_OPERATOR_COPY[input.sourceOperator] : undefined;
+  const heading = operatorCopy
+    ? `我可以幫你把${mealLabel}這樣調整（${operatorCopy}）：`
+    : `我可以幫你把${mealLabel}這樣調整：`;
+  const fieldLines = input.affectedFields.map((field) => `• ${formatAffectedMealNumericField(field)}`);
+  const otherProposalLine = input.otherProposalKindActive
+    ? "你也有另一組目標提案；若要套用餐點修正，請明確回覆「套用餐點修正」。"
+    : undefined;
+
+  return [
+    heading,
+    ...fieldLines,
+    "如果要套用，請回覆「好」；如果要調整，請直接給新的目標數字。",
+    ...(otherProposalLine ? [otherProposalLine] : []),
+  ].join("\n");
+}
+
+export function renderMealNumericAuthorityFailureCopy(
+  input: MealNumericFieldAwareCopyInput = {},
+): string {
+  const fieldText = input.field
+    ? `${mealNumericFieldLabel(input.field)}需要明確目標數字，或改用「減半」、「少 20%」這類可計算調整。`
+    : "請提供明確目標數字，或改用「減半」、「少 20%」這類可計算調整。";
+  return `這次沒有更新餐點紀錄。${fieldText}`;
+}
+
+export function renderMealNumericClarificationCopy(
+  input: MealNumericFieldAwareCopyInput = {},
+): string {
+  const fieldText = input.field
+    ? `如果要調整${mealNumericFieldLabel(input.field)}，`
+    : "如果要調整餐點數字，";
+  return `這次沒有更新餐點紀錄。${fieldText}請給明確目標數字，或說「減半」、「少 20%」、「偏高」這類方向讓我再確認。`;
+}
+
+export function renderMealNumericCancelCopy(): string {
+  return "已取消這組餐點修正提案，沒有更新任何餐點紀錄。";
+}
+
+export function renderProposalKindAmbiguityCopy(): string {
+  return "這次沒有更新任何內容。你同時有餐點修正和每日目標提案，請回覆「套用餐點修正」或「套用每日目標」。";
 }
 
 export function renderGoalProposalCopy(targets: DailyTargets): string {
