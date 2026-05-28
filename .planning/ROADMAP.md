@@ -43,7 +43,7 @@ Archived phase execution files:
 
 - [x] **Phase 65: Tool Contract Alignment and Meal-Period Authority** - Align `log_food` schema/runtime contracts and persist explicit meal-period intent as structured meal fact authority.
 - [x] **Phase 66: Numeric Correction Provenance Guard** - Prevent chat corrections from committing model-estimated calories/macros unless backed by explicit user numeric evidence or an approved backend-owned estimate/proposal. (completed 2026-05-28)
-- [x] **Phase 67: Correction Targeting and Backend Clarification Rendering** - Improve correction candidate ranking and canonical clarification copy so ambiguous edits surface stable numbered options instead of silently choosing weak targets. (completed 2026-05-28)
+- [ ] **Phase 67: Correction Targeting and Backend Clarification Rendering** - Improve correction candidate ranking and canonical clarification copy so ambiguous edits surface stable numbered options instead of silently choosing weak targets. (verification gaps found 2026-05-28)
 - [ ] **Phase 68: Structured Tool Results and Release-Proof Gate** - Remove serialized clarification-result parsing, prove v2.4 behavior with targeted tests and metadata-only evidence, and close local release gates.
 
 ## Phase Details
@@ -166,7 +166,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 |-------|-----------|----------------|--------|-----------|
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete    | 2026-05-28 |
-| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 6/6 | Complete   | 2026-05-28 |
+| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 6/6 | Gaps Found | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
 
 ## Future Milestone Candidates

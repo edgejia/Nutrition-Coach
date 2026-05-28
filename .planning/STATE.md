@@ -4,7 +4,7 @@ milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
 last_updated: "2026-05-28T20:40:06.847Z"
-last_activity: 2026-05-28
+last_activity: 2026-05-28 -- Phase 67 verification found TARGET-01 gaps
 progress:
   total_phases: 4
   completed_phases: 2
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-05-26)
 
 ## Current Position
 
-Phase: 67 (correction-targeting-and-backend-clarification-rendering) — EXECUTING
+Phase: 67 (correction-targeting-and-backend-clarification-rendering) — GAPS FOUND
 Plan: 6 of 6
-Status: Ready to execute
-Last activity: 2026-05-28
+Status: Verification gaps found; needs gap-closure planning
+Last activity: 2026-05-28 -- Phase 67 verification found TARGET-01 gaps
 
 ## Performance Metrics
 
