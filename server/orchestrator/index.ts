@@ -7,6 +7,11 @@ import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { createMealCorrectionService } from "../services/meal-correction.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
+import type {
+  createMealNumericProposalService,
+  MealNumericProposalPayload,
+} from "../services/meal-numeric-proposals.js";
+import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -29,9 +34,11 @@ import type { MutationEffects } from "./mutation-effects.js";
 import {
   assertNoForbiddenReceiptTerms,
   renderGoalCancelCopy,
+  renderMealNumericCancelCopy,
   renderMutationReceipt,
+  renderProposalKindAmbiguityCopy,
 } from "./mutation-receipts.js";
-import { isGoalProposalCancel } from "./source-text-guard.js";
+import { isGoalProposalCancel, isGoalProposalConsent } from "./source-text-guard.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -46,6 +53,7 @@ interface OrchestratorDeps {
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
   deviceService: ReturnType<typeof createDeviceService>;
   goalProposalService?: ReturnType<typeof createGoalProposalService>;
+  mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
 
@@ -303,6 +311,87 @@ function getDeviceTargets(device: Awaited<ReturnType<ReturnType<typeof createDev
     carbs: device.dailyCarbs,
     fat: device.dailyFat,
   };
+}
+
+function normalizeProposalDecisionText(message: string): string {
+  return message.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function isMealProposalKindText(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /(餐點|餐|meal).*(修正|修改|更新|提案)|(?:修正|修改|更新).*(餐點|餐|meal)/i.test(normalized);
+}
+
+function isGoalProposalKindText(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /(每日)?目標|goal/i.test(normalized);
+}
+
+function isMealProposalCancel(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /(取消|不要|不用|不套用|先不用|先不要|no)/i.test(normalized)
+    && isMealProposalKindText(message);
+}
+
+function isGoalKindCancel(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /(取消|不要|不用|不套用|先不用|先不要|no)/i.test(normalized)
+    && isGoalProposalKindText(message);
+}
+
+function isMealProposalApproval(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  if (isGoalProposalCancel(message)) return false;
+  if (/套用(?:這組)?(?:餐點)?(?:修正|修改)|套用餐點|applymeal/i.test(normalized)) return true;
+  return isMealProposalKindText(message) && isGoalProposalConsent(message);
+}
+
+function isGoalKindApproval(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  if (isGoalProposalCancel(message)) return false;
+  return /套用(?:每日)?目標|目標更新|applygoal/i.test(normalized);
+}
+
+function buildMealNumericProposalUpdateInput(
+  proposal: MealNumericProposalPayload,
+): Parameters<ReturnType<typeof createMealCorrectionService>["updateMeal"]>[2] {
+  return proposal.updateInput
+    ? { patch: proposal.updateInput }
+    : { items: proposal.items?.map((item) => ({
+      foodName: item.foodName,
+      calories: item.calories,
+      protein: item.protein,
+      carbs: item.carbs,
+      fat: item.fat,
+    })) ?? [] };
+}
+
+function buildLoggedMealFromMealProposalUpdate(
+  updatedMeal: Awaited<ReturnType<ReturnType<typeof createMealCorrectionService>["updateMeal"]>>["updatedMeal"],
+): LoggedMealReceipt {
+  return {
+    mealId: updatedMeal.id,
+    mealRevisionId: updatedMeal.mealRevisionId,
+    dateKey: formatLocalDate(new Date(updatedMeal.loggedAt)),
+    loggedAt: updatedMeal.loggedAt,
+    ...(updatedMeal.mealPeriod ? { mealPeriod: updatedMeal.mealPeriod } : {}),
+    imageAssetId: null,
+    imageUrl: null,
+    foodName: updatedMeal.foodName,
+    calories: updatedMeal.calories,
+    protein: updatedMeal.protein,
+    carbs: updatedMeal.carbs,
+    fat: updatedMeal.fat,
+    itemCount: updatedMeal.itemCount,
+    items: updatedMeal.items,
+    countedSources: [],
+    excludedSources: [],
+    usedConservativeAssumption: false,
+  };
+}
+
+function renderMealProposalStaleCopy(): string {
+  return "這筆餐點已經有較新的紀錄，請重新整理後再修改。";
 }
 
 function extractUserCorrectionTarget(userMessage: string): string {
@@ -638,18 +727,115 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           finalReplyShape: classifyFallbackReplyShape(hallucinatedChoiceRecovery),
         };
       }
-      if (isGoalProposalCancel(userMessage) && deps.goalProposalService) {
-        const proposal = await deps.goalProposalService.getLatest(deviceId);
-        if (proposal) {
-          await deps.goalProposalService.clear(deviceId);
-          const reply = renderGoalCancelCopy();
+
+      const activeGoalProposal = deps.goalProposalService
+        ? await deps.goalProposalService.getLatest(deviceId)
+        : undefined;
+      const activeMealProposal = deps.mealNumericProposalService
+        ? await deps.mealNumericProposalService.getLatest(deviceId)
+        : undefined;
+
+      if (activeMealProposal && isMealProposalCancel(userMessage)) {
+        await deps.mealNumericProposalService?.clear(deviceId);
+        const reply = renderMealNumericCancelCopy();
+        return {
+          reply,
+          didLogMeal: false,
+          didMutateMeal: false,
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(reply),
+        };
+      }
+
+      if (activeGoalProposal && isGoalKindCancel(userMessage)) {
+        await deps.goalProposalService?.clear(deviceId);
+        const reply = renderGoalCancelCopy();
+        return {
+          reply,
+          didLogMeal: false,
+          didMutateMeal: false,
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(reply),
+        };
+      }
+
+      if (isGoalProposalCancel(userMessage) && (activeGoalProposal || activeMealProposal)) {
+        await Promise.all([
+          activeGoalProposal ? deps.goalProposalService?.clear(deviceId) : undefined,
+          activeMealProposal ? deps.mealNumericProposalService?.clear(deviceId) : undefined,
+        ]);
+        const reply = activeMealProposal ? renderMealNumericCancelCopy() : renderGoalCancelCopy();
+        return {
+          reply,
+          didLogMeal: false,
+          didMutateMeal: false,
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(reply),
+        };
+      }
+
+      if (
+        activeGoalProposal
+        && activeMealProposal
+        && isGoalProposalConsent(userMessage)
+        && !isMealProposalApproval(userMessage)
+        && !isGoalKindApproval(userMessage)
+      ) {
+        const reply = renderProposalKindAmbiguityCopy();
+        return {
+          reply,
+          didLogMeal: false,
+          didMutateMeal: false,
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(reply),
+        };
+      }
+
+      if (
+        activeMealProposal
+        && deps.mealCorrectionService
+        && (isMealProposalApproval(userMessage) || (!activeGoalProposal && isGoalProposalConsent(userMessage)))
+      ) {
+        try {
+          const updated = await deps.mealCorrectionService.updateMeal(
+            deviceId,
+            activeMealProposal.mealId,
+            buildMealNumericProposalUpdateInput(activeMealProposal),
+            activeMealProposal.expectedMealRevisionId,
+          );
+          await deps.mealNumericProposalService?.clear(deviceId);
+          const loggedMeal = buildLoggedMealFromMealProposalUpdate(updated.updatedMeal);
+          const mutationEffects: MutationEffects = {
+            kind: "update",
+            affectedDate: updated.affectedDate,
+            summaryOutcome: requireSummaryOutcomeForMealMutation(updated.summaryOutcome),
+            committedTargets: getDeviceTargets(device),
+            meal: loggedMeal,
+          };
+          const reply = renderCheckedMutationReceipt(mutationEffects);
           return {
             reply,
             didLogMeal: false,
-            didMutateMeal: false,
+            didMutateMeal: true,
+            dailySummary: updated.dailySummary,
+            summaryOutcome: updated.summaryOutcome,
+            affectedDate: updated.affectedDate,
+            loggedMeal,
             finalReplySource: "renderer",
             finalReplyShape: classifyPlainReplyShape(reply),
           };
+        } catch (error) {
+          if (error instanceof MealRevisionPreconditionError) {
+            const reply = renderMealProposalStaleCopy();
+            return {
+              reply,
+              didLogMeal: false,
+              didMutateMeal: false,
+              finalReplySource: "renderer",
+              finalReplyShape: classifyPlainReplyShape(reply),
+            };
+          }
+          throw error;
         }
       }
       const systemMsg: ChatMessage = {
@@ -935,6 +1121,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 mealCorrectionService: deps.mealCorrectionService,
                 deviceService: deps.deviceService,
                 goalProposalService: deps.goalProposalService,
+                mealNumericProposalService: deps.mealNumericProposalService,
                 publisher: deps.publisher,
                 imagePath,
                 toolSessionState,

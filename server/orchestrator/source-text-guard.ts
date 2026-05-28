@@ -46,6 +46,7 @@ const NUTRITION_UNIT_CHARS = new Set(["g", "G", "克", "卡"]);
 
 const GOAL_PROPOSAL_CONSENT_PATTERNS = [
   /^(好|可以|幫我更新|就這樣|用這組|ok|okay|yes|y|sure)(?:$|[，,。!！、]|但)/i,
+  /^套用(?:每日)?目標(?:更新)?$/i,
 ] as const;
 const GOAL_PROPOSAL_CANCEL_PATTERNS = [
   /^(不要|取消|先不用|不用|不好|不可以|不行|不是|不對|no|nope|not)$/i,
