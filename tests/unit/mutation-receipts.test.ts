@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import type { DailyTargets } from "../../server/services/device.js";
 import type { DailySummary } from "../../server/services/summary.js";
 import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
+import type { MealCorrectionCandidate } from "../../server/services/meal-correction.js";
 import type { MutationEffects } from "../../server/orchestrator/mutation-effects.js";
 import {
   FORBIDDEN_RECEIPT_TERMS,
@@ -16,6 +17,9 @@ import {
   renderMealNumericCancelCopy,
   renderMealNumericClarificationCopy,
   renderMealNumericProposalCopy,
+  renderCorrectionTargetClarificationCopy,
+  renderCorrectionTargetNoMealsForDateCopy,
+  renderCorrectionTargetSameDateRecoveryCopy,
   renderProposalKindAmbiguityCopy,
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
@@ -82,6 +86,52 @@ const MEAL_NUMERIC_INTERNAL_TERMS = [
   "payload",
 ] as const;
 
+const CORRECTION_TARGET_INTERNAL_TERMS = [
+  "find_meals",
+  "update_meal",
+  "delete_meal",
+  "tool",
+  "revision",
+  "mealRevisionId",
+  "summaryOutcome",
+  "dailySummary",
+  "已更新",
+  "已刪除",
+] as const;
+
+const correctionCandidates = [
+  {
+    mealId: "meal-lunch",
+    mealRevisionId: "rev-lunch",
+    foodName: "滷蛋、雞腿便當",
+    itemCount: 2,
+    itemNames: ["滷蛋", "雞腿便當"],
+    calories: 720,
+    protein: 42,
+    carbs: 80,
+    fat: 24,
+    loggedAt: "2026-05-10T04:30:00.000Z",
+    dateKey: "2026-05-10",
+    mealPeriod: "lunch",
+    mealPeriodSource: "explicit",
+  },
+  {
+    mealId: "meal-dinner",
+    mealRevisionId: "rev-dinner",
+    foodName: "雞胸沙拉",
+    itemCount: 1,
+    itemNames: ["雞胸沙拉"],
+    calories: 430,
+    protein: 38,
+    carbs: 22,
+    fat: 18,
+    loggedAt: "2026-05-10T10:45:00.000Z",
+    dateKey: "2026-05-10",
+    mealPeriod: "dinner",
+    mealPeriodSource: "inferred",
+  },
+] satisfies MealCorrectionCandidate[];
+
 function assertNoGoalInternalTerms(text: string) {
   const leaked = GOAL_INTERNAL_TERMS.filter((term) => text.includes(term));
   assert.deepEqual(leaked, []);
@@ -90,6 +140,12 @@ function assertNoGoalInternalTerms(text: string) {
 
 function assertNoMealNumericInternalTerms(text: string) {
   const leaked = MEAL_NUMERIC_INTERNAL_TERMS.filter((term) => text.includes(term));
+  assert.deepEqual(leaked, []);
+  assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+}
+
+function assertNoCorrectionTargetInternalTerms(text: string) {
+  const leaked = CORRECTION_TARGET_INTERNAL_TERMS.filter((term) => text.includes(term));
   assert.deepEqual(leaked, []);
   assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
 }
@@ -304,6 +360,83 @@ describe("meal numeric proposal and rejection renderers", () => {
     assert.doesNotMatch(ambiguity, /已更新餐點|已更新每日目標/);
     assertNoMealNumericInternalTerms(cancel);
     assertNoMealNumericInternalTerms(ambiguity);
+  });
+});
+
+describe("correction target clarification renderers", () => {
+  it("Phase 67 D-22/D-23/D-24/D-25/D-26/D-28 renders stable backend-owned numbered options", () => {
+    const text = renderCorrectionTargetClarificationCopy({
+      action: "update",
+      matchedLabel: "滷蛋",
+      candidates: correctionCandidates,
+    });
+
+    assert.equal(
+      text,
+      "我找到多筆可能符合「滷蛋」的餐點，請直接回覆編號：\n1. 2026-05-10 12:30 午餐 滷蛋、雞腿便當\n2. 2026-05-10 18:45 雞胸沙拉",
+    );
+    assert.match(text, /^我找到多筆/);
+    assert.match(text, /請直接回覆編號/);
+    assert.match(text, /^1\. 2026-05-10 12:30 午餐 滷蛋、雞腿便當/m);
+    assert.match(text, /^2\. 2026-05-10 18:45 雞胸沙拉/m);
+    assert.doesNotMatch(text, /晚餐 雞胸沙拉/);
+    assert.doesNotMatch(text, /720|430|42|38|kcal|蛋白質|碳水|脂肪/);
+    assert.doesNotMatch(text, /中午雞腿便當/);
+    assertNoCorrectionTargetInternalTerms(text);
+  });
+
+  it("Phase 67 D-27/D-29/D-31 falls back to generic meal copy and limits options to five", () => {
+    const text = renderCorrectionTargetClarificationCopy({
+      action: "delete",
+      matchedLabel: "  ",
+      candidates: [
+        ...correctionCandidates,
+        { ...correctionCandidates[0], mealId: "meal-3", mealRevisionId: "rev-3", foodName: "第三筆" },
+        { ...correctionCandidates[0], mealId: "meal-4", mealRevisionId: "rev-4", foodName: "第四筆" },
+        { ...correctionCandidates[0], mealId: "meal-5", mealRevisionId: "rev-5", foodName: "第五筆" },
+        { ...correctionCandidates[0], mealId: "meal-6", mealRevisionId: "rev-6", foodName: "第六筆" },
+      ],
+    });
+
+    assert.match(text, /^我找到多筆可能要刪除的餐點，請直接回覆編號：/);
+    assert.match(text, /^5\. /m);
+    assert.doesNotMatch(text, /^6\. /m);
+    assertNoCorrectionTargetInternalTerms(text);
+  });
+
+  it("Phase 67 D-30 renders same-date recovery as same-date numbered confirmation only", () => {
+    const text = renderCorrectionTargetSameDateRecoveryCopy({
+      action: "update",
+      dateKey: "2026-05-10",
+      candidates: [
+        correctionCandidates[0],
+        { ...correctionCandidates[1], dateKey: "2026-05-09" },
+      ],
+    });
+
+    assert.equal(
+      text,
+      "2026-05-10 有幾筆餐點，請直接回覆編號：\n1. 2026-05-10 12:30 午餐 滷蛋、雞腿便當",
+    );
+    assert.match(text, /請直接回覆編號/);
+    assert.doesNotMatch(text, /2026-05-09/);
+    assert.doesNotMatch(text, /已更新|已刪除/);
+    assertNoCorrectionTargetInternalTerms(text);
+  });
+
+  it("Phase 67 D-30 renders explicit single-date no-meals copy without off-date options", () => {
+    const text = renderCorrectionTargetNoMealsForDateCopy({
+      action: "delete",
+      dateKey: "2026-05-08",
+    });
+
+    assert.equal(
+      text,
+      "2026-05-08 沒有記錄餐點，所以我還不能刪除那一天的餐點。請提供另一個日期或食物名稱。",
+    );
+    assert.doesNotMatch(text, /^1\. /m);
+    assert.doesNotMatch(text, /2026-05-09|2026-05-10|已刪除/);
+    assertNoCorrectionTargetInternalTerms(text);
   });
 });
 
