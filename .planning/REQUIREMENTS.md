@@ -21,9 +21,9 @@ Requirements for the v2.4 correction-authority milestone. Each requirement must 
 
 ### Correction Authority
 
-- [ ] **CORR-01**: User can change meal numeric fields through chat only when the current turn provides explicit numeric evidence or an approved backend-owned estimate/proposal.
-- [ ] **CORR-02**: User requests such as `蛋白質怪怪的，幫我改合理一點` do not mutate meal calories or macros directly; the backend returns deterministic clarification or proposal copy instead.
-- [ ] **CORR-03**: A rejected or clarification-required correction does not create a new meal revision, does not publish `daily_summary`, and does not show LLM-authored success-style text.
+- [x] **CORR-01**: User can change meal numeric fields through chat only when the current turn provides explicit numeric evidence or an approved backend-owned estimate/proposal.
+- [x] **CORR-02**: User requests such as `蛋白質怪怪的，幫我改合理一點` do not mutate meal calories or macros directly; the backend returns deterministic clarification or proposal copy instead.
+- [x] **CORR-03**: A rejected or clarification-required correction does not create a new meal revision, does not publish `daily_summary`, and does not show LLM-authored success-style text.
 
 ### Correction Targeting and Rendering
 
@@ -85,9 +85,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INTENT-01 | Phase 65 | Complete |
 | INTENT-02 | Phase 65 | Complete |
 | INTENT-03 | Phase 65 | Complete |
-| CORR-01 | Phase 66 | Pending |
-| CORR-02 | Phase 66 | Pending |
-| CORR-03 | Phase 66 | Pending |
+| CORR-01 | Phase 66 | Complete |
+| CORR-02 | Phase 66 | Complete |
+| CORR-03 | Phase 66 | Complete |
 | TARGET-01 | Phase 67 | Pending |
 | TARGET-02 | Phase 67 | Pending |
 | TARGET-03 | Phase 67 | Pending |
