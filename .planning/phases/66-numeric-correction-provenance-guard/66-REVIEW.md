@@ -1,6 +1,6 @@
 ---
 phase: 66-numeric-correction-provenance-guard
-reviewed: 2026-05-28T08:40:47Z
+reviewed: 2026-05-28T08:49:46Z
 depth: standard
 files_reviewed: 22
 files_reviewed_list:
@@ -27,75 +27,48 @@ files_reviewed_list:
   - tests/unit/system-prompt.test.ts
   - tests/unit/tools.test.ts
 findings:
-  critical: 2
-  warning: 1
+  critical: 0
+  warning: 0
   info: 0
-  total: 3
-status: issues_found
+  total: 0
+status: clean
 ---
 
 # Phase 66: Code Review Report
 
-**Reviewed:** 2026-05-28T08:40:47Z
+**Reviewed:** 2026-05-28T08:49:46Z
 **Depth:** standard
 **Files Reviewed:** 22
-**Status:** issues_found
+**Status:** clean
 
 ## Summary
 
-Reviewed the numeric meal-correction provenance guard, proposal storage, orchestrator short-circuit paths, renderer copy, and the associated unit/integration coverage. The implementation has two blocking correctness defects in the state and source-authority boundaries, plus one explicit-value parsing gap that should be fixed with focused regression coverage.
+Re-reviewed Phase 66 after commit `fb31b61` (`fix(66): close meal numeric review findings`), focusing on `server/orchestrator/index.ts`, `server/orchestrator/meal-numeric-authority.ts`, `tests/unit/meal-numeric-authority.test.ts`, and `tests/integration/chat-meal-correction.integration.test.ts`, with spot checks across the original reviewed Phase 66 surface.
+
+The prior findings are closed. Stored meal proposal approval now clears pending meal selection state before returning success. Meal numeric evidence now excludes explicitly negated values from authorized values. Bare Chinese digit targets after common target verbs are covered and tested.
+
+All reviewed files meet the Phase 66 quality bar. No new blocking issues or warnings were found in the re-review.
 
 ## Narrative Findings (AI reviewer)
 
-## Critical Issues
+No narrative findings.
 
-### CR-01: Stored Meal Proposal Approval Leaves A Stale Pending Meal Selection
+## Prior Finding Re-check
 
-**File:** `server/orchestrator/index.ts:800`
+- `CR-01` stale pending meal selection after stored proposal approval: fixed by `server/orchestrator/index.ts` clearing pending selection after the revision-scoped proposal update. Regression coverage was added in `tests/integration/chat-meal-correction.integration.test.ts`.
+- `CR-02` negated numeric values treated as authorized targets: fixed by excluding negated numeric tokens before building meal numeric authority evidence. Regression coverage was added in `tests/unit/meal-numeric-authority.test.ts`.
+- `WR-01` bare Chinese numerals after target verbs rejected: fixed by recognizing bare Chinese digit targets after common target verbs. Regression coverage was added in `tests/unit/meal-numeric-authority.test.ts`.
 
-**Issue:** The meal-proposal approval path applies the stored proposal by calling `deps.mealCorrectionService.updateMeal(...)` directly, clears only `mealNumericProposalService`, and returns. It bypasses the normal `update_meal` tool cleanup in `server/orchestrator/tools.ts:1515`, so the `meal_target_selection` turn-state row created by the earlier `find_meals` resolution remains active with the old `mealRevisionId`. A natural follow-up such as "再改成 22g" can then resolve through that stale pending selection and fail the revision precondition for up to 15 minutes, even though the user is continuing from the just-updated meal.
+## Verification
 
-**Fix:**
-```ts
-const updated = await deps.mealCorrectionService.updateMeal(
-  deviceId,
-  activeMealProposal.mealId,
-  buildMealNumericProposalUpdateInput(activeMealProposal),
-  activeMealProposal.expectedMealRevisionId,
-);
-await deps.mealCorrectionService.clearPendingSelection(deviceId);
-await deps.mealNumericProposalService?.clear(deviceId);
-```
+Parent-run verification reported for this re-review:
 
-Add an integration regression that creates a meal proposal through `find_meals`, approves it, then sends a follow-up correction and asserts it does not reuse the stale revision.
-
-### CR-02: Negated Numeric Values Are Treated As Authorized Meal Targets
-
-**File:** `server/orchestrator/meal-numeric-authority.ts:106`
-
-**Issue:** `extractMealNumericEvidence()` authorizes every number in the text segment after a field label until the next field label. It does not distinguish final target values from negated or rejected values. For example, "蛋白質不是 30g，改成 28g" authorizes both `30` and `28`, so an `update_meal` call setting `protein: 30` would pass the guard even though the user explicitly rejected 30. This breaks the provenance guard's core contract and can commit incorrect meal nutrition values.
-
-**Fix:**
-```ts
-// Sketch: only accept numbers in positive target clauses, and reject negated spans.
-const TARGET_VALUE_RE = /(?:改成|改為|改到|變成|換成|調成)\s*(\d+(?:\.\d+)?|[一二兩三四五六七八九十百千]+)/g;
-const NEGATED_VALUE_RE = /(?:不是|不要|別|非)\s*(\d+(?:\.\d+)?|[一二兩三四五六七八九十百千]+)/g;
-```
-
-Implement this with the existing Chinese-numeral normalizer rather than ad hoc string comparison, and add tests for "不是 30g，改成 28g" and "不要 500 卡，改 450 卡".
-
-## Warnings
-
-### WR-01: Bare Chinese Numerals After Common Target Verbs Are Rejected
-
-**File:** `server/orchestrator/meal-numeric-authority.ts:112`
-
-**Issue:** The meal-specific evidence extractor only adds a bare Chinese digit when it is the first character of the field segment. That handles "脂肪五", but common explicit target phrasing such as "脂肪改成五" or "蛋白質改為八" is rejected because `compact[0]` is the verb character, not the digit. The unit test claims bare Chinese digits are supported, but it only covers the narrow no-verb form.
-
-**Fix:** Scan the whole field segment for bare Chinese digits after target-setting verbs, or extend `normalizeNumericSourceText()` with a context-aware option for bare nutrition values. Add unit tests for `脂肪改成五` and `蛋白質改為八`.
+- `yarn tsc --noEmit` - passed.
+- `yarn test:unit` - passed.
+- `yarn test:integration` - passed.
 
 ---
 
-_Reviewed: 2026-05-28T08:40:47Z_
+_Reviewed: 2026-05-28T08:49:46Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
