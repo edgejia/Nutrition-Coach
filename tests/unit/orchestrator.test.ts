@@ -6,6 +6,7 @@ import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createGoalProposalService } from "../../server/services/goal-proposals.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+import { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
@@ -16,6 +17,8 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderMealNumericCancelCopy,
+  renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
 
@@ -325,6 +328,7 @@ describe("Orchestrator - didLogMeal", () => {
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   let goalProposalService: ReturnType<typeof createGoalProposalService>;
+  let mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
   let chatService: ReturnType<typeof createChatService>;
   let shouldFailSummary = false;
 
@@ -334,6 +338,7 @@ describe("Orchestrator - didLogMeal", () => {
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
     goalProposalService = createGoalProposalService(db);
+    mealNumericProposalService = createMealNumericProposalService(db);
     const summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
@@ -355,6 +360,7 @@ describe("Orchestrator - didLogMeal", () => {
       mealCorrectionService,
       deviceService,
       goalProposalService,
+      mealNumericProposalService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -1990,5 +1996,152 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.finalReplyShape, "plain_text");
     assert.equal(mockLLM.chatCalls.length, 0);
     assert.equal(await goalProposalService.getLatest(deviceId), undefined);
+  });
+
+  it("fails closed on bare consent when goal and meal proposals are both active", async () => {
+    const meal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await goalProposalService.putLatest(deviceId, {
+      calories: 1750,
+      protein: 125,
+      carbs: 180,
+      fat: 55,
+    });
+    await mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該被呼叫" });
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderProposalKindAmbiguityCopy());
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.ok(await goalProposalService.getLatest(deviceId));
+    assert.ok(await mealNumericProposalService.getLatest(deviceId));
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.find((current) => current.id === meal.id)?.protein, 30);
+  });
+
+  it("clears goal and meal proposals on broad cancel before any model call", async () => {
+    const meal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await goalProposalService.putLatest(deviceId, {
+      calories: 1750,
+      protein: 125,
+      carbs: 180,
+      fat: 55,
+    });
+    await mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該被呼叫" });
+
+    const result = await orchestrator.handleMessage(deviceId, "不要");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderMealNumericCancelCopy());
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(await goalProposalService.getLatest(deviceId), undefined);
+    assert.equal(await mealNumericProposalService.getLatest(deviceId), undefined);
+  });
+
+  it("clears only the meal proposal on kind-specific meal cancel", async () => {
+    const meal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await goalProposalService.putLatest(deviceId, {
+      calories: 1750,
+      protein: 125,
+      carbs: 180,
+      fat: 55,
+    });
+    await mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "取消餐點修改");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderMealNumericCancelCopy());
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.ok(await goalProposalService.getLatest(deviceId));
+    assert.equal(await mealNumericProposalService.getLatest(deviceId), undefined);
+  });
+
+  it("applies only the stored meal proposal on kind-specific meal approval without a model round", async () => {
+    const meal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await goalProposalService.putLatest(deviceId, {
+      calories: 1750,
+      protein: 125,
+      carbs: 180,
+      fat: 55,
+    });
+    await mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "套用餐點修改");
+
+    assert.ok("reply" in result);
+    assert.match(result.reply, /已更新.*雞腿飯.*蛋白質 15 g/);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.ok(await goalProposalService.getLatest(deviceId));
+    assert.equal(await mealNumericProposalService.getLatest(deviceId), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.find((current) => current.id === meal.id)?.protein, 15);
   });
 });

@@ -10,7 +10,10 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderMealNumericCancelCopy,
+  renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
+import type { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
 import type { FastifyInstance } from "fastify";
 
 interface DailyTargets {
@@ -26,6 +29,10 @@ interface ChatBody {
   didMutateMeal?: boolean;
   dailyTargets?: DailyTargets;
 }
+
+type AppServicesWithMealProposal = AppServices & {
+  mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+};
 
 const DEFAULT_TARGETS: DailyTargets = {
   calories: 1500,
@@ -70,8 +77,9 @@ describe("chat goal update integration", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
   let address: string;
+  let deviceId: string;
   let sessionCookieHeader: string;
-  let services: AppServices;
+  let services: AppServicesWithMealProposal;
   let publishCalls: Array<{ event: "goals_update" }>;
   let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
 
@@ -93,7 +101,7 @@ describe("chat goal update integration", () => {
         return recorder;
       },
       onServicesReady(appServices: AppServices) {
-        const readyServices = appServices;
+        const readyServices = appServices as AppServicesWithMealProposal;
         const originalPublishGoalsUpdate = readyServices.publisher.publishGoalsUpdate.bind(readyServices.publisher);
         readyServices.publisher.publishGoalsUpdate = (deviceId, targets) => {
           publishCalls.push({ event: "goals_update" });
@@ -103,6 +111,7 @@ describe("chat goal update integration", () => {
       },
     });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
+    deviceId = (res.json() as { deviceId: string }).deviceId;
     sessionCookieHeader = toCookieHeader(res.headers["set-cookie"]);
     address = await app.listen({ port: 0 });
   });
@@ -439,6 +448,183 @@ describe("chat goal update integration", () => {
       assert.deepEqual(publishCalls, []);
       assert.equal(mockLLM.chatCalls.length, index + 1);
     }
+  });
+
+  it("fails closed for bare approval when goal and meal proposals coexist", async () => {
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
+    await services.mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該選擇提案。" });
+
+    const { status, body } = await postChat("好");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, renderProposalKindAmbiguityCopy());
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.dailyTargets, undefined);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.ok(await services.goalProposalService.getLatest(deviceId));
+    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
+  it("cancels goal and meal proposals together before the model runs", async () => {
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
+    await services.mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該看到取消回合。" });
+
+    const { status, body } = await postChat("取消");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, renderMealNumericCancelCopy());
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.dailyTargets, undefined);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.equal(await services.goalProposalService.getLatest(deviceId), undefined);
+    assert.equal(await services.mealNumericProposalService.getLatest(deviceId), undefined);
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
+  it("applies a kind-specific meal proposal through the stored revision and clears only meal state", async () => {
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
+    await services.mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+
+    const { status, body } = await postChat("套用餐點修改");
+
+    assert.equal(status, 200);
+    assert.match(body.reply, /已更新.*雞腿飯.*蛋白質 15 g/);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.dailyTargets, undefined);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.ok(await services.goalProposalService.getLatest(deviceId));
+    assert.equal(await services.mealNumericProposalService.getLatest(deviceId), undefined);
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
+  it("leaves meal proposal untouched when kind-specific goal approval uses the existing goal path", async () => {
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
+    await services.mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_kind_specific_latest",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "latest_proposal" }),
+        },
+      }],
+    });
+
+    const { status, body } = await postChat("套用目標更新");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, PROPOSAL_SUCCESS_RECEIPT);
+    assert.deepEqual(body.dailyTargets, PROPOSAL_TARGETS);
+    assert.deepEqual(await readTargets(), PROPOSAL_TARGETS);
+    assert.equal(await services.goalProposalService.getLatest(deviceId), undefined);
+    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("rejects stale meal proposal approval through the existing meal revision precondition", async () => {
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    await services.mealNumericProposalService.putLatest(deviceId, {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      updateInput: { protein: 15 },
+      affectedFields: [{ field: "protein", before: 30, after: 15 }],
+      sourceOperator: "half",
+    });
+    const externalUpdate = await services.foodLoggingService.updateMeal(deviceId, meal.id, {
+      expectedMealRevisionId: meal.mealRevisionId,
+      items: [{
+        foodName: "新版雞腿飯",
+        calories: 640,
+        protein: 31,
+        carbs: 78,
+        fat: 19,
+      }],
+    });
+
+    const { status, body } = await postChat("套用餐點修改");
+
+    assert.equal(status, 200);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.doesNotMatch(body.reply, /已更新|蛋白質 15 g/);
+    const meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    const current = meals.find((candidate) => candidate.id === meal.id);
+    assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
+    assert.equal(current?.protein, 31);
+    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.equal(mockLLM.chatCalls.length, 0);
   });
 
   it("returns validation range copy without mutation, publish, or final reply generation", async () => {
