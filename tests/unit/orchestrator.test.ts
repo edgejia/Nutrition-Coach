@@ -186,6 +186,16 @@ describe("orchestrator shared patterns", () => {
     assert.doesNotMatch(source, /successfulGoalReceipt|ensureGoalReceipt/);
   });
 
+  it("Phase 67 D-26/D-27/D-28 removes raw-message correction clarification rendering from orchestrator", () => {
+    const source = readFileSync(new URL("../../server/orchestrator/index.ts", import.meta.url), "utf8");
+
+    assert.doesNotMatch(source, /buildCorrectionClarificationReply/);
+    assert.doesNotMatch(source, /extractUserCorrectionTarget/);
+    assert.doesNotMatch(source, /formatCorrectionCandidate/);
+    assert.doesNotMatch(source, /parseCorrectionToolResult/);
+    assert.doesNotMatch(source, /correctionClarificationReply/);
+  });
+
   it("guards no-mutation meal-specific summary claims against actual facts", () => {
     const emptyFactsReply = guardNoMutationLoggingClaim(
       "今天已記錄牛肉飯，650 kcal。",
@@ -1214,8 +1224,10 @@ describe("Orchestrator - didLogMeal", () => {
 
     if (!("reply" in result)) throw new Error("expected reply result");
     assert.equal(localLLM.chatCalls.length, 1, "renderer-owned clarification must not ask the model to rewrite it");
+    assert.equal(result.didLogMeal, false);
     assert.equal(result.didMutateMeal, false);
     assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
     assert.match(result.reply, /請直接回覆編號/);
     assert.match(result.reply, /1\./);
     assert.match(result.reply, /2\./);
