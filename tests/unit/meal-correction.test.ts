@@ -745,4 +745,92 @@ describe("meal correction service", () => {
       },
     );
   });
+
+  it("loads current persisted meal facts for the device-owned expected revision", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+      ],
+    });
+
+    const facts = await mealCorrectionService.loadCurrentMealFacts(
+      deviceId,
+      grouped.id,
+      grouped.mealRevisionId,
+    );
+
+    assert.equal(facts.mealId, grouped.id);
+    assert.equal(facts.currentMealRevisionId, grouped.mealRevisionId);
+    assert.equal(facts.mealLabel, "雞腿、白飯、滷蛋");
+    assert.deepEqual(facts.items, [
+      { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+    ]);
+    assert.deepEqual(facts.totals, {
+      calories: 630,
+      protein: 35,
+      carbs: 64,
+      fat: 18.5,
+    });
+
+    await assert.rejects(
+      () => mealCorrectionService.loadCurrentMealFacts(foreignDeviceId, grouped.id, grouped.mealRevisionId),
+      /MEAL_NOT_FOUND/,
+    );
+    await assert.rejects(
+      () => mealCorrectionService.loadCurrentMealFacts(deviceId, grouped.id, `${grouped.id}:stale`),
+      (error) => {
+        assert.ok(error instanceof MealRevisionPreconditionError);
+        assert.equal(error.code, "MEAL_REVISION_STALE");
+        assert.equal(error.mealId, grouped.id);
+        assert.equal(error.currentMealRevisionId, grouped.mealRevisionId);
+        return true;
+      },
+    );
+  });
+
+  it("previews locked numeric correction operators from persisted facts only", async () => {
+    const grouped = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    const facts = await mealCorrectionService.loadCurrentMealFacts(
+      deviceId,
+      grouped.id,
+      grouped.mealRevisionId,
+    );
+
+    const proteinHalf = mealCorrectionService.previewMealNumericCorrection(facts, {
+      fields: ["protein"],
+      operator: "half",
+    });
+    assert.deepEqual(proteinHalf.updateInput, { protein: 14 });
+    assert.equal(proteinHalf.items, undefined);
+    assert.deepEqual(proteinHalf.affectedFields, [{ field: "protein", before: 28, after: 14 }]);
+    assert.equal(proteinHalf.mealLabel, "雞腿、白飯");
+    assert.equal(proteinHalf.expectedMealRevisionId, grouped.mealRevisionId);
+
+    const caloriesLess = mealCorrectionService.previewMealNumericCorrection(facts, {
+      fields: ["calories"],
+      operator: "subtract_percent",
+      value: 25,
+    });
+    assert.deepEqual(caloriesLess.updateInput, { calories: 405 });
+    assert.deepEqual(caloriesLess.affectedFields, [{ field: "calories", before: 540, after: 405 }]);
+
+    assert.throws(
+      () => mealCorrectionService.previewMealNumericCorrection(facts, {
+        fields: ["protein"],
+        operator: "reasonable",
+      } as never),
+      /unsupported meal numeric correction operator/,
+    );
+  });
 });

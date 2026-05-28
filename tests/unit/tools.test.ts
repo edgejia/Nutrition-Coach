@@ -6,7 +6,12 @@ import { mealRevisionItems, mealRevisions, mealTransactions } from "../../server
 import { createDeviceService } from "../../server/services/device.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
+import {
+  renderMealNumericAuthorityFailureCopy,
+  renderMealNumericProposalCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 import {
   executeTool,
   getToolDefinitions,
@@ -1207,6 +1212,8 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       toolSessionState: {
         resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
+    }, {
+      currentUserMessage: "把蘋果熱量改成 48 卡",
     });
 
     const transaction = (
@@ -1562,6 +1569,8 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       toolSessionState: {
         resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
+    }, {
+      currentUserMessage: "把蘋果熱量改成 48 卡",
     });
 
     assert.equal(result.mealMutationKind, "update");
@@ -1845,5 +1854,234 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       status: "multiple_targets",
       dateKeys: [formatLocalDate(yesterday), formatLocalDate(dayBeforeYesterday)],
     });
+  });
+
+  it("allows explicit current-turn update_meal numeric evidence and preserves the resolver revision", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const calls: string[] = [];
+
+    const result = await executeTool({
+      id: "call_explicit_update",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          protein: 28,
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: {
+        ...mealCorrectionService,
+        async updateMeal(
+          calledDeviceId: string,
+          calledMealId: string,
+          input: Parameters<typeof mealCorrectionService.updateMeal>[2],
+          expectedMealRevisionId?: string | null,
+        ) {
+          calls.push(`${calledDeviceId}:${calledMealId}:${expectedMealRevisionId ?? ""}`);
+          return mealCorrectionService.updateMeal(calledDeviceId, calledMealId, input, expectedMealRevisionId);
+        },
+      },
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    } as ToolDeps, {
+      currentUserMessage: "蛋白質改成 28g",
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.equal(result.loggedMeal?.protein, 28);
+    assert.deepEqual(calls, [`${deviceId}:${created.id}:${created.mealRevisionId}`]);
+  });
+
+  it("blocks vague model-estimated update_meal numeric patches before service writes", async () => {
+    const created = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿",
+      calories: 220,
+      protein: 24,
+      carbs: 0,
+      fat: 9,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    let updateCalls = 0;
+
+    const result = await executeTool({
+      id: "call_vague_update",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          protein: 28,
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: {
+        ...mealCorrectionService,
+        async updateMeal(...args: Parameters<typeof mealCorrectionService.updateMeal>) {
+          updateCalls += 1;
+          return mealCorrectionService.updateMeal(...args);
+        },
+      },
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    } as ToolDeps, {
+      currentUserMessage: "蛋白質怪怪的，幫我改合理一點",
+    });
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.result, renderMealNumericAuthorityFailureCopy({ field: "protein" }));
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_numeric_authority_failure",
+      text: renderMealNumericAuthorityFailureCopy({ field: "protein" }),
+    });
+    assert.equal(updateCalls, 0);
+    assert.equal(revisions.length, 1);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+  });
+
+  it("blocks unauthorized items[] numeric replacements before service writes", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    let updateCalls = 0;
+
+    const result = await executeTool({
+      id: "call_items_update",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          items: [
+            { food_name: "雞腿", calories: 260, protein: 28, carbs: 0, fat: 12 },
+            { food_name: "白飯", calories: 250, protein: 4, carbs: 62, fat: 0.5 },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: {
+        ...mealCorrectionService,
+        async updateMeal(...args: Parameters<typeof mealCorrectionService.updateMeal>) {
+          updateCalls += 1;
+          return mealCorrectionService.updateMeal(...args);
+        },
+      },
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    } as ToolDeps, {
+      currentUserMessage: "雞腿蛋白質 28g",
+    });
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.match(result.result, /^這次沒有更新餐點紀錄。/);
+    assert.equal(updateCalls, 0);
+    assert.equal(revisions.length, 1);
+  });
+
+  it("registers propose_meal_numeric_correction and stores backend-computed proposal copy without mutating meals", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const mealNumericProposalService = createMealNumericProposalService(db);
+    const contract = toolRegistry.get("propose_meal_numeric_correction");
+    assert.ok(contract, "propose_meal_numeric_correction contract must be registered");
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      fields: ["protein"],
+      operator: "half",
+    }).success, true);
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      fields: ["protein"],
+      operator: "reasonable",
+    }).success, false);
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      fields: ["protein"],
+      operator: "half",
+      protein: 28,
+    }).success, false);
+
+    const result = await executeTool({
+      id: "call_propose_meal_numeric",
+      type: "function",
+      function: {
+        name: "propose_meal_numeric_correction",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          fields: ["protein"],
+          operator: "half",
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      mealNumericProposalService,
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    } as ToolDeps, {
+      currentUserMessage: "蛋白質減半",
+    });
+    const proposal = await mealNumericProposalService.getLatest(deviceId);
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, created.id);
+    assert.equal(proposal.expectedMealRevisionId, created.mealRevisionId);
+    assert.deepEqual(proposal.updateInput, { protein: 14 });
+    assert.deepEqual(proposal.affectedFields, [{ field: "protein", before: 28, after: 14 }]);
+    assert.equal(proposal.sourceOperator, "half");
+    assert.equal(result.result, renderMealNumericProposalCopy({
+      mealLabel: "雞腿、白飯",
+      affectedFields: proposal.affectedFields,
+      sourceOperator: proposal.sourceOperator,
+    }));
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_numeric_proposal",
+      text: result.result,
+    });
+    assert.equal(revisions.length, 1);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.summaryOutcome, undefined);
   });
 });
