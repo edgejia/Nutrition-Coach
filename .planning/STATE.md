@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-28T20:27:52.215Z"
+last_updated: "2026-05-28T20:40:06.847Z"
 last_activity: 2026-05-28
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 18
   percent: 50
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-26)
 ## Current Position
 
 Phase: 67 (correction-targeting-and-backend-clarification-rendering) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-05-28
 
@@ -88,6 +88,7 @@ Last activity: 2026-05-28
 | Phase 67 P02 | 7min | 2 tasks | 1 files |
 | Phase 67 P03 | 4min | 2 tasks | 3 files |
 | Phase 67 P04 | 4m50s | 2 tasks | 4 files |
+| Phase 67 P05 | 8m 52s | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -189,6 +190,9 @@ Recent decisions affecting current work:
 - [Phase 67]: [Phase 67 Plan 04]: Correction target clarification is final only through find_meals controlledReply; the orchestrator no longer reparses serialized find_meals JSON or derives target labels from userMessage.
 - [Phase 67]: [Phase 67 Plan 04]: The meal correction prompt is support-only: it routes update/delete targeting through find_meals, preserves user target terms in query, and forbids model candidate selection or backend clarification rewrites.
 - [Phase 67]: [Phase 67 Plan 04]: Mixed numbered selections and numeric edits keep target resolution separate from numeric authority; vague numeric text such as 合理一點 still cannot directly call update_meal.
+- [Phase 67]: Delayed pending selections now resolve only after device-scoped active candidate revalidation confirms the same meal id and original revision id. — Prevents stale or deleted delayed replies from mutating meals after the rendered option set is no longer authoritative.
+- [Phase 67]: Stale selected update/delete writes recover through meal_target_clarification controlled replies when pending scope is available. — Keeps no-mutation recovery on the renderer-owned clarification path while preserving existing stable stale-revision errors for direct resolver failures.
+- [Phase 67]: Same-label replacement meals may be shown as fresh choices inside recovered scope but are never auto-selected as the stale target replacement. — Prevents accidental retargeting when a deleted meal is recreated with matching display text.
 
 ### Pending Todos
 
@@ -219,8 +223,8 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-28T20:27:52.208Z
-Stopped at: Completed 67-04-PLAN.md
+Last session: 2026-05-28T20:40:06.839Z
+Stopped at: Completed 67-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

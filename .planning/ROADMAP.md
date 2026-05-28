@@ -133,7 +133,7 @@ Plans:
 - [x] 67-04-PLAN.md — Orchestrator terminal renderer wiring and support-only prompt alignment.
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 67-05-PLAN.md — Delayed selection revalidation, stale fail-closed handling, and Fastify route proof.
+- [x] 67-05-PLAN.md — Delayed selection revalidation, stale fail-closed handling, and Fastify route proof.
 
 **Wave 5** *(blocked on Wave 4 completion)*
 - [ ] 67-06-PLAN.md — Final local validation gates and `67-VALIDATION.md` status update.
@@ -166,7 +166,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 |-------|-----------|----------------|--------|-----------|
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete    | 2026-05-28 |
-| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 4/6 | In Progress|  |
+| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 5/6 | In Progress|  |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
 
 ## Future Milestone Candidates
