@@ -335,6 +335,8 @@ interface DeleteMealResult {
   deletedMeal: DeletedMealSnapshot;
 }
 
+type DeleteMealContractResult = DeleteMealResult | MealTargetControlledResult;
+
 interface GetDailySummaryArgs {
   date_text?: string;
 }
@@ -378,8 +380,14 @@ interface MealNumericControlledResult {
   reply: string;
 }
 
+interface MealTargetControlledResult {
+  status: "controlled_reply";
+  reason: "meal_target_clarification";
+  reply: string;
+}
+
 type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult;
-type UpdateMealContractResult = UpdateMealResult | MealNumericControlledResult;
+type UpdateMealContractResult = UpdateMealResult | MealNumericControlledResult | MealTargetControlledResult;
 type ProposeMealNumericCorrectionResult = MealNumericControlledResult & {
   reason: "meal_numeric_proposal";
 };
@@ -582,9 +590,9 @@ function isGoalControlledResult(result: UpdateGoalsContractResult): result is Go
   return "status" in result && result.status === "controlled_reply";
 }
 
-function isMealNumericControlledResult(
-  result: UpdateMealContractResult | ProposeMealNumericCorrectionResult,
-): result is MealNumericControlledResult {
+function isMealControlledResult(
+  result: UpdateMealContractResult | DeleteMealContractResult,
+): result is MealNumericControlledResult | MealTargetControlledResult {
   return "status" in result && result.status === "controlled_reply";
 }
 
@@ -1058,6 +1066,14 @@ function makeMealNumericControlledResult(
   };
 }
 
+function makeMealTargetControlledResult(reply: string): MealTargetControlledResult {
+  return {
+    status: "controlled_reply",
+    reason: "meal_target_clarification",
+    reply,
+  };
+}
+
 function classificationMatchesOperator(
   classification: MealNumericAdjustmentClassification,
   args: ProposeMealNumericCorrectionArgs,
@@ -1507,6 +1523,15 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealContractResult>
       );
     } catch (error) {
       if (error instanceof MealRevisionPreconditionError) {
+        const recovery = await deps.mealCorrectionService.recoverStalePendingSelection?.(deviceId, "update");
+        if (recovery) {
+          const reply = renderFindMealsControlledReply(recovery);
+          return {
+            ok: true,
+            result: makeMealTargetControlledResult(reply),
+            toolMessage: reply,
+          };
+        }
         throw revisionPreconditionFatalError(error);
       }
       const message = error instanceof Error ? error.message : "meal update failed";
@@ -1625,7 +1650,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
   },
 };
 
-const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealResult> = {
+const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult> = {
   name: "delete_meal",
   description: "刪除已解析出的歷史餐點。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
   parameters: {
@@ -1657,6 +1682,15 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealResult> = {
       deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id, resolvedTarget.mealRevisionId);
     } catch (error) {
       if (error instanceof MealRevisionPreconditionError) {
+        const recovery = await deps.mealCorrectionService.recoverStalePendingSelection?.(deviceId, "delete");
+        if (recovery) {
+          const reply = renderFindMealsControlledReply(recovery);
+          return {
+            ok: true,
+            result: makeMealTargetControlledResult(reply),
+            toolMessage: reply,
+          };
+        }
         throw revisionPreconditionFatalError(error);
       }
       throw error;
@@ -2116,7 +2150,7 @@ export async function executeTool(
 
   if (toolCall.function.name === "update_meal") {
     const contractResult = outcome.contractResult as UpdateMealContractResult;
-    if (isMealNumericControlledResult(contractResult)) {
+    if (isMealControlledResult(contractResult)) {
       return {
         result: contractResult.reply,
         summary: "failureReason: guard",
@@ -2154,7 +2188,21 @@ export async function executeTool(
   }
 
   if (toolCall.function.name === "delete_meal") {
-    const contractResult = outcome.contractResult as DeleteMealResult;
+    const contractResult = outcome.contractResult as DeleteMealContractResult;
+    if (isMealControlledResult(contractResult)) {
+      return {
+        result: contractResult.reply,
+        summary: "failureReason: guard",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        controlledReply: {
+          source: "renderer",
+          reason: contractResult.reason,
+          text: contractResult.reply,
+        },
+      };
+    }
     return {
       result: outcome.result,
       summary: "成功",

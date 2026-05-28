@@ -645,6 +645,82 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     return Array.isArray(legacy.candidates) ? createRenderedOptions(legacy.candidates) : [];
   }
 
+  function uniqueValue<T>(values: T[]): T | undefined {
+    const unique = [...new Set(values)];
+    return unique.length === 1 ? unique[0] : undefined;
+  }
+
+  function recoverScopedCandidates(
+    pending: PendingMealSelectionState,
+    currentCandidates: MealCorrectionCandidate[],
+  ): MealCorrectionCandidate[] {
+    const renderedOptions = getPendingRenderedOptions(pending);
+    const optionDateKey = uniqueValue(
+      renderedOptions
+        .map((option) => option.attributes.dateKey || option.candidate.dateKey)
+        .filter((dateKey) => dateKey.length > 0),
+    );
+    const targetDateKey = pending.scope.targetDateKey ?? optionDateKey;
+    const targetMealPeriod = pending.scope.targetMealPeriod;
+    const labels = new Set(
+      renderedOptions.flatMap((option) => [option.candidate.foodName, ...option.candidate.itemNames])
+        .map(normalizeText)
+        .filter((label) => label.length > 0),
+    );
+
+    let scoped = currentCandidates;
+    if (targetDateKey) {
+      scoped = scoped.filter((candidate) => candidate.dateKey === targetDateKey);
+    }
+    if (targetMealPeriod) {
+      scoped = scoped.filter((candidate) => candidate.mealPeriod === targetMealPeriod);
+    }
+    if (!targetDateKey && !targetMealPeriod && labels.size > 0) {
+      scoped = scoped.filter((candidate) => {
+        const candidateLabels = [candidate.foodName, ...candidate.itemNames].map(normalizeText);
+        return candidateLabels.some((label) => labels.has(label));
+      });
+    }
+
+    return scoped.slice(0, 5);
+  }
+
+  async function buildStalePendingSelectionRecovery(
+    deviceId: string,
+    pending: PendingMealSelectionState,
+  ): Promise<FindMealsClarificationResult> {
+    const currentCandidates = await loadActiveCandidates(deviceId);
+    const scopedCandidates = recoverScopedCandidates(pending, currentCandidates);
+    if (scopedCandidates.length === 0) {
+      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+      return {
+        status: "needs_clarification",
+        action: pending.action,
+        prompt: buildNotFoundPrompt(pending.action),
+        candidates: [],
+      };
+    }
+
+    const renderedOptions = createRenderedOptions(scopedCandidates);
+    await turnStateService.putState(
+      deviceId,
+      PENDING_SELECTION_KIND,
+      {
+        action: pending.action,
+        renderedOptions,
+        scope: pending.scope,
+      } satisfies PendingMealSelectionState,
+      PENDING_SELECTION_TTL_MS,
+    );
+
+    return {
+      status: "needs_clarification",
+      action: pending.action,
+      prompt: buildClarificationPromptFromOptions(pending.action, renderedOptions),
+      candidates: scopedCandidates,
+    };
+  }
+
   async function tryResolvePendingSelection(
     deviceId: string,
     action: "update" | "delete",
@@ -677,6 +753,17 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       candidate: option.candidate,
       fromPending: true,
     });
+    const resolveRevalidatedOption = async (
+      option: PendingMealSelectionOption,
+    ): Promise<FindMealsResolvedResult | FindMealsClarificationResult> => {
+      const currentCandidates = await loadActiveCandidates(deviceId);
+      const current = currentCandidates.find((candidate) => candidate.mealId === option.candidate.mealId);
+      if (current?.mealRevisionId === option.candidate.mealRevisionId) {
+        return resolveOption(option);
+      }
+
+      return buildStalePendingSelectionRecovery(deviceId, pending);
+    };
 
     const index = extractSelectionIndex(query);
     if (index !== undefined) {
@@ -685,7 +772,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         return reShow(true);
       }
 
-      return resolveOption(option);
+      return resolveRevalidatedOption(option);
     }
 
     const normalized = normalizeText(extractTargetEvidenceText(query));
@@ -695,7 +782,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     });
 
     if (matchingOptions.length === 1) {
-      return resolveOption(matchingOptions[0]!);
+      return resolveRevalidatedOption(matchingOptions[0]!);
     }
 
     if (matchingOptions.length > 1) {
@@ -714,7 +801,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     });
 
     if (attributeMatches.length === 1) {
-      return resolveOption(attributeMatches[0]!);
+      return resolveRevalidatedOption(attributeMatches[0]!);
     }
 
     if (attributeMatches.length > 1) {
@@ -730,7 +817,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       dateResolution.status === "resolved" &&
       !dateResolution.hasExplicitDate
     ) {
-      return resolveOption(renderedOptions[0]!);
+      return resolveRevalidatedOption(renderedOptions[0]!);
     }
 
     const hasNewDateEvidence = dateResolution.status === "needs_clarification"
@@ -886,6 +973,18 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
 
     async clearPendingSelection(deviceId: string): Promise<void> {
       await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+    },
+
+    async recoverStalePendingSelection(
+      deviceId: string,
+      action: "update" | "delete",
+    ): Promise<FindMealsClarificationResult | undefined> {
+      const pending = await turnStateService.getState<PendingMealSelectionState>(deviceId, PENDING_SELECTION_KIND);
+      if (!pending || pending.action !== action) {
+        return undefined;
+      }
+
+      return buildStalePendingSelectionRecovery(deviceId, pending);
     },
 
     async loadCurrentMealFacts(
