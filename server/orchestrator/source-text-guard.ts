@@ -42,6 +42,7 @@ const CHINESE_DIGIT: Record<string, number> = {
 };
 
 const APPROX_SUFFIX = "多";
+const NUTRITION_UNIT_CHARS = new Set(["g", "G", "克", "卡"]);
 
 const GOAL_PROPOSAL_CONSENT_PATTERNS = [
   /^(好|可以|幫我更新|就這樣|用這組|ok|okay|yes|y|sure)(?:$|[，,。!！、]|但)/i,
@@ -247,7 +248,7 @@ function parseChineseNumeralAt(
 
 /**
  * Emit all numeric candidates authorized by `text`. Candidates are returned as
- * stringified integers so callers can compare directly against tool args.
+ * stringified numbers so callers can compare directly against tool args.
  *
  * Arabic runs followed by `多` are dropped. Chinese compounds followed by
  * `多` are also dropped.
@@ -256,14 +257,17 @@ export function normalizeNumericSourceText(text: string): string[] {
   const stripped = stripFormatting(text);
   const candidates = new Set<string>();
 
-  // Arabic digit runs
-  const digitRe = /\d+/g;
+  // Arabic digit runs, including decimal final targets.
+  const digitRe = /\d+(?:\.\d+)?/g;
   let match: RegExpExecArray | null;
   while ((match = digitRe.exec(stripped)) !== null) {
     const end = match.index + match[0].length;
     const nextCh = stripped[end];
     if (nextCh === APPROX_SUFFIX) continue;
-    candidates.add(match[0].replace(/^0+/, "") || "0");
+    const normalized = Number(match[0]);
+    if (Number.isFinite(normalized)) {
+      candidates.add(String(normalized));
+    }
   }
 
   // Chinese numeral compounds
@@ -277,6 +281,12 @@ export function normalizeNumericSourceText(text: string): string[] {
       }
       i = parsed.end;
       continue;
+    }
+
+    const bareDigit = CHINESE_DIGIT[stripped[i]];
+    const nextCh = stripped[i + 1];
+    if (bareDigit !== undefined && nextCh !== APPROX_SUFFIX && nextCh && NUTRITION_UNIT_CHARS.has(nextCh)) {
+      candidates.add(String(bareDigit));
     }
     i += 1;
   }

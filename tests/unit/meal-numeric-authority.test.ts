@@ -34,12 +34,13 @@ describe("extractMealNumericEvidence", () => {
   });
 
   it("does not treat prior assistant numbers as current-turn meal numeric authority", () => {
-    const result = authorizeMealNumericUpdate({
+    const input = {
       currentUserMessage: "好",
       previousAssistantMessage: "我建議蛋白質改成 28g，要套用嗎?",
       currentMeal,
       update: { patch: { protein: 28 } },
-    });
+    };
+    const result = authorizeMealNumericUpdate(input);
 
     assert.equal(result.ok, false);
     assert.equal(result.reason, "unauthorized_numeric_values");
@@ -86,7 +87,6 @@ describe("authorizeMealNumericUpdate", () => {
   it("authorizes only current-turn explicit matching top-level patch fields", () => {
     const allowed = authorizeMealNumericUpdate({
       currentUserMessage: "蛋白質改成 28g",
-      previousAssistantMessage: "我建議蛋白質改成 30g",
       currentMeal,
       update: { patch: { protein: 28 } },
     });
