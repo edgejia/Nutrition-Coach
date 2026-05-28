@@ -50,6 +50,9 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderCorrectionTargetClarificationCopy,
+  renderCorrectionTargetNoMealsForDateCopy,
+  renderCorrectionTargetSameDateRecoveryCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericClarificationCopy,
   renderMealNumericProposalCopy,
@@ -98,6 +101,7 @@ export interface ToolExecutionResult {
       | "goal_authority_failure"
       | "goal_validation_failure"
       | "goal_cancel"
+      | "meal_target_clarification"
       | "meal_numeric_authority_failure"
       | "meal_numeric_clarification"
       | "meal_numeric_proposal";
@@ -1907,6 +1911,42 @@ function goalValidationFieldsFromFailure(result: string): UpdateGoalField[] {
   return [...new Set(fields)];
 }
 
+function dateKeyFromNoMealsPrompt(prompt: string): string | undefined {
+  const match = prompt.match(/(\d{4}-\d{2}-\d{2})\s+沒有記錄餐點/);
+  return match?.[1];
+}
+
+function renderFindMealsControlledReply(result: Exclude<FindMealsResult, { status: "resolved" }>): string {
+  const noMealsDateKey = dateKeyFromNoMealsPrompt(result.prompt);
+  if (noMealsDateKey) {
+    return renderCorrectionTargetNoMealsForDateCopy({
+      action: result.action,
+      dateKey: noMealsDateKey,
+    });
+  }
+
+  if (result.status === "needs_clarification" && result.candidates.length > 0) {
+    const candidateDateKeys = new Set(result.candidates.map((candidate) => candidate.dateKey));
+    if (candidateDateKeys.size === 1) {
+      const [dateKey] = candidateDateKeys;
+      if (dateKey) {
+        return renderCorrectionTargetSameDateRecoveryCopy({
+          action: result.action,
+          dateKey,
+          candidates: result.candidates,
+        });
+      }
+    }
+
+    return renderCorrectionTargetClarificationCopy({
+      action: result.action,
+      candidates: result.candidates,
+    });
+  }
+
+  return result.prompt;
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator-facing dispatch (registry-first per D-03). Adapts the
 // controlled `runContract` result back to the legacy `ToolExecutionResult`
@@ -2052,6 +2092,22 @@ export async function executeTool(
 
   if (toolCall.function.name === "find_meals") {
     const contractResult = outcome.contractResult as FindMealsResult;
+    if (contractResult.status !== "resolved") {
+      const reply = renderFindMealsControlledReply(contractResult);
+      return {
+        result: reply,
+        summary: `status: ${contractResult.status}`,
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        controlledReply: {
+          source: "renderer",
+          reason: "meal_target_clarification",
+          text: reply,
+        },
+      };
+    }
+
     return {
       result: outcome.result,
       summary: `status: ${contractResult.status}`,
