@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-28T19:59:08.536Z"
+last_updated: "2026-05-28T20:09:21.746Z"
 last_activity: 2026-05-28
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 19
-  completed_plans: 14
+  completed_plans: 15
   percent: 50
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-26)
 ## Current Position
 
 Phase: 67 (correction-targeting-and-backend-clarification-rendering) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-05-28
 
@@ -85,6 +85,7 @@ Last activity: 2026-05-28
 | Phase 66 P05 | 8m | 3 tasks | 4 files |
 | 66 | 5 | - | - |
 | Phase 67 P01 | 7min | 3 tasks | 4 files |
+| Phase 67 P02 | 7min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -179,6 +180,8 @@ Recent decisions affecting current work:
 - [Phase 66]: Plan 05: Route-level correction proof treats backend-rendered no-update copy and no daily_summary publish as the observable authority boundary.
 - [Phase 67 Plan 01]: Wave 0 remains red-first only; no production resolver, tool, orchestrator, or route code was changed.
 - [Phase 67 Plan 01]: Renderer-owned correction clarification tests reject raw correction request text, calories/macros in options, mutation metadata, summaryOutcome, and daily_summary publish on unresolved paths.
+- [Phase 67]: [Phase 67 Plan 02]: Correction target selection now uses locked evidence tiers instead of additive scoring. — Phase 67 service resolver now enforces explicit date, label, period-source, and recency precedence in code.
+- [Phase 67]: [Phase 67 Plan 02]: Pending meal target selections store exact rendered options with action and scope metadata. — Follow-up resolution is constrained to the options actually shown to the user.
 
 ### Pending Todos
 
@@ -209,8 +212,8 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-28T19:58:35.191Z
-Stopped at: Phase 67 context gathered
+Last session: 2026-05-28T20:09:14.180Z
+Stopped at: Completed 67-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps

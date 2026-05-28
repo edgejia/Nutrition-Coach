@@ -27,8 +27,8 @@ Requirements for the v2.4 correction-authority milestone. Each requirement must 
 
 ### Correction Targeting and Rendering
 
-- [ ] **TARGET-01**: Correction target resolution ranks current-turn, today, recency, explicit food label, and persisted meal-period evidence so ambiguous `那餐` requests surface the most relevant candidates without silently choosing unrelated historical meals.
-- [ ] **TARGET-02**: Multi-candidate correction clarification is backend-rendered with stable numbered options and concise target labels that do not echo the whole user correction request as a meal name.
+- [x] **TARGET-01**: Correction target resolution ranks current-turn, today, recency, explicit food label, and persisted meal-period evidence so ambiguous `那餐` requests surface the most relevant candidates without silently choosing unrelated historical meals.
+- [x] **TARGET-02**: Multi-candidate correction clarification is backend-rendered with stable numbered options and concise target labels that do not echo the whole user correction request as a meal name.
 - [ ] **TARGET-03**: `find_meals` and historical tool clarification results are carried as structured tool results through the orchestrator instead of reparsing serialized tool-message JSON.
 
 ### Proof and Release Gates
@@ -88,8 +88,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORR-01 | Phase 66 | Complete |
 | CORR-02 | Phase 66 | Complete |
 | CORR-03 | Phase 66 | Complete |
-| TARGET-01 | Phase 67 | Pending |
-| TARGET-02 | Phase 67 | Pending |
+| TARGET-01 | Phase 67 | Complete |
+| TARGET-02 | Phase 67 | Complete |
 | TARGET-03 | Phase 68 | Pending |
 | PROOF-01 | Phase 68 | Pending |
 | PROOF-02 | Phase 68 | Pending |
