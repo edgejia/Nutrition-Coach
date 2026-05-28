@@ -100,7 +100,7 @@ Plans:
 - [x] 66-03-PLAN.md — Tool-boundary update_meal enforcement and proposal creation.
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 66-04-PLAN.md — Pre-model proposal approval, cancel, and cross-kind ambiguity routing.
+- [x] 66-04-PLAN.md — Pre-model proposal approval, cancel, and cross-kind ambiguity routing.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 66-05-PLAN.md — Chat integration proof and prompt contract cleanup.
@@ -147,7 +147,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
-| 66. Numeric Correction Provenance Guard | v2.4 | 3/5 | In Progress|  |
+| 66. Numeric Correction Provenance Guard | v2.4 | 4/5 | In Progress|  |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
 

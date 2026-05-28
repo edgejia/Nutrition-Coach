@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-28T08:08:35.484Z"
+last_updated: "2026-05-28T08:20:49.194Z"
 last_activity: 2026-05-28
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 13
-  completed_plans: 11
+  completed_plans: 12
   percent: 25
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-26)
 ## Current Position
 
 Phase: 66 (numeric-correction-provenance-guard) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-05-28
 
@@ -81,6 +81,7 @@ Last activity: 2026-05-28
 | Phase 66 P01 | 4m 50s | 2 tasks | 4 files |
 | Phase 66 P02 | 4m 49s | 2 tasks | 4 files |
 | Phase 66 P03 | 902 | 2 tasks | 9 files |
+| Phase 66 P04 | 8m 05s | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,9 @@ Recent decisions affecting current work:
 - [Phase 66]: update_meal loads persisted meal facts and authorizes only changed numeric values before writes. — Recorded by Phase 66 Plan 03 summary.
 - [Phase 66]: propose_meal_numeric_correction accepts field/operator intent only; backend code computes proposal values from persisted facts. — Recorded by Phase 66 Plan 03 summary.
 - [Phase 66]: Success-path chat fixtures now include explicit current-turn numeric evidence because model-estimated meal numbers are blocked. — Recorded by Phase 66 Plan 03 summary.
+- [Phase 66 Plan 04]: Bare approval fails closed when active goal and meal proposal kinds coexist.
+- [Phase 66 Plan 04]: Meal proposal approval commits only stored backend proposal values through mealCorrectionService.updateMeal with expectedMealRevisionId.
+- [Phase 66 Plan 04]: Explicit goal-kind approval reuses the existing update_goals latest_proposal path while leaving active meal proposal state untouched.
 
 ### Pending Todos
 
@@ -198,10 +202,10 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-28T08:08:35.476Z
-Stopped at: Completed 66-03-PLAN.md
+Last session: 2026-05-28T08:20:49.186Z
+Stopped at: Completed 66-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Continue with Phase 66 plan 03 when ready.
+- Continue with Phase 66 plan 05 when ready.
