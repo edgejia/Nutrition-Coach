@@ -997,6 +997,171 @@ describe("chat meal correction integration", () => {
     assert.ok(meals.every((meal) => meal.foodName.includes("滷蛋")));
   });
 
+  it("Phase 67 D-39/D-40/D-42 mutates only after a mixed numbered selection revalidates the rendered option and explicit numeric evidence", async () => {
+    const first = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const second = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 28,
+      carbs: 76,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_ambiguous_mixed_follow_up",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把今天午餐的雞腿飯蛋白質改掉",
+          }),
+        },
+      }],
+    });
+
+    const firstTurn = await postChat("把今天午餐的雞腿飯蛋白質改掉");
+    assert.equal(firstTurn.status, 200);
+    assert.equal(firstTurn.body.didMutateMeal, false);
+    assert.match(firstTurn.body.reply, /請直接回覆編號/);
+    assert.equal(Object.prototype.hasOwnProperty.call(firstTurn.body, "summaryOutcome"), false);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_mixed_numbered_selection",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "2，蛋白質改 28g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "apply_mixed_numbered_selection",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: first.id,
+            protein: 28,
+          }),
+        },
+      }],
+    });
+
+    const selected = await postChat("2，蛋白質改 28g");
+
+    assert.equal(selected.status, 200);
+    assert.equal(selected.body.didLogMeal, false);
+    assert.equal(selected.body.didMutateMeal, true);
+    assert.match(selected.body.reply, /已更新.*雞腿飯.*蛋白質 28 g/);
+    assert.ok(selected.body.summaryOutcome);
+    assert.ok(publishDailySummaryCalls.length > 0);
+
+    const meals = await getMeals();
+    const updatedFirst = meals.find((meal) => meal.id === first.id);
+    const untouchedSecond = meals.find((meal) => meal.id === second.id);
+    assert.equal(updatedFirst?.protein, 28);
+    assert.notEqual(updatedFirst?.mealRevisionId, first.mealRevisionId);
+    assert.equal(untouchedSecond?.protein, 28);
+    assert.equal(untouchedSecond?.mealRevisionId, second.mealRevisionId);
+  });
+
+  it("Phase 67 D-43 resolves a mixed numbered vague follow-up without direct mutation or daily_summary publish", async () => {
+    const first = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const second = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 28,
+      carbs: 76,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_ambiguous_vague_follow_up",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把今天午餐的雞腿飯蛋白質改掉",
+          }),
+        },
+      }],
+    });
+    const firstTurn = await postChat("把今天午餐的雞腿飯蛋白質改掉");
+    assert.equal(firstTurn.status, 200);
+    assert.equal(firstTurn.body.didMutateMeal, false);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_mixed_vague_selection",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "2，蛋白質改合理一點",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unsafe_vague_selection_update",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: first.id,
+            protein: 24,
+          }),
+        },
+      }],
+    });
+
+    const selected = await postChat("2，蛋白質改合理一點");
+
+    assert.equal(selected.status, 200);
+    assert.equal(selected.body.didLogMeal, false);
+    assert.equal(selected.body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(selected.body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(selected.body, "dailySummary"), false);
+    assert.doesNotMatch(selected.body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const meals = await getMeals();
+    const unchangedFirst = meals.find((meal) => meal.id === first.id);
+    const unchangedSecond = meals.find((meal) => meal.id === second.id);
+    assert.equal(unchangedFirst?.mealRevisionId, first.mealRevisionId);
+    assert.equal(unchangedFirst?.protein, 30);
+    assert.equal(unchangedSecond?.mealRevisionId, second.mealRevisionId);
+    assert.equal(unchangedSecond?.protein, 28);
+  });
+
   it("consumes the pending selection on the next chat turn and deletes the chosen meal", async () => {
     const first = await services.foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",
@@ -1305,5 +1470,61 @@ describe("chat meal correction integration", () => {
     assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
     assert.equal(current?.foodName, "新版牛肉麵");
     assert.deepEqual(publishCalls, []);
+  });
+
+  it("Phase 67 D-28/D-32/D-39 route returns stable backend clarification without raw correction echo, mutation, summaryOutcome, or publish", async () => {
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T09:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T10:00:00.000Z",
+      items: [
+        { foodName: "排骨", calories: 300, protein: 26, carbs: 8, fat: 18 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+        { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
+      ],
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_route_renderer_owned_clarification",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已更新中午雞腿便當的滷蛋。" });
+
+    const { status, body } = await postChat("把中午雞腿便當的滷蛋改成兩顆水煮蛋");
+
+    assert.equal(status, 200);
+    assert.equal(mockLLM.chatCalls.length, 1);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.match(body.reply, /請直接回覆編號/);
+    assert.match(body.reply, /1\./);
+    assert.match(body.reply, /2\./);
+    assert.match(body.reply, /雞腿、白飯、滷蛋、青菜/);
+    assert.match(body.reply, /排骨、白飯、滷蛋、青菜/);
+    assert.doesNotMatch(body.reply, /中午雞腿便當|滷蛋改成|已更新|已套用|kcal|蛋白質/);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const meals = await getMeals();
+    assert.equal(meals.length, 2);
+    assert.ok(meals.every((meal) => meal.foodName.includes("滷蛋")));
   });
 });
