@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-28T07:40:09.445Z"
+last_updated: "2026-05-28T07:49:41.282Z"
 last_activity: 2026-05-28
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 13
-  completed_plans: 9
+  completed_plans: 10
   percent: 25
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-26)
 ## Current Position
 
 Phase: 66 (numeric-correction-provenance-guard) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-05-28
 
@@ -79,6 +79,7 @@ Last activity: 2026-05-28
 | Phase 65 P07 | 4m 44s | 2 tasks | 7 files |
 | 65 | 8 | - | - |
 | Phase 66 P01 | 4m 50s | 2 tasks | 4 files |
+| Phase 66 P02 | 4m 49s | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -161,6 +162,8 @@ Recent decisions affecting current work:
 - [Phase 65]: UI meal-period labels resolve explicit mealPeriod before loggedAt fallback on Home, History, Day Detail, and Summary Detail rows. — Plan 65-07 keeps fallback display-only for legacy/no-authority meals.
 - [Phase 66 Plan 01]: Meal numeric direct-write authority is current user text only; previous assistant prose is not accepted by the helper API.
 - [Phase 66 Plan 01]: items[] replacement numeric values are diffed against current persisted items and checked with the same field-level evidence as top-level patches.
+- [Phase 66]: Plan 02: Meal numeric correction proposals use a distinct meal_numeric_correction_proposal turn-state kind, so meal proposals replace only same-kind meal proposals and can coexist with goal proposals.
+- [Phase 66]: Plan 02: Meal numeric proposal payloads carry exactly one backend-computed update shape: either updateInput or items, plus meal id, expected revision, affected before/after fields, operator, createdAt, and expiresAt.
 
 ### Pending Todos
 
@@ -191,10 +194,10 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-28T07:40:09.438Z
-Stopped at: Completed 66-01-PLAN.md
+Last session: 2026-05-28T07:49:41.161Z
+Stopped at: Completed 66-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Continue with Phase 66 plan 02 when ready.
+- Continue with Phase 66 plan 03 when ready.

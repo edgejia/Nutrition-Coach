@@ -96,7 +96,7 @@ Plans:
 Plans:
 **Wave 1**
 - [x] 66-01-PLAN.md — Wave 0 meal numeric authority helper and explicit evidence proof.
-- [ ] 66-02-PLAN.md — Wave 0 backend-owned meal proposal state and renderer copy.
+- [x] 66-02-PLAN.md — Wave 0 backend-owned meal proposal state and renderer copy.
 - [ ] 66-03-PLAN.md — Tool-boundary update_meal enforcement and proposal creation.
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -147,7 +147,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
-| 66. Numeric Correction Provenance Guard | v2.4 | 1/5 | In Progress | — |
+| 66. Numeric Correction Provenance Guard | v2.4 | 2/5 | In Progress | — |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
 
