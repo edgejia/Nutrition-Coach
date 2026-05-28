@@ -1,8 +1,8 @@
 # Phase 67: Correction Targeting and Backend Clarification Rendering - Pattern Map
 
 **Mapped:** 2026-05-29  
-**Files analyzed:** 10  
-**Analogs found:** 10 / 10
+**Files analyzed:** 12  
+**Analogs found:** 12 / 12
 
 ## File Classification
 
@@ -17,6 +17,8 @@
 | `tests/unit/meal-correction.test.ts` | test | CRUD, request-response | `tests/unit/meal-correction.test.ts` | exact |
 | `tests/unit/tools.test.ts` | test | request-response, CRUD guard | `tests/unit/tools.test.ts` | exact |
 | `tests/unit/orchestrator.test.ts` | test | request-response, tool-loop | `tests/unit/orchestrator.test.ts` | exact |
+| `tests/unit/mutation-receipts.test.ts` | test | transform, renderer safety | `tests/unit/mutation-receipts.test.ts` | exact |
+| `tests/unit/system-prompt.test.ts` | test | transform, prompt contract | `tests/unit/system-prompt.test.ts` | exact |
 | `tests/integration/chat-meal-correction.integration.test.ts` | test | request-response, CRUD, publish boundary | `tests/integration/chat-meal-correction.integration.test.ts` | exact |
 
 ## Pattern Assignments
@@ -765,6 +767,68 @@ assert.equal(result.finalReplyShape, "plain_text");
 assert.equal(mockLLM.chatCalls.length, 1);
 ```
 
+### `tests/unit/mutation-receipts.test.ts` (unit test, renderer transform)
+
+**Analog:** `tests/unit/mutation-receipts.test.ts`
+
+**Imports and forbidden-term assertion pattern** (lines 1-67):
+```typescript
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  FORBIDDEN_RECEIPT_TERMS,
+  assertNoForbiddenReceiptTerms,
+  renderMealNumericAuthorityFailureCopy,
+  renderMealNumericClarificationCopy,
+  renderMealNumericProposalCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
+
+function assertNoMealNumericInternalTerms(text: string) {
+  const leaked = MEAL_NUMERIC_INTERNAL_TERMS.filter((term) => text.includes(term));
+  assert.deepEqual(leaked, []);
+  assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+}
+```
+
+**Apply to Plan 67-03:** add correction-target renderer helper tests beside existing mutation receipt tests. Use the same Node `node:test` and `node:assert/strict` pattern, assert exact Traditional Chinese copy when stable, and keep explicit forbidden-term checks for tool names, revision internals, `summaryOutcome`, `dailySummary`, calories/macros, inferred-period labels, and raw correction echo. The test should import exported helpers from `server/orchestrator/mutation-receipts.ts`, not duplicate renderer logic in the test.
+
+### `tests/unit/system-prompt.test.ts` (unit test, prompt transform)
+
+**Analog:** `tests/unit/system-prompt.test.ts`
+
+**Section extraction and prompt assertion pattern** (lines 1-20):
+```typescript
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import {
+  ACTIVE_SYSTEM_PROMPT_VERSION,
+  SYSTEM_PROMPT_SECTION_IDS,
+  buildSystemPrompt,
+} from "../../server/orchestrator/system-prompt.js";
+
+function mealCorrectionSection(prompt: string): string {
+  const match = /歷史餐點修正規則：[\s\S]*?(?=\n\n歷史日期規則：)/.exec(prompt);
+  assert.ok(match, "meal correction section must be present");
+  return match[0];
+}
+```
+
+**Legacy snapshot normalization pattern** (lines 21-55):
+```typescript
+const LEGACY_MEAL_CORRECTION_SECTION = `歷史餐點修正規則：
+1. 當使用者要修改或刪除舊餐點時，先解析目標餐點，再決定是否執行 mutation；不要把修正需求當成新的 log_food。
+2. 修改或刪除歷史餐點前，必須先呼叫 find_meals。只有當 find_meals 已解析出唯一目標時，才可以呼叫 update_meal 或 delete_meal。
+...`;
+
+function normalizeSectionsForLegacySnapshot(prompt: string): string {
+  return prompt
+    .replace(goalUpdateSection(prompt), LEGACY_GOAL_UPDATE_SECTION)
+    .replace(mealCorrectionSection(prompt), LEGACY_MEAL_CORRECTION_SECTION);
+}
+```
+
+**Apply to Plan 67-04:** keep byte-for-byte legacy snapshot tests maintainable by updating `LEGACY_MEAL_CORRECTION_SECTION` only when the production prompt section intentionally changes. Add focused assertions against `mealCorrectionSection(prompt)` for support-only guidance: call `find_meals` before update/delete, preserve user food/item/date/period words in `find_meals.query`, never choose from candidate lists, never rewrite backend-rendered clarification, and keep Phase 66 vague numeric authority guidance intact. Do not call external LLMs from this test.
+
 ### `tests/integration/chat-meal-correction.integration.test.ts` (integration test, route + real SQLite)
 
 **Analog:** `tests/integration/chat-meal-correction.integration.test.ts`
@@ -915,14 +979,14 @@ Correction clarification should become a `controlledReply` with `source: "render
 ### Safe Copy and Forbidden Terms
 
 **Source:** `server/orchestrator/mutation-receipts.ts` lines 9-43 and 121-156  
-**Apply to:** correction clarification renderer helpers and orchestrator/integration assertions
+**Apply to:** correction clarification renderer helpers, `tests/unit/mutation-receipts.test.ts`, and orchestrator/integration assertions
 
 Renderer copy should not include tool names, revision ids, `summaryOutcome`, `dailySummary`, or success-style update/delete wording on unresolved/stale paths. Reuse the local renderer-helper style: small pure functions, Traditional Chinese strings, deterministic lists joined with `\n`.
 
 ### Real SQLite Tests with TZ Guard
 
 **Source:** `tests/unit/meal-correction.test.ts` lines 1-69 and `tests/integration/chat-meal-correction.integration.test.ts` lines 1-87  
-**Apply to:** all Phase 67 tests
+**Apply to:** all Phase 67 tests, including `tests/unit/mutation-receipts.test.ts` and `tests/unit/system-prompt.test.ts`
 
 Use Node `node:test`, `node:assert/strict`, `createDb(":memory:")`, `MockLLMProvider`, `buildApp()`, and `process.env.TZ = "Asia/Taipei"`. Do not introduce Jest/Vitest or DB mocks.
 

@@ -389,22 +389,16 @@ if (controlledReply) {
 
 **If this table is empty:** All claims in this research were verified or cited — no user confirmation needed.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **How much stale/deleted recovery should Phase 67 implement before Phase 68 structured results?**
-   - What we know: D-45 prefers rerendering current scoped options after stale/deleted failures, and D-46 forbids auto-retargeting. [VERIFIED: 67-CONTEXT.md]
-   - What's unclear: whether the existing pending-state shape contains enough original scope/evidence metadata to rerender after a stale mutator failure without broader structured result plumbing. [VERIFIED: codebase grep]
-   - Recommendation: plan a scoped data-shape addition in `meal-correction.ts`; if full delayed recovery would require generic structured tool-result work, explicitly defer that part to Phase 68 while preserving fail-closed stale behavior. [VERIFIED: 67-CONTEXT.md; VERIFIED: .planning/REQUIREMENTS.md]
+1. **RESOLVED: stale/deleted recovery scope for Phase 67.**
+   - Plan decision: implement the scoped pending-selection data-shape addition in `server/services/meal-correction.ts` and the stale selected-target handling in `server/orchestrator/tools.ts` as planned in `67-02-PLAN.md` and `67-05-PLAN.md`. Phase 67 must revalidate a selected option before mutation, fail closed on stale/deleted targets, and re-render current scoped options only when the original scope can be recovered. It must not auto-retarget by same label. This explicitly implements D-39, D-40, D-41, D-44, D-45, D-46, and D-46a without expanding into TARGET-03 generic structured tool-result transport, which remains Phase 68. [VERIFIED: 67-CONTEXT.md; VERIFIED: 67-05-PLAN.md; VERIFIED: .planning/REQUIREMENTS.md]
 
-2. **Should grouped labels be shortened now?**
-   - What we know: D-25 allows full stored-item joins and D-25a says tests currently expect full joined labels. [VERIFIED: 67-CONTEXT.md]
-   - What's unclear: whether concise means shortening in this phase or just avoiding raw correction request echoes. [VERIFIED: 67-CONTEXT.md]
-   - Recommendation: keep full stored/projected labels unless the planner adds explicit tasks to update assertions and preserve distinguishability. [VERIFIED: 67-CONTEXT.md]
+2. **RESOLVED: grouped-label rendering policy.**
+   - Plan decision: keep full stored/projected grouped labels in Phase 67 unless implementation can preserve candidate distinguishability and intentionally update assertions. The active plans do not require shortening grouped labels; they require backend-derived labels, stable numbering, no raw correction request echo, and no calories/macros in options. This implements D-22, D-24, D-25, and D-25a while avoiding unnecessary assertion churn. [VERIFIED: 67-CONTEXT.md; VERIFIED: 67-03-PLAN.md]
 
-3. **Should invalid number copy live in service or renderer module?**
-   - What we know: invalid option should re-show the same options and state valid numbers. [VERIFIED: 67-CONTEXT.md]
-   - What's unclear: exact helper placement is discretionary. [VERIFIED: 67-CONTEXT.md]
-   - Recommendation: keep selection-state decisions in `meal-correction.ts`, but place reusable Traditional Chinese copy helpers near `mutation-receipts.ts` if multiple orchestrator paths need them. [VERIFIED: AGENTS.md; VERIFIED: codebase grep]
+3. **RESOLVED: invalid-number copy placement.**
+   - Plan decision: keep selection-state decisions, rendered-option identity, valid-number detection, and invalid-number re-show behavior in `server/services/meal-correction.ts` per `67-02-PLAN.md`. Put reusable Traditional Chinese renderer helpers for correction target clarification/no-safe-candidate copy in `server/orchestrator/mutation-receipts.ts` per `67-03-PLAN.md`, then expose them through controlled `find_meals` replies in `server/orchestrator/tools.ts`. This implements D-20, D-21, D-32, D-33, D-37, and D-38. [VERIFIED: 67-CONTEXT.md; VERIFIED: 67-02-PLAN.md; VERIFIED: 67-03-PLAN.md]
 
 ## Environment Availability
 
