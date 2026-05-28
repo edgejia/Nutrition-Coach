@@ -780,6 +780,122 @@ describe("meal correction service", () => {
     assert.equal("resolvedMealId" in invalidSelection, false);
   });
 
+  it("Phase 67 D-39/D-40 resolves a delayed valid option with the originally rendered revision", async () => {
+    const older = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const newer = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 29,
+      carbs: 78,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐的雞腿飯蛋白質改 28g");
+    assert.equal(firstPass.status, "needs_clarification");
+    assert.deepEqual(firstPass.candidates.map((candidate) => candidate.mealId), [newer.id, older.id]);
+
+    const selected = await mealCorrectionService.findMeals(deviceId, "update", "2，蛋白質改 28g");
+
+    assert.equal(selected.status, "resolved");
+    assert.equal(selected.fromPending, true);
+    assert.equal(selected.resolvedMealId, older.id);
+    assert.equal(selected.mealRevisionId, older.mealRevisionId);
+  });
+
+  it("Phase 67 D-41/D-46a rejects stale delayed selections and re-renders current scoped options", async () => {
+    const older = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const newer = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 29,
+      carbs: 78,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐的雞腿飯蛋白質改 28g");
+    assert.equal(firstPass.status, "needs_clarification");
+    await foodLoggingService.updateMeal(deviceId, older.id, {
+      expectedMealRevisionId: older.mealRevisionId,
+      items: [{
+        foodName: "新版雞腿飯",
+        calories: 640,
+        protein: 31,
+        carbs: 80,
+        fat: 19,
+      }],
+    });
+
+    const staleSelection = await mealCorrectionService.findMeals(deviceId, "update", "2，蛋白質改 28g");
+
+    assert.equal(staleSelection.status, "needs_clarification");
+    assert.equal("resolvedMealId" in staleSelection, false);
+    assert.ok(staleSelection.candidates.some((candidate) => candidate.mealId === older.id));
+    assert.ok(staleSelection.candidates.some((candidate) => candidate.mealId === newer.id));
+    assert.ok(staleSelection.candidates.every((candidate) => candidate.dateKey === "2026-04-19"));
+    assert.notEqual(
+      staleSelection.candidates.find((candidate) => candidate.mealId === older.id)?.mealRevisionId,
+      older.mealRevisionId,
+    );
+    assert.match(staleSelection.prompt, /請直接回覆編號/);
+    assert.doesNotMatch(staleSelection.prompt, /已更新|已刪除|成功/);
+  });
+
+  it("Phase 67 D-46 never auto-retargets a deleted selected option to a same-label replacement", async () => {
+    const selectedTarget = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const newer = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 29,
+      carbs: 78,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
+    assert.equal(firstPass.status, "needs_clarification");
+    await foodLoggingService.deleteMeal(deviceId, selectedTarget.id, selectedTarget.mealRevisionId);
+    const replacement = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 700,
+      protein: 35,
+      carbs: 82,
+      fat: 24,
+      loggedAt: "2026-04-19T05:00:00.000Z",
+    });
+
+    const staleSelection = await mealCorrectionService.findMeals(deviceId, "delete", "2");
+
+    assert.equal(staleSelection.status, "needs_clarification");
+    assert.equal("resolvedMealId" in staleSelection, false);
+    assert.ok(staleSelection.candidates.some((candidate) => candidate.mealId === replacement.id));
+    assert.ok(staleSelection.candidates.some((candidate) => candidate.mealId === newer.id));
+    assert.ok(!staleSelection.candidates.some((candidate) => candidate.mealId === selectedTarget.id));
+    assert.match(staleSelection.prompt, /請直接回覆編號/);
+  });
+
   it("does not reuse a pending selection for a different mutation action", async () => {
     const first = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",

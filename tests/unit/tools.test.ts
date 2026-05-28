@@ -1638,6 +1638,114 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.notEqual(transaction?.deletedAt, null);
   });
 
+  it("Phase 67 D-44/D-45 returns renderer-owned no-mutation copy when a selected pending update target goes stale before write", async () => {
+    const older = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const newer = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 29,
+      carbs: 78,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const toolSessionState = {
+      resolvedMealTargets: [] as Array<{ mealId: string; mealRevisionId: string }>,
+    };
+
+    await executeTool({
+      id: "call_pending_options",
+      type: "function",
+      function: {
+        name: "find_meals",
+        arguments: JSON.stringify({
+          action: "update",
+          query: "把 4/19 午餐的雞腿飯蛋白質改 28g",
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState,
+    });
+    const selected = await executeTool({
+      id: "call_select_pending_option",
+      type: "function",
+      function: {
+        name: "find_meals",
+        arguments: JSON.stringify({
+          action: "update",
+          query: "2，蛋白質改 28g",
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState,
+    });
+    assert.equal(selected.summary, "status: resolved");
+    assert.deepEqual(toolSessionState.resolvedMealTargets, [{
+      mealId: older.id,
+      mealRevisionId: older.mealRevisionId,
+    }]);
+
+    await foodLoggingService.updateMeal(deviceId, older.id, {
+      expectedMealRevisionId: older.mealRevisionId,
+      items: [{
+        foodName: "新版雞腿飯",
+        calories: 640,
+        protein: 31,
+        carbs: 80,
+        fat: 19,
+      }],
+    });
+    const staleUpdate = await executeTool({
+      id: "call_stale_selected_update",
+      type: "function",
+      function: {
+        name: "update_meal",
+        arguments: JSON.stringify({
+          meal_id: older.id,
+          protein: 28,
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      toolSessionState,
+    }, {
+      currentUserMessage: "2，蛋白質改 28g",
+    });
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.equal(staleUpdate.success, false);
+    assert.equal(staleUpdate.executed, false);
+    assert.equal(staleUpdate.failureReason, "guard");
+    assert.deepEqual(staleUpdate.controlledReply, {
+      source: "renderer",
+      reason: "meal_target_clarification",
+      text: staleUpdate.result,
+    });
+    assert.equal(staleUpdate.mealMutationKind, undefined);
+    assert.equal(staleUpdate.summaryOutcome, undefined);
+    assert.match(staleUpdate.result, /請直接回覆編號/);
+    assert.match(staleUpdate.result, /新版雞腿飯/);
+    assert.match(staleUpdate.result, /雞腿飯/);
+    assert.doesNotMatch(staleUpdate.result, /MEAL_REVISION_STALE|已更新|成功/);
+    assert.equal(revisions.length, 3);
+    assert.ok(newer.id);
+  });
+
   it("returns update_meal committed facts with unavailable summaryOutcome and no compatibility dailySummary", async () => {
     const created = await foodLoggingService.logFood(deviceId, {
       foodName: "蘋果",
