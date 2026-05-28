@@ -22,6 +22,7 @@ Phase 67 makes backend correction target resolution and clarification rendering 
 - **D-06:** If exactly one candidate matches food/item evidence within scope, it may resolve. If multiple grouped meals share the matched item, clarify unless stronger scoping evidence separates them.
 - **D-07:** Explicit persisted `mealPeriod` is stronger than inferred `loggedAt` period. Inferred period remains valid fallback evidence and can auto-resolve when it is the clean unique match.
 - **D-08:** Pure recency must not override a matching meal-period word. Within period-matching candidates, prefer explicit source over inferred source, then newest.
+- **D-08a:** D-07/D-08 describe the Phase 67 target state, not current behavior. Current scoring does not use `mealPeriodSource`; plan-phase must change ranking/scoring and add tests for explicit-period-over-inferred-period behavior.
 - **D-09:** Add regression proof for a period word plus `那餐` where a newer non-matching meal exists: the resolver should select the matching period candidate, not the newest meal overall.
 
 ### Auto-Resolve vs Clarify Threshold
@@ -43,6 +44,7 @@ Phase 67 makes backend correction target resolution and clarification rendering 
 - **D-23:** Do not render inferred meal-period labels. If the period only comes from `loggedAt` inference, omit it rather than presenting a clock-derived guess as fact.
 - **D-24:** Do not include calories or macros in correction clarification options by default. Clarification is for target selection, not nutrition review.
 - **D-25:** Grouped meal labels must come from stored meal/items, not from the user's correction request. Later shortening such as first items plus `等 N 項` is allowed only if enough identity remains to distinguish candidates.
+- **D-25a:** Full stored-item joins remain valid under D-25. If plan-phase introduces truncated grouped labels, it must intentionally update integration assertions that currently expect full joined labels.
 - **D-26:** Use a safe target-aware lead-in only when the label is backend-derived from matched stored evidence, such as `我找到多筆可能符合「滷蛋」的餐點，請直接回覆編號：`.
 - **D-27:** If no safe backend-derived target label exists, fall back to direct copy such as `我找到多筆可能要修改/刪除的餐點，請直接回覆編號：`.
 - **D-28:** Always include `請直接回覆編號`. Never echo raw correction text or model-rewritten phrases as the target label, and do not use phrases like `中午雞腿便當` as if they were stored meal labels.
@@ -66,6 +68,7 @@ Phase 67 makes backend correction target resolution and clarification rendering 
 - **D-44:** After a valid selection resolves but the write fails because the meal is stale, changed, or deleted, fail closed: no mutation, no `daily_summary` publish, and no success-style copy.
 - **D-45:** Prefer re-rendering current scoped options after stale/deleted selection failures. If no safe current candidates remain, say the previously selected meal is no longer available and ask for fresh date/period/food detail.
 - **D-46:** Never auto-retarget by label. A same-label meal is not the same target for update/delete.
+- **D-46a:** D-45 is a target-state change from current stale behavior, which is fail-closed with generic stale copy / `MEAL_REVISION_STALE`. Adopting D-45 requires updating or adding stale/deleted recovery tests. Re-rendering current candidates from the recoverable original scope is allowed, but the backend must not preselect or auto-retarget a same-label replacement. If the original scope cannot be recovered, ask for fresh target evidence.
 
 ### the agent's Discretion
 - Exact data structures, stored pending-selection shape, recovery plumbing for delayed visible prompts, and structured tool-result mechanics are for plan-phase. The product behavior above is locked; the implementation path is not.

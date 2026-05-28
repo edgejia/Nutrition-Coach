@@ -90,7 +90,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORR-03 | Phase 66 | Complete |
 | TARGET-01 | Phase 67 | Pending |
 | TARGET-02 | Phase 67 | Pending |
-| TARGET-03 | Phase 67 | Pending |
+| TARGET-03 | Phase 68 | Pending |
 | PROOF-01 | Phase 68 | Pending |
 | PROOF-02 | Phase 68 | Pending |
 | PROOF-03 | Phase 68 | Pending |
