@@ -30,6 +30,11 @@ describe("normalizeNumericSourceText digit + unit matrix", () => {
     const candidates = normalizeNumericSourceText("1800kcal");
     assert.ok(candidates.includes("1800"));
   });
+
+  it("Test 1f: decimal unit suffix 9.5g yields 9.5", () => {
+    const candidates = normalizeNumericSourceText("脂肪改 9.5g");
+    assert.ok(candidates.includes("9.5"), `candidates: ${candidates.join(",")}`);
+  });
 });
 
 describe("normalizeNumericSourceText Chinese numeral matrix", () => {
@@ -58,6 +63,11 @@ describe("normalizeNumericSourceText Chinese numeral matrix", () => {
     // 1800 appears inside the string, but because it is followed by 多 it must
     // not emit 1800 as an authorized exact candidate.
     assert.ok(!candidates.includes("1800"), `candidates: ${candidates.join(",")}`);
+  });
+
+  it("Test 3c: bare Chinese digit with a nutrition unit yields the final value", () => {
+    const candidates = normalizeNumericSourceText("蛋白質五克");
+    assert.ok(candidates.includes("5"), `candidates: ${candidates.join(",")}`);
   });
 });
 
