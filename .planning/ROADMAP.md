@@ -118,7 +118,25 @@ Plans:
   2. Explicit food-label evidence outranks weak meal-period-only hints when selecting or narrowing candidates.
   3. Multi-candidate clarification always includes stable numbered options that match the instruction to reply with a number.
   4. Clarification labels use concise meal labels or `餐點`, not the entire user correction request.
-**Plans**: TBD during `$gsd-plan-phase 67`
+**Plans**: 6 plans
+Plans:
+**Wave 0**
+- [ ] 67-01-PLAN.md — Red-first validation coverage for resolver ranking and backend-rendered clarification.
+
+**Wave 1** *(blocked on Wave 0 completion)*
+- [ ] 67-02-PLAN.md — Evidence-tier resolver ranking and exact rendered-option pending selection.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 67-03-PLAN.md — Backend correction clarification renderer and controlled `find_meals` tool replies.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 67-04-PLAN.md — Orchestrator terminal renderer wiring and support-only prompt alignment.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 67-05-PLAN.md — Delayed selection revalidation, stale fail-closed handling, and Fastify route proof.
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 67-06-PLAN.md — Final local validation gates and `67-VALIDATION.md` status update.
 **Implementation Notes:**
 - Build on `server/services/meal-correction.ts` candidate scoring and pending selection state.
 - Preserve deterministic no-mutation behavior for unresolved targets.
@@ -148,7 +166,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 |-------|-----------|----------------|--------|-----------|
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete    | 2026-05-28 |
-| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/TBD | Pending | — |
+| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 0/6 | Pending | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
 
 ## Future Milestone Candidates
