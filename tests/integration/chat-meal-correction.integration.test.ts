@@ -1162,6 +1162,169 @@ describe("chat meal correction integration", () => {
     assert.equal(unchangedSecond?.protein, 28);
   });
 
+  it("Phase 67 D-38 route re-shows rendered options for an invalid number without mutation or publish", async () => {
+    const first = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const second = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 28,
+      carbs: 76,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_invalid_number_options",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "delete",
+            query: "把今天午餐的雞腿飯刪掉",
+          }),
+        },
+      }],
+    });
+    const firstTurn = await postChat("把今天午餐的雞腿飯刪掉");
+    assert.equal(firstTurn.status, 200);
+    assert.match(firstTurn.body.reply, /請直接回覆編號/);
+
+    const beforeSecondTurnCalls = mockLLM.chatCalls.length;
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_invalid_number_selection",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "delete",
+            query: "3",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已刪除第三筆雞腿飯。" });
+
+    const invalid = await postChat("3");
+
+    assert.equal(invalid.status, 200);
+    assert.equal(mockLLM.chatCalls.length, beforeSecondTurnCalls + 1);
+    assert.equal(invalid.body.didLogMeal, false);
+    assert.equal(invalid.body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(invalid.body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(invalid.body, "dailySummary"), false);
+    assert.match(invalid.body.reply, /請直接回覆編號/);
+    assert.match(invalid.body.reply, /1\./);
+    assert.match(invalid.body.reply, /2\./);
+    assert.doesNotMatch(invalid.body.reply, /3\.|已刪除|成功/);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const meals = await getMeals();
+    assert.equal(meals.length, 2);
+    assert.equal(meals.find((meal) => meal.id === first.id)?.mealRevisionId, first.mealRevisionId);
+    assert.equal(meals.find((meal) => meal.id === second.id)?.mealRevisionId, second.mealRevisionId);
+  });
+
+  it("Phase 67 D-41/D-45/D-46 route rejects a deleted delayed selection without same-label auto-retargeting", async () => {
+    const selectedTarget = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+    });
+    const newer = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 620,
+      protein: 28,
+      carbs: 76,
+      fat: 18,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_deleted_delayed_selection_options",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把今天午餐的雞腿飯蛋白質改掉",
+          }),
+        },
+      }],
+    });
+    const firstTurn = await postChat("把今天午餐的雞腿飯蛋白質改掉");
+    assert.equal(firstTurn.status, 200);
+    assert.match(firstTurn.body.reply, /請直接回覆編號/);
+
+    await services.foodLoggingService.deleteMeal(deviceId, selectedTarget.id, selectedTarget.mealRevisionId);
+    const replacement = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 700,
+      protein: 35,
+      carbs: 82,
+      fat: 24,
+      loggedAt: "2026-04-19T05:00:00.000Z",
+    });
+
+    const beforeSecondTurnCalls = mockLLM.chatCalls.length;
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_deleted_delayed_selection",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "2，蛋白質改 28g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unsafe_deleted_delayed_selection_update",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: selectedTarget.id,
+            protein: 28,
+          }),
+        },
+      }],
+    });
+
+    const staleSelection = await postChat("2，蛋白質改 28g");
+
+    assert.equal(staleSelection.status, 200);
+    assert.equal(mockLLM.chatCalls.length, beforeSecondTurnCalls + 1);
+    assert.equal(staleSelection.body.didLogMeal, false);
+    assert.equal(staleSelection.body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(staleSelection.body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(staleSelection.body, "dailySummary"), false);
+    assert.match(staleSelection.body.reply, /請直接回覆編號/);
+    assert.match(staleSelection.body.reply, /雞腿飯/);
+    assert.doesNotMatch(staleSelection.body.reply, /蛋白質改|已更新|成功|MEAL_REVISION_STALE/);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const meals = await getMeals();
+    assert.equal(meals.some((meal) => meal.id === selectedTarget.id), false);
+    assert.equal(meals.find((meal) => meal.id === newer.id)?.protein, 28);
+    assert.equal(meals.find((meal) => meal.id === replacement.id)?.protein, 35);
+  });
+
   it("consumes the pending selection on the next chat turn and deletes the chosen meal", async () => {
     const first = await services.foodLoggingService.logFood(deviceId, {
       foodName: "雞腿飯",
