@@ -376,6 +376,22 @@ function assertNoPublishFailurePayload(payload: unknown) {
   assert.doesNotMatch(JSON.stringify(payload), /publish_failed|summary_publish_failed/);
 }
 
+const TERMINAL_CLARIFICATION_SUCCESS_COPY = /已記錄|完成記錄|已更新|已刪除|成功/;
+
+function assertNoTerminalClarificationDoneSideEffects(payload: {
+  didLogMeal?: boolean;
+  didMutateMeal?: boolean;
+  loggedMeal?: unknown;
+  dailySummary?: unknown;
+  summaryOutcome?: unknown;
+}) {
+  assert.equal(payload.didLogMeal, false);
+  assert.equal(payload.didMutateMeal, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "loggedMeal"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "dailySummary"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "summaryOutcome"), false);
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const providerMetadataFixture: ProviderErrorMetadata = {
@@ -1428,6 +1444,275 @@ describe("chat-streaming", () => {
       await reader?.cancel();
       controller.abort();
       clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE persists terminal historical log_food clarification without side effects or publish", async () => {
+    assert.ok(services);
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_historical_stream_multiple_dates",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25 和 2026-03-26",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["已記錄牛肉麵。"]);
+
+    const form = new FormData();
+    form.append("message", "幫我補記 2026-03-25 和 2026-03-26 吃牛肉麵");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: unknown;
+        dailySummary?: unknown;
+        summaryOutcome?: unknown;
+      };
+
+      assert.equal(chunkText, "這次沒有記錄餐點。我還不能確定你要記錄哪一天，請一次告訴我一個日期。");
+      assert.doesNotMatch(chunkText, TERMINAL_CLARIFICATION_SUCCESS_COPY);
+      assertNoTerminalClarificationDoneSideEffects(donePayload);
+      assert.equal(mockLLM.chatCalls.length, 1, "terminal clarification must not consume a second model reply");
+      assert.deepEqual(publishedPayloads, []);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const latestAssistant = historyJson.messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
+      assert.equal(latestAssistant, chunkText);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE persists get_daily_summary clarification without summary or publish", async () => {
+    assert.ok(services);
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_summary_stream_needs_clarification",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({ date_text: "前幾天" }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["已查詢完成。"]);
+
+    const form = new FormData();
+    form.append("message", "前幾天吃了多少？");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: unknown;
+        dailySummary?: unknown;
+        summaryOutcome?: unknown;
+      };
+
+      assert.equal(chunkText, "我還不能確定是哪一天，請再說一次日期。");
+      assert.doesNotMatch(chunkText, TERMINAL_CLARIFICATION_SUCCESS_COPY);
+      assertNoTerminalClarificationDoneSideEffects(donePayload);
+      assert.equal(mockLLM.chatCalls.length, 1, "terminal clarification must not consume a second model reply");
+      assert.deepEqual(publishedPayloads, []);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const latestAssistant = historyJson.messages.filter((message) => message.role === "assistant").at(-1)?.content ?? "";
+      assert.equal(latestAssistant, chunkText);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE multiple_targets follow-up does not carry one listed date into a later log", async () => {
+    assert.ok(services);
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_summary_stream_multiple_targets",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({ date_text: "2026-03-25 和 2026-03-26" }),
+        },
+      }],
+    });
+
+    const firstForm = new FormData();
+    firstForm.append("message", "2026-03-25 和 2026-03-26 各吃了多少？");
+
+    const firstController = new AbortController();
+    const firstTimeout = setTimeout(() => firstController.abort(), 3000);
+    let firstReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const firstRes = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: firstController.signal,
+        body: firstForm,
+      });
+      assert.ok(firstRes.body);
+      firstReader = firstRes.body.getReader();
+      const firstText = await readStreamUntil(firstReader, "event: done");
+      const firstEvents = parseSSEEvents(firstText);
+      const firstChunkText = firstEvents
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string })
+        .map((payload) => payload.token)
+        .join("");
+      const firstDonePayload = JSON.parse(firstEvents.find((event) => event.event === "done")!.data) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: unknown;
+        dailySummary?: unknown;
+        summaryOutcome?: unknown;
+      };
+      assert.match(firstChunkText, /我目前一次只能看一個日期/);
+      assert.match(firstChunkText, /1\. 2026-03-25/);
+      assert.match(firstChunkText, /2\. 2026-03-26/);
+      assertNoTerminalClarificationDoneSideEffects(firstDonePayload);
+    } finally {
+      await firstReader?.cancel().catch(() => {});
+      firstController.abort();
+      clearTimeout(firstTimeout);
+    }
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_follow_up_drink_after_multiple_targets",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "豆漿",
+            calories: 120,
+            protein: 8,
+            carbs: 12,
+            fat: 4,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["已", "記錄豆漿。"]);
+
+    const secondForm = new FormData();
+    secondForm.append("message", "再加一杯豆漿");
+    const secondController = new AbortController();
+    const secondTimeout = setTimeout(() => secondController.abort(), 3000);
+    let secondReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const secondRes = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: secondController.signal,
+        body: secondForm,
+      });
+      assert.ok(secondRes.body);
+      secondReader = secondRes.body.getReader();
+      const secondText = await readStreamUntil(secondReader, "event: done");
+      const secondEvents = parseSSEEvents(secondText);
+      const secondDonePayload = JSON.parse(secondEvents.find((event) => event.event === "done")!.data) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        affectedDate?: string;
+        dailySummary?: { date?: string };
+        loggedMeal?: { dateKey?: string };
+      };
+
+      if (secondDonePayload.didLogMeal) {
+        const forbiddenCarriedDates = new Set(["2026-03-25", "2026-03-26"]);
+        assert.equal(forbiddenCarriedDates.has(secondDonePayload.affectedDate ?? ""), false);
+        assert.equal(forbiddenCarriedDates.has(secondDonePayload.dailySummary?.date ?? ""), false);
+        assert.equal(forbiddenCarriedDates.has(secondDonePayload.loggedMeal?.dateKey ?? ""), false);
+      } else {
+        assertNoTerminalClarificationDoneSideEffects(secondDonePayload);
+      }
+
+      const march25Meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+      const march26Meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-26T12:00:00+08:00"));
+      assert.equal(march25Meals.length, 0);
+      assert.equal(march26Meals.length, 0);
+    } finally {
+      await secondReader?.cancel().catch(() => {});
+      secondController.abort();
+      clearTimeout(secondTimeout);
     }
   });
 
