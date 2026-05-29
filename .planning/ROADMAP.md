@@ -157,7 +157,7 @@ Plans:
 **Plans**: 4 plans
 Plans:
 **Wave 1**
-- [ ] 68-01-PLAN.md — Red-first unit proof for typed clarification facts and terminal renderer behavior.
+- [x] 68-01-PLAN.md — Red-first unit proof for typed clarification facts and terminal renderer behavior.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 68-02-PLAN.md — Structured `ToolExecutionResult` clarification union, renderer helpers, and `executeTool()` mapping.
@@ -182,7 +182,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete    | 2026-05-28 |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 7/7 | Complete    | 2026-05-29 |
-| 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/4 | Pending | — |
+| 68. Structured Tool Results and Release-Proof Gate | v2.4 | 1/4 | In Progress|  |
 
 ## Future Milestone Candidates
 

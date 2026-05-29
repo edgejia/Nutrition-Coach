@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
 status: executing
-last_updated: "2026-05-29T14:43:19.383Z"
-last_activity: 2026-05-29 -- Phase 68 planning complete
+last_updated: "2026-05-29T16:14:45.615Z"
+last_activity: 2026-05-29
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 24
-  completed_plans: 20
+  completed_plans: 21
   percent: 75
 ---
 
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-26)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Phase 68 — structured tool results and release proof gate
+**Current focus:** Phase 68 — structured-tool-results-and-release-proof-gate
 
 ## Current Position
 
-Phase: 68
-Plan: Not started
+Phase: 68 (structured-tool-results-and-release-proof-gate) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-05-29 -- Phase 68 planning complete
+Last activity: 2026-05-29
 
 ## Performance Metrics
 
@@ -90,6 +90,7 @@ Last activity: 2026-05-29 -- Phase 68 planning complete
 | Phase 67 P04 | 4m50s | 2 tasks | 4 files |
 | Phase 67 P05 | 8m 52s | 2 tasks | 5 files |
 | 67 | 7 | - | - |
+| Phase 68 P01 | 5m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -194,6 +195,8 @@ Recent decisions affecting current work:
 - [Phase 67]: Delayed pending selections now resolve only after device-scoped active candidate revalidation confirms the same meal id and original revision id. — Prevents stale or deleted delayed replies from mutating meals after the rendered option set is no longer authoritative.
 - [Phase 67]: Stale selected update/delete writes recover through meal_target_clarification controlled replies when pending scope is available. — Keeps no-mutation recovery on the renderer-owned clarification path while preserving existing stable stale-revision errors for direct resolver failures.
 - [Phase 67]: Same-label replacement meals may be shown as fresh choices inside recovered scope but are never auto-selected as the stale target replacement. — Prevents accidental retargeting when a deleted meal is recreated with matching display text.
+- [Phase 68]: Plan 68-01 stayed red-first: no production files were edited, and failing assertions are the expected handoff to Plan 68-02.
+- [Phase 68]: The test contract names the typed tool-result fact boundary ToolExecutionResult.clarification.
 
 ### Pending Todos
 
@@ -224,9 +227,9 @@ None yet for v2.4.
 
 ## Session Continuity
 
-Last session: 2026-05-29T13:23:57.515Z
-Stopped at: Phase 68 context gathered
-Resume file: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md
+Last session: 2026-05-29T16:14:45.538Z
+Stopped at: Completed 68-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
