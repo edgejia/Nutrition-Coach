@@ -482,6 +482,50 @@ describe("meal correction service", () => {
     assert.equal(result.candidate.dateKey, "2026-04-18");
   });
 
+  it("Phase 67 gap resolves an explicit historical-date meal before the newest candidate cap", async () => {
+    const scopedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿飯",
+      calories: 650,
+      protein: 30,
+      carbs: 80,
+      fat: 20,
+      loggedAt: "2026-04-18T04:00:00.000Z",
+    });
+
+    for (let index = 0; index < 21; index += 1) {
+      await foodLoggingService.logFood(deviceId, {
+        foodName: `新餐${index + 1}`,
+        calories: 300 + index,
+        protein: 10,
+        carbs: 40,
+        fat: 8,
+        loggedAt: `2026-04-19T${String(index).padStart(2, "0")}:00:00.000Z`,
+      });
+    }
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把 4/18 的雞腿飯改成 500 卡");
+
+    assert.equal(result.status, "resolved");
+    assert.equal(result.resolvedMealId, scopedMeal.id);
+    assert.equal(result.candidate.dateKey, "2026-04-18");
+  });
+
+  it("Phase 67 gap treats unmatched Latin food evidence as blocking weak period fallback", async () => {
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "蛋餅",
+      calories: 330,
+      protein: 12,
+      carbs: 38,
+      fat: 14,
+      loggedAt: "2026-04-19T04:30:00.000Z",
+    });
+
+    const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐 burger 改成 500 卡");
+
+    assert.notEqual(result.status, "resolved");
+    assert.equal("resolvedMealId" in result, false);
+  });
+
   it("Phase 67 D-07/D-08 explicit persisted mealPeriod outranks inferred loggedAt period", async () => {
     const explicitLunch = await foodLoggingService.logFood(deviceId, {
       foodName: "雞腿便當",
