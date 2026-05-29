@@ -43,7 +43,7 @@ Archived phase execution files:
 
 - [x] **Phase 65: Tool Contract Alignment and Meal-Period Authority** - Align `log_food` schema/runtime contracts and persist explicit meal-period intent as structured meal fact authority.
 - [x] **Phase 66: Numeric Correction Provenance Guard** - Prevent chat corrections from committing model-estimated calories/macros unless backed by explicit user numeric evidence or an approved backend-owned estimate/proposal. (completed 2026-05-28)
-- [ ] **Phase 67: Correction Targeting and Backend Clarification Rendering** - Improve correction candidate ranking and canonical clarification copy so ambiguous edits surface stable numbered options instead of silently choosing weak targets. (verification gaps found 2026-05-28)
+- [ ] **Phase 67: Correction Targeting and Backend Clarification Rendering** - Improve correction candidate ranking and canonical clarification copy so ambiguous edits surface stable numbered options instead of silently choosing weak targets. (gap-closure plan added 2026-05-29)
 - [ ] **Phase 68: Structured Tool Results and Release-Proof Gate** - Remove serialized clarification-result parsing, prove v2.4 behavior with targeted tests and metadata-only evidence, and close local release gates.
 
 ## Phase Details
@@ -118,7 +118,7 @@ Plans:
   2. Explicit food-label evidence outranks weak meal-period-only hints when selecting or narrowing candidates.
   3. Multi-candidate clarification always includes stable numbered options that match the instruction to reply with a number.
   4. Clarification labels use concise meal labels or `餐點`, not the entire user correction request.
-**Plans**: 6 plans
+**Plans**: 7 plans
 Plans:
 **Wave 0**
 - [x] 67-01-PLAN.md — Red-first validation coverage for resolver ranking and backend-rendered clarification.
@@ -137,6 +137,9 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 - [x] 67-06-PLAN.md — Final local validation gates and `67-VALIDATION.md` status update.
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 67-07-PLAN.md — TARGET-01 gap closure for explicit-date candidate loading and residual Latin food-label evidence.
 **Implementation Notes:**
 - Build on `server/services/meal-correction.ts` candidate scoring and pending selection state.
 - Preserve deterministic no-mutation behavior for unresolved targets.
@@ -166,7 +169,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 |-------|-----------|----------------|--------|-----------|
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete    | 2026-05-28 |
-| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 6/6 | Gaps Found | — |
+| 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 6/7 | Gap Closure Planned | — |
 | 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
 
 ## Future Milestone Candidates
