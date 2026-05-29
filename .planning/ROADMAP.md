@@ -156,16 +156,16 @@ Plans:
   4. Local closure runs `yarn tsc --noEmit` and `yarn release:check` with no staging or main promotion.
 **Plans**: 4 plans
 Plans:
-**Wave 0**
+**Wave 1**
 - [ ] 68-01-PLAN.md — Red-first unit proof for typed clarification facts and terminal renderer behavior.
 
-**Wave 1** *(blocked on Wave 0 completion)*
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 68-02-PLAN.md — Structured `ToolExecutionResult` clarification union, renderer helpers, and `executeTool()` mapping.
 
-**Wave 2** *(blocked on Wave 1 completion)*
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 68-03-PLAN.md — JSON/SSE terminal clarification persistence, no-side-effect, and carry-forward integration proof.
 
-**Wave 3** *(blocked on Wave 2 completion)*
+**Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 68-04-PLAN.md — Metadata-only verification record and local release-proof closure gates.
 **Implementation Notes:**
 - Prefer typed `ToolExecutionResult` fields over ad hoc parsing.

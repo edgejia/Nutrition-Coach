@@ -348,16 +348,20 @@ Use existing metadata-only artifact tests and record in `68-VERIFICATION.md` tha
 
 All claims in this research were verified against local project artifacts, code, or command output; no `[ASSUMED]` claims are used. [VERIFIED: local research session]
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All items below are resolved for Phase 68 planning.
 
 1. **Should candidate projection include meal id/revision internally?**  
+   **RESOLVED:** Candidate ids/revisions stay out of renderer and proof surfaces by default; executors may use internal service state only where existing code paths already require it.  
    What we know: renderer/proof surfaces should default to option number, date/time, label, and explicit meal-period facts, while meal id/revision should not become visible by default. [VERIFIED: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md]  
-   What's unclear: plan-phase may decide whether internal ids are useful for adapter tests or only service state. [VERIFIED: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md]  
+   Resolved planning note: plan-phase may decide whether internal ids are useful for adapter tests or only service state. [VERIFIED: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md]  
    Recommendation: keep ids out of copy and proof assertions; include them only if needed for internal typed state. [VERIFIED: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md]
 
 2. **Is any deterministic harness needed?**  
+   **RESOLVED:** No deterministic harness is planned unless execution identifies a named normal-test false-pass risk that targeted unit/integration tests cannot close.  
    What we know: D-19 says default proof is unit plus integration. [VERIFIED: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md]  
-   What's unclear: a harness may be justified only if JSON/SSE persistence plus metadata-only trace cannot be proven by existing integration tests. [VERIFIED: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md]  
+   Resolved planning note: a harness may be justified only if JSON/SSE persistence plus metadata-only trace cannot be proven by existing integration tests. [VERIFIED: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md]  
    Recommendation: plan no harness by default; add one only after a concrete false-pass risk is identified. [VERIFIED: .planning/phases/68-structured-tool-results-and-release-proof-gate/68-CONTEXT.md]
 
 ## Environment Availability
