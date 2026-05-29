@@ -341,17 +341,27 @@ function extractTargetEvidenceText(query: string): string {
   return changeVerb?.[1] ?? query;
 }
 
-function hasLikelyFoodReference(query: string): boolean {
-  const targetText = normalizeText(extractTargetEvidenceText(query))
+function stripKnownNonFoodEvidence(query: string): string {
+  return extractTargetEvidenceText(query)
+    .toLowerCase()
+    .replace(/\b(?:today|yesterday|tomorrow)\b/g, "")
+    .replace(/\b(?:breakfast|lunch|dinner|snack)\b/g, "")
+    .replace(/\b(?:protein|carbs?|carbohydrates?|fat|calories?|kcal|grams?|g)\b/g, "")
     .replace(/今天|昨日|昨天|前天|明天|上週|這週|本週|星期[一二三四五六日天]|週[一二三四五六日天]/g, "")
     .replace(/早餐|早上|早飯|午餐|中午|晚餐|晚上|宵夜|點心|下午茶/g, "")
     .replace(/剛剛|剛才|上一筆|上一餐|那筆|這筆|那餐|這餐|第[一二兩三四五六七八九0-9]+(?:個|筆|份|條)?/g, "")
     .replace(/幫我|請|把|的|要|想|覺得|正常|平均|多少|哪一筆|哪餐/g, "")
     .replace(/修改|修正|更新|調整|降低|提高|刪掉|刪除|移除|補充|套用/g, "")
     .replace(/蛋白質|熱量|卡路里|碳水化合物|碳水|脂肪|卡|kcal|cal/g, "")
-    .replace(/[0-9０-９一二兩三四五六七八九十百千.]+(?:g|克|卡|顆|份|碗|盤|個)?/g, "");
+    .replace(/[0-9０-９一二兩三四五六七八九十百千.]+(?:g|克|卡|顆|份|碗|盤|個)?/g, "")
+    .replace(/\s+/g, "");
+}
 
-  return /(雞|鴨|豬|牛|羊|魚|蝦|蛋|飯|麵|面|菜|豆|奶|肉|便當|餅|粥|湯|沙拉|吐司|麥|滷|煮|炸|烤|炒|咖哩)/.test(targetText);
+function hasLikelyFoodReference(query: string): boolean {
+  const targetText = stripKnownNonFoodEvidence(query);
+
+  return /(雞|鴨|豬|牛|羊|魚|蝦|蛋|飯|麵|面|菜|豆|奶|肉|便當|餅|粥|湯|沙拉|吐司|麥|滷|煮|炸|烤|炒|咖哩)/.test(targetText)
+    || /[a-z]{2,}/.test(targetText);
 }
 
 function distributePatchedTotal(
@@ -565,7 +575,11 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
   const summaryService = deps.summaryService ?? createSummaryService(db);
   const foodLoggingService = deps.foodLoggingService ?? createFoodLoggingService(db);
 
-  async function loadActiveCandidates(deviceId: string, limit = 20): Promise<MealCorrectionCandidate[]> {
+  async function loadActiveCandidates(
+    deviceId: string,
+    options: { limit?: number; targetDateKey?: string } = {},
+  ): Promise<MealCorrectionCandidate[]> {
+    const limit = options.limit ?? 20;
     const headers = await db
       .select({
         id: mealTransactions.id,
@@ -581,7 +595,14 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       return [];
     }
 
-    const limitedHeaders = headers.slice(-limit).reverse();
+    const scopedHeaders = options.targetDateKey
+      ? headers.filter((header) => formatLocalDate(new Date(header.loggedAt)) === options.targetDateKey)
+      : headers;
+    const limitedHeaders = scopedHeaders.slice(-limit).reverse();
+    if (limitedHeaders.length === 0) {
+      return [];
+    }
+
     const revisionIds = limitedHeaders.map((header) => header.currentRevisionId);
     const items = await db
       .select()
@@ -889,15 +910,6 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         return pendingSelection;
       }
 
-      const candidates = await loadActiveCandidates(deviceId);
-      if (candidates.length === 0) {
-        return {
-          status: "not_found",
-          action,
-          prompt: buildNotFoundPrompt(action),
-        };
-      }
-
       const dateResolution = resolveFindMealsTargetDateKey(query, action, options);
       if (dateResolution.status === "needs_clarification") {
         return {
@@ -905,6 +917,24 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
           action,
           prompt: dateResolution.prompt,
           candidates: [],
+        };
+      }
+
+      const candidates = await loadActiveCandidates(deviceId, { targetDateKey: dateResolution.targetDateKey });
+      if (candidates.length === 0) {
+        if (dateResolution.targetDateKey && dateResolution.canUseDateRecovery) {
+          return {
+            status: "needs_clarification",
+            action,
+            prompt: buildDateNoMealsPrompt(action, dateResolution.targetDateKey),
+            candidates: [],
+          };
+        }
+
+        return {
+          status: "not_found",
+          action,
+          prompt: buildNotFoundPrompt(action),
         };
       }
 
