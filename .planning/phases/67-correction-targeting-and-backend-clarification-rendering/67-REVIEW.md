@@ -1,6 +1,6 @@
 ---
 phase: 67-correction-targeting-and-backend-clarification-rendering
-reviewed: 2026-05-28T20:52:05Z
+reviewed: 2026-05-29T07:27:12Z
 depth: standard
 files_reviewed: 11
 files_reviewed_list:
@@ -16,35 +16,35 @@ files_reviewed_list:
   - tests/unit/system-prompt.test.ts
   - tests/integration/chat-meal-correction.integration.test.ts
 findings:
-  critical: 2
+  critical: 0
   warning: 2
   info: 0
-  total: 4
+  total: 2
 status: issues_found
 ---
 
 # Phase 67: Code Review Report
 
-**Reviewed:** 2026-05-28T20:52:05Z
+**Reviewed:** 2026-05-29T07:27:12Z
 **Depth:** standard
 **Files Reviewed:** 11
 **Status:** issues_found
 
 ## Summary
 
-Reviewed the correction targeting service, orchestrator tool contracts, backend-owned receipt renderers, system prompt guidance, and neighboring unit/integration coverage. The main risks are incorrect meal targeting for explicit historical dates and unmatched Latin food labels, plus one renderer path that drops invalid-selection guidance before it reaches chat users.
+Reviewed the correction targeting service, orchestrator tool contracts, backend-owned receipt renderers, system prompt guidance, and neighboring unit/integration coverage. The prior critical TARGET-01 findings are resolved by 67-07. Two advisory warnings remain outside the 67-07 gap-closure scope.
 
 ## Narrative Findings (AI reviewer)
 
 ## Critical Issues
 
-### CR-01: BLOCKER - Explicit historical correction lookup is capped before date scoping
+### CR-01: RESOLVED - Explicit historical correction lookup is capped before date scoping
 
 **File:** `server/services/meal-correction.ts:568`
 
-**Issue:** `loadActiveCandidates()` always loads only the newest 20 active meals (`headers.slice(-limit).reverse()` at line 584), and `findMeals()` applies the explicit date scope later in `resolveByEvidenceTier()` at lines 454-456. Once a device has more than 20 newer meals, an explicit request like "delete 3/25 beef noodles" reports that 2026-03-25 has no meals even when the target meal exists. I reproduced this with one 2026-03-25 meal plus 20 newer meals; the service returned `needs_clarification` with the no-meals copy.
+**Issue:** Previously, `loadActiveCandidates()` loaded only the newest 20 active meals before explicit date scoping, so older explicit-date targets could be dropped before ranking.
 
-**Fix:** Resolve the target date before loading candidates and query date-scoped candidates from SQLite for explicit dates, or pass `targetDateKey` into candidate loading and apply the cap only after date scoping. Add a regression test with an older explicit-date meal plus more than 20 newer meals.
+**Resolution:** 67-07 resolves the target date before loading candidates and passes `targetDateKey` into `loadActiveCandidates()`, which filters headers by date before applying the newest cap. `tests/unit/meal-correction.test.ts` now includes a regression with one 2026-04-18 target meal plus 21 newer active meals.
 
 ```ts
 const dateResolution = resolveFindMealsTargetDateKey(query, action, options);
@@ -53,13 +53,13 @@ const candidates = await loadActiveCandidates(deviceId, {
 });
 ```
 
-### CR-02: BLOCKER - Unmatched Latin food names can fall through to period-only targeting
+### CR-02: RESOLVED - Unmatched Latin food names can fall through to period-only targeting
 
 **File:** `server/services/meal-correction.ts:344`
 
-**Issue:** `hasLikelyFoodReference()` only recognizes a fixed set of Chinese food characters. If the user includes an unmatched Latin food label with a meal period, for example "把今天午餐 burger 改成 500 卡", `labelMatches` is empty, `hasLikelyFoodReference()` returns false, and the code proceeds to period matching at lines 490-499. That resolves the unrelated lunch meal instead of asking for clarification. I reproduced this with a single lunch `蛋餅`; the service resolved that meal for the unmatched `burger` query.
+**Issue:** Previously, `hasLikelyFoodReference()` only recognized a fixed set of Chinese food characters, so unmatched Latin food labels could fall through to period-only targeting.
 
-**Fix:** Treat non-command Latin/CJK target residue as food evidence after stripping dates, periods, verbs, and numbers, then block weak period/recent fallback when that evidence has no label match.
+**Resolution:** 67-07 adds residual evidence stripping for date, period, action, nutrient, unit, and numeric text, then treats remaining Latin tokens such as `burger` as food evidence. The new regression proves `把今天午餐 burger 改成 500 卡` does not resolve an unrelated lunch.
 
 ```ts
 const residualTarget = normalizeText(extractTargetEvidenceText(query))
@@ -97,6 +97,6 @@ if (opts.expectsUncertainty) {
 
 ---
 
-_Reviewed: 2026-05-28T20:52:05Z_
-_Reviewer: the agent (gsd-code-reviewer)_
+_Reviewed: 2026-05-29T07:27:12Z_
+_Reviewer: Codex execute-phase advisory review refresh_
 _Depth: standard_
