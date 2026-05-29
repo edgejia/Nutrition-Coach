@@ -1,5 +1,53 @@
 # Project Milestones: Nutrition Coach
 
+## v2.4 Correction Authority and Meal Intent Fidelity (Shipped: 2026-05-30)
+
+**Delivered:** Closed correction-authority and meal-intent fidelity gaps by making explicit meal-period text structured authority, requiring explicit numeric evidence or backend-owned proposals for meal macro edits, and routing ambiguous correction/historical clarification through backend-rendered structured tool results.
+
+**Phases completed:** 4 phases, 24 plans, 48 tasks
+
+**Key accomplishments:**
+
+- Nullable explicit meal-period authority now exists in SQLite, transaction services, and food logging projections without changing loggedAt semantics.
+- Additive nullable meal_period migration now has an enum CHECK without default, backfill, or meal_transactions table rebuild.
+- log_food now treats protein_sources as optional evidence and persists explicit source-text mealPeriod authority without trusting raw model meal_period.
+- Current-day, day snapshot, and history meal-row APIs now expose persisted explicit mealPeriod authority without inferring public values from loggedAt.
+- Chat JSON, SSE terminal, and restored history logged-meal receipts now carry explicit backend mealPeriod authority without inventing inferred period fields.
+- Client meal DTOs now carry explicit backend mealPeriod authority through transport and edit state while rejecting invalid or inferred period values.
+- Meal-row UI labels now display explicit mealPeriod authority before legacy loggedAt inference across Home, History, Day Detail, and Summary Detail.
+- Correction candidates now expose effective meal period facts with explicit/inferred provenance for the Phase 67 scorer handoff.
+- Current-turn meal numeric authority helper with explicit evidence extraction, relative correction classification, and nested items[] bypass proof
+- Turn-state-backed meal numeric correction proposals with renderer-owned before/after approval and no-update guidance copy
+- Tool-boundary meal numeric authority with persisted-fact proposal previews and renderer-owned blocked/proposal copy
+- Pre-model proposal routing for backend-owned meal numeric approvals, cancellation, stale revision rejection, and cross-kind ambiguity
+- Red-first Node test coverage now pins correction target ranking and backend-rendered clarification behavior before Phase 67 production changes.
+- Meal correction targeting now resolves by explicit evidence tiers and persists only the exact numbered options shown to the user.
+- `find_meals` ambiguity now terminates with backend-rendered numbered correction target copy instead of model-authored clarification text.
+- Correction target clarification now terminates through backend renderer copy, with prompt guidance supporting backend-owned target selection and numeric authority.
+- Phase 67 correction targeting and backend-rendered clarification proof is recorded as green for local TypeScript, targeted, unit, and integration gates.
+- TARGET-01 gap closure for explicit historical dates and unmatched Latin food-label evidence in meal correction targeting
+- Typed clarification fact and terminal renderer red tests now lock the Phase 68 implementation target without changing production code.
+- Typed clarification facts now carry meal-target and historical ambiguity results through executeTool with renderer-owned terminal copy.
+- JSON and SSE route tests now prove terminal historical clarification replies persist without meal, summary, or publish side effects.
+- Phase 68 now has a metadata-only verification record tying structured tool-result coverage to green local release gates without any promotion action.
+
+**Close notes:** Milestone audit passed at 15/15 requirements, 4/4 phases, 8/8 integration checks, and 5/5 E2E flows. `yarn release:check` passed during closeout with TypeScript, 1,245 tests, and Vite production build. No push, deploy, Railway smoke, staging promotion, or main promotion was performed.
+
+**Known advisory debt:**
+
+- Phase 67 invalid-selection guidance can drop the service's valid-number wording in one same-date renderer path, though stable numbered options still render.
+- One Phase 67 orchestrator test helper can false-pass if uncertainty copy disappears.
+- `server/orchestrator/tools.ts` and `server/services/meal-correction.ts` are large authority modules and should be split in a future targeted refactor.
+
+**Archives:**
+
+- Roadmap: `.planning/milestones/v2.4-ROADMAP.md`
+- Requirements: `.planning/milestones/v2.4-REQUIREMENTS.md`
+- Audit: `.planning/milestones/v2.4-MILESTONE-AUDIT.md`
+- Phases: `.planning/milestones/v2.4-phases/`
+
+---
+
 ## v2.3 Authoritative Mutation Outcomes and Fresh Meal State (Shipped: 2026-05-20)
 
 **Delivered:** Made backend-committed mutation facts authoritative across goal updates, meal log/update/delete receipts, stale chat receipt edits, and `daily_summary` SSE freshness, with metadata-only local release proof and no staging/main promotion.

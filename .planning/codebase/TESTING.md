@@ -1,6 +1,6 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-05-26
+**Analysis Date:** 2026-05-30
 
 ## Test Framework
 
@@ -22,6 +22,14 @@ yarn verify:harness -- <scenario>  # Run one deterministic harness scenario
 yarn tsc --noEmit      # TypeScript gate for any TypeScript edit
 yarn release:check     # TypeScript, full tests, and frontend build release gate
 ```
+
+## v2.4 Authority Coverage
+
+- `tests/unit/meal-numeric-authority.test.ts` covers explicit numeric evidence parsing and authorization for meal calories/macros and item replacement values.
+- `tests/unit/meal-numeric-proposals.test.ts` covers backend-owned meal numeric proposal lifecycle, expiry, same-kind replacement, and revision-scoped payloads.
+- `tests/unit/meal-correction.test.ts` covers evidence-tier target ranking, persisted meal-period evidence, rendered-option pending selection, stale recovery, explicit-date candidate loading, and residual Latin food evidence.
+- `tests/unit/tools.test.ts` covers `log_food` schema/runtime alignment, source-text meal-period persistence, structured `ToolExecutionResult.clarification` facts, and no-side-effect clarification paths.
+- `tests/integration/chat-meal-correction.integration.test.ts`, `tests/integration/chat-api.test.ts`, and `tests/integration/chat-streaming.test.ts` cover route-visible no-mutation/no-publish behavior, JSON/SSE parity, assistant persistence, and no second LLM pass for terminal clarification.
 
 ## Test File Organization
 

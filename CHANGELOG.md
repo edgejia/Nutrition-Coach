@@ -1,5 +1,27 @@
 # 更新日誌
 
+## v2.4 - 2026-05-30
+
+### 新增
+
+- 餐點記錄現在會保存使用者明確說出的餐別意圖，例如 `午餐`、`晚餐` 或 `宵夜`，並在今日、歷史、聊天收據與編輯 payload 中保留這個結構化事實。
+- Chat 餐點數字修正新增後端權限邊界。只有同一輪訊息的明確數字，或使用者核准的後端提案，才能改 calories / macros。
+- 模糊餐點修正與多候選目標現在會回傳後端產生的穩定澄清文案，包含可回覆的編號選項。
+- `find_meals`、歷史 `log_food`、歷史 `get_daily_summary` 的澄清結果改用結構化 tool result 傳遞，不再依賴重新解析序列化 tool message JSON。
+
+### 變更
+
+- `log_food` 的 LLM JSON schema 與 Zod runtime 對 `protein_sources` 的 optional 行為已對齊，保留既有 trusted-protein 保護。
+- 餐點候選排序改用明確日期、目前回合/今日/近期、食物標籤、持久化餐別事實等可解釋證據，避免弱提示靜默選錯歷史餐點。
+- 修正失敗、澄清、過期提案與無授權數字路徑都維持 no-mutation、no `daily_summary` publish、no success-style copy。
+- v2.4 closeout 仍維持本機驗證範圍；沒有 push、merge、deploy、Railway smoke、staging promotion 或 main promotion。
+
+### 驗證
+
+- Phase 65-68 verification 全部通過，涵蓋 tool schema、明確餐別保存、數字修正權限、目標排序、澄清渲染、結構化 tool-result plumbing。
+- Phase 68 release proof 記錄 `yarn tsc --noEmit` 與 `yarn release:check` 通過，`yarn release:check` 共 1,245 tests passed 並完成 frontend build。
+- 沒有新增 harness artifact；v2.4 證據維持 command/file/status metadata-only，不保存 raw prompt、user text、assistant final text、tool payload、provider body、image data、session material 或 database snapshot。
+
 ## v2.3 - 2026-05-19
 
 ### 新增

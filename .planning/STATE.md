@@ -2,33 +2,32 @@
 gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: Correction Authority and Meal Intent Fidelity
-status: milestone_complete
-last_updated: 2026-05-29T17:09:51.689Z
-last_activity: 2026-05-29
+status: Awaiting next milestone
+last_updated: "2026-05-30T04:58:00+08:00"
+last_activity: 2026-05-30 — Milestone v2.4 completed and archived
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 24
   completed_plans: 24
   percent: 100
-stopped_at: Milestone complete (Phase 68 was final phase)
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-26)
+See: .planning/PROJECT.md (updated 2026-05-30)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Milestone complete
+**Current focus:** Awaiting next milestone selection
 
 ## Current Position
 
-Phase: 68
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-05-29
+Phase: Milestone v2.4 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-30 — Milestone v2.4 completed and archived
 
 ## Performance Metrics
 
@@ -212,7 +211,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet for v2.4.
+None.
 
 ### Quick Tasks Completed
 
@@ -222,7 +221,7 @@ None yet for v2.4.
 
 ### Blockers/Concerns
 
-- No current v2.4 planning blockers. Staging/main promotion still requires a separate ship workflow and explicit current-thread approval.
+- No current planning blockers. Staging/main promotion still requires a separate ship workflow and explicit current-thread approval.
 
 ## Deferred Items
 
@@ -232,10 +231,13 @@ None yet for v2.4.
 | proof_hardening | Phase 58 provider-auth-failure-localization failure evidence can persist the matched forbidden snippet on a failing run | accepted non-blocking debt | v2.2 close |
 | dependency_review | High advisories in `drizzle-orm`, `fastify`, and transitive `fast-uri` | defer package upgrade and regression gates | v2.2 close |
 | mutation_outcome | CR-01: committed goal updates can still become failed chat outcomes if post-commit `goals_update` publish or summary lookup throws; Phase 61 left `update_goals` outside the public `summaryOutcome` contract | closed by quick 260520-tqd | v2.3 audit |
-| tool_schema | WR-01: `log_food` JSON schema still marks `protein_sources` as required while the Zod/executor contract accepts it as optional | planned in Phase 65 | v2.4 |
-| correction_authority | Vague numeric meal corrections can be committed from model estimates without explicit user numeric evidence | planned in Phase 66 | v2.4 |
-| meal_intent | Explicit meal-period text can be overridden by `loggedAt` hour heuristics | planned in Phase 65 | v2.4 |
-| correction_targeting | Ambiguous correction candidates and clarification copy can be weak or misleading | planned in Phase 67 | v2.4 |
+| tool_schema | WR-01: `log_food` JSON schema still marks `protein_sources` as required while the Zod/executor contract accepts it as optional | closed in Phase 65 | v2.4 |
+| correction_authority | Vague numeric meal corrections can be committed from model estimates without explicit user numeric evidence | closed in Phase 66 | v2.4 |
+| meal_intent | Explicit meal-period text can be overridden by `loggedAt` hour heuristics | closed in Phase 65 | v2.4 |
+| correction_targeting | Ambiguous correction candidates and clarification copy can be weak or misleading | closed in Phase 67 | v2.4 |
+| correction_targeting | Invalid-selection valid-number copy can be dropped in one same-date renderer path while stable numbered options still render | accepted non-blocking debt | v2.4 audit |
+| test_hardening | Phase 67 orchestrator test helper can false-pass if uncertainty copy disappears | accepted non-blocking debt | v2.4 audit |
+| architecture | `server/orchestrator/tools.ts` and `server/services/meal-correction.ts` are large authority modules | future targeted split candidate | v2.4 audit |
 
 ## Session Continuity
 
@@ -245,4 +247,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Run `$gsd-execute-phase 68` to execute structured tool results and the release-proof gate.
+- Start the next milestone with /gsd-new-milestone

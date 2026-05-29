@@ -1,20 +1,26 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-05-26
+**Analysis Date:** 2026-05-30
 
 ## Tech Debt
 
 **Chat transport mega-boundary:**
-- Issue: `server/routes/chat.ts` owns multipart parsing, staged upload cleanup, durable asset promotion, JSON and SSE chat execution, stream token filtering, assistant persistence, realtime summary publishing, stop-turn state, and observability classification in one 1,592-line module.
+- Issue: `server/routes/chat.ts` owns multipart parsing, staged upload cleanup, durable asset promotion, JSON and SSE chat execution, stream token filtering, assistant persistence, terminal clarification persistence, realtime summary publishing, stop-turn state, and observability classification in one 1,595-line module.
 - Files: `server/routes/chat.ts`, `server/orchestrator/index.ts`, `server/orchestrator/tools.ts`
 - Impact: Small chat changes can regress upload cleanup, SSE terminal events, mutation receipts, trace metadata, or post-commit summary publishing because multiple boundary contracts share local state and duplicated JSON/SSE branches.
 - Fix approach: Extract route-local helpers by responsibility: `chat-upload-boundary`, `chat-stream-finalizer`, `chat-mutation-publisher`, and `chat-route-observability`. Keep `registerChatRoutes()` as wiring only and preserve existing integration tests in `tests/integration/chat-api.test.ts`, `tests/integration/chat-streaming.test.ts`, and `tests/integration/sse.test.ts`.
 
 **Orchestrator tool registry size and compatibility adapters:**
-- Issue: `server/orchestrator/tools.ts` is a 1,884-line registry plus all tool schemas, validation, execution, result adapters, privacy redaction, and compatibility wrappers. The exported `toolRegistry` uses `ToolContract<any, any>` casts, and `executeTool()` contains tool-specific result mapping for every contract.
+- Issue: `server/orchestrator/tools.ts` is a 2,470-line registry plus all tool schemas, validation, execution, structured clarification adapters, privacy redaction, and compatibility wrappers. The exported `toolRegistry` uses `ToolContract<any, any>` casts, and `executeTool()` contains tool-specific result mapping for every contract.
 - Files: `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `tests/unit/tools.test.ts`, `tests/unit/orchestrator-registry.test.ts`
 - Impact: New tool behavior requires editing a large shared file, increasing regression risk around unrelated tools such as `log_food`, `update_goals`, and `delete_meal`.
 - Fix approach: Split one file per contract under `server/orchestrator/tools/`, keep a typed registry assembly file, and move legacy `ToolExecutionResult` adapters into tool-owned adapter functions.
+
+**Correction target resolver complexity:**
+- Issue: `server/services/meal-correction.ts` is now a 1,181-line service that owns target candidate loading, evidence-tier ranking, rendered option state, stale-selection recovery, update/delete writes, and summary outcome handling.
+- Files: `server/services/meal-correction.ts`, `server/orchestrator/tools.ts`, `server/orchestrator/mutation-receipts.ts`, `tests/unit/meal-correction.test.ts`, `tests/integration/chat-meal-correction.integration.test.ts`
+- Impact: Target-ranking fixes can accidentally affect stale revision behavior, rendered clarification copy, pending selection reuse, or update/delete side effects.
+- Fix approach: Split target resolution/rendered-option state from mutation write execution when the next correction-targeting feature lands. Keep route-level integration tests around no-mutation/no-publish behavior before moving code.
 
 **Duplicate mutation-outcome handling across chat and REST routes:**
 - Issue: Meal mutations flow through chat tools, direct REST routes, direct services, SSE publishing, and client state reconciliation with overlapping summary-outcome and receipt logic.

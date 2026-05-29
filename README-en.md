@@ -27,6 +27,8 @@ Local development calls the OpenAI API for real meal analysis. Tests and some ha
 - Text and image meal logging: `server/orchestrator/*`, `server/routes/chat.ts`
 - LLM tool calling with structured mutation commits: `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `server/orchestrator/mutation-effects.ts`
 - SSE streaming chat UX: `server/routes/chat.ts`, `client/src/sse.ts`, `client/src/components/ChatPanel.tsx`
+- Meal correction authority: explicit numbers or backend-owned proposals are required before calories/macros can change
+- Explicit meal-period intent: words like lunch, dinner, or late-night snack are stored as structured facts instead of being overridden by clock-hour inference
 - Metadata-only chat failure localization: `server/llm/errors.ts`, `server/observability/events.ts`, `tests/harness/scenarios/provider-auth-failure-localization.ts`
 - Signed-cookie guest sessions without a full account system: `server/routes/device.ts`, `server/lib/guest-session-resolver.ts`
 - SQLite-backed full-stack app deployed as one Fastify service: `server/app.ts`, `server/db/*`, `drizzle/`
@@ -40,6 +42,7 @@ Local development calls the OpenAI API for real meal analysis. Tests and some ha
 4. Home updates today's calories, macros, and meal list.
 5. History shows read-only daily snapshots and trends.
 6. Users can edit or delete existing meals from the meal detail/edit screens.
+7. Chat corrections resolve the target meal and numeric evidence server-side; vague requests do not directly commit model-estimated values.
 
 ## Quick Start
 

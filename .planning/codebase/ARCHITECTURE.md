@@ -1,7 +1,7 @@
-<!-- refreshed: 2026-05-26 -->
+<!-- refreshed: 2026-05-30 -->
 # Architecture
 
-**Analysis Date:** 2026-05-26
+**Analysis Date:** 2026-05-30
 
 ## System Overview
 
@@ -45,9 +45,10 @@
 | HTTP routes | Own request validation, cookie-backed auth resolution, transport-specific response shaping, SSE framing, and route-level fallbacks. | `server/routes/*.ts` |
 | Guest-session resolver | Converts active/resume cookies into an authorized `deviceId` and clears invalid cookies. Protected routes should use this helper instead of raw `deviceId` inputs. | `server/lib/guest-session-resolver.ts` |
 | Domain services | Own reusable persistence and domain operations over Drizzle/better-sqlite3. | `server/services/*.ts` |
-| Meal transaction core | Owns revisioned meal writes, optimistic revision preconditions, soft deletes, and asset references. | `server/services/meal-transactions.ts` |
+| Meal transaction core | Owns revisioned meal writes, optimistic revision preconditions, soft deletes, nullable explicit meal-period authority, and asset references. | `server/services/meal-transactions.ts`, `server/lib/meal-period.ts` |
 | Orchestrator | Owns model prompt construction, history loading, tool-call loop, controlled fallbacks, streaming handoff, and mutation receipt rules. | `server/orchestrator/index.ts` |
-| Tool contracts | Own LLM-facing tool schemas, Zod validation, source-text guard execution, redacted logging summaries, and controlled tool failure mapping. | `server/orchestrator/tool-contract.ts`, `server/orchestrator/tools.ts` |
+| Tool contracts | Own LLM-facing tool schemas, Zod validation, source-text guard execution, structured clarification facts, redacted logging summaries, and controlled tool failure mapping. | `server/orchestrator/tool-contract.ts`, `server/orchestrator/tools.ts` |
+| Correction authority | Owns backend evidence checks for meal numeric edits, meal numeric proposals, target ranking, rendered clarification options, and stale selection recovery. | `server/orchestrator/meal-numeric-authority.ts`, `server/services/meal-numeric-proposals.ts`, `server/services/meal-correction.ts`, `server/orchestrator/mutation-receipts.ts` |
 | LLM providers | Define runtime and test model-provider adapters. Runtime uses OpenAI; tests and harnesses inject deterministic providers. | `server/llm/openai.ts`, `server/llm/mock.ts`, `server/llm/types.ts` |
 | Realtime publisher | Owns in-memory per-device SSE subscribers and emits `daily_summary` / `goals_update` events. | `server/realtime/publisher.ts` |
 | Database schema | Defines SQLite tables for devices, chat messages, assets, revisioned meals, asset references, and turn states. | `server/db/schema.ts` |
@@ -65,6 +66,8 @@
 - `server/app.ts` is the only backend composition root: instantiate DB, services, `RealtimePublisher`, and `createOrchestrator()` there.
 - `server/routes/*.ts` own HTTP/SSE transport behavior and call injected services; keep persistence logic in `server/services/*.ts`.
 - `server/orchestrator/index.ts` controls the LLM loop and uses `server/orchestrator/tools.ts` / `server/orchestrator/tool-contract.ts` for all model tool side effects.
+- v2.4 clarification-only tool results terminate through renderer-owned controlled replies; `ToolExecutionResult.clarification` carries allowlisted facts and avoids serialized JSON reparsing in `server/orchestrator/index.ts`.
+- v2.4 meal correction authority is backend-owned: explicit numeric evidence is checked in `server/orchestrator/meal-numeric-authority.ts`, backend proposal state lives in `server/services/meal-numeric-proposals.ts`, and correction target selection/rendered options live in `server/services/meal-correction.ts`.
 - `client/src/store.ts` is the single client state boundary; components select actions/state from it and use `client/src/api.ts` / `client/src/sse.ts` for transport.
 - Local TypeScript imports use explicit `.js` specifiers throughout `server/`, `client/src/`, and `tests/`.
 
@@ -101,7 +104,7 @@
 **Orchestrator Layer:**
 - Purpose: Translate user turns into model messages, execute LLM tools, record tool summaries, detect unsafe model behavior, and return JSON or streamable replies.
 - Location: `server/orchestrator/`
-- Contains: `createOrchestrator()`, system prompt rendering, history loading, tool registry/contracts, mutation receipts, hooks, LLM trace support, source-text guards.
+- Contains: `createOrchestrator()`, system prompt rendering, history loading, tool registry/contracts, mutation receipts, structured clarification facts, hooks, LLM trace support, source-text and numeric authority guards.
 - Depends on: Injected `LLMProvider`, chat/summary/food/device/goal services, `RealtimePublisher`, `server/lib/time.ts`.
 - Used by: `server/routes/chat.ts`, integration tests, harness scenarios.
 
@@ -129,6 +132,14 @@
 4. `createOrchestrator().handleMessage()` loads device and compressed history, saves the user message, builds the system prompt and tool definitions, and runs up to `MAX_ROUNDS = 3` model/tool rounds (`server/orchestrator/index.ts:606`, `server/orchestrator/index.ts:621`, `server/orchestrator/index.ts:630`, `server/orchestrator/index.ts:717`).
 5. Tool calls run through contract validation and service execution before tool summaries are saved to chat history (`server/orchestrator/tool-contract.ts:111`, `server/orchestrator/index.ts:932`, `server/orchestrator/index.ts:973`).
 6. Client parses SSE frames, commits the provisional assistant bubble, updates daily summary/targets, and refreshes meals when needed (`client/src/api.ts:661`, `client/src/api.ts:703`, `client/src/store.ts:321`, `client/src/components/ChatPanel.tsx:96`).
+
+### v2.4 Meal Correction Authority Path
+
+1. `find_meals` resolves correction targets through evidence tiers in `server/services/meal-correction.ts`: explicit date, pending/current-turn evidence, food labels, persisted meal period, inferred fallback, and recency tie-breaks.
+2. Ambiguous targets return backend-rendered numbered options and store exact rendered option facts for follow-up validation.
+3. Numeric `update_meal` calls require explicit current-turn numeric evidence from `server/orchestrator/meal-numeric-authority.ts`; vague numeric requests create renderer-owned clarification/proposal copy instead of mutation facts.
+4. Approved backend meal numeric proposals are revision-scoped and single-use through `server/services/meal-numeric-proposals.ts`.
+5. Stale selections and stale proposal approvals fail closed through existing revision preconditions and clarification copy without `daily_summary` publication.
 
 ### JSON Chat Fallback Path
 

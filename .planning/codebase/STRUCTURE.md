@@ -1,6 +1,11 @@
+---
+last_mapped_commit: 93f249b78d8215f401f8764c8802a6da47e5e3cd
+last_mapped_at: 2026-05-30
+---
+
 # Codebase Structure
 
-**Analysis Date:** 2026-05-26
+**Analysis Date:** 2026-05-30
 
 ## Directory Layout
 
@@ -73,13 +78,13 @@ Nutrition-Coach/
 
 **`server/services/`:**
 - Purpose: Reusable domain and persistence logic.
-- Contains: Device, chat, food logging, meal transactions/history/display/correction, summaries, history query, asset, guest session, target generation, turn state, goal proposal services.
-- Key files: `server/services/device.ts`, `server/services/chat.ts`, `server/services/food-logging.ts`, `server/services/meal-transactions.ts`, `server/services/history-query.ts`, `server/services/assets.ts`, `server/services/guest-session.ts`
+- Contains: Device, chat, food logging, meal transactions/history/display/correction, meal numeric proposals, summaries, history query, asset, guest session, target generation, turn state, goal proposal services.
+- Key files: `server/services/device.ts`, `server/services/chat.ts`, `server/services/food-logging.ts`, `server/services/meal-transactions.ts`, `server/services/meal-correction.ts`, `server/services/meal-numeric-proposals.ts`, `server/services/history-query.ts`, `server/services/assets.ts`, `server/services/guest-session.ts`
 
 **`server/orchestrator/`:**
 - Purpose: Model workflow, tool definitions, prompt construction, mutation receipts, fallback behavior, trace hooks, and guard logic.
-- Contains: Orchestrator loop, tool contracts, tool registry/execution, system prompt, history loader, source-text guard, protein trust, LLM trace, mutation effects/receipts.
-- Key files: `server/orchestrator/index.ts`, `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `server/orchestrator/system-prompt.ts`, `server/orchestrator/history.ts`, `server/orchestrator/hooks.ts`
+- Contains: Orchestrator loop, tool contracts, tool registry/execution, system prompt, history loader, source-text guard, numeric authority guard, protein trust, LLM trace, mutation effects/receipts, and structured clarification fact adapters.
+- Key files: `server/orchestrator/index.ts`, `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `server/orchestrator/meal-numeric-authority.ts`, `server/orchestrator/mutation-receipts.ts`, `server/orchestrator/system-prompt.ts`, `server/orchestrator/history.ts`, `server/orchestrator/hooks.ts`
 
 **`server/db/`:**
 - Purpose: SQLite/Drizzle persistence setup.
@@ -88,8 +93,8 @@ Nutrition-Coach/
 
 **`server/lib/`:**
 - Purpose: Backend shared helpers with cross-route contracts.
-- Contains: Timezone/date utilities, historical date parsing, guest-session resolution.
-- Key files: `server/lib/time.ts`, `server/lib/historical-date.ts`, `server/lib/guest-session-resolver.ts`
+- Contains: Timezone/date utilities, historical date parsing, explicit meal-period normalization/extraction, guest-session resolution.
+- Key files: `server/lib/time.ts`, `server/lib/historical-date.ts`, `server/lib/meal-period.ts`, `server/lib/guest-session-resolver.ts`
 
 **`server/llm/`:**
 - Purpose: Runtime and test LLM provider abstractions.

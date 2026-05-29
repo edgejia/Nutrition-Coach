@@ -1,9 +1,9 @@
 ---
 phase: 65
 slug: tool-contract-alignment-and-meal-period-authority
-status: draft
+status: complete
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-05-27
 ---
 
@@ -38,12 +38,12 @@ created: 2026-05-27
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 65-TBD-TOOL-01 | TBD | TBD | TOOL-01 | T65-01 | JSON schema no longer requires `protein_sources`; Zod still accepts omission. | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/tool-contract.test.ts tests/unit/system-prompt.test.ts` | yes | pending |
-| 65-TBD-TOOL-02 | TBD | TBD | TOOL-02 | T65-02 | Trusted-protein counted/excluded/weak-source behavior remains backend-owned. | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/protein-trust.test.ts` | yes | pending |
-| 65-TBD-TOOL-03 | TBD | TBD | TOOL-03 | T65-03 | Text/image logging receipts still expose committed facts and `summaryOutcome` without raw model mutation authority. | integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/chat-api.test.ts tests/integration/chat-streaming.test.ts tests/integration/orchestrator.test.ts` | yes | pending |
-| 65-TBD-INTENT-01 | TBD | TBD | INTENT-01 | T65-04 | Source-text-backed meal-period words persist as explicit authority while `loggedAt` date/time semantics remain intact. | unit/integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/meal-transactions.test.ts tests/integration/chat-api.test.ts` | yes | pending |
-| 65-TBD-INTENT-02 | TBD | TBD | INTENT-02 | T65-05 | Meal row, history, receipt, update, and edit payload DTOs project explicit `mealPeriod` and omit it for legacy rows. | unit/integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/api-client.test.ts tests/unit/home-dashboard-contract.test.ts tests/unit/history-screen-contract.test.ts tests/unit/history-day-detail-screen.test.ts tests/unit/summary-detail-screen.test.ts tests/unit/meal-edit-payload.test.ts tests/integration/meals-api.test.ts tests/integration/day-snapshot-api.test.ts tests/integration/history-api.test.ts` | yes | pending |
-| 65-TBD-INTENT-03 | TBD | TBD | INTENT-03 | T65-06 | Correction candidates expose effective `mealPeriod` plus `mealPeriodSource` without changing Phase 67 ranking policy. | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/meal-correction.test.ts` | yes | pending |
+| 65-TBD-TOOL-01 | TBD | TBD | TOOL-01 | T65-01 | JSON schema no longer requires `protein_sources`; Zod still accepts omission. | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/tool-contract.test.ts tests/unit/system-prompt.test.ts` | yes | green |
+| 65-TBD-TOOL-02 | TBD | TBD | TOOL-02 | T65-02 | Trusted-protein counted/excluded/weak-source behavior remains backend-owned. | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/protein-trust.test.ts` | yes | green |
+| 65-TBD-TOOL-03 | TBD | TBD | TOOL-03 | T65-03 | Text/image logging receipts still expose committed facts and `summaryOutcome` without raw model mutation authority. | integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/chat-api.test.ts tests/integration/chat-streaming.test.ts tests/integration/orchestrator.test.ts` | yes | green |
+| 65-TBD-INTENT-01 | TBD | TBD | INTENT-01 | T65-04 | Source-text-backed meal-period words persist as explicit authority while `loggedAt` date/time semantics remain intact. | unit/integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/meal-transactions.test.ts tests/integration/chat-api.test.ts` | yes | green |
+| 65-TBD-INTENT-02 | TBD | TBD | INTENT-02 | T65-05 | Meal row, history, receipt, update, and edit payload DTOs project explicit `mealPeriod` and omit it for legacy rows. | unit/integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/api-client.test.ts tests/unit/home-dashboard-contract.test.ts tests/unit/history-screen-contract.test.ts tests/unit/history-day-detail-screen.test.ts tests/unit/summary-detail-screen.test.ts tests/unit/meal-edit-payload.test.ts tests/integration/meals-api.test.ts tests/integration/day-snapshot-api.test.ts tests/integration/history-api.test.ts` | yes | green |
+| 65-TBD-INTENT-03 | TBD | TBD | INTENT-03 | T65-06 | Correction candidates expose effective `mealPeriod` plus `mealPeriodSource` without changing Phase 67 ranking policy. | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/meal-correction.test.ts` | yes | green |
 
 ---
 
@@ -72,4 +72,4 @@ created: 2026-05-27
 - [x] No watch-mode flags are used.
 - [x] `nyquist_compliant: true` set in frontmatter.
 
-**Approval:** pending execution proof
+**Approval:** complete

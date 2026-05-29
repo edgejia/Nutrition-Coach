@@ -10,12 +10,12 @@ Nutrition Coach is a chat-first nutrition logging app for personal beta use. Use
 
 ## Current State
 
-**Shipped version:** v2.3 Authoritative Mutation Outcomes and Fresh Meal State on 2026-05-20.
-**Active milestone:** v2.4 Correction Authority and Meal Intent Fidelity. Phase 65 is complete locally; Phase 66 is ready to plan. Staging/main promotion still requires a separate ship workflow and explicit approval.
+**Shipped version:** v2.4 Correction Authority and Meal Intent Fidelity on 2026-05-30.
+**Active milestone:** none. The project is awaiting next milestone selection. Staging/main promotion still requires a separate ship workflow and explicit approval.
 
 v2.3 closed the P1 data-integrity risks that remained after the metadata-only failure-localization foundation. Backend-committed mutation facts are now authoritative across goal updates, meal log/update/delete receipts, stale chat receipt edits, and `daily_summary` SSE freshness.
 
-v2.4 focuses on the remaining P2 correction-authority and intent-fidelity issues from the Notion BUG / FEATURE board: AI-estimated numeric meal corrections must not commit without explicit evidence or backend-owned approval, explicit meal period intent must not be overwritten by clock heuristics, and ambiguous correction flows must use stable backend-rendered candidate clarification.
+v2.4 closed the remaining P2 correction-authority and intent-fidelity issues from the Notion BUG / FEATURE board: AI-estimated numeric meal corrections cannot commit without explicit evidence or backend-owned approval, explicit meal period intent is not overwritten by clock heuristics, and ambiguous correction flows use stable backend-rendered candidate clarification.
 
 **Recent shipped capabilities:**
 - Server-generated `turnId` correlation across SSE, JSON, route logs, orchestrator logs, trace facts, and frontend fallback reference display.
@@ -29,6 +29,8 @@ v2.4 focuses on the remaining P2 correction-authority and intent-fidelity issues
 - Server-side stale receipt protection with expected meal revision checks and deterministic recovery guidance.
 - Strict `daily_summary` SSE envelopes that refresh same-day rows before committing fresher totals and invalidate matching historical surfaces.
 - `log_food` JSON schema and runtime contracts now agree on optional `protein_sources`, and explicit meal-period intent persists as structured authority across logging, DTOs, receipts, client state, UI labels, and correction candidates.
+- Backend-owned meal numeric correction authority, with explicit current-turn evidence checks, revision-scoped meal proposal approval, and no-mutation handling for vague correction requests.
+- Backend-rendered correction target clarification and structured historical tool clarification facts carried through `ToolExecutionResult.clarification`.
 
 ## Last Completed Milestone: v2.3 Authoritative Mutation Outcomes and Fresh Meal State
 
@@ -43,11 +45,13 @@ v2.4 focuses on the remaining P2 correction-authority and intent-fidelity issues
 - Stale chat receipt protection so older receipts cannot overwrite newer meal facts.
 - SSE daily summary freshness so cross-tab/device summary events cannot leave Home/Summary totals newer than visible meal rows.
 
-## Current Milestone: v2.4 Correction Authority and Meal Intent Fidelity
+## Last Completed Milestone: v2.4 Correction Authority and Meal Intent Fidelity
 
 **Goal:** Close the remaining correction-authority and meal-intent fidelity gaps before returning to broader product polish.
 
-**Target features:**
+**Status:** Archived locally. All v2.4 phases are executed, the milestone audit passed, local release proof is green, and no staging/main promotion has been performed.
+
+**Delivered features:**
 - Align `log_food` JSON schema and runtime executor contracts around `protein_sources`.
 - Persist explicit user meal-period intent as structured authority so `午餐` remains lunch even when logged in the morning.
 - Prevent vague chat corrections from committing AI-estimated meal calories or macros without explicit numeric evidence or backend-owned approval.
@@ -77,13 +81,14 @@ v2.4 focuses on the remaining P2 correction-authority and intent-fidelity issues
 - ✓ v2.3 integrity behavior has targeted local proof, metadata-only evidence, local release gates, and no staging/main promotion — v2.3 Phase 64.
 - ✓ `log_food` schema and executor contracts agree on optional `protein_sources` without regressing trusted-protein behavior — v2.4 Phase 65.
 - ✓ Explicit meal-period intent is persisted, projected, preserved through client/edit flows, preferred by touched UI labels, and exposed to correction candidate authority — v2.4 Phase 65.
+- ✓ Chat corrections require explicit user numeric evidence or backend-owned approval before mutating meal calories or macros — v2.4 Phase 66.
+- ✓ Correction clarification is rendered from backend-owned structured candidates with stable numbered options — v2.4 Phase 67.
+- ✓ Correction and historical clarification results flow through structured tool fields instead of serialized JSON parsing — v2.4 Phase 68.
+- ✓ v2.4 has targeted local tests, metadata-only evidence, `yarn tsc --noEmit`, and `yarn release:check` proof with no staging/main promotion — v2.4 Phase 68.
 
 ### Active
 
-- [ ] Require explicit user numeric evidence or backend-owned approval before chat corrections can mutate meal calories or macros.
-- [ ] Render correction clarification from backend-owned structured candidates with stable numbered options.
-- [ ] Carry correction and historical clarification results through structured tool fields instead of serialized JSON parsing.
-- [ ] Prove v2.4 locally with targeted tests, metadata-only evidence, `yarn tsc --noEmit`, and `yarn release:check`.
+- [ ] Select the next milestone from Future Milestone Candidates in `.planning/ROADMAP.md`.
 
 ### Out of Scope
 
@@ -100,12 +105,12 @@ v2.4 focuses on the remaining P2 correction-authority and intent-fidelity issues
 
 ## Context
 
-Current codebase state after v2.3:
+Current codebase state after v2.4:
 - The backend remains Fastify + SQLite + TypeScript with route-owned HTTP/SSE boundaries and OpenAI access isolated behind the LLM provider boundary.
 - The frontend remains the Sport UI React/Vite client with Zustand as the state boundary.
-- Active planning history for v2.3 is archived under `.planning/milestones/v2.3-*.md` and `.planning/milestones/v2.3-phases/`.
-- v2.3 local closeout ran `yarn release:check` successfully and did not perform staging or main promotion.
-- v2.4 planning is based on `feature/v2-4-dev`, which matches `origin/staging` as of 2026-05-26. `origin/staging` is ahead of `origin/main`, so active work should continue from staging/feature head unless explicitly redirected.
+- Active planning history for v2.3 and v2.4 is archived under `.planning/milestones/v2.3-*`, `.planning/milestones/v2.3-phases/`, `.planning/milestones/v2.4-*`, and `.planning/milestones/v2.4-phases/`.
+- v2.4 local closeout ran `yarn release:check` successfully and did not perform staging or main promotion.
+- The branch remains `feature/v2-4-dev`, which tracks `origin/staging`. `origin/staging` is ahead of `origin/main`, so the next milestone should start from staging/feature head unless explicitly redirected.
 
 Known non-blocking debt accepted at v2.2 close:
 - Phase 58 proof-hardening warning: auth-detail denylist omits `401`, `Unauthorized`, and `invalid_request_error` in user-visible fallback assertions.
@@ -119,9 +124,10 @@ v2.3 integrity context:
 - Resolved v2.3 advisory debt in v2.4 Phase 65: `log_food` JSON tool schema and Zod/executor contract now agree that `protein_sources` is optional evidence.
 
 v2.4 integrity context:
-- The Notion BUG / FEATURE board still has P2 repros where vague numeric corrections can become committed meal facts, explicit meal period intent can be overwritten by `loggedAt` hour heuristics, and correction candidate clarification can be weak or misleading.
-- Success for this milestone means the backend owns correction authority: unresolved targets and unsupported numeric estimates ask for clarification or proposal approval instead of creating revisions.
+- The Notion BUG / FEATURE board P2 repros for vague numeric corrections, meal-period clock override, weak target clarification, and serialized clarification parsing are closed locally.
+- The backend owns correction authority: unresolved targets and unsupported numeric estimates ask for clarification or proposal approval instead of creating revisions.
 - `server/orchestrator/tools.ts`, `server/services/meal-correction.ts`, `server/orchestrator/index.ts`, and the chat integration suite are the primary implementation and proof surfaces.
+- Accepted advisory debt: one Phase 67 same-date invalid-selection path can drop valid-number wording while still rendering stable options; one orchestrator test helper has an uncertainty-copy false-pass risk; `server/orchestrator/tools.ts` and `server/services/meal-correction.ts` are large and should be split in a future targeted refactor.
 
 ## Constraints
 
@@ -149,9 +155,9 @@ v2.4 integrity context:
 | Route daily summary SSE through affected-date row freshness coordination | Same-day summary updates refresh rows before committing totals; historical affected dates invalidate the matching surface only. | Validated in Phase 63 |
 | Keep v2.3 release proof local until ship workflow approval | Phase 64 proves integrity behavior and local gates without push, deploy, staging promotion, or main promotion. | Validated in Phase 64 |
 | Defer raw debugger/user-flagged capture | Those features require trigger, access-control, retention, privacy notice, content scope, and storage decisions first. | Still deferred |
-| Treat vague numeric meal corrections as non-authoritative | Model-estimated macro patches can silently rewrite persisted meal facts without user evidence; v2.4 requires explicit numeric evidence or backend-owned approval before commit. | Pending v2.4 |
+| Treat vague numeric meal corrections as non-authoritative | Model-estimated macro patches can silently rewrite persisted meal facts without user evidence; v2.4 requires explicit numeric evidence or backend-owned approval before commit. | Validated in Phase 66 |
 | Treat explicit meal-period text as higher authority than clock heuristics | A user saying `午餐` is stronger evidence than the hour they logged it; persisted structured facts should preserve that intent across display and correction. | Validated in Phase 65 |
-| Move clarification plumbing toward structured tool results | Re-parsing serialized tool messages makes correction/historical clarification brittle; typed fields should carry backend-owned clarification facts. | Pending v2.4 |
+| Move clarification plumbing toward structured tool results | Re-parsing serialized tool messages makes correction/historical clarification brittle; typed fields should carry backend-owned clarification facts. | Validated in Phase 68 |
 
 ## Archived Previous State
 
@@ -198,4 +204,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-27 after Phase 65 completion*
+*Last updated: 2026-05-30 after v2.4 milestone closeout*

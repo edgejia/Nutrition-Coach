@@ -1,9 +1,9 @@
 ---
 phase: 66
 slug: numeric-correction-provenance-guard
-status: draft
+status: complete
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-05-28
 ---
 
@@ -38,11 +38,11 @@ created: 2026-05-28
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 66-W0-01 | TBD | 0 | CORR-01 | T-66-01 | Explicit current-turn numeric evidence authorizes only the matching numeric meal fields, including `items[]`. | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/source-text-guard.test.ts` | yes | pending |
-| 66-W0-02 | TBD | 0 | CORR-01 | T-66-02 | Backend-owned proposal state is single-use, same-kind replaceable, revision-scoped, and never LLM-originated. | unit | `yarn test:unit` | partial | pending |
-| 66-W0-03 | TBD | 0 | CORR-02 | T-66-03 | Vague non-computable correction requests return renderer-owned clarification and no meal mutation. | integration | `yarn test:integration` | yes | pending |
-| 66-W0-04 | TBD | 0 | CORR-03 | T-66-04 | Blocked or stale correction attempts create no revision, publish no `daily_summary`, and produce no success-style final copy. | integration | `yarn test:integration` | yes | pending |
-| 66-W0-05 | TBD | 0 | CORR-01, CORR-03 | T-66-05 | Bare approval fails closed when goal and meal proposals coexist; broad cancel clears active proposal kinds without mutation. | unit + integration | `yarn test:unit && yarn test:integration` | partial | pending |
+| 66-W0-01 | TBD | 0 | CORR-01 | T-66-01 | Explicit current-turn numeric evidence authorizes only the matching numeric meal fields, including `items[]`. | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/source-text-guard.test.ts` | yes | green |
+| 66-W0-02 | TBD | 0 | CORR-01 | T-66-02 | Backend-owned proposal state is single-use, same-kind replaceable, revision-scoped, and never LLM-originated. | unit | `yarn test:unit` | yes | green |
+| 66-W0-03 | TBD | 0 | CORR-02 | T-66-03 | Vague non-computable correction requests return renderer-owned clarification and no meal mutation. | integration | `yarn test:integration` | yes | green |
+| 66-W0-04 | TBD | 0 | CORR-03 | T-66-04 | Blocked or stale correction attempts create no revision, publish no `daily_summary`, and produce no success-style final copy. | integration | `yarn test:integration` | yes | green |
+| 66-W0-05 | TBD | 0 | CORR-01, CORR-03 | T-66-05 | Bare approval fails closed when goal and meal proposals coexist; broad cancel clears active proposal kinds without mutation. | unit + integration | `yarn test:unit && yarn test:integration` | yes | green |
 
 *Status: pending / green / red / flaky*
 
@@ -73,4 +73,4 @@ created: 2026-05-28
 - [x] No watch-mode flags.
 - [x] `nyquist_compliant: true` set in frontmatter.
 
-**Approval:** pending execution
+**Approval:** complete

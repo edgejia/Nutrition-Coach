@@ -1,9 +1,9 @@
 ---
 phase: 68
 slug: structured-tool-results-and-release-proof-gate
-status: draft
+status: complete
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-05-29
 ---
 
@@ -32,12 +32,12 @@ Per-phase validation contract for structured tool-result plumbing and v2.4 local
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 68-W0-tools | TBD | 0 | TARGET-03 | T-68-01 | Tool calls expose typed clarification facts without leaking raw contract payloads to `index.ts` | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts` | yes | pending |
-| 68-W0-orchestrator | TBD | 0 | TARGET-03 | T-68-02 | Terminal clarification replies are renderer-owned and do not consume a second LLM response | unit/source scan | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/orchestrator.test.ts` | yes | pending |
-| 68-route-json-sse | TBD | TBD | PROOF-01 | T-68-03 | JSON/SSE terminal clarification has no mutation, no summary, no publish, and persists assistant reply | integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/chat-api.test.ts tests/integration/chat-streaming.test.ts` | yes | pending |
-| 68-correction-carry-forward | TBD | TBD | PROOF-01 | T-68-04 | Existing v2.4 correction authority, target ranking, and clarification behavior remain covered after the refactor | unit/integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/meal-correction.test.ts tests/integration/chat-meal-correction.integration.test.ts` | yes | pending |
-| 68-metadata-proof | TBD | TBD | PROOF-02 | T-68-05 | Verification evidence and trace surfaces remain metadata-only and raw-payload-free | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/verification-artifacts.test.ts` | yes | pending |
-| 68-release-closure | TBD | final | PROOF-03 | T-68-06 | Local closure passes without push, merge, deploy, Railway smoke, staging promotion, or main promotion | command gate | `yarn tsc --noEmit && yarn release:check` | yes | pending |
+| 68-W0-tools | TBD | 0 | TARGET-03 | T-68-01 | Tool calls expose typed clarification facts without leaking raw contract payloads to `index.ts` | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts` | yes | green |
+| 68-W0-orchestrator | TBD | 0 | TARGET-03 | T-68-02 | Terminal clarification replies are renderer-owned and do not consume a second LLM response | unit/source scan | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/orchestrator.test.ts` | yes | green |
+| 68-route-json-sse | TBD | TBD | PROOF-01 | T-68-03 | JSON/SSE terminal clarification has no mutation, no summary, no publish, and persists assistant reply | integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/chat-api.test.ts tests/integration/chat-streaming.test.ts` | yes | green |
+| 68-correction-carry-forward | TBD | TBD | PROOF-01 | T-68-04 | Existing v2.4 correction authority, target ranking, and clarification behavior remain covered after the refactor | unit/integration | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/meal-correction.test.ts tests/integration/chat-meal-correction.integration.test.ts` | yes | green |
+| 68-metadata-proof | TBD | TBD | PROOF-02 | T-68-05 | Verification evidence and trace surfaces remain metadata-only and raw-payload-free | unit | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/verification-artifacts.test.ts` | yes | green |
+| 68-release-closure | TBD | final | PROOF-03 | T-68-06 | Local closure passes without push, merge, deploy, Railway smoke, staging promotion, or main promotion | command gate | `yarn tsc --noEmit && yarn release:check` | yes | green |
 
 ## Wave 0 Requirements
 
@@ -59,4 +59,4 @@ Per-phase validation contract for structured tool-result plumbing and v2.4 local
 - [x] No watch-mode flags.
 - [x] `nyquist_compliant: true` set in frontmatter.
 
-**Approval:** pending
+**Approval:** complete

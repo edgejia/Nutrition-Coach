@@ -34,6 +34,8 @@ Phase 68 replaces brittle serialized clarification-result parsing with typed, re
 - **D-16:** Existing `resolveHistoricalDateIntent` prompt text can remain mostly pass-through. `get_daily_summary` `multiple_targets` needs renderer-owned narrow-to-one-date copy because it currently has `dateKeys` but no prompt.
 - **D-17:** Terminal historical clarification has a hard no-side-effect invariant: no meal revision, `loggedMeal`, `summaryOutcome`, `daily_summary` publish, success receipt, success-style copy, or second LLM pass.
 - **D-18:** Terminal historical clarification should return as a clarification-only turn with `didLogMeal:false`, `didMutateMeal:false`, no `summaryOutcome`, and no logged meal payload.
+- **D-18a:** `get_daily_summary` `multiple_targets` narrow-to-one-date copy must not accidentally seed a single explicit historical date for the next turn. `extractPreviousHistoricalDateKey()` parses the previous assistant message for historical date carry-forward, so renderer-owned copy that lists multiple `dateKeys` must be shaped and tested so it cannot be misread as one resolved previous date.
+- **D-18b:** Controlled replies exit the orchestrator before assistant-message persistence. Plan-phase must preserve and prove JSON/SSE route persistence of terminal clarification replies through `finalizeAssistantReply()` so multi-turn follow-up behavior has the previous assistant clarification available where required.
 
 ### Proof Strategy
 - **D-19:** Default proof is targeted unit plus integration tests. Add deterministic harness coverage only if plan-phase identifies a specific false-pass risk that normal tests cannot close.
@@ -86,11 +88,13 @@ Phase 68 replaces brittle serialized clarification-result parsing with typed, re
 - `server/orchestrator/tool-contract.ts` - `runContract()` contract execution boundary, validation/failure mapping, and raw argument parsing at the tool-call boundary.
 - `server/orchestrator/mutation-receipts.ts` - Existing renderer-owned copy helpers for goals, meal numeric guidance, correction-target clarification, and mutation receipts.
 - `server/orchestrator/system-prompt.ts` - Prompt guidance that supports but must not enforce backend-owned clarification and correction authority.
+- `server/routes/chat.ts` - `finalizeAssistantReply()` and JSON/SSE assistant persistence paths that must persist terminal clarification replies for multi-turn follow-up behavior.
 
 ### Domain Services and Historical Date Facts
 - `server/services/meal-correction.ts` - Candidate loading, pending selection, renderer candidate facts, target clarification, stale recovery, and meal update/delete service behavior.
 - `server/lib/historical-date.ts` - Historical date intent resolution and prompt/reason facts for date clarification.
 - `server/realtime/publisher.ts` - `daily_summary` publish boundary that terminal clarification paths must not trigger.
+- `server/orchestrator/tools.ts` - `extractPreviousHistoricalDateKey()` carry-forward helper that parses the previous assistant message and can be affected by renderer-owned historical clarification copy.
 
 ### Proof Surfaces
 - `tests/unit/tools.test.ts` - Tool contract and `executeTool()` proof surface for structured clarification facts, schema alignment, historical log/summary outcomes, update/delete contracts, and numeric authority.
@@ -125,6 +129,8 @@ Phase 68 replaces brittle serialized clarification-result parsing with typed, re
 - Add typed clarification facts at the `executeTool()` to `ToolExecutionResult` boundary.
 - Update historical `log_food` and `get_daily_summary` adapter mapping so clarification facts become terminal renderer-owned controlled replies.
 - Keep `find_meals` renderer-owned terminal clarification behavior intact while replacing any serialized result dependency with typed facts.
+- Shape and test `get_daily_summary` `multiple_targets` copy so listing several `dateKeys` cannot seed `extractPreviousHistoricalDateKey()` as if one explicit historical date had been resolved for the next turn.
+- Preserve and prove route persistence of terminal clarification replies through `finalizeAssistantReply()` on both JSON and SSE paths, because controlled replies return from the orchestrator before assistant-message persistence and follow-up behavior depends on prior assistant clarification text.
 - Update route-visible JSON/SSE behavior only where terminal historical clarification changes output flow.
 - Record local release proof in `68-VERIFICATION.md` after targeted tests, `yarn tsc --noEmit`, and `yarn release:check`.
 
@@ -135,7 +141,9 @@ Phase 68 replaces brittle serialized clarification-result parsing with typed, re
 
 - A candidate projection should favor stable option number, date/time, safe display label, and explicit meal-period facts when allowed; full service candidates and nutrition totals should not become the renderer/proof contract.
 - `get_daily_summary` `multiple_targets` should render a narrow-to-one-date clarification from typed `dateKeys`, not attempt multi-date aggregation.
+- That `multiple_targets` copy should avoid wording that lets `extractPreviousHistoricalDateKey()` treat the previous assistant message as one explicit carried-forward date.
 - No-second-LLM proof can assert `finalReplySource === "renderer"` and that a queued follow-up LLM response was not consumed.
+- JSON/SSE proof should assert terminal clarification replies are persisted via `finalizeAssistantReply()` before follow-up turns that rely on previous assistant clarification text.
 - No-side-effect proof should assert no `loggedMeal`, no `summaryOutcome`, no `daily_summary` publish, no success receipt, `didLogMeal:false`, and `didMutateMeal:false`.
 - If no harness is needed, `68-VERIFICATION.md` should explicitly state that no harness artifact was generated because unit/integration tests closed the false-pass risk.
 
