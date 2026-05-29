@@ -212,6 +212,7 @@ describe("orchestrator shared patterns", () => {
     assert.doesNotMatch(source, /JSON\.parse\s*\(/);
     assert.doesNotMatch(source, /\bcontractResult\b/);
     assert.doesNotMatch(source, /\bbuildHistoricalToolMessage\b/);
+    assert.doesNotMatch(source, /\brenderHistorical(?:LogFood|Summary)/);
     assert.doesNotMatch(source, /\bneeds_clarification\b/);
     assert.doesNotMatch(source, /\bmultiple_targets\b/);
   });
