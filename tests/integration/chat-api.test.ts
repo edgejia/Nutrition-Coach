@@ -102,6 +102,24 @@ function assertMealMutationSummaryEnvelope(payload: unknown, affectedDate: strin
   assert.equal(Object.prototype.hasOwnProperty.call(envelope, "mealRevisionId"), false);
 }
 
+const TERMINAL_CLARIFICATION_SUCCESS_COPY = /已記錄|完成記錄|已更新|已刪除|成功/;
+
+function assertNoTerminalClarificationSideEffects(body: {
+  reply?: string;
+  didLogMeal?: boolean;
+  didMutateMeal?: boolean;
+  loggedMeal?: unknown;
+  dailySummary?: unknown;
+  summaryOutcome?: unknown;
+}) {
+  assert.equal(body.didLogMeal, false);
+  assert.equal(body.didMutateMeal, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(body, "loggedMeal"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+  assert.doesNotMatch(body.reply ?? "", TERMINAL_CLARIFICATION_SUCCESS_COPY);
+}
+
 function latestEventPayload(raw: string, eventName: string) {
   const frames = parseSSEEvents(raw).filter((frame) => frame.event === eventName);
   assert.ok(frames.length > 0, `expected ${eventName} frame in ${raw}`);
@@ -1765,6 +1783,180 @@ describe("Chat API", () => {
     assert.equal(body.affectedDate, "2026-03-25");
     assert.equal(body.dailySummary?.date, "2026-03-25");
     assert.equal(body.dailySummary?.totalProtein, 32);
+  });
+
+  it("POST /api/chat JSON persists terminal historical log_food clarification without side effects or publish", async () => {
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_historical_log_multiple_dates_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25 和 2026-03-26",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已記錄牛肉麵。" });
+
+    try {
+      const form = new FormData();
+      form.append("message", "幫我補記 2026-03-25 和 2026-03-26 吃牛肉麵");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        reply: string;
+        didLogMeal: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: unknown;
+        dailySummary?: unknown;
+        summaryOutcome?: unknown;
+      };
+      assertNoTerminalClarificationSideEffects(body);
+      assert.equal(body.reply, "這次沒有記錄餐點。我還不能確定你要記錄哪一天，請一次告訴我一個日期。");
+      assert.equal(mockLLM.chatCalls.length, 1, "terminal clarification must not consume a second model reply");
+      assert.deepEqual(publishedPayloads, []);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyBody = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const latestAssistant = historyBody.messages.filter((message) => message.role === "assistant").at(-1);
+      assert.equal(latestAssistant?.content, body.reply);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
+  it("POST /api/chat JSON persists get_daily_summary needs_clarification without summary or publish", async () => {
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_needs_clarification_json",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({ date_text: "前幾天" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已查詢完成。" });
+
+    try {
+      const form = new FormData();
+      form.append("message", "前幾天吃了多少？");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        reply: string;
+        didLogMeal: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: unknown;
+        dailySummary?: unknown;
+        summaryOutcome?: unknown;
+      };
+      assertNoTerminalClarificationSideEffects(body);
+      assert.equal(body.reply, "我還不能確定是哪一天，請再說一次日期。");
+      assert.equal(mockLLM.chatCalls.length, 1, "terminal clarification must not consume a second model reply");
+      assert.deepEqual(publishedPayloads, []);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyBody = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const latestAssistant = historyBody.messages.filter((message) => message.role === "assistant").at(-1);
+      assert.equal(latestAssistant?.content, body.reply);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
+  it("POST /api/chat JSON persists get_daily_summary multiple_targets without summary or publish", async () => {
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_multiple_targets_json",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({ date_text: "2026-03-25 和 2026-03-26" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已查詢完成。" });
+
+    try {
+      const form = new FormData();
+      form.append("message", "2026-03-25 和 2026-03-26 各吃了多少？");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        reply: string;
+        didLogMeal: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: unknown;
+        dailySummary?: unknown;
+        summaryOutcome?: unknown;
+      };
+      assertNoTerminalClarificationSideEffects(body);
+      assert.match(body.reply, /我目前一次只能看一個日期/);
+      assert.match(body.reply, /1\. 2026-03-25/);
+      assert.match(body.reply, /2\. 2026-03-26/);
+      assert.equal(mockLLM.chatCalls.length, 1, "terminal clarification must not consume a second model reply");
+      assert.deepEqual(publishedPayloads, []);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyBody = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const latestAssistant = historyBody.messages.filter((message) => message.role === "assistant").at(-1);
+      assert.equal(latestAssistant?.content, body.reply);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
   });
 
   it("POST /api/chat does not include dailySummary when no food is logged", async () => {
