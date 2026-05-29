@@ -30,6 +30,15 @@ function codePointLength(value: string) {
   return [...value].length;
 }
 
+function orchestratorIndexSourceWithoutComments() {
+  const source = readFileSync(new URL("../../server/orchestrator/index.ts", import.meta.url), "utf8");
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+}
+
 function assertSuccessfulLogReplyShape(
   reply: string,
   opts: {
@@ -194,6 +203,17 @@ describe("orchestrator shared patterns", () => {
     assert.doesNotMatch(source, /formatCorrectionCandidate/);
     assert.doesNotMatch(source, /parseCorrectionToolResult/);
     assert.doesNotMatch(source, /correctionClarificationReply/);
+  });
+
+  it("Phase 68 D-01/D-07/D-08/D-23 keeps serialized clarification parsing out of orchestrator source", () => {
+    const source = orchestratorIndexSourceWithoutComments();
+
+    assert.match(source, /controlledReply/);
+    assert.doesNotMatch(source, /JSON\.parse\s*\(/);
+    assert.doesNotMatch(source, /\bcontractResult\b/);
+    assert.doesNotMatch(source, /\bbuildHistoricalToolMessage\b/);
+    assert.doesNotMatch(source, /\bneeds_clarification\b/);
+    assert.doesNotMatch(source, /\bmultiple_targets\b/);
   });
 
   it("guards no-mutation meal-specific summary claims against actual facts", () => {
@@ -506,6 +526,100 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.didLogMeal, false);
     assert.equal(result.affectedDate, "2026-03-25");
     assert.equal(result.dailySummary?.date, "2026-03-25");
+  });
+
+  it("Phase 68 D-08/D-11/D-17/D-18 returns historical log_food ambiguity from renderer without a second LLM pass", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_historical_log_ambiguous",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "蛋餅",
+            calories: 320,
+            protein: 7,
+            carbs: 48,
+            fat: 10,
+            date_text: "昨天和前天",
+            protein_sources: [
+              { name: "蛋餅", protein: 7, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你補記昨天的蛋餅。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "幫我補昨天和前天吃蛋餅");
+
+    assert.ok("reply" in result);
+    assert.equal(mockLLM.chatCalls.length, 1, "terminal historical clarification must not consume a second LLM response");
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.dailySummary, undefined);
+    assert.match(result.reply, /一次告訴我一個日期/);
+    assert.doesNotMatch(result.reply, /已幫你|已記錄|補記|summaryOutcome|dailySummary|loggedMeal/);
+  });
+
+  it("Phase 68 D-12-D-18 returns get_daily_summary needs_clarification from renderer without mutation facts", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_needs_clarification",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({ date_text: "前幾天" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "前幾天你已記錄 2 餐，共 900 kcal。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "前幾天吃多少蛋白質？");
+
+    assert.ok("reply" in result);
+    assert.equal(mockLLM.chatCalls.length, 1, "terminal summary clarification must not consume a second LLM response");
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.dailySummary, undefined);
+    assert.match(result.reply, /我還不能確定是哪一天/);
+    assert.doesNotMatch(result.reply, /已記錄|共\s*\d+|kcal|summaryOutcome|dailySummary|loggedMeal/);
+  });
+
+  it("Phase 68 D-13/D-16/D-17 returns get_daily_summary multiple_targets from renderer without aggregate success copy", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_multiple_targets",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({}),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "昨天和前天合計 2 餐，共 900 kcal。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "昨天和前天各吃多少蛋白質？");
+
+    assert.ok("reply" in result);
+    assert.equal(mockLLM.chatCalls.length, 1, "terminal multi-date clarification must not consume a second LLM response");
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.dailySummary, undefined);
+    assert.match(result.reply, /請.*一天|一個日期|哪一天/);
+    assert.doesNotMatch(result.reply, /合計|共\s*\d+|kcal|已記錄|summaryOutcome|dailySummary|loggedMeal/);
   });
 
   it("handleMessage returns didLogMeal: true with projected copy after log_food succeeds", async () => {
