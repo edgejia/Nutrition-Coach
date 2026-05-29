@@ -34,8 +34,8 @@ Requirements for the v2.4 correction-authority milestone. Each requirement must 
 ### Proof and Release Gates
 
 - [x] **PROOF-01**: Targeted unit and integration tests cover tool schema alignment, explicit meal-period logging, numeric correction authority, target ranking, clarification rendering, and structured tool-result plumbing.
-- [ ] **PROOF-02**: Any harness or artifact evidence for correction authority remains metadata-only and does not persist raw prompts, user text, assistant final text, tool raw payloads, image data, session material, or database snapshots.
-- [ ] **PROOF-03**: Local closure runs `yarn tsc --noEmit` and `yarn release:check`, with no staging or main promotion.
+- [x] **PROOF-02**: Any harness or artifact evidence for correction authority remains metadata-only and does not persist raw prompts, user text, assistant final text, tool raw payloads, image data, session material, or database snapshots.
+- [x] **PROOF-03**: Local closure runs `yarn tsc --noEmit` and `yarn release:check`, with no staging or main promotion.
 
 ## Future Requirements
 
@@ -92,8 +92,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TARGET-02 | Phase 67 | Complete |
 | TARGET-03 | Phase 68 | Complete |
 | PROOF-01 | Phase 68 | Complete |
-| PROOF-02 | Phase 68 | Pending |
-| PROOF-03 | Phase 68 | Pending |
+| PROOF-02 | Phase 68 | Complete |
+| PROOF-03 | Phase 68 | Complete |
 
 **Coverage:**
 - v2.4 requirements: 15 total
