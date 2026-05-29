@@ -1,6 +1,6 @@
 ---
 phase: 68-structured-tool-results-and-release-proof-gate
-reviewed: 2026-05-29T16:57:41Z
+reviewed: 2026-05-29T17:02:41Z
 depth: standard
 files_reviewed: 7
 files_reviewed_list:
@@ -12,56 +12,44 @@ files_reviewed_list:
   - tests/integration/chat-api.test.ts
   - tests/integration/chat-streaming.test.ts
 findings:
-  critical: 1
+  critical: 0
   warning: 0
   info: 0
-  total: 1
-status: issues_found
+  total: 0
+status: clean
 ---
 
 # Phase 68: Code Review Report
 
-**Reviewed:** 2026-05-29T16:57:41Z
+**Reviewed:** 2026-05-29T17:02:41Z
 **Depth:** standard
 **Files Reviewed:** 7
-**Status:** issues_found
+**Status:** clean
 
 ## Summary
 
-Reviewed the Phase 68 orchestrator tool-result boundary, mutation receipt renderers, unit coverage, and JSON/SSE route proof. The structured meal-target clarification facts can diverge from the rendered numbered options, which makes the new `ToolExecutionResult.clarification` contract unsafe for clients or future routing logic that relies on `optionNumber`.
+Re-reviewed the Phase 68 structured tool-result boundary after commit `71d41f5` fixed the prior clarification option-order blocker. The implementation now builds `clarification.candidates` directly from `result.candidates.slice(0, 5)` in the same order consumed by the renderer, so structured `optionNumber` values preserve the rendered prompt order.
+
+The regression in `tests/unit/tools.test.ts` now sets up a newest-first same-date clarification case and asserts each rendered numbered option line matches the corresponding structured candidate's `optionNumber`, `dateKey`, `displayTime`, and `displayLabel`. That coverage would fail if the structured projection drifted back to independently sorting candidates.
+
+All reviewed files meet quality standards. No issues found.
 
 ## Narrative Findings (AI reviewer)
 
-## Critical Issues
+No Critical, Warning, or Info findings.
 
-### CR-01 [BLOCKER]: Structured clarification option numbers can point at different meals than the rendered prompt
+## Verification
 
-**File:** `server/orchestrator/tools.ts:2064`
+Ran:
 
-**Issue:** `renderFindMealsControlledReply()` renders meal-target options from `result.candidates` in service order, but `buildMealTargetClarificationFact()` copies those same candidates and re-sorts them by `loggedAt` ascending before assigning `optionNumber`. The meal-correction service commonly narrows candidates newest-first before building pending rendered options, so the user-visible prompt can say `1. newer meal` while `clarification.candidates[0]` says option `1` is the older meal. Any consumer that uses the structured facts to present options or resolve a follow-up can select or display the wrong meal.
-
-**Fix:**
-```ts
-function buildMealTargetClarificationFact(
-  result: Exclude<FindMealsResult, { status: "resolved" }>,
-  prompt: string,
-): ToolClarificationFact {
-  return {
-    kind: "meal_target",
-    status: result.status,
-    action: result.action,
-    prompt,
-    candidates: result.status === "needs_clarification"
-      ? result.candidates.slice(0, 5).map(projectMealTargetCandidateFact)
-      : [],
-  };
-}
+```bash
+node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts --test-name-pattern "Phase 68 D-02-D-06"
 ```
 
-Add a regression test that asserts each rendered `1.`, `2.`, etc. line has the same `dateKey`, `displayTime`, and `displayLabel` as the corresponding `clarification.candidates[n]`.
+Result: pass (`46` tests passed in `tests/unit/tools.test.ts`; the local Node invocation ran the whole file despite the name-pattern argument).
 
 ---
 
-_Reviewed: 2026-05-29T16:57:41Z_
+_Reviewed: 2026-05-29T17:02:41Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
