@@ -154,7 +154,19 @@ Plans:
   2. Targeted tests cover tool schema alignment, explicit meal-period logging, numeric correction authority, target ranking, clarification rendering, and structured tool-result plumbing.
   3. Any generated harness or proof artifacts remain metadata-only and exclude raw sensitive payloads.
   4. Local closure runs `yarn tsc --noEmit` and `yarn release:check` with no staging or main promotion.
-**Plans**: TBD during `$gsd-plan-phase 68`
+**Plans**: 4 plans
+Plans:
+**Wave 0**
+- [ ] 68-01-PLAN.md — Red-first unit proof for typed clarification facts and terminal renderer behavior.
+
+**Wave 1** *(blocked on Wave 0 completion)*
+- [ ] 68-02-PLAN.md — Structured `ToolExecutionResult` clarification union, renderer helpers, and `executeTool()` mapping.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 68-03-PLAN.md — JSON/SSE terminal clarification persistence, no-side-effect, and carry-forward integration proof.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 68-04-PLAN.md — Metadata-only verification record and local release-proof closure gates.
 **Implementation Notes:**
 - Prefer typed `ToolExecutionResult` fields over ad hoc parsing.
 - Add harness coverage only if unit/integration tests cannot prove a boundary without false-pass risk.
@@ -170,7 +182,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete    | 2026-05-28 |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 7/7 | Complete    | 2026-05-29 |
-| 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/TBD | Pending | — |
+| 68. Structured Tool Results and Release-Proof Gate | v2.4 | 0/4 | Pending | — |
 
 ## Future Milestone Candidates
 
