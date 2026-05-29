@@ -8,7 +8,11 @@ import {
   type SummaryOutcome,
 } from "../services/summary-outcome.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
-import type { createMealCorrectionService, FindMealsResult } from "../services/meal-correction.js";
+import type {
+  createMealCorrectionService,
+  FindMealsResult,
+  MealCorrectionCandidate,
+} from "../services/meal-correction.js";
 import {
   MEAL_NUMERIC_FIELDS,
   type MealNumericField,
@@ -53,6 +57,9 @@ import {
   renderCorrectionTargetClarificationCopy,
   renderCorrectionTargetNoMealsForDateCopy,
   renderCorrectionTargetSameDateRecoveryCopy,
+  renderHistoricalLogFoodClarificationCopy,
+  renderHistoricalSummaryClarificationCopy,
+  renderHistoricalSummaryMultipleTargetsCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericClarificationCopy,
   renderMealNumericProposalCopy,
@@ -94,6 +101,7 @@ export interface ToolExecutionResult {
   success?: boolean;
   executed?: boolean;
   failureReason?: "validation" | "guard" | "execute";
+  clarification?: ToolClarificationFact;
   controlledReply?: {
     source: "renderer";
     reason:
@@ -102,6 +110,8 @@ export interface ToolExecutionResult {
       | "goal_validation_failure"
       | "goal_cancel"
       | "meal_target_clarification"
+      | "historical_date_clarification"
+      | "historical_summary_clarification"
       | "meal_numeric_authority_failure"
       | "meal_numeric_clarification"
       | "meal_numeric_proposal";
@@ -150,6 +160,41 @@ export interface ToolExecutionResult {
     usedConservativeAssumption: boolean;
   };
 }
+
+export interface ToolMealTargetCandidateFact {
+  optionNumber: number;
+  dateKey: string;
+  displayTime: string;
+  displayLabel: string;
+  mealPeriod?: MealPeriod;
+  mealPeriodSource?: "explicit";
+}
+
+export type ToolClarificationFact =
+  | {
+      kind: "meal_target";
+      status: "needs_clarification" | "not_found";
+      action: "update" | "delete";
+      prompt: string;
+      candidates: ToolMealTargetCandidateFact[];
+    }
+  | {
+      kind: "historical_log";
+      status: "needs_clarification";
+      prompt: string;
+      reason: HistoricalToolClarification["reason"];
+    }
+  | {
+      kind: "historical_summary";
+      status: "needs_clarification";
+      prompt: string;
+      reason: HistoricalToolClarification["reason"];
+    }
+  | {
+      kind: "historical_summary";
+      status: "multiple_targets";
+      dateKeys: string[];
+    };
 
 export interface FatalToolDiagnostic {
   failureReason?: "validation" | "guard" | "execute";
@@ -1981,6 +2026,81 @@ function renderFindMealsControlledReply(result: Exclude<FindMealsResult, { statu
   return result.prompt;
 }
 
+function formatClarificationTime(loggedAt: string): string {
+  const local = new Date(loggedAt);
+  const hour = `${local.getHours()}`.padStart(2, "0");
+  const minute = `${local.getMinutes()}`.padStart(2, "0");
+  return `${hour}:${minute}`;
+}
+
+function projectMealTargetCandidateFact(
+  candidate: MealCorrectionCandidate,
+  index: number,
+): ToolMealTargetCandidateFact {
+  return {
+    optionNumber: index + 1,
+    dateKey: candidate.dateKey,
+    displayTime: formatClarificationTime(candidate.loggedAt),
+    displayLabel: candidate.foodName,
+    ...(candidate.mealPeriodSource === "explicit"
+      ? {
+          mealPeriod: candidate.mealPeriod,
+          mealPeriodSource: "explicit" as const,
+        }
+      : {}),
+  };
+}
+
+function buildMealTargetClarificationFact(
+  result: Exclude<FindMealsResult, { status: "resolved" }>,
+  prompt: string,
+): ToolClarificationFact {
+  return {
+    kind: "meal_target",
+    status: result.status,
+    action: result.action,
+    prompt,
+    candidates: result.status === "needs_clarification"
+      ? [...result.candidates]
+          .sort((left, right) => left.loggedAt.localeCompare(right.loggedAt))
+          .slice(0, 5)
+          .map(projectMealTargetCandidateFact)
+      : [],
+  };
+}
+
+function buildHistoricalLogClarificationFact(
+  clarification: HistoricalToolClarification,
+  prompt: string,
+): ToolClarificationFact {
+  return {
+    kind: "historical_log",
+    status: "needs_clarification",
+    prompt,
+    reason: clarification.reason,
+  };
+}
+
+function buildHistoricalSummaryClarificationFact(
+  summary: Exclude<GetDailySummaryResult, { status: "summary" }>,
+  prompt?: string,
+): ToolClarificationFact {
+  if (summary.status === "multiple_targets") {
+    return {
+      kind: "historical_summary",
+      status: "multiple_targets",
+      dateKeys: [...summary.dateKeys],
+    };
+  }
+
+  return {
+    kind: "historical_summary",
+    status: "needs_clarification",
+    prompt: prompt ?? summary.prompt,
+    reason: summary.reason,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator-facing dispatch (registry-first per D-03). Adapts the
 // controlled `runContract` result back to the legacy `ToolExecutionResult`
@@ -2105,12 +2225,21 @@ export async function executeTool(
   if (toolCall.function.name === "log_food") {
     const contractResult = outcome.contractResult as LogFoodResult;
     if (contractResult.status === "needs_clarification") {
+      const reply = renderHistoricalLogFoodClarificationCopy({
+        prompt: contractResult.prompt,
+      });
       return {
-        result: outcome.result,
+        result: reply,
         summary: "status: needs_clarification",
         success: false,
         executed: false,
         failureReason: "guard",
+        clarification: buildHistoricalLogClarificationFact(contractResult, reply),
+        controlledReply: {
+          source: "renderer",
+          reason: "historical_date_clarification",
+          text: reply,
+        },
       };
     }
     return {
@@ -2134,6 +2263,7 @@ export async function executeTool(
         success: false,
         executed: false,
         failureReason: "guard",
+        clarification: buildMealTargetClarificationFact(contractResult, reply),
         controlledReply: {
           source: "renderer",
           reason: "meal_target_clarification",
@@ -2217,21 +2347,39 @@ export async function executeTool(
   if (toolCall.function.name === "get_daily_summary") {
     const summary = outcome.contractResult as GetDailySummaryResult;
     if (summary.status === "needs_clarification") {
+      const reply = renderHistoricalSummaryClarificationCopy({
+        prompt: summary.prompt,
+      });
       return {
-        result: outcome.result,
+        result: reply,
         summary: "status: needs_clarification",
         success: false,
         executed: false,
         failureReason: "guard",
+        clarification: buildHistoricalSummaryClarificationFact(summary, reply),
+        controlledReply: {
+          source: "renderer",
+          reason: "historical_summary_clarification",
+          text: reply,
+        },
       };
     }
     if (summary.status === "multiple_targets") {
+      const reply = renderHistoricalSummaryMultipleTargetsCopy({
+        dateKeys: summary.dateKeys,
+      });
       return {
-        result: outcome.result,
+        result: reply,
         summary: "status: multiple_targets",
         success: false,
         executed: false,
         failureReason: "guard",
+        clarification: buildHistoricalSummaryClarificationFact(summary),
+        controlledReply: {
+          source: "renderer",
+          reason: "historical_summary_clarification",
+          text: reply,
+        },
       };
     }
     return {

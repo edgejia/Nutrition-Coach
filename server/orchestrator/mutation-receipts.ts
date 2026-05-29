@@ -23,6 +23,11 @@ export const FORBIDDEN_RECEIPT_TERMS = [
   "recompute_failed",
   "publish_failed",
   "dailyTargets",
+  "contractResult",
+  "daily_summary",
+  "provider",
+  "debug",
+  "tool",
   "API",
   "endpoint",
   "route",
@@ -92,6 +97,14 @@ export interface CorrectionTargetSameDateRecoveryCopyInput {
 export interface CorrectionTargetNoMealsForDateCopyInput {
   action: CorrectionTargetAction;
   dateKey: string;
+}
+
+export interface HistoricalClarificationCopyInput {
+  prompt: string;
+}
+
+export interface HistoricalSummaryMultipleTargetsCopyInput {
+  dateKeys: string[];
 }
 
 export interface MealNumericProposalCopyInput {
@@ -183,6 +196,28 @@ export function renderCorrectionTargetNoMealsForDateCopy(
 ): string {
   const verb = correctionTargetActionVerb(input.action);
   return `${input.dateKey} 沒有記錄餐點，所以我還不能${verb}那一天的餐點。請提供另一個日期或食物名稱。`;
+}
+
+export function renderHistoricalLogFoodClarificationCopy(
+  input: HistoricalClarificationCopyInput,
+): string {
+  return `這次沒有記錄餐點。${input.prompt}`;
+}
+
+export function renderHistoricalSummaryClarificationCopy(
+  input: HistoricalClarificationCopyInput,
+): string {
+  return input.prompt;
+}
+
+export function renderHistoricalSummaryMultipleTargetsCopy(
+  input: HistoricalSummaryMultipleTargetsCopyInput,
+): string {
+  const choices = input.dateKeys.map((dateKey, index) => `${index + 1}. ${dateKey}`);
+  return [
+    "我目前一次只能看一個日期。請回覆其中一個日期：",
+    ...choices,
+  ].join("\n");
 }
 
 function formatMealProposalLabel(input: Pick<MealNumericProposalCopyInput, "mealLabel" | "items">): string {
