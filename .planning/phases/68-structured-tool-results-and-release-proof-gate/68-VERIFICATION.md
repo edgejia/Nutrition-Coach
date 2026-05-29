@@ -1,6 +1,6 @@
 ---
 phase: 68-structured-tool-results-and-release-proof-gate
-verified: "2026-05-29T16:48:54Z"
+verified: "2026-05-29T17:04:36Z"
 status: passed
 requirements:
   - TARGET-03
@@ -48,6 +48,7 @@ It intentionally excludes raw prompts, raw user text, assistant final text, raw 
 | Command | Status | Timestamp | Notes |
 |---|---|---|---|
 | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/orchestrator.test.ts tests/unit/meal-correction.test.ts tests/integration/chat-api.test.ts tests/integration/chat-streaming.test.ts tests/integration/chat-meal-correction.integration.test.ts` | pass | 2026-05-29T16:46Z | 307 targeted unit/integration tests passed across structured tool-result plumbing and carry-forward v2.4 behavior families. |
+| `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/tools.test.ts tests/unit/orchestrator.test.ts tests/unit/meal-correction.test.ts tests/integration/chat-api.test.ts tests/integration/chat-streaming.test.ts tests/integration/chat-meal-correction.integration.test.ts` | pass | 2026-05-29T17:03Z | 307 targeted unit/integration tests passed again after the code-review option-order fix. |
 | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/mutation-receipts.test.ts` | pass | 2026-05-29T16:48Z | 24 tests passed after aligning the forbidden receipt-term expectation with production guard terms added by Phase 68. |
 
 ## PROOF-02 Metadata-Only Artifact Rationale
@@ -70,10 +71,16 @@ Normal evidence in this file is command/file/status metadata only. Existing `llm
 |---|---|---|---|
 | `yarn tsc --noEmit` | pass | 2026-05-29T16:48Z | Required TypeScript local gate exited 0 after the release-gate drift fix. |
 | `yarn release:check` | pass | 2026-05-29T16:48Z | Required final local release gate exited 0 after full tests and frontend build; local closure only. |
+| `yarn tsc --noEmit` | pass | 2026-05-29T17:03Z | TypeScript local gate exited 0 after the code-review option-order fix. |
+| `yarn release:check` | pass | 2026-05-29T17:04Z | Final post-review local release gate exited 0: 1,245 tests passed and frontend build completed; local closure only. |
 
 ### Release Gate Retry Note
 
 The first `yarn release:check` attempt failed in `tests/unit/mutation-receipts.test.ts` because the expected forbidden receipt-term list had not been updated for Phase 68 production guard terms. The test expectation was corrected, the focused mutation receipt test passed, `yarn tsc --noEmit` passed again, and `yarn release:check` then passed.
+
+### Code Review Closure Note
+
+The advisory Phase 68 code review initially found one blocker: structured `clarification.candidates` option numbers could diverge from the rendered numbered prompt. Commit `71d41f5` removed the independent candidate sort and added regression coverage that compares each rendered option line to the matching structured candidate fields. The re-review recorded in `68-REVIEW.md` is clean, and the final targeted matrix, TypeScript gate, and `yarn release:check` passed after the fix.
 
 ## Local-Only Scope
 
