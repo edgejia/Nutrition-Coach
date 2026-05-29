@@ -27,6 +27,28 @@ import type { ToolCall } from "../../server/llm/types.js";
 // the runContract layer so controlled `failureReason` values remain observable
 // where invalid input should not persist.
 
+function assertClarificationFact(result: unknown): Record<string, unknown> {
+  const clarification = (result as { clarification?: unknown }).clarification;
+  assert.ok(clarification && typeof clarification === "object", "ToolExecutionResult.clarification must be present");
+  return clarification as Record<string, unknown>;
+}
+
+function assertNoRawCandidateFields(candidate: Record<string, unknown>) {
+  for (const field of [
+    "mealId",
+    "mealRevisionId",
+    "currentRevisionId",
+    "calories",
+    "protein",
+    "carbs",
+    "fat",
+    "itemNames",
+    "score",
+  ]) {
+    assert.equal(candidate[field], undefined, `clarification candidate must not expose raw ${field}`);
+  }
+}
+
 describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   let db: ReturnType<typeof createDb>;
   let deviceId: string;
@@ -1277,7 +1299,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     }]);
   });
 
-  it("Phase 67 D-30/D-32 returns renderer-owned controlled find_meals clarification without resolved targets", async () => {
+  it("Phase 68 D-02-D-06 extends renderer-owned find_meals clarification with typed facts", async () => {
     const sameDateLunch = await foodLoggingService.logFood(deviceId, {
       foodName: "蛋餅",
       calories: 330,
@@ -1340,6 +1362,20 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.match(result.result, /牛肉麵/);
     assert.doesNotMatch(result.result, /鴨胸飯|鴨腿便當/);
     assert.doesNotMatch(result.result, /330|520|12\s*g|24\s*g|已更新|已刪除/);
+    const clarification = assertClarificationFact(result);
+    assert.equal(clarification.kind, "meal_target");
+    assert.equal(clarification.status, "needs_clarification");
+    assert.equal(clarification.action, "update");
+    assert.equal(clarification.prompt, result.result);
+    const candidates = clarification.candidates as Array<Record<string, unknown>>;
+    assert.equal(candidates.length, 2);
+    assert.deepEqual(candidates.map((candidate) => candidate.optionNumber), [1, 2]);
+    assert.deepEqual(candidates.map((candidate) => candidate.dateKey), ["2026-04-18", "2026-04-18"]);
+    assert.deepEqual(candidates.map((candidate) => candidate.displayLabel), ["蛋餅", "牛肉麵"]);
+    for (const candidate of candidates) {
+      assertNoRawCandidateFields(candidate);
+    }
+    assert.equal((result as { contractResult?: unknown }).contractResult, undefined);
     assert.deepEqual(toolSessionState.resolvedMealTargets, []);
     assert.ok([sameDateLunch.id, sameDateDinner.id].every((id) => !toolSessionState.resolvedMealTargets.some((target) => target.mealId === id)));
   });
@@ -2043,7 +2079,97 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(new Date(result.loggedMeal.loggedAt).getMinutes(), 0);
   });
 
-  it("returns a controlled multiple_targets outcome for multi-date summary requests", async () => {
+  it("Phase 68 D-10/D-11/D-17/D-18 returns typed terminal log_food clarification facts for historical ambiguity", async () => {
+    const call: ToolCall = {
+      id: "call_historical_log_multiple_dates",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "蛋餅",
+          calories: 320,
+          protein: 7,
+          carbs: 48,
+          fat: 10,
+          date_text: "昨天和前天",
+          protein_sources: [
+            { name: "蛋餅", protein: 7, is_primary: true, certainty: "clear" },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(
+      call,
+      deviceId,
+      { foodLoggingService, summaryService },
+      { currentUserMessage: "幫我補昨天和前天吃蛋餅" },
+    );
+    const clarification = assertClarificationFact(result);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "status: needs_clarification");
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "historical_date_clarification",
+      text: result.result,
+    });
+    assert.equal(clarification.kind, "historical_log");
+    assert.equal(clarification.status, "needs_clarification");
+    assert.equal(clarification.reason, "multiple_dates");
+    assert.match(String(clarification.prompt), /一次告訴我一個日期/);
+    assert.match(result.result, /一次告訴我一個日期/);
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.dailySummary, undefined);
+    assert.equal((result as { contractResult?: unknown }).contractResult, undefined);
+    assert.equal(meals.length, 0);
+  });
+
+  it("Phase 68 D-12/D-13/D-15/D-18a returns typed terminal get_daily_summary clarification facts", async () => {
+    const call: ToolCall = {
+      id: "call_summary_unsupported_date",
+      type: "function",
+      function: {
+        name: "get_daily_summary",
+        arguments: JSON.stringify({ date_text: "前幾天" }),
+      },
+    };
+
+    const result = await executeTool(
+      call,
+      deviceId,
+      { foodLoggingService, summaryService },
+      { currentUserMessage: "前幾天吃多少蛋白質？" },
+    );
+    const clarification = assertClarificationFact(result);
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "status: needs_clarification");
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "historical_summary_clarification",
+      text: result.result,
+    });
+    assert.equal(clarification.kind, "historical_summary");
+    assert.equal(clarification.status, "needs_clarification");
+    assert.equal(clarification.reason, "unsupported");
+    assert.match(String(clarification.prompt), /我還不能確定是哪一天/);
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.summaryHistoryFacts, undefined);
+    assert.equal((result as { contractResult?: unknown }).contractResult, undefined);
+  });
+
+  it("Phase 68 D-12/D-13/D-16/D-18a returns a controlled multiple_targets outcome for multi-date summary requests", async () => {
     const call: ToolCall = {
       id: "call_multi_summary",
       type: "function",
@@ -2068,10 +2194,80 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     yesterday.setDate(yesterday.getDate() - 1);
     const dayBeforeYesterday = new Date();
     dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
-    assert.deepEqual(JSON.parse(result.result), {
-      status: "multiple_targets",
-      dateKeys: [formatLocalDate(yesterday), formatLocalDate(dayBeforeYesterday)],
+    const expectedDateKeys = [formatLocalDate(yesterday), formatLocalDate(dayBeforeYesterday)];
+    const clarification = assertClarificationFact(result);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "historical_summary_clarification",
+      text: result.result,
     });
+    assert.equal(clarification.kind, "historical_summary");
+    assert.equal(clarification.status, "multiple_targets");
+    assert.deepEqual(clarification.dateKeys, expectedDateKeys);
+    assert.match(result.result, /請.*一天|一個日期|哪一天/);
+    for (const dateKey of expectedDateKeys) {
+      assert.match(result.result, new RegExp(dateKey));
+    }
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.summaryHistoryFacts, undefined);
+    assert.equal((result as { contractResult?: unknown }).contractResult, undefined);
+  });
+
+  it("Phase 68 D-18a multiple_targets renderer copy does not carry forward as one historical log date", async () => {
+    const summaryResult = await executeTool(
+      {
+        id: "call_multi_summary_copy",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({}),
+        },
+      },
+      deviceId,
+      { foodLoggingService, summaryService },
+      { currentUserMessage: "昨天和前天各吃多少蛋白質？" },
+    );
+    const previousAssistantMessage = summaryResult.controlledReply?.text;
+    assert.equal(typeof previousAssistantMessage, "string");
+
+    const logResult = await executeTool(
+      {
+        id: "call_after_multi_summary_copy",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "蛋餅",
+            calories: 320,
+            protein: 7,
+            carbs: 48,
+            fat: 10,
+            protein_sources: [
+              { name: "蛋餅", protein: 7, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      },
+      deviceId,
+      { foodLoggingService, summaryService },
+      {
+        currentUserMessage: "蛋餅",
+        previousAssistantMessage,
+      },
+    );
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dayBeforeYesterday = new Date();
+    dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
+
+    assert.equal(logResult.summary, "成功");
+    assert.ok(logResult.loggedMeal);
+    assert.notEqual(logResult.loggedMeal.dateKey, formatLocalDate(yesterday));
+    assert.notEqual(logResult.loggedMeal.dateKey, formatLocalDate(dayBeforeYesterday));
+    assert.equal(logResult.loggedMeal.dateKey, formatLocalDate(new Date()));
   });
 
   it("allows explicit current-turn update_meal numeric evidence and preserves the resolver revision", async () => {
