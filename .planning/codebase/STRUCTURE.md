@@ -1,307 +1,272 @@
----
-last_mapped_commit: 93f249b78d8215f401f8764c8802a6da47e5e3cd
-last_mapped_at: 2026-05-30
----
-
 # Codebase Structure
 
-**Analysis Date:** 2026-05-30
+**Analysis Date:** 2026-05-29
 
 ## Directory Layout
 
 ```text
 Nutrition-Coach/
-├── .codex/skills/          # Project-specific Codex skill indexes for verification, reviews, harnesses, and release smoke
-├── .planning/              # GSD planning state, roadmap, milestones, quick tasks, and codebase maps
-├── chatgpt/                # External ChatGPT project notes and wireframes
-├── client/                 # Vite React frontend application
+├── client/                 # Vite React client application
 │   ├── index.html          # Vite HTML entry
-│   ├── public/             # Static public assets for the client build
-│   ├── src/                # React, Zustand, client API, SSE, lib helpers, contracts, and types
-│   └── vite.config.ts      # Client build/dev config
-├── data/                   # Local SQLite database, WAL/SHM files, durable assets, and upload staging
-├── dist/                   # Built output, including `dist/client` when `yarn build` runs
-├── docs/                   # Repo documentation, ADRs, deployment notes, and research maps
-├── drizzle/                # Generated Drizzle SQL migrations and metadata snapshots
-├── scripts/                # Repo utility CLIs and release/check runners
-├── server/                 # Fastify backend, DB, services, routes, orchestrator, LLM, realtime, observability
-├── tests/                  # Unit, integration, helper, and deterministic harness tests
-├── AGENTS.md               # Local agent workflow, architecture, testing, and promotion rules
-├── Dockerfile              # Container image build entry
-├── drizzle.config.ts       # Drizzle Kit config
+│   ├── vite.config.ts      # Client dev/build config
+│   └── src/                # React components, store, transport, UI helpers
+├── server/                 # Fastify API, services, orchestration, persistence adapters
+│   ├── app.ts              # Backend composition root
+│   ├── index.ts            # Production server entry
+│   ├── config.ts           # Environment-derived runtime config
+│   ├── db/                 # Drizzle schema, SQLite client, migration runner
+│   ├── lib/                # Shared server helpers for session/date/time/meal periods
+│   ├── llm/                # LLM provider interface, OpenAI adapter, mock provider
+│   ├── observability/      # Structured event helpers
+│   ├── orchestrator/       # AI workflow, prompts, tools, receipts, traces
+│   ├── realtime/           # SSE fan-out publisher
+│   ├── routes/             # Fastify route registration modules
+│   └── services/           # Domain and persistence service factories
+├── tests/                  # Node test suites plus deterministic harness
+│   ├── unit/               # Unit/source contract tests
+│   ├── integration/        # Fastify route/service/orchestrator integration tests
+│   ├── helpers/            # Shared test helpers
+│   └── harness/            # Deterministic scenario runner, fixtures, artifacts
+├── drizzle/                # Generated SQL migrations and Drizzle snapshots
+├── scripts/                # Verification and documentation generation scripts
+├── docs/                   # Project docs, ADRs, deployment guidance, matrices
+├── data/                   # Runtime SQLite/assets area; only `.gitkeep` is source-controlled
+├── .planning/              # GSD project state, milestones, phases, codebase maps
+├── .codex/skills/          # Repo-local Codex skill indexes for Nutrition workflows
+├── .claude/                # Thin compatibility shims and local Claude settings
 ├── package.json            # Yarn scripts and dependencies
-├── tsconfig.json           # Shared TypeScript config
+├── tsconfig.json           # TypeScript project config
+├── drizzle.config.ts       # Drizzle generation config
+├── Dockerfile              # Deployment container config
 └── yarn.lock               # Yarn lockfile
 ```
 
 ## Directory Purposes
 
-**`.codex/skills/`:**
-- Purpose: Project-specific Codex workflow instructions for Nutrition Coach work.
-- Contains: Skill directories with `SKILL.md` indexes for verification, test generation, code/security/harness reviews, Railway smoke, harness scenarios, and milestone closeout.
-- Key files: `.codex/skills/nutrition-verify-change/SKILL.md`, `.codex/skills/nutrition-gen-test/SKILL.md`, `.codex/skills/nutrition-code-review/SKILL.md`, `.codex/skills/nutrition-security-review/SKILL.md`, `.codex/skills/nutrition-new-harness-scenario/SKILL.md`, `.codex/skills/nutrition-harness-review/SKILL.md`, `.codex/skills/nutrition-railway-smoke/SKILL.md`, `.codex/skills/nutrition-milestone-closeout/SKILL.md`
-
-**`.planning/`:**
-- Purpose: GSD workflow artifacts and active project planning state.
-- Contains: Milestones, phases, quick task plans, roadmap/state, codebase maps, research, todos, workstreams.
-- Key files: `.planning/PROJECT.md`, `.planning/ROADMAP.md`, `.planning/STATE.md`, `.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/STRUCTURE.md`
-
 **`client/`:**
-- Purpose: Frontend app packaged by Vite and served either by Vite dev server or Fastify static serving from `dist/client`.
-- Contains: `client/src/` application source, public assets, Vite config, HTML entry.
-- Key files: `client/src/main.tsx`, `client/src/App.tsx`, `client/src/store.ts`, `client/src/api.ts`, `client/src/sse.ts`, `client/vite.config.ts`
+- Purpose: Browser UI for onboarding, chat logging, home dashboard, history, settings, day detail, and meal editing.
+- Contains: `client/src/main.tsx`, `client/src/App.tsx`, `client/src/components/*.tsx`, `client/src/lib/*.ts`, `client/src/store.ts`, `client/src/api.ts`, `client/src/sse.ts`, `client/src/types.ts`.
+- Key files: `client/src/main.tsx`, `client/src/App.tsx`, `client/src/components/MainLayout.tsx`, `client/src/store.ts`, `client/src/api.ts`, `client/src/sse.ts`, `client/vite.config.ts`.
 
 **`client/src/components/`:**
-- Purpose: React UI components and screens.
-- Contains: Primary screens (`HomeScreen`, `ChatPanel`, `HistoryScreen`), layout shell, onboarding steps, settings, meal edit/detail screens, display primitives and icons.
-- Key files: `client/src/components/MainLayout.tsx`, `client/src/components/ChatPanel.tsx`, `client/src/components/HomeScreen.tsx`, `client/src/components/HistoryScreen.tsx`, `client/src/components/MealEditScreen.tsx`, `client/src/components/onboarding/OnboardingStepper.tsx`
+- Purpose: React screens and reusable UI components.
+- Contains: Top-level surfaces such as `HomeScreen.tsx`, `ChatPanel.tsx`, `HistoryScreen.tsx`, `GoalSettings.tsx`, `MealEditScreen.tsx`, sport design primitives, icons, and onboarding steps.
+- Key files: `client/src/components/MainLayout.tsx`, `client/src/components/ChatPanel.tsx`, `client/src/components/HomeScreen.tsx`, `client/src/components/HistoryScreen.tsx`, `client/src/components/onboarding/OnboardingStepper.tsx`.
 
 **`client/src/lib/`:**
-- Purpose: Frontend pure helpers and UI flow utilities.
-- Contains: Time/date helpers, onboarding validation/flow, history week utilities, chat scroll logic, markdown rendering helpers, target input helpers.
-- Key files: `client/src/lib/time.ts`, `client/src/lib/history-week.ts`, `client/src/lib/chat-scroll.ts`, `client/src/lib/onboarding-intake-validation.ts`, `client/src/lib/onboarding-stepper-flow.ts`
-
-**`client/src/contracts/`:**
-- Purpose: Client-side product contract data that is validated by source-scan tests and generated docs.
-- Contains: Capability matrix contract source.
-- Key files: `client/src/contracts/capability-matrix.ts`
+- Purpose: Pure client helpers and source-contract logic.
+- Contains: Time formatting, history-week calculations, onboarding validation/flow helpers, markdown parsing, target input helpers, chat scroll helpers.
+- Key files: `client/src/lib/time.ts`, `client/src/lib/onboarding-intake-validation.ts`, `client/src/lib/history-week.ts`, `client/src/lib/assistant-markdown.ts`.
 
 **`server/`:**
-- Purpose: Fastify backend and application core.
-- Contains: Composition root, config, routes, services, orchestrator, LLM providers, DB, realtime publisher, observability, shared libs.
-- Key files: `server/index.ts`, `server/app.ts`, `server/config.ts`
+- Purpose: Same-origin backend API, model orchestration, persistence, assets, and deployed static serving.
+- Contains: Composition root, entry point, config, DB layer, route modules, services, orchestrator, LLM adapters, observability, realtime publisher.
+- Key files: `server/app.ts`, `server/index.ts`, `server/config.ts`.
 
 **`server/routes/`:**
-- Purpose: HTTP and SSE transport boundaries.
-- Contains: Route registration functions for device/session, chat, meals, day snapshot, history, assets, observability, and SSE.
-- Key files: `server/routes/device.ts`, `server/routes/chat.ts`, `server/routes/meals.ts`, `server/routes/history.ts`, `server/routes/sse.ts`, `server/routes/assets.ts`
+- Purpose: Fastify route boundaries.
+- Contains: `assets.ts`, `chat.ts`, `day-snapshot.ts`, `device.ts`, `history.ts`, `meals.ts`, `observability.ts`, `sse.ts`.
+- Key files: `server/routes/chat.ts` for chat JSON/SSE and uploads, `server/routes/device.ts` for onboarding/session/goals, `server/routes/meals.ts` for direct meal edits/deletes, `server/routes/sse.ts` for realtime.
 
 **`server/services/`:**
 - Purpose: Reusable domain and persistence logic.
-- Contains: Device, chat, food logging, meal transactions/history/display/correction, meal numeric proposals, summaries, history query, asset, guest session, target generation, turn state, goal proposal services.
-- Key files: `server/services/device.ts`, `server/services/chat.ts`, `server/services/food-logging.ts`, `server/services/meal-transactions.ts`, `server/services/meal-correction.ts`, `server/services/meal-numeric-proposals.ts`, `server/services/history-query.ts`, `server/services/assets.ts`, `server/services/guest-session.ts`
+- Contains: Asset storage, chat history, device targets, food logging, meal transactions, corrections, proposals, summaries, history queries, guest sessions, target generation, turn state.
+- Key files: `server/services/meal-transactions.ts`, `server/services/food-logging.ts`, `server/services/meal-correction.ts`, `server/services/history-query.ts`, `server/services/guest-session.ts`, `server/services/assets.ts`, `server/services/summary.ts`.
 
 **`server/orchestrator/`:**
-- Purpose: Model workflow, tool definitions, prompt construction, mutation receipts, fallback behavior, trace hooks, and guard logic.
-- Contains: Orchestrator loop, tool contracts, tool registry/execution, system prompt, history loader, source-text guard, numeric authority guard, protein trust, LLM trace, mutation effects/receipts, and structured clarification fact adapters.
-- Key files: `server/orchestrator/index.ts`, `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `server/orchestrator/meal-numeric-authority.ts`, `server/orchestrator/mutation-receipts.ts`, `server/orchestrator/system-prompt.ts`, `server/orchestrator/history.ts`, `server/orchestrator/hooks.ts`
+- Purpose: AI workflow and tool execution.
+- Contains: `index.ts` model/tool loop, `tools.ts` registry and tool contracts, `system-prompt.ts`, mutation receipt renderers, tool-contract helpers, prompt patterns, protein trust, trace hooks, source-text guards.
+- Key files: `server/orchestrator/index.ts`, `server/orchestrator/tools.ts`, `server/orchestrator/system-prompt.ts`, `server/orchestrator/mutation-receipts.ts`, `server/orchestrator/llm-trace.ts`.
 
 **`server/db/`:**
-- Purpose: SQLite/Drizzle persistence setup.
-- Contains: Drizzle schema, DB factory, migration runner.
-- Key files: `server/db/schema.ts`, `server/db/client.ts`, `server/db/migrate.ts`
-
-**`server/lib/`:**
-- Purpose: Backend shared helpers with cross-route contracts.
-- Contains: Timezone/date utilities, historical date parsing, explicit meal-period normalization/extraction, guest-session resolution.
-- Key files: `server/lib/time.ts`, `server/lib/historical-date.ts`, `server/lib/meal-period.ts`, `server/lib/guest-session-resolver.ts`
+- Purpose: SQLite/Drizzle access.
+- Contains: `client.ts` DB opener/schema validator, `schema.ts` table definitions, `migrate.ts` migration runner.
+- Key files: `server/db/schema.ts`, `server/db/client.ts`, `server/db/migrate.ts`.
 
 **`server/llm/`:**
-- Purpose: Runtime and test LLM provider abstractions.
-- Contains: Shared provider types, OpenAI provider, mock provider, provider error metadata.
-- Key files: `server/llm/types.ts`, `server/llm/openai.ts`, `server/llm/mock.ts`, `server/llm/errors.ts`
+- Purpose: Runtime and test LLM abstraction.
+- Contains: OpenAI adapter, mock provider, provider errors, shared provider/tool-call types.
+- Key files: `server/llm/types.ts`, `server/llm/openai.ts`, `server/llm/mock.ts`, `server/llm/errors.ts`.
 
-**`server/realtime/`:**
-- Purpose: In-memory SSE fan-out.
-- Contains: Publisher for `daily_summary` and `goals_update` events.
-- Key files: `server/realtime/publisher.ts`
-
-**`server/observability/`:**
-- Purpose: Structured event helpers for server and orchestrator logs.
-- Contains: Event payload builders/loggers used by routes and orchestrator hooks.
-- Key files: `server/observability/events.ts`
-
-**`tests/unit/`:**
-- Purpose: Pure logic, contracts, components rendered to static markup, client helper, store, service, and orchestrator unit coverage.
-- Contains: Node built-in test files named `*.test.ts`.
-- Key files: `tests/unit/store.test.ts`, `tests/unit/orchestrator.test.ts`, `tests/unit/tools.test.ts`, `tests/unit/meal-transactions.test.ts`, `tests/unit/sse-client.test.ts`
-
-**`tests/integration/`:**
-- Purpose: Fastify routes, SSE transport, orchestrator boundaries, SQLite-backed flows, and beta web-app serving coverage.
-- Contains: Node built-in integration tests using real app fixtures and real SQLite.
-- Key files: `tests/integration/chat-api.test.ts`, `tests/integration/chat-streaming.test.ts`, `tests/integration/meals-api.test.ts`, `tests/integration/history-api.test.ts`, `tests/integration/sse.test.ts`, `tests/integration/web-app.test.ts`
-
-**`tests/harness/`:**
-- Purpose: Deterministic boundary verification with generated artifacts.
-- Contains: Scenario runner, app fixture, scenario types, artifact writers, LLM/harness helpers, TypeScript scenarios, visual/browser `.mjs` scenarios, generated artifacts.
-- Key files: `tests/harness/run.ts`, `tests/harness/app-fixture.ts`, `tests/harness/scenario-types.ts`, `tests/harness/scenarios/boundary-contracts.ts`, `tests/harness/scenarios/text-log.ts`, `tests/harness/artifacts.ts`
+**`tests/`:**
+- Purpose: Unit, integration, and deterministic scenario verification.
+- Contains: `tests/unit/*.test.ts`, `tests/integration/*.test.ts`, `tests/harness/scenarios/*.ts`, browser/visual `.mjs` harness scripts, helpers.
+- Key files: `tests/harness/app-fixture.ts`, `tests/harness/run.ts`, `tests/harness/scenario-types.ts`, `tests/helpers/spy-hooks.ts`.
 
 **`drizzle/`:**
-- Purpose: Generated database migration SQL and metadata.
-- Contains: Numbered migration SQL files and `drizzle/meta/*.json` snapshots.
-- Key files: `drizzle/0000_brainy_rocket_racer.sql`, `drizzle/0006_colossal_selene.sql`, `drizzle/meta/_journal.json`
+- Purpose: Generated SQLite migrations and snapshots.
+- Contains: SQL files `drizzle/0000_*.sql` through `drizzle/0007_*.sql` and metadata snapshots under `drizzle/meta/`.
+- Key files: `drizzle/0002_meal_transaction_v2_foundation.sql`, `drizzle/0004_history_query_hot_path_indexes.sql`, `drizzle/meta/_journal.json`.
 
 **`scripts/`:**
-- Purpose: Repo automation scripts.
-- Contains: Release check runner, timezone wrapper, matrix doc generators, mobile evidence script.
-- Key files: `scripts/run-node-with-tz.mjs`, `scripts/release-check.mjs`, `scripts/generate-capability-matrix-doc.mjs`, `scripts/generate-behavior-matrix-doc.mjs`
+- Purpose: Local verification and generated documentation helpers.
+- Contains: Timezone wrapper, release gate, capability/behavior matrix generation, mobile evidence script.
+- Key files: `scripts/run-node-with-tz.mjs`, `scripts/release-check.mjs`, `scripts/generate-capability-matrix-doc.mjs`, `scripts/generate-behavior-matrix-doc.mjs`.
 
 **`docs/`:**
-- Purpose: User/developer documentation, deployment procedures, research maps, and ADRs.
-- Contains: Deployment checklist, Codex workflow notes, ADRs, generated/research documentation.
-- Key files: `docs/codex.md`, `docs/deploy/railway-beta.md`, `docs/adr/0001-metadata-only-llm-failure-localization.md`, `docs/research/Backend-flow/00-overview.md`, `docs/research/AI-flow/04-orchestrator-index.md`
+- Purpose: Human project documentation, deployment guidance, ADRs, generated matrices.
+- Contains: `docs/codex.md`, `docs/deploy/railway-beta.md`, `docs/adr/*.md`, `docs/capability-matrix.md`.
+- Key files: `docs/codex.md`, `docs/deploy/railway-beta.md`, `docs/adr/0001-metadata-only-llm-failure-localization.md`, `docs/adr/0002-correction-authority-and-meal-intent.md`.
 
-**`data/`:**
-- Purpose: Local runtime persistence for development.
-- Contains: SQLite database/WAL files, durable assets, staged uploads, UAT asset folders.
-- Key files: `data/nutrition.db`, `data/assets/meal-images/`, `data/uploads-staging/`
+**`.planning/`:**
+- Purpose: GSD workflow state and planning artifacts.
+- Contains: Project state, roadmap/milestones, active phases, quick tasks, codebase maps.
+- Key files: `.planning/STATE.md`, `.planning/ROADMAP.md`, `.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/STRUCTURE.md`.
+
+**`.codex/skills/`:**
+- Purpose: Repo-local Codex skill instructions.
+- Contains: Nutrition verification, test generation, code review, harness review/scenario creation, Railway smoke, security review, milestone closeout skills.
+- Key files: `.codex/skills/nutrition-verify-change/SKILL.md`, `.codex/skills/nutrition-gen-test/SKILL.md`, `.codex/skills/nutrition-new-harness-scenario/SKILL.md`.
 
 ## Key File Locations
 
 **Entry Points:**
-- `server/index.ts`: Production server entry; creates `OpenAIProvider`, builds app, listens on configured port.
-- `server/app.ts`: Backend composition root; wire new services, routes, publisher, orchestrator dependencies, and static serving here.
-- `client/src/main.tsx`: React DOM entry.
-- `client/src/App.tsx`: Client session/onboarding/main-layout gate.
+- `server/index.ts`: Production backend entry, `OpenAIProvider` construction, logging, listen call.
+- `server/app.ts`: Testable Fastify app factory and dependency composition root.
+- `client/src/main.tsx`: React DOM mount.
+- `client/src/App.tsx`: Top-level UI gate for onboarding, recovery, loading, and main layout.
 - `tests/harness/run.ts`: Deterministic harness CLI entry.
 
 **Configuration:**
-- `package.json`: Yarn scripts, ESM package type, runtime/dev dependencies.
-- `tsconfig.json`: Shared strict TypeScript config for server, tests, client, and Vite config.
-- `client/vite.config.ts`: Vite root, React/Tailwind plugins, dev proxy, and client output directory.
-- `server/config.ts`: Centralized server environment configuration.
-- `drizzle.config.ts`: Drizzle Kit SQLite schema/migration configuration.
-- `.env`: Present - contains environment configuration and must not be read or quoted.
-- `.env.example`: Example environment configuration.
-- `AGENTS.md`: Local workflow, architecture, verification, and branch/promotion rules.
+- `package.json`: Yarn scripts and runtime/dev dependency declarations.
+- `tsconfig.json`: Strict ESM TypeScript config across `server`, `client/src`, `tests`, and Vite config.
+- `client/vite.config.ts`: Vite React/Tailwind config, `/api` dev proxy, `dist/client` build output.
+- `drizzle.config.ts`: Drizzle SQLite schema and migration output config.
+- `server/config.ts`: Runtime config for model, DB, assets, uploads, guest sessions, port, client dist, timezone.
+- `.env`: Present, contains local environment configuration; do not read or quote contents.
+- `.env.example`: Present, contains example environment configuration; do not read or quote contents.
 
 **Core Logic:**
-- `server/routes/chat.ts`: Chat JSON/SSE route, upload staging, durable asset creation, active turn cancellation, SSE terminal events, route fallbacks.
-- `server/orchestrator/index.ts`: Model loop, prompt/history/tool orchestration, fallback behavior, mutation receipt handling.
-- `server/orchestrator/tools.ts`: LLM tool definitions and tool-side domain execution.
-- `server/orchestrator/tool-contract.ts`: Tool validation/source guard/controlled failure runner.
-- `server/services/meal-transactions.ts`: Revisioned meal writes, optimistic preconditions, asset references, soft deletes.
-- `server/services/history-query.ts`: History filtering, pagination, trends, and DTO projection.
-- `server/services/guest-session.ts`: HMAC signed guest-session cookies.
-- `server/lib/guest-session-resolver.ts`: Protected-route authorization helper.
-- `client/src/store.ts`: Client state boundary.
-- `client/src/api.ts`: Client HTTP and chat stream transport boundary.
-- `client/src/sse.ts`: Client EventSource boundary.
-- `client/src/components/MainLayout.tsx`: Main app shell, SSE subscription, day rollover refresh, and screen routing.
+- `server/routes/chat.ts`: Chat JSON/SSE transport, upload staging, fallback persistence, cancellation, summary publish timing.
+- `server/orchestrator/index.ts`: Model/tool loop, state accumulation, mutation receipts, fallback behavior.
+- `server/orchestrator/tools.ts`: Tool contracts, validation, dispatch, controlled replies, redacted logging.
+- `server/services/meal-transactions.ts`: Meal transaction/revision writes, optimistic revision preconditions, soft delete.
+- `server/services/meal-correction.ts`: Historical meal lookup, pending selection, numeric correction flows.
+- `server/services/history-query.ts`: History pagination, search, trends, and day snapshots.
+- `server/services/guest-session.ts`: Signed active/resume guest-session tokens.
+- `server/realtime/publisher.ts`: In-process SSE fan-out.
+- `client/src/store.ts`: Zustand state boundary and localStorage persistence.
+- `client/src/api.ts`: REST/streaming client transport and payload normalization.
+- `client/src/sse.ts`: EventSource setup and SSE payload guards.
+- `client/src/sse-summary-coordinator.ts`: Reconcile meal rows and summary envelopes.
 
 **Testing:**
-- `tests/unit/*.test.ts`: Unit and contract tests.
-- `tests/integration/*.test.ts`: App-level Fastify/SQLite integration tests.
-- `tests/harness/scenarios/*.ts`: Deterministic proof scenarios run by `yarn verify:harness -- <scenario>`.
-- `tests/harness/scenarios/*.mjs`: Direct browser/visual harness scripts; follow artifact README or phase docs rather than `yarn verify:harness`.
-- `tests/helpers/spy-hooks.ts`: Typed orchestrator hook spies.
-- `tests/harness/artifacts/**`: Generated verification evidence; regenerate, do not hand-edit.
+- `tests/unit/*.test.ts`: Pure logic, UI source contracts, store/transport helpers, service unit behavior.
+- `tests/integration/*.test.ts`: Fastify routes, services, SSE, orchestrator, SQLite-backed flows.
+- `tests/harness/scenarios/*.ts`: Deterministic boundary scenarios run by `yarn verify:harness -- <scenario>`.
+- `tests/harness/scenarios/*.mjs`: Direct browser/visual harness scripts.
+- `tests/harness/artifacts/**`: Generated verification evidence; regenerate through matching harness commands.
 
 ## Naming Conventions
 
 **Files:**
-- Backend route files use kebab-case matching API domains: `server/routes/day-snapshot.ts`, `server/routes/assets.ts`, `server/routes/observability.ts`.
-- Backend service files use kebab-case domain names and export `createXService()`: `server/services/food-logging.ts`, `server/services/meal-transactions.ts`, `server/services/history-query.ts`.
-- Orchestrator modules use kebab-case for focused subdomains: `server/orchestrator/tool-contract.ts`, `server/orchestrator/source-text-guard.ts`, `server/orchestrator/mutation-receipts.ts`.
-- React component files use PascalCase: `client/src/components/ChatPanel.tsx`, `client/src/components/MealTimeline.tsx`, `client/src/components/onboarding/StepGoal.tsx`.
-- Client helper files use kebab-case or concise domain names: `client/src/lib/chat-scroll.ts`, `client/src/lib/history-week.ts`, `client/src/sse-summary-coordinator.ts`.
-- Tests use `*.test.ts`; integration tests sometimes include `.integration.test.ts` for cross-boundary chat flows: `tests/integration/chat-goal-update.integration.test.ts`.
-- Harness scenarios use kebab-case: `tests/harness/scenarios/guest-session-hardening.ts`, `tests/harness/scenarios/meal-image-continuity.ts`.
+- Backend route files use lowercase kebab or single words under `server/routes/`: `server/routes/day-snapshot.ts`, `server/routes/chat.ts`.
+- Backend services use lowercase kebab or domain nouns under `server/services/`: `server/services/food-logging.ts`, `server/services/meal-transactions.ts`.
+- Orchestrator helpers use lowercase kebab by concern: `server/orchestrator/system-prompt.ts`, `server/orchestrator/source-text-guard.ts`.
+- React component files use PascalCase: `client/src/components/MainLayout.tsx`, `client/src/components/HistoryScreen.tsx`.
+- Client helper files use lowercase kebab or domain nouns: `client/src/meal-edit-payload.ts`, `client/src/lib/onboarding-flow.ts`.
+- Tests use `*.test.ts` for unit/integration and scenario names under `tests/harness/scenarios/`: `tests/integration/chat-api.test.ts`, `tests/harness/scenarios/boundary-contracts.ts`.
 
 **Directories:**
-- Runtime backend code lives under `server/` by architectural layer (`routes`, `services`, `orchestrator`, `db`, `llm`, `lib`, `realtime`, `observability`).
-- Runtime frontend code lives under `client/src/` by UI boundary (`components`, `lib`, `contracts`) plus top-level transport/state files.
-- Tests are split by verification level: `tests/unit/`, `tests/integration/`, `tests/harness/`.
-- Generated SQL migrations live under `drizzle/`; generated harness proof artifacts live under `tests/harness/artifacts/`.
+- Use domain/layer directories: `server/routes`, `server/services`, `server/orchestrator`, `client/src/components`, `client/src/lib`, `tests/integration`, `tests/harness/scenarios`.
+- Onboarding component substeps live under `client/src/components/onboarding/`.
+- Generated migrations live under `drizzle/` and generated harness evidence lives under `tests/harness/artifacts/`.
 
 ## Where to Add New Code
 
-**New API Route:**
-- Primary code: Add `server/routes/<domain>.ts` with `register<Domain>Routes(app, deps)`.
-- Wiring: Register it in `server/app.ts` and pass only the required services.
-- Auth: Use `server/lib/guest-session-resolver.ts` for browser-protected routes.
-- Tests: Add route coverage in `tests/integration/<domain>-api.test.ts`; use `buildApp()` with `MockLLMProvider` or targeted test providers.
+**New Backend API Feature:**
+- Primary code: Add the transport boundary in `server/routes/<feature>.ts`.
+- Domain code: Add reusable logic in `server/services/<feature>.ts`.
+- Composition: Wire the service and route in `server/app.ts`.
+- Tests: Add route/service coverage in `tests/integration/<feature>-api.test.ts`; use real SQLite through `buildApp()`.
 
-**New Domain Service:**
-- Primary code: Add `server/services/<domain>.ts` with a `create<Domain>Service(db, opts?)` factory.
-- Wiring: Instantiate it in `server/app.ts`; expose it through `AppServices` only when harness/integration tests need in-process access.
-- Tests: Add focused tests in `tests/unit/<domain>.test.ts` for pure service behavior or `tests/integration/<domain>-api.test.ts` for route-backed behavior.
+**New AI Tool or Orchestrator Behavior:**
+- Tool schema/validation/execution: `server/orchestrator/tools.ts`.
+- Prompt policy: `server/orchestrator/system-prompt.ts`.
+- Reply ownership/receipt copy: `server/orchestrator/mutation-receipts.ts`.
+- Provider-agnostic loop changes: `server/orchestrator/index.ts`.
+- Tests: Use `tests/integration/orchestrator.test.ts`, chat integration tests, and harness scenarios in `tests/harness/scenarios/` when boundary proof is needed.
 
-**New Orchestrator Tool:**
-- Primary code: Add contract, schema, definition, and executor path in `server/orchestrator/tools.ts`; use `runContract()` from `server/orchestrator/tool-contract.ts`.
-- Prompt: Update `server/orchestrator/system-prompt.ts` only when model routing instructions must change.
-- Tests: Add `tests/unit/tools.test.ts` / `tests/unit/tool-contract.test.ts` coverage and integration or harness coverage when the tool mutates state.
+**New Persistence Entity or Query:**
+- Schema: `server/db/schema.ts`.
+- Migration: Generate SQL into `drizzle/` with `yarn db:generate`.
+- Service API: Add queries/mutations under `server/services/<domain>.ts`.
+- Tests: Add unit coverage for pure projection helpers and integration coverage for SQLite-backed behavior.
 
-**New LLM Provider Behavior:**
-- Primary code: Update shared provider types in `server/llm/types.ts` and implementations in `server/llm/openai.ts` / `server/llm/mock.ts`.
-- Wiring: Keep provider creation at `server/index.ts` or tests; do not instantiate runtime providers in services.
-- Tests: Add provider-specific unit tests under `tests/unit/openai-provider.test.ts` or orchestrator integration tests under `tests/integration/orchestrator.test.ts`.
+**New Client Screen or UI Surface:**
+- Component: `client/src/components/<ScreenName>.tsx`.
+- Navigation/state: `client/src/store.ts`.
+- Layout shell wiring: `client/src/components/MainLayout.tsx`.
+- Shared types: `client/src/types.ts`.
+- Transport helpers: `client/src/api.ts` or `client/src/sse.ts` only when the screen needs server data.
 
-**New Client Screen:**
-- Primary code: Add a PascalCase component under `client/src/components/`.
-- State: Add shared app state/actions to `client/src/store.ts`; use local component state only for screen-local UI details.
-- Navigation: Wire top-level screen routing in `client/src/components/MainLayout.tsx` and tab affordances in `client/src/components/BottomTabBar.tsx` when applicable.
-- Tests: Add markup/source contract tests under `tests/unit/<screen-or-contract>.test.ts`.
+**New Onboarding Step:**
+- Step component: `client/src/components/onboarding/Step<Name>.tsx`.
+- Flow helpers: `client/src/lib/onboarding-flow.ts` and `client/src/lib/onboarding-stepper-flow.ts`.
+- Intake validation: `client/src/lib/onboarding-intake-validation.ts` and `server/routes/device.ts`.
+- Types: `client/src/types.ts` and `server/services/device.ts`.
 
-**New Client Transport Function:**
-- Primary code: Add `fetch()` wrapper and response shape guards/normalizers in `client/src/api.ts`.
-- Realtime: Add EventSource event parsing to `client/src/sse.ts` and coordination logic to `client/src/sse-summary-coordinator.ts` when events affect summary/meals/targets.
-- Tests: Add `tests/unit/api-client.test.ts`, `tests/unit/sse-client.test.ts`, or integration tests for matching server routes.
+**New Realtime Event:**
+- Server publish method: `server/realtime/publisher.ts`.
+- SSE route subscription remains in `server/routes/sse.ts`.
+- Client parser/guards: `client/src/sse.ts`.
+- Client state reconciliation: Add a coordinator near `client/src/sse-summary-coordinator.ts` or a store action in `client/src/store.ts`.
 
-**New Shared Client Helper:**
-- Primary code: Add pure helpers under `client/src/lib/<domain>.ts`.
-- Tests: Add `tests/unit/<domain>.test.ts` or source-contract tests if behavior is UI contract driven.
+**New Asset or Upload Behavior:**
+- Upload parsing and cleanup: `server/routes/chat.ts`.
+- Durable asset persistence and references: `server/services/assets.ts`.
+- Asset serving: `server/routes/assets.ts`.
+- Client file preparation: `client/src/api.ts`.
+- Harness proof: Add/update scenarios under `tests/harness/scenarios/`.
 
-**New Database Table or Index:**
-- Schema: Update `server/db/schema.ts`.
-- Migration: Generate SQL under `drizzle/` with `yarn db:generate`; apply with `yarn db:migrate`.
-- Services: Access the table through `server/services/*.ts`, not routes/components.
-- Tests: Add `tests/unit/db-migrate.test.ts` coverage for migration-sensitive behavior and integration tests using real SQLite.
-
-**New Harness Scenario:**
-- Primary code: Add `tests/harness/scenarios/<scenario>.ts` exporting a `VerificationScenario`.
-- Fixture: Use `createScenarioApp()` from `tests/harness/app-fixture.ts` or the runner-provided app context; close fixtures in `finally` when manually created.
-- Artifacts: Let `tests/harness/artifacts.ts` write evidence under `tests/harness/artifacts/<scenario>/latest/`.
-- Verification: Run `yarn verify:harness -- <scenario>` for TypeScript scenarios.
-
-**Utilities:**
-- Backend shared helpers: `server/lib/<domain>.ts`
-- Frontend shared helpers: `client/src/lib/<domain>.ts`
-- Repo scripts: `scripts/<task>.mjs`
-- Test helpers: `tests/helpers/<domain>.ts` or `tests/harness/<domain>.ts`
+**New Utility:**
+- Server date/session/meal-period helpers: `server/lib/*.ts`.
+- Client pure UI/domain helpers: `client/src/lib/*.ts`.
+- Test-only helpers: `tests/helpers/*.ts` or `tests/harness/*.ts`.
+- Shared runtime types should stay scoped to server or client unless both sides already use a generated/duplicated DTO in `client/src/types.ts`.
 
 ## Special Directories
 
-**`.planning/`:**
-- Purpose: GSD workflow artifacts consumed by planning/execution agents.
-- Generated: Mixed; workflow-generated and manually reviewed planning files.
-- Committed: Project-dependent; treat active GSD artifacts as first-class workflow outputs.
-
-**`.codex/skills/`:**
-- Purpose: Local project skill instructions used by Codex.
-- Generated: No.
-- Committed: Local/project-specific according to repo policy; do not duplicate policy into legacy shims.
-
-**`.claude/`:**
-- Purpose: Legacy Claude compatibility shims and settings.
-- Generated: No.
-- Committed: Compatibility-only; source of truth is `AGENTS.md` and `docs/codex.md`.
-
 **`data/`:**
-- Purpose: Local runtime database, WAL files, assets, and staged uploads.
-- Generated: Yes.
-- Committed: Only placeholders or intentional fixtures; runtime DB/assets should generally remain local.
+- Purpose: Local runtime SQLite database, WAL/SHM files, uploads, and assets.
+- Generated: Yes, except `data/.gitkeep`.
+- Committed: Only `data/.gitkeep` is tracked.
 
 **`dist/`:**
-- Purpose: Build output, including `dist/client` served by Fastify when present.
+- Purpose: Build output for the Vite client and TypeScript declarations/output when generated.
 - Generated: Yes.
-- Committed: No for normal development output.
+- Committed: No.
 
 **`drizzle/`:**
-- Purpose: Generated SQL migrations and metadata snapshots.
-- Generated: Yes, via Drizzle Kit.
-- Committed: Yes; migrations are source-controlled schema history.
+- Purpose: Source-controlled database migrations and schema snapshots generated from `server/db/schema.ts`.
+- Generated: Yes, by Drizzle.
+- Committed: Yes.
 
 **`tests/harness/artifacts/`:**
-- Purpose: Generated deterministic verification evidence.
-- Generated: Yes, via harness commands.
-- Committed: Yes when evidence is intentional for the phase; do not hand-edit.
+- Purpose: Generated deterministic scenario evidence.
+- Generated: Yes.
+- Committed: No in the current tracked file list; treat as generated evidence and regenerate with the matching harness command.
+
+**`.planning/`:**
+- Purpose: GSD workflow state, milestones, phases, and codebase maps.
+- Generated: Mixed; created/updated by GSD workflows.
+- Committed: Codebase map files are tracked; keep updates scoped to the active GSD task.
+
+**`.codex/skills/`:**
+- Purpose: Repo-local Codex workflow instructions.
+- Generated: No.
+- Committed: Local/project workflow guidance; read `SKILL.md` indexes before task-specific work.
+
+**`.claude/`:**
+- Purpose: Compatibility shims and local Claude settings.
+- Generated: Mixed.
+- Committed: Some compatibility files may be tracked; keep project rules in `AGENTS.md` and `docs/codex.md`.
 
 **`.playwright-mcp/`:**
-- Purpose: Local browser automation logs, screenshots, and smoke artifacts.
+- Purpose: Local browser automation logs, screenshots, and captured pages.
 - Generated: Yes.
-- Committed: No for routine local artifacts.
+- Committed: No in the current tracked file list.
 
 ---
 
-*Structure analysis: 2026-05-26*
+*Structure analysis: 2026-05-29*

@@ -1,331 +1,299 @@
-<!-- refreshed: 2026-05-30 -->
+<!-- refreshed: 2026-05-29 -->
 # Architecture
 
-**Analysis Date:** 2026-05-30
+**Analysis Date:** 2026-05-29
 
 ## System Overview
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                 React Client + Same-Origin API              │
-├──────────────────┬──────────────────┬───────────────────────┤
-│  App shell/state │  Transport APIs  │  Screen components    │
-│ `client/src/App.tsx` │ `client/src/api.ts` │ `client/src/components/` │
-│ `client/src/store.ts` │ `client/src/sse.ts` │ `client/src/components/MainLayout.tsx` │
-└────────┬─────────┴────────┬─────────┴──────────┬────────────┘
-         │                  │                     │
-         ▼                  ▼                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Fastify HTTP Boundary                    │
-│ `server/index.ts` -> `server/app.ts` -> `server/routes/*.ts` │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│            Domain Services + Orchestrator Runtime           │
-│ `server/services/*.ts`  `server/orchestrator/*.ts`          │
-│ `server/realtime/publisher.ts` `server/lib/*.ts`            │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│        SQLite, Durable Assets, External LLM Provider        │
-│ `server/db/schema.ts` `drizzle/` `data/assets/`             │
-│ `server/llm/openai.ts`                                     │
-└─────────────────────────────────────────────────────────────┘
+Browser React app
+`client/src/main.tsx`, `client/src/App.tsx`, `client/src/components/*`
+        |
+        | fetch/FormData/EventSource through `client/src/api.ts` and `client/src/sse.ts`
+        v
+Fastify HTTP/SSE transport
+`server/index.ts` -> `server/app.ts` -> `server/routes/*.ts`
+        |
+        | dependency-injected services and orchestrator
+        v
+Domain + AI workflow layer
+`server/services/*.ts`, `server/orchestrator/*.ts`, `server/llm/*.ts`
+        |
+        | Drizzle + better-sqlite3, filesystem assets, OpenAI provider
+        v
+SQLite + local files + external LLM
+`server/db/schema.ts`, `drizzle/*`, `data/`, `server/llm/openai.ts`
 ```
 
 ## Component Responsibilities
 
 | Component | Responsibility | File |
 |-----------|----------------|------|
-| Server process entry | Creates the production Fastify app with `OpenAIProvider`, logger redaction, configured port, and `0.0.0.0` listen host. | `server/index.ts` |
-| App composition root | Creates the SQLite DB, services, orchestrator, realtime publisher, Fastify plugins, route registrations, and optional static client serving. Add new route/service wiring here. | `server/app.ts` |
-| Server config | Centralizes all server `process.env` reads and defaults for model, DB path, asset paths, guest-session cookies, runtime port, and timezone contract. | `server/config.ts` |
-| HTTP routes | Own request validation, cookie-backed auth resolution, transport-specific response shaping, SSE framing, and route-level fallbacks. | `server/routes/*.ts` |
-| Guest-session resolver | Converts active/resume cookies into an authorized `deviceId` and clears invalid cookies. Protected routes should use this helper instead of raw `deviceId` inputs. | `server/lib/guest-session-resolver.ts` |
-| Domain services | Own reusable persistence and domain operations over Drizzle/better-sqlite3. | `server/services/*.ts` |
-| Meal transaction core | Owns revisioned meal writes, optimistic revision preconditions, soft deletes, nullable explicit meal-period authority, and asset references. | `server/services/meal-transactions.ts`, `server/lib/meal-period.ts` |
-| Orchestrator | Owns model prompt construction, history loading, tool-call loop, controlled fallbacks, streaming handoff, and mutation receipt rules. | `server/orchestrator/index.ts` |
-| Tool contracts | Own LLM-facing tool schemas, Zod validation, source-text guard execution, structured clarification facts, redacted logging summaries, and controlled tool failure mapping. | `server/orchestrator/tool-contract.ts`, `server/orchestrator/tools.ts` |
-| Correction authority | Owns backend evidence checks for meal numeric edits, meal numeric proposals, target ranking, rendered clarification options, and stale selection recovery. | `server/orchestrator/meal-numeric-authority.ts`, `server/services/meal-numeric-proposals.ts`, `server/services/meal-correction.ts`, `server/orchestrator/mutation-receipts.ts` |
-| LLM providers | Define runtime and test model-provider adapters. Runtime uses OpenAI; tests and harnesses inject deterministic providers. | `server/llm/openai.ts`, `server/llm/mock.ts`, `server/llm/types.ts` |
-| Realtime publisher | Owns in-memory per-device SSE subscribers and emits `daily_summary` / `goals_update` events. | `server/realtime/publisher.ts` |
-| Database schema | Defines SQLite tables for devices, chat messages, assets, revisioned meals, asset references, and turn states. | `server/db/schema.ts` |
-| Migrations | Applies Drizzle migrations and reconciles partial migration state. | `server/db/migrate.ts`, `drizzle/` |
-| Client state boundary | Owns Zustand state, localStorage persistence, guest-session recovery state, provisional chat bubble state, daily-summary guard, and navigation state. | `client/src/store.ts` |
-| Client transport | Owns `fetch()` wrappers, response normalization, image compression, SSE stream parsing, and typed client-side errors. | `client/src/api.ts` |
-| Client app shell | Gates onboarding/session recovery/main UI and wires viewport shell behavior, SSE subscription, meal refresh, and day rollover. | `client/src/App.tsx`, `client/src/components/MainLayout.tsx` |
-| Deterministic harness | Boots the real app against in-memory SQLite and deterministic LLM providers, then writes proof artifacts. | `tests/harness/app-fixture.ts`, `tests/harness/run.ts`, `tests/harness/scenarios/*.ts` |
+| Server entry | Instantiate the production `OpenAIProvider`, configure Fastify logging, and listen on `0.0.0.0` | `server/index.ts:1` |
+| App composition root | Create DB, services, orchestrator, realtime publisher, route registrations, CORS/multipart/static serving | `server/app.ts:75` |
+| Config boundary | Centralize environment reads for DB paths, upload paths, guest sessions, client dist, port, timezone, and model | `server/config.ts:9` |
+| DB client | Open SQLite with WAL and foreign keys, apply in-memory migrations for tests, validate persistent schema on boot | `server/db/client.ts:34` |
+| Schema | Define devices, chat messages, assets, meal transactions/revisions/items, receipts, asset references, and turn states | `server/db/schema.ts:4` |
+| Route layer | Own HTTP/SSE validation, session resolution, request parsing, response shaping, and transport-specific fallback behavior | `server/routes/*.ts` |
+| Guest-session resolver | Convert signed active/resume cookies into a verified device ownership context for protected routes | `server/lib/guest-session-resolver.ts:32` |
+| Services | Own reusable domain and persistence operations over Drizzle and SQLite transactions | `server/services/*.ts` |
+| Orchestrator | Own model prompt construction, chat history, tool loop, mutation receipts, fallbacks, and stream/non-stream replies | `server/orchestrator/index.ts:630` |
+| Tool contracts | Define LLM tools, Zod validation, controlled replies, tool dispatch, and redacted hook summaries | `server/orchestrator/tools.ts:1907` |
+| LLM provider | Adapt OpenAI chat, streaming, tool-call merging, aborts, and provider error metadata behind `LLMProvider` | `server/llm/openai.ts:79` |
+| Realtime publisher | Maintain in-process SSE subscribers and publish `daily_summary` / `goals_update` events by device | `server/realtime/publisher.ts:13` |
+| React app shell | Gate onboarding, guest-session recovery, and main authenticated UI state | `client/src/App.tsx:7` |
+| Zustand store | Own single client state boundary, localStorage persistence, provisional chat bubbles, summaries, meals, and navigation | `client/src/store.ts:100` |
+| Client transport | Normalize REST/SSE payloads, image compression, credentials, conflicts, and API-specific errors | `client/src/api.ts:475`, `client/src/sse.ts:67` |
+| Harness fixture | Boot the real Fastify app with `:memory:` SQLite and deterministic LLM providers for scenario evidence | `tests/harness/app-fixture.ts:65` |
 
 ## Pattern Overview
 
-**Overall:** Layered TypeScript monolith with dependency-injected Fastify backend, Drizzle SQLite persistence, LLM orchestration as an application service, and a React/Zustand same-origin client.
+**Overall:** Layered TypeScript monolith with dependency-injected backend services, server-owned AI/tool orchestration, and a client-side state/transport split.
 
 **Key Characteristics:**
-- `server/app.ts` is the only backend composition root: instantiate DB, services, `RealtimePublisher`, and `createOrchestrator()` there.
-- `server/routes/*.ts` own HTTP/SSE transport behavior and call injected services; keep persistence logic in `server/services/*.ts`.
-- `server/orchestrator/index.ts` controls the LLM loop and uses `server/orchestrator/tools.ts` / `server/orchestrator/tool-contract.ts` for all model tool side effects.
-- v2.4 clarification-only tool results terminate through renderer-owned controlled replies; `ToolExecutionResult.clarification` carries allowlisted facts and avoids serialized JSON reparsing in `server/orchestrator/index.ts`.
-- v2.4 meal correction authority is backend-owned: explicit numeric evidence is checked in `server/orchestrator/meal-numeric-authority.ts`, backend proposal state lives in `server/services/meal-numeric-proposals.ts`, and correction target selection/rendered options live in `server/services/meal-correction.ts`.
-- `client/src/store.ts` is the single client state boundary; components select actions/state from it and use `client/src/api.ts` / `client/src/sse.ts` for transport.
-- Local TypeScript imports use explicit `.js` specifiers throughout `server/`, `client/src/`, and `tests/`.
+- Backend runtime composition happens in `server/app.ts`; route modules receive concrete dependencies instead of importing or instantiating runtime services directly.
+- HTTP routes in `server/routes/*.ts` remain transport boundaries. They resolve guest sessions, validate payloads, call services/orchestrator, and shape responses.
+- Services in `server/services/*.ts` own DB queries, transactions, and persistence semantics. Use Drizzle builders for ordinary queries and raw SQLite only for deliberate hot paths such as `server/services/meal-transactions.ts:308`.
+- The AI workflow is isolated behind `server/orchestrator/index.ts`, `server/orchestrator/tools.ts`, and `server/llm/types.ts`; runtime uses `OpenAIProvider`, while tests and harnesses inject deterministic providers.
+- Client state is centralized in `client/src/store.ts`; API and SSE parsing are centralized in `client/src/api.ts` and `client/src/sse.ts`.
 
 ## Layers
 
-**Client UI Layer:**
-- Purpose: Render onboarding, home, chat, history, settings, and meal-edit screens.
-- Location: `client/src/components/`
-- Contains: React components, screen shells, icons/primitives, onboarding step components.
-- Depends on: `client/src/store.ts`, `client/src/api.ts`, `client/src/sse.ts`, `client/src/lib/*.ts`, `client/src/types.ts`
-- Used by: `client/src/App.tsx`, `client/src/main.tsx`
+**Backend Composition:**
+- Purpose: Wire the app and enforce cross-cutting runtime contracts.
+- Location: `server/app.ts`
+- Contains: DB creation, service factories, orchestrator factory, publisher singleton per app instance, route registration, static client serving.
+- Depends on: `server/config.ts`, `server/db/client.ts`, `server/services/*.ts`, `server/orchestrator/index.ts`, `server/routes/*.ts`.
+- Used by: `server/index.ts`, `tests/integration/*.test.ts`, `tests/harness/app-fixture.ts`.
 
-**Client State and Transport Layer:**
-- Purpose: Hold app state, normalize server payloads, parse chat streaming events, manage guest-session recovery, and sync realtime summary/goal events.
-- Location: `client/src/store.ts`, `client/src/api.ts`, `client/src/sse.ts`, `client/src/sse-summary-coordinator.ts`
-- Contains: Zustand store actions, `fetch()` wrappers, EventSource connection management, stream parser callbacks, response guards.
-- Depends on: Browser APIs, `client/src/types.ts`, `client/src/lib/*.ts`
-- Used by: `client/src/components/*.tsx`, `client/src/App.tsx`
+**Backend Transport:**
+- Purpose: Own HTTP and SSE protocol details.
+- Location: `server/routes/*.ts`
+- Contains: Fastify route registration, cookie-backed session checks, multipart parsing, request validation, SSE framing, response DTO projection.
+- Depends on: Service interfaces, `server/lib/guest-session-resolver.ts`, `server/realtime/publisher.ts`, selected orchestrator helpers.
+- Used by: Fastify through `server/app.ts`.
 
-**HTTP Route Layer:**
-- Purpose: Validate request bodies/query params, resolve signed guest sessions, shape responses, own SSE framing, and translate domain errors to HTTP status codes.
-- Location: `server/routes/`
-- Contains: `registerDeviceRoutes()`, `registerChatRoutes()`, `registerMealRoutes()`, `registerHistoryRoutes()`, `registerDaySnapshotRoutes()`, `registerAssetRoutes()`, `registerSSERoutes()`, `registerObservabilityRoutes()`.
-- Depends on: Injected services from `server/app.ts`, `server/lib/guest-session-resolver.ts`, `server/realtime/publisher.ts`, route-local validation helpers.
-- Used by: `server/app.ts`
+**Domain Services:**
+- Purpose: Own business rules that can be reused by routes, tools, tests, and harnesses.
+- Location: `server/services/*.ts`
+- Contains: Device targets, chat history, assets, meal transactions, meal corrections, history queries, summaries, proposal state, guest-session signing.
+- Depends on: `server/db/schema.ts`, `server/db/client.ts`, `server/lib/*.ts`.
+- Used by: Routes in `server/routes/*.ts`, AI tools in `server/orchestrator/tools.ts`, harness setup in `tests/harness/app-fixture.ts`.
 
-**Domain Service Layer:**
-- Purpose: Persist and query devices, chat messages, assets, meal transactions, summaries, history, target generation, guest sessions, and turn state.
-- Location: `server/services/`
-- Contains: Factory functions such as `createDeviceService()`, `createFoodLoggingService()`, `createSummaryService()`, `createHistoryQueryService()`, `createAssetService()`, `createGuestSessionService()`.
-- Depends on: `server/db/client.ts`, `server/db/schema.ts`, `server/lib/time.ts`, Drizzle query builders, selected raw better-sqlite3 hot-path queries.
-- Used by: `server/routes/*.ts`, `server/orchestrator/*.ts`, `tests/*`
+**AI Orchestration:**
+- Purpose: Convert user turns into model calls, tool executions, renderer-owned receipts, and fallback-safe replies.
+- Location: `server/orchestrator/*.ts`
+- Contains: `MAX_ROUNDS = 3` loop, system prompt sections, tool registry, mutation receipt rendering, hallucination guards, provider metadata hooks, LLM trace artifacts.
+- Depends on: `server/llm/types.ts`, injected services, `server/services/summary.ts`, `server/services/food-logging.ts`, `server/realtime/publisher.ts`.
+- Used by: `server/routes/chat.ts`.
 
-**Orchestrator Layer:**
-- Purpose: Translate user turns into model messages, execute LLM tools, record tool summaries, detect unsafe model behavior, and return JSON or streamable replies.
-- Location: `server/orchestrator/`
-- Contains: `createOrchestrator()`, system prompt rendering, history loading, tool registry/contracts, mutation receipts, structured clarification facts, hooks, LLM trace support, source-text and numeric authority guards.
-- Depends on: Injected `LLMProvider`, chat/summary/food/device/goal services, `RealtimePublisher`, `server/lib/time.ts`.
-- Used by: `server/routes/chat.ts`, integration tests, harness scenarios.
+**Persistence:**
+- Purpose: Store device, chat, asset, meal, revision, proposal, and turn-state data.
+- Location: `server/db/*.ts`, `drizzle/*`, `data/`
+- Contains: Drizzle schema, migration runner/client, generated SQL migrations, runtime SQLite DB files.
+- Depends on: `better-sqlite3`, `drizzle-orm`, `drizzle-kit`.
+- Used by: Service factories in `server/services/*.ts`.
 
-**Persistence Layer:**
-- Purpose: Store devices, chat history, assets, meal transactions/revisions/items, asset references, and turn state in SQLite.
-- Location: `server/db/`, `drizzle/`, `data/`
-- Contains: Drizzle schema, migration runner, generated SQL migrations, local SQLite files and asset directories.
-- Depends on: `better-sqlite3`, `drizzle-orm`, process configuration in `server/config.ts`.
-- Used by: `server/services/*.ts`, tests using `:memory:` fixtures.
+**Client Application:**
+- Purpose: Render onboarding, home, chat, history, settings, day detail, and meal edit flows.
+- Location: `client/src/*`
+- Contains: React components, Zustand store, API/SSE clients, shared client types and pure UI helpers.
+- Depends on: React, Zustand, browser `fetch`, browser `EventSource`, Vite build/runtime.
+- Used by: Browser runtime from `client/src/main.tsx`; production same-origin serving from `server/app.ts:162`.
 
-**Observability and Verification Layer:**
-- Purpose: Emit structured route/orchestrator events and prove boundary contracts with unit, integration, and harness tests.
-- Location: `server/observability/events.ts`, `tests/unit/`, `tests/integration/`, `tests/harness/`
-- Contains: structured event helpers, Node test suites, app fixtures, deterministic scenario runner, generated artifact output.
-- Depends on: Node built-in `node:test`, real Fastify app, real SQLite, injected mock/harness LLM providers.
-- Used by: GSD verification workflows and release checks.
+**Verification Harness:**
+- Purpose: Prove route, SSE, AI, upload, and UI boundary contracts with deterministic artifacts.
+- Location: `tests/harness/*`
+- Contains: Scenario runner, app fixture, deterministic streaming LLM, scenario files, artifact writer, browser `.mjs` scenarios.
+- Depends on: Real Fastify app through `server/app.ts`, in-memory SQLite, harness providers.
+- Used by: `yarn verify:harness -- <scenario>` from `package.json:17`.
 
 ## Data Flow
 
 ### Primary Chat Request Path
 
-1. Client sends multipart chat with `Accept: text/event-stream` from `sendMessageStream()` (`client/src/api.ts:609`).
-2. `registerChatRoutes()` resolves the signed guest session, parses multipart input, stores a turn entry in `activeChatTurns`, opens the SSE response, and schedules orchestrator work (`server/routes/chat.ts:1181`, `server/routes/chat.ts:1511`).
-3. `handleOrchestratorSSE()` creates durable assets, calls `orchestrator.handleMessage()`, streams `status` / `chunk` / `done` events, publishes summary events after mutations, and always cleans staged uploads (`server/routes/chat.ts:787`, `server/routes/chat.ts:906`, `server/routes/chat.ts:991`, `server/routes/chat.ts:1126`).
-4. `createOrchestrator().handleMessage()` loads device and compressed history, saves the user message, builds the system prompt and tool definitions, and runs up to `MAX_ROUNDS = 3` model/tool rounds (`server/orchestrator/index.ts:606`, `server/orchestrator/index.ts:621`, `server/orchestrator/index.ts:630`, `server/orchestrator/index.ts:717`).
-5. Tool calls run through contract validation and service execution before tool summaries are saved to chat history (`server/orchestrator/tool-contract.ts:111`, `server/orchestrator/index.ts:932`, `server/orchestrator/index.ts:973`).
-6. Client parses SSE frames, commits the provisional assistant bubble, updates daily summary/targets, and refreshes meals when needed (`client/src/api.ts:661`, `client/src/api.ts:703`, `client/src/store.ts:321`, `client/src/components/ChatPanel.tsx:96`).
+1. Browser submits a chat turn through JSON or streaming transport in `client/src/api.ts:553` and `client/src/api.ts:623`.
+2. `server/routes/chat.ts:1184` resolves the signed guest session with `server/lib/guest-session-resolver.ts:32`, parses multipart input, stages uploads, and chooses JSON vs SSE by the `Accept` header.
+3. `server/routes/chat.ts:1300` creates a durable asset when needed, then calls `orchestrator.handleMessage()`.
+4. `server/orchestrator/index.ts:641` loads the device and chat history, saves the user message at `server/orchestrator/index.ts:653`, builds the system prompt at `server/orchestrator/index.ts:777`, and enters the `MAX_ROUNDS` model/tool loop at `server/orchestrator/index.ts:836`.
+5. Tool calls dispatch through `server/orchestrator/tools.ts:2112` into services such as `server/services/food-logging.ts:49`, `server/services/summary.ts:20`, and `server/services/meal-correction.ts:572`.
+6. Meal mutations commit through transaction/revision semantics in `server/services/meal-transactions.ts:343`, `server/services/meal-transactions.ts:438`, or `server/services/meal-transactions.ts:492`.
+7. The orchestrator returns a renderer/model/fallback reply with summaries, targets, affected dates, and receipt metadata from `server/orchestrator/index.ts:991`, `server/orchestrator/index.ts:1078`, or `server/orchestrator/index.ts:1231`.
+8. The route writes assistant output and receipt references through `server/routes/chat.ts:227`, publishes summary updates through `server/routes/chat.ts:1368`, and emits JSON or SSE terminal events through `server/routes/chat.ts:1386` and `server/routes/chat.ts:1537`.
+9. The client normalizes final payloads in `client/src/api.ts:465`, commits provisional bubbles in `client/src/store.ts:321`, and reconciles daily summaries/meals through `client/src/sse-summary-coordinator.ts:23`.
 
-### v2.4 Meal Correction Authority Path
+### Onboarding and Guest Session Flow
 
-1. `find_meals` resolves correction targets through evidence tiers in `server/services/meal-correction.ts`: explicit date, pending/current-turn evidence, food labels, persisted meal period, inferred fallback, and recency tie-breaks.
-2. Ambiguous targets return backend-rendered numbered options and store exact rendered option facts for follow-up validation.
-3. Numeric `update_meal` calls require explicit current-turn numeric evidence from `server/orchestrator/meal-numeric-authority.ts`; vague numeric requests create renderer-owned clarification/proposal copy instead of mutation facts.
-4. Approved backend meal numeric proposals are revision-scoped and single-use through `server/services/meal-numeric-proposals.ts`.
-5. Stale selections and stale proposal approvals fail closed through existing revision preconditions and clarification copy without `daily_summary` publication.
+1. `client/src/App.tsx:20` shows onboarding when `client/src/store.ts:100` has no `deviceId`.
+2. `client/src/api.ts:486` submits intake to `POST /api/device`.
+3. `server/routes/device.ts:370` validates goal/intake fields, optionally calls target generation, creates the device via `server/services/device.ts:41`, and issues signed guest-session cookies through `server/services/guest-session.ts:188`.
+4. Existing browser sessions bootstrap or recover via `client/src/store.ts:188` and `client/src/api.ts:517`.
+5. Protected server routes resolve active/resume cookies through `server/lib/guest-session-resolver.ts:32`; route code uses the resolved `deviceId`, not query strings or custom browser headers.
 
-### JSON Chat Fallback Path
+### Realtime Summary and Goals Flow
 
-1. Non-SSE chat callers omit `Accept: text/event-stream`; `server/routes/chat.ts` branches into the JSON path (`server/routes/chat.ts:1207`).
-2. The JSON path still uses the same multipart parsing, durable asset creation, orchestrator, reply sanitization, summary publication, and cleanup logic (`server/routes/chat.ts:1297`, `server/routes/chat.ts:1303`, `server/routes/chat.ts:1365`, `server/routes/chat.ts:1498`).
-3. Client `sendMessage()` normalizes the returned reply, logged meal receipt, summary outcome, and asset URLs (`client/src/api.ts:539`, `client/src/api.ts:451`).
+1. `client/src/components/MainLayout.tsx:156` performs the initial meal load and `client/src/components/MainLayout.tsx:161` opens `/api/sse`.
+2. `server/routes/sse.ts:21` verifies the guest session, hijacks the response, subscribes through `server/realtime/publisher.ts:16`, and emits the initial `daily_summary`.
+3. Meal mutation routes and chat route publish summary envelopes through `server/realtime/publisher.ts:58`; goal changes publish through `server/realtime/publisher.ts:67`.
+4. `client/src/sse.ts:67` validates incoming payload shapes before invoking handlers.
+5. `client/src/sse-summary-coordinator.ts:65` refreshes meal rows before committing same-day mutation summaries, records historical affected dates, and ignores future summaries.
 
-### Guest Session and Protected API Path
+### Historical Query Flow
 
-1. Onboarding submits to `POST /api/device`, which validates goal/intake, creates a device, and issues active/resume cookies (`server/routes/device.ts:370`, `server/routes/device.ts:396`, `server/routes/device.ts:407`).
-2. Returning browser sessions call `POST /api/device/session`; active cookies are accepted, resume cookies are reissued, and legacy localStorage `deviceId` can migrate once (`server/routes/device.ts:411`, `server/routes/device.ts:419`, `server/routes/device.ts:429`, `server/routes/device.ts:444`).
-3. Protected routes call `resolveGuestSession()` and use its `deviceId`; invalid cookies trigger `clearSessionCookies()` (`server/lib/guest-session-resolver.ts:32`, `server/routes/meals.ts:133`, `server/routes/sse.ts:21`).
-4. Client `useStore.bootstrapGuestSession()` and `recoverGuestSession()` update localStorage and recovery state from `/api/device/session` (`client/src/store.ts:188`, `client/src/store.ts:214`, `client/src/api.ts:503`).
-
-### Meal Mutation and Realtime Summary Path
-
-1. REST meal edits/deletes resolve the guest session and validate revision preconditions (`server/routes/meals.ts:171`, `server/routes/meals.ts:273`, `server/services/meal-transactions.ts:220`).
-2. `createFoodLoggingService()` delegates mutation writes to `createMealTransactionsService()`, which creates revisioned records and asset references inside SQLite transactions (`server/services/food-logging.ts:46`, `server/services/meal-transactions.ts:334`, `server/services/meal-transactions.ts:347`).
-3. Routes recompute summary outcome with `buildSummaryOutcomeAfterMealCommit()` and publish a `daily_summary` SSE envelope through `RealtimePublisher` (`server/routes/meals.ts:236`, `server/routes/meals.ts:311`, `server/realtime/publisher.ts:58`).
-4. Client `connectSSE()` validates `daily_summary` / `goals_update` frames, and `createSSESummaryCoordinator()` reloads today's meals before committing same-day summaries (`client/src/sse.ts:67`, `client/src/sse-summary-coordinator.ts:23`, `client/src/sse-summary-coordinator.ts:50`).
-
-### History and Day Snapshot Path
-
-1. Client history screens call `getHistoryTrends()`, `getHistoryDaySnapshot()`, `getDaySnapshot()`, and `getMeals()` from `client/src/api.ts` (`client/src/api.ts:767`, `client/src/api.ts:790`, `client/src/api.ts:848`, `client/src/api.ts:856`).
-2. `server/routes/history.ts` validates flat query parameters and delegates to `createHistoryQueryService()` (`server/routes/history.ts:142`, `server/routes/history.ts:179`, `server/routes/history.ts:195`).
-3. `server/services/history-query.ts` validates date keys, encodes/decodes cursors, projects revisioned meal DTOs, and derives trends from current meal revisions (`server/services/history-query.ts:131`, `server/services/history-query.ts:159`, `server/services/history-query.ts:351`).
-4. `server/routes/day-snapshot.ts` combines summary and meal rows for a specific date through `createDaySnapshotService()` (`server/routes/day-snapshot.ts:17`, `server/routes/day-snapshot.ts:36`).
+1. The client calls history APIs through `client/src/api.ts:872` and `client/src/api.ts:880`.
+2. `server/routes/history.ts:142` resolves sessions and validates query parameters before calling `server/services/history-query.ts:446`.
+3. `server/services/history-query.ts:451` pages meals, `server/services/history-query.ts:505` searches item names with cursors and nutrition bounds, and `server/services/history-query.ts:621` aggregates trend buckets.
+4. Route responses are normalized into client meal entries by `client/src/api.ts:851`.
 
 **State Management:**
-- Server request state is per request except `server/routes/chat.ts` module-level `activeChatTurns`, which tracks cancellable in-flight SSE chat turns by `deviceId:turnId`.
-- Realtime server state is an in-memory `Map<string, FastifyReply[]>` inside `server/realtime/publisher.ts`.
-- Durable application state is SQLite via `server/db/schema.ts` and durable image files under `data/assets/`.
-- Client app state is centralized in Zustand in `client/src/store.ts`; persistent identity/targets mirror to browser `localStorage`, while signed ownership lives in HttpOnly cookies.
+- Server request state is per Fastify request except `server/routes/chat.ts:100`, which stores in-process active chat turns for cancellation, and `server/realtime/publisher.ts:14`, which stores in-process SSE subscribers.
+- Persistent domain state lives in SQLite through `server/db/schema.ts` and `drizzle/*`; durable images live under the configured assets directory from `server/config.ts:36`.
+- Client UI state lives in the single Zustand store at `client/src/store.ts:100`; device identity and daily targets are mirrored to `localStorage` at `client/src/store.ts:173`.
+- Client streaming response state is held as a provisional bubble in `client/src/store.ts:91` and finalized by `client/src/store.ts:321`.
 
 ## Key Abstractions
 
 **`buildApp()` Composition Root:**
-- Purpose: Assemble DB, services, orchestrator, plugins, routes, static serving, and test hooks.
-- Examples: `server/app.ts`, `tests/harness/app-fixture.ts`, `tests/integration/*.test.ts`
-- Pattern: Dependency injection via factory-created services and `AppOptions`; production injects `OpenAIProvider`, tests inject `MockLLMProvider` or harness providers.
-
-**Route Registration Functions:**
-- Purpose: Keep each HTTP/SSE surface isolated behind `register*Routes(app, deps)`.
-- Examples: `server/routes/chat.ts`, `server/routes/device.ts`, `server/routes/meals.ts`, `server/routes/history.ts`
-- Pattern: Routes receive service dependencies from `server/app.ts`; they own validation, auth, status codes, headers, and response DTO shaping.
+- Purpose: Build a complete Fastify app with injected LLM provider and optional test/harness overrides.
+- Examples: `server/app.ts:75`, `tests/integration/*.test.ts`, `tests/harness/app-fixture.ts:92`.
+- Pattern: Factory with dependency injection and optional `onServicesReady` observer.
 
 **Service Factories:**
-- Purpose: Create cohesive DB-backed service APIs from a shared Drizzle database handle.
-- Examples: `server/services/device.ts`, `server/services/food-logging.ts`, `server/services/summary.ts`, `server/services/assets.ts`
-- Pattern: `createXService(db, opts?)` returns an object of async methods; callers do not instantiate DB clients inside routes.
+- Purpose: Encapsulate domain operations behind `createXService(db)` return objects.
+- Examples: `server/services/device.ts:41`, `server/services/food-logging.ts:49`, `server/services/history-query.ts:446`, `server/services/assets.ts:46`.
+- Pattern: Factory functions close over `AppDatabase`; methods return DTOs or domain errors.
 
-**Revisioned Meal Model:**
-- Purpose: Preserve meal edit/delete history with transaction headers, immutable revisions, revision items, and optimistic preconditions.
-- Examples: `server/db/schema.ts`, `server/services/meal-transactions.ts`, `server/services/food-logging.ts`, `server/services/meal-history.ts`
-- Pattern: Writes create a `meal_transactions` row plus `meal_revisions` / `meal_revision_items`; updates create new revisions and move `currentRevisionId`.
-
-**Asset Reference Tokens:**
-- Purpose: Decouple durable asset IDs from legacy image fields and authorize image reads by owner device.
-- Examples: `server/services/assets.ts`, `server/services/chat.ts`, `server/services/meal-transactions.ts`, `server/routes/assets.ts`
-- Pattern: Store `asset:<id>` references in legacy image fields, maintain `asset_references`, serve bytes via `/api/assets/:id` after guest-session ownership checks.
+**Meal Transactions and Revisions:**
+- Purpose: Maintain mutable meals as immutable revisions with current pointers, optimistic revision guards, and soft delete semantics.
+- Examples: `server/db/schema.ts:64`, `server/services/meal-transactions.ts:119`, `server/services/meal-transactions.ts:229`.
+- Pattern: Transaction table owns identity/current revision; revision and item tables own versioned content.
 
 **Guest Session Cookies:**
-- Purpose: Authorize browser-owned guest data without exposing raw device ownership through headers or query params.
-- Examples: `server/services/guest-session.ts`, `server/lib/guest-session-resolver.ts`, `server/routes/device.ts`
-- Pattern: HMAC-signed active and resume cookies; protected routes resolve cookies to `deviceId` and reissue active sessions from resume cookies.
+- Purpose: Bind browser requests to device ownership using signed active/resume cookies.
+- Examples: `server/services/guest-session.ts:124`, `server/lib/guest-session-resolver.ts:32`, `server/routes/sse.ts:21`.
+- Pattern: HMAC signed claims plus resume-cookie reissue; route handlers clear invalid cookies.
 
 **LLM Provider Interface:**
-- Purpose: Hide runtime OpenAI and deterministic test providers behind a shared chat/tool/stream API.
-- Examples: `server/llm/types.ts`, `server/llm/openai.ts`, `server/llm/mock.ts`, `tests/harness/streaming-llm.ts`
-- Pattern: Inject `LLMProvider` into `buildApp()` / `createOrchestrator()`; services do not instantiate model clients.
+- Purpose: Keep runtime OpenAI calls replaceable by mocks and harness providers.
+- Examples: `server/llm/types.ts:64`, `server/llm/openai.ts:79`, `tests/harness/streaming-llm.ts`.
+- Pattern: Interface with `chat`, optional `chatRound`, and optional `chatStream`.
 
-**Tool Contract Runner:**
-- Purpose: Validate LLM tool calls, run source-text guards, execute side effects, and map controlled failures without leaking raw arguments.
-- Examples: `server/orchestrator/tool-contract.ts`, `server/orchestrator/tools.ts`
-- Pattern: `ToolContract` + Zod schema + `runContract()` + redacted `logSummary()`.
+**Tool Contract Registry:**
+- Purpose: Make each LLM tool schema, validation, log summary, and execution path explicit.
+- Examples: `server/orchestrator/tools.ts:1900`, `server/orchestrator/tools.ts:1907`, `server/orchestrator/tools.ts:2112`.
+- Pattern: Registry-first dispatch over `ToolContract` with Zod validation and controlled failure/reply adapters.
 
 **Realtime Publisher:**
-- Purpose: Fan out per-device state changes to connected browser EventSource clients.
-- Examples: `server/realtime/publisher.ts`, `server/routes/sse.ts`, `server/routes/chat.ts`, `server/routes/meals.ts`
-- Pattern: Route subscribes Fastify replies; publisher writes named SSE frames and removes stale replies.
+- Purpose: Fan out summary and goals events to current device subscribers.
+- Examples: `server/realtime/publisher.ts:13`, `server/routes/sse.ts:57`.
+- Pattern: In-memory `Map<deviceId, FastifyReply[]>` scoped to one app process.
 
-**Zustand Store:**
-- Purpose: Single state boundary for client identity, navigation, messages, meals, summaries, targets, provisional streaming, and recovery.
-- Examples: `client/src/store.ts`, `client/src/components/MainLayout.tsx`, `client/src/components/ChatPanel.tsx`
-- Pattern: Components select state/actions; transport modules normalize payloads before state writes.
+**Client Transport Boundary:**
+- Purpose: Hide fetch/SSE details and normalize untrusted server payloads before they touch UI state.
+- Examples: `client/src/api.ts:553`, `client/src/api.ts:623`, `client/src/sse.ts:67`.
+- Pattern: API-specific exported functions plus local type guards/normalizers.
+
+**Harness Scenario App:**
+- Purpose: Reuse the real app in deterministic verification scenarios.
+- Examples: `tests/harness/app-fixture.ts:65`, `tests/harness/run.ts:31`.
+- Pattern: Full app boot against `:memory:` SQLite, seeded device, deterministic provider, generated artifacts.
 
 ## Entry Points
 
 **Production Server:**
 - Location: `server/index.ts`
-- Triggers: `yarn start`, Railway production runtime, `yarn dev:server` through `tsx --watch`
-- Responsibilities: Load `config`, create `OpenAIProvider`, call `buildApp()`, listen on configured port, enable request auth redaction.
+- Triggers: `yarn start` from `package.json:13`, Railway/runtime process start.
+- Responsibilities: Instantiate `OpenAIProvider`, set logger redaction, call `buildApp()`, listen on `config.port`.
 
-**Fastify Composition:**
+**Fastify App Factory:**
 - Location: `server/app.ts`
-- Triggers: `server/index.ts`, integration tests, harness fixtures
-- Responsibilities: Create DB/services/orchestrator/publisher, validate timezone, register CORS/multipart/static plugins, register routes.
+- Triggers: Production server, integration tests, harness fixture.
+- Responsibilities: Build the complete app graph, validate timezone, register routes, serve built client when `dist/client/index.html` exists.
 
-**Database Migration CLI:**
-- Location: `server/db/migrate.ts`
-- Triggers: `yarn db:migrate`
-- Responsibilities: Load `.env` when invoked directly, open SQLite, apply `drizzle/` migrations, close DB.
-
-**React Client:**
+**Vite Client:**
 - Location: `client/src/main.tsx`
-- Triggers: Vite dev server and built `dist/client/index.html`
-- Responsibilities: Mount `<App />` in React `StrictMode` and load `client/src/app.css`.
+- Triggers: Browser loading `client/index.html` in dev or built bundle in `dist/client`.
+- Responsibilities: Mount React `App` and global CSS.
 
-**Client App Gate:**
+**React App Gate:**
 - Location: `client/src/App.tsx`
-- Triggers: React render
-- Responsibilities: Choose onboarding, recovery, loading, or main layout based on `deviceId` and `guestSessionStatus`.
+- Triggers: React render.
+- Responsibilities: Choose onboarding, recovery, loading, or main layout based on Zustand `deviceId` and guest-session status.
 
-**Vite Build/Dev:**
-- Location: `client/vite.config.ts`
-- Triggers: `yarn dev:client`, `yarn build`
-- Responsibilities: Set `client` root, proxy `/api` to `localhost:3000`, emit build output to `dist/client`.
+**Chat API Route:**
+- Location: `server/routes/chat.ts`
+- Triggers: `POST /api/chat`, `POST /api/chat/stop`, `GET /api/chat/history`.
+- Responsibilities: Own chat upload parsing, JSON/SSE transport, cancellation, fallback persistence, summary publishing, and cleanup.
 
-**Harness Scenario Runner:**
+**SSE Route:**
+- Location: `server/routes/sse.ts`
+- Triggers: Browser `EventSource("/api/sse")` from `client/src/sse.ts:69`.
+- Responsibilities: Verify cookie-backed session, subscribe the raw reply, emit initial summary, keep the connection alive.
+
+**Harness CLI:**
 - Location: `tests/harness/run.ts`
-- Triggers: `yarn verify:harness -- <scenario>`
-- Responsibilities: Dynamic-import `tests/harness/scenarios/<name>.js`, boot a real in-memory app fixture, run the scenario, and write artifacts.
+- Triggers: `yarn verify:harness -- <scenario>` from `package.json:17`.
+- Responsibilities: Import scenario, boot scenario app, run scenario, write generated artifacts, print pass/fail summary.
 
 ## Architectural Constraints
 
-- **Threading:** Node single-process event loop. SQLite uses synchronous `better-sqlite3` under Drizzle; long operations should remain bounded. `server/routes/chat.ts` schedules SSE orchestrator work with `setImmediate()` after opening the stream.
-- **Global state:** `server/routes/chat.ts` has module-level `activeChatTurns` for SSE cancellation; `server/realtime/publisher.ts` has an instance-level subscriber map created in `server/app.ts`; `client/src/sse.ts` has a module-level `eventSource`; `client/src/store.ts` has module-level `rolloverRefreshHandler`.
-- **Circular imports:** `server/orchestrator/tool-contract.ts` lazily imports `./source-text-guard.js` inside `runContract()` to avoid a module-load circular dependency with tool code.
-- **Timezone:** `server/app.ts` calls `validateTimezone()` at boot; `server/config.ts` defines required timezone `Asia/Taipei`; tests and harness fixtures set `process.env.TZ = "Asia/Taipei"`.
-- **Authentication:** Browser-protected API routes use signed guest-session cookies via `server/lib/guest-session-resolver.ts`; `GET /api/sse` uses cookies because browser `EventSource` cannot set custom headers.
-- **Static serving:** `server/app.ts` serves `dist/client` only when `index.html` exists in `CLIENT_DIST_DIR`; otherwise API-only local development is supported.
-- **Dependency injection:** Runtime code injects `OpenAIProvider` only at `server/index.ts`; tests and harnesses inject `MockLLMProvider` or custom providers through `buildApp()`.
-- **ESM imports:** `package.json` sets `"type": "module"`; local TypeScript imports use explicit `.js` specifiers.
+- **Threading:** The runtime uses the Node.js event loop. Chat SSE work is scheduled after response open with `setImmediate()` in `server/routes/chat.ts:1545`; OpenAI and DB operations are async around synchronous `better-sqlite3` calls.
+- **Global state:** Keep global mutable state limited and intentional. Current module-level state appears in `server/routes/chat.ts:100` for active chat turn cancellation, `client/src/sse.ts:10` for one EventSource, `client/src/store.ts:33` for the rollover handler, and `server/config.ts:9` for environment-derived constants.
+- **Circular imports:** Not detected by import inspection. Preserve the current direction: `routes -> services/orchestrator -> db/lib`, `client components -> store/api/sse`, and avoid importing route modules from services.
+- **Timezone:** `server/app.ts:82` validates `TZ=Asia/Taipei` through `server/lib/time.ts`; tests and harnesses also run through timezone-aware scripts such as `scripts/run-node-with-tz.mjs`.
+- **Authentication:** Browser protected routes must derive ownership from guest-session cookies through `server/lib/guest-session-resolver.ts`, because `EventSource` cannot set custom headers.
+- **LLM dependency injection:** Only `server/index.ts:8` instantiates `OpenAIProvider`; tests and harnesses inject mocks/providers through `buildApp()`.
+- **Single-process realtime:** `server/realtime/publisher.ts:14` stores subscribers in memory. Multi-instance deployment requires an external pub/sub layer before horizontal realtime scaling.
 
 ## Anti-Patterns
 
-### Raw Device Authorization
+### Raw Device Ownership In Routes
 
-**What happens:** A route trusts `deviceId` from query parameters, request bodies, or `x-device-id` headers for ownership.
-**Why it's wrong:** Browser routes must derive ownership from signed cookies; raw IDs bypass the guest-session contract and can expose another user's meals/assets.
-**Do this instead:** Use `resolveGuestSession(request, { deviceService, guestSessionService })` in protected routes, matching `server/routes/meals.ts`, `server/routes/history.ts`, `server/routes/assets.ts`, and `server/routes/sse.ts`.
+**What happens:** Route code trusts `deviceId` query parameters, request bodies, or `x-device-id` headers for protected browser surfaces.
+**Why it's wrong:** It bypasses the signed guest-session ownership contract and breaks `/api/sse`, where browser `EventSource` cannot send custom headers.
+**Do this instead:** Resolve the session with `resolveGuestSession()` in `server/lib/guest-session-resolver.ts:32`, then use the returned `deviceId` as shown in `server/routes/meals.ts:133` and `server/routes/sse.ts:21`.
 
-### Service or Route Creates Runtime LLM Client
+### Service-Owned Runtime LLM Clients
 
-**What happens:** A service or route imports and instantiates `OpenAIProvider` directly.
-**Why it's wrong:** It bypasses test/harness DI and makes deterministic providers impossible.
-**Do this instead:** Add provider dependencies through `server/app.ts` and pass them to `createOrchestrator()` or targeted services, matching `server/index.ts` and `server/app.ts`.
+**What happens:** A service or route creates an OpenAI client directly.
+**Why it's wrong:** It breaks deterministic testing and bypasses the `LLMProvider` seam used by `tests/harness/app-fixture.ts:72`.
+**Do this instead:** Add provider-dependent behavior to an injected service factory or the orchestrator, and wire it in `server/app.ts:86`; keep runtime provider construction in `server/index.ts:8`.
 
-### Persistence Logic in React or Route Helpers
+### DB Logic In Client Or Transport DTOs
 
-**What happens:** UI components or route-local helpers duplicate Drizzle queries or meal revision rules.
-**Why it's wrong:** Meal revisions, asset references, summary recomputation, and optimistic preconditions are cross-route domain contracts.
-**Do this instead:** Put reusable domain behavior in `server/services/*.ts`, especially `server/services/meal-transactions.ts` for meal writes and `server/services/history-query.ts` for history DTOs.
+**What happens:** A route or client component starts owning meal transaction/revision semantics.
+**Why it's wrong:** Optimistic revision checks and grouped meal rules are centralized in `server/services/meal-transactions.ts:119` and `server/services/food-logging.ts:49`; duplicating them creates stale writes and inconsistent conflicts.
+**Do this instead:** Routes validate transport payloads, then call service methods such as `foodLoggingService.updateMeal()` in `server/routes/meals.ts:213`.
 
-### Hand-Rolled Tool Side Effects Outside Contracts
+### Direct Store Mutation Outside Actions
 
-**What happens:** Orchestrator code executes a new model tool without `ToolContract`, Zod validation, source guards, and redacted log summaries.
-**Why it's wrong:** Tool calls are untrusted model output and must fail closed without leaking raw arguments.
-**Do this instead:** Add the tool schema/executor in `server/orchestrator/tools.ts` and run it through `runContract()` from `server/orchestrator/tool-contract.ts`.
+**What happens:** Components mutate state outside `client/src/store.ts` actions or duplicate localStorage writes.
+**Why it's wrong:** Guest-session recovery, target persistence, rollover guards, and provisional bubbles rely on centralized action behavior in `client/src/store.ts:173` and `client/src/store.ts:321`.
+**Do this instead:** Add or reuse a store action in `client/src/store.ts`, then consume it from components through selectors as in `client/src/components/MainLayout.tsx:117`.
 
 ## Error Handling
 
-**Strategy:** Routes translate expected validation/auth/domain conflicts to HTTP responses and let unexpected errors propagate to Fastify. Orchestrator and chat routes provide controlled user-facing fallbacks for LLM/provider/tool failures while preserving durable mutation side effects.
+**Strategy:** Validate at transport and contract boundaries, return controlled HTTP errors for user-caused input/session failures, and convert model/tool failures into deterministic fallback replies without losing committed mutations.
 
 **Patterns:**
-- Protected routes return `401` from `resolveGuestSession()` failures and clear invalid cookies when requested (`server/lib/guest-session-resolver.ts`, `server/routes/*.ts`).
-- Validation failures return route-specific `400` payloads such as onboarding `VALIDATION_ERROR`, history `INVALID_QUERY`, and multipart upload errors (`server/routes/device.ts`, `server/routes/history.ts`, `server/routes/chat.ts`).
-- Meal revision conflicts throw `MealRevisionPreconditionError` in `server/services/meal-transactions.ts` and map to `409` in `server/routes/meals.ts`.
-- Chat route catch paths save fallback assistant messages and still emit terminal `done` frames on SSE (`server/routes/chat.ts:1070`, `server/routes/chat.ts:1113`).
-- Orchestrator catches provider errors, records hooks/fallback context, and returns partial-success replies after mutations (`server/orchestrator/index.ts:780`).
-- Client transport throws typed `UNAUTHORIZED`, `IntakeValidationError`, and `MealRevisionConflictError` errors from `client/src/api.ts`.
+- Guest-session failures return `401` and optionally clear cookies from routes such as `server/routes/sse.ts:21` and `server/routes/meals.ts:133`.
+- Route validation returns `400` for malformed intake, query, multipart, or edit payloads in files such as `server/routes/device.ts:178`, `server/routes/history.ts:158`, and `server/routes/meals.ts:185`.
+- Meal revision conflicts throw `MealRevisionPreconditionError` in `server/services/meal-transactions.ts:98` and map to `409` in `server/routes/meals.ts:90`.
+- Orchestrator/provider failures are classified with `LLMProviderError` metadata in `server/llm/openai.ts:70`, observed by hooks in `server/orchestrator/hooks.ts:103`, and returned as renderer/fallback replies in `server/orchestrator/index.ts:901`.
+- Chat route catch paths persist fallback assistant messages and clean up staged/durable uploads in `server/routes/chat.ts:1453` and `server/routes/chat.ts:1501`.
 
 ## Cross-Cutting Concerns
 
-**Logging:** Fastify logger is configured in `server/index.ts`; structured route/orchestrator events are emitted through `server/observability/events.ts` and route-local log calls. Tool logging uses redacted summaries from `server/orchestrator/tool-contract.ts`.
+**Logging:** Fastify logging is configured in `server/index.ts:9`; structured route/orchestrator events live in `server/observability/events.ts` and `server/orchestrator/hooks.ts:51`. Client events are best-effort through `client/src/api.ts:367` and `server/routes/observability.ts:16`.
 
-**Validation:** Routes use local guards for HTTP payloads (`server/routes/device.ts`, `server/routes/history.ts`, `server/routes/meals.ts`). Tool calls use Zod schemas and source-text guards (`server/orchestrator/tool-contract.ts`, `server/orchestrator/tools.ts`). Client SSE/API payloads use shape guards before state mutation (`client/src/api.ts`, `client/src/sse.ts`).
+**Validation:** Routes use local parsing/type guards in `server/routes/*.ts`; tool contracts use Zod through `server/orchestrator/tool-contract.ts` and `server/orchestrator/tools.ts`; client transport normalizes untrusted payloads in `client/src/api.ts` and `client/src/sse.ts`.
 
-**Authentication:** Guest-session cookies are created by `server/services/guest-session.ts`, resolved by `server/lib/guest-session-resolver.ts`, and recovered by `client/src/store.ts` through `client/src/api.ts`. Do not add browser route auth based on raw device IDs.
+**Authentication:** The app uses custom signed guest sessions from `server/services/guest-session.ts:124`; protected browser routes call `server/lib/guest-session-resolver.ts:32`; the client uses `credentials: "same-origin"` in `client/src/api.ts`.
 
-**Time:** Day-boundary logic uses `server/lib/time.ts` and `client/src/lib/time.ts`; runtime must use `TZ=Asia/Taipei`. Tests use `scripts/run-node-with-tz.mjs`.
+**Uploads and Assets:** Chat uploads are staged by `server/routes/chat.ts`, persisted by `server/services/assets.ts:46`, represented as `asset:<id>` refs by `server/services/assets.ts:30`, and served only after ownership checks in `server/routes/assets.ts:16`.
 
-**Assets:** Uploads stage under `config.uploadsStagingDir`, durable files live under `config.assetsDir`, and ownership is enforced through `assets` / `asset_references` plus `/api/assets/:id`.
-
-**Testing:** Unit tests live in `tests/unit/`, route/service integration tests in `tests/integration/`, and boundary proof scenarios in `tests/harness/scenarios/`. Project skills prescribe Node built-in `node:test`, real SQLite, explicit `.js` imports, and `MockLLMProvider` / harness providers.
+**Release Verification:** `scripts/release-check.mjs:123` enforces timezone, TypeScript, tests, and frontend build; `package.json:14` and `package.json:17` define the core test and harness gates.
 
 ---
 
-*Architecture analysis: 2026-05-26*
+*Architecture analysis: 2026-05-29*

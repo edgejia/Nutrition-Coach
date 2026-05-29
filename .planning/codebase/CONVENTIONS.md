@@ -1,112 +1,109 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-05-30
+**Analysis Date:** 2026-05-29
 
 ## Naming Patterns
 
 **Files:**
-- Use kebab-case for most source and test files: `server/services/food-logging.ts`, `server/routes/day-snapshot.ts`, `client/src/lib/onboarding-intake-validation.ts`, `tests/unit/source-text-guard.test.ts`.
-- Use PascalCase for React component files: `client/src/components/MessageBubble.tsx`, `client/src/components/Onboarding.tsx`, `client/src/components/DashboardMiniBar.tsx`.
-- Use `.test.ts` for Node test files under `tests/unit/` and `tests/integration/`: `tests/unit/food-logging.test.ts`, `tests/integration/meals-api.test.ts`.
-- Use `.integration.test.ts` only when the test name needs to call out a larger cross-boundary scenario: `tests/integration/chat-goal-update.integration.test.ts`, `tests/integration/chat-meal-correction.integration.test.ts`.
-- Use scenario names as kebab-case under `tests/harness/scenarios/`: `tests/harness/scenarios/daily-rollover.ts`, `tests/harness/scenarios/guest-session-hardening.ts`, `tests/harness/scenarios/provider-auth-failure-localization.ts`.
+- Use kebab-case for multi-word modules in server, client, and tests: `server/services/meal-history.ts`, `server/lib/guest-session-resolver.ts`, `client/src/lib/onboarding-stepper-flow.ts`, `tests/integration/history-search-api.test.ts`.
+- Use PascalCase for React component files: `client/src/components/ChatPanel.tsx`, `client/src/components/MealTimeline.tsx`, `client/src/components/onboarding/StepGoalClarification.tsx`.
+- Use `.test.ts` for unit and integration test files, with some integration names carrying `.integration.test.ts` when the behavior is cross-layer: `tests/unit/device.test.ts`, `tests/integration/chat-api.test.ts`, `tests/integration/chat-meal-correction.integration.test.ts`.
+- Use scenario names that map directly to harness CLI names under `tests/harness/scenarios/`: `tests/harness/scenarios/boundary-contracts.ts` runs as `yarn verify:harness -- boundary-contracts`.
 
 **Functions:**
-- Use camelCase for functions and methods: `createFoodLoggingService()` in `server/services/food-logging.ts`, `registerMealRoutes()` in `server/routes/meals.ts`, `buildApp()` in `server/app.ts`.
-- Use `create*Service` factories for domain services that close over dependencies and return method objects: `server/services/food-logging.ts`, `server/services/summary.ts`, `server/services/guest-session.ts`.
-- Use `register*Routes` functions for Fastify route modules: `server/routes/meals.ts`, `server/routes/chat.ts`, `server/routes/sse.ts`.
-- Use local parser/guard helpers with intent-specific names: `parseMealUpdateBody()`, `isFiniteNonNegativeNumber()`, and `publishDailySummarySafe()` in `server/routes/meals.ts`.
-- Use assertion helpers in tests with `assert*` names: `assertMealRevisionPrecondition()` in `tests/unit/food-logging.test.ts`, `assertNoRawImageStorageFields()` in `tests/integration/meals-api.test.ts`.
+- Use camelCase for functions and factory functions: `createSummaryService()` in `server/services/summary.ts`, `buildApp()` in `server/app.ts`, `createScenarioApp()` in `tests/harness/app-fixture.ts`.
+- Use `createXService(db)` factories for server services and return object literals of async methods: `server/services/summary.ts`, `server/services/device.ts`, `server/services/food-logging.ts`.
+- Use local helper functions for route/test assertions instead of broad utility modules when the logic is scoped: `parseSSEEvents()` and `assertNoSuccessfulLogInternalCopy()` in `tests/integration/chat-api.test.ts`.
+- Use predicate names beginning with `is`, `has`, or `should` for guards and decisions: `isSummaryOutcome()` in `client/src/api.ts`, `shouldComposeSummaryHistoryReply()` in `server/routes/chat.ts`, `hasRecentUserScrollIntent()` in `client/src/components/ChatPanel.tsx`.
 
 **Variables:**
-- Use camelCase for runtime values and dependency handles: `foodLoggingService`, `guestSessionService`, `deviceCookieHeader`, `otherDeviceId` in `server/app.ts` and `tests/integration/meals-api.test.ts`.
-- Use UPPER_SNAKE_CASE for constants that represent protocol limits, pattern tables, event strings, or runtime contracts: `ALLOWED_TYPES`, `UNIFIED_FALLBACK`, `SENSITIVE_IDENTIFIERS` in `server/routes/chat.ts`; `REQUIRED_TZ` in `scripts/run-node-with-tz.mjs`.
-- Use `*Id` suffixes for persisted identifiers and ownership boundaries: `deviceId`, `mealId`, `mealRevisionId`, `imageAssetId` in `server/routes/meals.ts`, `client/src/api.ts`, and `tests/integration/meals-api.test.ts`.
-- Use `*Dir` suffixes for filesystem roots: `uploadsDir`, `assetsDir`, `clientDistDir` in `server/app.ts` and `server/config.ts`.
+- Use camelCase for runtime values and service handles: `deviceService`, `guestSessionService`, `dailyTargets`, `summaryOutcome` in `server/app.ts` and `client/src/store.ts`.
+- Use ALL_CAPS for constants and regular expressions: `ALLOWED_TYPES`, `UNIFIED_FALLBACK`, `CONCRETE_DATE_PATTERN` in `server/routes/chat.ts`; `MAX_CHAT_IMAGE_BYTES` in `client/src/api.ts`.
+- Use `...Service` names for injected service dependencies and `...Provider` for LLM implementations: `MockLLMProvider` in `server/llm/mock.ts`, `StreamingLLMProvider` in `tests/harness/streaming-llm.ts`.
+- Use explicit `deviceId`, `cookieHeader`, and `otherDeviceId` names in tests to make ownership boundaries visible: `tests/integration/meals-api.test.ts`, `tests/harness/app-fixture.ts`.
 
 **Types:**
-- Use PascalCase interfaces/types for DTOs, service payloads, and harness contracts: `AppOptions`, `AppServices` in `server/app.ts`; `MealUpdateBody` in `server/routes/meals.ts`; `ScenarioResult` and `VerificationScenario` in `tests/harness/scenario-types.ts`.
-- Use union literal types for protocol state and error codes: `GuestSessionStatus` in `client/src/store.ts`, `MealRevisionConflictCode` in `client/src/api.ts`, `RouteFallbackReason` in `server/observability/events.ts`.
-- Use `ReturnType<typeof create...>` to type DI dependencies instead of duplicating service object shapes: `Deps` in `server/routes/meals.ts`, `AppServices` in `server/app.ts`.
-- Use `as const` for fixed enum-like tables and step name tuples: `INTAKE_FIELDS` in `server/observability/events.ts`, `STEP_NAMES` in `tests/harness/scenarios/daily-rollover.ts`.
+- Use PascalCase for interfaces, types, and classes: `AppOptions` and `AppServices` in `server/app.ts`, `DailySummary` in `server/services/summary.ts`, `IntakeValidationError` in `client/src/api.ts`.
+- Export interfaces and domain DTO types near the module that owns them: `server/observability/events.ts`, `server/orchestrator/tool-contract.ts`, `client/src/types.ts`.
+- Use discriminated unions and literal types for domain status fields: `SummaryOutcome` from `server/services/summary-outcome.ts`, `RouteFallbackReason` in `server/observability/events.ts`, `GuestSessionStatus` in `client/src/store.ts`.
 
 ## Code Style
 
 **Formatting:**
-- Formatting is TypeScript-first with no detected Prettier, ESLint, Biome, Jest, or Vitest config files at the repo root. `tsconfig.json` is the enforceable style/type gate.
-- Use two-space indentation, semicolons, double quotes for string literals, and trailing commas in multiline object/array/function call layouts. Examples: `server/app.ts`, `client/src/components/MessageBubble.tsx`, `tests/integration/meals-api.test.ts`.
-- Keep narrow helper functions near their consumers. Route-local parsing and publishing helpers live above `registerMealRoutes()` in `server/routes/meals.ts`; component-local formatting and presentation helpers live above `MessageBubble` in `client/src/components/MessageBubble.tsx`.
-- Prefer explicit object shapes and type predicates over ad hoc casts. Examples: `isRecord()` and response guards in `client/src/api.ts`, `isSummaryOutcome()` in `client/src/api.ts`, `sanitizeFields()` in `server/observability/events.ts`.
+- No Prettier, Biome, or ESLint config is present at the repo root; the visible formatting contract comes from existing TypeScript style in `server/app.ts`, `client/src/store.ts`, and `tests/integration/meals-api.test.ts`.
+- Use two-space indentation, semicolons, double quotes, and trailing commas in multi-line object, array, and function-call literals: `server/app.ts`, `server/routes/chat.ts`, `tests/harness/scenarios/boundary-contracts.ts`.
+- Keep `else` uncommon when early returns are clearer: `client/src/api.ts`, `server/observability/events.ts`, `tests/harness/app-fixture.ts`.
+- Preserve strict TypeScript settings from `tsconfig.json`: `strict: true`, `module: "ES2022"`, `moduleResolution: "bundler"`, and `jsx: "react-jsx"`.
 
 **Linting:**
-- Not detected: `.eslintrc*`, `eslint.config.*`, `.prettierrc*`, `biome.json`, `jest.config.*`, and `vitest.config.*`.
-- Use `yarn tsc --noEmit` as the primary repository-wide static gate. The command is required by `AGENTS.md` for any `*.ts` edit and is part of `yarn release:check` in `scripts/release-check.mjs`.
-- `tsconfig.json` sets `"strict": true`, `"module": "ES2022"`, `"moduleResolution": "bundler"`, `"jsx": "react-jsx"`, and includes `server/**/*.ts`, `tests/**/*.ts`, `client/src/**/*.ts`, `client/src/**/*.tsx`, and `client/vite.config.ts`.
+- Not detected. There is no `.eslintrc*`, `eslint.config.*`, `.prettierrc*`, `prettier.config.*`, or `biome.json` at the repo root.
+- Use `yarn tsc --noEmit` as the main static quality gate for TypeScript files, as required by `AGENTS.md`, `docs/codex.md`, and `package.json`.
+- Do not introduce Jest, Vitest, ESLint, Prettier, or formatter churn without an explicit migration; existing quality automation is in `package.json` and `scripts/release-check.mjs`.
 
 ## Import Organization
 
 **Order:**
-1. External runtime/library imports first: `fastify`, `@fastify/cors`, `drizzle-orm`, `react`, `zustand`.
-2. Node built-ins with `node:` specifiers: `node:fs/promises`, `node:path`, `node:test`, `node:assert/strict`, `node:stream`.
-3. Local implementation imports with explicit `.js` specifiers: `./db/client.js`, `../services/assets.js`, `../../server/app.js`, `./AssistantMarkdown.js`.
-4. Type-only imports use `import type` and are grouped beside the related value imports: `server/app.ts`, `server/routes/meals.ts`, `client/src/components/MessageBubble.tsx`.
+1. Runtime external or Node imports first: `fastify`, `@fastify/cors`, `node:fs/promises` in `server/app.ts`; `node:test`, `node:assert/strict` in `tests/unit/device.test.ts`.
+2. Local runtime imports next, using explicit `.js` specifiers: `./db/client.js`, `./services/device.js`, `../lib/time.js` in `server/app.ts` and `server/routes/chat.ts`.
+3. Type-only imports use `import type` and stay adjacent to related runtime imports: `server/app.ts`, `server/routes/chat.ts`, `tests/integration/meals-api.test.ts`.
+4. Dynamic imports are used when runtime ordering matters, especially timezone bootstrapping or test module loading: `await import("./lib/time.js")` in `server/app.ts`, `await import("../../client/src/lib/assistant-markdown.js")` in `tests/unit/assistant-markdown.test.ts`.
 
 **Path Aliases:**
-- Not detected. Use relative imports throughout the repo.
-- Local TypeScript imports must include explicit `.js` specifiers because the repo is ESM: `server/app.ts`, `client/src/api.ts`, `tests/unit/food-logging.test.ts`, and `tests/harness/run.ts` all follow this pattern.
-- Do not introduce CommonJS `require` or extensionless local imports.
+- Not detected. `tsconfig.json` defines no `paths` aliases.
+- Use relative imports with explicit `.js` specifiers for local TypeScript modules. The source scan found no local extensionless imports under `server/`, `client/src/`, or `tests/`.
+- Do not use CommonJS `require`; the repo is ESM via `"type": "module"` in `package.json`.
 
 ## Error Handling
 
 **Patterns:**
-- Route handlers return explicit HTTP responses with stable error payloads at the transport boundary. Examples: `reply.code(401).send({ error: session.error })`, `reply.code(400).send({ error: "Invalid meal update" })`, and `sendMealRevisionConflict()` in `server/routes/meals.ts`.
-- Service/domain errors use typed `Error` subclasses or stable error messages/codes when callers need branching behavior. Examples: `MealRevisionPreconditionError` consumed by `server/routes/meals.ts`; `MealRevisionConflictError` and `IntakeValidationError` in `client/src/api.ts`.
-- Treat observability and realtime fan-out as best-effort when product state is already committed. `publishDailySummarySafe()` in `server/routes/meals.ts` catches publisher failures and logs a warning without changing the route response.
-- Sanitize user-facing or persisted fallback text before emitting or saving it. `sanitizeReply()` and `normalizeRouteFinalReply()` in `server/routes/chat.ts` strip internal tool identifiers and guard false meal-logging claims.
-- Fail fast on runtime contracts that would corrupt product behavior. `validateTimezone()` in `server/lib/time.ts` throws unless `TZ` is explicitly `Asia/Taipei`; `buildApp()` invokes it during app boot in `server/app.ts`.
-- Close resources in `catch`/`finally` paths. `createDb()` closes SQLite before rethrowing schema errors in `server/db/client.ts`; integration tests close Fastify and delete temp dirs in `afterEach()` in `tests/integration/meals-api.test.ts`.
+- Use domain-specific error classes when client or service callers need structured handling: `IntakeValidationError` and `MealRevisionConflictError` in `client/src/api.ts`, `FatalToolError` in `server/orchestrator/tools.ts`, `LLMProviderError` in `server/llm/errors.ts`.
+- Convert unsafe external/provider failures into metadata-only errors before logging or serializing: `OpenAIProvider` behavior is locked by `tests/unit/openai-provider.test.ts`.
+- Routes should return controlled status codes and DTOs at HTTP boundaries: `server/routes/chat.ts`, `server/routes/device.ts`, `server/routes/meals.ts`.
+- Catch blocks that protect user-facing flows should sanitize or suppress raw internals: `sanitizeRouteCatchError()` in `server/observability/events.ts`, `sanitizeReply()` and `UNIFIED_FALLBACK` in `server/routes/chat.ts`.
+- Test error paths with `assert.rejects()`, `assert.throws()`, or explicit response status assertions: `tests/unit/device.test.ts`, `tests/integration/observability-api.test.ts`, `tests/integration/chat-api.test.ts`.
 
 ## Logging
 
-**Framework:** Fastify logger plus selected `console` output in scripts/harnesses.
+**Framework:** Fastify/Pino logger plus console output for CLI scripts.
 
 **Patterns:**
-- `server/app.ts` defaults Fastify logging to `false` for tests and accepts `AppOptions.logger` for production or capture-based tests.
-- Route logs use structured payloads with an `event` field: `request.log.info({ event: "day_rollover" }, ...)` in `server/routes/meals.ts`, `logChatTurnCompleted()` and `logChatRouteFallback()` in `server/routes/chat.ts`.
-- Observability event builders sanitize and allowlist fields before logging. Use `server/observability/events.ts` for onboarding, chat fallback, device goals, and SSE connection events.
-- Scripts and harnesses print concise operational summaries: `scripts/release-check.mjs` prints `[release-check]` labeled steps, and `tests/harness/run.ts` prints `PASS <scenario> <passed>/<total>` or `FAIL <scenario> <step>`.
+- Runtime logging should flow through Fastify loggers, not direct `console.*`: `server/app.ts` creates Fastify with optional `logger`, `server/orchestrator/hooks.ts` accepts `FastifyBaseLogger`, and `server/observability/events.ts` emits redacted structured events.
+- Keep observability event payloads allowlisted and redacted: `RedactedObservabilityEvent` in `server/observability/events.ts`; tests assert no prompts, device IDs, image paths, or provider raw data leak in `tests/integration/observability-api.test.ts` and `tests/unit/openai-provider.test.ts`.
+- Use `console.log` and `console.error` in command-line scripts and harness runners only: `scripts/release-check.mjs`, `tests/harness/run.ts`, `scripts/generate-capability-matrix-doc.mjs`.
+- Capture logger output with a `Writable` stream when asserting logs: `tests/integration/chat-api.test.ts`, `tests/integration/chat-streaming.test.ts`, `tests/harness/scenarios/provider-auth-failure-localization.ts`.
 
 ## Comments
 
 **When to Comment:**
-- Comment runtime invariants, test fixture mechanics, or non-obvious safety gates. Examples: timezone contract comments in `server/lib/time.ts`, upload parser limit comment in `server/app.ts`, and EventSource shim comments in `tests/unit/sse-client.test.ts`.
-- Use comments to document generated or deterministic harness behavior, especially artifact and fixture ownership. Examples: `tests/harness/app-fixture.ts`, `tests/harness/run.ts`, `tests/harness/scenarios/daily-rollover.ts`.
-- Avoid comments for simple assignments or self-evident code. Most service methods in `server/services/food-logging.ts` are uncommented and rely on names and types.
+- Add comments for boundary contracts, runtime invariants, and test harness behavior: `server/app.ts` comments on timezone validation, multipart limits, and logger redaction; `tests/harness/app-fixture.ts` documents fixture ownership.
+- Keep comments short and tied to an invariant that future edits must preserve: `server/routes/chat.ts`, `client/src/store.ts`, `tests/helpers/spy-hooks.ts`.
+- Avoid narrative comments for self-explanatory helpers; most service factories such as `server/services/summary.ts` rely on names and types instead.
 
 **JSDoc/TSDoc:**
-- Use short block comments for exported app/harness option fields where callers need behavior details: `AppOptions` in `server/app.ts`, `ScenarioAppOptions` in `tests/harness/app-fixture.ts`, `VerificationScenario` in `tests/harness/scenario-types.ts`.
-- Use JSDoc on reusable test helpers only when lifecycle usage is important. `createSpyHooks()` in `tests/helpers/spy-hooks.ts` documents that spies must be created inside `beforeEach()`.
+- Use JSDoc for public fixtures, CLI runners, and reusable testing helpers: `tests/harness/app-fixture.ts`, `tests/harness/run.ts`, `tests/helpers/spy-hooks.ts`.
+- Use inline interface comments for options whose defaults affect runtime/test behavior: `AppOptions` in `server/app.ts`, `ScenarioAppOptions` in `tests/harness/app-fixture.ts`.
+- Do not require full TSDoc for every exported function; existing modules use targeted comments only where behavior is non-obvious.
 
 ## Function Design
 
-**Size:** Keep ordinary helpers small and purpose-specific. Larger route and orchestration modules exist where protocol coordination is inherently complex: `server/routes/chat.ts` owns SSE, upload, fallback, trace, and cleanup behavior; split new reusable logic into `server/orchestrator/*`, `server/services/*`, or `server/lib/*` when it becomes independent of route transport.
+**Size:** Keep pure helpers and services small where practical; route and orchestrator modules are larger because they own transport and workflow coordination. New logic should prefer focused helpers near the owning module, as in `server/routes/chat.ts`, `client/src/api.ts`, and `tests/integration/meals-api.test.ts`.
 
-**Parameters:** Pass explicit dependencies through factory options instead of importing singletons inside services or routes. `buildApp()` wires services and route dependencies in `server/app.ts`; route modules receive a `Deps` object, as in `server/routes/meals.ts`; tests inject `MockLLMProvider`, temp dirs, and `onServicesReady` through `buildApp()` in `tests/integration/meals-api.test.ts`.
+**Parameters:** Prefer object parameters for dependency bundles and multi-field inputs: `buildApp(opts: AppOptions)` in `server/app.ts`, `createScenarioApp(opts: ScenarioAppOptions)` in `tests/harness/app-fixture.ts`, service methods such as `logFood(deviceId, input)` in `server/services/food-logging.ts`.
 
-**Return Values:** Prefer typed DTO objects at boundaries and small discriminated outcomes for parse/validation results. Examples: `ParseHomeCtaClientEventResult` in `server/observability/events.ts`, `SummaryOutcome` in `server/services/summary-outcome.ts`, `ScenarioResult` in `tests/harness/scenario-types.ts`.
+**Return Values:** Use typed DTOs and explicit status/result objects rather than ambiguous primitives: `DailySummary` in `server/services/summary.ts`, `ParseHomeCtaClientEventResult` in `server/observability/events.ts`, `ScenarioResult` in `tests/harness/scenario-types.ts`.
 
 ## Module Design
 
-**Exports:** Use named exports. Examples: `export async function buildApp()` in `server/app.ts`, `export function createFoodLoggingService()` in `server/services/food-logging.ts`, `export function MessageBubble()` in `client/src/components/MessageBubble.tsx`.
+**Exports:** Prefer named exports. Service modules export `createXService()` factories; React component modules export named components such as `ChatPanel` in `client/src/components/ChatPanel.tsx`; tests import exact symbols from source files.
 
-**Barrel Files:** Not detected. Import concrete modules directly by relative path, such as `../services/food-logging.js`, `../../server/lib/time.js`, and `./components/Onboarding.js`.
+**Barrel Files:** Not detected. There are no central barrel exports in `server/`, `client/src/`, or `tests/`; import directly from the owning file such as `../../server/app.js` or `../lib/time.js`.
 
-**Project-Specific Constraints:**
-- Use `yarn` commands only. `package.json` defines the repo-native scripts.
-- Preserve ESM discipline: `"type": "module"` in `package.json`, explicit `.js` local imports, and no CommonJS escape hatches.
-- Preserve dependency injection: runtime uses `OpenAIProvider` through `server/index.ts`/`server/app.ts`; tests use `MockLLMProvider` from `server/llm/mock.ts` or deterministic harness providers from `tests/harness/streaming-llm.ts`.
-- Preserve the cookie-backed guest-session contract for browser routes. `server/lib/guest-session-resolver.ts` and route modules such as `server/routes/meals.ts` derive ownership from cookies rather than raw `deviceId` query params or `x-device-id` headers.
+**Architecture Constraints From Local Skills:**
+- Keep dependency injection through `buildApp()` in `server/app.ts`; tests use `MockLLMProvider` in `server/llm/mock.ts` or harness providers in `tests/harness/streaming-llm.ts`.
+- Do not instantiate runtime LLM clients inside services. Runtime provider wiring belongs in `server/index.ts` and `server/app.ts`; services under `server/services/` should receive dependencies or database handles.
+- Keep `GET /api/sse` and browser-protected routes cookie-backed because EventSource cannot set custom headers; relevant code lives in `server/routes/sse.ts`, `server/lib/guest-session-resolver.ts`, and `client/src/sse.ts`.
+- Preserve `TZ=Asia/Taipei` behavior. Time-sensitive code lives in `server/lib/time.ts`, `client/src/lib/time.ts`, and `scripts/run-node-with-tz.mjs`.
 
 ---
 
-*Convention analysis: 2026-05-26*
+*Convention analysis: 2026-05-29*
