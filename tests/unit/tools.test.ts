@@ -1371,7 +1371,16 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(candidates.length, 2);
     assert.deepEqual(candidates.map((candidate) => candidate.optionNumber), [1, 2]);
     assert.deepEqual(candidates.map((candidate) => candidate.dateKey), ["2026-04-18", "2026-04-18"]);
-    assert.deepEqual(candidates.map((candidate) => candidate.displayLabel), ["蛋餅", "牛肉麵"]);
+    assert.deepEqual(candidates.map((candidate) => candidate.displayLabel), ["牛肉麵", "蛋餅"]);
+    const renderedOptions = result.result.split("\n").filter((line) => /^\d+\./.test(line));
+    assert.equal(renderedOptions.length, candidates.length);
+    for (const [index, candidate] of candidates.entries()) {
+      const rendered = renderedOptions[index]!;
+      assert.match(rendered, new RegExp(`^${candidate.optionNumber}\\. `));
+      assert.match(rendered, new RegExp(String(candidate.dateKey)));
+      assert.match(rendered, new RegExp(String(candidate.displayTime)));
+      assert.match(rendered, new RegExp(String(candidate.displayLabel)));
+    }
     for (const candidate of candidates) {
       assertNoRawCandidateFields(candidate);
     }

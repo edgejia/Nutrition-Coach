@@ -2061,10 +2061,7 @@ function buildMealTargetClarificationFact(
     action: result.action,
     prompt,
     candidates: result.status === "needs_clarification"
-      ? [...result.candidates]
-          .sort((left, right) => left.loggedAt.localeCompare(right.loggedAt))
-          .slice(0, 5)
-          .map(projectMealTargetCandidateFact)
+      ? result.candidates.slice(0, 5).map(projectMealTargetCandidateFact)
       : [],
   };
 }
