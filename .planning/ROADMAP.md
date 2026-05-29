@@ -182,7 +182,7 @@ Phases execute in numeric order: 65 -> 66 -> 67 -> 68.
 | 65. Tool Contract Alignment and Meal-Period Authority | v2.4 | 8/8 | Complete    | 2026-05-27 |
 | 66. Numeric Correction Provenance Guard | v2.4 | 5/5 | Complete    | 2026-05-28 |
 | 67. Correction Targeting and Backend Clarification Rendering | v2.4 | 7/7 | Complete    | 2026-05-29 |
-| 68. Structured Tool Results and Release-Proof Gate | v2.4 | 4/4 | Complete   | 2026-05-29 |
+| 68. Structured Tool Results and Release-Proof Gate | v2.4 | 4/4 | Complete    | 2026-05-29 |
 
 ## Future Milestone Candidates
 
