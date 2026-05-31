@@ -97,7 +97,7 @@ export interface GenerateObjectMetadata {
 
 export type GenerateObjectResult<T> =
   | { ok: true; value: T; metadata: GenerateObjectMetadata }
-  | { ok: false; reason: "provider_error"; metadata: ProviderErrorMetadata | GenerateObjectMetadata }
+  | { ok: false; reason: "provider_error"; metadata: ProviderErrorMetadata }
   | {
       ok: false;
       reason: Exclude<StructuredOutputFailureReason, "provider_error">;

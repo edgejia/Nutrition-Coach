@@ -131,6 +131,7 @@ export class MockLLMProvider implements LLMProvider {
           provider: "mock",
           operation: "generate_object",
           model: "mock",
+          aborted: false,
         },
       };
     }

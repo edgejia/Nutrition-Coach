@@ -249,6 +249,7 @@ describe("MockLLMProvider generateObject", () => {
       provider: "mock",
       operation: "generate_object",
       model: "mock",
+      aborted: false,
     });
     assertNoForbiddenSentinels(result);
   });
