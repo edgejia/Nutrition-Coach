@@ -10,7 +10,15 @@ import { createMealNumericProposalService } from "../../server/services/meal-num
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
-import type { ChatMessage, ToolDefinition, LLMResponse, LLMRoundResult, LLMProvider } from "../../server/llm/types.js";
+import type {
+  ChatMessage,
+  GenerateObjectRequest,
+  GenerateObjectResult,
+  ToolDefinition,
+  LLMResponse,
+  LLMRoundResult,
+  LLMProvider,
+} from "../../server/llm/types.js";
 import { createOrchestrator, guardNoMutationLoggingClaim } from "../../server/orchestrator/index.js";
 import {
   renderGoalAuthorityFailureCopy,
@@ -127,6 +135,21 @@ class StreamingLLMProvider implements LLMProvider {
     return { kind: "response", response: { content: "Mock: 已記錄您的飲食！" } };
   }
 
+  async generateObject<T>(
+    _messages: ChatMessage[],
+    _request: GenerateObjectRequest<T>,
+  ): Promise<GenerateObjectResult<T>> {
+    return {
+      ok: false,
+      reason: "provider_error",
+      metadata: {
+        provider: "mock",
+        operation: "generate_object",
+        model: "streaming-mock",
+      },
+    };
+  }
+
   reset() {
     this.chatQueue = [];
     this.roundQueue = [];
@@ -160,6 +183,21 @@ class ChatStreamOnlyProvider implements LLMProvider {
   async *chatStream(messages: ChatMessage[], tools: ToolDefinition[]): AsyncGenerator<string> {
     this.chatCalls.push({ messages, tools });
     yield* streamTokens(this.streamTokens);
+  }
+
+  async generateObject<T>(
+    _messages: ChatMessage[],
+    _request: GenerateObjectRequest<T>,
+  ): Promise<GenerateObjectResult<T>> {
+    return {
+      ok: false,
+      reason: "provider_error",
+      metadata: {
+        provider: "mock",
+        operation: "generate_object",
+        model: "chat-stream-only-mock",
+      },
+    };
   }
 }
 

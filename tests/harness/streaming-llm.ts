@@ -12,6 +12,8 @@ import type {
   LLMProvider,
   LLMResponse,
   LLMRoundResult,
+  GenerateObjectRequest,
+  GenerateObjectResult,
   ToolDefinition,
 } from "../../server/llm/types.js";
 
@@ -110,5 +112,20 @@ export class StreamingLLMProvider implements LLMProvider {
     }
     // Default fallback when queue is exhausted
     return { kind: "response", response: { content: "Mock: 已記錄您的飲食！" } };
+  }
+
+  async generateObject<T>(
+    _messages: ChatMessage[],
+    _request: GenerateObjectRequest<T>,
+  ): Promise<GenerateObjectResult<T>> {
+    return {
+      ok: false,
+      reason: "provider_error",
+      metadata: {
+        provider: "mock",
+        operation: "generate_object",
+        model: "streaming-mock",
+      },
+    };
   }
 }

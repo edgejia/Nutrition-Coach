@@ -12,7 +12,17 @@ import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import { renderMealNumericAuthorityFailureCopy } from "../../server/orchestrator/mutation-receipts.js";
 import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
 import type { FastifyInstance } from "fastify";
-import type { ChatMessage, LLMProvider, LLMResponse, LLMRoundResult, ProviderErrorMetadata, ToolCall, ToolDefinition } from "../../server/llm/types.js";
+import type {
+  ChatMessage,
+  GenerateObjectRequest,
+  GenerateObjectResult,
+  LLMProvider,
+  LLMResponse,
+  LLMRoundResult,
+  ProviderErrorMetadata,
+  ToolCall,
+  ToolDefinition,
+} from "../../server/llm/types.js";
 
 type LLMCallOptions = { signal?: AbortSignal };
 type RoundQueueItem = LLMRoundResult | Error | ((opts?: LLMCallOptions) => LLMRoundResult);
@@ -93,6 +103,21 @@ class StreamingLLMProvider implements LLMProvider {
       return item;
     }
     return { kind: "response", response: { content: "Mock: 已記錄您的飲食！" } };
+  }
+
+  async generateObject<T>(
+    _messages: ChatMessage[],
+    _request: GenerateObjectRequest<T>,
+  ): Promise<GenerateObjectResult<T>> {
+    return {
+      ok: false,
+      reason: "provider_error",
+      metadata: {
+        provider: "mock",
+        operation: "generate_object",
+        model: "streaming-mock",
+      },
+    };
   }
 }
 

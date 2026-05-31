@@ -21,7 +21,13 @@ import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createSpyHooks } from "../helpers/spy-hooks.js";
 import type { DailyTargets } from "../../server/services/device.js";
-import type { LLMProvider, ProviderErrorMetadata } from "../../server/llm/types.js";
+import type {
+  ChatMessage,
+  GenerateObjectRequest,
+  GenerateObjectResult,
+  LLMProvider,
+  ProviderErrorMetadata,
+} from "../../server/llm/types.js";
 
 function assertReplyResult(result: OrchestratorResult): asserts result is Extract<OrchestratorResult, { reply: string }> {
   assert.ok("reply" in result);
@@ -31,6 +37,21 @@ function assertStreamResult(
   result: OrchestratorResult,
 ): asserts result is Extract<OrchestratorResult, { streamGenerator: AsyncGenerator<string> }> {
   assert.ok("streamGenerator" in result);
+}
+
+async function unsupportedGenerateObject<T>(
+  _messages: ChatMessage[],
+  _request: GenerateObjectRequest<T>,
+): Promise<GenerateObjectResult<T>> {
+  return {
+    ok: false,
+    reason: "provider_error",
+    metadata: {
+      provider: "mock",
+      operation: "generate_object",
+      model: "orchestrator-test-mock",
+    },
+  };
 }
 
 async function collectStreamFailure(stream: AsyncGenerator<string>): Promise<{ tokens: string[]; error: unknown }> {
@@ -489,6 +510,7 @@ describe("Orchestrator", () => {
       providerRequestId: "req_stream_round",
     };
     const llmProvider: LLMProvider = {
+      generateObject: unsupportedGenerateObject,
       async chat() {
         return { content: "unused" };
       },
@@ -547,6 +569,7 @@ describe("Orchestrator", () => {
       providerRequestId: "req_stream_final",
     };
     const llmProvider: LLMProvider = {
+      generateObject: unsupportedGenerateObject,
       async chat() {
         return {
           toolCalls: [{
@@ -599,6 +622,7 @@ describe("Orchestrator", () => {
     const openAIProvider = new OpenAIProvider(fakeClient);
     const chatOnlyProvider: LLMProvider = {
       chat: openAIProvider.chat.bind(openAIProvider),
+      generateObject: openAIProvider.generateObject.bind(openAIProvider),
     };
     const openAIOrchestrator = createOrchestratorWithProvider(chatOnlyProvider);
 

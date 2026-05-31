@@ -12,7 +12,15 @@ import type { AppServices } from "../../server/app.js";
 import { applyMigrations } from "../../server/db/migrate.js";
 import { LLMProviderError } from "../../server/llm/errors.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
-import type { ChatMessage, LLMProvider, LLMResponse, ProviderErrorMetadata, ToolDefinition } from "../../server/llm/types.js";
+import type {
+  ChatMessage,
+  GenerateObjectRequest,
+  GenerateObjectResult,
+  LLMProvider,
+  LLMResponse,
+  ProviderErrorMetadata,
+  ToolDefinition,
+} from "../../server/llm/types.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
@@ -200,6 +208,21 @@ class JsonHallucinationStreamProvider implements LLMProvider {
     };
   }
 
+  async generateObject<T>(
+    _messages: ChatMessage[],
+    _request: GenerateObjectRequest<T>,
+  ): Promise<GenerateObjectResult<T>> {
+    return {
+      ok: false,
+      reason: "provider_error",
+      metadata: {
+        provider: "mock",
+        operation: "generate_object",
+        model: "json-hallucination-stream-mock",
+      },
+    };
+  }
+
   private async *streamChoicePrompt(): AsyncGenerator<string> {
     yield "請選擇方式 1 或方式 2";
   }
@@ -220,6 +243,21 @@ class JsonProviderStreamErrorProvider implements LLMProvider {
     return {
       kind: "stream" as const,
       streamGenerator: this.streamThenThrow(),
+    };
+  }
+
+  async generateObject<T>(
+    _messages: ChatMessage[],
+    _request: GenerateObjectRequest<T>,
+  ): Promise<GenerateObjectResult<T>> {
+    return {
+      ok: false,
+      reason: "provider_error",
+      metadata: {
+        provider: "mock",
+        operation: "generate_object",
+        model: "json-provider-stream-error-mock",
+      },
     };
   }
 
