@@ -4,7 +4,7 @@ import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
-import type { Goal } from "../../server/services/device.js";
+import { getGoalDefaults, type Goal } from "../../server/services/device.js";
 
 function getSetCookieHeaders(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
   const rawHeader = res.headers["set-cookie"];
@@ -76,6 +76,14 @@ function assertLogEventsExclude(events: readonly Record<string, unknown>[], forb
   const serialized = events.map((event) => JSON.stringify(event)).join("\n");
   for (const value of forbiddenValues) {
     assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+  }
+}
+
+function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg"]);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(event)) {
+    assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
   }
 }
 
@@ -250,8 +258,8 @@ describe("Device API", () => {
 
   it("POST /api/device returns usedFallback true when target generation falls back", async () => {
     const llmProvider = new MockLLMProvider();
-    llmProvider.queueObjectContent("not valid json");
-    llmProvider.queueObjectContent("still not valid json");
+    llmProvider.queueObjectNoContent("empty_content");
+    llmProvider.queueObjectProviderError();
     const fallbackApp = await buildApp({ dbPath: ":memory:", llmProvider });
 
     const res = await fallbackApp.inject({
@@ -275,6 +283,8 @@ describe("Device API", () => {
     assert.equal(body.dailyTargets.calories, 1500);
     assert.equal(body.coachExplanation, "先用預設目標，之後可再微調。");
     assert.equal(body.usedFallback, true);
+    assert.equal(llmProvider.objectCalls.length, 2);
+    assert.equal(llmProvider.chatCalls.length, 0);
   });
 
   it("POST /api/device/session migrates a legacy device into cookie-backed mode", async () => {
@@ -466,13 +476,18 @@ describe("Device API", () => {
     assert.ok(res.json().error);
   });
 
-  it("OBS-02: emits sanitized target-generation attempt and fallback events when LLM returns invalid targets", async () => {
+  it("OBS-02: falls back, persists defaults, and logs sanitized target-generation failures for invalid structured output", async () => {
     const { logLines, logStream } = createLogCapture();
 
     const obs02LLM = new MockLLMProvider();
-    // Queue 2 invalid responses — target-generation makes 2 attempts before fallback
-    obs02LLM.queueObjectContent("not valid json at all");
-    obs02LLM.queueObjectContent("also not valid json");
+    obs02LLM.queueObjectContent(JSON.stringify({
+      calories: 9999,
+      protein: 210,
+      carbs: 800,
+      fat: 500,
+      coachExplanation: "RAW_MODEL_SENTINEL",
+    }));
+    obs02LLM.queueObjectProviderError();
 
     const obs02App = await buildApp({
       dbPath: ":memory:",
@@ -492,49 +507,133 @@ describe("Device API", () => {
         weightKg: 60,
         activityLevel: "moderate",
         trainingFrequency: "3_4",
+        allergies: "INTAKE_ALLERGY_SENTINEL",
+        goalClarification: "INTAKE_GOAL_SENTINEL",
+        advancedNotes: "INTAKE_NOTES_SENTINEL",
       },
+    });
+
+    assert.equal(res.statusCode, 200, `Expected 200 but got ${res.statusCode}: ${res.body}`);
+    const body = res.json() as {
+      deviceId: string;
+      dailyTargets: { calories: number; protein: number; carbs: number; fat: number };
+      coachExplanation: string;
+      usedFallback: boolean;
+    };
+    const fallbackTargets = getGoalDefaults("fat_loss");
+    assert.deepEqual(body.dailyTargets, fallbackTargets);
+    assert.equal(body.coachExplanation, "先用預設目標，之後可再微調。");
+    assert.equal(body.usedFallback, true);
+    assert.equal(obs02LLM.objectCalls.length, 2);
+    assert.equal(obs02LLM.chatCalls.length, 0);
+
+    const cookieHeader = toCookieHeader(res);
+    const session = await obs02App.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: cookieHeader },
+      payload: {},
     });
 
     await obs02App.close();
 
-    // Response should still succeed (fallback targets used)
-    assert.equal(res.statusCode, 200, `Expected 200 but got ${res.statusCode}: ${res.body}`);
+    assert.equal(session.statusCode, 200);
+    assert.deepEqual(session.json(), {
+      deviceId: body.deviceId,
+      goal: "fat_loss",
+      dailyTargets: fallbackTargets,
+      establishedBy: "active",
+    });
 
     const attemptEvents = findLogEvents(logLines, "target_generation_attempt_failed");
     assert.equal(attemptEvents.length, 2);
-    assert.deepEqual(
-      attemptEvents.map((event) =>
-        pickEventMetadata(event, ["event", "attempt", "providerReason", "targetReason", "metadataContext"]),
-      ),
-      [
-        {
-          event: "target_generation_attempt_failed",
-          attempt: 1,
-          providerReason: "invalid_json",
-          targetReason: "invalid_json",
-          metadataContext: "target_generation",
-        },
-        {
-          event: "target_generation_attempt_failed",
-          attempt: 2,
-          providerReason: "invalid_json",
-          targetReason: "invalid_json",
-          metadataContext: "target_generation",
-        },
-      ],
-    );
+    assert.deepEqual(attemptEvents.map(pickTargetGenerationMetadata), [
+      {
+        event: "target_generation_attempt_failed",
+        attempt: 1,
+        providerReason: "schema_validation",
+        targetReason: "bounds_failed",
+        metadataContext: "target_generation",
+        issueCount: 1,
+        fields: ["calories"],
+        codes: ["bounds_failed"],
+        noContentSubtype: undefined,
+      },
+      {
+        event: "target_generation_attempt_failed",
+        attempt: 2,
+        providerReason: "provider_error",
+        targetReason: "provider_error",
+        metadataContext: "target_generation",
+        issueCount: undefined,
+        fields: undefined,
+        codes: undefined,
+        noContentSubtype: undefined,
+      },
+    ]);
     const fallbackEvents = findLogEvents(logLines, "target_generation_fallback_used");
     assert.equal(fallbackEvents.length, 1);
+    assert.deepEqual(pickTargetGenerationMetadata(fallbackEvents[0]!), {
+      event: "target_generation_fallback_used",
+      attempt: 2,
+      providerReason: "provider_error",
+      targetReason: "provider_error",
+      metadataContext: "target_generation",
+      issueCount: undefined,
+      fields: undefined,
+      codes: undefined,
+      noContentSubtype: undefined,
+    });
     assert.deepEqual(
-      pickEventMetadata(fallbackEvents[0]!, ["event", "attempt", "providerReason", "targetReason", "metadataContext"]),
-      {
-        event: "target_generation_fallback_used",
-        attempt: 2,
-        providerReason: "invalid_json",
-        targetReason: "invalid_json",
-        metadataContext: "target_generation",
-      },
+      findLogEvents(logLines, "onboarding_submit_succeeded").map((event) =>
+        pickEventMetadata(event, ["event", "usedTargetFallback"]),
+      ),
+      [{ event: "onboarding_submit_succeeded", usedTargetFallback: true }],
     );
+
+    const allowedTargetKeys = [
+      "event",
+      "attempt",
+      "providerReason",
+      "targetReason",
+      "metadataContext",
+      "issueCount",
+      "fields",
+      "codes",
+      "noContentSubtype",
+    ];
+    for (const event of [...attemptEvents, ...fallbackEvents]) {
+      assertLogEventApplicationKeys(event, allowedTargetKeys);
+    }
+    const targetGenerationPayloads = [...attemptEvents, ...fallbackEvents].map(pickTargetGenerationMetadata);
+    const onboardingPayloads = findLogEvents(logLines, "onboarding_submit_succeeded").map(pickOnboardingMetadata);
+    assertLogEventsExclude([...targetGenerationPayloads, ...onboardingPayloads], [
+      body.deviceId,
+      cookieHeader,
+      "guest_session",
+      "guest_session_resume",
+      "INTAKE_ALLERGY_SENTINEL",
+      "INTAKE_GOAL_SENTINEL",
+      "INTAKE_NOTES_SENTINEL",
+      "RAW_MODEL_SENTINEL",
+      "9999",
+      "210",
+      "800",
+      "500",
+      String(fallbackTargets.calories),
+      String(fallbackTargets.protein),
+      String(fallbackTargets.carbs),
+      String(fallbackTargets.fat),
+      "minimum",
+      "maximum",
+      "too_big",
+      "provider body",
+      "provider header",
+      "authorization",
+      "bearer",
+      "session",
+      "validation error",
+    ]);
   });
 
   it("OBS-01: logs onboarding validation failure with redacted fields and codes", async () => {
