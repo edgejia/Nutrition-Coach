@@ -1,22 +1,69 @@
-import type { LLMProvider, ChatMessage } from "../llm/types.js";
-import type { Goal, IntakeFields, DailyTargets } from "./device.js";
 import type { FastifyBaseLogger } from "fastify";
+import { z } from "zod";
+import type {
+  ChatMessage,
+  GenerateObjectRequest,
+  StructuredJsonSchemaHint,
+  StructuredValidationIssue,
+  StructuredValidationResult,
+  LLMProvider,
+} from "../llm/types.js";
+import type { Goal, IntakeFields, DailyTargets } from "./device.js";
 import { getGoalDefaults } from "./device.js";
+
+export const TARGET_GENERATION_METADATA_CONTEXT = "target_generation";
+export const TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS = 160;
+
+const TARGET_GENERATION_FIELDS = ["calories", "protein", "carbs", "fat", "coachExplanation"] as const;
+
+export const targetGenerationOutputSchema = z.strictObject({
+  calories: z.number().int().positive(),
+  protein: z.number().int().positive(),
+  carbs: z.number().int().nonnegative(),
+  fat: z.number().int().positive(),
+  coachExplanation: z.string().trim().min(1).max(TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS),
+});
+
+export type TargetGenerationOutput = z.infer<typeof targetGenerationOutputSchema>;
+
+export const TARGET_GENERATION_SCHEMA_HINT: StructuredJsonSchemaHint = {
+  name: "onboarding_target_generation",
+  description: "Daily nutrition targets and one short Traditional Chinese coach explanation.",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: TARGET_GENERATION_FIELDS,
+    properties: {
+      calories: {
+        type: "integer",
+        minimum: 1,
+      },
+      protein: {
+        type: "integer",
+        minimum: 1,
+      },
+      carbs: {
+        type: "integer",
+        minimum: 0,
+      },
+      fat: {
+        type: "integer",
+        minimum: 1,
+      },
+      coachExplanation: {
+        type: "string",
+        minLength: 1,
+        maxLength: TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS,
+      },
+    },
+  },
+};
 
 interface TargetGenerationResult {
   dailyTargets: DailyTargets;
   coachExplanation: string;
   usedFallback: boolean;
-}
-
-interface LLMTargetResponse {
-  dailyTargets?: Partial<DailyTargets>;
-  explanation?: string;
-  coachExplanation?: string;
-  calories?: number;
-  protein?: number;
-  carbs?: number;
-  fat?: number;
 }
 
 const CALORIE_BOUNDS: Record<Goal, { min: number; max: number }> = {
@@ -67,75 +114,58 @@ function buildMessages(goal: Goal, intake: IntakeFields): ChatMessage[] {
   ];
 }
 
-function cleanJsonContent(content: string): string {
-  const trimmed = content.trim();
-  const fencedMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return fencedMatch ? fencedMatch[1].trim() : trimmed;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function issuePath(issue: z.core.$ZodIssue): string {
+  return issue.path.length > 0 ? issue.path.join(".") : "root";
 }
 
-const EXPLANATION_KEYS = ["coachExplanation", "explanation", "note", "coachNote", "message", "coach_explanation"];
-
-function readExplanation(obj: Record<string, unknown>): string | null {
-  // Check known keys first
-  for (const key of EXPLANATION_KEYS) {
-    const value = obj[key];
-    if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  }
-  // Fallback: any key containing "note", "explanation", or "coach"
-  for (const key of Object.keys(obj)) {
-    const lower = key.toLowerCase();
-    if (lower.includes("note") || lower.includes("explanation") || lower.includes("coach")) {
-      const value = obj[key];
-      if (typeof value === "string" && value.trim().length > 0) return value.trim();
-    }
-  }
-  return null;
+function issueCode(issue: z.core.$ZodIssue): string {
+  return typeof issue.code === "string" && issue.code.length > 0 ? issue.code : "custom";
 }
 
-function readMacroNumber(obj: Record<string, unknown>, key: string): number | null {
-  return readFiniteNumber(obj[key] ?? obj[`${key}_g`] ?? obj[`${key}_kcal`]);
-}
-
-function parseTargetResponse(content: string): { dailyTargets: DailyTargets; coachExplanation: string } {
-  const cleaned = cleanJsonContent(content);
-  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-  // Support nested "macros" or "dailyTargets" sub-objects
-  const macros = (parsed.macros ?? parsed.dailyTargets ?? parsed) as Record<string, unknown>;
-
-  const calories = readMacroNumber(parsed, "calories") ?? readMacroNumber(macros, "calories");
-  const protein = readMacroNumber(macros, "protein") ?? readMacroNumber(parsed, "protein");
-  const carbs = readMacroNumber(macros, "carbs") ?? readMacroNumber(parsed, "carbs");
-  const fat = readMacroNumber(macros, "fat") ?? readMacroNumber(parsed, "fat");
-  const coachExplanation = readExplanation(parsed);
-
-  if (calories === null || protein === null || carbs === null || fat === null || coachExplanation === null) {
-    throw new Error("Invalid target response");
+function buildMissingFieldIssues(raw: unknown): StructuredValidationIssue[] {
+  if (!isRecord(raw)) {
+    return [];
   }
 
-  const dailyTargets: DailyTargets = { calories, protein, carbs, fat };
-  return { dailyTargets, coachExplanation };
+  return TARGET_GENERATION_FIELDS
+    .filter((field) => !Object.hasOwn(raw, field))
+    .map((field) => ({ path: field, code: "missing_required" }));
 }
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+export function validateStructuredTargetOutput(raw: unknown): StructuredValidationResult<TargetGenerationOutput> {
+  const parsed = targetGenerationOutputSchema.safeParse(raw);
+  if (parsed.success) {
+    return { ok: true, value: parsed.data };
+  }
+
+  const missingIssues = buildMissingFieldIssues(raw);
+  const missingPaths = new Set(missingIssues.map((issue) => issue.path));
+  const zodIssues = parsed.error.issues
+    .map((issue) => ({ path: issuePath(issue), code: issueCode(issue) }))
+    .filter((issue) => !(missingPaths.has(issue.path) && issue.code === "invalid_type"));
+
+  return {
+    ok: false,
+    issues: [...missingIssues, ...zodIssues],
+  };
+}
+
+export function buildTargetGenerationRequest(): GenerateObjectRequest<TargetGenerationOutput> {
+  return {
+    validate: validateStructuredTargetOutput,
+    schemaHint: TARGET_GENERATION_SCHEMA_HINT,
+    metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+    maxCompletionTokens: 300,
+  };
 }
 
 function validateTargets(goal: Goal, targets: DailyTargets): boolean {
   const bounds = CALORIE_BOUNDS[goal];
-  if (!isFiniteNumber(targets.calories) || targets.calories < bounds.min || targets.calories > bounds.max) {
-    return false;
-  }
-  if (!isFiniteNumber(targets.protein) || targets.protein <= 0) {
-    return false;
-  }
-  if (!isFiniteNumber(targets.fat) || targets.fat <= 0) {
-    return false;
-  }
-  if (!isFiniteNumber(targets.carbs) || targets.carbs < 0) {
+  if (targets.calories < bounds.min || targets.calories > bounds.max) {
     return false;
   }
 
@@ -159,19 +189,25 @@ export function createTargetGenerationService(llmProvider: LLMProvider, log?: Fa
 
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          const response = await llmProvider.chat(messages, []);
-          if (!response.content) {
+          const response = await llmProvider.generateObject(messages, buildTargetGenerationRequest());
+          if (!response.ok) {
             continue;
           }
 
-          const parsed = parseTargetResponse(response.content);
-          if (!validateTargets(goal, parsed.dailyTargets)) {
+          const dailyTargets: DailyTargets = {
+            calories: response.value.calories,
+            protein: response.value.protein,
+            carbs: response.value.carbs,
+            fat: response.value.fat,
+          };
+
+          if (!validateTargets(goal, dailyTargets)) {
             continue;
           }
 
           return {
-            dailyTargets: parsed.dailyTargets,
-            coachExplanation: parsed.coachExplanation,
+            dailyTargets,
+            coachExplanation: response.value.coachExplanation,
             usedFallback: false,
           };
         } catch {
