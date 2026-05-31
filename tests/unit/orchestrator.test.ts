@@ -139,15 +139,7 @@ class StreamingLLMProvider implements LLMProvider {
     _messages: ChatMessage[],
     _request: GenerateObjectRequest<T>,
   ): Promise<GenerateObjectResult<T>> {
-    return {
-      ok: false,
-      reason: "provider_error",
-      metadata: {
-        provider: "mock",
-        operation: "generate_object",
-        model: "streaming-mock",
-      },
-    };
+    throw new Error("generateObject unexpectedly called by this test provider");
   }
 
   reset() {
@@ -189,15 +181,7 @@ class ChatStreamOnlyProvider implements LLMProvider {
     _messages: ChatMessage[],
     _request: GenerateObjectRequest<T>,
   ): Promise<GenerateObjectResult<T>> {
-    return {
-      ok: false,
-      reason: "provider_error",
-      metadata: {
-        provider: "mock",
-        operation: "generate_object",
-        model: "chat-stream-only-mock",
-      },
-    };
+    throw new Error("generateObject unexpectedly called by this test provider");
   }
 }
 

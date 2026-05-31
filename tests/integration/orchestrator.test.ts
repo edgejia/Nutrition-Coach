@@ -43,15 +43,7 @@ async function unsupportedGenerateObject<T>(
   _messages: ChatMessage[],
   _request: GenerateObjectRequest<T>,
 ): Promise<GenerateObjectResult<T>> {
-  return {
-    ok: false,
-    reason: "provider_error",
-    metadata: {
-      provider: "mock",
-      operation: "generate_object",
-      model: "orchestrator-test-mock",
-    },
-  };
+  throw new Error("generateObject unexpectedly called by this test provider");
 }
 
 async function collectStreamFailure(stream: AsyncGenerator<string>): Promise<{ tokens: string[]; error: unknown }> {

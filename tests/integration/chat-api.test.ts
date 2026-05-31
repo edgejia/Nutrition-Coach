@@ -212,15 +212,7 @@ class JsonHallucinationStreamProvider implements LLMProvider {
     _messages: ChatMessage[],
     _request: GenerateObjectRequest<T>,
   ): Promise<GenerateObjectResult<T>> {
-    return {
-      ok: false,
-      reason: "provider_error",
-      metadata: {
-        provider: "mock",
-        operation: "generate_object",
-        model: "json-hallucination-stream-mock",
-      },
-    };
+    throw new Error("generateObject unexpectedly called by this test provider");
   }
 
   private async *streamChoicePrompt(): AsyncGenerator<string> {
@@ -250,15 +242,7 @@ class JsonProviderStreamErrorProvider implements LLMProvider {
     _messages: ChatMessage[],
     _request: GenerateObjectRequest<T>,
   ): Promise<GenerateObjectResult<T>> {
-    return {
-      ok: false,
-      reason: "provider_error",
-      metadata: {
-        provider: "mock",
-        operation: "generate_object",
-        model: "json-provider-stream-error-mock",
-      },
-    };
+    throw new Error("generateObject unexpectedly called by this test provider");
   }
 
   private async *streamThenThrow(): AsyncGenerator<string> {
