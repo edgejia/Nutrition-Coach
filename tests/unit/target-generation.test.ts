@@ -4,6 +4,10 @@ import type { FastifyBaseLogger } from "fastify";
 import { isLLMProviderError } from "../../server/llm/errors.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import {
+  buildTargetGenerationAttemptFailedEvent,
+  buildTargetGenerationFallbackUsedEvent,
+} from "../../server/observability/events.js";
+import {
   TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS,
   TARGET_GENERATION_METADATA_CONTEXT,
   createTargetGenerationService,
@@ -406,5 +410,46 @@ describe("target-generation service", () => {
     assert.equal(mockLLM.objectCalls.length, 1);
     assert.equal(fallbackEvents(entries).length, 0);
     assertNoForbiddenLogContent(entries);
+  });
+
+  it("passes caller abort signals into generateObject without returning fallback", async () => {
+    const mockLLM = new MockLLMProvider();
+    const { entries, logger } = createLoggerCapture();
+    const service = createTargetGenerationService(mockLLM, logger);
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(
+      () => service.generateTargets("fat_loss", createIntake(), { signal: controller.signal }),
+      (error) => isLLMProviderError(error) && error.providerMetadata.aborted === true,
+    );
+
+    assert.equal(mockLLM.objectCalls.length, 1);
+    assert.equal(mockLLM.objectCalls[0].opts?.signal, controller.signal);
+    assert.equal(attemptEvents(entries).length, 0);
+    assert.equal(fallbackEvents(entries).length, 0);
+  });
+
+  it("drops unsafe runtime noContentSubtype values from target-generation events", () => {
+    const unsafeSubtype = "authorization raw provider body user-intake-sentinel";
+
+    const attempt = buildTargetGenerationAttemptFailedEvent({
+      attempt: 1,
+      providerReason: "no_content",
+      targetReason: "no_content",
+      metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+      noContentSubtype: unsafeSubtype,
+    });
+    const fallback = buildTargetGenerationFallbackUsedEvent({
+      attempt: 2,
+      providerReason: "no_content",
+      targetReason: "no_content",
+      metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+      noContentSubtype: unsafeSubtype,
+    });
+
+    assert.equal("noContentSubtype" in attempt, false);
+    assert.equal("noContentSubtype" in fallback, false);
+    assertNoForbiddenLogContent([attempt, fallback]);
   });
 });

@@ -58,11 +58,13 @@ const INTAKE_FIELDS = [
 const GOAL_UPDATE_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
 const GOAL_VALIDATION_CODES = ["invalid_body", "invalid_field_value", "empty_valid_fields"] as const;
 const TARGET_GENERATION_FIELDS = ["calories", "protein", "carbs", "fat", "coachExplanation", "root"] as const;
+const TARGET_GENERATION_NO_CONTENT_SUBTYPES = ["no_choices", "missing_content", "empty_content"] as const;
 
 const INTAKE_FIELD_SET = new Set<string>(INTAKE_FIELDS);
 const GOAL_UPDATE_FIELD_SET = new Set<string>(GOAL_UPDATE_FIELDS);
 const GOAL_VALIDATION_CODE_SET = new Set<string>(GOAL_VALIDATION_CODES);
 const TARGET_GENERATION_FIELD_SET = new Set<string>(TARGET_GENERATION_FIELDS);
+const TARGET_GENERATION_NO_CONTENT_SUBTYPE_SET = new Set<string>(TARGET_GENERATION_NO_CONTENT_SUBTYPES);
 const VALID_IDENTIFIER = /^[a-z0-9_-]{1,64}$/;
 const VALID_CODE = /^[A-Z0-9_]{1,64}$/;
 const VALID_GOAL_VALIDATION_CODE = /^[a-z0-9_]{1,64}$/;
@@ -272,6 +274,12 @@ function sanitizeTargetGenerationCodes(codes: readonly string[]): string[] {
   return uniqueSorted(codes.filter((code) => VALID_TARGET_GENERATION_CODE.test(code)));
 }
 
+function sanitizeNoContentSubtype(value: unknown): StructuredOutputNoContentSubtype | undefined {
+  return typeof value === "string" && TARGET_GENERATION_NO_CONTENT_SUBTYPE_SET.has(value)
+    ? value as StructuredOutputNoContentSubtype
+    : undefined;
+}
+
 function sanitizeIssueCount(issueCount: number | undefined): number | undefined {
   if (typeof issueCount !== "number" || !Number.isFinite(issueCount)) {
     return undefined;
@@ -411,11 +419,12 @@ export function buildTargetGenerationAttemptFailedEvent(params: {
   issueCount?: number;
   fields?: readonly string[];
   codes?: readonly string[];
-  noContentSubtype?: StructuredOutputNoContentSubtype;
+  noContentSubtype?: unknown;
 }): TargetGenerationAttemptFailedEvent {
   const fields = sanitizeTargetGenerationFields(params.fields ?? []);
   const codes = sanitizeTargetGenerationCodes(params.codes ?? []);
   const issueCount = sanitizeIssueCount(params.issueCount);
+  const noContentSubtype = sanitizeNoContentSubtype(params.noContentSubtype);
 
   return {
     event: "target_generation_attempt_failed",
@@ -426,7 +435,7 @@ export function buildTargetGenerationAttemptFailedEvent(params: {
     ...(issueCount !== undefined ? { issueCount } : {}),
     ...(fields.length > 0 ? { fields } : {}),
     ...(codes.length > 0 ? { codes } : {}),
-    ...(params.noContentSubtype !== undefined ? { noContentSubtype: params.noContentSubtype } : {}),
+    ...(noContentSubtype !== undefined ? { noContentSubtype } : {}),
   };
 }
 
@@ -445,7 +454,7 @@ export function buildTargetGenerationFallbackUsedEvent(params: {
   issueCount?: number;
   fields?: readonly string[];
   codes?: readonly string[];
-  noContentSubtype?: StructuredOutputNoContentSubtype;
+  noContentSubtype?: unknown;
 }): TargetGenerationFallbackUsedEvent {
   const failed = buildTargetGenerationAttemptFailedEvent(params);
   return {

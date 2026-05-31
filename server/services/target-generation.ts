@@ -8,6 +8,7 @@ import type {
   StructuredOutputFailureReason,
   StructuredValidationIssue,
   StructuredValidationResult,
+  LLMCallOptions,
   LLMProvider,
 } from "../llm/types.js";
 import { isLLMProviderError } from "../llm/errors.js";
@@ -347,14 +348,14 @@ function logFallback(
 
 export function createTargetGenerationService(llmProvider: LLMProvider, log?: FastifyBaseLogger) {
   return {
-    async generateTargets(goal: Goal, intake: IntakeFields): Promise<TargetGenerationResult> {
+    async generateTargets(goal: Goal, intake: IntakeFields, opts?: LLMCallOptions): Promise<TargetGenerationResult> {
       const messages = buildMessages(goal, intake);
 
       let finalFailure: TargetGenerationFailureSummary | undefined;
 
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const response = await llmProvider.generateObject(messages, buildTargetGenerationRequest());
+          const response = await llmProvider.generateObject(messages, buildTargetGenerationRequest(), opts);
           if (!response.ok) {
             finalFailure = classifyProviderFailure(response);
             logAttemptFailure(log, attempt, finalFailure);
