@@ -58,6 +58,20 @@ function pickOnboardingMetadata(event: Record<string, unknown>) {
   return pickEventMetadata(event, ["event", "usedTargetFallback"]);
 }
 
+function pickTargetGenerationMetadata(event: Record<string, unknown>) {
+  return pickEventMetadata(event, [
+    "event",
+    "attempt",
+    "providerReason",
+    "targetReason",
+    "metadataContext",
+    "issueCount",
+    "fields",
+    "codes",
+    "noContentSubtype",
+  ]);
+}
+
 function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
   const serialized = events.map((event) => JSON.stringify(event)).join("\n");
   for (const value of forbiddenValues) {
@@ -192,13 +206,46 @@ describe("Device API", () => {
       },
     });
 
-    await generatedApp.close();
-
     assert.equal(res.statusCode, 200);
     const body = res.json();
+    assert.deepEqual(Object.keys(body).sort(), ["coachExplanation", "dailyTargets", "deviceId", "usedFallback"]);
     assert.equal(body.dailyTargets.calories, 1800);
+    assert.equal(body.dailyTargets.protein, 120);
+    assert.equal(body.dailyTargets.carbs, 210);
+    assert.equal(body.dailyTargets.fat, 53);
     assert.equal(body.coachExplanation, "以穩定赤字開始，保留訓練表現。");
     assert.equal(body.usedFallback, false);
+    assertLogEventsExclude([body], [
+      "providerReason",
+      "targetReason",
+      "metadataContext",
+      "issueCount",
+      "fields",
+      "codes",
+      "noContentSubtype",
+      "raw",
+      "body",
+      "headers",
+    ]);
+    assert.equal(llmProvider.objectCalls.length, 1);
+    assert.equal(llmProvider.chatCalls.length, 0);
+
+    const session = await generatedApp.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: toCookieHeader(res) },
+      payload: {},
+    });
+
+    await generatedApp.close();
+
+    assert.equal(session.statusCode, 200);
+    assert.deepEqual(session.json(), {
+      deviceId: body.deviceId,
+      goal: "fat_loss",
+      dailyTargets: body.dailyTargets,
+      establishedBy: "active",
+    });
   });
 
   it("POST /api/device returns usedFallback true when target generation falls back", async () => {
