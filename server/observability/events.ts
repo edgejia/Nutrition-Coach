@@ -1,10 +1,17 @@
 import type { FastifyBaseLogger } from "fastify";
-import type { ProviderErrorMetadata, ProviderOperation } from "../llm/types.js";
+import type {
+  ProviderErrorMetadata,
+  ProviderOperation,
+  StructuredOutputFailureReason,
+  StructuredOutputNoContentSubtype,
+} from "../llm/types.js";
 
 export type RedactedObservabilityEventName =
   | "onboarding_submit_started"
   | "onboarding_validation_failed"
   | "onboarding_submit_succeeded"
+  | "target_generation_attempt_failed"
+  | "target_generation_fallback_used"
   | "home_cta_intent_selected"
   | "home_cta_option_sent"
   | "chat_turn_completed"
@@ -24,6 +31,15 @@ export type RouteFallbackReason =
   | "route_catch";
 export type RouteCatchSite = "json_outer" | "sse_outer" | "sse_persist";
 export type SseConnectionState = "opened" | "closed" | "rejected";
+export type TargetGenerationTargetReason =
+  | "provider_error"
+  | "invalid_json"
+  | "no_content"
+  | "missing_field"
+  | "schema_validation"
+  | "bounds_failed"
+  | "macro_calorie_mismatch";
+export type TargetGenerationField = "calories" | "protein" | "carbs" | "fat" | "coachExplanation" | "root";
 
 const INTAKE_FIELDS = [
   "goal",
@@ -41,13 +57,16 @@ const INTAKE_FIELDS = [
 ] as const;
 const GOAL_UPDATE_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
 const GOAL_VALIDATION_CODES = ["invalid_body", "invalid_field_value", "empty_valid_fields"] as const;
+const TARGET_GENERATION_FIELDS = ["calories", "protein", "carbs", "fat", "coachExplanation", "root"] as const;
 
 const INTAKE_FIELD_SET = new Set<string>(INTAKE_FIELDS);
 const GOAL_UPDATE_FIELD_SET = new Set<string>(GOAL_UPDATE_FIELDS);
 const GOAL_VALIDATION_CODE_SET = new Set<string>(GOAL_VALIDATION_CODES);
+const TARGET_GENERATION_FIELD_SET = new Set<string>(TARGET_GENERATION_FIELDS);
 const VALID_IDENTIFIER = /^[a-z0-9_-]{1,64}$/;
 const VALID_CODE = /^[A-Z0-9_]{1,64}$/;
 const VALID_GOAL_VALIDATION_CODE = /^[a-z0-9_]{1,64}$/;
+const VALID_TARGET_GENERATION_CODE = /^[a-z0-9_]{1,64}$/;
 const SAFE_ROUTE_ERROR_TEXT = /^[A-Za-z0-9 .:_/-]+$/;
 const ROUTE_ERROR_NAME_LIMIT = 80;
 const ROUTE_ERROR_MESSAGE_LIMIT = 160;
@@ -114,6 +133,30 @@ export interface OnboardingSubmitSucceededEvent {
   usedTargetFallback: boolean;
 }
 
+export interface TargetGenerationAttemptFailedEvent {
+  event: "target_generation_attempt_failed";
+  attempt: number;
+  providerReason: StructuredOutputFailureReason;
+  targetReason: TargetGenerationTargetReason;
+  metadataContext: string;
+  issueCount?: number;
+  fields?: TargetGenerationField[];
+  codes?: string[];
+  noContentSubtype?: StructuredOutputNoContentSubtype;
+}
+
+export interface TargetGenerationFallbackUsedEvent {
+  event: "target_generation_fallback_used";
+  attempt: number;
+  providerReason: StructuredOutputFailureReason;
+  targetReason: TargetGenerationTargetReason;
+  metadataContext: string;
+  issueCount?: number;
+  fields?: TargetGenerationField[];
+  codes?: string[];
+  noContentSubtype?: StructuredOutputNoContentSubtype;
+}
+
 export interface HomeCtaIntentSelectedEvent {
   event: "home_cta_intent_selected";
   intent: string;
@@ -175,6 +218,8 @@ export type RedactedObservabilityEvent =
   | OnboardingSubmitStartedEvent
   | OnboardingValidationFailedEvent
   | OnboardingSubmitSucceededEvent
+  | TargetGenerationAttemptFailedEvent
+  | TargetGenerationFallbackUsedEvent
   | HomeCtaIntentSelectedEvent
   | HomeCtaOptionSentEvent
   | ChatTurnCompletedEvent
@@ -217,6 +262,21 @@ function sanitizeGoalValidationCodes(codes: readonly string[]): string[] {
   return uniqueSorted(
     codes.filter((code) => VALID_GOAL_VALIDATION_CODE.test(code) && GOAL_VALIDATION_CODE_SET.has(code)),
   );
+}
+
+function sanitizeTargetGenerationFields(fields: readonly string[]): TargetGenerationField[] {
+  return uniqueSorted(fields.filter((field) => TARGET_GENERATION_FIELD_SET.has(field))) as TargetGenerationField[];
+}
+
+function sanitizeTargetGenerationCodes(codes: readonly string[]): string[] {
+  return uniqueSorted(codes.filter((code) => VALID_TARGET_GENERATION_CODE.test(code)));
+}
+
+function sanitizeIssueCount(issueCount: number | undefined): number | undefined {
+  if (typeof issueCount !== "number" || !Number.isFinite(issueCount)) {
+    return undefined;
+  }
+  return Math.max(0, Math.round(issueCount));
 }
 
 function isIdentifier(value: unknown): value is string {
@@ -341,6 +401,64 @@ export function logOnboardingSubmitSucceeded(
   params: Parameters<typeof buildOnboardingSubmitSucceededEvent>[0],
 ) {
   logRedactedEvent(log, buildOnboardingSubmitSucceededEvent(params), "Onboarding submit succeeded");
+}
+
+export function buildTargetGenerationAttemptFailedEvent(params: {
+  attempt: number;
+  providerReason: StructuredOutputFailureReason;
+  targetReason: TargetGenerationTargetReason;
+  metadataContext: string;
+  issueCount?: number;
+  fields?: readonly string[];
+  codes?: readonly string[];
+  noContentSubtype?: StructuredOutputNoContentSubtype;
+}): TargetGenerationAttemptFailedEvent {
+  const fields = sanitizeTargetGenerationFields(params.fields ?? []);
+  const codes = sanitizeTargetGenerationCodes(params.codes ?? []);
+  const issueCount = sanitizeIssueCount(params.issueCount);
+
+  return {
+    event: "target_generation_attempt_failed",
+    attempt: Math.max(1, Math.round(params.attempt)),
+    providerReason: params.providerReason,
+    targetReason: params.targetReason,
+    metadataContext: isIdentifier(params.metadataContext) ? params.metadataContext : "redacted",
+    ...(issueCount !== undefined ? { issueCount } : {}),
+    ...(fields.length > 0 ? { fields } : {}),
+    ...(codes.length > 0 ? { codes } : {}),
+    ...(params.noContentSubtype !== undefined ? { noContentSubtype: params.noContentSubtype } : {}),
+  };
+}
+
+export function logTargetGenerationAttemptFailed(
+  log: FastifyBaseLogger,
+  params: Parameters<typeof buildTargetGenerationAttemptFailedEvent>[0],
+) {
+  logRedactedEvent(log, buildTargetGenerationAttemptFailedEvent(params), "Target generation attempt failed");
+}
+
+export function buildTargetGenerationFallbackUsedEvent(params: {
+  attempt: number;
+  providerReason: StructuredOutputFailureReason;
+  targetReason: TargetGenerationTargetReason;
+  metadataContext: string;
+  issueCount?: number;
+  fields?: readonly string[];
+  codes?: readonly string[];
+  noContentSubtype?: StructuredOutputNoContentSubtype;
+}): TargetGenerationFallbackUsedEvent {
+  const failed = buildTargetGenerationAttemptFailedEvent(params);
+  return {
+    ...failed,
+    event: "target_generation_fallback_used",
+  };
+}
+
+export function logTargetGenerationFallbackUsed(
+  log: FastifyBaseLogger,
+  params: Parameters<typeof buildTargetGenerationFallbackUsedEvent>[0],
+) {
+  logRedactedEvent(log, buildTargetGenerationFallbackUsedEvent(params), "Target generation fallback used");
 }
 
 export function buildHomeCtaIntentSelectedEvent(params: {

@@ -2,12 +2,20 @@ import type { FastifyBaseLogger } from "fastify";
 import { z } from "zod";
 import type {
   ChatMessage,
+  GenerateObjectResult,
   GenerateObjectRequest,
   StructuredJsonSchemaHint,
+  StructuredOutputFailureReason,
   StructuredValidationIssue,
   StructuredValidationResult,
   LLMProvider,
 } from "../llm/types.js";
+import { isLLMProviderError } from "../llm/errors.js";
+import {
+  logTargetGenerationAttemptFailed,
+  logTargetGenerationFallbackUsed,
+  type TargetGenerationTargetReason,
+} from "../observability/events.js";
 import type { Goal, IntakeFields, DailyTargets } from "./device.js";
 import { getGoalDefaults } from "./device.js";
 
@@ -25,6 +33,18 @@ export const targetGenerationOutputSchema = z.strictObject({
 });
 
 export type TargetGenerationOutput = z.infer<typeof targetGenerationOutputSchema>;
+
+export type { TargetGenerationTargetReason };
+
+export interface TargetGenerationFailureSummary {
+  providerReason: StructuredOutputFailureReason;
+  targetReason: TargetGenerationTargetReason;
+  metadataContext: typeof TARGET_GENERATION_METADATA_CONTEXT;
+  issueCount?: number;
+  fields?: string[];
+  codes?: string[];
+  noContentSubtype?: "no_choices" | "missing_content" | "empty_content";
+}
 
 export const TARGET_GENERATION_SCHEMA_HINT: StructuredJsonSchemaHint = {
   name: "onboarding_target_generation",
@@ -136,6 +156,11 @@ function buildMissingFieldIssues(raw: unknown): StructuredValidationIssue[] {
     .map((field) => ({ path: field, code: "missing_required" }));
 }
 
+function fieldFromIssuePath(path: string): string {
+  const first = path.split(".")[0];
+  return TARGET_GENERATION_FIELDS.includes(first as (typeof TARGET_GENERATION_FIELDS)[number]) ? first : "root";
+}
+
 export function validateStructuredTargetOutput(raw: unknown): StructuredValidationResult<TargetGenerationOutput> {
   const parsed = targetGenerationOutputSchema.safeParse(raw);
   if (parsed.success) {
@@ -163,15 +188,48 @@ export function buildTargetGenerationRequest(): GenerateObjectRequest<TargetGene
   };
 }
 
-function validateTargets(goal: Goal, targets: DailyTargets): boolean {
+export function validateTargetDomain(
+  goal: Goal,
+  output: TargetGenerationOutput,
+): { ok: true; dailyTargets: DailyTargets } | { ok: false; failure: TargetGenerationFailureSummary } {
+  const dailyTargets: DailyTargets = {
+    calories: output.calories,
+    protein: output.protein,
+    carbs: output.carbs,
+    fat: output.fat,
+  };
   const bounds = CALORIE_BOUNDS[goal];
-  if (targets.calories < bounds.min || targets.calories > bounds.max) {
-    return false;
+  if (dailyTargets.calories < bounds.min || dailyTargets.calories > bounds.max) {
+    return {
+      ok: false,
+      failure: {
+        providerReason: "schema_validation",
+        targetReason: "bounds_failed",
+        metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+        issueCount: 1,
+        fields: ["calories"],
+        codes: ["bounds_failed"],
+      },
+    };
   }
 
-  const macroCalories = targets.protein * 4 + targets.carbs * 4 + targets.fat * 9;
-  const diffRatio = Math.abs(macroCalories - targets.calories) / targets.calories;
-  return diffRatio <= 0.1;
+  const macroCalories = dailyTargets.protein * 4 + dailyTargets.carbs * 4 + dailyTargets.fat * 9;
+  const diffRatio = Math.abs(macroCalories - dailyTargets.calories) / dailyTargets.calories;
+  if (diffRatio > 0.1) {
+    return {
+      ok: false,
+      failure: {
+        providerReason: "schema_validation",
+        targetReason: "macro_calorie_mismatch",
+        metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+        issueCount: 4,
+        fields: ["calories", "protein", "carbs", "fat"],
+        codes: ["macro_calorie_mismatch"],
+      },
+    };
+  }
+
+  return { ok: true, dailyTargets };
 }
 
 function getFallbackResult(goal: Goal): TargetGenerationResult {
@@ -182,42 +240,150 @@ function getFallbackResult(goal: Goal): TargetGenerationResult {
   };
 }
 
+function getProviderMetadataContext(response: GenerateObjectResult<TargetGenerationOutput>): typeof TARGET_GENERATION_METADATA_CONTEXT {
+  if ("metadataContext" in response.metadata && response.metadata.metadataContext === TARGET_GENERATION_METADATA_CONTEXT) {
+    return TARGET_GENERATION_METADATA_CONTEXT;
+  }
+  return TARGET_GENERATION_METADATA_CONTEXT;
+}
+
+export function classifyProviderFailure(
+  response: Exclude<GenerateObjectResult<TargetGenerationOutput>, { ok: true }>,
+): TargetGenerationFailureSummary {
+  if (response.reason === "provider_error") {
+    return {
+      providerReason: "provider_error",
+      targetReason: "provider_error",
+      metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+    };
+  }
+
+  if (response.reason === "invalid_json") {
+    return {
+      providerReason: "invalid_json",
+      targetReason: "invalid_json",
+      metadataContext: getProviderMetadataContext(response),
+    };
+  }
+
+  if (response.reason === "no_content") {
+    return {
+      providerReason: "no_content",
+      targetReason: "no_content",
+      metadataContext: getProviderMetadataContext(response),
+      noContentSubtype: response.metadata.noContentSubtype,
+    };
+  }
+
+  const issues = response.metadata.issues ?? [];
+  const fields = issues.map((issue) => fieldFromIssuePath(issue.path));
+  const codes = issues.map((issue) => issue.code);
+  const hasMissingCanonicalField = issues.some((issue) =>
+    issue.code === "missing_required"
+    && TARGET_GENERATION_FIELDS.includes(issue.path as (typeof TARGET_GENERATION_FIELDS)[number])
+  );
+
+  return {
+    providerReason: "schema_validation",
+    targetReason: hasMissingCanonicalField ? "missing_field" : "schema_validation",
+    metadataContext: getProviderMetadataContext(response),
+    issueCount: response.metadata.issueCount ?? issues.length,
+    fields,
+    codes,
+  };
+}
+
+function classifyThrownFailure(error: unknown): TargetGenerationFailureSummary {
+  if (isLLMProviderError(error) && error.providerMetadata.aborted === true) {
+    throw error;
+  }
+
+  return {
+    providerReason: "provider_error",
+    targetReason: "provider_error",
+    metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+  };
+}
+
+function logAttemptFailure(
+  log: FastifyBaseLogger | undefined,
+  attempt: number,
+  failure: TargetGenerationFailureSummary,
+) {
+  if (!log) {
+    return;
+  }
+  logTargetGenerationAttemptFailed(log, {
+    attempt,
+    providerReason: failure.providerReason,
+    targetReason: failure.targetReason,
+    metadataContext: failure.metadataContext,
+    issueCount: failure.issueCount,
+    fields: failure.fields,
+    codes: failure.codes,
+    noContentSubtype: failure.noContentSubtype,
+  });
+}
+
+function logFallback(
+  log: FastifyBaseLogger | undefined,
+  attempt: number,
+  failure: TargetGenerationFailureSummary,
+) {
+  if (!log) {
+    return;
+  }
+  logTargetGenerationFallbackUsed(log, {
+    attempt,
+    providerReason: failure.providerReason,
+    targetReason: failure.targetReason,
+    metadataContext: failure.metadataContext,
+    issueCount: failure.issueCount,
+    fields: failure.fields,
+    codes: failure.codes,
+    noContentSubtype: failure.noContentSubtype,
+  });
+}
+
 export function createTargetGenerationService(llmProvider: LLMProvider, log?: FastifyBaseLogger) {
   return {
     async generateTargets(goal: Goal, intake: IntakeFields): Promise<TargetGenerationResult> {
       const messages = buildMessages(goal, intake);
 
-      for (let attempt = 0; attempt < 2; attempt++) {
+      let finalFailure: TargetGenerationFailureSummary | undefined;
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const response = await llmProvider.generateObject(messages, buildTargetGenerationRequest());
           if (!response.ok) {
+            finalFailure = classifyProviderFailure(response);
+            logAttemptFailure(log, attempt, finalFailure);
             continue;
           }
 
-          const dailyTargets: DailyTargets = {
-            calories: response.value.calories,
-            protein: response.value.protein,
-            carbs: response.value.carbs,
-            fat: response.value.fat,
-          };
-
-          if (!validateTargets(goal, dailyTargets)) {
+          const domainResult = validateTargetDomain(goal, response.value);
+          if (!domainResult.ok) {
+            finalFailure = domainResult.failure;
+            logAttemptFailure(log, attempt, finalFailure);
             continue;
           }
 
           return {
-            dailyTargets,
+            dailyTargets: domainResult.dailyTargets,
             coachExplanation: response.value.coachExplanation,
             usedFallback: false,
           };
-        } catch {
-          if (attempt === 1) {
-            break;
-          }
+        } catch (error) {
+          finalFailure = classifyThrownFailure(error);
+          logAttemptFailure(log, attempt, finalFailure);
         }
       }
 
-      log?.warn({ event: "target_gen_fallback", reason: "llm_attempts_exhausted" }, "Target generation fallback");
+      logFallback(log, 2, finalFailure ?? {
+        providerReason: "provider_error",
+        targetReason: "provider_error",
+        metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+      });
       return getFallbackResult(goal);
     },
   };
