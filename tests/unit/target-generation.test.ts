@@ -1,8 +1,43 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import type { FastifyBaseLogger } from "fastify";
+import { isLLMProviderError } from "../../server/llm/errors.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
-import { createTargetGenerationService } from "../../server/services/target-generation.js";
-import type { Goal, IntakeFields } from "../../server/services/device.js";
+import {
+  TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS,
+  TARGET_GENERATION_METADATA_CONTEXT,
+  createTargetGenerationService,
+} from "../../server/services/target-generation.js";
+import { getGoalDefaults, type Goal, type IntakeFields } from "../../server/services/device.js";
+
+interface CapturedLog {
+  payload: Record<string, unknown>;
+  message: string;
+}
+
+const validTargets = {
+  calories: 1800,
+  protein: 140,
+  carbs: 180,
+  fat: 60,
+  coachExplanation: "先用這組目標執行兩週，再依體重和訓練表現調整。",
+};
+
+const forbiddenLogSentinels = [
+  "raw-model-output-sentinel",
+  "user-intake-sentinel",
+  "provider body",
+  "authorization",
+  "x-request-id",
+  "1100",
+  "1200",
+  "4000",
+  "Expected",
+  "Too small",
+  "Invalid input",
+  "希望減脂但保住重訓表現",
+  "晚餐常外食",
+];
 
 function createIntake(overrides: Partial<IntakeFields> = {}): IntakeFields {
   return {
@@ -16,36 +51,117 @@ function createIntake(overrides: Partial<IntakeFields> = {}): IntakeFields {
     goalClarification: "希望減脂但保住重訓表現",
     bodyFatPercent: 24,
     tdee: 1980,
-    advancedNotes: "晚餐常外食",
+    advancedNotes: "晚餐常外食 user-intake-sentinel",
     ...overrides,
   };
 }
 
+function queueObject(mockLLM: MockLLMProvider, value: unknown) {
+  mockLLM.queueObjectContent(JSON.stringify(value));
+}
+
+function queueValidObject(mockLLM: MockLLMProvider, overrides: Partial<typeof validTargets> = {}) {
+  queueObject(mockLLM, { ...validTargets, ...overrides });
+}
+
 function extractUserContent(mockLLM: MockLLMProvider, callIndex = 0): string {
-  const content = mockLLM.chatCalls[callIndex]?.messages[1]?.content;
+  const content = mockLLM.objectCalls[callIndex]?.messages[1]?.content;
   if (typeof content !== "string") {
     throw new Error("expected user message content to be a string");
   }
   return content;
 }
 
+function createLoggerCapture() {
+  const entries: CapturedLog[] = [];
+  const logger = {
+    info(payload: Record<string, unknown>, message: string) {
+      entries.push({ payload, message });
+    },
+    warn(payload: Record<string, unknown>, message: string) {
+      entries.push({ payload, message });
+    },
+  } as unknown as FastifyBaseLogger;
+  return { entries, logger };
+}
+
+function assertNoForbiddenLogContent(value: unknown) {
+  const serialized = JSON.stringify(value);
+  for (const sentinel of forbiddenLogSentinels) {
+    assert.equal(serialized.includes(sentinel), false, `leaked forbidden log content: ${sentinel}`);
+  }
+}
+
+function attemptEvents(entries: CapturedLog[]) {
+  return entries
+    .map((entry) => entry.payload)
+    .filter((payload) => payload.event === "target_generation_attempt_failed");
+}
+
+function fallbackEvents(entries: CapturedLog[]) {
+  return entries
+    .map((entry) => entry.payload)
+    .filter((payload) => payload.event === "target_generation_fallback_used");
+}
+
+async function generateWithFirstFailureThenSuccess(
+  queueFailure: (mockLLM: MockLLMProvider) => void,
+  goal: Goal = "fat_loss",
+) {
+  const mockLLM = new MockLLMProvider();
+  const { entries, logger } = createLoggerCapture();
+  const service = createTargetGenerationService(mockLLM, logger);
+
+  queueFailure(mockLLM);
+  queueValidObject(mockLLM);
+
+  const result = await service.generateTargets(goal, createIntake());
+  return { entries, mockLLM, result };
+}
+
 describe("target-generation service", () => {
-  it("passes intake fields to the LLM prompt and calls with no tools", async () => {
+  it("uses generateObject with target-generation metadata and a strict schema hint", async () => {
     const mockLLM = new MockLLMProvider();
     const service = createTargetGenerationService(mockLLM);
     const intake = createIntake();
+    queueValidObject(mockLLM);
 
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1800, protein: 150, carbs: 180, fat: 50 },
-        coachExplanation: "好",
-      }),
+    const result = await service.generateTargets("fat_loss", intake);
+
+    assert.equal(result.usedFallback, false);
+    assert.deepEqual(result.dailyTargets, {
+      calories: validTargets.calories,
+      protein: validTargets.protein,
+      carbs: validTargets.carbs,
+      fat: validTargets.fat,
+    });
+    assert.equal(result.coachExplanation, validTargets.coachExplanation);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(mockLLM.objectCalls.length, 1);
+
+    const request = mockLLM.objectCalls[0].request;
+    assert.equal(request.metadataContext, TARGET_GENERATION_METADATA_CONTEXT);
+    assert.equal(request.schemaHint?.strict, true);
+    assert.equal(request.schemaHint?.schema.additionalProperties, false);
+    assert.deepEqual(request.schemaHint?.schema.required, [
+      "calories",
+      "protein",
+      "carbs",
+      "fat",
+      "coachExplanation",
+    ]);
+    assert.deepEqual(request.schemaHint?.schema.properties, {
+      calories: { type: "integer", minimum: 1 },
+      protein: { type: "integer", minimum: 1 },
+      carbs: { type: "integer", minimum: 0 },
+      fat: { type: "integer", minimum: 1 },
+      coachExplanation: {
+        type: "string",
+        minLength: 1,
+        maxLength: TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS,
+      },
     });
 
-    await service.generateTargets("fat_loss", intake);
-
-    assert.equal(mockLLM.chatCalls.length, 1);
-    assert.equal(mockLLM.chatCalls[0].tools.length, 0);
     const userContent = extractUserContent(mockLLM);
     assert.match(userContent, /goalClarification/);
     assert.match(userContent, /希望減脂但保住重訓表現/);
@@ -55,280 +171,240 @@ describe("target-generation service", () => {
     assert.match(userContent, /晚餐常外食/);
   });
 
-  it("generates targets from a fenced JSON LLM response", async () => {
-    const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
+  const strictFailureCases: Array<{
+    name: string;
+    queueFailure: (mockLLM: MockLLMProvider) => void;
+  }> = [
+    {
+      name: "legacy nested dailyTargets with explanation alias",
+      queueFailure: (mockLLM) => queueObject(mockLLM, {
+        dailyTargets: { calories: 1750, protein: 145, carbs: 175, fat: 49 },
+        explanation: "raw-model-output-sentinel",
+      }),
+    },
+    {
+      name: "fenced JSON text",
+      queueFailure: (mockLLM) => mockLLM.queueObjectContent(
+        "```json\n{\"calories\":1750,\"protein\":145,\"carbs\":175,\"fat\":49,\"coachExplanation\":\"raw-model-output-sentinel\"}\n```",
+      ),
+    },
+    {
+      name: "extra key",
+      queueFailure: (mockLLM) => queueObject(mockLLM, {
+        ...validTargets,
+        raw_model_payload: "raw-model-output-sentinel",
+      }),
+    },
+    {
+      name: "decimal number",
+      queueFailure: (mockLLM) => queueObject(mockLLM, { ...validTargets, calories: 1800.5 }),
+    },
+    {
+      name: "empty coachExplanation",
+      queueFailure: (mockLLM) => queueObject(mockLLM, { ...validTargets, coachExplanation: "   " }),
+    },
+    {
+      name: "overlong coachExplanation",
+      queueFailure: (mockLLM) => queueObject(mockLLM, {
+        ...validTargets,
+        coachExplanation: "說".repeat(TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS + 1),
+      }),
+    },
+  ];
 
-    mockLLM.queueChatResponse({
-      content: "```json\n{\"dailyTargets\":{\"calories\":1750,\"protein\":145,\"carbs\":175,\"fat\":49},\"explanation\":\"可先這樣試 2 週\"}\n```",
+  for (const testCase of strictFailureCases) {
+    it(`rejects ${testCase.name} before trusting the second structured object`, async () => {
+      const { entries, mockLLM, result } = await generateWithFirstFailureThenSuccess(testCase.queueFailure);
+
+      assert.equal(mockLLM.objectCalls.length, 2);
+      assert.equal(mockLLM.chatCalls.length, 0);
+      assert.equal(result.usedFallback, false);
+      assert.deepEqual(result.dailyTargets, {
+        calories: validTargets.calories,
+        protein: validTargets.protein,
+        carbs: validTargets.carbs,
+        fat: validTargets.fat,
+      });
+      assert.equal(attemptEvents(entries).length, 1);
+      assertNoForbiddenLogContent(entries);
     });
+  }
 
-    const result = await service.generateTargets("fat_loss", createIntake());
+  it("maps missing canonical fields to missing_field without raw validation messages", async () => {
+    const { entries, result } = await generateWithFirstFailureThenSuccess((mockLLM) => {
+      queueObject(mockLLM, {
+        calories: 1800,
+        protein: 140,
+        carbs: 180,
+        fat: 60,
+        raw: "raw-model-output-sentinel",
+      });
+    });
 
     assert.equal(result.usedFallback, false);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 1750,
-      protein: 145,
-      carbs: 175,
-      fat: 49,
-    });
-    assert.equal(result.coachExplanation, "可先這樣試 2 週");
+    const [event] = attemptEvents(entries);
+    assert.equal(event.providerReason, "schema_validation");
+    assert.equal(event.targetReason, "missing_field");
+    assert.equal(event.metadataContext, TARGET_GENERATION_METADATA_CONTEXT);
+    assert.deepEqual(event.fields, ["coachExplanation", "root"]);
+    assert.ok(Array.isArray(event.codes));
+    assert.ok((event.codes as string[]).includes("missing_required"));
+    assertNoForbiddenLogContent(entries);
   });
 
-  it("rejects malformed numeric fields and retries once before succeeding", async () => {
-    const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
-
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: null, protein: 150, carbs: 180, fat: 50 },
-        explanation: "第一次不合格",
-      }),
-    });
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1850, protein: 150, carbs: 180, fat: 55 },
-        explanation: "第二次也不合格",
-      }),
+  it("maps calorie bounds failures to bounds_failed without logging rejected values or bounds", async () => {
+    const { entries, result } = await generateWithFirstFailureThenSuccess((mockLLM) => {
+      queueObject(mockLLM, { ...validTargets, calories: 1100 });
     });
 
-    const result = await service.generateTargets("fat_loss", createIntake());
-
-    assert.equal(mockLLM.chatCalls.length, 2);
     assert.equal(result.usedFallback, false);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 1850,
-      protein: 150,
+    const [event] = attemptEvents(entries);
+    assert.equal(event.providerReason, "schema_validation");
+    assert.equal(event.targetReason, "bounds_failed");
+    assert.deepEqual(event.fields, ["calories"]);
+    assert.deepEqual(event.codes, ["bounds_failed"]);
+    assertNoForbiddenLogContent(entries);
+  });
+
+  it("maps macro calorie mismatch failures to macro_calorie_mismatch without logging macro totals", async () => {
+    const { entries, result } = await generateWithFirstFailureThenSuccess((mockLLM) => {
+      queueObject(mockLLM, {
+        ...validTargets,
+        calories: 1800,
+        protein: 30,
+        carbs: 30,
+        fat: 30,
+      });
+    });
+
+    assert.equal(result.usedFallback, false);
+    const [event] = attemptEvents(entries);
+    assert.equal(event.providerReason, "schema_validation");
+    assert.equal(event.targetReason, "macro_calorie_mismatch");
+    assert.deepEqual(event.fields, ["calories", "carbs", "fat", "protein"]);
+    assert.deepEqual(event.codes, ["macro_calorie_mismatch"]);
+    assertNoForbiddenLogContent(entries);
+  });
+
+  const retryableReasonCases: Array<{
+    name: string;
+    targetReason: string;
+    queueFailure: (mockLLM: MockLLMProvider) => void;
+  }> = [
+    {
+      name: "provider_error",
+      targetReason: "provider_error",
+      queueFailure: (mockLLM) => mockLLM.queueObjectProviderError(),
+    },
+    {
+      name: "invalid_json",
+      targetReason: "invalid_json",
+      queueFailure: (mockLLM) => mockLLM.queueObjectContent("raw-model-output-sentinel not json"),
+    },
+    {
+      name: "no_content",
+      targetReason: "no_content",
+      queueFailure: (mockLLM) => mockLLM.queueObjectNoContent("empty_content"),
+    },
+    {
+      name: "missing_field",
+      targetReason: "missing_field",
+      queueFailure: (mockLLM) => queueObject(mockLLM, {
+        calories: 1800,
+        protein: 140,
+        carbs: 180,
+        fat: 60,
+      }),
+    },
+    {
+      name: "schema_validation",
+      targetReason: "schema_validation",
+      queueFailure: (mockLLM) => queueObject(mockLLM, { ...validTargets, calories: 1800.5 }),
+    },
+    {
+      name: "bounds_failed",
+      targetReason: "bounds_failed",
+      queueFailure: (mockLLM) => queueObject(mockLLM, { ...validTargets, calories: 1100 }),
+    },
+    {
+      name: "macro_calorie_mismatch",
+      targetReason: "macro_calorie_mismatch",
+      queueFailure: (mockLLM) => queueObject(mockLLM, {
+        ...validTargets,
+        calories: 1800,
+        protein: 30,
+        carbs: 30,
+        fat: 30,
+      }),
+    },
+  ];
+
+  for (const testCase of retryableReasonCases) {
+    it(`retries once after ${testCase.name} and accepts the second structured object`, async () => {
+      const { entries, mockLLM, result } = await generateWithFirstFailureThenSuccess(testCase.queueFailure);
+
+      assert.equal(mockLLM.objectCalls.length, 2);
+      assert.equal(result.usedFallback, false);
+      const [event] = attemptEvents(entries);
+      assert.equal(event.targetReason, testCase.targetReason);
+      assert.equal(fallbackEvents(entries).length, 0);
+      assertNoForbiddenLogContent(entries);
+    });
+  }
+
+  it("returns deterministic fallback defaults after the second normal failure", async () => {
+    const mockLLM = new MockLLMProvider();
+    const { entries, logger } = createLoggerCapture();
+    const service = createTargetGenerationService(mockLLM, logger);
+
+    queueObject(mockLLM, {
+      calories: 1800,
+      protein: 140,
       carbs: 180,
-      fat: 55,
+      fat: 60,
+      raw: "raw-model-output-sentinel",
     });
-    assert.equal(result.coachExplanation, "第二次也不合格");
-  });
-
-  it("rejects missing explanation and retries once before falling back", async () => {
-    const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
-
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1800, protein: 150, carbs: 180, fat: 50 },
-      }),
-    });
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1100, protein: 150, carbs: 180, fat: 55 },
-      }),
-    });
+    queueObject(mockLLM, { ...validTargets, calories: 1100 });
 
     const result = await service.generateTargets("fat_loss", createIntake());
 
-    assert.equal(mockLLM.chatCalls.length, 2);
+    assert.equal(mockLLM.objectCalls.length, 2);
     assert.equal(result.usedFallback, true);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 1500,
-      protein: 120,
-      carbs: 150,
-      fat: 50,
-    });
-  });
-
-  it("rejects macro sums that diverge by more than 10% and retries once", async () => {
-    const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
-
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 2500, protein: 150, carbs: 200, fat: 55 },
-        coachExplanation: "第一次不合格",
-      }),
-    });
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1850, protein: 150, carbs: 180, fat: 55 },
-        coachExplanation: "第二次可用",
-      }),
-    });
-
-    const result = await service.generateTargets("fat_loss", createIntake());
-
-    assert.equal(mockLLM.chatCalls.length, 2);
-    assert.equal(result.usedFallback, false);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 1850,
-      protein: 150,
-      carbs: 180,
-      fat: 55,
-    });
-    assert.equal(result.coachExplanation, "第二次可用");
-  });
-
-  it("rejects zero fat and retries once", async () => {
-    const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
-
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1800, protein: 150, carbs: 180, fat: 0 },
-        coachExplanation: "第一次不合格",
-      }),
-    });
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1850, protein: 150, carbs: 180, fat: 55 },
-        coachExplanation: "第二次可用",
-      }),
-    });
-
-    const result = await service.generateTargets("fat_loss", createIntake());
-
-    assert.equal(mockLLM.chatCalls.length, 2);
-    assert.equal(result.usedFallback, false);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 1850,
-      protein: 150,
-      carbs: 180,
-      fat: 55,
-    });
-    assert.equal(result.coachExplanation, "第二次可用");
-  });
-
-  it("rejects zero protein and retries once", async () => {
-    const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
-
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1800, protein: 0, carbs: 180, fat: 50 },
-        coachExplanation: "第一次不合格",
-      }),
-    });
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1850, protein: 150, carbs: 180, fat: 55 },
-        coachExplanation: "第二次可用",
-      }),
-    });
-
-    const result = await service.generateTargets("fat_loss", createIntake());
-
-    assert.equal(mockLLM.chatCalls.length, 2);
-    assert.equal(result.usedFallback, false);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 1850,
-      protein: 150,
-      carbs: 180,
-      fat: 55,
-    });
-    assert.equal(result.coachExplanation, "第二次可用");
-  });
-
-  it("retries once on a sanity check failure then falls back", async () => {
-    const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
-
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1100, protein: 150, carbs: 180, fat: 50 },
-        coachExplanation: "第一次不合格",
-      }),
-    });
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1100, protein: 150, carbs: 180, fat: 0 },
-        coachExplanation: "第二次仍不合格",
-      }),
-    });
-
-    const result = await service.generateTargets("fat_loss", createIntake());
-
-    assert.equal(mockLLM.chatCalls.length, 2);
-    assert.equal(result.usedFallback, true);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 1500,
-      protein: 120,
-      carbs: 150,
-      fat: 50,
-    });
+    assert.deepEqual(result.dailyTargets, getGoalDefaults("fat_loss"));
     assert.match(result.coachExplanation, /預設/);
+    assert.equal(attemptEvents(entries).length, 2);
+    const [fallback] = fallbackEvents(entries);
+    assert.equal(fallback.providerReason, "schema_validation");
+    assert.equal(fallback.targetReason, "bounds_failed");
+    assertNoForbiddenLogContent(entries);
   });
 
-  it("falls back on an LLM error", async () => {
+  it("uses goal-specific fallback defaults", async () => {
     const mockLLM = new MockLLMProvider();
     const service = createTargetGenerationService(mockLLM);
 
-    mockLLM.queueChatError(new Error("API timeout"));
-    mockLLM.queueChatError(new Error("API timeout"));
+    mockLLM.queueObjectProviderError();
+    mockLLM.queueObjectProviderError();
 
     const result = await service.generateTargets("muscle_gain", createIntake());
 
-    assert.equal(mockLLM.chatCalls.length, 2);
     assert.equal(result.usedFallback, true);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 2500,
-      protein: 180,
-      carbs: 300,
-      fat: 70,
-    });
+    assert.deepEqual(result.dailyTargets, getGoalDefaults("muscle_gain"));
   });
 
-  it("falls back on an unparseable LLM response", async () => {
+  it("propagates provider aborts without returning fallback or logging fallback usage", async () => {
     const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
+    const { entries, logger } = createLoggerCapture();
+    const service = createTargetGenerationService(mockLLM, logger);
 
-    mockLLM.queueChatResponse({ content: "not json at all" });
-    mockLLM.queueChatResponse({ content: "still not json" });
+    mockLLM.queueObjectAbort();
 
-    const result = await service.generateTargets("fat_loss", createIntake());
-
-    assert.equal(mockLLM.chatCalls.length, 2);
-    assert.equal(result.usedFallback, true);
-    assert.deepEqual(result.dailyTargets, {
-      calories: 1500,
-      protein: 120,
-      carbs: 150,
-      fat: 50,
-    });
-  });
-
-  it("uses the correct calorie bounds for each goal", async () => {
-    const mockLLM = new MockLLMProvider();
-    const service = createTargetGenerationService(mockLLM);
-
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1550, protein: 120, carbs: 150, fat: 50 },
-        coachExplanation: "fat loss ok",
-      }),
-    });
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1400, protein: 120, carbs: 150, fat: 50 },
-        coachExplanation: "still below range",
-      }),
-    });
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1900, protein: 150, carbs: 200, fat: 55 },
-        coachExplanation: "muscle gain ok",
-      }),
-    });
-
-    const fatLoss = await service.generateTargets("fat_loss", createIntake());
-    const muscleGain = await service.generateTargets("muscle_gain", createIntake());
-
-    assert.equal(fatLoss.usedFallback, false);
-    assert.deepEqual(fatLoss.dailyTargets, {
-      calories: 1550,
-      protein: 120,
-      carbs: 150,
-      fat: 50,
-    });
-    assert.equal(muscleGain.usedFallback, false);
-    assert.deepEqual(muscleGain.dailyTargets, {
-      calories: 1900,
-      protein: 150,
-      carbs: 200,
-      fat: 55,
-    });
+    await assert.rejects(
+      () => service.generateTargets("fat_loss", createIntake()),
+      (error) => isLLMProviderError(error) && error.providerMetadata.aborted === true,
+    );
+    assert.equal(mockLLM.objectCalls.length, 1);
+    assert.equal(fallbackEvents(entries).length, 0);
+    assertNoForbiddenLogContent(entries);
   });
 });
