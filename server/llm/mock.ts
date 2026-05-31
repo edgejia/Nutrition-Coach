@@ -9,6 +9,7 @@ import type {
   GenerateObjectResult,
   StructuredOutputNoContentSubtype,
   StructuredValidationIssue,
+  StructuredValidationResult,
 } from "./types.js";
 import { LLMProviderError } from "./errors.js";
 
@@ -19,23 +20,38 @@ type ObjectQueueItem =
   | { kind: "abort" };
 
 function buildObjectMetadata<T>(request: GenerateObjectRequest<T>): GenerateObjectMetadata {
+  const metadataContext = typeof request.metadataContext === "string" && request.metadataContext.length > 0
+    ? request.metadataContext
+    : undefined;
+
   return {
     provider: "mock",
     operation: "generate_object",
     model: "mock",
-    ...(typeof request.metadataContext === "string" && request.metadataContext.length > 0
-      ? { metadataContext: request.metadataContext }
+    ...(metadataContext
+      ? { metadataContext: safeMetadataToken(metadataContext) }
       : {}),
   };
+}
+
+function safeMetadataToken(value: string): string {
+  return /^[A-Za-z0-9_.]{1,80}$/.test(value) ? value : "redacted";
 }
 
 function summarizeStructuredValidationIssues(issues: StructuredValidationIssue[]): Pick<GenerateObjectMetadata, "issueCount" | "issues"> {
   return {
     issueCount: issues.length,
     issues: issues.map((issue) => ({
-      path: issue.path,
-      code: issue.code,
+      path: safeMetadataToken(issue.path),
+      code: safeMetadataToken(issue.code),
     })),
+  };
+}
+
+function validatorExceptionMetadata(): Pick<GenerateObjectMetadata, "issueCount" | "issues"> {
+  return {
+    issueCount: 1,
+    issues: [{ path: "root", code: "validator_exception" }],
   };
 }
 
@@ -101,9 +117,11 @@ export class MockLLMProvider implements LLMProvider {
       });
     }
 
-    const item = this.objectCallIndex < this.objectQueue.length
-      ? this.objectQueue[this.objectCallIndex++]
-      : { kind: "content" as const, content: "{}" };
+    if (this.objectCallIndex >= this.objectQueue.length) {
+      throw new Error("MockLLMProvider.generateObject called without a queued object fixture");
+    }
+
+    const item = this.objectQueue[this.objectCallIndex++];
 
     if (item.kind === "provider_error") {
       return {
@@ -148,7 +166,19 @@ export class MockLLMProvider implements LLMProvider {
       };
     }
 
-    const validated = request.validate(raw);
+    let validated: StructuredValidationResult<T>;
+    try {
+      validated = request.validate(raw);
+    } catch {
+      return {
+        ok: false,
+        reason: "schema_validation",
+        metadata: {
+          ...buildObjectMetadata(request),
+          ...validatorExceptionMetadata(),
+        },
+      };
+    }
     if (!validated.ok) {
       return {
         ok: false,

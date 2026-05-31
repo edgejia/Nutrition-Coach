@@ -14,6 +14,7 @@ import type {
   GenerateObjectResult,
   StructuredOutputNoContentSubtype,
   StructuredValidationIssue,
+  StructuredValidationResult,
 } from "./types.js";
 import { LLMProviderError } from "./errors.js";
 import { config } from "../config.js";
@@ -82,12 +83,17 @@ function wrapOpenAIError(
 }
 
 function buildGenerateObjectMetadata<T>(model: string, request: GenerateObjectRequest<T>): GenerateObjectMetadata {
+  const metadataContext = nonEmptyString(request.metadataContext);
   return {
     provider: "openai",
     operation: "generate_object",
     model,
-    ...(nonEmptyString(request.metadataContext) ? { metadataContext: request.metadataContext } : {}),
+    ...(metadataContext ? { metadataContext: safeMetadataToken(metadataContext) } : {}),
   };
+}
+
+function safeMetadataToken(value: string): string {
+  return /^[A-Za-z0-9_.]{1,80}$/.test(value) ? value : "redacted";
 }
 
 function buildNoContentMetadata<T>(
@@ -105,9 +111,16 @@ function summarizeStructuredValidationIssues(issues: StructuredValidationIssue[]
   return {
     issueCount: issues.length,
     issues: issues.map((issue) => ({
-      path: issue.path,
-      code: issue.code,
+      path: safeMetadataToken(issue.path),
+      code: safeMetadataToken(issue.code),
     })),
+  };
+}
+
+function validatorExceptionMetadata(): Pick<GenerateObjectMetadata, "issueCount" | "issues"> {
+  return {
+    issueCount: 1,
+    issues: [{ path: "root", code: "validator_exception" }],
   };
 }
 
@@ -243,7 +256,19 @@ export class OpenAIProvider implements LLMProvider {
       };
     }
 
-    const validated = request.validate(raw);
+    let validated: StructuredValidationResult<T>;
+    try {
+      validated = request.validate(raw);
+    } catch {
+      return {
+        ok: false,
+        reason: "schema_validation",
+        metadata: {
+          ...buildGenerateObjectMetadata(this.model, request),
+          ...validatorExceptionMetadata(),
+        },
+      };
+    }
     if (!validated.ok) {
       return {
         ok: false,

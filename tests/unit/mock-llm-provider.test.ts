@@ -145,6 +145,76 @@ describe("MockLLMProvider generateObject", () => {
     assertNoForbiddenSentinels(schemaValidation);
   });
 
+  it("returns schema_validation when validators throw or emit unsafe metadata tokens", async () => {
+    const throwingMock = new MockLLMProvider();
+    throwingMock.queueObjectContent(JSON.stringify({ label: "raw-validator-value-sentinel", calories: 450 }));
+
+    const thrownValidation = await throwingMock.generateObject(
+      [{ role: "user", content: "user-input-sentinel" }],
+      createGenerateObjectRequest({
+        metadataContext: "prompt-sentinel unsafe context",
+        validate: () => {
+          throw new Error("validator-error-sentinel raw-validator-value-sentinel");
+        },
+      }),
+    );
+    assert.equal(thrownValidation.ok, false);
+    assert.equal(thrownValidation.reason, "schema_validation");
+    assertStructuredMetadata(thrownValidation.metadata, [
+      "provider",
+      "operation",
+      "model",
+      "metadataContext",
+      "issueCount",
+      "issues",
+    ]);
+    assert.equal(thrownValidation.metadata.metadataContext, "redacted");
+    assert.deepEqual(thrownValidation.metadata.issues, [
+      { path: "root", code: "validator_exception" },
+    ]);
+    assertNoForbiddenSentinels(thrownValidation);
+
+    const unsafeIssueMock = new MockLLMProvider();
+    unsafeIssueMock.queueObjectContent(JSON.stringify({ label: "早餐", calories: "validator-error-sentinel" }));
+    const unsafeIssue = await unsafeIssueMock.generateObject(
+      [{ role: "user", content: "message-sentinel" }],
+      createGenerateObjectRequest({
+        validate: () => ({
+          ok: false,
+          issues: [
+            { path: "meal.raw-validator-value-sentinel", code: "validator-error-sentinel" },
+          ],
+        }),
+      }),
+    );
+    assert.equal(unsafeIssue.ok, false);
+    assert.equal(unsafeIssue.reason, "schema_validation");
+    assertStructuredMetadata(unsafeIssue.metadata, [
+      "provider",
+      "operation",
+      "model",
+      "metadataContext",
+      "issueCount",
+      "issues",
+    ]);
+    assert.deepEqual(unsafeIssue.metadata.issues, [
+      { path: "redacted", code: "redacted" },
+    ]);
+    assertNoForbiddenSentinels(unsafeIssue);
+  });
+
+  it("throws when generateObject is called without a queued object fixture", async () => {
+    const mockLLM = new MockLLMProvider();
+
+    await assert.rejects(
+      () => mockLLM.generateObject(
+        [{ role: "user", content: "default object" }],
+        createGenerateObjectRequest(),
+      ),
+      /MockLLMProvider\.generateObject called without a queued object fixture/,
+    );
+  });
+
   it("returns no_content with each subtype marker", async () => {
     const mockLLM = new MockLLMProvider();
     mockLLM.queueObjectNoContent("no_choices");
@@ -253,20 +323,14 @@ describe("MockLLMProvider generateObject", () => {
       content: "Mock: 已記錄您的飲食！",
     });
 
-    const objectResult = await mockLLM.generateObject(
-      [{ role: "user", content: "default object" }],
-      {
-        validate: (raw) => ({ ok: true, value: raw }),
-      },
+    await assert.rejects(
+      () => mockLLM.generateObject(
+        [{ role: "user", content: "default object" }],
+        {
+          validate: (raw) => ({ ok: true, value: raw }),
+        },
+      ),
+      /MockLLMProvider\.generateObject called without a queued object fixture/,
     );
-    assert.deepEqual(objectResult, {
-      ok: true,
-      value: {},
-      metadata: {
-        provider: "mock",
-        operation: "generate_object",
-        model: "mock",
-      },
-    });
   });
 });

@@ -386,6 +386,62 @@ describe("OpenAI Provider", () => {
     assertNoForbiddenProviderSentinels(result);
   });
 
+  it("D-07 returns schema_validation when validators throw or emit unsafe metadata tokens", async () => {
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async () => ({
+            choices: [{
+              message: {
+                content: JSON.stringify({ label: "raw-validator-value-sentinel", calories: 450 }),
+              },
+            }],
+          }),
+        },
+      },
+    } as unknown as OpenAI;
+
+    const throwingProvider = new OpenAIProvider(fakeClient);
+    const thrownValidation = await throwingProvider.generateObject(
+      [{ role: "user", content: "user-input-sentinel" }],
+      createGenerateObjectRequest({
+        metadataContext: "prompt-sentinel unsafe context",
+        validate: () => {
+          throw new Error("validator-error-sentinel raw-validator-value-sentinel");
+        },
+      }),
+    );
+    assert.equal(thrownValidation.ok, false);
+    assert.equal(thrownValidation.reason, "schema_validation");
+    assertStructuredMetadata(thrownValidation.metadata, allowedStructuredSchemaMetadataKeys);
+    assert.equal(thrownValidation.metadata.metadataContext, "redacted");
+    assert.deepEqual(thrownValidation.metadata.issues, [
+      { path: "root", code: "validator_exception" },
+    ]);
+    assertNoForbiddenProviderSentinels(thrownValidation);
+
+    const unsafeIssueProvider = new OpenAIProvider(fakeClient);
+    const unsafeIssue = await unsafeIssueProvider.generateObject(
+      [{ role: "user", content: "message-sentinel" }],
+      createGenerateObjectRequest({
+        metadataContext: "safe_context",
+        validate: () => ({
+          ok: false,
+          issues: [
+            { path: "meal.raw-validator-value-sentinel", code: "validator-error-sentinel" },
+          ],
+        }),
+      }),
+    );
+    assert.equal(unsafeIssue.ok, false);
+    assert.equal(unsafeIssue.reason, "schema_validation");
+    assertStructuredMetadata(unsafeIssue.metadata, allowedStructuredSchemaMetadataKeys);
+    assert.deepEqual(unsafeIssue.metadata.issues, [
+      { path: "redacted", code: "redacted" },
+    ]);
+    assertNoForbiddenProviderSentinels(unsafeIssue);
+  });
+
   it("D-14 returns no_content subtype metadata for no choices, missing content, and empty content", async () => {
     const cases: Array<{ response: unknown; subtype: string }> = [
       { response: { choices: [] }, subtype: "no_choices" },
