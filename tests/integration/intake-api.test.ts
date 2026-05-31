@@ -50,12 +50,13 @@ describe("Intake API", () => {
   }
 
   it("POST /api/device with intake returns AI-generated targets", async () => {
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1750, protein: 145, carbs: 175, fat: 49 },
-        explanation: "先維持訓練表現，再慢慢調整熱量。",
-      }),
-    });
+    mockLLM.queueObjectContent(JSON.stringify({
+      calories: 1750,
+      protein: 145,
+      carbs: 175,
+      fat: 49,
+      coachExplanation: "先維持訓練表現，再慢慢調整熱量。",
+    }));
 
     const res = await app.inject({
       method: "POST",
@@ -64,9 +65,9 @@ describe("Intake API", () => {
     });
 
     assert.equal(res.statusCode, 200);
-    assert.equal(mockLLM.chatCalls.length, 1);
-    assert.equal(mockLLM.chatCalls[0].tools.length, 0);
-    const prompt = mockLLM.chatCalls[0].messages[1].content;
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(mockLLM.objectCalls.length, 1);
+    const prompt = mockLLM.objectCalls[0].messages[1].content;
     assertString(prompt);
     assert.match(prompt, /goalClarification/);
     assert.match(prompt, /不想影響重訓表現/);
@@ -83,8 +84,8 @@ describe("Intake API", () => {
   });
 
   it("POST /api/device with intake falls back on LLM failure", async () => {
-    mockLLM.queueChatError(new Error("API timeout"));
-    mockLLM.queueChatError(new Error("API timeout"));
+    mockLLM.queueObjectProviderError();
+    mockLLM.queueObjectProviderError();
 
     const res = await app.inject({
       method: "POST",
@@ -93,7 +94,8 @@ describe("Intake API", () => {
     });
 
     assert.equal(res.statusCode, 200);
-    assert.equal(mockLLM.chatCalls.length, 2);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(mockLLM.objectCalls.length, 2);
 
     const body = res.json();
     assert.ok(body.deviceId);
@@ -291,12 +293,13 @@ describe("Intake API", () => {
   });
 
   it("POST /api/device accepts optional advanced fields", async () => {
-    mockLLM.queueChatResponse({
-      content: JSON.stringify({
-        dailyTargets: { calories: 1850, protein: 155, carbs: 180, fat: 52 },
-        explanation: "進一步考慮體脂與 TDEE 後，先用這組目標。",
-      }),
-    });
+    mockLLM.queueObjectContent(JSON.stringify({
+      calories: 1850,
+      protein: 155,
+      carbs: 180,
+      fat: 52,
+      coachExplanation: "進一步考慮體脂與 TDEE 後，先用這組目標。",
+    }));
 
     const res = await app.inject({
       method: "POST",
@@ -309,8 +312,9 @@ describe("Intake API", () => {
     });
 
     assert.equal(res.statusCode, 200);
-    assert.equal(mockLLM.chatCalls.length, 1);
-    const prompt = mockLLM.chatCalls[0].messages[1].content;
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(mockLLM.objectCalls.length, 1);
+    const prompt = mockLLM.objectCalls[0].messages[1].content;
     assertString(prompt);
     assert.match(prompt, /bodyFatPercent/);
     assert.match(prompt, /18/);

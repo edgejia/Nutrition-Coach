@@ -169,15 +169,13 @@ describe("Device API", () => {
 
   it("POST /api/device returns usedFallback false when generated targets are valid", async () => {
     const llmProvider = new MockLLMProvider();
-    llmProvider.queueChatResponse({
-      content: JSON.stringify({
-        calories: 1800,
-        protein: 120,
-        carbs: 210,
-        fat: 53,
-        coachExplanation: "以穩定赤字開始，保留訓練表現。",
-      }),
-    });
+    llmProvider.queueObjectContent(JSON.stringify({
+      calories: 1800,
+      protein: 120,
+      carbs: 210,
+      fat: 53,
+      coachExplanation: "以穩定赤字開始，保留訓練表現。",
+    }));
     const generatedApp = await buildApp({ dbPath: ":memory:", llmProvider });
 
     const res = await generatedApp.inject({
@@ -205,8 +203,8 @@ describe("Device API", () => {
 
   it("POST /api/device returns usedFallback true when target generation falls back", async () => {
     const llmProvider = new MockLLMProvider();
-    llmProvider.queueChatResponse({ content: "not valid json" });
-    llmProvider.queueChatResponse({ content: "still not valid json" });
+    llmProvider.queueObjectContent("not valid json");
+    llmProvider.queueObjectContent("still not valid json");
     const fallbackApp = await buildApp({ dbPath: ":memory:", llmProvider });
 
     const res = await fallbackApp.inject({
@@ -421,13 +419,13 @@ describe("Device API", () => {
     assert.ok(res.json().error);
   });
 
-  it("OBS-02: emits target_gen_fallback event when LLM returns invalid targets", async () => {
+  it("OBS-02: emits sanitized target-generation attempt and fallback events when LLM returns invalid targets", async () => {
     const { logLines, logStream } = createLogCapture();
 
     const obs02LLM = new MockLLMProvider();
     // Queue 2 invalid responses — target-generation makes 2 attempts before fallback
-    obs02LLM.queueChatResponse({ content: "not valid json at all" });
-    obs02LLM.queueChatResponse({ content: "also not valid json" });
+    obs02LLM.queueObjectContent("not valid json at all");
+    obs02LLM.queueObjectContent("also not valid json");
 
     const obs02App = await buildApp({
       dbPath: ":memory:",
@@ -455,27 +453,40 @@ describe("Device API", () => {
     // Response should still succeed (fallback targets used)
     assert.equal(res.statusCode, 200, `Expected 200 but got ${res.statusCode}: ${res.body}`);
 
-    // Find target_gen_fallback event in captured log lines
-    let fallbackEventFound = false;
-    for (const line of logLines) {
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      if (parsed.event === "target_gen_fallback") {
-        fallbackEventFound = true;
-        assert.ok(
-          typeof parsed.reason === "string" && parsed.reason.length > 0,
-          `target_gen_fallback must have a non-empty reason field. Got: ${JSON.stringify(parsed)}`,
-        );
-        break;
-      }
-    }
-    assert.ok(
-      fallbackEventFound,
-      `Expected a log line with event="target_gen_fallback" but none found. Lines captured: ${logLines.length}`,
+    const attemptEvents = findLogEvents(logLines, "target_generation_attempt_failed");
+    assert.equal(attemptEvents.length, 2);
+    assert.deepEqual(
+      attemptEvents.map((event) =>
+        pickEventMetadata(event, ["event", "attempt", "providerReason", "targetReason", "metadataContext"]),
+      ),
+      [
+        {
+          event: "target_generation_attempt_failed",
+          attempt: 1,
+          providerReason: "invalid_json",
+          targetReason: "invalid_json",
+          metadataContext: "target_generation",
+        },
+        {
+          event: "target_generation_attempt_failed",
+          attempt: 2,
+          providerReason: "invalid_json",
+          targetReason: "invalid_json",
+          metadataContext: "target_generation",
+        },
+      ],
+    );
+    const fallbackEvents = findLogEvents(logLines, "target_generation_fallback_used");
+    assert.equal(fallbackEvents.length, 1);
+    assert.deepEqual(
+      pickEventMetadata(fallbackEvents[0]!, ["event", "attempt", "providerReason", "targetReason", "metadataContext"]),
+      {
+        event: "target_generation_fallback_used",
+        attempt: 2,
+        providerReason: "invalid_json",
+        targetReason: "invalid_json",
+        metadataContext: "target_generation",
+      },
     );
   });
 
@@ -573,8 +584,8 @@ describe("Device API", () => {
   it("OBS-01: logs intake onboarding success with fallback status only", async () => {
     const { logLines, logStream } = createLogCapture();
     const obs01LLM = new MockLLMProvider();
-    obs01LLM.queueChatResponse({ content: "not valid json" });
-    obs01LLM.queueChatResponse({ content: "still not valid json" });
+    obs01LLM.queueObjectContent("not valid json");
+    obs01LLM.queueObjectContent("still not valid json");
     const obs01App = await buildApp({
       dbPath: ":memory:",
       llmProvider: obs01LLM,
