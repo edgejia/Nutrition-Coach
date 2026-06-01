@@ -48,8 +48,9 @@ describe("server config guest-session policy", () => {
           assert.match(error.message, /NODE_ENV=production/);
           assert.match(error.message, /GUEST_SESSION_COOKIE_SECURE=true/);
           assert.match(error.message, /non-empty, non-default value at least 32 characters/);
-          if (guestSessionSecret) {
-            assert.doesNotMatch(error.message, new RegExp(guestSessionSecret.trim()));
+          const trimmedSecret = guestSessionSecret?.trim();
+          if (trimmedSecret) {
+            assert.doesNotMatch(error.message, new RegExp(trimmedSecret));
           }
           return true;
         },
@@ -80,7 +81,7 @@ describe("server config guest-session policy", () => {
   it("accepts any trimmed non-default secret at least 32 characters without format restrictions", () => {
     assert.doesNotThrow(() => {
       validateGuestSessionSecretForRuntime({
-        guestSessionSecret: "  not-hex!!!not-base64url???value  ",
+        guestSessionSecret: "  not-hex!!!not-base64url???value-ok  ",
         guestSessionCookieSecure: false,
         nodeEnv: "production",
       });
@@ -98,6 +99,6 @@ describe("server config guest-session policy", () => {
       });
     });
 
-    assert.deepEqual(process.env, before);
+    assert.deepEqual({ ...process.env }, before);
   });
 });
