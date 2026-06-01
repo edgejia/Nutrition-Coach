@@ -5,6 +5,10 @@ import type {
   StructuredOutputFailureReason,
   StructuredOutputNoContentSubtype,
 } from "../llm/types.js";
+import {
+  sanitizeRouteFallbackCatchField,
+  sanitizeRouteFallbackCatchFields,
+} from "./route-fallback-redaction.js";
 
 export type RedactedObservabilityEventName =
   | "onboarding_submit_started"
@@ -69,7 +73,6 @@ const VALID_IDENTIFIER = /^[a-z0-9_-]{1,64}$/;
 const VALID_CODE = /^[A-Z0-9_]{1,64}$/;
 const VALID_GOAL_VALIDATION_CODE = /^[a-z0-9_]{1,64}$/;
 const VALID_TARGET_GENERATION_CODE = /^[a-z0-9_]{1,64}$/;
-const SAFE_ROUTE_ERROR_TEXT = /^[A-Za-z0-9 .:_/-]+$/;
 const ROUTE_ERROR_NAME_LIMIT = 80;
 const ROUTE_ERROR_MESSAGE_LIMIT = 160;
 const UNSAFE_PROVIDER_METADATA_LABEL_FRAGMENTS = [
@@ -88,32 +91,6 @@ const UNSAFE_PROVIDER_METADATA_LABEL_FRAGMENTS = [
   "token",
   "upload",
 ] as const;
-const UNSAFE_ROUTE_ERROR_TERMS = [
-  "prompt",
-  "message",
-  "messages",
-  "user",
-  "nutrition",
-  "provider",
-  "body",
-  "header",
-  "authorization",
-  "bearer",
-  "tool",
-  "payload",
-  "guest_session",
-  "session",
-  "cookie",
-  "image",
-  "data:image",
-  "assistant",
-  "final reply",
-  "stack",
-  "cause",
-  "device",
-  "upload",
-] as const;
-
 export type IntakeObservabilityField = (typeof INTAKE_FIELDS)[number];
 export type GoalUpdateField = (typeof GOAL_UPDATE_FIELDS)[number];
 
@@ -341,18 +318,6 @@ function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErro
   return sanitized;
 }
 
-function sanitizeRouteErrorText(value: string, limit: number): string | undefined {
-  const text = value.slice(0, limit).trim();
-  if (!text || !SAFE_ROUTE_ERROR_TEXT.test(text)) {
-    return undefined;
-  }
-  const lower = text.toLowerCase();
-  if (UNSAFE_ROUTE_ERROR_TERMS.some((term) => lower.includes(term))) {
-    return undefined;
-  }
-  return text;
-}
-
 function logRedactedEvent(log: FastifyBaseLogger, payload: RedactedObservabilityEvent, message: string) {
   log.info(payload, message);
 }
@@ -552,6 +517,11 @@ export function buildChatRouteFallbackEvent(params: {
   round?: number;
   lastTool?: string;
 }): ChatRouteFallbackEvent {
+  const catchFields = sanitizeRouteFallbackCatchFields({
+    errorName: params.errorName,
+    errorMessage: params.errorMessage,
+  });
+
   return {
     event: "chat_route_fallback",
     source: params.source,
@@ -566,8 +536,7 @@ export function buildChatRouteFallbackEvent(params: {
     ...(params.providerMetadata !== undefined
       ? { providerMetadata: sanitizeProviderMetadata(params.providerMetadata) }
       : {}),
-    ...(params.errorName !== undefined ? { errorName: params.errorName } : {}),
-    ...(params.errorMessage !== undefined ? { errorMessage: params.errorMessage } : {}),
+    ...catchFields,
     ...(params.round !== undefined ? { round: Math.max(0, Math.round(params.round)) } : {}),
     ...(params.lastTool !== undefined ? { lastTool: params.lastTool } : {}),
   };
@@ -587,16 +556,15 @@ export function sanitizeRouteCatchError(
     return {};
   }
 
-  const errorMessage = sanitizeRouteErrorText(error.message, ROUTE_ERROR_MESSAGE_LIMIT);
+  const errorMessage = sanitizeRouteFallbackCatchField(error.message, ROUTE_ERROR_MESSAGE_LIMIT);
   if (!errorMessage) {
     return {};
   }
 
-  const errorName = sanitizeRouteErrorText(error.name, ROUTE_ERROR_NAME_LIMIT);
-  return {
-    ...(errorName !== undefined ? { errorName } : {}),
+  return sanitizeRouteFallbackCatchFields({
+    errorName: error.name,
     errorMessage,
-  };
+  });
 }
 
 export function buildDeviceGoalsValidationFailedEvent(params: {
