@@ -29,7 +29,26 @@ import { registerSSERoutes } from "./routes/sse.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
 import type { LLMProvider } from "./llm/types.js";
 import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
-import { config, validateGuestSessionSecretForRuntime } from "./config.js";
+import { config, isDeployedLikeRuntime, validateGuestSessionSecretForRuntime } from "./config.js";
+
+const LOCAL_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+export function getCorsRegistrationPolicy(input: {
+  guestSessionCookieSecure: boolean;
+  nodeEnv: string | undefined;
+}) {
+  if (isDeployedLikeRuntime(input)) {
+    return { register: false as const };
+  }
+
+  return {
+    register: true as const,
+    options: {
+      origin: LOCAL_CORS_ORIGINS,
+      credentials: true,
+    },
+  };
+}
 
 export interface AppServices {
   assetService: ReturnType<typeof createAssetService>;
@@ -134,7 +153,13 @@ export async function buildApp(opts: AppOptions) {
     publisher,
     summaryService,
   });
-  await app.register(cors);
+  const corsPolicy = getCorsRegistrationPolicy({
+    guestSessionCookieSecure: config.guestSessionCookieSecure,
+    nodeEnv: config.nodeEnv,
+  });
+  if (corsPolicy.register) {
+    await app.register(cors, corsPolicy.options);
+  }
   // Keep the parser limit above the product limit so the chat route can return a controlled 400 at 5MB.
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 

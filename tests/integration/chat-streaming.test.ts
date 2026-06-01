@@ -2673,7 +2673,7 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat stream response includes CORS header", async () => {
+  it("POST /api/chat stream response includes local Vite CORS header", async () => {
     mockLLM.queueChatStream(["直接", "回覆"]);
 
     const form = new FormData();
@@ -2686,12 +2686,16 @@ describe("chat-streaming", () => {
       timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${address}/api/chat`, {
         method: "POST",
-        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        headers: {
+          cookie: sessionCookieHeader,
+          "Accept": "text/event-stream",
+          "Origin": "http://localhost:5173",
+        },
         signal: controller.signal,
         body: form,
       });
 
-      assert.notEqual(res.headers.get("access-control-allow-origin"), null);
+      assert.equal(res.headers.get("access-control-allow-origin"), "http://localhost:5173");
     } finally {
       if (timeout) clearTimeout(timeout);
       if (app.server.listening) {
