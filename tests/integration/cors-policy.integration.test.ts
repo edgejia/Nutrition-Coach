@@ -44,7 +44,7 @@ function runCorsProbe(env: NodeJS.ProcessEnv, origin: string) {
 }
 
 function localEnv() {
-  const env = { ...process.env, NODE_ENV: "test" };
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test" };
   delete env.GUEST_SESSION_COOKIE_SECURE;
   delete env.GUEST_SESSION_SECRET;
   return env;

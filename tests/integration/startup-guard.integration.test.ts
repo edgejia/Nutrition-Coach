@@ -27,7 +27,7 @@ function runBootProbe(env: NodeJS.ProcessEnv) {
 }
 
 function baseEnv() {
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: "test",
     TZ: "Asia/Taipei",
