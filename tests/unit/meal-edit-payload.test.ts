@@ -300,6 +300,45 @@ describe("meal edit payload builders", () => {
     }
   });
 
+  it("rejects blank mealRevisionId before building editable payloads", () => {
+    const baseHistoryMeal = {
+      id: "history-blank-revision",
+      mealRevisionId: "history-blank-revision:r1",
+      foodName: "完整餐點",
+      calories: 450,
+      protein: 30,
+      carbs: 42,
+      fat: 12,
+      itemCount: 1,
+      imageAssetId: null,
+      imageUrl: null,
+      loggedAt: "2026-05-06T08:00:00.000+08:00",
+    };
+
+    for (const mealRevisionId of ["", "   "]) {
+      assert.throws(
+        () => buildHistoryMealEditPayload({ ...baseHistoryMeal, mealRevisionId } as any, "2026-05-06"),
+        { message: "MEAL_REVISION_REQUIRED" },
+      );
+    }
+
+    const baseReceipt = {
+      mealId: "receipt-blank-revision",
+      mealRevisionId: "receipt-blank-revision:r1",
+      dateKey: "2026-05-06",
+      foodName: "豆漿",
+      calories: 160,
+      protein: 10,
+      carbs: 14,
+      fat: 6,
+      itemCount: 1,
+    };
+
+    for (const mealRevisionId of ["", "   "]) {
+      assert.equal(buildReceiptMealEditPayload({ ...baseReceipt, mealRevisionId } as any), null);
+    }
+  });
+
   it("normalizeHistoryMeal and normalizeLoggedMealReceipt preserve mealRevisionId", () => {
     const historyMeal = normalizeHistoryMeal({
       id: "meal-history-revision",

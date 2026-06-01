@@ -16,6 +16,10 @@ function isValidMealPeriod(value: unknown): value is MealPeriod {
   return value === "breakfast" || value === "lunch" || value === "dinner" || value === "late_night";
 }
 
+function getRequiredString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
 function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
@@ -66,7 +70,8 @@ function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
 }
 
 export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): MealEditPayload {
-  if (!meal.mealRevisionId) {
+  const mealRevisionId = getRequiredString(meal.mealRevisionId);
+  if (!mealRevisionId) {
     throw new Error("MEAL_REVISION_REQUIRED");
   }
 
@@ -94,7 +99,7 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
 
   return {
     mealId: meal.id,
-    mealRevisionId: meal.mealRevisionId,
+    mealRevisionId: mealRevisionId,
     dateKey,
     foodName: meal.foodName,
     calories: meal.calories,
@@ -111,10 +116,11 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
 }
 
 export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | undefined): MealEditPayload | null {
+  const mealRevisionId = getRequiredString(loggedMeal?.mealRevisionId);
   if (
     !loggedMeal ||
     !loggedMeal.mealId ||
-    !loggedMeal.mealRevisionId ||
+    !mealRevisionId ||
     !loggedMeal.dateKey ||
     loggedMeal.foodName.trim().length === 0 ||
     !Number.isFinite(loggedMeal.calories) ||
@@ -129,7 +135,7 @@ export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | unde
 
   return {
     mealId: loggedMeal.mealId,
-    mealRevisionId: loggedMeal.mealRevisionId,
+    mealRevisionId: mealRevisionId,
     dateKey: loggedMeal.dateKey,
     foodName: loggedMeal.foodName,
     calories: loggedMeal.calories,
