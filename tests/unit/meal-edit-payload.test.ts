@@ -240,8 +240,8 @@ describe("meal edit payload builders", () => {
     assert.equal(payload?.mealPeriod, undefined);
   });
 
-  it("defaults legacy edit payloads without itemCount to single-item semantics", () => {
-    const historyPayload = buildHistoryMealEditPayload({
+  it("rejects history edit payloads missing itemCount authority", () => {
+    assert.throws(() => buildHistoryMealEditPayload({
       id: "legacy-history",
       mealRevisionId: "legacy-history:r1",
       foodName: "蘋果",
@@ -252,7 +252,8 @@ describe("meal edit payload builders", () => {
       imageAssetId: null,
       imageUrl: null,
       loggedAt: "2026-05-06T08:00:00.000+08:00",
-    } as any, "2026-05-06");
+    } as any, "2026-05-06"), { message: "MEAL_AUTHORITY_REQUIRED" });
+
     const receiptPayload = buildReceiptMealEditPayload({
       mealId: "legacy-receipt",
       mealRevisionId: "legacy-receipt:r1",
@@ -265,10 +266,37 @@ describe("meal edit payload builders", () => {
       fat: 0.4,
     } as any);
 
-    assert.equal((historyPayload as any).itemCount, 1);
-    assert.equal((historyPayload as any).mealRevisionId, "legacy-history:r1");
     assert.equal((receiptPayload as any)?.itemCount, 1);
     assert.equal((receiptPayload as any)?.mealRevisionId, "legacy-receipt:r1");
+  });
+
+  it("rejects history edit payloads missing complete core meal authority", () => {
+    const base = {
+      id: "history-incomplete",
+      mealRevisionId: "history-incomplete:r1",
+      foodName: "完整餐點",
+      calories: 450,
+      protein: 30,
+      carbs: 42,
+      fat: 12,
+      itemCount: 1,
+      imageAssetId: null,
+      imageUrl: null,
+      loggedAt: "2026-05-06T08:00:00.000+08:00",
+    };
+
+    for (const meal of [
+      { ...base, foodName: "" },
+      { ...base, calories: Number.NaN },
+      { ...base, protein: undefined },
+      { ...base, carbs: undefined },
+      { ...base, fat: undefined },
+      { ...base, loggedAt: "" },
+    ]) {
+      assert.throws(() => buildHistoryMealEditPayload(meal as any, "2026-05-06"), {
+        message: "MEAL_AUTHORITY_REQUIRED",
+      });
+    }
   });
 
   it("normalizeHistoryMeal and normalizeLoggedMealReceipt preserve mealRevisionId", () => {

@@ -1548,6 +1548,52 @@ describe("sendMessageStream", () => {
     assert.equal((donePayload as { summaryOutcome?: unknown } | undefined)?.summaryOutcome, undefined);
   });
 
+  it("omits malformed done authoritative additions while preserving the terminal callback", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        didMutateMeal: true,
+        loggedMeal: { foodName: "", calories: 1, protein: 1, carbs: 1, fat: 1 },
+        dailySummary: { date: "2026-04-30", totalCalories: "bad" },
+        summaryOutcome: { status: "fresh" },
+        dailyTargets: { calories: 1800, protein: 120, carbs: 160 },
+        affectedDate: "2026-04-30",
+        turnId: "turn-done-malformed",
+      })}\n\n`,
+    ]);
+    let donePayload:
+      | {
+          didLogMeal: boolean;
+          didMutateMeal?: boolean;
+          loggedMeal?: unknown;
+          dailySummary?: unknown;
+          summaryOutcome?: unknown;
+          dailyTargets?: unknown;
+          affectedDate?: string;
+          turnId?: string;
+        }
+      | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        donePayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(donePayload?.didLogMeal, true);
+    assert.equal(donePayload?.didMutateMeal, true);
+    assert.equal(donePayload?.affectedDate, "2026-04-30");
+    assert.equal(donePayload?.turnId, "turn-done-malformed");
+    assert.equal(donePayload?.loggedMeal, undefined);
+    assert.equal(donePayload?.dailySummary, undefined);
+    assert.equal(donePayload?.summaryOutcome, undefined);
+    assert.equal(donePayload?.dailyTargets, undefined);
+  });
+
   it("dispatches stopped loggedMeal image urls through withAuthorizedAssetUrl", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [
@@ -1727,6 +1773,75 @@ describe("sendMessageStream", () => {
     });
 
     assert.equal((stoppedPayload as { summaryOutcome?: unknown } | undefined)?.summaryOutcome, undefined);
+  });
+
+  it("omits malformed stopped authoritative additions while preserving the terminal callback", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 4,
+        didLogMeal: true,
+        loggedMeal: { foodName: "", calories: 1, protein: 1, carbs: 1, fat: 1 },
+        dailySummary: { date: "2026-04-30", totalCalories: "bad" },
+        summaryOutcome: { status: "fresh" },
+        dailyTargets: { calories: 1800, protein: 120, carbs: 160 },
+        affectedDate: "2026-04-30",
+        turnId: "turn-stopped-malformed",
+      })}\n\n`,
+    ]);
+    let stoppedPayload:
+      | {
+          stopped: true;
+          tokensStreamed: number;
+          didLogMeal?: boolean;
+          loggedMeal?: unknown;
+          dailySummary?: unknown;
+          summaryOutcome?: unknown;
+          dailyTargets?: unknown;
+          affectedDate?: string;
+          turnId?: string;
+        }
+      | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedPayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(stoppedPayload?.stopped, true);
+    assert.equal(stoppedPayload?.tokensStreamed, 4);
+    assert.equal(stoppedPayload?.didLogMeal, true);
+    assert.equal(stoppedPayload?.affectedDate, "2026-04-30");
+    assert.equal(stoppedPayload?.turnId, "turn-stopped-malformed");
+    assert.equal(stoppedPayload?.loggedMeal, undefined);
+    assert.equal(stoppedPayload?.dailySummary, undefined);
+    assert.equal(stoppedPayload?.summaryOutcome, undefined);
+    assert.equal(stoppedPayload?.dailyTargets, undefined);
+  });
+
+  it("ignores malformed terminal event JSON without dispatching lifecycle callbacks", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, ['event: done\ndata: []\n\n']);
+    let done = false;
+    const errors: string[] = [];
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {
+        done = true;
+      },
+      onError: (message) => errors.push(message),
+    });
+
+    assert.equal(done, false);
+    assert.deepEqual(errors, ["Stream interrupted"]);
   });
 
   it("handles SSE event split across two chunks", async () => {
