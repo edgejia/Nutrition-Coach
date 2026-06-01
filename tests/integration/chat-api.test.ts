@@ -128,6 +128,44 @@ function assertNoTerminalClarificationSideEffects(body: {
   assert.doesNotMatch(body.reply ?? "", TERMINAL_CLARIFICATION_SUCCESS_COPY);
 }
 
+type MaybeAtomicReceiptChatService = AppServices["chatService"] & {
+  saveAssistantReplyWithReceipt?: (...args: unknown[]) => Promise<unknown>;
+};
+
+function jsonForRedactionCheck(value: unknown) {
+  return JSON.stringify(value, (_key, nestedValue) =>
+    typeof nestedValue === "function" ? "[function]" : nestedValue,
+  );
+}
+
+function installAtomicReceiptPersistenceFailure(chatService: AppServices["chatService"]) {
+  const service = chatService as MaybeAtomicReceiptChatService;
+  const original = service.saveAssistantReplyWithReceipt;
+  if (typeof original !== "function") {
+    return false;
+  }
+
+  service.saveAssistantReplyWithReceipt = async (...args: unknown[]) => {
+    const serializedArgs = jsonForRedactionCheck(args);
+    if (/receipt|mealTransactionId|mealRevisionId/i.test(serializedArgs)) {
+      throw new Error("AtomicReceiptPersistenceFailure");
+    }
+    return original.apply(chatService, args);
+  };
+  return true;
+}
+
+function assertNoReceiptIdentityProjection(payload: unknown, label: string) {
+  assert.ok(payload && typeof payload === "object", `${label} must be an object`);
+  const objectPayload = payload as Record<string, unknown>;
+  const serializedPayload = jsonForRedactionCheck(payload);
+
+  assert.equal(Object.prototype.hasOwnProperty.call(objectPayload, "loggedMeal"), false, `${label} must omit loggedMeal`);
+  assert.doesNotMatch(serializedPayload, /"mealId"|"mealRevisionId"|"dateKey"|"deviceId"|"currentRevisionId"/);
+  assert.doesNotMatch(serializedPayload, /AtomicReceiptPersistenceFailure|raw-provider-body|toolCalls|log_food|protein_sources/);
+  assert.doesNotMatch(serializedPayload, /雞腿便當|已幫你記錄雞腿便當|這段不應曝光/);
+}
+
 function latestEventPayload(raw: string, eventName: string) {
   const frames = parseSSEEvents(raw).filter((frame) => frame.event === eventName);
   assert.ok(frames.length > 0, `expected ${eventName} frame in ${raw}`);
@@ -1559,6 +1597,70 @@ describe("Chat API", () => {
     assert.equal(body.dailySummary?.totalProtein, 24);
     assert.match(body.dailySummary?.date ?? "", /^\d{4}-\d{2}-\d{2}$/);
     assert.doesNotMatch(body.reply, /無法辨識|回覆生成失敗|這次無法完成請求|headline/);
+  });
+
+  it("POST /api/chat JSON omits receipt identity when assistant receipt persistence fails after log_food", async () => {
+    assert.ok(services, "expected app services");
+    installAtomicReceiptPersistenceFailure(services.chatService);
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_atomic_receipt_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄雞腿便當！這段不應曝光。" });
+
+    const form = new FormData();
+    form.append("message", "raw-user-food-雞腿便當");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as Record<string, unknown>;
+
+    const sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const mealRow = sqlite
+        .prepare("SELECT id, current_revision_id AS currentRevisionId FROM meal_transactions WHERE device_id = ?")
+        .get(deviceId) as { id: string; currentRevisionId: string } | undefined;
+      assert.ok(mealRow, "meal mutation must be committed before receipt persistence failure is projected");
+      assert.match(mealRow.id, /^[0-9a-f-]{36}$/);
+      assert.match(mealRow.currentRevisionId, /^[0-9a-f-]{36}:r\d+$/);
+    } finally {
+      sqlite.close();
+    }
+
+    assertNoReceiptIdentityProjection(body, "JSON atomic persistence failure response");
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(historyRes.status, 200);
+    const historyBody = await historyRes.json() as {
+      messages: Array<{ role: string; content?: string; loggedMeal?: unknown }>;
+    };
+    const latestAssistant = historyBody.messages.filter((message) => message.role === "assistant").at(-1);
+    if (latestAssistant) {
+      assertNoReceiptIdentityProjection(latestAssistant, "JSON atomic persistence failure history assistant");
+    }
   });
 
   it("POST /api/chat JSON projects unavailable summaryOutcome for committed log responses", async () => {
