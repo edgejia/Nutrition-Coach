@@ -4292,7 +4292,7 @@ describe("Chat API", () => {
     assert.ok(logServices);
     const originalGetCompressedHistory = logServices.chatService.getCompressedHistory.bind(logServices.chatService);
     const rawMealText = "機密營養文字";
-    const unsafeErrorMessage = `prompt ${rawMealText} provider body header tool payload assistant final text data:image guest_session`;
+    const unsafeErrorMessage = `prompt messages user ${rawMealText} provider body header tool payload assistant final text data:image guest_session session`;
     logServices.chatService.getCompressedHistory = async () => {
       const error = new Error(unsafeErrorMessage);
       (error as Error & { cause?: unknown }).cause = new Error("CAUSE_SECRET");
@@ -4344,7 +4344,10 @@ describe("Chat API", () => {
         assert.ok(!serialized.includes(rawMealText));
         assert.ok(!serialized.includes(logDeviceId));
         assert.ok(!serialized.includes(logCookieHeader));
-        assert.doesNotMatch(serialized, /CAUSE_SECRET|prompt 機密營養文字|provider body|header|tool payload|assistant final text|data:image|guest_session|stack/);
+        assert.doesNotMatch(
+          serialized,
+          /CAUSE_SECRET|prompt messages user 機密營養文字|provider body|header|tool payload|assistant final text|data:image|guest_session|session|stack/,
+        );
       }
     } finally {
       logServices.chatService.getCompressedHistory = originalGetCompressedHistory;
