@@ -1,251 +1,211 @@
 <!-- refreshed: 2026-06-01 -->
-<!-- last_mapped_commit: df5f989b593d494ac44ce3b004307c1c6ada7bec -->
+<!-- last_mapped_commit: 782a04005f8f328f7f86ac589eb1253060471b5f -->
 # Codebase Structure
 
 **Analysis Date:** 2026-06-01
+
+**Scope:** Incremental remap limited to `.env.example`, `CHANGELOG.md`, `drizzle/`, `drizzle.config.ts`, `package.json`, `scripts/`, and `tsconfig.json`.
 
 ## Directory Layout
 
 ```text
 Nutrition-Coach/
-├── client/                 # Vite React client; described by `README.md`
-│   └── src/                # Components, Zustand store, API, SSE helpers
-├── server/                 # Fastify API, services, LLM orchestration, SQLite access
-│   ├── routes/             # HTTP/SSE transport boundaries
-│   ├── services/           # Domain logic and persistence services
-│   ├── orchestrator/       # LLM prompts, tools, receipts, fallback behavior
-│   ├── llm/                # OpenAI and mock provider adapters
-│   ├── realtime/           # SSE fan-out
-│   └── db/                 # Drizzle schema/client/migration runner
-├── tests/                  # Unit, integration, and deterministic harness tests
-│   └── harness/            # Scenario verification and generated artifacts
-├── drizzle/                # Source-controlled SQLite migrations and snapshots
-│   ├── 0000_*.sql          # Base devices/chat/meals schema
-│   ├── 0001_*.sql          # Assets
-│   ├── 0002_*.sql          # Meal transaction/revision model
-│   ├── 0003_*.sql          # Turn states
-│   ├── 0004_*.sql          # History hot-path index
-│   ├── 0005_*.sql          # Chat message status
-│   ├── 0006_*.sql          # Chat meal receipts
-│   ├── 0007_*.sql          # Meal-period intent
-│   ├── 0008_*.sql          # Chat mutation outcomes
-│   └── meta/               # Drizzle migration journal and JSON snapshots
-├── data/                   # Runtime SQLite/assets area; ignored except `.gitkeep`
-├── dist/                   # Generated client build output; ignored
-├── Dockerfile              # Production container build/start path
-├── README.md               # Traditional Chinese product, setup, architecture guide
-├── README-en.md            # English product, setup, architecture guide
-├── CHANGELOG.md            # Versioned product/architecture/verification changes
-├── .gitignore              # Git source boundary
-├── .dockerignore           # Docker build-context boundary
-└── yarn.lock               # Locked dependency graph
+├── .env.example                         # Safe environment contract template
+├── CHANGELOG.md                         # Versioned product, architecture, and verification history
+├── drizzle/                             # Source-controlled SQLite migrations
+│   ├── 0000_brainy_rocket_racer.sql     # Base devices/chat/messages/meals schema
+│   ├── 0001_sleepy_vivisector.sql       # Asset storage table
+│   ├── 0002_meal_transaction_v2_foundation.sql
+│   │                                    # Transaction/revision meal model and legacy backfill
+│   ├── 0003_aspiring_masque.sql         # Turn state table
+│   ├── 0004_history_query_hot_path_indexes.sql
+│   │                                    # Active meal history index
+│   ├── 0005_chat_message_status.sql     # Chat message status column
+│   ├── 0006_colossal_selene.sql         # Chat meal receipts
+│   ├── 0007_violet_living_lightning.sql # Meal-period intent column
+│   ├── 0008_shiny_stellaris.sql         # Chat mutation outcomes
+│   └── meta/                            # Drizzle snapshots and journal
+├── drizzle.config.ts                    # Drizzle Kit SQLite generation config
+├── package.json                         # Yarn script and dependency manifest
+├── scripts/                             # Node ESM workflow, generator, release, and evidence CLIs
+│   ├── generate-behavior-matrix-doc.mjs
+│   ├── generate-capability-matrix-doc.mjs
+│   ├── phase45-mobile-evidence.mjs
+│   ├── release-check.mjs
+│   └── run-node-with-tz.mjs
+└── tsconfig.json                        # Strict TypeScript compiler config
 ```
 
 ## Directory Purposes
 
-**`client/`:**
-- Purpose: Mobile-first browser app for onboarding, chat logging, home dashboard, history, settings, detail, and meal edit flows.
-- Contains: `client/src/components/`, `client/src/store.ts`, `client/src/api.ts`, `client/src/sse.ts`.
-- Key files: `client/src/store.ts`, `client/src/api.ts`, `client/src/sse.ts`, `client/src/components/ChatPanel.tsx` as documented in `README.md`.
-
-**`server/`:**
-- Purpose: Same-origin Fastify backend, static client serving, model orchestration, persistence, guest sessions, and SSE.
-- Contains: `server/app.ts`, `server/routes/`, `server/services/`, `server/orchestrator/`, `server/llm/`, `server/realtime/`, `server/db/`.
-- Key files: `server/app.ts`, `server/routes/chat.ts`, `server/routes/device.ts`, `server/lib/guest-session-resolver.ts`, `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `server/orchestrator/mutation-effects.ts` as documented in `README.md`.
-
-**`server/routes/`:**
-- Purpose: HTTP and SSE transport boundaries.
-- Contains: Chat streaming/upload routes, device/session routes, meal routes, history routes, assets, and `/api/sse`.
-- Key files: `server/routes/chat.ts`, `server/routes/device.ts` from `README.md`.
-
-**`server/services/`:**
-- Purpose: Domain logic and SQLite-backed persistence.
-- Contains: Meal persistence, corrections, goals, assets, history, summaries, guest sessions, and mutation support.
-- Key files: `server/services/*` as documented in `README.md`.
-
-**`server/orchestrator/`:**
-- Purpose: OpenAI-backed meal analysis/coaching, tool calling, structured mutation commits, receipts, and fallback behavior.
-- Contains: Prompts, tool contracts, mutation effects, correction authority, and fallback flow.
-- Key files: `server/orchestrator/*`, `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `server/orchestrator/mutation-effects.ts` from `README.md`.
-
-**`server/llm/`:**
-- Purpose: LLM provider abstraction and metadata-only failure localization.
-- Contains: OpenAI provider, mock provider, provider error types, and shared provider interfaces.
-- Key files: `server/llm/errors.ts` from `README.md`.
-
-**`server/db/`:**
-- Purpose: Runtime schema/client/migration integration for SQLite.
-- Contains: Drizzle schema, SQLite client, and migration runner.
-- Key files: `server/db/*` as documented in `README.md`.
-
-**`tests/`:**
-- Purpose: Unit, integration, route/service/SSE/orchestrator, and deterministic harness coverage.
-- Contains: `tests/unit/`, `tests/integration/`, `tests/harness/`.
-- Key files: `tests/harness/scenarios/provider-auth-failure-localization.ts` from `README.md`.
-
 **`drizzle/`:**
-- Purpose: Source-controlled SQLite migration history and Drizzle snapshots.
-- Contains: Migrations `drizzle/0000_brainy_rocket_racer.sql` through `drizzle/0008_shiny_stellaris.sql`, plus `drizzle/meta/*.json`.
-- Key files: `drizzle/meta/_journal.json`, `drizzle/0002_meal_transaction_v2_foundation.sql`, `drizzle/0004_history_query_hot_path_indexes.sql`, `drizzle/0007_violet_living_lightning.sql`, `drizzle/0008_shiny_stellaris.sql`.
+- Purpose: Store replayable SQLite schema migrations generated by Drizzle.
+- Contains: SQL migrations for devices, chat messages, assets, meal transactions/revisions/items, asset references, turn states, history indexes, chat status, receipts, meal period, and mutation outcomes.
+- Key files: `drizzle/0002_meal_transaction_v2_foundation.sql`, `drizzle/0008_shiny_stellaris.sql`, `drizzle/meta/_journal.json`.
 
-**`data/`:**
-- Purpose: Local/deployed runtime storage for SQLite, WAL/SHM files, durable assets, and staging uploads.
-- Contains: Runtime-generated files only; source control should keep only `data/.gitkeep`.
-- Key files: `data/.gitkeep`; runtime DB/assets are ignored by `.gitignore` and `.dockerignore`.
+**`drizzle/meta/`:**
+- Purpose: Store Drizzle metadata needed to track and replay the ordered migration history.
+- Contains: Snapshot JSON files from `drizzle/meta/0000_snapshot.json` through `drizzle/meta/0008_snapshot.json`, plus `drizzle/meta/_journal.json`.
+- Key files: `drizzle/meta/_journal.json`, `drizzle/meta/0008_snapshot.json`.
 
-**`.planning/`:**
-- Purpose: Local GSD workflow state and codebase map output.
-- Contains: `.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/STRUCTURE.md`, and other workflow artifacts.
-- Key files: `.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/STRUCTURE.md`.
+**`scripts/`:**
+- Purpose: Provide repo-native Node CLIs for release verification, timezone-safe command execution, generated documentation, and mobile visual evidence.
+- Contains: ESM `.mjs` scripts using Node built-ins, project TypeScript imports, and browser CDP.
+- Key files: `scripts/run-node-with-tz.mjs`, `scripts/release-check.mjs`, `scripts/generate-capability-matrix-doc.mjs`, `scripts/generate-behavior-matrix-doc.mjs`, `scripts/phase45-mobile-evidence.mjs`.
 
 ## Key File Locations
 
 **Entry Points:**
-- `Dockerfile`: Production container build and start path.
-- `README.md`: Local setup, product flow, architecture overview, command list, environment variables, and deployment guidance in Traditional Chinese.
-- `README-en.md`: English mirror of local setup, architecture overview, commands, environment variables, and deployment guidance.
-- `server/app.ts`: Fastify composition root documented by `README.md`.
-- `server/routes/chat.ts`: Streaming chat route documented by `README.md`.
-- `client/src/store.ts`: Client state boundary documented by `README.md`.
+- `package.json`: Primary command surface for development, build, migration, tests, harness verification, generated matrices, and release checks.
+- `scripts/release-check.mjs`: Release verification CLI invoked by `yarn release:check`.
+- `scripts/run-node-with-tz.mjs`: Timezone wrapper invoked by test, harness, and release scripts.
+- `scripts/generate-capability-matrix-doc.mjs`: Capability matrix generator/checker.
+- `scripts/generate-behavior-matrix-doc.mjs`: Behavior matrix generator/checker.
+- `scripts/phase45-mobile-evidence.mjs`: Operator-run mobile screenshot/audit evidence CLI.
+- `drizzle.config.ts`: Drizzle Kit generation entry point used by `yarn db:generate`.
 
 **Configuration:**
-- `.gitignore`: Defines source-control exclusions for local agent state, `.planning`, dependencies, build output, runtime data, generated harness artifacts, local docs, secrets, DB files, OS files, and browser/tool cache.
-- `.dockerignore`: Defines Docker build-context exclusions for dependencies, build output, coverage, secrets, runtime data, tests, docs, local agent/planning folders, browser cache, git metadata, logs, and DB files.
-- `Dockerfile`: Uses `node:22-bookworm-slim`, `corepack enable`, `yarn install --frozen-lockfile`, `yarn build`, `NODE_ENV=production`, `EXPOSE 3000`, and `yarn db:migrate && yarn start`.
-- `yarn.lock`: Locks framework/runtime dependencies including Fastify, React, Vite, Drizzle, `better-sqlite3`, and OpenAI SDK packages.
-- `README.md`: Documents required runtime variables: `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `PORT`, `DB_PATH`, `TZ`, `NODE_ENV`, `GUEST_SESSION_SECRET`, `ASSETS_DIR`, `UPLOADS_STAGING_DIR`, `CLIENT_DIST_DIR`.
+- `.env.example`: Documents `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `PORT`, `DB_PATH`, `TZ`, `NODE_ENV`, `GUEST_SESSION_SECRET`, `ASSETS_DIR`, `UPLOADS_STAGING_DIR`, and `CLIENT_DIST_DIR`.
+- `package.json`: Sets `"type": "module"`, package metadata, Yarn scripts, runtime dependencies, and dev dependencies.
+- `tsconfig.json`: Configures strict ES2022 TypeScript with bundler module resolution and includes server, tests, client source, and Vite config.
+- `drizzle.config.ts`: Sets Drizzle dialect to SQLite, schema path to `./server/db/schema.ts`, migration output to `./drizzle`, and default DB URL to `./data/nutrition.db`.
 
 **Core Logic:**
-- `server/routes/chat.ts`: Text/image meal logging, streaming chat UX, corrections, upload flow, receipts, and fallback behavior.
-- `server/orchestrator/*`: Model prompts, tool calls, correction authority, fallback behavior, and receipt generation.
-- `server/orchestrator/tools.ts`: LLM tool calling with structured mutation commits.
-- `server/orchestrator/tool-contract.ts`: Tool contract boundary.
-- `server/orchestrator/mutation-effects.ts`: Structured mutation effect ownership.
-- `server/services/*`: Persistence and domain logic.
-- `server/routes/device.ts`: Signed-cookie guest sessions and device onboarding.
-- `server/lib/guest-session-resolver.ts`: Guest-session resolution boundary.
-- `client/src/sse.ts`: SSE transport helpers.
-- `client/src/components/ChatPanel.tsx`: Streaming chat surface.
+- `scripts/release-check.mjs`: Resolves git diff base, collects changed files, validates timezone, and runs TypeScript/test/build gates.
+- `scripts/run-node-with-tz.mjs`: Spawns the current Node executable with inherited args and `TZ=Asia/Taipei`.
+- `scripts/generate-capability-matrix-doc.mjs`: Sorts and renders `capabilityMatrix` rows into `docs/capability-matrix.md`.
+- `scripts/generate-behavior-matrix-doc.mjs`: Renders behavior cases, risk distributions, assertion coverage, and expected failures into `tests/harness/behavior-matrix.md`.
+- `scripts/phase45-mobile-evidence.mjs`: Launches Edge/Chrome headless, injects synthetic app state, captures mobile screenshots, and writes manifest/audit JSON.
 
 **Persistence:**
-- `drizzle/0000_brainy_rocket_racer.sql`: Initial `chat_messages`, `devices`, and legacy `meals` tables.
-- `drizzle/0001_sleepy_vivisector.sql`: `assets` table and storage-key uniqueness.
-- `drizzle/0002_meal_transaction_v2_foundation.sql`: `meal_transactions`, `meal_revisions`, `meal_revision_items`, `asset_references`, and legacy meal backfill.
-- `drizzle/0003_aspiring_masque.sql`: `turn_states` table and device/kind uniqueness.
-- `drizzle/0004_history_query_hot_path_indexes.sql`: Active meal history pagination index.
-- `drizzle/0005_chat_message_status.sql`: `chat_messages.status`.
-- `drizzle/0006_colossal_selene.sql`: `chat_meal_receipts`.
-- `drizzle/0007_violet_living_lightning.sql`: `meal_transactions.meal_period`.
-- `drizzle/0008_shiny_stellaris.sql`: `chat_mutation_outcomes`.
-- `drizzle/meta/_journal.json`: Ordered Drizzle migration journal through index `8`.
+- `drizzle/0000_brainy_rocket_racer.sql`: Creates `chat_messages`, `devices`, and legacy `meals`.
+- `drizzle/0001_sleepy_vivisector.sql`: Creates `assets` and `assets_storage_key_unique`.
+- `drizzle/0002_meal_transaction_v2_foundation.sql`: Creates `meal_transactions`, `meal_revisions`, `meal_revision_items`, `asset_references`, indexes, and backfills from legacy tables.
+- `drizzle/0003_aspiring_masque.sql`: Creates `turn_states`, `turn_states_device_kind_uq`, and `turn_states_device_expires_idx`.
+- `drizzle/0004_history_query_hot_path_indexes.sql`: Adds `meal_tx_active_device_logged_created_id_idx`.
+- `drizzle/0005_chat_message_status.sql`: Adds constrained `chat_messages.status`.
+- `drizzle/0006_colossal_selene.sql`: Creates `chat_meal_receipts` and receipt lookup indexes.
+- `drizzle/0007_violet_living_lightning.sql`: Adds constrained `meal_transactions.meal_period`.
+- `drizzle/0008_shiny_stellaris.sql`: Creates `chat_mutation_outcomes` and outcome lookup indexes.
+- `drizzle/meta/_journal.json`: Lists migration entries `0000` through `0008` in order.
 
 **Testing:**
-- `tests/unit/`: Pure logic and contract tests documented in `README.md`.
-- `tests/integration/`: Routes, services, SSE, and orchestrator boundary tests documented in `README.md`.
-- `tests/harness/`: Deterministic AI behavior, receipt, and boundary harness documented in `README.md`.
-- `tests/harness/artifacts/`: Generated evidence ignored by `.gitignore`.
-- `tests/harness/tmp/`: Generated temporary harness files ignored by `.gitignore`.
+- `package.json`: Defines `yarn test`, `yarn test:unit`, `yarn test:integration`, and `yarn verify:harness`.
+- `scripts/run-node-with-tz.mjs`: Required wrapper for scoped test/harness commands.
+- `scripts/release-check.mjs`: Full local release gate for TypeScript, tests, and frontend build.
+- `scripts/generate-capability-matrix-doc.mjs`: Supports `yarn matrix:gen:check` and participates in `yarn matrix:check`.
+- `scripts/generate-behavior-matrix-doc.mjs`: Supports `yarn behavior-matrix:gen:check`.
 
 ## Naming Conventions
 
 **Files:**
-- Drizzle migrations use numbered snake/kebab-ish generated names: `drizzle/0008_shiny_stellaris.sql`.
-- Drizzle snapshots use matching numeric JSON names under `drizzle/meta/`: `drizzle/meta/0008_snapshot.json`.
-- Public documentation uses root README files: `README.md` and `README-en.md`.
-- Ignore and deployment files live at repository root: `.gitignore`, `.dockerignore`, `Dockerfile`.
+- Drizzle migrations use four-digit ordered prefixes and generated snake-style labels: `drizzle/0008_shiny_stellaris.sql`.
+- Drizzle snapshots mirror migration numbers: `drizzle/meta/0008_snapshot.json`.
+- Node workflow scripts use lower-kebab `.mjs` names: `scripts/release-check.mjs`, `scripts/run-node-with-tz.mjs`.
+- Generator scripts use `generate-<artifact>-doc.mjs`: `scripts/generate-capability-matrix-doc.mjs`.
+- Root config files use conventional names: `package.json`, `tsconfig.json`, `drizzle.config.ts`, `.env.example`.
 
 **Directories:**
-- Use architecture-layer directories documented in `README.md`: `client/src/components`, `server/routes`, `server/services`, `server/orchestrator`, `server/llm`, `server/realtime`, `server/db`, `tests/harness`.
-- Keep generated/source-controlled migrations in `drizzle/`.
-- Keep runtime-only DB/assets in `data/`.
-- Keep generated workflow maps in `.planning/codebase/`.
+- Keep generated migrations in `drizzle/`.
+- Keep Drizzle metadata in `drizzle/meta/`.
+- Keep executable workflow scripts in `scripts/`.
+- Keep source-derived generated markdown targets at the paths hard-coded by generators: `docs/capability-matrix.md` and `tests/harness/behavior-matrix.md`.
 
 ## Where to Add New Code
 
-**New Backend API Feature:**
-- Primary code: `server/routes/<feature>.ts`.
-- Domain code: `server/services/<feature>.ts`.
-- Composition: `server/app.ts`.
-- Tests: `tests/integration/<feature>-api.test.ts`.
+**New Package Command:**
+- Primary code: `package.json`.
+- Supporting script: `scripts/<command-name>.mjs` when the command needs non-trivial logic.
+- Use `scripts/run-node-with-tz.mjs` when the command observes dates, runs tests, or validates day-boundary behavior.
 
-**New AI Tool or Orchestrator Behavior:**
-- Tool contract/schema: `server/orchestrator/tools.ts` and `server/orchestrator/tool-contract.ts`.
-- Mutation effects/receipts: `server/orchestrator/mutation-effects.ts` and related receipt renderers under `server/orchestrator/`.
-- Runtime provider behavior: `server/llm/`.
-- Boundary proof: `tests/harness/`.
+**New Database Migration:**
+- Schema source: `server/db/schema.ts` as configured by `drizzle.config.ts`.
+- Generated migration: `drizzle/00NN_<generated_name>.sql`.
+- Generated metadata: `drizzle/meta/00NN_snapshot.json` and `drizzle/meta/_journal.json`.
+- Command: `yarn db:generate`.
 
-**New Persistence Entity or Query:**
-- Schema source: `server/db/schema.ts`.
-- Generated migration output: `drizzle/`.
-- Migration journal/snapshot output: `drizzle/meta/`.
-- Service API: `server/services/<domain>.ts`.
-- Do not hand-edit runtime SQLite files under `data/`.
+**New Release or Verification Gate:**
+- Primary script: `scripts/<gate-name>.mjs`.
+- Package entry: `package.json`.
+- Timezone-sensitive runner: wrap with `node scripts/run-node-with-tz.mjs`.
+- Keep release promotion readiness integrated with `scripts/release-check.mjs` when the gate must block staging or main promotion.
 
-**New Client Screen or UI Surface:**
-- Component: `client/src/components/<ScreenName>.tsx`.
-- Shared client state: `client/src/store.ts`.
-- REST transport: `client/src/api.ts`.
-- SSE transport: `client/src/sse.ts`.
+**New Generated Documentation Matrix:**
+- Source data: an existing typed source under the appropriate product/test area.
+- Generator: `scripts/generate-<name>-doc.mjs`.
+- Package commands: add `:<name>:gen` and `:<name>:gen:check` patterns in `package.json`.
+- Drift detection: implement a `--check` path that compares current output and exits nonzero on mismatch.
 
-**New Deployment or Runtime Configuration:**
-- Container behavior: `Dockerfile`.
-- Docker context exclusions: `.dockerignore`.
-- Git source exclusions: `.gitignore`.
-- User-facing setup docs: `README.md` and `README-en.md`.
-- Do not commit `.env`, `.env.*`, DB files, local agent folders, or `.planning` outputs outside explicit GSD artifacts.
+**New Visual Evidence Capture:**
+- Primary script: `scripts/<scenario>-evidence.mjs`.
+- Output: keep generated screenshots/manifests under an output or harness artifact directory, not in source configs.
+- Data policy: follow `scripts/phase45-mobile-evidence.mjs` by using synthetic/local data and documenting privacy in the manifest.
 
-**New Verification Evidence:**
-- Unit tests: `tests/unit/`.
-- Integration tests: `tests/integration/`.
-- Deterministic harness scenarios: `tests/harness/`.
-- Generated artifacts: `tests/harness/artifacts/`, regenerated by commands and ignored by `.gitignore`.
+**New Environment Variable:**
+- Documentation: `.env.example`.
+- Runtime loader command: update relevant `package.json` script only if it needs `.env`.
+- Secret handling: document names and defaults only; do not place real values in tracked files.
 
 ## Special Directories
 
 **`drizzle/`:**
-- Purpose: Source-controlled database migrations and schema snapshots.
-- Generated: Yes, by Drizzle.
+- Purpose: SQLite migration SQL.
+- Generated: Yes, by Drizzle Kit.
 - Committed: Yes.
 
 **`drizzle/meta/`:**
-- Purpose: Drizzle migration journal and snapshots.
+- Purpose: Drizzle migration snapshots and journal.
 - Generated: Yes.
 - Committed: Yes.
 
-**`data/`:**
-- Purpose: Runtime SQLite database, WAL/SHM files, uploads, and durable assets.
-- Generated: Yes, except `data/.gitkeep`.
-- Committed: Only `data/.gitkeep`.
+**`scripts/`:**
+- Purpose: Repo-native automation CLIs.
+- Generated: No.
+- Committed: Yes.
 
-**`dist/`:**
-- Purpose: Generated frontend build output served by Fastify in deployed mode.
-- Generated: Yes.
-- Committed: No.
+## Scoped File Guide
 
-**`tests/harness/artifacts/`:**
-- Purpose: Generated deterministic scenario evidence.
-- Generated: Yes.
-- Committed: No; excluded by `.gitignore`.
+**`.env.example`:**
+- Use for environment names, safe defaults, comments, and deployment override documentation.
+- Do not place actual API keys, session secrets, production DB paths, or private values here.
 
-**`tests/harness/tmp/`:**
-- Purpose: Temporary harness runtime files.
-- Generated: Yes.
-- Committed: No; excluded by `.gitignore`.
+**`CHANGELOG.md`:**
+- Use for milestone-visible behavior, verification, privacy, release, and deployment history.
+- Keep entries concrete and versioned; include command-level verification when it is part of release proof.
 
-**`.planning/`:**
-- Purpose: GSD workflow state, active planning artifacts, and codebase maps.
-- Generated: Mixed.
-- Committed: Excluded by `.gitignore`; this scoped task intentionally updates `.planning/codebase/ARCHITECTURE.md` and `.planning/codebase/STRUCTURE.md` only.
+**`package.json`:**
+- Use as the only package command registry.
+- Keep scripts composed from `yarn`, `node`, `tsx`, Vite, Drizzle Kit, and the local `scripts/` CLIs.
+- Preserve `"type": "module"` and Yarn-only workflow assumptions.
 
-**`.codex/` and `.claude/`:**
-- Purpose: Local/project agent instructions and compatibility shims.
-- Generated: Mixed.
-- Committed: Excluded by `.gitignore` and `.dockerignore` in the scoped files.
+**`tsconfig.json`:**
+- Keep strict TypeScript coverage over `server/**/*.ts`, `tests/**/*.ts`, `client/src/**/*.ts`, `client/src/**/*.tsx`, and `client/vite.config.ts`.
+- Preserve `moduleResolution: "bundler"` and `jsx: "react-jsx"` unless a broader architecture change is intentionally planned.
 
-**`.playwright-*` and `.playwright-mcp`:**
-- Purpose: Browser automation cache/log output.
-- Generated: Yes.
-- Committed: No; excluded by `.gitignore` and `.dockerignore`.
+**`drizzle.config.ts`:**
+- Keep the schema path, output path, and SQLite dialect aligned with `package.json` `db:generate`.
+- Keep DB URL configurable through `DB_PATH` with a local default.
+
+**`scripts/release-check.mjs`:**
+- Keep as the merge/promotion local gate.
+- Preserve timezone validation before expensive gates.
+- Add new required release gates here only when they must block release readiness.
+
+**`scripts/run-node-with-tz.mjs`:**
+- Keep small and generic.
+- Do not embed test-specific behavior here; it should only set `TZ=Asia/Taipei` and delegate.
+
+**`scripts/generate-capability-matrix-doc.mjs`:**
+- Keep `client/src/contracts/capability-matrix.ts` as the source of truth.
+- Preserve `--check` behavior for drift detection.
+
+**`scripts/generate-behavior-matrix-doc.mjs`:**
+- Keep `tests/harness/behavior-matrix.ts` as the source of truth.
+- Preserve risk distribution, assertion coverage, expected failure, and `--check` output.
+
+**`scripts/phase45-mobile-evidence.mjs`:**
+- Keep synthetic data and privacy statement intact.
+- Preserve blank screenshot, minimum size, byte diversity, horizontal overflow, and base URL reachability checks.
 
 ---
 

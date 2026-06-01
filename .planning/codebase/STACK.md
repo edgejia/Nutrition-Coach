@@ -1,111 +1,123 @@
+---
+last_mapped_commit: 782a04005f8f328f7f86ac589eb1253060471b5f
+---
+
 # Technology Stack
 
 **Analysis Date:** 2026-06-01
-**Last Mapped Commit:** `df5f989b593d494ac44ce3b004307c1c6ada7bec`
-**Scope:** `.dockerignore`, `.gitignore`, `CHANGELOG.md`, `Dockerfile`, `README-en.md`, `README.md`, `drizzle/`, `yarn.lock`
+**Scope:** `.env.example`, `CHANGELOG.md`, `drizzle/`, `drizzle.config.ts`, `package.json`, `scripts/`, `tsconfig.json`
 
 ## Languages
 
 **Primary:**
-- TypeScript 5.x - Full-stack application code is documented in `README.md` and `README-en.md` as a complete TypeScript app with server, client, and tests. The locked compiler in `yarn.lock` resolves `typescript@^5.7.0` to `5.9.3`.
+- TypeScript 5.x - Full-stack source is compiled under `tsconfig.json`; scoped includes cover `server/**/*.ts`, `tests/**/*.ts`, `client/src/**/*.ts`, `client/src/**/*.tsx`, and `client/vite.config.ts`. `package.json` declares `typescript` `^5.7.0`.
 
 **Secondary:**
-- TSX / React JSX - The mobile-first client uses React surfaces under `client/src/components/`, `client/src/App.tsx`, and `client/src/main.tsx` per `README.md` and `README-en.md`; `yarn.lock` resolves React packages to React `19.2.4`.
-- JavaScript ESM - Operational commands in `README.md` and `README-en.md` run through Yarn scripts; the scoped lockfile resolves `tsx@^4.19.0` / `tsx@^4.21.0` to `4.21.0` for TypeScript execution.
-- SQL - SQLite schema migrations live in `drizzle/*.sql`; Drizzle migration metadata lives in `drizzle/meta/*.json`.
-- CSS - Tailwind-backed styling remains part of the Vite client stack; `yarn.lock` resolves `tailwindcss@^4.0.0` and `@tailwindcss/vite` to `4.2.2`.
-- Markdown - Product and release documentation in `README.md`, `README-en.md`, and `CHANGELOG.md` define setup, deployment, verification, and release history.
+- TSX / React JSX - `tsconfig.json` sets `jsx` to `react-jsx`; `package.json` declares `react` `^19.0.0` and `react-dom` `^19.0.0`.
+- JavaScript ESM - `package.json` sets `"type": "module"` and uses ESM `.mjs` operational scripts in `scripts/generate-capability-matrix-doc.mjs`, `scripts/generate-behavior-matrix-doc.mjs`, `scripts/phase45-mobile-evidence.mjs`, `scripts/release-check.mjs`, and `scripts/run-node-with-tz.mjs`.
+- SQL - SQLite migrations live in `drizzle/*.sql`; Drizzle metadata snapshots live in `drizzle/meta/*.json`.
+- Markdown generation - `scripts/generate-capability-matrix-doc.mjs` writes `docs/capability-matrix.md`; `scripts/generate-behavior-matrix-doc.mjs` writes `tests/harness/behavior-matrix.md`.
+- Chinese Markdown release notes - `CHANGELOG.md` records milestone changes, verification, Railway smoke evidence, and release constraints.
 
 ## Runtime
 
 **Environment:**
-- Node.js 22+ - Required by `README.md` and `README-en.md`; the production container uses `node:22-bookworm-slim` in `Dockerfile`.
-- ESM-oriented Node execution - Development and test commands documented in `README.md` run through Yarn scripts, with TypeScript execution provided by `tsx` from `yarn.lock`.
-- Timezone-sensitive runtime - `README.md` and `README-en.md` require `TZ=Asia/Taipei` for daily nutrition boundaries.
-- Production process - `Dockerfile` sets `NODE_ENV=production`, exposes port `3000`, and starts with `yarn db:migrate && yarn start`.
+- Node.js ESM runtime - `package.json` scripts run Node directly with `--import tsx` for TypeScript entry points such as `server/index.ts`, `server/db/migrate.ts`, and `tests/harness/run.ts`.
+- TypeScript execution - `tsx` `^4.19.0` is declared in `package.json` and is used by `dev:server`, `db:migrate`, `start`, `test`, `test:unit`, `test:integration`, `verify:harness`, and matrix-generation scripts.
+- Timezone contract - `.env.example` sets `TZ=Asia/Taipei`; `scripts/run-node-with-tz.mjs` forces `TZ=Asia/Taipei` for test and harness commands; `scripts/release-check.mjs` fails unless runtime `process.env.TZ` is exactly `Asia/Taipei`.
+- Local env loading - `package.json` uses `node --env-file=.env` for `dev:server` and `node scripts/run-node-with-tz.mjs --env-file=.env scripts/release-check.mjs` for `release:check`.
 
 **Package Manager:**
-- Yarn 1 lockfile - `yarn.lock` is present and is the dependency source used by `Dockerfile`.
-- Install command: `yarn install` for local setup in `README.md` / `README-en.md`; `Dockerfile` runs `corepack enable && yarn install --frozen-lockfile`.
-- Lockfile: present at `yarn.lock`.
+- Yarn - All scoped lifecycle scripts in `package.json` are written for Yarn, and `scripts/release-check.mjs` shells out to `yarn` or `yarn.cmd`.
+- Lockfile: not in this incremental-remap scope. Do not infer installed resolved versions from scoped files.
 
 ## Frameworks
 
 **Core:**
-- Fastify `^5.2.0` - Backend API server documented in `README.md` and `README-en.md`; `yarn.lock` resolves `fastify` to `5.8.4`.
-- React `^19.0.0` and React DOM - Mobile-first client documented in `README.md` and `README-en.md`; `yarn.lock` resolves `react` to `19.2.4` and `react-dom` to `19.2.4`.
-- Vite `^6.2.0` with `@vitejs/plugin-react` - Client dev/build stack documented in `README.md` / `README-en.md`; `yarn.lock` resolves `vite` to `6.4.1` and `@vitejs/plugin-react` to `4.7.0`.
-- Tailwind CSS `^4.0.0` with `@tailwindcss/vite` - Client styling/build integration; `yarn.lock` resolves both Tailwind packages to `4.2.2`.
-- Drizzle ORM `^0.39.0` - SQLite persistence documented in `README.md` / `README-en.md`; `yarn.lock` resolves `drizzle-orm` to `0.39.3`, and migrations live under `drizzle/`.
-- better-sqlite3 `^11.8.0` - SQLite driver resolved by `yarn.lock` to `11.10.0`.
+- Fastify `^5.2.0` - API/server framework declared in `package.json`.
+- React `^19.0.0` and `react-dom` `^19.0.0` - Client UI dependencies declared in `package.json`.
+- Vite `^6.2.0` with `@vitejs/plugin-react` `^4.4.0` - Client dev/build tooling exposed through `package.json` scripts `dev:client` and `build`.
+- Tailwind CSS `^4.0.0` with `@tailwindcss/vite` `^4.0.0` - Styling/build integration declared in `package.json`.
+- Drizzle ORM `^0.39.0` - SQLite ORM declared in `package.json`; migration generation is configured in `drizzle.config.ts`.
+- better-sqlite3 `^11.8.0` - SQLite driver declared in `package.json`.
+- Zustand `^5.0.0` - Client state dependency declared in `package.json`.
+- Zod `^4.3.6` - Runtime validation dependency declared in `package.json`; `CHANGELOG.md` notes LLM JSON schema and Zod runtime alignment for `log_food` behavior.
 
 **Testing:**
-- Node built-in test runner - `README.md` and `README-en.md` document `yarn test`, `yarn test:unit`, and `yarn test:integration` with test locations under `tests/unit/`, `tests/integration/`, and `tests/harness/`.
-- Deterministic harness runner - `README.md` and `README-en.md` document `yarn verify:harness -- behavior-matrix`, `yarn verify:harness -- guest-session-hardening`, and `yarn verify:harness -- provider-auth-failure-localization`.
-- Mock provider boundary - `README.md` and `README-en.md` state that local development calls OpenAI, while tests and some harness flows use mock providers.
+- Node built-in test runner - `package.json` uses `node ... --test` for `test`, `test:unit`, `test:integration`, and `matrix:check`.
+- TypeScript test execution - `package.json` routes Node test commands through `scripts/run-node-with-tz.mjs --import tsx`.
+- Deterministic harness runner - `package.json` exposes `verify:harness` as `node scripts/run-node-with-tz.mjs --import tsx tests/harness/run.ts`.
+- Release verification - `package.json` exposes `release:check`; `scripts/release-check.mjs` runs `yarn tsc --noEmit`, `yarn test`, and `yarn build` after validating timezone.
 
 **Build/Dev:**
-- Docker - `Dockerfile` is the container build recipe: copy `package.json` / `yarn.lock`, install with frozen lockfile, copy the repo, run `yarn build`, then start with migrations plus `yarn start`.
-- Vite build - `README.md` and `README-en.md` document `yarn install && yarn build`; deployed Fastify serves `dist/client`.
-- Drizzle migrations - `README.md` and `README-en.md` document `yarn db:migrate`; migration files are `drizzle/0000_brainy_rocket_racer.sql` through `drizzle/0008_shiny_stellaris.sql`.
-- Release verification - `README.md`, `README-en.md`, and `CHANGELOG.md` document `yarn release:check` as the release gate; recent v2.4 proof records `yarn tsc --noEmit` and `yarn release:check` passing.
+- Server watch mode - `package.json` `dev:server` runs `node --env-file=.env --import tsx --watch server/index.ts`.
+- Client dev server - `package.json` `dev:client` runs `vite dev --config client/vite.config.ts`.
+- Client build - `package.json` `build` runs `vite build --config client/vite.config.ts`.
+- Database migration generation - `package.json` `db:generate` runs `drizzle-kit generate --config=drizzle.config.ts`.
+- Database migration application - `package.json` `db:migrate` runs `node --import tsx server/db/migrate.ts`.
+- Production start command - `package.json` `start` runs `node --import tsx server/index.ts`.
+- Matrix generators - `package.json` exposes `matrix:gen`, `matrix:gen:check`, `matrix:check`, `behavior-matrix:gen`, and `behavior-matrix:gen:check`; implementations live in `scripts/generate-capability-matrix-doc.mjs` and `scripts/generate-behavior-matrix-doc.mjs`.
 
 ## Key Dependencies
 
 **Critical:**
-- `openai` `^4.82.0` - OpenAI-backed meal analysis and coaching are documented in `README.md` and `README-en.md`; `yarn.lock` resolves the SDK to `4.104.0`.
-- `fastify` `^5.2.0` - API and same-origin service runtime; `yarn.lock` resolves to `5.8.4`.
-- `@fastify/multipart` `^9.0.0` - Multipart/image upload support; `yarn.lock` resolves to `9.4.0`.
-- `@fastify/static` `^9.1.1` - Same-origin serving for built `dist/client`; `yarn.lock` resolves to `9.1.1`.
-- `@fastify/cors` `^11.0.0` - API CORS support; `yarn.lock` resolves to `11.2.0`.
-- `better-sqlite3` `^11.8.0` - SQLite driver; `yarn.lock` resolves to `11.10.0`.
-- `drizzle-orm` `^0.39.0` - SQLite ORM and schema layer; `yarn.lock` resolves to `0.39.3`.
-- `zod` `^4.3.6` - Runtime schema validation dependency; `yarn.lock` resolves to `4.3.6`.
-- `zustand` `^5.0.0` - Client state boundary documented in `README.md` and `README-en.md`; `yarn.lock` resolves to `5.0.12`.
+- `openai` `^4.82.0` - OpenAI SDK dependency declared in `package.json`; `.env.example` requires `OPENAI_API_KEY` and `OPENAI_ORCHESTRATOR_MODEL`.
+- `fastify` `^5.2.0` - Backend API runtime declared in `package.json`.
+- `@fastify/multipart` `^9.0.0` - Multipart upload support declared in `package.json`.
+- `@fastify/static` `^9.1.1` - Static asset/client serving support declared in `package.json`; `.env.example` includes `CLIENT_DIST_DIR`.
+- `@fastify/cors` `^11.0.0` - CORS support declared in `package.json`.
+- `better-sqlite3` `^11.8.0` - SQLite runtime dependency declared in `package.json`.
+- `drizzle-orm` `^0.39.0` - Database abstraction declared in `package.json`; migrations are under `drizzle/`.
+- `zod` `^4.3.6` - Runtime validation dependency declared in `package.json`.
+- `zustand` `^5.0.0` - Client state management dependency declared in `package.json`.
 
 **Infrastructure:**
-- `tsx` `^4.19.0` / `^4.21.0` - TypeScript runtime execution for scripts/tests; `yarn.lock` resolves to `4.21.0`.
-- `drizzle-kit` `^0.31.10` - Migration generation tooling; `yarn.lock` resolves to `0.31.10`.
-- `@types/node` `^22.0.0`, `@types/react` `^19.0.0`, and `@types/react-dom` `^19.0.0` - Type support resolved in `yarn.lock`.
-- `@vitejs/plugin-react` `^4.4.0` and `@tailwindcss/vite` `^4.0.0` - Vite plugin stack resolved in `yarn.lock`.
+- `tsx` `^4.19.0` - TypeScript runtime loader declared in `package.json` and used across server, migration, tests, harness, and generation commands.
+- `drizzle-kit` `^0.31.10` - Migration generation tool declared in `package.json` and configured by `drizzle.config.ts`.
+- `typescript` `^5.7.0` - Compiler declared in `package.json`; strict settings live in `tsconfig.json`.
+- `vite` `^6.2.0`, `@vitejs/plugin-react` `^4.4.0`, `tailwindcss` `^4.0.0`, and `@tailwindcss/vite` `^4.0.0` - Client build stack declared in `package.json`.
+- `@types/node` `^22.0.0`, `@types/react` `^19.0.0`, `@types/react-dom` `^19.0.0`, and `@types/better-sqlite3` `^7.6.0` - Type packages declared in `package.json`.
 
 ## Configuration
 
 **Environment:**
-- Local setup copies `.env.example` to `.env` per `README.md` and `README-en.md`; `.env` and `.env.*` are ignored by `.gitignore` and excluded from Docker context by `.dockerignore`.
-- Required core env vars documented in `README.md` and `README-en.md`: `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `PORT`, `DB_PATH`, and `TZ`.
-- Deployment overrides documented in `README.md` and `README-en.md`: `NODE_ENV`, `GUEST_SESSION_SECRET`, `ASSETS_DIR`, `UPLOADS_STAGING_DIR`, and `CLIENT_DIST_DIR`.
-- `GUEST_SESSION_SECRET` is documented as an app-owned random secret, not an external provider credential, in `README.md` and `README-en.md`.
-- Docker runtime sets `NODE_ENV=production` in `Dockerfile`; deployment still needs external values for OpenAI, database path, timezone, and guest-session secret per `README.md`.
+- `.env.example` is the committed environment template for local/deployed configuration.
+- Required values in `.env.example`: `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `PORT`, `DB_PATH`, and `TZ`.
+- Optional deployment overrides in `.env.example`: `NODE_ENV`, `GUEST_SESSION_SECRET`, `ASSETS_DIR`, `UPLOADS_STAGING_DIR`, and `CLIENT_DIST_DIR`.
+- `drizzle.config.ts` reads `process.env.DB_PATH` and falls back to `./data/nutrition.db`.
+- `scripts/release-check.mjs` requires `TZ=Asia/Taipei` before running release gates.
+- `scripts/run-node-with-tz.mjs` injects `TZ=Asia/Taipei` for child Node processes.
 
 **Build:**
-- Container build config: `Dockerfile`.
-- Dependency lock config: `yarn.lock`.
-- Database migration config/artifacts: `drizzle/*.sql`, `drizzle/meta/*.json`, and `drizzle/meta/_journal.json`.
-- Ignore config: `.gitignore` excludes `node_modules/`, `dist/`, `data/*`, `.planning/`, `.env*`, local DB files, and generated harness artifacts; `.dockerignore` excludes tests, docs, planning/agent state, local DBs, and secret env files from the Docker context.
+- TypeScript config: `tsconfig.json` targets `ES2022`, emits ESM, uses `moduleResolution: "bundler"`, enables `strict`, `esModuleInterop`, `resolveJsonModule`, declarations, and React JSX transform.
+- Drizzle config: `drizzle.config.ts` sets `dialect: "sqlite"`, `schema: "./server/db/schema.ts"`, and `out: "./drizzle"`.
+- Migration artifacts: `drizzle/0000_brainy_rocket_racer.sql` through `drizzle/0008_shiny_stellaris.sql`, with metadata in `drizzle/meta/_journal.json` and `drizzle/meta/0008_snapshot.json`.
+- Release gate implementation: `scripts/release-check.mjs` collects changed files from Git, validates timezone, runs `yarn tsc --noEmit`, runs `yarn test`, notes route/service integration relevance, and runs `yarn build`.
+- Visual evidence tooling: `scripts/phase45-mobile-evidence.mjs` drives a headless installed Chrome/Edge over CDP, writes screenshots/manifest/audit files, and requires a reachable Vite-style `--base-url`.
 
 ## Platform Requirements
 
 **Development:**
-- Install with `yarn install` from `README.md` / `README-en.md`.
-- Create local env with `cp .env.example .env`, then set `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `PORT`, `DB_PATH`, and `TZ`.
-- Initialize SQLite with `yarn db:migrate`; `README.md` and `README-en.md` state migrations read `.env` when present, so custom `DB_PATH` applies.
-- Run backend with `yarn dev:server` and Vite client with `yarn dev:client`; open `http://localhost:5173`, with API at `http://localhost:3000`.
-- Keep `TZ=Asia/Taipei` for daily nutrition boundaries.
+- Use Yarn commands from `package.json`; do not use npm for repo workflows.
+- Populate `.env` from `.env.example` without committing secret values.
+- Keep `TZ=Asia/Taipei`; test, integration, harness, and release commands rely on `scripts/run-node-with-tz.mjs` and `scripts/release-check.mjs`.
+- Use `yarn dev:server` for the Fastify/Node server and `yarn dev:client` for the Vite client.
+- Use `yarn db:migrate` after setting `DB_PATH`; use `yarn db:generate` when schema changes require a Drizzle migration under `drizzle/`.
 
 **Production:**
-- Deployment target: one Fastify process serving both API and `dist/client`, documented in `README.md` and `README-en.md`.
-- Container target: `Dockerfile` on Node 22 with `yarn build`, `EXPOSE 3000`, and `CMD ["sh", "-lc", "yarn db:migrate && yarn start"]`.
-- Runtime storage: use a persistent volume for SQLite and durable image assets per `README.md` and `README-en.md`; configure `DB_PATH` and `ASSETS_DIR`.
-- Hosting guidance: Railway deployment example is referenced from `README.md` and `README-en.md`, while `CHANGELOG.md` records Railway staging/production smoke history and notes v2.4 had no Railway smoke or promotion.
-- Before release/promotion, run `yarn release:check`; v2.4 `CHANGELOG.md` records 1,245 tests passed plus frontend build during release proof.
+- Runtime configuration comes from environment variables represented by `.env.example`.
+- SQLite storage is file-based through `DB_PATH`; durable image and staging directories are controlled by `ASSETS_DIR` and `UPLOADS_STAGING_DIR`.
+- `NODE_ENV=production` is the deployment mode signal for secure session behavior.
+- `CLIENT_DIST_DIR` points Fastify/static serving at the built Vite client directory.
+- `CHANGELOG.md` records Railway staging and production smoke history for v2.0 and production smoke evidence for v2.1; v2.4 explicitly records no push, merge, deploy, Railway smoke, staging promotion, or main promotion.
 
 ## Project Skill Constraints
 
-- Use `yarn` only; this is required by `AGENTS.md`, reflected in `README.md` / `README-en.md`, and enforced in `Dockerfile`.
-- Use Node built-in `node:test`, real SQLite, and mock providers for tests per `AGENTS.md` and the test guidance documented in `README.md` / `README-en.md`.
-- Do not hand-edit generated harness artifacts; `.gitignore` excludes `tests/harness/artifacts/` and `tests/harness/tmp/`.
-- Do not read or quote `.env` contents; `.gitignore` and `.dockerignore` confirm `.env` / `.env.*` are local secrets, with `.env.example` allowed.
+- Use Yarn-only workflows; this is reinforced by `package.json` and `scripts/release-check.mjs`.
+- Use Node built-in `node:test`; `package.json` does not declare Jest or Vitest.
+- Use real SQLite/Drizzle rather than mocked database layers for persistence-facing tests; scoped migrations under `drizzle/` define the durable schema.
+- Preserve `TZ=Asia/Taipei`; `.env.example`, `scripts/run-node-with-tz.mjs`, and `scripts/release-check.mjs` make this a release-blocking contract.
+- Keep generated matrix docs synchronized through `yarn matrix:gen:check` and `yarn behavior-matrix:gen:check` when the source matrices change.
 
 ---
 

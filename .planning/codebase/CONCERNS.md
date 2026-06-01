@@ -1,191 +1,216 @@
+---
+last_mapped_commit: 782a04005f8f328f7f86ac589eb1253060471b5f
+---
+
 # Codebase Concerns
 
 **Analysis Date:** 2026-06-01
-**Last mapped commit:** df5f989b593d494ac44ce3b004307c1c6ada7bec
-**Scope:** `.dockerignore`, `.gitignore`, `CHANGELOG.md`, `Dockerfile`, `README-en.md`, `README.md`, `drizzle/`, `yarn.lock`
+**Scope:** `.env.example`, `CHANGELOG.md`, `drizzle/`, `drizzle.config.ts`, `package.json`, `scripts/`, `tsconfig.json`
 
 ## Tech Debt
 
-**Docker image relies on runtime migrations:**
-- Issue: The container build compiles the app, but `Dockerfile` runs `yarn db:migrate && yarn start` every time the container starts.
-- Files: `Dockerfile`, `drizzle/`, `README.md`, `README-en.md`
-- Impact: Application boot is coupled to schema migration success. A migration failure prevents startup, and concurrent or repeated deploy starts depend on the migration runner being safe for the deployed SQLite volume.
-- Fix approach: Keep `drizzle/` migrations idempotent and deployment-tested. For higher-risk migrations, run `yarn db:migrate` as an explicit release step before starting the web process instead of hiding it inside `CMD`.
+**Release gate excludes harness and matrix checks by default:**
+- Issue: `yarn release:check` runs TypeScript, `yarn test`, and `yarn build`, but it does not run `yarn matrix:check`, `yarn behavior-matrix:gen:check`, or any `yarn verify:harness -- <scenario>` command.
+- Files: `package.json`, `scripts/release-check.mjs`, `scripts/generate-capability-matrix-doc.mjs`, `scripts/generate-behavior-matrix-doc.mjs`, `CHANGELOG.md`
+- Impact: Capability matrix drift, behavior matrix drift, and deterministic harness regressions can pass the normal release gate unless a phase explicitly adds those commands. `CHANGELOG.md` shows several releases rely on separate metadata-only harness evidence.
+- Fix approach: Keep `scripts/release-check.mjs` as the core local gate, but add phase-specific verification checklists for matrix and harness-sensitive changes. Consider a higher-cost `release:full` script if those checks should be standardized before promotion.
 
-**Docker build excludes operational documentation:**
-- Issue: `.dockerignore` excludes `docs`, `.planning`, `.codex`, `AGENTS.md`, and `CLAUDE.md`, while `README.md` and `README-en.md` link to `docs/deploy/railway-beta.md`.
-- Files: `.dockerignore`, `README.md`, `README-en.md`
-- Impact: The runtime image is lean, but deployment/debug guidance is unavailable inside the container. Operators must use repository docs outside the image for Railway setup, smoke checks, and agent-specific release rules.
-- Fix approach: Keep docs excluded from the image, but make the minimum runtime requirements explicit in `README.md` and `README-en.md`: persistent volume, required env vars, migrations, and smoke commands.
+**Dependency versions are semver ranges without a package-manager pin:**
+- Issue: `package.json` uses caret ranges for runtime and dev dependencies and does not declare a `packageManager` field.
+- Files: `package.json`
+- Impact: `yarn.lock` controls current installs, but fresh dependency updates can pull broad minor/patch movement, and Corepack cannot infer a project-pinned Yarn version from `package.json`.
+- Fix approach: Add a `packageManager` pin to `package.json` and keep dependency updates focused. Treat `better-sqlite3`, `drizzle-orm`, `drizzle-kit`, `openai`, `fastify`, `vite`, and React major/minor movement as review-sensitive.
 
-**Generated planning and harness evidence are intentionally untracked:**
-- Issue: `.gitignore` excludes `.planning/`, `tests/harness/artifacts/`, and `tests/harness/tmp/`, while `CHANGELOG.md` records verification summaries rather than generated evidence files.
-- Files: `.gitignore`, `CHANGELOG.md`
-- Impact: Release evidence can be summarized without the raw artifacts that prove it. This supports privacy and repo hygiene, but future audits depend on accurate changelog and phase metadata.
-- Fix approach: Continue keeping generated artifacts out of git. Record command, status, scenario name, and artifact path metadata in committed planning/release docs without committing raw artifact payloads.
+**Drizzle config depends on a server schema outside the migration scope:**
+- Issue: `drizzle.config.ts` points schema generation at `./server/db/schema.ts` while generated SQL and snapshots live under `drizzle/`.
+- Files: `drizzle.config.ts`, `drizzle/`, `package.json`
+- Impact: Migration generation can drift if `server/db/schema.ts` changes without regenerating and committing matching `drizzle/*.sql` and `drizzle/meta/*.json` files. This scoped remap did not inspect `server/db/schema.ts`, so the configured source of truth is intentionally outside the requested path set.
+- Fix approach: When changing persistence schema, review both `server/db/schema.ts` and `drizzle/` together, run `yarn db:generate` only intentionally, and verify the resulting migration against empty and upgraded SQLite databases.
 
-**No package-manager version is pinned in scoped files:**
-- Issue: `README.md` and `README-en.md` require Yarn, and `Dockerfile` enables Corepack, but the scoped files do not pin a Yarn version.
-- Files: `README.md`, `README-en.md`, `Dockerfile`, `yarn.lock`
-- Impact: Local and Docker installs depend on the Corepack/Yarn version available in the active Node 22 environment. Lockfile stability reduces risk, but package-manager behavior can still drift.
-- Fix approach: Add a package-manager pin in the project manifest or document the expected Yarn major version in the README files. Keep using `yarn install --frozen-lockfile` in `Dockerfile`.
+**Generated documentation scripts encode output paths directly:**
+- Issue: Matrix generators hard-code `docs/capability-matrix.md` and `tests/harness/behavior-matrix.md`.
+- Files: `scripts/generate-capability-matrix-doc.mjs`, `scripts/generate-behavior-matrix-doc.mjs`, `package.json`
+- Impact: Moving docs or harness directories requires script edits and package script updates in lockstep. The check mode fails only after rendering content against the hard-coded target.
+- Fix approach: Keep these paths stable, or add explicit CLI flags for output paths before reorganizing `docs/`, `tests/harness/`, or matrix source files.
 
 ## Known Bugs
 
 **No scoped bug marker found:**
-- Symptoms: A scoped scan of `.dockerignore`, `.gitignore`, `CHANGELOG.md`, `Dockerfile`, `README-en.md`, `README.md`, `drizzle/`, and `yarn.lock` found no live `TODO`, `FIXME`, `HACK`, or `XXX` markers.
-- Files: `.dockerignore`, `.gitignore`, `CHANGELOG.md`, `Dockerfile`, `README-en.md`, `README.md`, `drizzle/`, `yarn.lock`
+- Symptoms: A scoped scan of `.env.example`, `CHANGELOG.md`, `drizzle/`, `drizzle.config.ts`, `package.json`, `scripts/`, and `tsconfig.json` found no live `TODO`, `FIXME`, `HACK`, or `XXX` markers.
+- Files: `.env.example`, `CHANGELOG.md`, `drizzle/`, `drizzle.config.ts`, `package.json`, `scripts/`, `tsconfig.json`
 - Trigger: Not applicable.
-- Workaround: Use behavioral verification and release evidence rather than marker comments to find regressions in these paths.
+- Workaround: Use behavioral verification, migration checks, release evidence, and phase-specific harness runs rather than marker comments to find regressions in these paths.
 
-**Documentation references docs excluded from the Docker context:**
-- Symptoms: `README.md` and `README-en.md` link to `docs/deploy/railway-beta.md`, but `.dockerignore` removes `docs` from the build context.
-- Files: `README.md`, `README-en.md`, `.dockerignore`
-- Trigger: Inspect the built image or try to follow the Railway link from files copied into the image.
-- Workaround: Use the repository checkout for deployment documentation, not the built container image.
+**Mobile evidence script rejects non-Vite packaged app flows:**
+- Symptoms: `scripts/phase45-mobile-evidence.mjs` requires a base URL that can import `/src/store.ts`, and its help text recommends `yarn dev:client`.
+- Files: `scripts/phase45-mobile-evidence.mjs`
+- Trigger: Run the script against a built same-origin app that does not expose `/src/store.ts`.
+- Workaround: Use the script with the Vite dev server for deterministic UI evidence. Use separate Railway or production smoke procedures for packaged deployment behavior.
 
 ## Security Considerations
 
-**Default guest-session signing secret remains documented as a fallback:**
-- Risk: `README.md` and `README-en.md` document `GUEST_SESSION_SECRET` defaulting to `dev-guest-session-secret-change-me` while also requiring a stable random value for deployment.
-- Files: `README.md`, `README-en.md`
-- Current mitigation: The README deployment instructions explicitly list `GUEST_SESSION_SECRET` as required for deployed environments and suggest generating it with `openssl rand -hex 32`.
-- Recommendations: Keep documentation explicit that the default is development-only. Add or preserve a production boot guard in code so a deployed `NODE_ENV=production` process cannot run with the default secret.
+**Environment template is tracked, but env contents must remain secret:**
+- Risk: `.env.example` is in scope and contains placeholder/template values, while actual `.env` files are secret-bearing and must not be read or committed.
+- Files: `.env.example`, `package.json`, `scripts/run-node-with-tz.mjs`, `scripts/release-check.mjs`
+- Current mitigation: Runtime scripts use `--env-file=.env` for local server and release checks, while `scripts/run-node-with-tz.mjs` preserves `process.env` and forces `TZ=Asia/Taipei`.
+- Recommendations: Keep `.env.example` limited to names, placeholders, and safe defaults. Never include real `OPENAI_API_KEY`, guest-session secrets, database snapshots, or deployed host credentials in tracked env templates or generated evidence.
 
-**Secrets are excluded from both git and Docker context:**
-- Risk: Environment files are intentionally ignored, so deployments depend on out-of-band secret provisioning.
-- Files: `.gitignore`, `.dockerignore`, `README.md`, `README-en.md`
-- Current mitigation: `.gitignore` and `.dockerignore` ignore `.env` and `.env.*` while allowing `.env.example`; README setup tells developers to create `.env` locally and lists required variables.
-- Recommendations: Keep `.env.example` free of real secrets. Document every production-required variable in README files when new secrets or runtime paths are added.
+**Release check inherits the full environment:**
+- Risk: `scripts/run-node-with-tz.mjs` forwards all environment variables to child commands after setting `TZ=Asia/Taipei`.
+- Files: `scripts/run-node-with-tz.mjs`, `package.json`
+- Current mitigation: Child process stdio is inherited, but the wrapper itself does not print environment values.
+- Recommendations: Avoid adding debug logging of `process.env` to release, test, matrix, or harness scripts. Keep provider payload and secret redaction requirements in tests and generated artifacts.
 
-**OpenAI API key is required for local and deployed app use:**
-- Risk: `README.md` and `README-en.md` state local development calls the OpenAI API for real meal analysis and require `OPENAI_API_KEY`.
-- Files: `README.md`, `README-en.md`
-- Current mitigation: Tests and some harness flows use mock providers, and `.gitignore`/`.dockerignore` exclude environment files.
-- Recommendations: Keep test and harness documentation clear about mock providers. Never commit `.env` or raw provider payloads; continue summarizing verification metadata in `CHANGELOG.md` instead of storing sensitive request content.
+**Mobile evidence script writes operator-provided URLs into artifacts:**
+- Risk: `scripts/phase45-mobile-evidence.mjs` writes `baseUrl` and output metadata to `phase45-manifest.json`. A production or private URL passed to `--base-url` becomes part of generated evidence.
+- Files: `scripts/phase45-mobile-evidence.mjs`
+- Current mitigation: The manifest declares synthetic in-browser API responses and synthetic local store data only; the script does not read `.env`, raw databases, private logs, production user data, or provider payloads.
+- Recommendations: Keep `--base-url` values non-sensitive in shared artifacts. Do not commit generated `output/playwright/` evidence if it includes private hosts or unreleased environment details.
+
+**Provider and session privacy are enforced by evidence policy, not by changelog content:**
+- Risk: `CHANGELOG.md` records that releases keep raw prompts, user text, assistant final text, tool payloads, provider bodies, image data, session material, and database snapshots out of committed evidence.
+- Files: `CHANGELOG.md`, `scripts/generate-behavior-matrix-doc.mjs`, `scripts/phase45-mobile-evidence.mjs`
+- Current mitigation: Release notes describe metadata-only evidence, and the Phase 45 mobile evidence manifest states synthetic data only.
+- Recommendations: Preserve metadata-only evidence when adding new generators or changelog entries. Generated reports should store command/status/counts/paths rather than raw user or provider content.
 
 ## Performance Bottlenecks
 
-**Single-process SQLite and durable asset model limits horizontal scaling:**
-- Problem: README deployment guidance describes one Fastify process serving the API and `dist/client`, with SQLite and durable assets on a persistent volume.
-- Files: `README.md`, `README-en.md`, `Dockerfile`, `drizzle/`
-- Cause: The app stores relational data in SQLite migrations under `drizzle/` and image assets in local durable directories such as `ASSETS_DIR`.
-- Improvement path: Keep deployments single-process with a persistent volume. Before horizontal scaling, move database and assets behind services that support cross-process coordination and object storage.
+**Release check always runs full tests and frontend build:**
+- Problem: `scripts/release-check.mjs` runs `yarn tsc --noEmit`, `yarn test`, and `yarn build` regardless of changed file type.
+- Files: `scripts/release-check.mjs`, `package.json`
+- Cause: The release gate prioritizes predictable promotion readiness over path-sensitive speed.
+- Improvement path: Keep `release:check` comprehensive for merge and promotion gates. Use narrower commands such as `yarn test:unit`, `yarn test:integration`, `yarn matrix:check`, or `yarn behavior-matrix:gen:check` during development before the final gate.
 
-**Startup migrations add boot latency and failure surface:**
-- Problem: `Dockerfile` runs `yarn db:migrate` before `yarn start`.
-- Files: `Dockerfile`, `drizzle/`
-- Cause: Schema migration happens in the serving container entrypoint rather than a separate deploy phase.
-- Improvement path: For production promotion, run migrations once with release orchestration, then start the app. Keep Docker startup migration only for simple single-instance deployments.
+**Mobile screenshot evidence is intentionally serial and browser-bound:**
+- Problem: `scripts/phase45-mobile-evidence.mjs` captures 22 screenshots across surfaces and mobile viewport sizes using a real browser over CDP.
+- Files: `scripts/phase45-mobile-evidence.mjs`
+- Cause: The script loops through targets and viewports sequentially and waits for page setup, rendering, inspection, screenshot capture, and byte checks for each case.
+- Improvement path: Preserve serial execution for deterministic evidence unless runtime becomes a bottleneck. If parallelizing, isolate browser targets and keep the blank-capture, overflow, and manifest checks intact.
 
 **History query scaling still depends on non-FTS indexes:**
-- Problem: `drizzle/0004_history_query_hot_path_indexes.sql` adds hot-path indexes for active meal transactions, but the scoped migrations do not define an FTS search table.
+- Problem: `drizzle/0004_history_query_hot_path_indexes.sql` adds hot-path indexes for active meal transactions, but scoped migrations do not define a full-text search table.
 - Files: `drizzle/0004_history_query_hot_path_indexes.sql`, `drizzle/0002_meal_transaction_v2_foundation.sql`
-- Cause: The schema optimizes device/date/id access paths, not full-text or substring meal search.
+- Cause: The schema optimizes device/date/id access paths, not substring or full-text meal search.
 - Improvement path: Add an FTS-backed meal item index or normalized search table if history search latency becomes a product issue at larger row counts.
 
 ## Fragile Areas
 
 **Schema history is migration-file ordered and append-only:**
-- Files: `drizzle/0000_brainy_rocket_racer.sql`, `drizzle/0001_sleepy_vivisector.sql`, `drizzle/0002_meal_transaction_v2_foundation.sql`, `drizzle/meta/_journal.json`
+- Files: `drizzle/0000_brainy_rocket_racer.sql`, `drizzle/0001_sleepy_vivisector.sql`, `drizzle/0002_meal_transaction_v2_foundation.sql`, `drizzle/0003_aspiring_masque.sql`, `drizzle/0004_history_query_hot_path_indexes.sql`, `drizzle/0005_chat_message_status.sql`, `drizzle/0006_colossal_selene.sql`, `drizzle/0007_violet_living_lightning.sql`, `drizzle/0008_shiny_stellaris.sql`, `drizzle/meta/_journal.json`
 - Why fragile: Existing deployments depend on the exact migration sequence in `drizzle/meta/_journal.json`. Editing old migration files can desynchronize fresh databases from already-migrated SQLite volumes.
 - Safe modification: Add a new numbered migration for schema changes. Do not rewrite existing `drizzle/*.sql` or `drizzle/meta/*.json` files unless intentionally repairing migration history with a documented database procedure.
 - Test coverage: Use `yarn db:migrate` against an empty SQLite database and an upgraded copy of an existing database when changing `drizzle/`.
 
 **Backfill migration assumes legacy asset references are well-formed:**
 - Files: `drizzle/0002_meal_transaction_v2_foundation.sql`
-- Why fragile: The migration converts legacy `image_path` values beginning with `asset:` into `meal_revisions.image_asset_id` and `asset_references` rows. Malformed legacy values can produce references without validating asset existence in the SQL itself.
+- Why fragile: The migration converts legacy `image_path` values beginning with `asset:` into `meal_revisions.image_asset_id` and `asset_references` rows without validating asset existence in the SQL itself.
 - Safe modification: Preserve legacy compatibility behavior when changing asset schema. Add repair or validation migrations separately if missing asset rows must be enforced.
 - Test coverage: Add migration tests with legacy `meals.image_path` and `chat_messages.image_path` values before changing asset reference backfills.
 
-**Guest-session documentation spans local and production modes:**
-- Files: `README.md`, `README-en.md`
-- Why fragile: The README tables show development defaults and deployment-only overrides in one place. Future edits can accidentally make production-only variables look optional.
-- Safe modification: Keep local defaults and production requirements separated. Treat `NODE_ENV`, `GUEST_SESSION_SECRET`, `DB_PATH`, `TZ`, `ASSETS_DIR`, and `CLIENT_DIST_DIR` as deployment-sensitive fields.
-- Test coverage: Documentation-only changes need human review; code changes around these variables need boot/config tests and deployment smoke.
+**Mutation outcome schema stores typed actions plus semi-structured goal fields:**
+- Files: `drizzle/0008_shiny_stellaris.sql`
+- Why fragile: `action` has a CHECK constraint, but `updated_goal_fields` is stored as text. Runtime code must keep serialization, parsing, and action-specific nullable columns aligned with this migration.
+- Safe modification: Add new action values through a new migration and update runtime validators, tests, matrix documentation, and changelog evidence together.
+- Test coverage: Run integration tests for chat mutation receipts and goal updates after changing mutation outcome persistence.
 
-**Ignore rules protect local workflow state:**
-- Files: `.gitignore`, `.dockerignore`
-- Why fragile: `.planning/`, `.codex/`, `AGENTS.md`, local databases, and generated harness artifacts are intentionally excluded. Removing these entries can leak local workflow policy, raw evidence, or runtime data into commits/build contexts.
-- Safe modification: Add narrow exceptions only when a file is intentionally safe and needed. Keep `.env`, `*.db`, `.planning/`, and harness artifact payloads ignored.
-- Test coverage: Review `git status --ignored` and Docker build context behavior when changing ignore rules.
+**Timezone enforcement depends on wrapper usage:**
+- Files: `scripts/run-node-with-tz.mjs`, `scripts/release-check.mjs`, `package.json`
+- Why fragile: Test and release scripts use `scripts/run-node-with-tz.mjs`, but scripts such as `yarn db:migrate`, `yarn matrix:gen`, `yarn behavior-matrix:gen`, and `yarn start` do not go through that wrapper.
+- Safe modification: Use the wrapper for date-sensitive tests and release gates. Preserve `TZ=Asia/Taipei` in commands that validate day-boundary behavior.
+- Test coverage: Date-boundary changes need `yarn tsc --noEmit`, the relevant unit/integration tests through `scripts/run-node-with-tz.mjs`, and any matching harness scenario.
+
+**Visual evidence script is coupled to current CSS selectors and Zustand store shape:**
+- Files: `scripts/phase45-mobile-evidence.mjs`
+- Why fragile: The script inspects selectors such as `.sp-chat-textarea`, `.screen-bottom-bar`, `.sp-meal-edit-footer`, `.sp-meal-edit-save`, `.sp-onboarding-primary`, `.screen-shell`, and `.app-viewport`, and it directly imports `client/src/store.ts`.
+- Safe modification: Update the evidence script in the same change as UI selector/store-shape changes. Keep assertions for body text, horizontal overflow, fixed-bar overlap, bottom occlusion, keyboard-safe layout, non-empty screenshots, and manifest output.
+- Test coverage: Run the script against `yarn dev:client` after mobile shell, chat composer, onboarding, history, settings, or meal edit UI changes.
 
 ## Scaling Limits
 
-**SQLite plus local filesystem persistence:**
-- Current capacity: One SQLite database path (`DB_PATH`) and local asset directories (`ASSETS_DIR`, `UPLOADS_STAGING_DIR`) on a persistent volume.
-- Limit: Multi-process writes, cross-region deploys, and object-storage scale are outside the documented architecture.
-- Scaling path: Keep the Railway-style deployment single-instance, or introduce an external database and object storage behind the existing persistence boundaries before scaling horizontally.
+**SQLite migration configuration is single-database-path oriented:**
+- Current capacity: `drizzle.config.ts` reads `DB_PATH` or falls back to `./data/nutrition.db`.
+- Limit: Multi-instance migrations and cross-process SQLite writes are outside this scoped migration configuration.
+- Scaling path: Keep deployments single-writer unless an external database replaces the local SQLite path behind the existing persistence boundary.
 
-**Single Fastify service deployment:**
-- Current capacity: One Node 22 process serves API routes and `dist/client`.
-- Limit: Container startup, migration, API serving, and static frontend serving are coupled.
-- Scaling path: Split migration execution from web startup first; split static hosting or API scaling only after persistence and session behavior support it.
+**Release verification is local-machine oriented:**
+- Current capacity: `scripts/release-check.mjs` validates local TypeScript, Node tests, and Vite build.
+- Limit: Deployed-domain smoke, mounted volume behavior, production cookies, and protected asset fetches are not represented in `scripts/release-check.mjs`.
+- Scaling path: Keep Railway staging/production smoke as a separate promotion requirement, as reflected by `CHANGELOG.md` release evidence.
 
-**Guest-only identity model:**
-- Current capacity: Same-browser guest sessions with signed cookies.
-- Limit: Cross-device continuity, account recovery, and long-term data portability are not documented as supported features.
-- Scaling path: Add account/export requirements before changing persistence or session documentation.
+**Mobile evidence assumes installed desktop browsers on macOS-style paths:**
+- Current capacity: `scripts/phase45-mobile-evidence.mjs` searches `/Applications/Microsoft Edge.app/...` and `/Applications/Google Chrome.app/...`.
+- Limit: Linux CI, containerized runners, and machines without those browser installs cannot run the script as written.
+- Scaling path: Add a configurable browser path or Playwright-managed browser mode before making this evidence script a portable CI gate.
 
 ## Dependencies at Risk
 
 **Native SQLite dependency remains a deployment risk:**
-- Risk: `yarn.lock` includes native build support packages such as `prebuild-install`, `node-abi`, and platform-specific tooling used by native dependencies.
-- Impact: Node or base image upgrades can break native install/build behavior even when TypeScript code is unchanged.
-- Migration plan: Keep `Dockerfile` pinned to a supported Node 22 base image. Verify native installs through Docker build before changing Node major versions or SQLite driver dependencies.
+- Risk: `package.json` depends on `better-sqlite3`, which uses native bindings.
+- Impact: Node, platform, or base-image changes can break native install/build behavior even when TypeScript code is unchanged.
+- Migration plan: Verify installs and migration execution before changing Node major versions or `better-sqlite3`. Keep SQLite-related lockfile changes focused and review native build output.
 
 **OpenAI SDK behavior is externally controlled:**
-- Risk: `yarn.lock` pins `openai` through the lockfile, while README files document OpenAI-backed meal analysis and `OPENAI_ORCHESTRATOR_MODEL`.
-- Impact: SDK or model behavior changes can affect meal analysis, streaming, tool calling, or fallback behavior when dependencies are upgraded.
-- Migration plan: Treat `yarn.lock` changes involving `openai` as high-risk. Run targeted LLM provider tests, deterministic harnesses, and metadata-only failure localization checks before release.
+- Risk: `package.json` depends on `openai`, while `CHANGELOG.md` records provider failure localization, fallback behavior, metadata-only traces, and model workflow evidence.
+- Impact: SDK or model behavior changes can affect meal analysis, streaming, tool calling, fallback metadata, or provider error shape.
+- Migration plan: Treat `openai` dependency movement as high-risk. Run targeted provider tests, deterministic harnesses, and metadata-only failure localization checks before release.
 
-**Large lockfile updates can hide unrelated dependency movement:**
-- Risk: `yarn.lock` is the authoritative dependency snapshot and contains many transitive packages.
-- Impact: Broad lockfile churn can obscure security or runtime-impacting upgrades during review.
-- Migration plan: Keep dependency upgrades focused. Review `yarn.lock` diffs by package group and run `yarn release:check` after lockfile changes.
+**Drizzle ORM and Kit must stay schema-compatible:**
+- Risk: `package.json` pins `drizzle-orm` and `drizzle-kit` by semver range, while migrations and snapshots are generated under `drizzle/`.
+- Impact: Generator output, snapshot format, or SQLite DDL rendering can change during dependency updates.
+- Migration plan: Review generated `drizzle/*.sql` and `drizzle/meta/*.json` diffs carefully after Drizzle updates. Run migration checks against empty and upgraded databases before committing.
+
+**Frontend major versions are current and tightly coupled to build tooling:**
+- Risk: `package.json` uses React 19, Vite 6, Tailwind 4, and `@vitejs/plugin-react` 4.
+- Impact: Build behavior, JSX transform behavior, CSS output, and dev-server import behavior can affect `yarn build`, matrix scripts, and `scripts/phase45-mobile-evidence.mjs`.
+- Migration plan: Keep frontend dependency updates grouped by toolchain and verify `yarn build`, mobile evidence, and matrix generation after upgrades.
 
 ## Missing Critical Features
 
-**Automated deployed-domain smoke gate is not part of documented release commands:**
-- Problem: README files list `yarn release:check`, while `CHANGELOG.md` separates local release checks from Railway staging/production smoke evidence.
-- Files: `README.md`, `README-en.md`, `CHANGELOG.md`
-- Blocks: Same-origin serving, mounted-volume persistence, production cookies, and protected asset fetch can pass local release checks and still fail on the deployed domain.
+**No script-level migration verification command exists in scoped package scripts:**
+- Problem: `package.json` includes `db:generate` and `db:migrate`, but no dedicated migration test command for empty and upgraded SQLite databases.
+- Files: `package.json`, `drizzle.config.ts`, `drizzle/`
+- Blocks: Migration changes require manual setup to prove both fresh installs and existing-volume upgrades.
 
-**Backup/export/restore path is not documented:**
-- Problem: README deployment guidance requires persistent SQLite and asset storage, but the scoped docs do not document backup, restore, export, or disaster-recovery procedures.
-- Files: `README.md`, `README-en.md`, `Dockerfile`
-- Blocks: Operators do not have a documented procedure for preserving or moving user data across deployments, volume changes, or host failures.
+**No portable CI mode for mobile visual evidence:**
+- Problem: `scripts/phase45-mobile-evidence.mjs` uses hard-coded macOS browser paths and direct CDP wiring.
+- Files: `scripts/phase45-mobile-evidence.mjs`
+- Blocks: The Phase 45 screenshot evidence cannot become a reliable CI gate across Linux containers or machines without Edge/Chrome in `/Applications`.
 
-**Package-manager pin is not visible in scoped documentation:**
-- Problem: The README files say to use Yarn and `Dockerfile` uses Corepack, but the scoped files do not document the expected Yarn version.
-- Files: `README.md`, `README-en.md`, `Dockerfile`, `yarn.lock`
-- Blocks: Reproducible setup depends on the environment’s Corepack resolution unless the project manifest pins `packageManager`.
+**Release gate does not encode deployed-domain smoke requirements:**
+- Problem: `scripts/release-check.mjs` ends at local build success, while `CHANGELOG.md` records separate staging/production smoke evidence for deployed behavior.
+- Files: `scripts/release-check.mjs`, `CHANGELOG.md`
+- Blocks: Same-origin serving, mounted-volume persistence, production cookies, protected asset fetch, and mobile deployed-domain behavior can pass local release checks and still fail after deployment.
+
+**Env template safety is not machine-checked in scoped scripts:**
+- Problem: `.env.example` is present, but scoped scripts do not provide a check that it contains only placeholders and complete variable names.
+- Files: `.env.example`, `package.json`, `scripts/`
+- Blocks: New required variables can be omitted from `.env.example`, or unsafe example values can be added without a dedicated guard.
 
 ## Test Coverage Gaps
 
-**Harness scenarios remain outside the normal release command list:**
-- What's not tested: README command lists include `yarn release:check` and show example harness commands separately; `CHANGELOG.md` records dedicated harness evidence for specific releases.
-- Files: `README.md`, `README-en.md`, `CHANGELOG.md`
-- Risk: Boundary scenarios such as guest-session hardening, behavior-matrix, and provider-auth failure localization can drift unless run intentionally for matching changes.
-- Priority: High for auth, upload, SSE, LLM fallback, and deployed-domain changes.
-
 **Migration upgrade paths need explicit verification for existing databases:**
-- What's not tested: Scoped files show migrations and metadata, but do not show a committed fixture or command proving every migration against a realistic existing production-like SQLite database.
-- Files: `drizzle/`, `README.md`, `README-en.md`
-- Risk: Fresh database migration can pass while an upgrade from an older volume fails on legacy rows, asset references, or added constraints.
+- What's not tested: Scoped files show migrations and metadata, but do not show a committed fixture or package script proving every migration against a realistic existing production-like SQLite database.
+- Files: `drizzle/`, `drizzle.config.ts`, `package.json`
+- Risk: Fresh database migration can pass while an upgrade from an older volume fails on legacy rows, asset references, added constraints, or new nullable/required column behavior.
 - Priority: High for `drizzle/` changes.
 
-**Docker build does not run tests:**
-- What's not tested: `.dockerignore` excludes `tests`, and `Dockerfile` runs `yarn build` but no test command.
-- Files: `.dockerignore`, `Dockerfile`, `README.md`, `README-en.md`
-- Risk: A container image can build successfully even when unit, integration, or harness checks fail outside Docker.
-- Priority: Medium; keep `yarn release:check` as the pre-build gate and use Docker build as packaging verification.
+**Matrix generators are outside `yarn release:check`:**
+- What's not tested: `scripts/release-check.mjs` does not run `yarn matrix:check` or `yarn behavior-matrix:gen:check`.
+- Files: `scripts/release-check.mjs`, `scripts/generate-capability-matrix-doc.mjs`, `scripts/generate-behavior-matrix-doc.mjs`, `package.json`
+- Risk: Generated Markdown can drift from `client/src/contracts/capability-matrix.ts` or `tests/harness/behavior-matrix.ts` while release checks still pass.
+- Priority: Medium; high for capability, behavior, UI affordance, or harness coverage changes.
 
-**Production-secret validation coverage is not visible from scoped files:**
-- What's not tested: The scoped files document `GUEST_SESSION_SECRET` as required for deployment but do not show a test or boot guard proving the development default is rejected in production.
-- Files: `README.md`, `README-en.md`
-- Risk: A deployment can follow most README requirements but accidentally run with the development signing secret if runtime validation is missing or regresses.
-- Priority: High.
+**Harness scenarios remain outside the normal release command list:**
+- What's not tested: `package.json` exposes `yarn verify:harness`, but `scripts/release-check.mjs` does not invoke any harness scenario.
+- Files: `package.json`, `scripts/release-check.mjs`, `CHANGELOG.md`
+- Risk: Boundary scenarios such as behavior matrix, provider-auth failure localization, guest-session hardening, upload cleanup, and SSE ordering can drift unless run intentionally for matching changes.
+- Priority: High for auth, upload, SSE, LLM fallback, and deployed-domain changes.
+
+**Mobile visual evidence script has no package script wrapper:**
+- What's not tested: `scripts/phase45-mobile-evidence.mjs` exists but is not exposed through `package.json`.
+- Files: `scripts/phase45-mobile-evidence.mjs`, `package.json`
+- Risk: Operators may miss or mistype the command, and the script is easy to omit from phase verification despite being high-value for mobile UI regressions.
+- Priority: Medium for mobile UI changes.
 
 ---
 

@@ -1,5 +1,5 @@
 ---
-last_mapped_commit: df5f989b593d494ac44ce3b004307c1c6ada7bec
+last_mapped_commit: 782a04005f8f328f7f86ac589eb1253060471b5f
 ---
 
 # Testing Patterns
@@ -9,230 +9,201 @@ last_mapped_commit: df5f989b593d494ac44ce3b004307c1c6ada7bec
 ## Test Framework
 
 **Runner:**
-- Node built-in test runner via `node --test`, launched through `tsx` and the repo timezone wrapper by established project convention.
-- Config: no Jest, Vitest, or standalone test config file appears in the scoped paths. Test commands are documented in `README.md`, `README-en.md`, and AGENTS guidance.
-- Timezone: `TZ=Asia/Taipei` is a required core environment variable in `README.md` and `README-en.md`; tests and daily-boundary checks must preserve it.
+- Node built-in test runner via `node --test`, launched through `tsx` and the repo timezone wrapper in `package.json`.
+- Config: no Jest, Vitest, or standalone test config file appears in the scoped paths. Test commands are defined directly in `package.json`.
+- Timezone: `TZ=Asia/Taipei` is required by `.env.example` and enforced for Node test commands by `scripts/run-node-with-tz.mjs`.
 
 **Assertion Library:**
-- Use `node:assert/strict` for TypeScript tests by established repo convention.
-- Use `node:test` hooks and `mock.fn` for suites, setup, teardown, and spies by established repo convention.
+- Use Node's built-in assertion library by project convention. The scoped test runner does not add Chai, Jest, Vitest, or Testing Library dependencies in `package.json`.
 
 **Run Commands:**
 ```bash
-yarn tsc --noEmit      # TypeScript check
-yarn test:unit         # Unit tests
-yarn test:integration  # Integration tests
-yarn test              # Full test suite
-yarn verify:harness -- behavior-matrix  # Deterministic harness example from README
-yarn verify:harness -- guest-session-hardening  # Deterministic harness example from README
-yarn verify:harness -- provider-auth-failure-localization  # Deterministic harness example from README
-yarn release:check     # Release gate before promotion
+yarn tsc --noEmit                    # TypeScript check
+yarn test:unit                       # Node test runner over tests/unit/*.test.ts
+yarn test:integration                # Node test runner over tests/integration/*.test.ts
+yarn test                            # Unit and integration test suite
+yarn verify:harness -- <scenario>    # Deterministic harness runner
+yarn matrix:gen:check                # Capability matrix generated-doc check
+yarn matrix:check                    # Capability matrix source scans plus generated-doc check
+yarn behavior-matrix:gen:check       # Behavior matrix generated-doc check
+yarn release:check                   # Release gate: timezone, TypeScript, tests, build
 ```
 
 ## Test File Organization
 
 **Location:**
-- Unit tests live in `tests/unit/`, as documented in `README.md` and `README-en.md`.
-- Integration tests live in `tests/integration/`, as documented in `README.md` and `README-en.md`.
-- Deterministic scenario verification and redacted artifacts live under `tests/harness/`, as documented in `README.md`, `README-en.md`, and `CHANGELOG.md`.
-- Drizzle migrations live under `drizzle/` with generated snapshots in `drizzle/meta/`; migration behavior should be covered by service, route, integration, or harness tests that exercise the resulting schema.
+- Unit tests are targeted by `package.json` through `tests/unit/*.test.ts`.
+- Integration tests are targeted by `package.json` through `tests/integration/*.test.ts`.
+- Harness scenarios are executed through `yarn verify:harness`, which maps to `node scripts/run-node-with-tz.mjs --import tsx tests/harness/run.ts` in `package.json`.
+- Generated-doc checks for capability and behavior matrices are driven by scripts under `scripts/` and compare source data to generated Markdown.
+- Drizzle migrations live under `drizzle/` with generated snapshots in `drizzle/meta/`; migration behavior should be covered by tests that exercise the resulting SQLite schema.
 
 **Naming:**
-- Unit tests use `tests/unit/<subject>.test.ts`.
-- Integration tests use `tests/integration/<surface>.test.ts` or `<surface>.integration.test.ts`.
-- Harness scenarios use `tests/harness/scenarios/<scenario-name>.ts` and map to `yarn verify:harness -- <scenario-name>`.
-- Migration files use `drizzle/<sequence>_<tag>.sql` and matching `drizzle/meta/<sequence>_snapshot.json`; the current journal ends at `drizzle/0008_shiny_stellaris.sql`.
+- Unit test glob: `tests/unit/*.test.ts` in `package.json`.
+- Integration test glob: `tests/integration/*.test.ts` in `package.json`.
+- Harness command shape: `yarn verify:harness -- <scenario>` from `package.json`.
+- Matrix contract test names are explicit in `package.json`: `tests/unit/capability-matrix-contract.test.ts` and `tests/unit/capability-matrix-source-scan.test.ts`.
+- Migration files use `drizzle/<sequence>_<tag>.sql` with matching `drizzle/meta/<sequence>_snapshot.json`; the current journal ends at `drizzle/0008_shiny_stellaris.sql`.
 
 **Structure:**
 ```text
-tests/
-├── unit/                 # Pure logic and contract tests
-├── integration/          # Routes, services, SSE, and orchestrator boundaries
-└── harness/              # Deterministic scenario verification and redacted artifacts
-
+package.json                         # Test and verification command definitions
+scripts/run-node-with-tz.mjs          # TZ wrapper for tests and harnesses
+scripts/release-check.mjs             # Full release gate
+scripts/generate-*-matrix-doc.mjs     # Generated-doc checks
 drizzle/
-├── 0000_*.sql            # Ordered SQLite migrations
+├── 0000_*.sql                        # Ordered SQLite migrations
 ├── 0008_shiny_stellaris.sql
-└── meta/                 # Generated Drizzle snapshots and _journal.json
+└── meta/                             # Generated Drizzle snapshots and _journal.json
 ```
 
 ## Test Structure
 
 **Suite Organization:**
 ```typescript
-import { describe, it, beforeEach } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createDb } from "../../server/db/client.js";
-import { createDeviceService } from "../../server/services/device.js";
 
-describe("DeviceService", () => {
-  beforeEach(() => {
-    const db = createDb(":memory:");
-    // create service under test here
-  });
-
-  it("rejects invalid input", async () => {
-    await assert.rejects(async () => {
-      // exercise the failing path
-    });
+describe("scoped behavior", () => {
+  it("preserves the contract", async () => {
+    assert.equal(actual, expected);
   });
 });
 ```
 
 **Patterns:**
-- Prefer exact assertions on DTO shape, status codes, redaction, SSE frames, persisted rows, and migration-visible schema behavior.
-- Use fresh `:memory:` SQLite databases for persistence tests; do not mock database behavior.
-- Keep route tests on real Fastify boundaries with `app.inject()` or a local ephemeral server.
-- For schema changes under `drizzle/`, add or update tests that prove both new rows and migrated/backfilled rows behave correctly.
-- Test metadata-only failure localization without asserting raw prompt, provider body, image bytes, session material, or database snapshots. This release invariant is documented in `CHANGELOG.md`.
+- Wrap Node-based tests and harnesses with `scripts/run-node-with-tz.mjs` so `TZ=Asia/Taipei` is always present.
+- Prefer exact generated-output comparisons for documentation generators. `scripts/generate-capability-matrix-doc.mjs` and `scripts/generate-behavior-matrix-doc.mjs` render full Markdown and compare it to the current file in `--check` mode.
+- Keep release verification deterministic. `scripts/release-check.mjs` always validates timezone, then runs `yarn tsc --noEmit`, `yarn test`, and `yarn build` unless `--dry-run` is passed.
+- For schema changes under `drizzle/`, add or update tests that prove constraints, indexes, and backfilled rows behave through the application surfaces that depend on them.
+- Preserve metadata-only verification evidence. `CHANGELOG.md` records that release proof should avoid raw prompts, user text, assistant final text, tool payloads, provider bodies, image data, session material, and database snapshots.
 
 ## Mocking
 
-**Framework:** `node:test` `mock.fn` plus repo-specific deterministic providers.
+**Framework:** Node built-in test tooling by repo convention; scoped files do not introduce a separate mocking library.
 
 **Patterns:**
 ```typescript
 import { mock } from "node:test";
 
-export function createSpyHooks() {
-  return {
-    onLLMStart: mock.fn(),
-    onLLMEnd: mock.fn(),
-    onToolReceived: mock.fn(),
-    onToolResult: mock.fn(),
-    onLLMError: mock.fn(),
-    onFallback: mock.fn(),
-  };
-}
+const onEvent = mock.fn();
 ```
 
 **What to Mock:**
-- Mock LLM/provider boundaries with `MockLLMProvider` or deterministic harness providers. `README.md` and `README-en.md` state local development calls OpenAI, while tests and some harness flows use mock providers.
-- Mock callback hooks and spies only when call counts or arguments are part of the contract.
-- Browser/visual harness scripts may mock browser/network surfaces when static visual proof is the goal.
+- Mock external model/provider boundaries in tests outside this scoped path set, using the repo's established deterministic providers.
+- Mock callback hooks or spies only when call counts, payload shape, or ordering are the contract being tested.
+- Generated-doc checks should not mock their source data; they should import the source matrices and compare rendered output.
 
 **What NOT to Mock:**
-- Do not mock SQLite. Use real SQLite, usually `:memory:`, for unit, integration, and harness tests that touch persistence.
-- Do not stub Fastify transport for route coverage. Exercise `server/routes/*` through the app boundary.
-- Do not instantiate real OpenAI clients in route or service tests; isolate provider behavior separately.
+- Do not mock SQLite for migration-backed behavior. Use a real SQLite database when validating schema created by `drizzle/*.sql`.
+- Do not mock `scripts/run-node-with-tz.mjs` in command-level verification; its purpose is to prove process-level timezone propagation.
+- Do not replace `scripts/release-check.mjs` with partial checks for promotion readiness; it is the scoped release gate.
 
 ## Fixtures and Factories
 
 **Test Data:**
 ```typescript
-const app = await buildApp({
-  dbPath: ":memory:",
-  llmProvider: mockLLM,
-  uploadsDir,
-  assetsDir,
-});
-
-const deviceRes = await app.inject({
-  method: "POST",
-  url: "/api/device",
-  payload: { goal: "fat_loss" },
-});
+const env = {
+  ...process.env,
+  TZ: "Asia/Taipei",
+};
 ```
 
 **Location:**
-- Full app fixture: `tests/harness/app-fixture.ts` by established repo convention.
-- Deterministic harness scenarios: `tests/harness/scenarios/`.
-- Redacted generated evidence: `tests/harness/artifacts/**`; ignored by `.gitignore` and excluded from Docker by `.dockerignore`.
-- Temporary harness files: `tests/harness/tmp/`; ignored by `.gitignore`.
-- Migration state: `drizzle/meta/_journal.json` and `drizzle/meta/*_snapshot.json`.
+- Environment template values live in `.env.example`.
+- Drizzle migration state lives in `drizzle/meta/_journal.json` and `drizzle/meta/*_snapshot.json`.
+- Capability matrix generation reads `client/src/contracts/capability-matrix.ts` through `scripts/generate-capability-matrix-doc.mjs`.
+- Behavior matrix generation reads `tests/harness/behavior-matrix.ts` through `scripts/generate-behavior-matrix-doc.mjs`.
 
 ## Coverage
 
-**Requirements:** No numeric coverage threshold is documented in scoped files. Coverage is contract-based through unit tests, route integration tests, deterministic harnesses, release proof, and changelog-recorded verification.
+**Requirements:** No numeric coverage threshold is documented in scoped files. Coverage is command- and contract-based through `yarn test`, harness scenarios, generated-doc checks, and `yarn release:check`.
 
 **View Coverage:**
 ```bash
-# No coverage command is documented in scoped files.
+# No coverage report command is defined in package.json.
 yarn test
-yarn verify:harness -- <scenario-name>
+yarn release:check
 ```
 
 ## Test Types
 
 **Unit Tests:**
-- Scope: pure logic, formatting/parsing helpers, source-contract scans, provider wrappers, and isolated service behavior.
-- Approach: use `node:test`, `node:assert/strict`, direct imports, and real `:memory:` SQLite where persistence exists.
-- Add unit coverage when changing code referenced by README reuse points, such as `server/orchestrator/tool-contract.ts`, `server/llm/errors.ts`, or `server/observability/events.ts`.
+- Scope: files matching `tests/unit/*.test.ts` in `package.json`.
+- Approach: run through `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/*.test.ts`.
+- Matrix-specific unit coverage is encoded in `yarn matrix:check`, which runs `tests/unit/capability-matrix-contract.test.ts`, `tests/unit/capability-matrix-source-scan.test.ts`, and `yarn matrix:gen:check`.
 
 **Integration Tests:**
-- Scope: Fastify routes, SSE streams, image upload/persistence, guest-session cookies, orchestrator boundaries, Drizzle/SQLite schema behavior, and route DTO shaping.
-- Approach: boot `server/app.ts` with `dbPath: ":memory:"`, a mock LLM provider, temp upload/assets directories, and real route calls.
-- Add integration coverage for migration-backed behavior introduced in `drizzle/`, including constraints, indexes that affect query paths, and backfilled ownership rows.
+- Scope: files matching `tests/integration/*.test.ts` in `package.json`.
+- Approach: run through `node scripts/run-node-with-tz.mjs --import tsx --test tests/integration/*.test.ts`.
+- Release coverage: `scripts/release-check.mjs` runs the full `yarn test` command, which includes unit and integration tests.
 
 **E2E Tests:**
-- Framework: deterministic harness plus direct browser `.mjs` scripts by established repo convention, not Playwright Test.
-- Harness examples documented in `README.md` and `README-en.md`: `behavior-matrix`, `guest-session-hardening`, and `provider-auth-failure-localization`.
-- Real deployed-domain smoke remains separate from local `yarn test`; deployment proof is recorded in release/changelog materials such as `CHANGELOG.md`.
+- Framework: deterministic harness command, not Playwright Test, in scoped `package.json`.
+- Command: `yarn verify:harness -- <scenario>` maps to `tests/harness/run.ts` through `scripts/run-node-with-tz.mjs`.
+- Additional browser/mobile evidence scripts may live under `scripts/`, such as `scripts/phase45-mobile-evidence.mjs`, and should be documented by the phase or artifact that invokes them.
 
 ## Common Patterns
 
 **Async Testing:**
 ```typescript
-beforeEach(async () => {
-  process.env.TZ = "Asia/Taipei";
-  app = await buildApp({ dbPath: ":memory:", llmProvider: mockLLM });
-});
-
-afterEach(async () => {
-  if (app.server.listening) {
-    await app.close();
-  }
+await assert.rejects(async () => {
+  await runInvalidOperation();
 });
 ```
 
 **Error Testing:**
 ```typescript
-await assert.rejects(
-  async () => {
-    await service.doWork(invalidInput);
+const result = spawnSync(process.execPath, process.argv.slice(2), {
+  stdio: "inherit",
+  env: {
+    ...process.env,
+    TZ: "Asia/Taipei",
   },
-  /Invalid/,
-);
+});
+
+process.exit(result.status ?? 1);
 ```
 
-**SSE Testing:**
+**Generated Document Checks:**
 ```typescript
-function parseSSEEvents(raw: string) {
-  return raw
-    .split("\n\n")
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map((block) => {
-      const lines = block.split("\n");
-      return {
-        event: lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) ?? "",
-        data: lines.find((line) => line.startsWith("data: "))?.slice("data: ".length) ?? "",
-      };
-    });
+const nextContent = renderMarkdown();
+
+if (process.argv.includes("--check")) {
+  const currentContent = await readFile(OUTPUT_PATH, "utf8").catch(() => null);
+  if (currentContent !== nextContent) {
+    console.error(`${OUTPUT_PATH} is out of sync with ${SOURCE_PATH}`);
+    process.exit(1);
+  }
+  process.exit(0);
 }
 ```
 
-**Harness Scenario Shape:**
+**Release Gate Shape:**
 ```typescript
-const result = await runScenarioByName("provider-auth-failure-localization");
-assert.equal(result.status, "passed");
+runStep("TypeScript gate", ["tsc", "--noEmit"]);
+runStep("Full test suite", ["test"]);
+runStep("Frontend build", ["build"]);
 ```
 
 **Verification Matrix:**
-- Any `*.ts` edit: run `yarn tsc --noEmit`.
-- `tests/unit/*.test.ts`: run `yarn test:unit`.
-- `tests/integration/*.test.ts` or route/service changes: run `yarn test:integration`.
-- `tests/harness/scenarios/*.ts`: run `yarn verify:harness -- <scenario-name>` and inspect `tests/harness/artifacts/<scenario-name>/latest/`.
-- `tests/harness/scenarios/*.mjs`: follow the matching artifact README or phase docs; these are not covered by `yarn verify:harness`.
-- `drizzle/*.sql` or `drizzle/meta/*.json`: run the tests covering affected services/routes plus `yarn db:migrate` against a disposable database when validating migration application.
+- Any TypeScript edit included by `tsconfig.json`: run `yarn tsc --noEmit`.
+- Unit test changes matching `tests/unit/*.test.ts`: run `yarn test:unit`.
+- Integration test changes matching `tests/integration/*.test.ts`: run `yarn test:integration`.
+- Harness scenario changes: run `yarn verify:harness -- <scenario>`.
+- Capability matrix source or generated doc changes: run `yarn matrix:check`.
+- Behavior matrix source or generated doc changes: run `yarn behavior-matrix:gen:check`.
+- Migration changes under `drizzle/*.sql` or `drizzle/meta/*.json`: run affected schema tests plus `yarn db:migrate` against a disposable `DB_PATH`.
 - Promotion or release readiness: run `yarn release:check`.
 
 ## Scoped Path Notes
 
-- `.gitignore` keeps `.planning/`, `tests/harness/artifacts/`, `tests/harness/tmp/`, local DBs, runtime data, secrets, and build output out of git.
-- `.dockerignore` excludes `tests`, `docs`, `.planning`, local agent state, logs, databases, and caches from production images.
-- `Dockerfile` does not run tests during image build; it installs with `yarn install --frozen-lockfile`, builds with `yarn build`, and starts with `yarn db:migrate && yarn start`.
-- `CHANGELOG.md` records v2.4 release proof with `yarn tsc --noEmit`, `yarn release:check`, 1,245 passing tests, and frontend build completion.
+- `scripts/run-node-with-tz.mjs` is the timezone-preserving wrapper for tests, harnesses, and release checks.
+- `scripts/release-check.mjs` accepts `--dry-run` to validate release-check setup without running TypeScript, tests, or build.
+- `package.json` uses `yarn` scripts only; do not add npm-oriented verification instructions.
+- `tsconfig.json` includes `server/**/*.ts`, `tests/**/*.ts`, `client/src/**/*.ts`, `client/src/**/*.tsx`, and `client/vite.config.ts`; type checks cover all of those included paths.
+- `.env.example` is the only env file in scope and contains placeholder values only.
+- `CHANGELOG.md` records release verification in Traditional Chinese and should continue to summarize command/status evidence rather than raw sensitive data.
 
 ---
 
