@@ -296,6 +296,62 @@ describe("redacted observability event builders", () => {
     assertLockedPayload(payload);
   });
 
+  it("omits unsafe direct route fallback catch fields in the event builder", () => {
+    const forbiddenValues = [
+      "prompt: system says log the meal",
+      "messages[0].content user nutrition text",
+      "我今天吃了雞胸便當",
+      "provider body raw payload",
+      "tool payload {\"food\":\"secret\"}",
+      "guest_session=signed-session",
+      "image data:image/png;base64,abc123",
+      "assistant final reply text",
+      "stack: at route handler",
+      "cause: nested raw error",
+    ];
+
+    for (const forbidden of forbiddenValues) {
+      const payload = buildChatRouteFallbackEvent({
+        source: "json",
+        turnId: "turn-direct-unsafe-route-catch",
+        fallbackSource: "route_catch",
+        didLogMeal: false,
+        didMutateMeal: false,
+        hadImage: true,
+        latencyMs: 5,
+        reason: "route_catch",
+        catchSite: "json_outer",
+        errorName: forbidden,
+        errorMessage: forbidden,
+      });
+
+      assert.equal("errorName" in payload, false);
+      assert.equal("errorMessage" in payload, false);
+      assert.doesNotMatch(JSON.stringify(payload), new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      assertLockedPayload(payload);
+    }
+  });
+
+  it("preserves safe direct route fallback catch fields in the event builder", () => {
+    const payload = buildChatRouteFallbackEvent({
+      source: "sse",
+      turnId: "turn-direct-safe-route-catch",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      hadImage: false,
+      latencyMs: 9,
+      reason: "route_catch",
+      catchSite: "sse_outer",
+      errorName: "SseOuterSafeFailure",
+      errorMessage: "Safe route error",
+    });
+
+    assert.equal(payload.errorName, "SseOuterSafeFailure");
+    assert.equal(payload.errorMessage, "Safe route error");
+    assertLockedPayload(payload);
+  });
+
   it("redacts unsafe allowed provider metadata values on route fallback events", () => {
     const providerMetadata: ProviderErrorMetadata = {
       provider: "openai",
