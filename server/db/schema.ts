@@ -138,6 +138,49 @@ export const chatMealReceipts = sqliteTable(
   ],
 );
 
+export const chatMutationOutcomes = sqliteTable(
+  "chat_mutation_outcomes",
+  {
+    id: text("id").primaryKey(),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    assistantMessageId: text("assistant_message_id")
+      .notNull()
+      .references(() => chatMessages.id),
+    toolMessageId: text("tool_message_id").references(() => chatMessages.id),
+    action: text("action").notNull(),
+    affectedDate: text("affected_date").notNull(),
+    foodName: text("food_name"),
+    calories: real("calories"),
+    protein: real("protein"),
+    carbs: real("carbs"),
+    fat: real("fat"),
+    goalCalories: integer("goal_calories"),
+    goalProtein: integer("goal_protein"),
+    goalCarbs: integer("goal_carbs"),
+    goalFat: integer("goal_fat"),
+    updatedGoalFields: text("updated_goal_fields"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    check(
+      "chat_mutation_outcomes_action_check",
+      sql`${table.action} in ('log_food','update_meal','delete_meal','update_goals')`,
+    ),
+    uniqueIndex("chat_mutation_outcomes_assistant_message_uq").on(table.assistantMessageId),
+    index("chat_mutation_outcomes_device_assistant_idx").on(
+      table.deviceId,
+      table.assistantMessageId,
+    ),
+    index("chat_mutation_outcomes_device_action_date_idx").on(
+      table.deviceId,
+      table.action,
+      table.affectedDate,
+    ),
+  ],
+);
+
 export const mealRevisionItems = sqliteTable(
   "meal_revision_items",
   {
