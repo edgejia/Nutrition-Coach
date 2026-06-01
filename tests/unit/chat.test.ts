@@ -6,7 +6,13 @@ import { createDeviceService } from "../../server/services/device.js";
 import { createChatService } from "../../server/services/chat.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { formatLocalDate } from "../../server/lib/time.js";
-import { chatMealReceipts, chatMessages, mealRevisions, mealTransactions } from "../../server/db/schema.js";
+import {
+  chatMealReceipts,
+  chatMessages,
+  chatMutationOutcomes,
+  mealRevisions,
+  mealTransactions,
+} from "../../server/db/schema.js";
 import { eq } from "drizzle-orm";
 
 describe("ChatService", () => {
@@ -419,9 +425,9 @@ describe("ChatService", () => {
     const compressed = await chatService.getCompressedHistory(deviceId, 10);
     assert.ok(compressed.length > 0);
     assert.match(compressed[0].content, /\[附帶圖片\]/);
-    // log_food tool should use human-safe summary, not raw identifier
+    // log_food committed mutation authority now requires structured outcome rows.
     const allContent = compressed.map((m) => m.content).join("\n");
-    assert.match(allContent, /系統已完成餐點記錄/);
+    assert.doesNotMatch(allContent, /系統已完成餐點記錄/);
     assert.doesNotMatch(allContent, /log_food|get_daily_summary/);
   });
 
@@ -445,6 +451,7 @@ describe("ChatService", () => {
       fat: 18,
       loggedAt: "2026-03-25T04:30:00.000Z",
     });
+    await chatService.saveMessage(deviceId, "user", "幫我記雞胸便當");
     const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     const saveAssistantReplyWithReceipt = (
       chatService as unknown as {
@@ -501,11 +508,20 @@ describe("ChatService", () => {
       .from(chatMealReceipts)
       .where(eq(chatMealReceipts.assistantMessageId, assistant.id))
       .limit(1);
+    const [outcomeRow] = await db
+      .select()
+      .from(chatMutationOutcomes)
+      .where(eq(chatMutationOutcomes.assistantMessageId, assistant.id))
+      .limit(1);
     const compressed = await chatService.getCompressedHistory(deviceId, 10);
     const allContent = compressed.map((message) => message.content).join("\n");
 
     assert.equal(assistantRow?.role, "assistant");
     assert.equal(receiptRow?.mealTransactionId, loggedMeal.id);
+    assert.equal(outcomeRow?.action, "log_food");
+    assert.equal(outcomeRow?.affectedDate, "2026-03-25");
+    assert.equal(outcomeRow?.foodName, "雞胸便當");
+    assert.equal(outcomeRow?.calories, 620);
     assert.match(allContent, /雞胸便當/);
     assert.match(allContent, /2026-03-25/);
     assert.doesNotMatch(allContent, new RegExp(loggedMeal.id));
@@ -562,9 +578,11 @@ describe("ChatService", () => {
       .from(chatMessages)
       .where(eq(chatMessages.role, "assistant"));
     const receipts = await db.select().from(chatMealReceipts);
+    const outcomes = await db.select().from(chatMutationOutcomes);
 
     assert.equal(afterAssistants.length, beforeAssistants.length);
     assert.equal(receipts.length, 0);
+    assert.equal(outcomes.length, 0);
   });
 
   it("D-19/D-21/D-23 keeps legacy receipt display but omits compressed mutation claims without structured outcomes", async () => {

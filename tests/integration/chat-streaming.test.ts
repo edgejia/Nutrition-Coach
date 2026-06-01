@@ -411,7 +411,7 @@ function assertNoTerminalClarificationDoneSideEffects(payload: {
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "summaryOutcome"), false);
 }
 
-type MaybeAtomicReceiptChatService = AppServices["chatService"] & {
+type MaybeAtomicReceiptChatService = Omit<AppServices["chatService"], "saveAssistantReplyWithReceipt"> & {
   saveAssistantReplyWithReceipt?: (...args: unknown[]) => Promise<unknown>;
 };
 

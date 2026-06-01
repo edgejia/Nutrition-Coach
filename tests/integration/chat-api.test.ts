@@ -128,7 +128,7 @@ function assertNoTerminalClarificationSideEffects(body: {
   assert.doesNotMatch(body.reply ?? "", TERMINAL_CLARIFICATION_SUCCESS_COPY);
 }
 
-type MaybeAtomicReceiptChatService = AppServices["chatService"] & {
+type MaybeAtomicReceiptChatService = Omit<AppServices["chatService"], "saveAssistantReplyWithReceipt"> & {
   saveAssistantReplyWithReceipt?: (...args: unknown[]) => Promise<unknown>;
 };
 
