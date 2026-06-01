@@ -209,11 +209,79 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().dailySummary?.totalCalories, 100);
   });
 
+  it("setDailySummary rejects malformed summary shapes without mutating state or firing rollover", () => {
+    let handlerCallCount = 0;
+    useStore.getState().setRolloverRefreshHandler(() => {
+      handlerCallCount++;
+    });
+
+    const today = formatLocalDate(new Date());
+    const trusted = {
+      date: today,
+      totalCalories: 500,
+      totalProtein: 30,
+      totalCarbs: 60,
+      totalFat: 15,
+      mealCount: 1,
+    };
+    useStore.getState().setDailySummary(trusted);
+
+    assert.doesNotThrow(() => {
+      useStore.getState().setDailySummary({
+        date: today,
+        totalCalories: "999",
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        mealCount: 1,
+      } as any);
+    });
+
+    assert.deepEqual(useStore.getState().dailySummary, trusted);
+    assert.equal(handlerCallCount, 0);
+  });
+
   it("setDailyTargets persists to localStorage", () => {
     const targets = { calories: 2000, protein: 150, carbs: 200, fat: 60 };
     useStore.getState().setDailyTargets(targets);
     assert.deepEqual(useStore.getState().dailyTargets, targets);
     assert.equal(storage.get("dailyTargets"), JSON.stringify(targets));
+  });
+
+  it("setDailyTargets rejects malformed targets without mutating state or localStorage", () => {
+    const trusted = { calories: 2000, protein: 150, carbs: 200, fat: 60 };
+    useStore.getState().setDailyTargets(trusted);
+    const storedBefore = storage.get("dailyTargets");
+
+    assert.doesNotThrow(() => {
+      useStore.getState().setDailyTargets({ calories: 1800, protein: "130", carbs: 200, fat: 60 } as any);
+    });
+
+    assert.deepEqual(useStore.getState().dailyTargets, trusted);
+    assert.equal(storage.get("dailyTargets"), storedBefore);
+  });
+
+  it("setMeals rejects malformed meal rows without replacing previous state", () => {
+    useStore.getState().setMeals(sampleMeals);
+
+    assert.doesNotThrow(() => {
+      useStore.getState().setMeals([
+        sampleMeals[0],
+        {
+          id: "meal-bad",
+          foodName: "壞資料",
+          calories: 100,
+          protein: 5,
+          carbs: 10,
+          fat: 4,
+          itemCount: 1,
+          loggedAt: "2026-04-01T09:00:00.000Z",
+          mealPeriod: "brunch",
+        },
+      ] as any);
+    });
+
+    assert.deepEqual(useStore.getState().meals, sampleMeals);
   });
 
   it("tracks activeScreen changes and meal collection helpers", () => {
@@ -595,6 +663,51 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(useStore.getState().messages.length, 1);
     assert.equal(useStore.getState().dailySummary, null);
     assert.equal(handlerCallCount, 1);
+  });
+
+  it("commitProvisionalBubble finalizes message when malformed authoritative additions are rejected", () => {
+    const trustedTargets = { calories: 2000, protein: 150, carbs: 200, fat: 60 };
+    useStore.getState().setDailyTargets(trustedTargets);
+    const storedTargetsBefore = storage.get("dailyTargets");
+
+    const today = formatLocalDate(new Date());
+    useStore.getState().setDailySummary({
+      date: today,
+      totalCalories: 400,
+      totalProtein: 25,
+      totalCarbs: 50,
+      totalFat: 12,
+      mealCount: 1,
+    });
+
+    useStore.getState().setProvisionalBubble({
+      id: "msg-malformed-authority",
+      statusLabel: "",
+      content: "已記錄",
+      isStreaming: true,
+    });
+
+    assert.doesNotThrow(() => {
+      useStore.getState().commitProvisionalBubble({
+        didLogMeal: true,
+        dailyTargets: { calories: 1800, protein: 130, carbs: "200", fat: 60 } as any,
+        dailySummary: {
+          date: today,
+          totalCalories: 999,
+          totalProtein: null,
+          totalCarbs: 0,
+          totalFat: 0,
+          mealCount: 1,
+        } as any,
+      });
+    });
+
+    assert.equal(useStore.getState().provisionalBubble, null);
+    assert.equal(useStore.getState().messages.length, 1);
+    assert.equal(useStore.getState().messages[0].id, "msg-malformed-authority");
+    assert.deepEqual(useStore.getState().dailyTargets, trustedTargets);
+    assert.equal(storage.get("dailyTargets"), storedTargetsBefore);
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 400);
   });
 
   it("commitProvisionalBubble without dailySummary leaves dailySummary untouched and handler unfired", () => {
