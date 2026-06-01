@@ -430,13 +430,19 @@ function normalizeSummaryOutcomeFields<T extends { dailySummary?: unknown; summa
   };
 }
 
-function normalizeChatReply<T extends { loggedMeal?: LoggedMealReceipt; dailySummary?: unknown; summaryOutcome?: unknown }>(
+function normalizeChatReply<T extends {
+  loggedMeal?: LoggedMealReceipt;
+  dailySummary?: unknown;
+  summaryOutcome?: unknown;
+  deletedMealId?: unknown;
+}>(
   reply: T,
 ): T {
-  const { loggedMeal, ...rest } = reply;
+  const { loggedMeal, deletedMealId, ...rest } = reply;
   return {
     ...normalizeSummaryOutcomeFields(rest),
     ...(loggedMeal ? { loggedMeal: normalizeLoggedMealReceipt(loggedMeal) } : {}),
+    ...(typeof deletedMealId === "string" ? { deletedMealId } : {}),
   } as T;
 }
 
@@ -676,6 +682,7 @@ export interface StreamCallbacks {
     summaryOutcome?: SummaryOutcome;
     dailyTargets?: DailyTargets;
     affectedDate?: string;
+    deletedMealId?: string;
     turnId?: string;
   }) => void;
   onStopped?: (data: {
@@ -689,6 +696,7 @@ export interface StreamCallbacks {
     summaryOutcome?: SummaryOutcome;
     dailyTargets?: DailyTargets;
     affectedDate?: string;
+    deletedMealId?: string;
   }) => void;
   onError: (message: string) => void;
 }
@@ -808,6 +816,7 @@ export async function sendMessageStream(
             ...(isSummaryOutcome(parsed.summaryOutcome) ? { summaryOutcome: parsed.summaryOutcome } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
+            ...(typeof parsed.deletedMealId === "string" ? { deletedMealId: parsed.deletedMealId } : {}),
             ...(getValidTurnId(parsed.turnId) ? { turnId: getValidTurnId(parsed.turnId) } : {}),
           });
         } else if (eventType === "stopped") {
@@ -828,6 +837,7 @@ export async function sendMessageStream(
             ...(isSummaryOutcome(parsed.summaryOutcome) ? { summaryOutcome: parsed.summaryOutcome } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
+            ...(typeof parsed.deletedMealId === "string" ? { deletedMealId: parsed.deletedMealId } : {}),
           });
         } else if (eventType === "error") {
           sawTerminalEvent = true;

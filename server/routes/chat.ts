@@ -898,6 +898,7 @@ async function handleOrchestratorSSE(
   let streamSummaryOutcome: SummaryOutcome | undefined;
   let streamDailyTargets: unknown;
   let streamAffectedDate: string | undefined;
+  let streamDeletedMealId: string | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
   let streamReceiptIdentity: ReceiptIdentity | undefined;
@@ -1007,13 +1008,23 @@ async function handleOrchestratorSSE(
     );
 
     if ("streamGenerator" in result) {
-      const { streamGenerator, didLogMeal, dailySummary, summaryOutcome, summaryHistoryFacts, affectedDate, loggedMeal } = result;
+      const {
+        streamGenerator,
+        didLogMeal,
+        dailySummary,
+        summaryOutcome,
+        summaryHistoryFacts,
+        affectedDate,
+        deletedMealId,
+        loggedMeal,
+      } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
       streamDailySummary = dailySummary;
       streamSummaryOutcome = summaryOutcome;
       streamDailyTargets = result.dailyTargets;
       streamAffectedDate = affectedDate;
+      streamDeletedMealId = deletedMealId;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
@@ -1057,6 +1068,7 @@ async function handleOrchestratorSSE(
           ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
           ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
           ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
+          ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
         };
         stream.write(`event: stopped\ndata: ${JSON.stringify(stoppedData)}\n\n`);
         recordSseCompletion({
@@ -1078,6 +1090,7 @@ async function handleOrchestratorSSE(
         ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
+        ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (streamResult.finalReplySource === "fallback") {
@@ -1095,7 +1108,17 @@ async function handleOrchestratorSSE(
       }
       publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
     } else {
-      const { reply: replyText, didLogMeal, dailySummary, summaryOutcome, summaryHistoryFacts, dailyTargets, affectedDate, loggedMeal } = result;
+      const {
+        reply: replyText,
+        didLogMeal,
+        dailySummary,
+        summaryOutcome,
+        summaryHistoryFacts,
+        dailyTargets,
+        affectedDate,
+        deletedMealId,
+        loggedMeal,
+      } = result;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
         shape: result.finalReplyShape ?? "empty_or_missing",
@@ -1106,6 +1129,7 @@ async function handleOrchestratorSSE(
       streamSummaryOutcome = summaryOutcome;
       streamDailyTargets = dailyTargets;
       streamAffectedDate = affectedDate;
+      streamDeletedMealId = deletedMealId;
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
@@ -1146,6 +1170,7 @@ async function handleOrchestratorSSE(
         ...(summaryOutcome ? { summaryOutcome } : {}),
         ...(dailyTargets ? { dailyTargets } : {}),
         ...(affectedDate ? { affectedDate } : {}),
+        ...(deletedMealId ? { deletedMealId } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (result.fallbackOutcomeContext) {
@@ -1225,6 +1250,7 @@ async function handleOrchestratorSSE(
       ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
+      ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
     recordSseFallback({
@@ -1334,6 +1360,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonSummaryOutcome: SummaryOutcome | undefined;
       let jsonDailyTargets: unknown;
       let jsonAffectedDate: string | undefined;
+      let jsonDeletedMealId: string | undefined;
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
       let jsonReceiptIdentity: ReceiptIdentity | undefined;
@@ -1436,6 +1463,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonSummaryOutcome = result.summaryOutcome;
         jsonDailyTargets = result.dailyTargets;
         jsonAffectedDate = result.affectedDate;
+        jsonDeletedMealId = result.deletedMealId;
         jsonLoggedMealFallback = result.loggedMeal
           ? buildPartialSuccessLoggedReply(result.loggedMeal)
           : undefined;
@@ -1517,6 +1545,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
             ...(affectedDate ? { affectedDate } : {}),
+            ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
           };
         }
 
@@ -1581,6 +1610,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
           ...(dailyTargets ? { dailyTargets } : {}),
           ...(affectedDate ? { affectedDate } : {}),
+          ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
         };
       } catch (error) {
         const fallback = jsonDidLogMeal
@@ -1636,6 +1666,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
           ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),
+          ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
         };
       } finally {
         await cleanupDurableAssetSafe(

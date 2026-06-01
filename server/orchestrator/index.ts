@@ -113,6 +113,7 @@ export type OrchestratorResult =
       summaryHistoryFacts?: SummaryHistoryFacts;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
+      deletedMealId?: string;
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
       mutationOutcomeFact?: ChatMutationOutcomeFact;
@@ -126,6 +127,7 @@ export type OrchestratorResult =
       summaryHistoryFacts?: SummaryHistoryFacts;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
+      deletedMealId?: string;
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
       mutationOutcomeFact?: ChatMutationOutcomeFact;
@@ -413,6 +415,10 @@ function mutationOutcomeFactFields(
   mutationOutcomeFact: ChatMutationOutcomeFact | undefined,
 ): { mutationOutcomeFact?: ChatMutationOutcomeFact } {
   return mutationOutcomeFact ? { mutationOutcomeFact } : {};
+}
+
+function deletedMealIdFields(deletedMealId: string | undefined): { deletedMealId?: string } {
+  return deletedMealId ? { deletedMealId } : {};
 }
 
 function classifyPlainReplyShape(reply: string): LlmTraceFinalReplyShape {
@@ -839,6 +845,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let successfulGoalTargets: DailyTargets | undefined;
       let mutationEffects: MutationEffects | undefined;
       let mutationOutcomeFact: ChatMutationOutcomeFact | undefined;
+      let deletedMealId: string | undefined;
       let mutationReceiptText: string | undefined;
       let resolvedAffectedDate: string | undefined;
       let loggedMeal:
@@ -881,6 +888,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 loggedMeal,
                 loggedMealToolMessageId,
                 ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               };
             }
             response = roundResult.response;
@@ -909,6 +917,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 loggedMeal,
                 loggedMealToolMessageId,
                 ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               };
             }
 
@@ -963,6 +972,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMeal,
               loggedMealToolMessageId,
               ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
               providerFallbackContext,
@@ -983,6 +993,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMeal,
               loggedMealToolMessageId,
               ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               finalReplySource: "fallback",
               finalReplyShape: classifyFallbackReplyShape(partialFallback),
               providerFallbackContext,
@@ -1000,6 +1011,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             loggedMeal,
             loggedMealToolMessageId,
             ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
             finalReplySource: "fallback",
             finalReplyShape: classifyFallbackReplyShape(errorMsg),
             providerFallbackContext,
@@ -1029,6 +1041,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             loggedMeal,
             loggedMealToolMessageId,
             ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
             finalReplySource,
             finalReplyShape: finalReplySource === "fallback"
               ? classifyFallbackReplyShape(reply)
@@ -1172,6 +1185,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     committedTargets: getDeviceTargets(device),
                     deletedMeal,
                   };
+                  deletedMealId = deletedMeal.mealId;
                   mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
                   mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
                 }
@@ -1236,6 +1250,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     loggedMeal,
                     loggedMealToolMessageId,
                     ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
                     finalReplySource: "renderer",
                     finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
                   };
@@ -1264,6 +1279,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMeal,
               loggedMealToolMessageId,
               ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1281,6 +1297,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMeal,
               loggedMealToolMessageId,
               ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1298,6 +1315,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMeal,
               loggedMealToolMessageId,
               ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1315,6 +1333,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMeal,
               loggedMealToolMessageId,
               ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1332,6 +1351,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               loggedMeal,
               loggedMealToolMessageId,
               ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1360,6 +1380,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           loggedMeal,
           loggedMealToolMessageId,
           ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
           finalReplySource: "renderer",
           finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
           fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
@@ -1375,6 +1396,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         loggedMeal,
         loggedMealToolMessageId,
         ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
         finalReplySource: "fallback",
         finalReplyShape: classifyFallbackReplyShape(FALLBACK),
         fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,

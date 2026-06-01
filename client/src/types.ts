@@ -209,6 +209,7 @@ export interface ChatReply {
   summaryOutcome?: SummaryOutcome;
   dailyTargets?: DailyTargets;
   affectedDate?: string;
+  deletedMealId?: string;
 }
 
 export type CoachCTAIntentId = "protein" | "next_meal" | "calorie_control" | "food_logging";

@@ -42,9 +42,26 @@ type CommitProvisionalBubbleExtra = {
   loggedMeal?: LoggedMealReceipt;
   dailySummary?: DailySummary;
   dailyTargets?: DailyTargets;
+  deletedMealId?: string;
   status?: Message["status"];
   turnId?: string;
 };
+
+function redactReceiptIdentityFromMessages(messages: Message[], mealId: string): Message[] {
+  return messages.map((message) => {
+    if (message.loggedMeal?.mealId !== mealId) {
+      return message;
+    }
+
+    const {
+      mealId: _mealId,
+      mealRevisionId: _mealRevisionId,
+      dateKey: _dateKey,
+      ...displayOnlyReceipt
+    } = message.loggedMeal;
+    return { ...message, loggedMeal: displayOnlyReceipt };
+  });
+}
 
 function getStoppedMessageContent(content: string) {
   const trimmedContent = content.trim();
@@ -155,19 +172,7 @@ export const useStore = create<AppState>((set, get) => ({
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
   redactChatReceiptIdentity: (mealId) =>
     set((state) => ({
-      messages: state.messages.map((message) => {
-        if (message.loggedMeal?.mealId !== mealId) {
-          return message;
-        }
-
-        const {
-          mealId: _mealId,
-          mealRevisionId: _mealRevisionId,
-          dateKey: _dateKey,
-          ...displayOnlyReceipt
-        } = message.loggedMeal;
-        return { ...message, loggedMeal: displayOnlyReceipt };
-      }),
+      messages: redactReceiptIdentityFromMessages(state.messages, mealId),
     })),
   recordMealMutation: (affectedDate) =>
     set((state) => ({
@@ -351,7 +356,11 @@ export const useStore = create<AppState>((set, get) => ({
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
       };
 
-      return { messages: [...state.messages, finalMessage], provisionalBubble: null };
+      const messages = extra.deletedMealId
+        ? redactReceiptIdentityFromMessages(state.messages, extra.deletedMealId)
+        : state.messages;
+
+      return { messages: [...messages, finalMessage], provisionalBubble: null };
     });
     if (extra.dailySummary) {
       get().setDailySummary(extra.dailySummary);
@@ -377,7 +386,11 @@ export const useStore = create<AppState>((set, get) => ({
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
       };
 
-      return { messages: [...state.messages, finalMessage], provisionalBubble: null };
+      const messages = extra.deletedMealId
+        ? redactReceiptIdentityFromMessages(state.messages, extra.deletedMealId)
+        : state.messages;
+
+      return { messages: [...messages, finalMessage], provisionalBubble: null };
     });
     if (extra.dailySummary) {
       get().setDailySummary(extra.dailySummary);

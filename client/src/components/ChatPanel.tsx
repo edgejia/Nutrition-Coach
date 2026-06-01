@@ -504,7 +504,7 @@ export function ChatPanel() {
           onToken: (token) => {
             useStore.getState().appendProvisionalToken(token);
           },
-          onDone: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets, turnId }) => {
+          onDone: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets, deletedMealId, turnId }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -525,13 +525,14 @@ export function ChatPanel() {
               didLogMeal: didLogMeal || didMutateMeal,
               dailySummary,
               loggedMeal,
+              deletedMealId,
               ...(isFallbackReply ? { status: "error" as const } : {}),
               ...(isFallbackReply && fallbackTurnId ? { turnId: fallbackTurnId } : {}),
             });
             setSending(false);
             clearActiveStreamAfterTerminal();
           },
-          onStopped: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets, turnId }) => {
+          onStopped: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets, deletedMealId, turnId }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -550,6 +551,7 @@ export function ChatPanel() {
               dailySummary,
               dailyTargets,
               loggedMeal,
+              deletedMealId,
               ...(turnId ? { turnId } : {}),
             });
             setSending(false);
