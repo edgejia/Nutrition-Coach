@@ -20,6 +20,15 @@ import type {
   UpdateMealInput,
   UpdateMealResponse,
 } from "./types.js";
+import {
+  isDailySummaryDto,
+  isDailyTargetsDto,
+  isFiniteNumber as isDtoFiniteNumber,
+  isRecord as isDtoRecord,
+  isSummaryOutcomeDto,
+  isValidMealPeriod,
+} from "./dto-guards.js";
+import { isRealDateKey } from "./lib/history-week.js";
 import { getEarliestValidationStep } from "./lib/onboarding-intake-validation.js";
 
 export interface GuestSessionBootstrapResult {
@@ -70,9 +79,7 @@ function normalizeItemCount(value: unknown): number {
 }
 
 function normalizeMealPeriod(value: unknown): MealPeriod | undefined {
-  return value === "breakfast" || value === "lunch" || value === "dinner" || value === "late_night"
-    ? value
-    : undefined;
+  return isValidMealPeriod(value) ? value : undefined;
 }
 
 function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
@@ -169,54 +176,15 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
 }
 
 function isDailySummary(value: unknown): value is DailySummary {
-  return (
-    isRecord(value) &&
-    typeof value.date === "string" &&
-    typeof value.totalCalories === "number" &&
-    Number.isFinite(value.totalCalories) &&
-    typeof value.totalProtein === "number" &&
-    Number.isFinite(value.totalProtein) &&
-    typeof value.totalCarbs === "number" &&
-    Number.isFinite(value.totalCarbs) &&
-    typeof value.totalFat === "number" &&
-    Number.isFinite(value.totalFat) &&
-    typeof value.mealCount === "number" &&
-    Number.isFinite(value.mealCount)
-  );
+  return isDailySummaryDto(value);
 }
 
 export function isSummaryOutcome(value: unknown): value is SummaryOutcome {
-  if (!isRecord(value) || typeof value.status !== "string") {
-    return false;
-  }
-
-  if (value.status === "fresh") {
-    return isDailySummary(value.dailySummary) && value.reason === undefined;
-  }
-
-  if (value.status === "recovered") {
-    return value.reason === "recompute_failed" && isDailySummary(value.dailySummary);
-  }
-
-  if (value.status === "unavailable") {
-    return value.reason === "recompute_failed" && value.dailySummary === undefined;
-  }
-
-  return false;
+  return isSummaryOutcomeDto(value);
 }
 
 function isDailyTargets(value: unknown): value is DailyTargets {
-  return (
-    isRecord(value) &&
-    typeof value.calories === "number" &&
-    Number.isFinite(value.calories) &&
-    typeof value.protein === "number" &&
-    Number.isFinite(value.protein) &&
-    typeof value.carbs === "number" &&
-    Number.isFinite(value.carbs) &&
-    typeof value.fat === "number" &&
-    Number.isFinite(value.fat)
-  );
+  return isDailyTargetsDto(value);
 }
 
 async function readJsonSafe(res: Response): Promise<unknown> {
@@ -472,6 +440,113 @@ function normalizeChatReply<T extends { loggedMeal?: LoggedMealReceipt; dailySum
   } as T;
 }
 
+function isOptionalNullableString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isAuthoritativeMealCoreDto(value: unknown): value is MealEntry {
+  return (
+    isDtoRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    (value.mealRevisionId === undefined || typeof value.mealRevisionId === "string") &&
+    typeof value.foodName === "string" &&
+    value.foodName.trim().length > 0 &&
+    isDtoFiniteNumber(value.calories) &&
+    isDtoFiniteNumber(value.protein) &&
+    isDtoFiniteNumber(value.carbs) &&
+    isDtoFiniteNumber(value.fat) &&
+    isDtoFiniteNumber(value.itemCount) &&
+    value.itemCount > 0 &&
+    typeof value.loggedAt === "string" &&
+    value.loggedAt.trim().length > 0 &&
+    isOptionalNullableString(value.imageAssetId) &&
+    isOptionalNullableString(value.imageUrl)
+  );
+}
+
+function assertUpdateGoalsResponse(value: unknown): asserts value is { dailyTargets: DailyTargets } {
+  if (!isDtoRecord(value) || !isDailyTargetsDto(value.dailyTargets)) {
+    throw new Error("Invalid update goals payload");
+  }
+}
+
+function assertMealsResponse(value: unknown): asserts value is { meals: MealEntry[] } {
+  if (!isDtoRecord(value) || !Array.isArray(value.meals) || !value.meals.every(isAuthoritativeMealCoreDto)) {
+    throw new Error("Invalid meals payload");
+  }
+}
+
+function assertDaySnapshotResponse(
+  value: unknown,
+): asserts value is { date: string; summary: DailySummary; meals: MealEntry[] } {
+  if (
+    !isDtoRecord(value) ||
+    typeof value.date !== "string" ||
+    !isRealDateKey(value.date) ||
+    !isDailySummaryDto(value.summary) ||
+    value.summary.date !== value.date ||
+    !Array.isArray(value.meals) ||
+    !value.meals.every(isAuthoritativeMealCoreDto)
+  ) {
+    throw new Error("Invalid day snapshot payload");
+  }
+}
+
+type HistoryTrendBucketDto = HistoryTrendResponse["daily"][number];
+
+function isHistoryTrendBucketDto(value: unknown): value is HistoryTrendBucketDto {
+  return (
+    isDtoRecord(value) &&
+    typeof value.date === "string" &&
+    isRealDateKey(value.date) &&
+    isDtoFiniteNumber(value.calories) &&
+    isDtoFiniteNumber(value.protein) &&
+    isDtoFiniteNumber(value.carbs) &&
+    isDtoFiniteNumber(value.fat) &&
+    isDtoFiniteNumber(value.mealCount)
+  );
+}
+
+function isHistoryTrendTotalsDto(value: unknown): value is HistoryTrendResponse["totals"] {
+  return (
+    isDtoRecord(value) &&
+    isDtoFiniteNumber(value.calories) &&
+    isDtoFiniteNumber(value.protein) &&
+    isDtoFiniteNumber(value.carbs) &&
+    isDtoFiniteNumber(value.fat) &&
+    isDtoFiniteNumber(value.mealCount)
+  );
+}
+
+function isHistoryTrendAveragesDto(value: unknown): value is HistoryTrendResponse["averages"] {
+  return (
+    isDtoRecord(value) &&
+    isDtoFiniteNumber(value.calories) &&
+    isDtoFiniteNumber(value.protein) &&
+    isDtoFiniteNumber(value.carbs) &&
+    isDtoFiniteNumber(value.fat) &&
+    isDtoFiniteNumber(value.mealsPerDay)
+  );
+}
+
+function assertHistoryTrendResponse(value: unknown): asserts value is HistoryTrendResponse {
+  if (
+    !isDtoRecord(value) ||
+    typeof value.from !== "string" ||
+    !isRealDateKey(value.from) ||
+    typeof value.to !== "string" ||
+    !isRealDateKey(value.to) ||
+    (value.completeness !== "empty" && value.completeness !== "sparse" && value.completeness !== "complete") ||
+    !Array.isArray(value.daily) ||
+    !value.daily.every(isHistoryTrendBucketDto) ||
+    !isHistoryTrendTotalsDto(value.totals) ||
+    !isHistoryTrendAveragesDto(value.averages)
+  ) {
+    throw new Error("Invalid history trends payload");
+  }
+}
+
 export async function registerDevice(goal: string): Promise<{ deviceId: string; dailyTargets: DailyTargets }> {
   const res = await fetch("/api/device", {
     method: "POST",
@@ -547,7 +622,9 @@ export async function updateGoals(goals: Partial<DailyTargets>): Promise<{ daily
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to update goals");
-  return res.json();
+  const body = await res.json() as unknown;
+  assertUpdateGoalsResponse(body);
+  return body;
 }
 
 export async function sendMessage(message: string, image?: File): Promise<ChatReply> {
@@ -787,7 +864,8 @@ export async function getMeals(options?: { refreshReason?: "day_rollover" | "mea
   const res = await fetch("/api/meals", { credentials: "same-origin", headers });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load meals");
-  const body = await res.json() as { meals: MealEntry[] };
+  const body = await res.json() as unknown;
+  assertMealsResponse(body);
   return {
     meals: body.meals.map(normalizeMealEntry),
   };
@@ -799,7 +877,8 @@ export async function getDaySnapshot(
   const res = await fetch(`/api/day-snapshot?date=${encodeURIComponent(dateKey)}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load day snapshot");
-  const body = await res.json() as { date: string; summary: DailySummary; meals: MealEntry[] };
+  const body = await res.json() as unknown;
+  assertDaySnapshotResponse(body);
   return {
     ...body,
     meals: body.meals.map(normalizeMealEntry),
@@ -823,6 +902,80 @@ interface HistoryMealDto {
   imageAssetId?: string | null;
   imageUrl?: string | null;
   mealPeriod?: unknown;
+}
+
+function getHistoryMealTitle(meal: HistoryMealDto): string | null {
+  const title = meal.display?.title ?? meal.foodName;
+  return typeof title === "string" && title.trim().length > 0 ? title : null;
+}
+
+function getHistoryMealNutrition(meal: HistoryMealDto): {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+} | null {
+  const calories = meal.nutrition?.calories ?? meal.calories;
+  const protein = meal.nutrition?.protein ?? meal.protein;
+  const carbs = meal.nutrition?.carbs ?? meal.carbs;
+  const fat = meal.nutrition?.fat ?? meal.fat;
+
+  if (
+    !isDtoFiniteNumber(calories) ||
+    !isDtoFiniteNumber(protein) ||
+    !isDtoFiniteNumber(carbs) ||
+    !isDtoFiniteNumber(fat)
+  ) {
+    return null;
+  }
+
+  return { calories, protein, carbs, fat };
+}
+
+function isHistoryMealDtoComplete(value: unknown): value is HistoryMealDto {
+  if (!isDtoRecord(value)) {
+    return false;
+  }
+
+  const meal = value as unknown as HistoryMealDto;
+  return (
+    typeof meal.id === "string" &&
+    meal.id.trim().length > 0 &&
+    typeof meal.mealRevisionId === "string" &&
+    meal.mealRevisionId.trim().length > 0 &&
+    typeof meal.loggedAt === "string" &&
+    meal.loggedAt.trim().length > 0 &&
+    getHistoryMealTitle(meal) !== null &&
+    getHistoryMealNutrition(meal) !== null &&
+    isDtoFiniteNumber(meal.itemCount) &&
+    meal.itemCount > 0
+  );
+}
+
+function normalizeAuthoritativeHistoryMeal(meal: HistoryMealDto): MealEntry {
+  if (!isHistoryMealDtoComplete(meal)) {
+    throw new Error("Invalid history meal payload");
+  }
+
+  return normalizeHistoryMeal(meal);
+}
+
+function assertHistoryDaySnapshotResponse(value: unknown): asserts value is {
+  date: string;
+  summary: DailySummary;
+  meals: HistoryMealDto[];
+} {
+  if (
+    !isDtoRecord(value) ||
+    typeof value.date !== "string" ||
+    !isRealDateKey(value.date) ||
+    !isDailySummaryDto(value.summary) ||
+    value.summary.date !== value.date ||
+    !Array.isArray(value.meals) ||
+    !value.meals.every(isHistoryMealDtoComplete)
+  ) {
+    throw new Error("Invalid history day snapshot payload");
+  }
 }
 
 function normalizeMealEntry(meal: MealEntry): MealEntry {
@@ -851,16 +1004,22 @@ function normalizeMealEntry(meal: MealEntry): MealEntry {
 export function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
   const items = normalizeMealItems(meal.items);
   const mealPeriod = normalizeMealPeriod(meal.mealPeriod);
+  const foodName = getHistoryMealTitle(meal);
+  const nutrition = getHistoryMealNutrition(meal);
+
+  if (!foodName || !nutrition || !isDtoFiniteNumber(meal.itemCount) || meal.itemCount <= 0) {
+    throw new Error("Invalid history meal payload");
+  }
 
   return {
     id: meal.id,
     ...(typeof meal.mealRevisionId === "string" ? { mealRevisionId: meal.mealRevisionId } : {}),
-    foodName: meal.display?.title ?? meal.foodName ?? "未命名餐點",
-    calories: meal.nutrition?.calories ?? meal.calories ?? 0,
-    protein: meal.nutrition?.protein ?? meal.protein ?? 0,
-    carbs: meal.nutrition?.carbs ?? meal.carbs ?? 0,
-    fat: meal.nutrition?.fat ?? meal.fat ?? 0,
-    itemCount: normalizeItemCount(meal.itemCount),
+    foodName,
+    calories: nutrition.calories,
+    protein: nutrition.protein,
+    carbs: nutrition.carbs,
+    fat: nutrition.fat,
+    itemCount: Math.floor(meal.itemCount),
     ...(items ? { items } : {}),
     imageAssetId: meal.asset?.imageAssetId ?? meal.imageAssetId ?? null,
     imageUrl: withAuthorizedAssetUrl(meal.asset?.imageUrl ?? meal.imageUrl ?? null) ?? null,
@@ -874,18 +1033,21 @@ export async function getHistoryTrends(from: string, to: string): Promise<Histor
   const res = await fetch(`/api/history/trends?${params.toString()}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history trends");
-  return res.json() as Promise<HistoryTrendResponse>;
+  const body = await res.json() as unknown;
+  assertHistoryTrendResponse(body);
+  return body;
 }
 
 export async function getHistoryDaySnapshot(dateKey: string): Promise<HistoryDaySnapshot> {
   const res = await fetch(`/api/history/days/${encodeURIComponent(dateKey)}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history day snapshot");
-  const body = await res.json() as { date: string; summary: DailySummary; meals: HistoryMealDto[] };
+  const body = await res.json() as unknown;
+  assertHistoryDaySnapshotResponse(body);
   return {
     date: body.date,
     summary: body.summary,
-    meals: body.meals.map(normalizeHistoryMeal),
+    meals: body.meals.map(normalizeAuthoritativeHistoryMeal),
   };
 }
 
