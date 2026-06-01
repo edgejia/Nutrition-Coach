@@ -650,6 +650,31 @@ describe("mutation receipt renderer", () => {
     assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
   });
 
+  it("D-14 keeps visible receipt copy renderer-owned and separate from structured history facts", () => {
+    const visibleReceipt = renderMutationReceipt({
+      kind: "log",
+      affectedDate: "2025-12-31",
+      summaryOutcome: summaryOutcomes[0],
+      committedTargets,
+      meal: {
+        mealId: "meal-log",
+        mealRevisionId: "rev-log",
+        dateKey: "2025-12-31",
+        loggedAt: "2025-12-31T04:30:00.000Z",
+        foodName: "雞胸便當",
+        calories: 520,
+        protein: 31,
+        carbs: 48,
+        fat: 18,
+        itemCount: 1,
+      },
+    });
+
+    assert.equal(visibleReceipt, "已記錄2025/12/31 雞胸便當，520 kcal，蛋白質 31 g。");
+    assert.deepEqual(assertNoForbiddenReceiptTerms(visibleReceipt), []);
+    assert.doesNotMatch(visibleReceipt, /mutationOutcomeFact|compressed history|structured outcome/i);
+  });
+
   it("rejects implementation and API-like forbidden terms", () => {
     const rejected = [
       "headline",

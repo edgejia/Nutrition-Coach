@@ -20,6 +20,7 @@ import type {
   LLMProvider,
 } from "../../server/llm/types.js";
 import { createOrchestrator, guardNoMutationLoggingClaim } from "../../server/orchestrator/index.js";
+import { currentAppDate, formatLocalDate } from "../../server/lib/time.js";
 import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
@@ -32,6 +33,55 @@ import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
 
 function assertString(value: unknown): asserts value is string {
   assert.equal(typeof value, "string");
+}
+
+type ExpectedMutationOutcomeFact = {
+  action: "log_food" | "update_meal" | "delete_meal" | "update_goals";
+  affectedDate: string;
+  [key: string]: unknown;
+};
+
+function getMutationOutcomeFact(result: unknown): Record<string, unknown> | undefined {
+  const maybeResult = result as { mutationOutcomeFact?: Record<string, unknown> };
+  return maybeResult.mutationOutcomeFact;
+}
+
+function assertNoForbiddenOutcomeFactSurface(
+  fact: Record<string, unknown>,
+  forbiddenValues: string[] = [],
+) {
+  for (const forbiddenKey of [
+    "mealId",
+    "mealRevisionId",
+    "deviceId",
+    "rawToolArgs",
+    "rawToolResult",
+    "toolArgs",
+    "toolResult",
+    "summaryOutcome",
+    "providerMetadata",
+    "assistantFinalText",
+    "finalReply",
+    "debug",
+    "protocol",
+  ]) {
+    assert.equal(forbiddenKey in fact, false, forbiddenKey);
+  }
+
+  const serialized = JSON.stringify(fact);
+  for (const forbiddenValue of forbiddenValues) {
+    assert.equal(serialized.includes(forbiddenValue), false, forbiddenValue);
+  }
+}
+
+function assertMutationOutcomeFact(
+  result: unknown,
+  expected: ExpectedMutationOutcomeFact,
+  forbiddenValues: string[] = [],
+) {
+  const fact = getMutationOutcomeFact(result);
+  assert.deepEqual(fact, expected, "missing mutationOutcomeFact propagation");
+  assertNoForbiddenOutcomeFactSurface(fact, forbiddenValues);
 }
 
 function codePointLength(value: string) {
@@ -1195,6 +1245,235 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.dailySummary, undefined);
     assert.equal(result.loggedMeal, undefined);
     assert.doesNotMatch(result.reply, /summaryOutcome|recompute_failed|dailySummary|publish_failed/);
+  });
+
+  it("D-11/D-13/D-14 exposes a safe structured outcome fact for successful log_food", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "outcome_fact_log",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "牛肉麵",
+            calories: 520,
+            protein: 24,
+            carbs: 68,
+            fat: 16,
+            date_text: "2026-03-25",
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "幫我補記 2026-03-25 吃牛肉麵");
+
+    assert.ok("reply" in result);
+    assertMutationOutcomeFact(result, {
+      action: "log_food",
+      affectedDate: "2026-03-25",
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+    }, [
+      result.loggedMeal?.mealId ?? "",
+      result.loggedMeal?.mealRevisionId ?? "",
+      deviceId,
+      result.reply,
+    ].filter(Boolean));
+  });
+
+  it("D-11/D-13/D-14 exposes a safe structured outcome fact for successful update_meal", async () => {
+    const seeded = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_update_outcome_target",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "update", query: "雞腿便當" }),
+          },
+        },
+        {
+          id: "outcome_fact_update",
+          type: "function",
+          function: {
+            name: "update_meal",
+            arguments: JSON.stringify({
+              meal_id: seeded.id,
+              food_name: "半份雞腿便當",
+              calories: 360,
+              protein: 20,
+              carbs: 45,
+              fat: 10,
+            }),
+          },
+        },
+      ],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "把雞腿便當改成半份雞腿便當，360 kcal，蛋白質 20 g，碳水 45 g，脂肪 10 g",
+    );
+
+    assert.ok("reply" in result);
+    assertMutationOutcomeFact(result, {
+      action: "update_meal",
+      affectedDate: "2026-03-25",
+      foodName: "半份雞腿便當",
+      calories: 360,
+      protein: 20,
+      carbs: 45,
+      fat: 10,
+    }, [
+      seeded.id,
+      seeded.mealRevisionId,
+      result.loggedMeal?.mealRevisionId ?? "",
+      deviceId,
+      result.reply,
+    ].filter(Boolean));
+  });
+
+  it("D-11/D-13/D-14 exposes a safe structured outcome fact for successful delete_meal", async () => {
+    const seeded = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_delete_outcome_target",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({ action: "delete", query: "雞腿便當" }),
+          },
+        },
+        {
+          id: "outcome_fact_delete",
+          type: "function",
+          function: {
+            name: "delete_meal",
+            arguments: JSON.stringify({ meal_id: seeded.id }),
+          },
+        },
+      ],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in result);
+    assertMutationOutcomeFact(result, {
+      action: "delete_meal",
+      affectedDate: "2026-03-25",
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+    }, [
+      seeded.id,
+      seeded.mealRevisionId,
+      deviceId,
+      result.reply,
+    ].filter(Boolean));
+  });
+
+  it("D-11/D-13/D-14 exposes a safe structured outcome fact for successful update_goals", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "outcome_fact_goals",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "卡路里 1800 蛋白質 130");
+
+    assert.ok("reply" in result);
+    assertMutationOutcomeFact(result, {
+      action: "update_goals",
+      affectedDate: formatLocalDate(currentAppDate()),
+      updatedGoals: [
+        { label: "卡路里", value: 1800, unit: "kcal" },
+        { label: "蛋白質", value: 130, unit: "g" },
+      ],
+    }, [
+      deviceId,
+      result.reply,
+    ]);
+  });
+
+  it("D-14/HIST-02 omits mutationOutcomeFact for failed tools, controlled replies, and summary-only tools", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "failed_goal_fact",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 100 }),
+        },
+      }],
+    });
+    const failedGoalResult = await orchestrator.handleMessage(deviceId, "卡路里 100");
+    assert.equal(getMutationOutcomeFact(failedGoalResult), undefined);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "controlled_historical_log_fact",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "蛋餅",
+            calories: 320,
+            protein: 7,
+            carbs: 48,
+            fat: 10,
+            date_text: "昨天和前天",
+          }),
+        },
+      }],
+    });
+    const controlledReplyResult = await orchestrator.handleMessage(deviceId, "幫我補昨天和前天吃蛋餅");
+    assert.equal(getMutationOutcomeFact(controlledReplyResult), undefined);
+
+    await foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸肉",
+      calories: 220,
+      protein: 32,
+      carbs: 0,
+      fat: 5,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "summary_only_fact",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: JSON.stringify({}),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "今天有雞胸肉。" });
+    const summaryOnlyResult = await orchestrator.handleMessage(deviceId, "今天吃了什麼？");
+    assert.equal(getMutationOutcomeFact(summaryOnlyResult), undefined);
   });
 
   it("returns a deterministic logged reply for image-only uploads after log_food succeeds", async () => {
