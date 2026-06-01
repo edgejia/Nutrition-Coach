@@ -2,7 +2,9 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Writable } from "node:stream";
 import { buildApp } from "../../server/app.js";
 import type { AppServices } from "../../server/app.js";
@@ -409,6 +411,48 @@ function assertNoTerminalClarificationDoneSideEffects(payload: {
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "summaryOutcome"), false);
 }
 
+type MaybeAtomicReceiptChatService = AppServices["chatService"] & {
+  saveAssistantReplyWithReceipt?: (...args: unknown[]) => Promise<unknown>;
+};
+
+function jsonForRedactionCheck(value: unknown) {
+  return JSON.stringify(value, (_key, nestedValue) =>
+    typeof nestedValue === "function" ? "[function]" : nestedValue,
+  );
+}
+
+function installAtomicReceiptPersistenceFailure(chatService: AppServices["chatService"]) {
+  const service = chatService as MaybeAtomicReceiptChatService;
+  const original = service.saveAssistantReplyWithReceipt;
+  if (typeof original !== "function") {
+    return false;
+  }
+
+  service.saveAssistantReplyWithReceipt = async (...args: unknown[]) => {
+    const serializedArgs = jsonForRedactionCheck(args);
+    if (/receipt|mealTransactionId|mealRevisionId/i.test(serializedArgs)) {
+      throw new Error("AtomicReceiptPersistenceFailure");
+    }
+    return original.apply(chatService, args);
+  };
+  return true;
+}
+
+function assertNoReceiptIdentityProjection(payload: unknown, label: string) {
+  assert.ok(payload && typeof payload === "object", `${label} must be an object`);
+  const objectPayload = payload as Record<string, unknown>;
+  const serializedPayload = jsonForRedactionCheck(payload);
+
+  assert.equal(Object.prototype.hasOwnProperty.call(objectPayload, "loggedMeal"), false, `${label} must omit loggedMeal`);
+  assert.doesNotMatch(serializedPayload, /"mealId"|"mealRevisionId"|"dateKey"|"deviceId"|"currentRevisionId"/);
+  assert.doesNotMatch(serializedPayload, /AtomicReceiptPersistenceFailure|SseReceiptAssistantPersistFailure|raw-provider-body|toolCalls|log_food|protein_sources/);
+  assert.doesNotMatch(serializedPayload, /雞腿便當|已幫你記錄雞腿便當|這段不應曝光/);
+}
+
+function latestAssistantMessage<T extends { role: string }>(messages: T[]) {
+  return messages.filter((message) => message.role === "assistant").at(-1);
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const providerMetadataFixture: ProviderErrorMetadata = {
@@ -432,6 +476,9 @@ describe("chat-streaming", () => {
   let deviceId: string;
   let sessionCookieHeader: string;
   let address: string;
+  let tempRoot: string;
+  let uploadsDir: string;
+  let assetsDir: string;
   let services: AppServices | undefined;
   let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
   let logLines: string[];
@@ -445,11 +492,16 @@ describe("chat-streaming", () => {
     mockLLM = new StreamingLLMProvider();
     services = undefined;
     traceRecorders = [];
+    tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-chat-streaming-"));
+    uploadsDir = path.join(tempRoot, "uploads");
+    assetsDir = path.join(tempRoot, "assets");
     const logCapture = createLogCapture();
     logLines = logCapture.logLines;
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: mockLLM,
+      uploadsDir,
+      assetsDir,
       logger: { level: "info", stream: logCapture.stream },
       onServicesReady: (readyServices) => {
         services = readyServices;
@@ -475,6 +527,7 @@ describe("chat-streaming", () => {
     if (app.server.listening) {
       await app.close();
     }
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("POST /api/chat returns content-type: text/event-stream", async () => {
@@ -512,6 +565,7 @@ describe("chat-streaming", () => {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
       const res = await fetch(`${address}/api/chat`, {
@@ -842,6 +896,48 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat SSE done omits receipt identity when assistant receipt persistence fails after log_food", async () => {
+    assert.ok(services, "expected app services");
+    installAtomicReceiptPersistenceFailure(services.chatService);
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    mockLLM.queueChatStream(["已幫你記錄雞腿便當！這段不應曝光。"]);
+
+    const form = new FormData();
+    form.append("message", "raw-user-food-雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as Record<string, unknown>;
+      assert.equal(donePayload.didLogMeal, true);
+      assertNoReceiptIdentityProjection(donePayload, "SSE done atomic persistence failure payload");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as {
+        messages: Array<{ role: string; content?: string; loggedMeal?: unknown }>;
+      };
+      const assistant = latestAssistantMessage(historyJson.messages);
+      if (assistant) {
+        assertNoReceiptIdentityProjection(assistant, "SSE done atomic persistence failure history assistant");
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat SSE successful missing quantity reply hides internal metadata and keeps grouped name", async () => {
     mockLLM.queueRoundResponse({
       toolCalls: [{
@@ -1102,6 +1198,110 @@ describe("chat-streaming", () => {
       );
       assert.equal(trace.timeline.some((event) => event.type === "route_fallback"), false);
     } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+    }
+  });
+
+  it("POST /api/chat/stop omits receipt identity when stopped receipt persistence fails after log_food", async () => {
+    assert.ok(services, "expected app services");
+    const loggedMeal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      mealPeriod: "lunch",
+    });
+    installAtomicReceiptPersistenceFailure(services.chatService);
+    const originalHandleMessage = services.orchestrator.handleMessage.bind(services.orchestrator);
+    services.orchestrator.handleMessage = async (_requestDeviceId, _userMessage, _imageBase64, _assetRef, opts) => {
+      opts?.onUserMessageSaved?.();
+      return {
+        streamGenerator: streamTokensUntilAbort(["已幫你記錄雞腿便當！這段不應曝光。"], opts?.signal, () => {}),
+        didLogMeal: true,
+        didMutateMeal: true,
+        affectedDate: "2026-04-19",
+        loggedMeal: {
+          mealId: loggedMeal.id,
+          mealRevisionId: loggedMeal.mealRevisionId,
+          dateKey: "2026-04-19",
+          loggedAt: loggedMeal.loggedAt,
+          mealPeriod: "lunch",
+          imageAssetId: null,
+          imageUrl: null,
+          foodName: loggedMeal.foodName,
+          calories: loggedMeal.calories,
+          protein: loggedMeal.protein,
+          carbs: loggedMeal.carbs,
+          fat: loggedMeal.fat,
+          itemCount: loggedMeal.itemCount,
+          countedSources: [],
+          excludedSources: [],
+          usedConservativeAssumption: false,
+        },
+      };
+    };
+
+    const form = new FormData();
+    form.append("message", "raw-user-food-雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const firstText = await readStreamUntil(reader, "event: chunk");
+      const startPayload = parseSSEEvents(firstText)
+        .filter((event) => event.event === "start")
+        .map((event) => JSON.parse(event.data) as { turnId?: string })
+        .find((payload) => typeof payload.turnId === "string");
+      const turnId = startPayload?.turnId;
+      assert.match(turnId ?? "", UUID_PATTERN);
+
+      const stopRes = await fetch(`${address}/api/chat/stop`, {
+        method: "POST",
+        headers: {
+          cookie: sessionCookieHeader,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ turnId }),
+      });
+      assert.equal(stopRes.status, 200);
+      await mockLLM.abortObserved;
+
+      const stoppedText = firstText + await readStreamUntil(reader, "event: stopped");
+      const stoppedPayload = JSON.parse(
+        parseSSEEvents(stoppedText).find((event) => event.event === "stopped")!.data,
+      ) as Record<string, unknown>;
+      assert.equal(stoppedPayload.stopped, true);
+      assert.equal(stoppedPayload.didLogMeal, true);
+      assertNoReceiptIdentityProjection(stoppedPayload, "SSE stopped atomic persistence failure payload");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as {
+        messages: Array<{ role: string; content?: string; loggedMeal?: unknown }>;
+      };
+      const assistant = latestAssistantMessage(historyJson.messages);
+      if (assistant) {
+        assertNoReceiptIdentityProjection(assistant, "SSE stopped atomic persistence failure history assistant");
+      }
+    } finally {
+      services.orchestrator.handleMessage = originalHandleMessage;
       clearTimeout(timeout);
       await reader?.cancel().catch(() => {});
       controller.abort();
@@ -3470,6 +3670,69 @@ describe("chat-streaming", () => {
       services.chatService.getCompressedHistory = originalGetCompressedHistory;
       services.chatService.saveMessage = originalSaveMessage;
       clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE persistence catch omits receipt identity after committed log_food", async () => {
+    assert.ok(services, "expected app services");
+    const chatService = services.chatService;
+    const hasAtomicHelper = installAtomicReceiptPersistenceFailure(chatService);
+    const originalSaveMessage = chatService.saveMessage.bind(chatService);
+    if (!hasAtomicHelper) {
+      chatService.saveMessage = async (
+        ...args: Parameters<typeof chatService.saveMessage>
+      ) => {
+        const [, role] = args;
+        if (role === "assistant") {
+          throw new Error("SseReceiptAssistantPersistFailure");
+        }
+        return originalSaveMessage(...args);
+      };
+    }
+
+    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+    mockLLM.queueChatStream(["已幫你記錄雞腿便當！這段不應曝光。"]);
+
+    const form = new FormData();
+    form.append("message", "raw-user-food-雞腿便當");
+    form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as Record<string, unknown>;
+      assert.equal(donePayload.didLogMeal, true);
+      assert.deepEqual(await readdir(uploadsDir).catch(() => []), [], "staged uploads must be cleaned after receipt persistence failure");
+      assertNoReceiptIdentityProjection(donePayload, "SSE persistence catch atomic failure payload");
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as {
+        messages: Array<{ role: string; content?: string; loggedMeal?: unknown }>;
+      };
+      const assistant = latestAssistantMessage(historyJson.messages);
+      if (assistant) {
+        assertNoReceiptIdentityProjection(assistant, "SSE persistence catch atomic failure history assistant");
+      }
+    } finally {
+      chatService.saveMessage = originalSaveMessage;
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
     }
   });
 
