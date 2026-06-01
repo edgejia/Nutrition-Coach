@@ -39,7 +39,7 @@ interface SaveAssistantReplyWithReceiptInput {
   deviceId: string;
   content: string;
   status?: ChatMessageStatus;
-  receipt: ChatMealReceiptReferenceInput;
+  receipt?: ChatMealReceiptReferenceInput;
   mutationOutcomeFact?: unknown;
   outcomeFact?: unknown;
 }
@@ -346,15 +346,17 @@ export function createChatService(db: AppDatabase) {
           status: input.status ?? "complete",
         }).run();
 
-        tx.insert(chatMealReceipts).values({
-          id: receiptId,
-          deviceId: input.deviceId,
-          assistantMessageId: id,
-          toolMessageId: input.receipt.toolMessageId ?? null,
-          mealTransactionId: input.receipt.mealTransactionId,
-          mealRevisionId: input.receipt.mealRevisionId,
-          createdAt,
-        }).run();
+        if (input.receipt) {
+          tx.insert(chatMealReceipts).values({
+            id: receiptId,
+            deviceId: input.deviceId,
+            assistantMessageId: id,
+            toolMessageId: input.receipt.toolMessageId ?? null,
+            mealTransactionId: input.receipt.mealTransactionId,
+            mealRevisionId: input.receipt.mealRevisionId,
+            createdAt,
+          }).run();
+        }
 
         if (outcomeFactInput !== undefined) {
           const outcomeFact = validateChatMutationOutcomeFact(outcomeFactInput);
@@ -366,7 +368,7 @@ export function createChatService(db: AppDatabase) {
             id: crypto.randomUUID(),
             deviceId: input.deviceId,
             assistantMessageId: id,
-            toolMessageId: input.receipt.toolMessageId ?? null,
+            toolMessageId: input.receipt?.toolMessageId ?? null,
             ...mutationOutcomeFactToRow(outcomeFact),
             createdAt,
           }).run();

@@ -38,6 +38,7 @@ import {
   type RouteFallbackSource,
 } from "../observability/events.js";
 import type { ProviderErrorMetadata } from "../llm/types.js";
+import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -74,6 +75,7 @@ type ReceiptIdentity = {
   mealRevisionId: string;
   toolMessageId?: string;
 };
+type ReceiptPersistence = "not_applicable" | "persisted" | "failed_closed";
 interface ActiveChatTurn {
   controller: AbortController;
   stopRequested: boolean;
@@ -95,6 +97,7 @@ interface StreamingReplyResult {
   tokensStreamed: number;
   finalReplySource: LlmTraceFinalReplySource;
   finalReplyShape: LlmTraceFinalReplyShape;
+  receiptPersistence: ReceiptPersistence;
 }
 
 const activeChatTurns = new Map<string, ActiveChatTurn>();
@@ -229,25 +232,75 @@ async function finalizeAssistantReply(
   deviceId: string,
   rawReply: string,
   receiptIdentity?: ReceiptIdentity,
-  opts?: { status?: "complete" | "stopped" | "error" },
-): Promise<{ sanitized: string; assistantMessageId: string }> {
+  opts?: {
+    status?: "complete" | "stopped" | "error";
+    mutationOutcomeFact?: ChatMutationOutcomeFact;
+    log?: FastifyBaseLogger;
+    transport?: "json" | "sse";
+  },
+): Promise<{ sanitized: string; assistantMessageId: string; receiptPersistence: ReceiptPersistence }> {
   const sanitized = sanitizeReply(rawReply);
-  const assistantMessage = await chatService.saveMessage(
-    deviceId,
-    "assistant",
-    sanitized,
-    opts?.status ? { status: opts.status } : undefined,
-  );
-  if (receiptIdentity) {
-    await chatService.saveMealReceiptReference({
+  if (!receiptIdentity && opts?.mutationOutcomeFact === undefined) {
+    const assistantMessage = await chatService.saveMessage(
       deviceId,
+      "assistant",
+      sanitized,
+      opts?.status ? { status: opts.status } : undefined,
+    );
+    return {
+      sanitized,
       assistantMessageId: assistantMessage.id,
-      toolMessageId: receiptIdentity.toolMessageId,
-      mealTransactionId: receiptIdentity.mealTransactionId,
-      mealRevisionId: receiptIdentity.mealRevisionId,
-    });
+      receiptPersistence: "not_applicable",
+    };
   }
-  return { sanitized, assistantMessageId: assistantMessage.id };
+
+  try {
+    const assistantMessage = await chatService.saveAssistantReplyWithReceipt({
+      deviceId,
+      content: sanitized,
+      ...(opts?.status ? { status: opts.status } : {}),
+      ...(receiptIdentity ? { receipt: receiptIdentity } : {}),
+      ...(opts?.mutationOutcomeFact ? { mutationOutcomeFact: opts.mutationOutcomeFact } : {}),
+    });
+    return {
+      sanitized,
+      assistantMessageId: assistantMessage.id,
+      receiptPersistence: "persisted",
+    };
+  } catch (error) {
+    const failureReply = sanitizeReply(
+      opts?.mutationOutcomeFact?.action === "log_food"
+        ? PARTIAL_SUCCESS_FALLBACK
+        : opts?.mutationOutcomeFact
+          ? PARTIAL_MUTATION_FALLBACK
+          : receiptIdentity
+            ? PARTIAL_SUCCESS_FALLBACK
+            : sanitized,
+    );
+    const assistantMessage = await chatService.saveMessage(
+      deviceId,
+      "assistant",
+      failureReply,
+      { status: opts?.status ?? "error" },
+    );
+    opts?.log?.warn(
+      {
+        event: "chat_receipt_persistence_failed_closed",
+        transport: opts.transport ?? "json",
+        mutationFamily: opts.mutationOutcomeFact?.action ?? "receipt_only",
+        hasReceiptIdentity: Boolean(receiptIdentity),
+        hasMutationOutcomeFact: opts.mutationOutcomeFact !== undefined,
+        status: opts.status ?? "complete",
+        failureClass: error instanceof Error ? error.name : typeof error,
+      },
+      "Chat receipt persistence failed closed",
+    );
+    return {
+      sanitized: failureReply,
+      assistantMessageId: assistantMessage.id,
+      receiptPersistence: "failed_closed",
+    };
+  }
 }
 
 function createStreamingSanitizer() {
@@ -608,9 +661,11 @@ async function handleStreamingReply(
   dailySummary: unknown,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
   receiptIdentity: ReceiptIdentity | undefined,
+  mutationOutcomeFact: ChatMutationOutcomeFact | undefined,
   affectedDate?: string,
   partialMutationReply?: string,
   hooks?: OrchestratorHooks,
+  log?: FastifyBaseLogger,
   stopControl?: StreamingStopControl,
 ): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
@@ -627,6 +682,27 @@ async function handleStreamingReply(
   let holdingChoicePrompt = false;
   let hallucinationDetected = false;
   let noMutationLoggingClaimDetected = false;
+  let receiptPersistence: ReceiptPersistence = "not_applicable";
+
+  async function persistFinalReply(
+    replyText: string,
+    opts?: { status?: "complete" | "stopped" | "error" },
+  ): Promise<string> {
+    const result = await finalizeAssistantReply(
+      chatService,
+      deviceId,
+      replyText,
+      receiptIdentity,
+      {
+        ...opts,
+        mutationOutcomeFact,
+        log,
+        transport: "sse",
+      },
+    );
+    receiptPersistence = result.receiptPersistence;
+    return result.sanitized;
+  }
 
   function writeVisibleChunk(token: string): void {
     if (shouldHoldNoMutationSummaryText) {
@@ -674,16 +750,17 @@ async function handleStreamingReply(
         summaryHistoryFacts,
       }),
     ) || "（已停止）";
-    await finalizeAssistantReply(chatService, deviceId, stoppedReply, receiptIdentity, { status: "stopped" });
+    const persistedReply = await persistFinalReply(stoppedReply, { status: "stopped" });
     return {
-      fullReply: stoppedReply,
+      fullReply: persistedReply,
       didLogMeal,
       dailySummary,
       summaryHistoryFacts,
       stopped: true,
       tokensStreamed,
       finalReplySource: "model",
-      finalReplyShape: stoppedReply.trim() ? "streamed_text" : "empty_or_missing",
+      finalReplyShape: persistedReply.trim() ? "streamed_text" : "empty_or_missing",
+      receiptPersistence,
     };
   }
 
@@ -692,16 +769,17 @@ async function handleStreamingReply(
     const retryMsg = didMutateMeal && partialMutationReply
       ? partialMutationReply
       : "抱歉，無法辨識這次的請求，可以再試一次或補充文字描述嗎？";
-    await finalizeAssistantReply(chatService, deviceId, retryMsg, receiptIdentity);
-    stream.write(`event: chunk\ndata: ${JSON.stringify({ token: retryMsg })}\n\n`);
+    const persistedReply = await persistFinalReply(retryMsg);
+    stream.write(`event: chunk\ndata: ${JSON.stringify({ token: persistedReply })}\n\n`);
     return {
-      fullReply: retryMsg,
+      fullReply: persistedReply,
       didLogMeal,
       dailySummary,
       summaryHistoryFacts,
       tokensStreamed,
       finalReplySource: "fallback",
       finalReplyShape: "fallback_text",
+      receiptPersistence,
     };
   }
 
@@ -731,9 +809,9 @@ async function handleStreamingReply(
     if (sanitizedReply) {
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedReply })}\n\n`);
     }
-    await finalizeAssistantReply(chatService, deviceId, sanitizedReply, receiptIdentity);
+    const persistedReply = await persistFinalReply(sanitizedReply);
     return {
-      fullReply: sanitizedReply,
+      fullReply: persistedReply,
       didLogMeal,
       dailySummary,
       summaryHistoryFacts,
@@ -741,7 +819,8 @@ async function handleStreamingReply(
       finalReplySource: composedSummaryHistory ? "renderer" : "fallback",
       finalReplyShape: composedSummaryHistory
         ? (sanitizedReply.trim() ? "streamed_text" : "empty_or_missing")
-        : (sanitizedReply.trim() ? "fallback_text" : "empty_or_missing"),
+        : (persistedReply.trim() ? "fallback_text" : "empty_or_missing"),
+      receiptPersistence,
     };
   }
   if (shouldHoldNoMutationSummaryText) {
@@ -753,15 +832,16 @@ async function handleStreamingReply(
     if (finalHeldChunk) {
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalHeldChunk })}\n\n`);
     }
-    await finalizeAssistantReply(chatService, deviceId, guardedFullReply, receiptIdentity);
+    const persistedReply = await persistFinalReply(guardedFullReply);
     return {
-      fullReply: guardedFullReply,
+      fullReply: persistedReply,
       didLogMeal,
       dailySummary,
       summaryHistoryFacts,
       tokensStreamed,
       finalReplySource: composedSummaryHistory ? "renderer" : "model",
-      finalReplyShape: guardedFullReply.trim() ? "streamed_text" : "empty_or_missing",
+      finalReplyShape: persistedReply.trim() ? "streamed_text" : "empty_or_missing",
+      receiptPersistence,
     };
   }
   const guardedFinalChunk = noMutationClaimGuard?.flush() ?? "";
@@ -775,15 +855,16 @@ async function handleStreamingReply(
   if (finalChunk) {
     stream.write(`event: chunk\ndata: ${JSON.stringify({ token: finalChunk })}\n\n`);
   }
-  await finalizeAssistantReply(chatService, deviceId, fullReply, receiptIdentity);
+  const persistedReply = await persistFinalReply(fullReply);
   return {
-    fullReply,
+    fullReply: persistedReply,
     didLogMeal,
     dailySummary,
     summaryHistoryFacts,
     tokensStreamed,
     finalReplySource: "model",
-    finalReplyShape: fullReply.trim() ? "streamed_text" : "empty_or_missing",
+    finalReplyShape: persistedReply.trim() ? "streamed_text" : "empty_or_missing",
+    receiptPersistence,
   };
 }
 
@@ -820,6 +901,8 @@ async function handleOrchestratorSSE(
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
   let streamReceiptIdentity: ReceiptIdentity | undefined;
+  let streamMutationOutcomeFact: ChatMutationOutcomeFact | undefined;
+  let streamReceiptPersistence: ReceiptPersistence = "not_applicable";
   const recordSseCompletion = (params: {
     didLogMeal: boolean;
     didMutateMeal: boolean;
@@ -934,6 +1017,7 @@ async function handleOrchestratorSSE(
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
+      streamMutationOutcomeFact = result.mutationOutcomeFact;
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -945,13 +1029,17 @@ async function handleOrchestratorSSE(
         dailySummary,
         summaryHistoryFacts,
         streamReceiptIdentity,
+        streamMutationOutcomeFact,
         streamAffectedDate,
         streamLoggedMeal ?? (streamDidMutateMeal ? PARTIAL_MUTATION_FALLBACK : undefined),
         hooks,
+        deps.log,
         stopControl,
       );
       streamDidLogMeal = streamResult.didLogMeal;
       streamDailySummary = streamResult.dailySummary;
+      streamReceiptPersistence = streamResult.receiptPersistence;
+      const canProjectStreamReceipt = streamReceiptPersistence !== "failed_closed";
       recorder?.recordFinalReply({
         source: streamResult.finalReplySource,
         shape: streamResult.finalReplyShape,
@@ -964,7 +1052,7 @@ async function handleOrchestratorSSE(
           tokensStreamed: streamResult.tokensStreamed,
           didLogMeal: streamDidLogMeal,
           didMutateMeal: streamDidMutateMeal,
-          ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
+          ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
           ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
           ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
           ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
@@ -985,7 +1073,7 @@ async function handleOrchestratorSSE(
         turnId: stopControl.turnId,
         didLogMeal: streamDidLogMeal,
         didMutateMeal: streamDidMutateMeal,
-        ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
+        ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
         ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
@@ -1021,6 +1109,7 @@ async function handleOrchestratorSSE(
       streamLoggedMeal = loggedMeal ? buildPartialSuccessLoggedReply(loggedMeal) : undefined;
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
+      streamMutationOutcomeFact = result.mutationOutcomeFact;
       const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
         && !result.fallbackOutcomeContext;
       const normalizedReply = normalizeRouteFinalReply(
@@ -1033,18 +1122,26 @@ async function handleOrchestratorSSE(
           rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
         },
       ).reply;
-      const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
+      const finalized = await finalizeAssistantReply(
         deps.chatService,
         deviceId,
         normalizedReply,
         streamReceiptIdentity,
+        {
+          mutationOutcomeFact: streamMutationOutcomeFact,
+          log: deps.log,
+          transport: "sse",
+        },
       );
+      const sanitizedFallback = finalized.sanitized;
+      streamReceiptPersistence = finalized.receiptPersistence;
+      const canProjectStreamReceipt = streamReceiptPersistence !== "failed_closed";
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
         turnId: stopControl.turnId,
         didLogMeal,
         didMutateMeal: streamDidMutateMeal,
-        ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
+        ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(dailySummary ? { dailySummary } : {}),
         ...(summaryOutcome ? { summaryOutcome } : {}),
         ...(dailyTargets ? { dailyTargets } : {}),
@@ -1090,12 +1187,19 @@ async function handleOrchestratorSSE(
         );
         userMessagePersisted = true;
       }
-      const { sanitized: sanitizedFallback } = await finalizeAssistantReply(
+      const finalized = await finalizeAssistantReply(
         deps.chatService,
         deviceId,
         fallback,
         streamReceiptIdentity,
+        {
+          mutationOutcomeFact: streamMutationOutcomeFact,
+          log: deps.log,
+          transport: "sse",
+        },
       );
+      const sanitizedFallback = finalized.sanitized;
+      streamReceiptPersistence = finalized.receiptPersistence;
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
     } catch (persistError) {
       catchSite = "sse_persist";
@@ -1107,7 +1211,7 @@ async function handleOrchestratorSSE(
       turnId: stopControl.turnId,
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
-      ...(streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
+      ...(streamReceiptPersistence !== "failed_closed" && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
       ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
@@ -1224,6 +1328,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
       let jsonReceiptIdentity: ReceiptIdentity | undefined;
+      let jsonMutationOutcomeFact: ChatMutationOutcomeFact | undefined;
+      let jsonReceiptPersistence: ReceiptPersistence = "not_applicable";
       const traceRecorder = llmTraceRecorderFactory?.();
       const hooks = fanOutOrchestratorHooks(
         createStructuredHooks(orchLog),
@@ -1326,6 +1432,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           : undefined;
         jsonLoggedMealReceipt = projectLoggedMealReceipt(result.loggedMeal);
         jsonReceiptIdentity = buildReceiptIdentity(result.loggedMeal, result.loggedMealToolMessageId);
+        jsonMutationOutcomeFact = result.mutationOutcomeFact;
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
@@ -1353,12 +1460,20 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             summaryHistoryFacts,
             { composeSummaryHistory: !hallucinationDetected },
           );
-          const { sanitized } = await finalizeAssistantReply(
+          const finalized = await finalizeAssistantReply(
             chatService,
             deviceId,
             replyText,
             jsonReceiptIdentity,
+            {
+              mutationOutcomeFact: jsonMutationOutcomeFact,
+              log: turnLog,
+              transport: "json",
+            },
           );
+          const sanitized = finalized.sanitized;
+          jsonReceiptPersistence = finalized.receiptPersistence;
+          const canProjectJsonReceipt = jsonReceiptPersistence !== "failed_closed";
           traceRecorder?.recordFinalReply({
             source: hallucinationDetected ? "fallback" : composedSummaryHistory ? "renderer" : "model",
             shape: sanitized.trim() ? (hallucinationDetected ? "fallback_text" : "streamed_text") : "empty_or_missing",
@@ -1388,7 +1503,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             reply: sanitized,
             didLogMeal,
             ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
-            ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
+            ...(canProjectJsonReceipt && jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
             ...(dailySummary ? { dailySummary } : {}),
             ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
@@ -1409,12 +1524,20 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
           },
         ).reply;
-        const { sanitized: sanitizedJson } = await finalizeAssistantReply(
+        const finalized = await finalizeAssistantReply(
           chatService,
           deviceId,
           normalizedReply,
           jsonReceiptIdentity,
+          {
+            mutationOutcomeFact: jsonMutationOutcomeFact,
+            log: turnLog,
+            transport: "json",
+          },
         );
+        const sanitizedJson = finalized.sanitized;
+        jsonReceiptPersistence = finalized.receiptPersistence;
+        const canProjectJsonReceipt = jsonReceiptPersistence !== "failed_closed";
         traceRecorder?.recordFinalReply({
           source: result.finalReplySource ?? "model",
           shape: result.finalReplyShape ?? "empty_or_missing",
@@ -1444,7 +1567,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           reply: sanitizedJson,
           didLogMeal,
           ...(result.didMutateMeal !== undefined ? { didMutateMeal: result.didMutateMeal } : {}),
-          ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
+          ...(canProjectJsonReceipt && jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(dailySummary ? { dailySummary } : {}),
           ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
           ...(dailyTargets ? { dailyTargets } : {}),
@@ -1467,12 +1590,19 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           );
           userMessagePersisted = true;
         }
-        const { sanitized: sanitizedJson } = await finalizeAssistantReply(
+        const finalized = await finalizeAssistantReply(
           chatService,
           deviceId,
           fallback,
           jsonReceiptIdentity,
+          {
+            mutationOutcomeFact: jsonMutationOutcomeFact,
+            log: turnLog,
+            transport: "json",
+          },
         );
+        const sanitizedJson = finalized.sanitized;
+        jsonReceiptPersistence = finalized.receiptPersistence;
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, jsonAffectedDate, turnLog);
@@ -1492,7 +1622,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           reply: sanitizedJson,
           didLogMeal: jsonDidLogMeal,
           ...(jsonDidMutateMeal ? { didMutateMeal: true } : {}),
-          ...(jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
+          ...(jsonReceiptPersistence !== "failed_closed" && jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}),
           ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
@@ -1586,10 +1716,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     }
     const messages = await chatService.getHistory(deviceId, parsedLimit);
     return {
-      messages: messages.map((message) => ({
-        ...message,
-        ...projectAssetFields(message.imagePath),
-      })),
+      messages: messages.map((message) => {
+        const { deviceId: _deviceId, ...publicMessage } = message;
+        void _deviceId;
+        return {
+          ...publicMessage,
+          ...projectAssetFields(message.imagePath),
+        };
+      }),
     };
   });
 }
