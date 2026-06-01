@@ -52,6 +52,36 @@ function mockStreamFetch(status: number, chunks: string[]) {
   }) as typeof fetch;
 }
 
+const validDailySummary = {
+  date: "2026-04-29",
+  totalCalories: 520,
+  totalProtein: 42,
+  totalCarbs: 48,
+  totalFat: 18,
+  mealCount: 1,
+};
+
+const validMeal = {
+  id: "meal-valid",
+  mealRevisionId: "meal-valid:r1",
+  foodName: "雞胸肉便當",
+  calories: 520,
+  protein: 42,
+  carbs: 48,
+  fat: 18,
+  itemCount: 1,
+  loggedAt: "2026-04-29T04:30:00.000Z",
+};
+
+const validHistoryMeal = {
+  id: "meal-history",
+  mealRevisionId: "meal-history:r1",
+  loggedAt: "2026-04-29T07:30:00.000Z",
+  display: { title: "燕麥 + 香蕉 + 杏仁" },
+  nutrition: { calories: 320, protein: 18, carbs: 45, fat: 9 },
+  itemCount: 1,
+};
+
 const api = await import("../../client/src/api.js");
 
 describe("API Client", () => {
@@ -427,6 +457,7 @@ describe("API Client", () => {
           protein: 42,
           carbs: 48,
           fat: 18,
+          itemCount: 1,
           loggedAt: "2026-04-01T04:30:00.000Z",
         },
       ],
@@ -453,6 +484,7 @@ describe("API Client", () => {
           protein: 42,
           carbs: 48,
           fat: 18,
+          itemCount: 1,
           imageAssetId: "asset-1",
           imageUrl: "/api/assets/asset-1",
           loggedAt: "2026-04-01T04:30:00.000Z",
@@ -472,11 +504,13 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "文字點心",
           calories: 120,
           protein: 6,
           carbs: 14,
           fat: 4,
+          itemCount: 1,
           imageAssetId: null,
           imageUrl: null,
           loggedAt: "2026-04-01T04:30:00.000Z",
@@ -501,16 +535,19 @@ describe("API Client", () => {
           protein: 42,
           carbs: 48,
           fat: 18,
+          itemCount: 1,
           mealPeriod: "lunch",
           loggedAt: "2026-04-01T00:30:00.000Z",
         },
         {
           id: "meal-2",
+          mealRevisionId: "meal-2:r1",
           foodName: "不明餐別",
           calories: 320,
           protein: 20,
           carbs: 42,
           fat: 8,
+          itemCount: 1,
           mealPeriod: "snack",
           loggedAt: "2026-04-01T06:30:00.000Z",
         },
@@ -566,6 +603,7 @@ describe("API Client", () => {
           protein: 42,
           carbs: 48,
           fat: 18,
+          itemCount: 1,
           imageAssetId: "asset-1",
           imageUrl: "/api/assets/asset-1",
           loggedAt: "2026-03-25T04:30:00.000Z",
@@ -594,11 +632,13 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "文字點心",
           calories: 120,
           protein: 6,
           carbs: 14,
           fat: 4,
+          itemCount: 1,
           imageAssetId: null,
           imageUrl: null,
           loggedAt: "2026-03-25T04:30:00.000Z",
@@ -632,26 +672,31 @@ describe("API Client", () => {
           protein: 32,
           carbs: 64,
           fat: 18,
+          itemCount: 1,
           mealPeriod: "lunch",
           loggedAt: "2026-03-25T00:30:00.000Z",
         },
         {
           id: "meal-2",
+          mealRevisionId: "meal-2:r1",
           foodName: "未知餐別",
           calories: 280,
           protein: 16,
           carbs: 36,
           fat: 8,
+          itemCount: 1,
           mealPeriod: "afternoon_tea",
           loggedAt: "2026-03-25T06:30:00.000Z",
         },
         {
           id: "meal-3",
+          mealRevisionId: "meal-3:r1",
           foodName: "未帶餐別",
           calories: 120,
           protein: 6,
           carbs: 14,
           fat: 2,
+          itemCount: 1,
           loggedAt: "2026-03-25T21:30:00.000Z",
         },
       ],
@@ -707,6 +752,7 @@ describe("API Client", () => {
           loggedAt: "2026-04-29T07:30:00.000Z",
           display: { title: "燕麥 + 香蕉 + 杏仁" },
           nutrition: { calories: 320, protein: 18, carbs: 45, fat: 9 },
+          itemCount: 1,
           asset: { imageAssetId: "asset-1", imageUrl: "/api/assets/asset-1?deviceId=legacy" },
         },
       ],
@@ -736,17 +782,21 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           loggedAt: "2026-04-29T07:30:00.000Z",
           display: { title: "照片便當" },
           nutrition: { calories: 320, protein: 30, carbs: 40, fat: 9 },
+          itemCount: 1,
           imageAssetId: "asset-flat",
           imageUrl: "/api/assets/asset-flat?deviceId=legacy",
         },
         {
           id: "meal-2",
+          mealRevisionId: "meal-2:r1",
           loggedAt: "2026-04-29T08:30:00.000Z",
           display: { title: "文字點心" },
           nutrition: { calories: 120, protein: 6, carbs: 14, fat: 4 },
+          itemCount: 1,
           asset: { imageAssetId: null, imageUrl: null },
         },
       ],
@@ -760,19 +810,61 @@ describe("API Client", () => {
     assert.equal(result.meals[1]?.imageUrl, null);
   });
 
+  it("rejects malformed REST authoritative DTO payloads with stable errors", async () => {
+    storage.set("deviceId", "d-1");
+
+    mockFetch(200, { dailyTargets: { calories: 2000, protein: 120, carbs: 220 } });
+    await assert.rejects(() => api.updateGoals({ calories: 2000 }), {
+      message: "Invalid update goals payload",
+    });
+
+    mockFetch(200, { meals: [{ ...validMeal, foodName: "" }] });
+    await assert.rejects(() => api.getMeals(), { message: "Invalid meals payload" });
+
+    mockFetch(200, { date: "2026-04-29", summary: { ...validDailySummary, mealCount: "1" }, meals: [] });
+    await assert.rejects(() => api.getDaySnapshot("2026-04-29"), {
+      message: "Invalid day snapshot payload",
+    });
+
+    mockFetch(200, {
+      from: "2026-04-27",
+      to: "2026-05-03",
+      completeness: "sparse",
+      daily: [{ date: "2026-04-29", calories: 200, protein: 20, carbs: 10, fat: 8 }],
+      totals: { calories: 200, protein: 20, carbs: 10, fat: 8, mealCount: 1 },
+      averages: { calories: 200, protein: 20, carbs: 10, fat: 8, mealsPerDay: 1 },
+    });
+    await assert.rejects(() => api.getHistoryTrends("2026-04-27", "2026-05-03"), {
+      message: "Invalid history trends payload",
+    });
+
+    mockFetch(200, {
+      date: "2026-04-29",
+      summary: validDailySummary,
+      meals: [{ ...validHistoryMeal, mealRevisionId: undefined }],
+    });
+    await assert.rejects(() => api.getHistoryDaySnapshot("2026-04-29"), {
+      message: "Invalid history day snapshot payload",
+    });
+  });
+
   it("normalizeHistoryMeal preserves only public mealPeriod enum values", () => {
     const valid = api.normalizeHistoryMeal({
       id: "meal-1",
+      mealRevisionId: "meal-1:r1",
       loggedAt: "2026-04-29T00:30:00.000Z",
       display: { title: "午餐便當" },
       nutrition: { calories: 520, protein: 32, carbs: 64, fat: 18 },
+      itemCount: 1,
       mealPeriod: "lunch",
     });
     const invalid = api.normalizeHistoryMeal({
       id: "meal-2",
+      mealRevisionId: "meal-2:r1",
       loggedAt: "2026-04-29T21:30:00.000Z",
       display: { title: "未知餐別" },
       nutrition: { calories: 120, protein: 6, carbs: 14, fat: 2 },
+      itemCount: 1,
       mealPeriod: "midnight_snack",
     });
 
