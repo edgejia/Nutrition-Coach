@@ -6,7 +6,7 @@ import { createDeviceService } from "../../server/services/device.js";
 import { createChatService } from "../../server/services/chat.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { formatLocalDate } from "../../server/lib/time.js";
-import { mealRevisions, mealTransactions } from "../../server/db/schema.js";
+import { chatMealReceipts, chatMessages, mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { eq } from "drizzle-orm";
 
 describe("ChatService", () => {
@@ -434,5 +434,233 @@ describe("ChatService", () => {
     const text = compressed.map((msg) => msg.content).join("\n");
     assert.match(text, /第12次/);
     assert.doesNotMatch(text, /第1次/);
+  });
+
+  it("D-01/D-04/D-28 commits assistant reply, receipt, and structured outcome together", async () => {
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸便當",
+      calories: 620,
+      protein: 42,
+      carbs: 72,
+      fat: 18,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    const saveAssistantReplyWithReceipt = (
+      chatService as unknown as {
+        saveAssistantReplyWithReceipt?: (input: {
+          deviceId: string;
+          content: string;
+          status?: "complete" | "stopped" | "error";
+          receipt: {
+            toolMessageId: string;
+            mealTransactionId: string;
+            mealRevisionId: string;
+          };
+          mutationOutcomeFact: {
+            action: "log_food";
+            affectedDate: string;
+            foodName: string;
+            calories: number;
+          };
+        }) => Promise<{ id: string; createdAt: string }>;
+      }
+    ).saveAssistantReplyWithReceipt;
+
+    assert.equal(
+      typeof saveAssistantReplyWithReceipt,
+      "function",
+      "missing saveAssistantReplyWithReceipt structured atomic helper",
+    );
+    const saveWithReceipt =
+      saveAssistantReplyWithReceipt as NonNullable<typeof saveAssistantReplyWithReceipt>;
+
+    const assistant = await saveWithReceipt({
+      deviceId,
+      content: "已幫你記錄雞胸便當。",
+      receipt: {
+        toolMessageId: tool.id,
+        mealTransactionId: loggedMeal.id,
+        mealRevisionId: loggedMeal.mealRevisionId,
+      },
+      mutationOutcomeFact: {
+        action: "log_food",
+        affectedDate: "2026-03-25",
+        foodName: "雞胸便當",
+        calories: 620,
+      },
+    });
+
+    const [assistantRow] = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.id, assistant.id))
+      .limit(1);
+    const [receiptRow] = await db
+      .select()
+      .from(chatMealReceipts)
+      .where(eq(chatMealReceipts.assistantMessageId, assistant.id))
+      .limit(1);
+    const compressed = await chatService.getCompressedHistory(deviceId, 10);
+    const allContent = compressed.map((message) => message.content).join("\n");
+
+    assert.equal(assistantRow?.role, "assistant");
+    assert.equal(receiptRow?.mealTransactionId, loggedMeal.id);
+    assert.match(allContent, /雞胸便當/);
+    assert.match(allContent, /2026-03-25/);
+    assert.doesNotMatch(allContent, new RegExp(loggedMeal.id));
+    assert.doesNotMatch(allContent, new RegExp(loggedMeal.mealRevisionId));
+  });
+
+  it("D-04 rolls back assistant and receipt rows when structured outcome persistence fails", async () => {
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "牛肉飯",
+      calories: 700,
+      protein: 32,
+      carbs: 88,
+      fat: 22,
+    });
+    const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    const beforeAssistants = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.role, "assistant"));
+    const saveAssistantReplyWithReceipt = (
+      chatService as unknown as {
+        saveAssistantReplyWithReceipt?: (input: unknown) => Promise<unknown>;
+      }
+    ).saveAssistantReplyWithReceipt;
+
+    assert.equal(
+      typeof saveAssistantReplyWithReceipt,
+      "function",
+      "missing saveAssistantReplyWithReceipt structured atomic helper",
+    );
+    const saveWithReceipt =
+      saveAssistantReplyWithReceipt as NonNullable<typeof saveAssistantReplyWithReceipt>;
+
+    await assert.rejects(
+      saveWithReceipt({
+        deviceId,
+        content: "已幫你記錄牛肉飯。",
+        receipt: {
+          toolMessageId: tool.id,
+          mealTransactionId: loggedMeal.id,
+          mealRevisionId: loggedMeal.mealRevisionId,
+        },
+        mutationOutcomeFact: {
+          action: "unsupported_action",
+          affectedDate: "2026-03-25",
+          foodName: "牛肉飯",
+        },
+      }),
+      /structured outcome|mutation outcome|invalid/i,
+    );
+
+    const afterAssistants = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.role, "assistant"));
+    const receipts = await db.select().from(chatMealReceipts);
+
+    assert.equal(afterAssistants.length, beforeAssistants.length);
+    assert.equal(receipts.length, 0);
+  });
+
+  it("D-19/D-21/D-23 keeps legacy receipt display but omits compressed mutation claims without structured outcomes", async () => {
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      loggedAt: "2026-03-25T08:30:00.000Z",
+    });
+    const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    const assistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄鮭魚飯糰。");
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: assistant.id,
+      toolMessageId: tool.id,
+      mealTransactionId: loggedMeal.id,
+      mealRevisionId: loggedMeal.mealRevisionId,
+    });
+
+    const history = await chatService.getHistory(deviceId, 50);
+    const restoredAssistant = history.find((message) => message.id === assistant.id);
+    const compressed = await chatService.getCompressedHistory(deviceId, 10);
+    const allContent = compressed.map((message) => message.content).join("\n");
+
+    assert.equal(restoredAssistant?.didLogMeal, true);
+    assert.equal(restoredAssistant?.loggedMeal?.foodName, "鮭魚飯糰");
+    assert.equal(restoredAssistant?.loggedMeal?.mealId, loggedMeal.id);
+    assert.doesNotMatch(allContent, /系統已完成餐點記錄/);
+    assert.doesNotMatch(allContent, /鮭魚飯糰/);
+  });
+
+  it("D-19/D-25 omits compressed mutation claims for missing, malformed, or invalid structured outcomes", async () => {
+    await chatService.saveMessage(deviceId, "user", "記一下午餐");
+    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    await chatService.saveMessage(deviceId, "tool", "{not-json", { toolName: "log_food" });
+    await chatService.saveMessage(deviceId, "tool", JSON.stringify({ action: "log_food" }), { toolName: "log_food" });
+    await chatService.saveMessage(deviceId, "assistant", "已記錄完成。");
+
+    const compressed = await chatService.getCompressedHistory(deviceId, 10);
+    const allContent = compressed.map((message) => message.content).join("\n");
+
+    assert.doesNotMatch(allContent, /系統已完成餐點記錄/);
+    assert.doesNotMatch(allContent, /committed|mutation|outcome/i);
+    assert.doesNotMatch(allContent, /not-json/);
+  });
+
+  it("D-22/D-26 keeps stale and deleted legacy receipt identity display-only", async () => {
+    const staleMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    const staleAssistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄雞腿便當。");
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: staleAssistant.id,
+      mealTransactionId: staleMeal.id,
+      mealRevisionId: staleMeal.mealRevisionId,
+    });
+    await foodLoggingService.updateMeal(deviceId, staleMeal.id, {
+      expectedMealRevisionId: staleMeal.mealRevisionId,
+      items: [{ foodName: "雞腿便當半份", calories: 360, protein: 20, carbs: 45, fat: 10 }],
+    });
+
+    const deletedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      loggedAt: "2026-03-25T08:30:00.000Z",
+    });
+    const deletedAssistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄鮭魚飯糰。");
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: deletedAssistant.id,
+      mealTransactionId: deletedMeal.id,
+      mealRevisionId: deletedMeal.mealRevisionId,
+    });
+    await foodLoggingService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
+
+    const history = await chatService.getHistory(deviceId, 50);
+    const stale = history.find((message) => message.id === staleAssistant.id);
+    const deleted = history.find((message) => message.id === deletedAssistant.id);
+
+    for (const message of [stale, deleted]) {
+      assert.equal(message?.didLogMeal, true);
+      assert.ok(message?.loggedMeal);
+      assert.equal(message.loggedMeal.mealId, undefined);
+      assert.equal(message.loggedMeal.dateKey, undefined);
+      assert.equal(message.loggedMeal.mealRevisionId, undefined);
+    }
   });
 });

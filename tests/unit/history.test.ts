@@ -36,7 +36,7 @@ describe("loadHistory", () => {
     assert.match(String(history[1].content), /\[使用 analyze_food/);
   });
 
-  it("returns sanitized compressed history without raw tool names", async () => {
+  it("D-14/D-19 does not derive scoped mutation markers from successful tool strings", async () => {
     const db = createDb(":memory:");
     const deviceService = createDeviceService(db);
     const chatSvc = createChatService(db);
@@ -44,13 +44,17 @@ describe("loadHistory", () => {
 
     await chatSvc.saveMessage(did, "user", "我吃了午餐");
     await chatSvc.saveMessage(did, "tool", "成功", { toolName: "log_food" });
+    await chatSvc.saveMessage(did, "tool", "成功", { toolName: "update_meal" });
+    await chatSvc.saveMessage(did, "tool", "成功", { toolName: "delete_meal" });
     await chatSvc.saveMessage(did, "tool", "熱量: 500kcal", { toolName: "get_daily_summary" });
     await chatSvc.saveMessage(did, "assistant", "已記錄完成！");
 
     const history = await loadHistory(chatSvc, did, 10);
     const allContent = history.map((m) => String(m.content)).join("\n");
     assert.doesNotMatch(allContent, /log_food|get_daily_summary/);
-    assert.match(allContent, /系統已完成餐點記錄/);
+    assert.doesNotMatch(allContent, /系統已完成餐點記錄/);
+    assert.doesNotMatch(allContent, /系統已完成餐點修改/);
+    assert.doesNotMatch(allContent, /系統已完成餐點刪除/);
     assert.match(allContent, /系統已更新今日攝取摘要/);
   });
 });
