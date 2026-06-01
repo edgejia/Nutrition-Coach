@@ -29,7 +29,7 @@ import { registerSSERoutes } from "./routes/sse.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
 import type { LLMProvider } from "./llm/types.js";
 import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
-import { config } from "./config.js";
+import { config, validateGuestSessionSecretForRuntime } from "./config.js";
 
 export interface AppServices {
   assetService: ReturnType<typeof createAssetService>;
@@ -82,6 +82,11 @@ export async function buildApp(opts: AppOptions) {
   // Fail fast if the runtime timezone contract is misconfigured.
   const { validateTimezone } = await import("./lib/time.js");
   validateTimezone(app.log);
+  validateGuestSessionSecretForRuntime({
+    guestSessionSecret: config.guestSessionSecret,
+    guestSessionCookieSecure: config.guestSessionCookieSecure,
+    nodeEnv: config.nodeEnv,
+  });
 
   const deviceService = createDeviceService(db);
   const targetGenerationService = createTargetGenerationService(llmProvider, app.log);
