@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import { clearGuestSession, establishGuestSession } from "./api.js";
+import {
+  isAuthoritativeMealEntryArray,
+  isDailySummaryDto,
+  isDailyTargetsDto,
+} from "./dto-guards.js";
 import type {
   ActiveScreen,
   DailyTargets,
@@ -141,7 +146,12 @@ export const useStore = create<AppState>((set, get) => ({
     })),
   closeSecondaryScreen: () => set({ secondaryScreen: null }),
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
-  setMeals: (meals) => set({ meals }),
+  setMeals: (meals) => {
+    if (!isAuthoritativeMealEntryArray(meals)) {
+      return;
+    }
+    set({ meals });
+  },
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
   redactChatReceiptIdentity: (mealId) =>
     set((state) => ({
@@ -263,6 +273,9 @@ export const useStore = create<AppState>((set, get) => ({
   // Writes only when `summary.date` equals local today. Mismatches fire the
   // registered rollover refresh handler without propagating errors to callers.
   setDailySummary: (summary) => {
+    if (!isDailySummaryDto(summary)) {
+      return;
+    }
     const activeDate = formatLocalDate(new Date());
     if (summary.date === activeDate) {
       set({ dailySummary: summary });
@@ -284,6 +297,9 @@ export const useStore = create<AppState>((set, get) => ({
     rolloverRefreshHandler = handler;
   },
   setDailyTargets: (dailyTargets) => {
+    if (!isDailyTargetsDto(dailyTargets)) {
+      return;
+    }
     localStorage.setItem("dailyTargets", JSON.stringify(dailyTargets));
     set({ dailyTargets });
   },
