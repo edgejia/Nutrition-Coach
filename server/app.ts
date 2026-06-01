@@ -92,7 +92,6 @@ export interface AppOptions {
 }
 
 export async function buildApp(opts: AppOptions) {
-  const db = createDb(opts.dbPath ?? config.dbPath);
   const llmProvider = opts.llmProvider;
   const clientDistDir = path.resolve(opts.clientDistDir ?? config.clientDistDir);
 
@@ -107,6 +106,7 @@ export async function buildApp(opts: AppOptions) {
     nodeEnv: config.nodeEnv,
   });
 
+  const db = createDb(opts.dbPath ?? config.dbPath);
   const deviceService = createDeviceService(db);
   const targetGenerationService = createTargetGenerationService(llmProvider, app.log);
   const foodLoggingService = createFoodLoggingService(db);

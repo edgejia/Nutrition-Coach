@@ -32,15 +32,15 @@ export function sanitizeRouteFallbackCatchField(value: string | undefined, limit
     return undefined;
   }
 
-  const text = value.slice(0, limit).trim();
-  if (!text || !SAFE_ROUTE_ERROR_TEXT.test(text)) {
+  const rawText = value.trim();
+  if (!rawText || !SAFE_ROUTE_ERROR_TEXT.test(rawText)) {
     return undefined;
   }
-  const lower = text.toLowerCase();
+  const lower = rawText.toLowerCase();
   if (UNSAFE_ROUTE_ERROR_TERMS.some((term) => lower.includes(term))) {
     return undefined;
   }
-  return text;
+  return rawText.slice(0, limit).trim();
 }
 
 export function sanitizeRouteFallbackCatchFields(params: {

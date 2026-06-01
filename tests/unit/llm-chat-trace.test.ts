@@ -321,6 +321,27 @@ describe("createLlmTraceRecorder", () => {
     }
   });
 
+  it("omits route fallback catch fields from trace facts when unsafe markers appear after truncation limits", () => {
+    const recorder = createLlmTraceRecorder();
+
+    recorder.recordRouteFallback({
+      transport: "json",
+      turnId: "t_safe_late_unsafe_catch",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      reason: "route_catch",
+      catchSite: "json_outer",
+      errorName: `${"SafeRouteError".repeat(7)} prompt`,
+      errorMessage: `${"Safe route error. ".repeat(11)} guest_session`,
+    });
+
+    const routeFallback = recorder.build({ scenario: "unit-route-fallback-late-unsafe-catch", status: "pass" })
+      .timeline.at(-1) as Record<string, unknown>;
+    assert.equal("errorName" in routeFallback, false);
+    assert.equal("errorMessage" in routeFallback, false);
+  });
+
   it("preserves safe route fallback catch fields in trace facts", () => {
     const recorder = createLlmTraceRecorder();
 

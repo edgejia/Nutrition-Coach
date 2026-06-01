@@ -332,6 +332,26 @@ describe("redacted observability event builders", () => {
     }
   });
 
+  it("omits direct route fallback catch fields when unsafe markers appear after truncation limits", () => {
+    const payload = buildChatRouteFallbackEvent({
+      source: "json",
+      turnId: "turn-direct-late-unsafe-route-catch",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      hadImage: true,
+      latencyMs: 5,
+      reason: "route_catch",
+      catchSite: "json_outer",
+      errorName: `${"SafeRouteError".repeat(7)} prompt`,
+      errorMessage: `${"Safe route error. ".repeat(11)} guest_session`,
+    });
+
+    assert.equal("errorName" in payload, false);
+    assert.equal("errorMessage" in payload, false);
+    assertLockedPayload(payload);
+  });
+
   it("preserves safe direct route fallback catch fields in the event builder", () => {
     const payload = buildChatRouteFallbackEvent({
       source: "sse",

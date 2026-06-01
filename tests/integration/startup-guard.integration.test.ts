@@ -3,12 +3,15 @@ process.env.TZ = "Asia/Taipei";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { DEFAULT_GUEST_SESSION_SECRET } from "../../server/config.js";
 
 const probeScript = [
   'const { buildApp } = await import("./server/app.ts");',
   'const { MockLLMProvider } = await import("./server/llm/mock.ts");',
-  'const app = await buildApp({ dbPath: ":memory:", llmProvider: new MockLLMProvider() });',
+  'const app = await buildApp({ dbPath: process.env.TEST_DB_PATH ?? ":memory:", llmProvider: new MockLLMProvider() });',
   'console.log("BOOT_OK");',
   "await app.close();",
 ].join("\n");
@@ -74,6 +77,18 @@ describe("startup guest-session security guard", () => {
       }),
       rejectedSecret,
     );
+  });
+
+  it("fails production boot on weak guest-session secret before file-backed schema validation", () => {
+    const dbPath = path.join(mkdtempSync(path.join(tmpdir(), "nc-weak-secret-")), "fresh.sqlite");
+    const result = runBootProbe({
+      ...baseEnv(),
+      NODE_ENV: "production",
+      TEST_DB_PATH: dbPath,
+    });
+
+    assertWeakSecretBootFailure(result);
+    assert.doesNotMatch(result.output, /Database schema missing/);
   });
 
   it("boots ordinary local test runtime with the development default and secure cookies off", () => {
