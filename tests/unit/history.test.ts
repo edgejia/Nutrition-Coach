@@ -4,6 +4,7 @@ import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createChatService } from "../../server/services/chat.js";
 import { loadHistory } from "../../server/orchestrator/history.js";
+import { chatMutationOutcomes } from "../../server/db/schema.js";
 
 describe("loadHistory", () => {
   let chatService: ReturnType<typeof createChatService>;
@@ -56,5 +57,62 @@ describe("loadHistory", () => {
     assert.doesNotMatch(allContent, /系統已完成餐點修改/);
     assert.doesNotMatch(allContent, /系統已完成餐點刪除/);
     assert.match(allContent, /系統已更新今日攝取摘要/);
+  });
+
+  it("D-13/D-19 renders compressed mutation facts from valid persisted outcome rows only", async () => {
+    const db = createDb(":memory:");
+    const deviceService = createDeviceService(db);
+    const chatSvc = createChatService(db);
+    const did = (await deviceService.createDevice("fat_loss")).deviceId;
+
+    await chatSvc.saveMessage(did, "user", "幫我記一下晚餐");
+    const validAssistant = await chatSvc.saveMessage(did, "assistant", "已處理。");
+    const invalidAssistant = await chatSvc.saveMessage(did, "assistant", "也處理了。");
+
+    await db.insert(chatMutationOutcomes).values({
+      id: "structured-valid-log",
+      deviceId: did,
+      assistantMessageId: validAssistant.id,
+      toolMessageId: null,
+      action: "log_food",
+      affectedDate: "2026-03-25",
+      foodName: "雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      goalCalories: null,
+      goalProtein: null,
+      goalCarbs: null,
+      goalFat: null,
+      updatedGoalFields: null,
+      createdAt: new Date().toISOString(),
+    });
+    await db.insert(chatMutationOutcomes).values({
+      id: "structured-invalid-log",
+      deviceId: did,
+      assistantMessageId: invalidAssistant.id,
+      toolMessageId: null,
+      action: "log_food",
+      affectedDate: "2026-03-25",
+      foodName: null,
+      calories: null,
+      protein: null,
+      carbs: null,
+      fat: null,
+      goalCalories: null,
+      goalProtein: null,
+      goalCarbs: null,
+      goalFat: null,
+      updatedGoalFields: null,
+      createdAt: new Date().toISOString(),
+    });
+
+    const history = await loadHistory(chatSvc, did, 10);
+    const allContent = history.map((message) => String(message.content)).join("\n");
+
+    assert.match(allContent, /系統已記錄餐點：2026-03-25 雞腿便當/);
+    assert.match(allContent, /640 kcal/);
+    assert.equal((allContent.match(/系統已記錄餐點/g) ?? []).length, 1);
   });
 });
