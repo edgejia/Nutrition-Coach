@@ -9,6 +9,92 @@ import type { FastifyInstance } from "fastify";
 import type { AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 
+const VALID_MEAL_PERIODS = new Set(["breakfast", "lunch", "dinner", "late_night"]);
+
+function assertRecord(value: unknown): asserts value is Record<string, unknown> {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+}
+
+function assertFiniteNumber(value: unknown, field: string): asserts value is number {
+  assert.equal(typeof value, "number", `expected ${field} to be a number`);
+  assert.ok(Number.isFinite(value), `expected ${field} to be finite`);
+}
+
+function assertNullableString(value: unknown, field: string) {
+  assert.ok(value === null || typeof value === "string", `expected ${field} to be string or null`);
+}
+
+function assertPublicDailySummaryDto(value: unknown) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), [
+    "date",
+    "mealCount",
+    "totalCalories",
+    "totalCarbs",
+    "totalFat",
+    "totalProtein",
+  ]);
+  assert.equal(typeof value.date, "string");
+  assertFiniteNumber(value.totalCalories, "summary.totalCalories");
+  assertFiniteNumber(value.totalProtein, "summary.totalProtein");
+  assertFiniteNumber(value.totalCarbs, "summary.totalCarbs");
+  assertFiniteNumber(value.totalFat, "summary.totalFat");
+  assertFiniteNumber(value.mealCount, "summary.mealCount");
+}
+
+function assertPublicDaySnapshotMealDto(value: unknown) {
+  assertRecord(value);
+  const allowedKeys = new Set([
+    "id",
+    "mealRevisionId",
+    "foodName",
+    "itemCount",
+    "calories",
+    "protein",
+    "carbs",
+    "fat",
+    "imageAssetId",
+    "imageUrl",
+    "loggedAt",
+    "mealPeriod",
+  ]);
+  for (const key of Object.keys(value)) {
+    assert.ok(allowedKeys.has(key), `expected day snapshot meal to exclude ${key}`);
+  }
+  assert.equal(typeof value.id, "string");
+  assert.equal(typeof value.mealRevisionId, "string");
+  assert.equal(typeof value.foodName, "string");
+  assert.ok(typeof value.foodName === "string" && value.foodName.length > 0);
+  assertFiniteNumber(value.calories, "meal.calories");
+  assertFiniteNumber(value.protein, "meal.protein");
+  assertFiniteNumber(value.carbs, "meal.carbs");
+  assertFiniteNumber(value.fat, "meal.fat");
+  assertFiniteNumber(value.itemCount, "meal.itemCount");
+  assertNullableString(value.imageAssetId, "meal.imageAssetId");
+  assertNullableString(value.imageUrl, "meal.imageUrl");
+  assert.equal(typeof value.loggedAt, "string");
+  if ("mealPeriod" in value) {
+    assert.equal(typeof value.mealPeriod, "string");
+    assert.ok(
+      typeof value.mealPeriod === "string" && VALID_MEAL_PERIODS.has(value.mealPeriod),
+      `expected valid mealPeriod, got ${String(value.mealPeriod)}`,
+    );
+  }
+}
+
+function assertPublicDaySnapshotDto(value: unknown) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["date", "meals", "summary"]);
+  assert.equal(typeof value.date, "string");
+  assertPublicDailySummaryDto(value.summary);
+  assert.ok(Array.isArray(value.meals), "expected meals array");
+  for (const meal of value.meals) {
+    assertPublicDaySnapshotMealDto(meal);
+  }
+}
+
 describe("Day snapshot API", () => {
   let app: FastifyInstance;
   let deviceId: string;
@@ -85,6 +171,7 @@ describe("Day snapshot API", () => {
     });
 
     assert.equal(res.statusCode, 200);
+    assertPublicDaySnapshotDto(res.json());
     const body = res.json() as {
       date: string;
       summary: {
@@ -148,7 +235,10 @@ describe("Day snapshot API", () => {
         loggedAt: "2026-03-25T04:00:00.000Z",
       },
     ]);
-    assert.doesNotMatch(JSON.stringify(body), /currentRevisionId/);
+    const serialized = JSON.stringify(body);
+    assert.doesNotMatch(serialized, /currentRevisionId/);
+    assert.doesNotMatch(serialized, /deviceId/);
+    assert.doesNotMatch(serialized, /deviceId=/);
   });
 
   it("GET /api/day-snapshot projects explicit mealPeriod without inferring legacy rows", async () => {
@@ -180,6 +270,7 @@ describe("Day snapshot API", () => {
 
     assert.equal(res.statusCode, 200);
     const body = res.json() as { meals: Array<{ id: string; mealPeriod?: unknown }> };
+    assertPublicDaySnapshotDto(body);
     const explicitMeal = body.meals.find((meal) => meal.id === explicitLunch.id);
     assert.ok(explicitMeal, "expected day snapshot to include explicit lunch meal");
     assert.equal(explicitMeal.mealPeriod, "lunch");
@@ -187,6 +278,10 @@ describe("Day snapshot API", () => {
     const legacyMeal = body.meals.find((meal) => meal.id === legacyBreakfastHour.id);
     assert.ok(legacyMeal, "expected day snapshot to include legacy breakfast-hour meal");
     assert.equal(Object.prototype.hasOwnProperty.call(legacyMeal, "mealPeriod"), false);
+    const serialized = JSON.stringify(body);
+    assert.doesNotMatch(serialized, /currentRevisionId/);
+    assert.doesNotMatch(serialized, /deviceId/);
+    assert.doesNotMatch(serialized, /deviceId=/);
   });
 
   it("GET /api/day-snapshot rejects missing and malformed dates", async () => {

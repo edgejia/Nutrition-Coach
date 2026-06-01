@@ -79,6 +79,32 @@ function assertLogEventsExclude(events: readonly Record<string, unknown>[], forb
   }
 }
 
+function assertRecord(value: unknown): asserts value is Record<string, unknown> {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+}
+
+function assertFiniteNumber(value: unknown, field: string): asserts value is number {
+  assert.equal(typeof value, "number", `expected ${field} to be a number`);
+  assert.ok(Number.isFinite(value), `expected ${field} to be finite`);
+}
+
+function assertDailyTargetsDto(value: unknown) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["calories", "carbs", "fat", "protein"]);
+  assertFiniteNumber(value.calories, "dailyTargets.calories");
+  assertFiniteNumber(value.protein, "dailyTargets.protein");
+  assertFiniteNumber(value.carbs, "dailyTargets.carbs");
+  assertFiniteNumber(value.fat, "dailyTargets.fat");
+}
+
+function assertGoalsResponseDto(value: unknown) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["dailyTargets"]);
+  assertDailyTargetsDto(value.dailyTargets);
+}
+
 function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
   const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg"]);
   const allowed = new Set(allowedKeys);
@@ -149,7 +175,11 @@ describe("Device API", () => {
       payload: { protein: 150 },
     });
     assert.equal(res.statusCode, 200);
-    assert.equal(res.json().dailyTargets.protein, 150);
+    const body = res.json() as unknown;
+    assertGoalsResponseDto(body);
+    assertRecord(body);
+    assertRecord(body.dailyTargets);
+    assert.equal(body.dailyTargets.protein, 150);
   });
 
   it("PATCH /api/device/goals updates targets through the same guest-session contract", async () => {
@@ -162,7 +192,48 @@ describe("Device API", () => {
       payload: { protein: 150 },
     });
     assert.equal(res.statusCode, 200);
-    assert.equal(res.json().dailyTargets.protein, 150);
+    const body = res.json() as unknown;
+    assertGoalsResponseDto(body);
+    assertRecord(body);
+    assertRecord(body.dailyTargets);
+    assert.equal(body.dailyTargets.protein, 150);
+  });
+
+  it("PUT /api/device/goals projects only public dailyTargets", async () => {
+    const create = await createGuestDevice();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: create.cookieHeader },
+      payload: {
+        protein: 150,
+        requestEcho: "RAW_GOAL_REQUEST_SENTINEL",
+        telemetry: { providerReason: "RAW_TELEMETRY_SENTINEL" },
+        xDeviceId: "RAW_DEVICE_SENTINEL",
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as unknown;
+    assertGoalsResponseDto(body);
+    const serialized = JSON.stringify(body);
+    for (const forbidden of [
+      "deviceId",
+      "guest_session",
+      "guest_session_resume",
+      "requestEcho",
+      "RAW_GOAL_REQUEST_SENTINEL",
+      "telemetry",
+      "RAW_TELEMETRY_SENTINEL",
+      "RAW_DEVICE_SENTINEL",
+      "providerReason",
+      "targetReason",
+      "metadataContext",
+      "updatedFields",
+    ]) {
+      assert.ok(!serialized.includes(forbidden), `expected goals response to exclude ${forbidden}`);
+    }
   });
 
   it("PUT /api/device/goals returns 401 without a guest session", async () => {
