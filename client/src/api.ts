@@ -449,7 +449,8 @@ function isAuthoritativeMealCoreDto(value: unknown): value is MealEntry {
     isDtoRecord(value) &&
     typeof value.id === "string" &&
     value.id.trim().length > 0 &&
-    (value.mealRevisionId === undefined || typeof value.mealRevisionId === "string") &&
+    typeof value.mealRevisionId === "string" &&
+    value.mealRevisionId.trim().length > 0 &&
     typeof value.foodName === "string" &&
     value.foodName.trim().length > 0 &&
     isDtoFiniteNumber(value.calories) &&
@@ -814,7 +815,7 @@ export async function sendMessageStream(
           sawTerminalEvent = true;
           callbacks.onStopped?.({
             stopped: true,
-            ...(typeof parsed.turnId === "string" ? { turnId: parsed.turnId } : {}),
+            ...(getValidTurnId(parsed.turnId) ? { turnId: getValidTurnId(parsed.turnId) } : {}),
             tokensStreamed: typeof parsed.tokensStreamed === "number" && Number.isFinite(parsed.tokensStreamed)
               ? parsed.tokensStreamed
               : 0,
@@ -1010,13 +1011,20 @@ export function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
   const foodName = getHistoryMealTitle(meal);
   const nutrition = getHistoryMealNutrition(meal);
 
-  if (!foodName || !nutrition || !isDtoFiniteNumber(meal.itemCount) || meal.itemCount <= 0) {
+  if (
+    typeof meal.mealRevisionId !== "string" ||
+    meal.mealRevisionId.trim().length === 0 ||
+    !foodName ||
+    !nutrition ||
+    !isDtoFiniteNumber(meal.itemCount) ||
+    meal.itemCount <= 0
+  ) {
     throw new Error("Invalid history meal payload");
   }
 
   return {
     id: meal.id,
-    ...(typeof meal.mealRevisionId === "string" ? { mealRevisionId: meal.mealRevisionId } : {}),
+    mealRevisionId: meal.mealRevisionId,
     foodName,
     calories: nutrition.calories,
     protein: nutrition.protein,

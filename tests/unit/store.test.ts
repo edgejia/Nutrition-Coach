@@ -24,6 +24,7 @@ async function loadFreshStore(suffix: string) {
 const sampleMeals = [
   {
     id: "meal-1",
+    mealRevisionId: "meal-1:r1",
     foodName: "雞胸肉便當",
     calories: 520,
     protein: 42,
@@ -34,6 +35,7 @@ const sampleMeals = [
   },
   {
     id: "meal-2",
+    mealRevisionId: "meal-2:r1",
     foodName: "優格",
     calories: 180,
     protein: 12,
@@ -580,6 +582,22 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(message.turnId, turnId);
     assert.equal(messageRecord.referenceCode, undefined);
     assert.equal(messageRecord.turnReference, undefined);
+  });
+
+  it("commitStoppedProvisionalBubble retains supplied full turnId for stopped messages", () => {
+    const turnId = "b2c3d4e5-1111-4222-8333-0123456789ab";
+    useStore.getState().setProvisionalBubble({
+      id: "msg-stopped",
+      statusLabel: "",
+      content: "部分回覆",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitStoppedProvisionalBubble({ didLogMeal: false, turnId });
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message.status, "stopped");
+    assert.equal(message.turnId, turnId);
   });
 
   it("commitProvisionalBubble does not synthesize turnId or reference fields for normal completion", () => {

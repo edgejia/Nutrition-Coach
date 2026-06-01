@@ -531,7 +531,7 @@ export function ChatPanel() {
             setSending(false);
             clearActiveStreamAfterTerminal();
           },
-          onStopped: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets }) => {
+          onStopped: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets, turnId }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -550,6 +550,7 @@ export function ChatPanel() {
               dailySummary,
               dailyTargets,
               loggedMeal,
+              ...(turnId ? { turnId } : {}),
             });
             setSending(false);
             clearActiveStreamAfterTerminal();

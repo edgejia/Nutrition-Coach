@@ -372,6 +372,7 @@ export const useStore = create<AppState>((set, get) => ({
         content: getStoppedMessageContent(state.provisionalBubble.content),
         createdAt: new Date().toISOString(),
         status: "stopped",
+        ...(extra.turnId ? { turnId: extra.turnId } : {}),
         didLogMeal: extra.didLogMeal ?? Boolean(extra.loggedMeal),
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
       };

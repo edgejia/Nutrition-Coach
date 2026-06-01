@@ -99,7 +99,8 @@ export function isAuthoritativeMealEntryDto(value: unknown): value is MealEntry 
   return (
     typeof value.id === "string" &&
     value.id.trim().length > 0 &&
-    (value.mealRevisionId === undefined || typeof value.mealRevisionId === "string") &&
+    typeof value.mealRevisionId === "string" &&
+    value.mealRevisionId.trim().length > 0 &&
     typeof value.foodName === "string" &&
     value.foodName.trim().length > 0 &&
     isFiniteNumber(value.calories) &&

@@ -355,6 +355,7 @@ describe("chat stream contract", () => {
     });
 
     useStore.getState().commitStoppedProvisionalBubble({
+      turnId: "turn-stopped-1",
       loggedMeal: {
         foodName: "雞腿便當",
         calories: 720,
@@ -380,6 +381,7 @@ describe("chat stream contract", () => {
 
     const message = useStore.getState().messages[0];
     assert.equal(message?.status, "stopped");
+    assert.equal(message?.turnId, "turn-stopped-1");
     assert.equal(message?.content, "已記錄\n\n已停止");
     assert.equal(message?.loggedMeal?.foodName, "雞腿便當");
     assert.equal(useStore.getState().dailySummary?.totalCalories, 720);
@@ -429,10 +431,12 @@ describe("chat stream contract", () => {
     }
 
     assert.match(chatPanel, /onDone: \(\{[^}]*turnId[^}]*\}\) =>/);
+    assert.match(chatPanel, /onStopped: \(\{[^}]*turnId[^}]*\}\) =>/);
     assert.match(chatPanel, /const content = useStore\.getState\(\)\.provisionalBubble\?\.content \?\? ""/);
     assert.match(chatPanel, /const isFallbackReply = isFallbackReplyContent\(content\)/);
     assert.match(chatPanel, /const fallbackTurnId = turnId \?\? activeTurnIdRef\.current/);
     assert.match(chatPanel, /\.\.\.\(isFallbackReply \? \{ status: "error" as const \} : \{\}\)/);
     assert.match(chatPanel, /\.\.\.\(isFallbackReply && fallbackTurnId \? \{ turnId: fallbackTurnId \} : \{\}\)/);
+    assert.match(chatPanel, /\.\.\.\(turnId \? \{ turnId \} : \{\}\)/);
   });
 });

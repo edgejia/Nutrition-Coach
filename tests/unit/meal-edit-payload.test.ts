@@ -13,6 +13,7 @@ describe("meal edit payload builders", () => {
   it("normalizeHistoryMeal preserves valid grouped item detail from history DTOs", () => {
     const meal = normalizeHistoryMeal({
       id: "meal-items-history",
+      mealRevisionId: "meal-items-history:r1",
       loggedAt: "2026-05-06T12:00:00.000+08:00",
       display: { title: "雞腿、白飯、青菜" },
       nutrition: { calories: 720, protein: 42, carbs: 88, fat: 24 },

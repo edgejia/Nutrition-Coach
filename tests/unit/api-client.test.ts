@@ -530,6 +530,7 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "午餐便當",
           calories: 520,
           protein: 42,
@@ -667,6 +668,7 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "午餐便當",
           calories: 520,
           protein: 32,
@@ -821,7 +823,19 @@ describe("API Client", () => {
     mockFetch(200, { meals: [{ ...validMeal, foodName: "" }] });
     await assert.rejects(() => api.getMeals(), { message: "Invalid meals payload" });
 
+    mockFetch(200, { meals: [{ ...validMeal, mealRevisionId: undefined }] });
+    await assert.rejects(() => api.getMeals(), { message: "Invalid meals payload" });
+
     mockFetch(200, { date: "2026-04-29", summary: { ...validDailySummary, mealCount: "1" }, meals: [] });
+    await assert.rejects(() => api.getDaySnapshot("2026-04-29"), {
+      message: "Invalid day snapshot payload",
+    });
+
+    mockFetch(200, {
+      date: "2026-04-29",
+      summary: validDailySummary,
+      meals: [{ ...validMeal, mealRevisionId: undefined }],
+    });
     await assert.rejects(() => api.getDaySnapshot("2026-04-29"), {
       message: "Invalid day snapshot payload",
     });
