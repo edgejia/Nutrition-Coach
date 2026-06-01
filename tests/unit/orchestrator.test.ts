@@ -20,6 +20,8 @@ import type {
   LLMProvider,
 } from "../../server/llm/types.js";
 import { createOrchestrator, guardNoMutationLoggingClaim } from "../../server/orchestrator/index.js";
+import { mutationOutcomeFactFromEffects } from "../../server/orchestrator/mutation-effects.js";
+import type { MutationEffects } from "../../server/orchestrator/mutation-effects.js";
 import { currentAppDate, formatLocalDate } from "../../server/lib/time.js";
 import {
   renderGoalAuthorityFailureCopy,
@@ -47,7 +49,7 @@ function getMutationOutcomeFact(result: unknown): Record<string, unknown> | unde
 }
 
 function assertNoForbiddenOutcomeFactSurface(
-  fact: Record<string, unknown>,
+  fact: object,
   forbiddenValues: string[] = [],
 ) {
   for (const forbiddenKey of [
@@ -83,6 +85,146 @@ function assertMutationOutcomeFact(
   assert.deepEqual(fact, expected, "missing mutationOutcomeFact propagation");
   assertNoForbiddenOutcomeFactSurface(fact, forbiddenValues);
 }
+
+describe("mutationOutcomeFactFromEffects", () => {
+  const committedTargets = {
+    calories: 1800,
+    protein: 130,
+    carbs: 190,
+    fat: 55,
+  };
+  const summaryOutcome = { status: "unavailable", reason: "recompute_failed" } as const;
+
+  it("maps committed log effects to safe log_food facts", () => {
+    const effects: MutationEffects = {
+      kind: "log",
+      affectedDate: "2026-03-25",
+      committedTargets,
+      summaryOutcome,
+      meal: {
+        mealId: "meal-internal",
+        mealRevisionId: "revision-internal",
+        dateKey: "2026-03-25",
+        loggedAt: "2026-03-25T04:30:00.000Z",
+        foodName: "牛肉麵",
+        calories: 520,
+        protein: 24,
+        carbs: 68,
+        fat: 16,
+        itemCount: 1,
+      },
+    };
+
+    const fact = mutationOutcomeFactFromEffects(effects);
+
+    assert.deepEqual(fact, {
+      action: "log_food",
+      affectedDate: "2026-03-25",
+      foodName: "牛肉麵",
+      calories: 520,
+      protein: 24,
+      carbs: 68,
+      fat: 16,
+    });
+    assertNoForbiddenOutcomeFactSurface(fact, [
+      "meal-internal",
+      "revision-internal",
+      "recompute_failed",
+    ]);
+  });
+
+  it("maps committed update effects to safe update_meal facts", () => {
+    const effects: MutationEffects = {
+      kind: "update",
+      affectedDate: "2026-03-25",
+      committedTargets,
+      summaryOutcome,
+      meal: {
+        mealId: "updated-meal-internal",
+        mealRevisionId: "updated-revision-internal",
+        dateKey: "2026-03-25",
+        loggedAt: "2026-03-25T04:30:00.000Z",
+        foodName: "半份雞腿便當",
+        calories: 360,
+        protein: 20,
+        carbs: 45,
+        fat: 10,
+        itemCount: 1,
+      },
+    };
+
+    const fact = mutationOutcomeFactFromEffects(effects);
+
+    assert.deepEqual(fact, {
+      action: "update_meal",
+      affectedDate: "2026-03-25",
+      foodName: "半份雞腿便當",
+      calories: 360,
+      protein: 20,
+      carbs: 45,
+      fat: 10,
+    });
+    assertNoForbiddenOutcomeFactSurface(fact, [
+      "updated-meal-internal",
+      "updated-revision-internal",
+      "recompute_failed",
+    ]);
+  });
+
+  it("maps committed delete effects from deletedMeal, not receipt copy", () => {
+    const effects: MutationEffects = {
+      kind: "delete",
+      affectedDate: "2026-03-25",
+      committedTargets,
+      summaryOutcome,
+      deletedMeal: {
+        mealId: "deleted-meal-internal",
+        dateKey: "2026-03-25",
+        loggedAt: "2026-03-25T04:30:00.000Z",
+        foodName: "雞腿便當",
+        calories: 620,
+        protein: 24,
+      },
+    };
+
+    const fact = mutationOutcomeFactFromEffects(effects);
+
+    assert.deepEqual(fact, {
+      action: "delete_meal",
+      affectedDate: "2026-03-25",
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+    });
+    assertNoForbiddenOutcomeFactSurface(fact, [
+      "deleted-meal-internal",
+      "已刪除雞腿便當",
+      "recompute_failed",
+    ]);
+  });
+
+  it("maps committed goal effects to changed goal values only", () => {
+    const effects: MutationEffects = {
+      kind: "goals",
+      affectedDate: "2026-03-25",
+      committedTargets,
+      targets: committedTargets,
+      updatedFields: ["calories", "protein"],
+    };
+
+    const fact = mutationOutcomeFactFromEffects(effects);
+
+    assert.deepEqual(fact, {
+      action: "update_goals",
+      affectedDate: "2026-03-25",
+      updatedGoals: [
+        { label: "卡路里", value: 1800, unit: "kcal" },
+        { label: "蛋白質", value: 130, unit: "g" },
+      ],
+    });
+    assertNoForbiddenOutcomeFactSurface(fact, ["carbs", "fat"]);
+  });
+});
 
 function codePointLength(value: string) {
   return [...value].length;
