@@ -1401,6 +1401,58 @@ describe("sendMessageStream", () => {
     assert.equal(affectedDate, "2026-03-25");
   });
 
+  it("dispatches valid deletedMealId from done and stopped events and omits malformed values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":false,"didMutateMeal":true,"deletedMealId":"meal-deleted"}\n\n',
+    ]);
+    let doneDeletedMealId: string | undefined;
+
+    await api.sendMessageStream("delete meal", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        doneDeletedMealId = payload.deletedMealId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(doneDeletedMealId, "meal-deleted");
+
+    mockStreamFetch(200, [
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":2,"didMutateMeal":true,"deletedMealId":"meal-stopped"}\n\n',
+    ]);
+    let stoppedDeletedMealId: string | undefined;
+
+    await api.sendMessageStream("delete meal", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedDeletedMealId = payload.deletedMealId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(stoppedDeletedMealId, "meal-stopped");
+
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":false,"didMutateMeal":true,"deletedMealId":123}\n\n',
+    ]);
+    doneDeletedMealId = "not-reset";
+
+    await api.sendMessageStream("delete meal", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        doneDeletedMealId = payload.deletedMealId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(doneDeletedMealId, undefined);
+  });
+
   it("dispatches done loggedMeal image urls through withAuthorizedAssetUrl", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [

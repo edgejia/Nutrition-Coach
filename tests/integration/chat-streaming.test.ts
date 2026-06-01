@@ -2264,6 +2264,7 @@ describe("chat-streaming", () => {
       didLogMeal: boolean;
       didMutateMeal?: boolean;
       affectedDate?: string;
+      deletedMealId?: string;
       loggedMeal?: unknown;
       dailySummary?: unknown;
       summaryOutcome?: SummaryOutcome;
@@ -2271,6 +2272,7 @@ describe("chat-streaming", () => {
 
     assert.equal(donePayload.didLogMeal, false);
     assert.equal(donePayload.didMutateMeal, true);
+    assert.equal(donePayload.deletedMealId, mealId);
     assert.match(donePayload.affectedDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(donePayload.loggedMeal, undefined);
     assertUnavailableSummaryOutcome(donePayload.summaryOutcome);
@@ -2386,10 +2388,12 @@ describe("chat-streaming", () => {
     const donePayload = JSON.parse(doneDataMatch[1]) as {
       didLogMeal: boolean;
       didMutateMeal?: boolean;
+      deletedMealId?: string;
       loggedMeal?: unknown;
     };
     assert.equal(donePayload.didLogMeal, false);
     assert.equal(donePayload.didMutateMeal, true);
+    assert.equal(donePayload.deletedMealId, mealId);
     assert.equal(donePayload.loggedMeal, undefined);
   });
 
@@ -2437,10 +2441,12 @@ describe("chat-streaming", () => {
       reply: string;
       didLogMeal: boolean;
       didMutateMeal?: boolean;
+      deletedMealId?: string;
       loggedMeal?: unknown;
     };
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
+    assert.equal(body.deletedMealId, mealId);
     assert.equal(body.loggedMeal, undefined);
     assert.match(body.reply, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(body.reply, /方式1|方式2|無法辨識/);

@@ -561,6 +561,87 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(useStore.getState().messages[0].didLogMeal, true);
   });
 
+  it("commitProvisionalBubble redacts prior matching receipt identity when a delete commits", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-logged-deleted",
+        role: "assistant",
+        content: "已幫你記錄雞腿便當。",
+        createdAt: "2026-04-30T04:00:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-delete",
+          mealRevisionId: "meal-delete:r1",
+          dateKey: "2026-04-30",
+          loggedAt: "2026-04-30T04:00:00.000Z",
+          foodName: "雞腿便當",
+          calories: 640,
+          protein: 30,
+          carbs: 78,
+          fat: 20,
+          itemCount: 1,
+          imageAssetId: "asset-lunch",
+          imageUrl: "/api/assets/asset-lunch",
+        },
+      },
+      {
+        id: "assistant-logged-kept",
+        role: "assistant",
+        content: "已幫你記錄鮭魚飯糰。",
+        createdAt: "2026-04-30T08:00:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-keep",
+          mealRevisionId: "meal-keep:r1",
+          dateKey: "2026-04-30",
+          loggedAt: "2026-04-30T08:00:00.000Z",
+          foodName: "鮭魚飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+          itemCount: 1,
+          imageAssetId: "asset-salmon",
+          imageUrl: "/api/assets/asset-salmon",
+        },
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "assistant-delete-confirmation",
+      statusLabel: "",
+      content: "已刪除雞腿便當，已從當日紀錄移除。",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: true,
+      deletedMealId: "meal-delete",
+    });
+
+    const [redactedMessage, untouchedMessage, deleteConfirmation] = useStore.getState().messages;
+    assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.mealRevisionId, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(redactedMessage?.loggedMeal?.calories, 640);
+    assert.equal(redactedMessage?.loggedMeal?.protein, 30);
+    assert.equal(redactedMessage?.loggedMeal?.carbs, 78);
+    assert.equal(redactedMessage?.loggedMeal?.fat, 20);
+    assert.equal(redactedMessage?.loggedMeal?.itemCount, 1);
+    assert.equal(redactedMessage?.loggedMeal?.imageAssetId, "asset-lunch");
+    assert.equal(redactedMessage?.loggedMeal?.imageUrl, "/api/assets/asset-lunch");
+    assert.equal(buildReceiptMealEditPayload(redactedMessage?.loggedMeal), null);
+
+    assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-keep");
+    assert.equal(untouchedMessage?.loggedMeal?.mealRevisionId, "meal-keep:r1");
+    assert.equal(untouchedMessage?.loggedMeal?.dateKey, "2026-04-30");
+    assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-keep");
+
+    assert.equal(deleteConfirmation?.id, "assistant-delete-confirmation");
+    assert.equal(deleteConfirmation?.loggedMeal, undefined);
+    assert.equal(deleteConfirmation?.content, "已刪除雞腿便當，已從當日紀錄移除。");
+  });
+
   it("commitProvisionalBubble retains supplied full turnId for finalized error messages", () => {
     const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";
     useStore.getState().setProvisionalBubble({
