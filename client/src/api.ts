@@ -782,7 +782,10 @@ export async function sendMessageStream(
       }
 
       try {
-        const parsed = JSON.parse(data) as Record<string, unknown>;
+        const parsed = JSON.parse(data) as unknown;
+        if (!isRecord(parsed)) {
+          continue;
+        }
 
         if (eventType === "status") {
           maybeEmitTurnStart(parsed.turnId);

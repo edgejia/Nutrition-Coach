@@ -1,4 +1,4 @@
-import type { LoggedMealReceipt, MealEditPayload, MealEntry, MealItemDetail } from "./types.js";
+import type { LoggedMealReceipt, MealEditPayload, MealEntry, MealItemDetail, MealPeriod } from "./types.js";
 
 function normalizeItemCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
@@ -6,6 +6,14 @@ function normalizeItemCount(value: number | undefined): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isValidMealPeriod(value: unknown): value is MealPeriod {
+  return value === "breakfast" || value === "lunch" || value === "dinner" || value === "late_night";
 }
 
 function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
@@ -62,7 +70,27 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
     throw new Error("MEAL_REVISION_REQUIRED");
   }
 
+  if (
+    typeof meal.id !== "string" ||
+    meal.id.trim().length === 0 ||
+    typeof meal.foodName !== "string" ||
+    meal.foodName.trim().length === 0 ||
+    !isFiniteNumber(meal.calories) ||
+    !isFiniteNumber(meal.protein) ||
+    !isFiniteNumber(meal.carbs) ||
+    !isFiniteNumber(meal.fat) ||
+    !isFiniteNumber(meal.itemCount) ||
+    meal.itemCount <= 0 ||
+    typeof meal.loggedAt !== "string" ||
+    meal.loggedAt.trim().length === 0
+  ) {
+    throw new Error("MEAL_AUTHORITY_REQUIRED");
+  }
+
   const items = normalizeMealItems((meal as { items?: unknown }).items);
+  const mealPeriod = isValidMealPeriod((meal as { mealPeriod?: unknown }).mealPeriod)
+    ? meal.mealPeriod
+    : undefined;
 
   return {
     mealId: meal.id,
@@ -78,7 +106,7 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
     imageAssetId: meal.imageAssetId ?? null,
     imageUrl: meal.imageUrl ?? null,
     loggedAt: meal.loggedAt,
-    ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
+    ...(mealPeriod ? { mealPeriod } : {}),
   };
 }
 
