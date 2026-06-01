@@ -1039,7 +1039,7 @@ async function handleOrchestratorSSE(
       streamDidLogMeal = streamResult.didLogMeal;
       streamDailySummary = streamResult.dailySummary;
       streamReceiptPersistence = streamResult.receiptPersistence;
-      const canProjectStreamReceipt = streamReceiptPersistence !== "failed_closed";
+      const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
       recorder?.recordFinalReply({
         source: streamResult.finalReplySource,
         shape: streamResult.finalReplyShape,
@@ -1135,7 +1135,7 @@ async function handleOrchestratorSSE(
       );
       const sanitizedFallback = finalized.sanitized;
       streamReceiptPersistence = finalized.receiptPersistence;
-      const canProjectStreamReceipt = streamReceiptPersistence !== "failed_closed";
+      const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
         turnId: stopControl.turnId,
@@ -1204,14 +1204,23 @@ async function handleOrchestratorSSE(
     } catch (persistError) {
       catchSite = "sse_persist";
       sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(persistError);
+      if (streamReceiptIdentity || streamMutationOutcomeFact) {
+        streamReceiptPersistence = "failed_closed";
+      }
+      const closedFallback = streamDidLogMeal
+        ? PARTIAL_SUCCESS_FALLBACK
+        : streamDidMutateMeal
+          ? PARTIAL_MUTATION_FALLBACK
+          : UNIFIED_FALLBACK;
       // If history persistence also fails, still close the stream with done.
-      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: fallback })}\n\n`);
+      stream.write(`event: chunk\ndata: ${JSON.stringify({ token: closedFallback })}\n\n`);
     }
+    const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
     const doneData = {
       turnId: stopControl.turnId,
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
-      ...(streamReceiptPersistence !== "failed_closed" && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
+      ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
       ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
@@ -1473,7 +1482,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           );
           const sanitized = finalized.sanitized;
           jsonReceiptPersistence = finalized.receiptPersistence;
-          const canProjectJsonReceipt = jsonReceiptPersistence !== "failed_closed";
+          const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
           traceRecorder?.recordFinalReply({
             source: hallucinationDetected ? "fallback" : composedSummaryHistory ? "renderer" : "model",
             shape: sanitized.trim() ? (hallucinationDetected ? "fallback_text" : "streamed_text") : "empty_or_missing",
@@ -1537,7 +1546,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         );
         const sanitizedJson = finalized.sanitized;
         jsonReceiptPersistence = finalized.receiptPersistence;
-        const canProjectJsonReceipt = jsonReceiptPersistence !== "failed_closed";
+        const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
         traceRecorder?.recordFinalReply({
           source: result.finalReplySource ?? "model",
           shape: result.finalReplyShape ?? "empty_or_missing",
@@ -1622,7 +1631,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           reply: sanitizedJson,
           didLogMeal: jsonDidLogMeal,
           ...(jsonDidMutateMeal ? { didMutateMeal: true } : {}),
-          ...(jsonReceiptPersistence !== "failed_closed" && jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
+          ...(jsonReceiptPersistence === "persisted" && jsonLoggedMealReceipt ? { loggedMeal: jsonLoggedMealReceipt } : {}),
           ...(jsonDailySummary ? { dailySummary: jsonDailySummary } : {}),
           ...(jsonSummaryOutcome ? { summaryOutcome: jsonSummaryOutcome } : {}),
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),

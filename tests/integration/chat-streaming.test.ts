@@ -3676,19 +3676,17 @@ describe("chat-streaming", () => {
   it("POST /api/chat SSE persistence catch omits receipt identity after committed log_food", async () => {
     assert.ok(services, "expected app services");
     const chatService = services.chatService;
-    const hasAtomicHelper = installAtomicReceiptPersistenceFailure(chatService);
+    installAtomicReceiptPersistenceFailure(chatService);
     const originalSaveMessage = chatService.saveMessage.bind(chatService);
-    if (!hasAtomicHelper) {
-      chatService.saveMessage = async (
-        ...args: Parameters<typeof chatService.saveMessage>
-      ) => {
-        const [, role] = args;
-        if (role === "assistant") {
-          throw new Error("SseReceiptAssistantPersistFailure");
-        }
-        return originalSaveMessage(...args);
-      };
-    }
+    chatService.saveMessage = async (
+      ...args: Parameters<typeof chatService.saveMessage>
+    ) => {
+      const [, role] = args;
+      if (role === "assistant") {
+        throw new Error("SseReceiptAssistantPersistFailure");
+      }
+      return originalSaveMessage(...args);
+    };
 
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
     mockLLM.queueChatStream(["已幫你記錄雞腿便當！這段不應曝光。"]);
@@ -3716,6 +3714,9 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didLogMeal, true);
       assert.deepEqual(await readdir(uploadsDir).catch(() => []), [], "staged uploads must be cleaned after receipt persistence failure");
       assertNoReceiptIdentityProjection(donePayload, "SSE persistence catch atomic failure payload");
+
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(fallbackEvents.at(-1)?.catchSite, "sse_persist");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
