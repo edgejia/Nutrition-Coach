@@ -1,4 +1,5 @@
 import type { ProviderErrorMetadata } from "../llm/types.js";
+import { sanitizeRouteFallbackCatchFields } from "../observability/route-fallback-redaction.js";
 import type {
   FallbackPayload,
   FallbackReason,
@@ -267,6 +268,11 @@ function buildLLMErrorEvent(payload: LLMErrorPayload): Extract<LlmTraceTimelineE
 function buildRouteFallbackEvent(
   input: RecordRouteFallbackInput,
 ): Extract<LlmTraceTimelineEvent, { type: "route_fallback" }> {
+  const catchFields = sanitizeRouteFallbackCatchFields({
+    errorName: input.errorName,
+    errorMessage: input.errorMessage,
+  });
+
   const event: Extract<LlmTraceTimelineEvent, { type: "route_fallback" }> = {
     type: "route_fallback",
     transport: input.transport,
@@ -291,12 +297,7 @@ function buildRouteFallbackEvent(
   if (input.lastTool !== undefined) {
     event.lastTool = sanitizeTraceLabel(input.lastTool);
   }
-  if (input.errorName !== undefined) {
-    event.errorName = sanitizeTraceLabel(input.errorName);
-  }
-  if (input.errorMessage !== undefined) {
-    event.errorMessage = sanitizeTraceLabel(input.errorMessage);
-  }
+  Object.assign(event, catchFields);
 
   return event;
 }
