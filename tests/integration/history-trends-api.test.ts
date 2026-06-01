@@ -33,6 +33,81 @@ type TrendsResponse = {
   };
 };
 
+const VALID_COMPLETENESS = new Set(["empty", "sparse", "complete"]);
+
+function assertRecord(value: unknown): asserts value is Record<string, unknown> {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+}
+
+function assertFiniteNumber(value: unknown, field: string): asserts value is number {
+  assert.equal(typeof value, "number", `expected ${field} to be a number`);
+  assert.ok(Number.isFinite(value), `expected ${field} to be finite`);
+}
+
+function assertRealDateKey(value: unknown, field: string): asserts value is string {
+  assert.equal(typeof value, "string", `expected ${field} to be a date string`);
+  assert.ok(typeof value === "string", `expected ${field} to be a date string`);
+  assert.match(value, /^\d{4}-\d{2}-\d{2}$/, `expected ${field} to be YYYY-MM-DD`);
+  const parsed = new Date(`${value}T12:00:00`);
+  assert.equal(Number.isNaN(parsed.getTime()), false, `expected ${field} to be calendar-real`);
+  assert.equal(parsed.toISOString().slice(0, 10), value, `expected ${field} to round-trip as a calendar date`);
+}
+
+function assertTrendBucketDto(value: unknown, field: string) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["calories", "carbs", "date", "fat", "mealCount", "protein"]);
+  assertRealDateKey(value.date, `${field}.date`);
+  assertFiniteNumber(value.calories, `${field}.calories`);
+  assertFiniteNumber(value.protein, `${field}.protein`);
+  assertFiniteNumber(value.carbs, `${field}.carbs`);
+  assertFiniteNumber(value.fat, `${field}.fat`);
+  assertFiniteNumber(value.mealCount, `${field}.mealCount`);
+}
+
+function assertTrendTotalsDto(value: unknown, field: string) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["calories", "carbs", "fat", "mealCount", "protein"]);
+  assertFiniteNumber(value.calories, `${field}.calories`);
+  assertFiniteNumber(value.protein, `${field}.protein`);
+  assertFiniteNumber(value.carbs, `${field}.carbs`);
+  assertFiniteNumber(value.fat, `${field}.fat`);
+  assertFiniteNumber(value.mealCount, `${field}.mealCount`);
+}
+
+function assertTrendAveragesDto(value: unknown, field: string) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["calories", "carbs", "fat", "mealsPerDay", "protein"]);
+  assertFiniteNumber(value.calories, `${field}.calories`);
+  assertFiniteNumber(value.protein, `${field}.protein`);
+  assertFiniteNumber(value.carbs, `${field}.carbs`);
+  assertFiniteNumber(value.fat, `${field}.fat`);
+  assertFiniteNumber(value.mealsPerDay, `${field}.mealsPerDay`);
+}
+
+function assertHistoryTrendDto(value: unknown) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["averages", "completeness", "daily", "from", "to", "totals"]);
+  assertRealDateKey(value.from, "historyTrend.from");
+  assertRealDateKey(value.to, "historyTrend.to");
+  assert.ok(
+    typeof value.completeness === "string" && VALID_COMPLETENESS.has(value.completeness),
+    `expected valid completeness, got ${String(value.completeness)}`,
+  );
+  assert.ok(Array.isArray(value.daily), "expected historyTrend.daily to be an array");
+  for (const [index, bucket] of value.daily.entries()) {
+    assertTrendBucketDto(bucket, `historyTrend.daily[${index}]`);
+  }
+  assertTrendTotalsDto(value.totals, "historyTrend.totals");
+  assertTrendAveragesDto(value.averages, "historyTrend.averages");
+
+  const serialized = JSON.stringify(value);
+  for (const forbidden of ["deviceId", "currentRevisionId", "mealRevisionId", "revisionId", "imagePath", "deviceId="]) {
+    assert.ok(!serialized.includes(forbidden), `expected history trend response to exclude ${forbidden}`);
+  }
+}
+
 describe("History trends API", () => {
   let app: FastifyInstance;
   let deviceId: string;
@@ -138,6 +213,7 @@ describe("History trends API", () => {
 
     assert.equal(res.statusCode, 200);
     const body = res.json() as TrendsResponse;
+    assertHistoryTrendDto(body);
 
     assert.equal(body.from, "2026-03-24");
     assert.equal(body.to, "2026-03-26");
@@ -246,6 +322,7 @@ describe("History trends API", () => {
 
     assert.equal(emptyRes.statusCode, 200);
     const emptyBody = emptyRes.json() as TrendsResponse;
+    assertHistoryTrendDto(emptyBody);
     assert.equal(emptyBody.completeness, "empty");
     assert.equal(emptyBody.daily.length, 3);
     assert.deepEqual(emptyBody.daily, [
@@ -273,6 +350,7 @@ describe("History trends API", () => {
 
     assert.equal(sparseRes.statusCode, 200);
     const sparseBody = sparseRes.json() as TrendsResponse;
+    assertHistoryTrendDto(sparseBody);
     assert.equal(sparseBody.completeness, "sparse");
     assert.deepEqual(sparseBody.daily, [
       { date: "2026-03-24", calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
@@ -313,6 +391,7 @@ describe("History trends API", () => {
 
     assert.equal(completeRes.statusCode, 200);
     const completeBody = completeRes.json() as TrendsResponse;
+    assertHistoryTrendDto(completeBody);
     assert.equal(completeBody.completeness, "complete");
     assert.deepEqual(completeBody.daily, [
       { date: "2026-03-24", calories: 10, protein: 1, carbs: 1, fat: 1, mealCount: 1 },
@@ -366,6 +445,7 @@ describe("History trends API", () => {
 
     assert.equal(res.statusCode, 200);
     const body = res.json() as TrendsResponse;
+    assertHistoryTrendDto(body);
 
     assert.equal(body.completeness, "complete");
     assert.deepEqual(body.daily, [

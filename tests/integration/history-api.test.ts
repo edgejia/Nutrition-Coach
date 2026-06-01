@@ -46,6 +46,90 @@ type HistoryMeal = {
   };
 };
 
+const VALID_MEAL_PERIODS = new Set(["breakfast", "lunch", "dinner", "late_night"]);
+
+function assertRecord(value: unknown): asserts value is Record<string, unknown> {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+}
+
+function assertFiniteNumber(value: unknown, field: string): asserts value is number {
+  assert.equal(typeof value, "number", `expected ${field} to be a number`);
+  assert.ok(Number.isFinite(value), `expected ${field} to be finite`);
+}
+
+function assertNullableString(value: unknown, field: string) {
+  assert.ok(value === null || typeof value === "string", `expected ${field} to be string or null`);
+}
+
+function assertNutritionDto(value: unknown, pathName: string) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["calories", "carbs", "fat", "protein"]);
+  assertFiniteNumber(value.calories, `${pathName}.calories`);
+  assertFiniteNumber(value.protein, `${pathName}.protein`);
+  assertFiniteNumber(value.carbs, `${pathName}.carbs`);
+  assertFiniteNumber(value.fat, `${pathName}.fat`);
+}
+
+function assertPublicHistoryMealDto(value: unknown) {
+  assertRecord(value);
+  const allowedKeys = new Set([
+    "id",
+    "mealRevisionId",
+    "dateKey",
+    "loggedAt",
+    "display",
+    "itemCount",
+    "nutrition",
+    "items",
+    "asset",
+    "imageAssetId",
+    "imageUrl",
+    "mealPeriod",
+    "revision",
+  ]);
+  for (const key of Object.keys(value)) {
+    assert.ok(allowedKeys.has(key), `expected history meal to exclude ${key}`);
+  }
+  assert.equal(typeof value.id, "string");
+  assert.equal(typeof value.mealRevisionId, "string");
+  assert.equal(typeof value.dateKey, "string");
+  assert.equal(typeof value.loggedAt, "string");
+  assertRecord(value.display);
+  assert.ok(typeof value.display.title === "string" && value.display.title.length > 0);
+  assertFiniteNumber(value.itemCount, "meal.itemCount");
+  assertNutritionDto(value.nutrition, "meal.nutrition");
+  assert.ok(Array.isArray(value.items), "expected meal.items to be an array");
+  for (const item of value.items) {
+    assertRecord(item);
+    assert.equal(typeof item.name, "string");
+    assert.ok(typeof item.name === "string" && item.name.length > 0);
+    assertFiniteNumber(item.position, "meal.items[].position");
+    assertNutritionDto(item.nutrition, "meal.items[].nutrition");
+  }
+  assertRecord(value.asset);
+  assert.deepEqual(Object.keys(value.asset).sort(), ["imageAssetId", "imageUrl"]);
+  assertNullableString(value.asset.imageAssetId, "meal.asset.imageAssetId");
+  assertNullableString(value.asset.imageUrl, "meal.asset.imageUrl");
+  assertNullableString(value.imageAssetId, "meal.imageAssetId");
+  assertNullableString(value.imageUrl, "meal.imageUrl");
+  assert.deepEqual(value.asset.imageAssetId, value.imageAssetId);
+  assert.deepEqual(value.asset.imageUrl, value.imageUrl);
+  if (typeof value.imageUrl === "string") {
+    assert.doesNotMatch(value.imageUrl, /deviceId=/);
+  }
+  if ("mealPeriod" in value) {
+    assert.ok(
+      typeof value.mealPeriod === "string" && VALID_MEAL_PERIODS.has(value.mealPeriod),
+      `expected valid mealPeriod, got ${String(value.mealPeriod)}`,
+    );
+  }
+  assertRecord(value.revision);
+  assert.deepEqual(Object.keys(value.revision), ["currentRevisionNumber"]);
+  assertFiniteNumber(value.revision.currentRevisionNumber, "meal.revision.currentRevisionNumber");
+}
+
 describe("History API", () => {
   let app: FastifyInstance;
   let deviceId: string;
@@ -97,6 +181,8 @@ describe("History API", () => {
 
   function assertNoUnsafeHistoryFields(value: unknown) {
     const serialized = JSON.stringify(value);
+    assert.ok(!serialized.includes("deviceId"), "history response must not expose raw deviceId");
+    assert.ok(!serialized.includes("deviceId="), "history response must not expose legacy asset deviceId queries");
     assert.ok(!serialized.includes("imagePath"), "history response must not expose imagePath");
     assert.ok(!serialized.includes("storageKey"), "history response must not expose storageKey");
     assert.ok(!serialized.includes("currentRevisionId"), "history response must not expose currentRevisionId");
@@ -255,6 +341,9 @@ describe("History API", () => {
     const body = res.json() as { meals: HistoryMeal[]; nextCursor: string | null };
 
     assert.equal(body.nextCursor, null);
+    for (const meal of body.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
     assert.deepEqual(
       body.meals.map((meal) => meal.id),
       [updatedMeal.id, assetMeal.id, nearbyMeal.id, boundaryMeal.id],
@@ -354,6 +443,10 @@ describe("History API", () => {
     });
     assert.equal(listRes.statusCode, 200);
     const listBody = listRes.json() as { meals: HistoryMeal[] };
+    for (const meal of listBody.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
+    assertNoUnsafeHistoryFields(listBody);
     const listExplicitMeal = listBody.meals.find((meal) => meal.id === explicitLunch.id);
     assert.ok(listExplicitMeal, "expected history list to include explicit lunch meal");
     assert.equal(listExplicitMeal.mealPeriod, "lunch");
@@ -367,7 +460,22 @@ describe("History API", () => {
       headers: { cookie: sessionCookieHeader },
     });
     assert.equal(searchRes.statusCode, 200);
-    const searchBody = searchRes.json() as { results: Array<{ meal: HistoryMeal }> };
+    const searchBody = searchRes.json() as {
+      results: Array<{
+        item: { name: string; position: number; nutrition: { calories: number; protein: number; carbs: number; fat: number } };
+        meal: HistoryMeal;
+      }>;
+    };
+    for (const result of searchBody.results) {
+      assertRecord(result);
+      assertRecord(result.item);
+      assert.equal(typeof result.item.name, "string");
+      assert.ok(result.item.name.length > 0);
+      assertFiniteNumber(result.item.position, "history.search.item.position");
+      assertNutritionDto(result.item.nutrition, "history.search.item.nutrition");
+      assertPublicHistoryMealDto(result.meal);
+    }
+    assertNoUnsafeHistoryFields(searchBody);
     assert.equal(searchBody.results.find((result) => result.meal.id === explicitLunch.id)?.meal.mealPeriod, "lunch");
 
     const dayRes = await app.inject({
@@ -377,6 +485,10 @@ describe("History API", () => {
     });
     assert.equal(dayRes.statusCode, 200);
     const dayBody = dayRes.json() as { meals: HistoryMeal[] };
+    for (const meal of dayBody.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
+    assertNoUnsafeHistoryFields(dayBody);
     const dayExplicitMeal = dayBody.meals.find((meal) => meal.id === explicitLunch.id);
     assert.ok(dayExplicitMeal, "expected history day detail to include explicit lunch meal");
     assert.equal(dayExplicitMeal.mealPeriod, "lunch");
@@ -396,6 +508,9 @@ describe("History API", () => {
 
     assert.equal(firstPage.statusCode, 200);
     const firstBody = firstPage.json() as { meals: HistoryMeal[]; nextCursor: string | null };
+    for (const meal of firstBody.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
     assert.deepEqual(firstBody.meals.map((meal) => meal.id), [seeded.newest.id, seeded.middle.id]);
     assert.equal(typeof firstBody.nextCursor, "string");
     const nextCursor = firstBody.nextCursor;
@@ -410,6 +525,9 @@ describe("History API", () => {
 
     assert.equal(secondPage.statusCode, 200);
     const secondBody = secondPage.json() as { meals: HistoryMeal[]; nextCursor: string | null };
+    for (const meal of secondBody.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
     assert.deepEqual(secondBody.meals.map((meal) => meal.id), [seeded.oldest.id]);
     assert.equal(secondBody.nextCursor, null);
 
@@ -497,6 +615,7 @@ describe("History API", () => {
     });
 
     assert.equal(res.statusCode, 200);
+    assertNoUnsafeHistoryFields(res.json());
     const body = res.json() as {
       date: string;
       summary: {
@@ -509,6 +628,9 @@ describe("History API", () => {
       };
       meals: HistoryMeal[];
     };
+    for (const meal of body.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
 
     assert.equal(body.date, "2026-03-25");
     assert.deepEqual(body.summary, {
