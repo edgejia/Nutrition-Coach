@@ -1,10 +1,11 @@
-import { isRealDateKey } from "./lib/history-week.js";
+import {
+  isDailySummarySSEPayloadDto,
+  isGoalsUpdatePayloadDto,
+} from "./dto-guards.js";
 import type {
   DailySummary,
   DailySummarySSEPayload,
-  DailySummarySSESource,
   DailyTargets,
-  GoalsUpdatePayload,
 } from "./types.js";
 
 let eventSource: EventSource | null = null;
@@ -15,55 +16,6 @@ export interface SSEHandlers {
   onGoalsUpdate: (targets: DailyTargets) => void;
 }
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-// Shape-check guard for `goals_update` payloads: the SSE boundary is untrusted
-// (T-10-14). We reject anything that does not match `{ targets: { calories,
-// protein, carbs, fat } }` with finite numbers so malformed JSON or malicious
-// partial payloads never mutate `dailyTargets` state.
-function isValidTargets(value: unknown): value is DailyTargets {
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    isFiniteNumber(obj.calories) &&
-    isFiniteNumber(obj.protein) &&
-    isFiniteNumber(obj.carbs) &&
-    isFiniteNumber(obj.fat)
-  );
-}
-
-function isDailySummarySSESource(value: unknown): value is DailySummarySSESource {
-  return value === "initial" || value === "meal_mutation";
-}
-
-function isDailySummary(value: unknown): value is DailySummary {
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.date === "string" &&
-    isRealDateKey(obj.date) &&
-    isFiniteNumber(obj.totalCalories) &&
-    isFiniteNumber(obj.totalProtein) &&
-    isFiniteNumber(obj.totalCarbs) &&
-    isFiniteNumber(obj.totalFat) &&
-    isFiniteNumber(obj.mealCount)
-  );
-}
-
-function isDailySummarySSEPayload(value: unknown): value is DailySummarySSEPayload {
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    isDailySummary(obj.summary) &&
-    typeof obj.affectedDate === "string" &&
-    isRealDateKey(obj.affectedDate) &&
-    isDailySummarySSESource(obj.source) &&
-    obj.summary.date === obj.affectedDate
-  );
-}
-
 export function connectSSE(_deviceId: string, handlers: SSEHandlers) {
   disconnectSSE();
   eventSource = new EventSource("/api/sse");
@@ -72,7 +24,7 @@ export function connectSSE(_deviceId: string, handlers: SSEHandlers) {
     try {
       const raw = (event as MessageEvent<string>).data;
       const parsed = JSON.parse(raw) as unknown;
-      if (!isDailySummarySSEPayload(parsed)) return;
+      if (!isDailySummarySSEPayloadDto(parsed)) return;
       if (handlers.onDailySummaryEnvelope) {
         handlers.onDailySummaryEnvelope(parsed);
         return;
@@ -92,8 +44,8 @@ export function connectSSE(_deviceId: string, handlers: SSEHandlers) {
   eventSource.addEventListener("goals_update", (event) => {
     try {
       const raw = (event as MessageEvent<string>).data;
-      const parsed = JSON.parse(raw) as GoalsUpdatePayload;
-      if (parsed && typeof parsed === "object" && isValidTargets(parsed.targets)) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (isGoalsUpdatePayloadDto(parsed)) {
         handlers.onGoalsUpdate(parsed.targets);
       }
     } catch {
