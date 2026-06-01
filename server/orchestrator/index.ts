@@ -5,6 +5,7 @@ import type { createSummaryService, DailySummary } from "../services/summary.js"
 import type { SummaryOutcome } from "../services/summary-outcome.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
+import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
 import type { createMealCorrectionService } from "../services/meal-correction.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type {
@@ -30,7 +31,10 @@ import type {
   LlmTraceFinalReplySource,
 } from "./llm-trace.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
-import type { MutationEffects } from "./mutation-effects.js";
+import {
+  mutationOutcomeFactFromEffects,
+  type MutationEffects,
+} from "./mutation-effects.js";
 import {
   assertNoForbiddenReceiptTerms,
   renderGoalCancelCopy,
@@ -62,6 +66,8 @@ const MAX_ROUNDS = 3;
 const IMAGE_PLACEHOLDER = "(圖片)";
 const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
+const COMMITTED_MEAL_MUTATION_HISTORY_PATTERN =
+  /\[系統已(?:完成餐點(?:記錄|修改|刪除)|(?:記錄|更新|刪除)餐點[：:])/;
 const NO_MUTATION_LOGGING_CLAIM_PATTERN = /已\s*(?:經\s*)?記錄|完成\s*記錄/;
 const NO_MUTATION_LOGGING_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
 // Summary replies often use approximate wording after totals are rounded by the model.
@@ -109,6 +115,7 @@ export type OrchestratorResult =
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
+      mutationOutcomeFact?: ChatMutationOutcomeFact;
     } & FinalReplyTraceMetadata)
   | ({
       streamGenerator: AsyncGenerator<string>;
@@ -121,6 +128,7 @@ export type OrchestratorResult =
       affectedDate?: string;
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
+      mutationOutcomeFact?: ChatMutationOutcomeFact;
     } & FinalReplyTraceMetadata);
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
@@ -401,6 +409,12 @@ function renderCheckedMutationReceipt(effects: MutationEffects): string {
   return reply;
 }
 
+function mutationOutcomeFactFields(
+  mutationOutcomeFact: ChatMutationOutcomeFact | undefined,
+): { mutationOutcomeFact?: ChatMutationOutcomeFact } {
+  return mutationOutcomeFact ? { mutationOutcomeFact } : {};
+}
+
 function classifyPlainReplyShape(reply: string): LlmTraceFinalReplyShape {
   return reply.trim().length > 0 ? "plain_text" : "empty_or_missing";
 }
@@ -604,10 +618,7 @@ function detectHallucinatedChoiceFollowUp(
   const lastAssistant = [...recentMessages].reverse().find((message) => message.role === "assistant");
   const lastAssistantContent = typeof lastAssistant?.content === "string" ? lastAssistant.content : "";
   if (!lastAssistant?.didLogMeal) {
-    const hasRecentMealMutationSummary =
-      lastAssistantContent.includes("[系統已完成餐點記錄]") ||
-      lastAssistantContent.includes("[系統已完成餐點修改]") ||
-      lastAssistantContent.includes("[系統已完成餐點刪除]");
+    const hasRecentMealMutationSummary = COMMITTED_MEAL_MUTATION_HISTORY_PATTERN.test(lastAssistantContent);
     if (!hasRecentMealMutationSummary) {
       return undefined;
     }
@@ -749,6 +760,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             meal: loggedMeal,
           };
           const reply = renderCheckedMutationReceipt(mutationEffects);
+          const mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
           return {
             reply,
             didLogMeal: false,
@@ -757,6 +769,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             summaryOutcome: updated.summaryOutcome,
             affectedDate: updated.affectedDate,
             loggedMeal,
+            mutationOutcomeFact,
             finalReplySource: "renderer",
             finalReplyShape: classifyPlainReplyShape(reply),
           };
@@ -825,6 +838,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let shouldStreamFinalReply = false;
       let successfulGoalTargets: DailyTargets | undefined;
       let mutationEffects: MutationEffects | undefined;
+      let mutationOutcomeFact: ChatMutationOutcomeFact | undefined;
       let mutationReceiptText: string | undefined;
       let resolvedAffectedDate: string | undefined;
       let loggedMeal:
@@ -866,6 +880,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 affectedDate: resolvedAffectedDate,
                 loggedMeal,
                 loggedMealToolMessageId,
+                ...mutationOutcomeFactFields(mutationOutcomeFact),
               };
             }
             response = roundResult.response;
@@ -893,6 +908,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 affectedDate: resolvedAffectedDate,
                 loggedMeal,
                 loggedMealToolMessageId,
+                ...mutationOutcomeFactFields(mutationOutcomeFact),
               };
             }
 
@@ -946,6 +962,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              ...mutationOutcomeFactFields(mutationOutcomeFact),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
               providerFallbackContext,
@@ -965,6 +982,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              ...mutationOutcomeFactFields(mutationOutcomeFact),
               finalReplySource: "fallback",
               finalReplyShape: classifyFallbackReplyShape(partialFallback),
               providerFallbackContext,
@@ -981,6 +999,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             affectedDate: resolvedAffectedDate,
             loggedMeal,
             loggedMealToolMessageId,
+            ...mutationOutcomeFactFields(mutationOutcomeFact),
             finalReplySource: "fallback",
             finalReplyShape: classifyFallbackReplyShape(errorMsg),
             providerFallbackContext,
@@ -1009,6 +1028,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             affectedDate: resolvedAffectedDate,
             loggedMeal,
             loggedMealToolMessageId,
+            ...mutationOutcomeFactFields(mutationOutcomeFact),
             finalReplySource,
             finalReplyShape: finalReplySource === "fallback"
               ? classifyFallbackReplyShape(reply)
@@ -1115,6 +1135,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   committedTargets: getDeviceTargets(device),
                   meal: toolLoggedMeal,
                 };
+                mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
                 mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
               }
               if (toolCall.function.name === "get_daily_summary" && dailySummary) {
@@ -1138,6 +1159,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     committedTargets: getDeviceTargets(device),
                     meal: toolLoggedMeal,
                   };
+                  mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
                   mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
                 } else {
                   if (!deletedMeal) {
@@ -1150,6 +1172,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     committedTargets: getDeviceTargets(device),
                     deletedMeal,
                   };
+                  mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
                   mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
                 }
               }
@@ -1173,6 +1196,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   targets: dailyTargets,
                   updatedFields: updatedFields as Array<keyof DailyTargets>,
                 };
+                mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
                 mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
               }
               opts?.hooks?.onToolResult?.({
@@ -1211,6 +1235,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     affectedDate: resolvedAffectedDate,
                     loggedMeal,
                     loggedMealToolMessageId,
+                    ...mutationOutcomeFactFields(mutationOutcomeFact),
                     finalReplySource: "renderer",
                     finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
                   };
@@ -1238,6 +1263,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              ...mutationOutcomeFactFields(mutationOutcomeFact),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1254,6 +1280,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              ...mutationOutcomeFactFields(mutationOutcomeFact),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1270,6 +1297,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              ...mutationOutcomeFactFields(mutationOutcomeFact),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1286,6 +1314,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              ...mutationOutcomeFactFields(mutationOutcomeFact),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1302,6 +1331,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               affectedDate: resolvedAffectedDate,
               loggedMeal,
               loggedMealToolMessageId,
+              ...mutationOutcomeFactFields(mutationOutcomeFact),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
             };
@@ -1329,6 +1359,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           affectedDate: resolvedAffectedDate,
           loggedMeal,
           loggedMealToolMessageId,
+          ...mutationOutcomeFactFields(mutationOutcomeFact),
           finalReplySource: "renderer",
           finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
           fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
@@ -1343,6 +1374,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         affectedDate: resolvedAffectedDate,
         loggedMeal,
         loggedMealToolMessageId,
+        ...mutationOutcomeFactFields(mutationOutcomeFact),
         finalReplySource: "fallback",
         finalReplyShape: classifyFallbackReplyShape(FALLBACK),
         fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,

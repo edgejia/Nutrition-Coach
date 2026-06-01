@@ -1952,13 +1952,33 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("recovers locally when the user replies 2 to a previously hallucinated choice prompt", async () => {
+    const meal = await foodLoggingService.logFood(deviceId, {
+      foodName: "鮭魚飯",
+      calories: 540,
+      protein: 34,
+      carbs: 58,
+      fat: 18,
+    });
     await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "asset:meal-image" });
-    await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
-    await chatService.saveMessage(
+    const toolMessage = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    await chatService.saveAssistantReplyWithReceipt({
       deviceId,
-      "assistant",
-      "已收到圖片。若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算並記錄。",
-    );
+      content: "已收到圖片。若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算並記錄。",
+      receipt: {
+        toolMessageId: toolMessage.id,
+        mealTransactionId: meal.id,
+        mealRevisionId: meal.mealRevisionId,
+      },
+      mutationOutcomeFact: {
+        action: "log_food",
+        affectedDate: formatLocalDate(currentAppDate()),
+        foodName: "鮭魚飯",
+        calories: 540,
+        protein: 34,
+        carbs: 58,
+        fat: 18,
+      },
+    });
 
     const result = await orchestrator.handleMessage(deviceId, "2");
 
