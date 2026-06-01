@@ -376,22 +376,19 @@ Source: `renderMutationReceipt()` in `server/orchestrator/mutation-receipts.ts`.
 | A2 | A typed `mutationOutcomeFact` returned from the orchestrator is the narrowest way to cover delete facts without parsing text. | Common Pitfalls / Architecture Patterns | Planner may instead derive facts in `executeTool()` or another helper, but must preserve the no-display-inference rule. |
 | A3 | No new package install is needed, so slopcheck can be skipped. | Package Legitimacy Audit | If planner introduces a package, package legitimacy gate must be rerun before execution. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where should the new outcome type live?**  
    - What we know: `mutation-effects.ts` already contains safe committed effect types; `ToolExecutionResult` contains the tool result facts; `OrchestratorResult` currently omits a generic outcome field. [VERIFIED: codebase grep]  
-   - What's unclear: whether the planner should expose `mutationEffects`, a new `MutationOutcomeFact`, or a separate service-facing DTO. [ASSUMED]  
-   - Recommendation: expose the smallest service-facing DTO that contains only compressed-history-safe fields. [ASSUMED]
+   - RESOLVED: expose a new service-facing `ChatMutationOutcomeFact` DTO from `server/services/chat-mutation-outcomes.ts`, and add `mutationOutcomeFact?: ChatMutationOutcomeFact` to `OrchestratorResult`. Keep `MutationEffects` as the committed-domain source and add `mutationOutcomeFactFromEffects()` in `server/orchestrator/mutation-effects.ts` as the narrow converter. This keeps route code from parsing receipt prose and keeps the compressed-history DTO limited to safe fields. [RESOLVED: 72-03/72-05 plan decision]
 
 2. **Should the outcome payload be normalized columns or strict JSON payload?**  
    - What we know: context rejects opaque JSON directly in `chat_messages`, but leaves exact table/column names to the planner. [VERIFIED: `72-CONTEXT.md`]  
-   - What's unclear: whether to use one table with discriminator plus JSON payload, or separate nullable columns for common fields. [ASSUMED]  
-   - Recommendation: prefer a separate table with discriminator columns plus a strict validated payload if that is the smallest additive migration; never read unvalidated JSON into compressed history. [ASSUMED]
+   - RESOLVED: use a separate additive `chat_mutation_outcomes` table with identity/scope columns (`device_id`, `assistant_message_id`, optional `tool_message_id`), an action discriminator, user-safe common fields needed for lookup/indexing, and a strict Zod-validated payload for action-specific safe summary fields. Do not store opaque JSON on `chat_messages`; never render compressed history from an unvalidated payload. [RESOLVED: 72-03/72-04 plan decision]
 
 3. **Is a one-time transient retry worth planning?**  
    - What we know: context allows a narrowly scoped retry only if it does not weaken fail-closed behavior. [VERIFIED: `72-CONTEXT.md`]  
-   - What's unclear: whether local SQLite failures in this app are meaningfully transient. [ASSUMED]  
-   - Recommendation: skip retry unless planning finds a specific current failure mode; atomic fail-closed tests matter more. [ASSUMED]
+   - RESOLVED: do not plan a retry for Phase 72. The implementation should fail closed on atomic persistence failure, omit receipt-derived identity/outcome facts, and prove that behavior in JSON/SSE integration tests. A future retry can be introduced only with a concrete transient-failure case and proof that it preserves fail-closed semantics. [RESOLVED: 72-02/72-06 plan decision]
 
 ## Environment Availability
 
