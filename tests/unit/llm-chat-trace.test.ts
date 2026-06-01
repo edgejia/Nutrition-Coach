@@ -285,6 +285,63 @@ describe("createLlmTraceRecorder", () => {
     }
   });
 
+  it("omits unsafe route fallback catch fields from trace facts", () => {
+    const forbiddenValues = [
+      "prompt: system says log the meal",
+      "messages[0].content user nutrition text",
+      "provider body raw payload",
+      "tool payload {\"food\":\"secret\"}",
+      "guest_session=signed-session",
+      "image data:image/png;base64,abc123",
+      "assistant final reply text",
+      "stack: at route handler",
+      "cause: nested raw error",
+    ];
+
+    for (const forbidden of forbiddenValues) {
+      const recorder = createLlmTraceRecorder();
+
+      recorder.recordRouteFallback({
+        transport: "json",
+        turnId: "t_safe_unsafe_catch",
+        fallbackSource: "route_catch",
+        didLogMeal: false,
+        didMutateMeal: false,
+        reason: "route_catch",
+        catchSite: "json_outer",
+        errorName: forbidden,
+        errorMessage: forbidden,
+      });
+
+      const routeFallback = recorder.build({ scenario: "unit-route-fallback-catch", status: "pass" })
+        .timeline.at(-1) as Record<string, unknown>;
+      assert.equal("errorName" in routeFallback, false);
+      assert.equal("errorMessage" in routeFallback, false);
+      assert.equal(JSON.stringify(routeFallback).includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("preserves safe route fallback catch fields in trace facts", () => {
+    const recorder = createLlmTraceRecorder();
+
+    recorder.recordRouteFallback({
+      transport: "sse",
+      turnId: "t_safe_route_catch",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      reason: "route_catch",
+      catchSite: "sse_outer",
+      errorName: "SseOuterSafeFailure",
+      errorMessage: "Safe route error",
+    });
+
+    const routeFallback = recorder.build({ scenario: "unit-route-fallback-safe-catch", status: "pass" })
+      .timeline.at(-1) as Record<string, unknown>;
+    assert.equal(routeFallback.errorName, "SseOuterSafeFailure");
+    assert.equal(routeFallback.errorMessage, "Safe route error");
+  });
+
   it("records provider-caused fallback hook facts with metadata-only trace fields", () => {
     const recorder = createLlmTraceRecorder();
     const hooks = recorder.asOrchestratorHooks();
