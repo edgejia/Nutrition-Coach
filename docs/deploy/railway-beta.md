@@ -19,7 +19,11 @@ ASSETS_DIR=/app/data/assets
 UPLOADS_STAGING_DIR=/tmp/nutrition-uploads
 CLIENT_DIST_DIR=/app/dist/client
 TZ=Asia/Taipei
+NODE_ENV=production
+GUEST_SESSION_SECRET=<stable random value from `openssl rand -hex 32`>
 ```
+
+`GUEST_SESSION_SECRET` is app-owned signing material for browser guest-session cookies. Production-like runtime rejects a missing, default, or shorter-than-32-character value, so set it before deploy and do not reuse the local development default.
 
 ## Build and Start
 

@@ -363,6 +363,60 @@ describe("SSE API", () => {
     }
   });
 
+  it("does not start keepalive after the client closes during the initial summary load", async () => {
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalSetInterval = globalThis.setInterval;
+    const createdKeepalives: unknown[] = [];
+    let markSummaryRequested!: () => void;
+    let releaseSummary!: () => void;
+    const summaryRequested = new Promise<void>((resolve) => {
+      markSummaryRequested = resolve;
+    });
+    const summaryReleased = new Promise<void>((resolve) => {
+      releaseSummary = resolve;
+    });
+    services.summaryService.getDailySummary = async (...args) => {
+      markSummaryRequested();
+      await summaryReleased;
+      return originalGetDailySummary(...args);
+    };
+
+    const address = await app.listen({ port: 0 });
+    const controller = new AbortController();
+    let fetchResult: Promise<Response | undefined> | undefined;
+
+    try {
+      fetchResult = fetch(`${address}/api/sse`, {
+        headers: { cookie: sessionCookieHeader },
+        signal: controller.signal,
+      }).catch(() => undefined);
+      await summaryRequested;
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      globalThis.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+        const interval = originalSetInterval(handler, timeout, ...args);
+        createdKeepalives.push(interval);
+        return interval;
+      }) as typeof setInterval;
+      releaseSummary();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await fetchResult.catch(() => undefined);
+
+      assert.equal(createdKeepalives.length, 0);
+    } finally {
+      globalThis.setInterval = originalSetInterval;
+      for (const interval of createdKeepalives) {
+        clearInterval(interval as ReturnType<typeof setInterval>);
+      }
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      controller.abort();
+      await fetchResult?.catch(() => undefined);
+      if (app.server.listening) {
+        await app.close();
+      }
+    }
+  });
+
   it("GET /api/sse receives another daily_summary after log_food succeeds", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{

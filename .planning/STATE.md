@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v2.5
 milestone_name: Scope
-status: ready_for_milestone_closeout
-stopped_at: Phase 73 complete and secured
-last_updated: "2026-06-02T02:12:25+08:00"
-last_activity: 2026-06-02 -- v2.5 true-LLM smoke fix complete; ready for milestone closeout
+status: Awaiting next milestone
+stopped_at: Completed 73-03-PLAN.md
+last_updated: "2026-06-02T08:45:57.921Z"
+last_activity: 2026-06-02 — Milestone v2.5 completed and archived
 progress:
   total_phases: 5
   completed_phases: 5
@@ -18,17 +18,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-31)
+See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** v2.5 pre-closeout smoke fix complete; milestone closeout next
+**Current focus:** Planning next milestone after v2.5 closeout
 
 ## Current Position
 
-Phase: 73
-Plan: Complete
-Status: v2.5 complete — ready for milestone closeout
-Last activity: 2026-06-02 -- Quick 260602-2qw fixed the true-LLM smoke finding where live delete_meal left stale prior receipts editable
+Phase: Milestone v2.5 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-02 — Milestone v2.5 completed and archived
 
 ## Performance Metrics
 
@@ -309,5 +309,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- v2.5 phases 69-73 are complete, verified, and secured.
-- Next: `$nutrition-milestone-closeout v2.5`.
+- Start the next milestone with $gsd-new-milestone

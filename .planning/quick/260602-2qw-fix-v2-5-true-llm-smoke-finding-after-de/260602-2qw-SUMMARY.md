@@ -1,6 +1,7 @@
 ---
 quick_task: 260602-2qw
 title: Fix v2.5 true-LLM smoke finding after delete
+status: complete
 completed: 2026-06-02
 commits:
   - 90670af

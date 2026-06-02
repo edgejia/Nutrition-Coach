@@ -1,5 +1,29 @@
 # 更新日誌
 
+## v2.5 - 2026-06-02
+
+### 新增
+
+- 後端 LLM provider 新增非串流、schema-backed structured object output contract，runtime OpenAI provider 與測試 provider 共用同一組成功、驗證失敗、provider 失敗與 fallback 語意。
+- Onboarding 目標產生改走結構化輸出與 Zod 驗證，無效結果會 fail closed 到既有 deterministic fallback，不會保存 partial 或超界目標。
+- 前端 API、SSE 與 Zustand state 寫入前新增 authoritative DTO validation，保護 daily summary、goals、history、day snapshot 與 chat terminal additions。
+- 聊天 assistant reply、餐點 receipt identity 與 structured mutation outcome 現在透過原子 persistence 邊界保存；compressed history 改讀 persisted structured facts，不再由 display success copy 推論 tool outcome。
+- Production-like runtime 會拒絕缺失、預設或過弱的 `GUEST_SESSION_SECRET`，並將 CORS policy 收斂為本機 Vite allowlist 與 production same-origin serving。
+
+### 變更
+
+- Target-generation failure telemetry 只記錄 sanitized reason，例如 `invalid_json`、`missing_field`、`bounds_failed` 或 `macro_calorie_mismatch`，不保存 raw model output。
+- Malformed server payloads 會被 reject、omit 或維持既有 trusted state，而不是被 coerced 成 authoritative UI state。
+- Route fallback catch-field redaction 集中到共用 sanitizer，structured events 與 `llm-trace.v2` 都套用同一個 raw-detail omission policy。
+- Production dependency baseline 更新 `fastify`、`@fastify/static`，並用 Yarn resolutions 固定 patched `fast-uri` / `brace-expansion` transitive versions。
+- v2.5 closeout 維持本機驗證範圍；沒有 push、merge、deploy、Railway smoke、staging promotion 或 main promotion。
+
+### 驗證
+
+- Phase 69-73 verification 全部通過，涵蓋 provider structured output、target generation、DTO guards、receipt/history persistence、compressed history、guest-secret/CORS hardening、fallback redaction，以及 local release proof。
+- v2.5 milestone audit 通過 `18/18` scoped requirements、`5/5` phases、cross-phase integration 與 E2E flow checks，並確認所有 phase 都有 Nyquist validation artifact。
+- Closeout 前後重新執行 `yarn release:check`；最終結果為 `1,330` tests passing 與 frontend production build passing。證據維持 metadata-only，不保存 raw prompt、user text、assistant final text、tool raw payload、provider body、image data、session material 或 database snapshot。
+
 ## v2.4 - 2026-05-30
 
 ### 新增

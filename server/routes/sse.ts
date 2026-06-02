@@ -75,6 +75,10 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
       return;
     }
 
+    if (closed || reply.raw.destroyed) {
+      return;
+    }
+
     // Keepalive every 30s
     keepalive = setInterval(() => {
       if (!reply.raw.destroyed) {
