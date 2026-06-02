@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildHistoryMealEditPayload,
+  buildMealEditPayloadIfComplete,
   buildReceiptMealEditPayload,
 } from "../../client/src/meal-edit-payload.js";
 import {
@@ -111,6 +112,96 @@ describe("meal edit payload builders", () => {
       imageUrl: "/api/assets/asset-history",
       loggedAt: "2026-05-06T12:00:00.000+08:00",
     });
+  });
+
+  it("buildMealEditPayloadIfComplete returns the complete History payload shape", () => {
+    const meal = {
+      id: "home-meal-1",
+      mealRevisionId: "home-meal-1:r1",
+      foodName: "雞腿便當",
+      calories: 720,
+      protein: 42,
+      carbs: 88,
+      fat: 24,
+      itemCount: 1,
+      imageAssetId: "asset-home",
+      imageUrl: "/api/assets/asset-home",
+      loggedAt: "2026-05-06T12:00:00.000+08:00",
+      mealPeriod: "lunch" as const,
+    };
+
+    assert.deepEqual(
+      buildMealEditPayloadIfComplete(meal, "2026-05-06"),
+      buildHistoryMealEditPayload(meal, "2026-05-06"),
+    );
+  });
+
+  it("buildMealEditPayloadIfComplete returns null for missing revision and core authority", () => {
+    const baseMeal = {
+      id: "home-meal-incomplete",
+      mealRevisionId: "home-meal-incomplete:r1",
+      foodName: "完整餐點",
+      calories: 450,
+      protein: 30,
+      carbs: 42,
+      fat: 12,
+      itemCount: 1,
+      imageAssetId: null,
+      imageUrl: null,
+      loggedAt: "2026-05-06T08:00:00.000+08:00",
+    };
+
+    for (const meal of [
+      { ...baseMeal, mealRevisionId: undefined },
+      { ...baseMeal, mealRevisionId: "" },
+      { ...baseMeal, id: "" },
+      { ...baseMeal, foodName: "" },
+      { ...baseMeal, calories: Number.NaN },
+      { ...baseMeal, protein: undefined },
+      { ...baseMeal, carbs: undefined },
+      { ...baseMeal, fat: undefined },
+      { ...baseMeal, itemCount: 0 },
+      { ...baseMeal, loggedAt: "" },
+    ]) {
+      assert.equal(buildMealEditPayloadIfComplete(meal as any, "2026-05-06"), null);
+    }
+
+    assert.throws(() => buildHistoryMealEditPayload({ ...baseMeal, mealRevisionId: "" } as any, "2026-05-06"), {
+      message: "MEAL_REVISION_REQUIRED",
+    });
+  });
+
+  it("buildMealEditPayloadIfComplete preserves grouped item and image authority", () => {
+    const payload = buildMealEditPayloadIfComplete({
+      id: "home-grouped-meal",
+      mealRevisionId: "home-grouped-meal:r1",
+      foodName: "雞腿、白飯、青菜",
+      calories: 720,
+      protein: 42,
+      carbs: 88,
+      fat: 24,
+      itemCount: 3,
+      items: [
+        { name: "青菜", position: 2, calories: 80, protein: 4, carbs: 10, fat: 2 },
+        { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+        { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 4 },
+      ],
+      imageAssetId: "asset-grouped",
+      imageUrl: "/api/assets/asset-grouped",
+      loggedAt: "2026-05-06T12:00:00.000+08:00",
+      mealPeriod: "lunch",
+    } as any, "2026-05-06");
+
+    assert.deepEqual(payload?.items, [
+      { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+      { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 4 },
+      { name: "青菜", position: 2, calories: 80, protein: 4, carbs: 10, fat: 2 },
+    ]);
+    assert.equal(payload?.itemCount, 3);
+    assert.equal(payload?.imageAssetId, "asset-grouped");
+    assert.equal(payload?.imageUrl, "/api/assets/asset-grouped");
+    assert.equal(payload?.loggedAt, "2026-05-06T12:00:00.000+08:00");
+    assert.equal(payload?.mealPeriod, "lunch");
   });
 
   it("buildHistoryMealEditPayload preserves explicit mealPeriod from history rows", () => {
