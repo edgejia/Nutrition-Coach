@@ -341,17 +341,17 @@ Source: `server/services/meal-transactions.ts`. [VERIFIED: codebase grep]
 | A1 | Render code with a throwing builder but no guard could crash Home. | Common Pitfalls | If React error boundaries mask it, impact may be lower, but the non-throw helper is still required by D-09. |
 | A2 | Planner should include the meals integration route contract checks if server files are not edited. | Common Pitfalls | If no server path is touched, executor might prefer unit/source checks only; EDIT-BASE-01 still asks for revalidation. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact helper placement**
    - What we know: `buildHistoryMealEditPayload()` is in `client/src/meal-edit-payload.ts`, and Home needs a non-throw eligibility path. [VERIFIED: codebase grep]
-   - What's unclear: Whether executor should add a wrapper in `meal-edit-payload.ts` or keep it local to `HomeScreen.tsx`. [VERIFIED: 74-CONTEXT.md]
-   - Recommendation: Put a reusable nullable helper in `meal-edit-payload.ts` if tests need direct helper coverage; keep it local only if source-contract tests are sufficient. [ASSUMED]
+   - Resolved decision: Add a reusable nullable helper in `client/src/meal-edit-payload.ts` named `buildMealEditPayloadIfComplete(meal, dateKey)`, implemented by wrapping `buildHistoryMealEditPayload()` and returning `null` for missing revision/core authority rather than throwing during Home render.
+   - Why: The Phase 74 plans need direct helper coverage in `tests/unit/meal-edit-payload.test.ts`, and keeping the helper next to the throwing builder avoids a Home-only authority rule.
 
 2. **Home back label implementation shape**
    - What we know: `MealEditScreen` currently maps chat/history origins to `返回對話` / `返回歷史` and defaults to `返回`. [VERIFIED: codebase grep]
-   - What's unclear: Whether to inline `origin === "home" ? "返回首頁"` or extract an origin-label helper. [VERIFIED: 74-CONTEXT.md]
-   - Recommendation: Inline the third branch unless tests become cleaner with a helper. [ASSUMED]
+   - Resolved decision: Update `MealEditScreen.tsx` back-label logic with an inline Home branch: `origin === "home" ? "返回首頁"`.
+   - Why: This is the smallest change that satisfies D-05 and keeps the existing chat/history/default label structure intact; no separate origin-label helper is required for Phase 74.
 
 ## Environment Availability
 
