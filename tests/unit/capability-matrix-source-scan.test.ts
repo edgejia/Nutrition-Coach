@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import { capabilityMatrix } from "../../client/src/contracts/capability-matrix.js";
+import type { CapabilityMatrixRow } from "../../client/src/contracts/capability-matrix.js";
 
 const AUDITED_COMPONENT_FILES = [
   "client/src/components/HomeScreen.tsx",
@@ -169,6 +170,12 @@ function matrixRowsForFile(file: string) {
   return capabilityMatrix.filter((row) => row.sourceFile === file);
 }
 
+function findMatrixRow(surface: string, affordance: string): CapabilityMatrixRow {
+  const row = capabilityMatrix.find((candidate) => candidate.surface === surface && candidate.affordance === affordance);
+  assert.ok(row, `missing ${surface} ${affordance} row`);
+  return row;
+}
+
 function isReasonedExclusion(handler: HandlerOccurrence) {
   return SCANNER_EXCLUSIONS.some((exclusion) => {
     assert.ok(exclusion.reason.trim().length > 12, `${exclusion.file} exclusion must include a reason string`);
@@ -231,6 +238,34 @@ describe("capability matrix source scanner", () => {
         assert.ok(hasMatrixRowNearHandler(handler, source), labelForFailure(handler));
       }
     }
+  });
+
+  it("requires Home and Day Detail matchers to describe their actual component handlers", async () => {
+    const homeRow = findMatrixRow("Home", "Today meal rows and authorized thumbnails");
+    const homeSource = await readSource(homeRow.sourceFile);
+    const homeOpenMealEditIndex = homeSource.indexOf("openMealEdit(editPayload, \"home\")");
+    assert.notEqual(homeOpenMealEditIndex, -1, "Home source must contain the concrete Home-origin edit handoff");
+    const homeContext = contextAroundLine(homeSource, lineNumberForIndex(homeSource, homeOpenMealEditIndex));
+
+    assert.ok(
+      homeRow.handlerMatchers?.some((matcher) => sourceIncludesMatcher(homeContext, matcher)),
+      "Home handlerMatchers must match near the concrete Home edit handler",
+    );
+    assert.ok(
+      homeRow.sourceMatchers.every((matcher) => sourceIncludesMatcher(homeSource, matcher)),
+      "Home sourceMatchers must all exist in HomeScreen.tsx",
+    );
+
+    const dayDetailRow = findMatrixRow("Day Detail", "Read-only day snapshot");
+    const dayDetailSource = await readSource(dayDetailRow.sourceFile);
+    const onBackIndex = dayDetailSource.indexOf("onClick={onBack}");
+    assert.notEqual(onBackIndex, -1, "Day Detail source must contain the real back handler");
+    const dayDetailContext = contextAroundLine(dayDetailSource, lineNumberForIndex(dayDetailSource, onBackIndex));
+
+    assert.deepEqual(dayDetailRow.handlerMatchers, ["onBack"]);
+    assert.ok(sourceIncludesMatcher(dayDetailContext, "onBack"), "Day Detail handler matcher must match near onBack");
+    assert.doesNotMatch(dayDetailRow.sourceMatchers.join(" "), /\bopenMealEdit\b/);
+    assert.doesNotMatch(dayDetailRow.handlerMatchers.join(" "), /\bopenMealEdit\b/);
   });
 
   it("documents meaningful action-level onChange handling policy", () => {
