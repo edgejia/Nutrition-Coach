@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { createClientId } from "../lib/clientId.js";
 import { formatLocalDate } from "../lib/time.js";
+import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
@@ -379,7 +380,51 @@ function CalorieHero({
   );
 }
 
-function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChatClick: () => void }) {
+function MealRowContent({ meal }: { meal: MealEntry }) {
+  return (
+    <>
+      <span className="home-sport-meal-media">
+        {meal.imageUrl ? (
+          <PersistedAssetImage
+            src={meal.imageUrl}
+            alt={`${meal.foodName} 縮圖`}
+            imgClassName="home-sport-meal-image"
+            fallbackClassName="home-sport-meal-fallback"
+          />
+        ) : (
+          <span role="img" aria-label={`${meal.foodName} 無照片`} className="home-sport-meal-fallback">
+            無照片
+          </span>
+        )}
+      </span>
+      <span className="home-sport-meal-main">
+        <span className="home-sport-meal-meta">
+          <span>{formatMealRowTime(meal.loggedAt)}</span>
+          <span>{getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}</span>
+          <span>{getMealBadge(meal.mealPeriod, meal.loggedAt)}</span>
+        </span>
+        <span className="home-sport-meal-title">{meal.foodName}</span>
+        <span className="home-sport-meal-macros">{getMealMacroSummary(meal)}</span>
+      </span>
+      <span className="home-sport-meal-calories">
+        <span>{Math.max(0, Math.round(meal.calories)).toLocaleString("en-US")}</span>
+        <small>kcal</small>
+      </span>
+    </>
+  );
+}
+
+function MealRows({
+  meals,
+  todayDateKey,
+  openMealEdit,
+  onEmptyChatClick,
+}: {
+  meals: MealEntry[];
+  todayDateKey: string;
+  openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
+  onEmptyChatClick: () => void;
+}) {
   const emptyCopy = getHomeEmptyCoachCopy();
 
   return (
@@ -398,37 +443,30 @@ function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChat
         </SportCard>
       ) : (
         <div className="home-sport-meal-list">
-          {meals.map((meal) => (
-            <article key={meal.id} className="home-sport-meal-row">
-              <div className="home-sport-meal-media">
-                {meal.imageUrl ? (
-                  <PersistedAssetImage
-                    src={meal.imageUrl}
-                    alt={`${meal.foodName} 縮圖`}
-                    imgClassName="home-sport-meal-image"
-                    fallbackClassName="home-sport-meal-fallback"
-                  />
+          {meals.map((meal) => {
+            const editPayload = buildMealEditPayloadIfComplete(meal, todayDateKey);
+
+            return (
+              <Fragment key={meal.id}>
+                {editPayload ? (
+                  <button
+                    type="button"
+                    className="home-sport-meal-row"
+                    aria-label={`編輯 ${getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)} ${meal.foodName}`}
+                    onClick={() => {
+                      openMealEdit(editPayload, "home");
+                    }}
+                  >
+                    <MealRowContent meal={meal} />
+                  </button>
                 ) : (
-                  <div role="img" aria-label={`${meal.foodName} 無照片`} className="home-sport-meal-fallback">
-                    無照片
-                  </div>
+                  <article key={meal.id} className="home-sport-meal-row">
+                    <MealRowContent meal={meal} />
+                  </article>
                 )}
-              </div>
-              <div className="home-sport-meal-main">
-                <div className="home-sport-meal-meta">
-                  <span>{formatMealRowTime(meal.loggedAt)}</span>
-                  <span>{getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}</span>
-                  <span>{getMealBadge(meal.mealPeriod, meal.loggedAt)}</span>
-                </div>
-                <div className="home-sport-meal-title">{meal.foodName}</div>
-                <div className="home-sport-meal-macros">{getMealMacroSummary(meal)}</div>
-              </div>
-              <div className="home-sport-meal-calories">
-                <span>{Math.max(0, Math.round(meal.calories)).toLocaleString("en-US")}</span>
-                <small>kcal</small>
-              </div>
-            </article>
-          ))}
+              </Fragment>
+            );
+          })}
         </div>
       )}
     </section>
@@ -442,11 +480,13 @@ export function HomeScreen() {
   const setCoachAdvice = useStore((s) => s.setCoachAdvice);
   const sending = useStore((s) => s.sending);
   const meals = useStore((s) => s.meals);
+  const openMealEdit = useStore((s) => s.openMealEdit);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const coachAdvice = getDisplayedCoachAdvice(storedCoachAdvice, dailySummary, dailyTargets);
   const cta = getCoachCTA(dailySummary, dailyTargets);
   const emptyCopy = getHomeEmptyCoachCopy();
+  const todayDateKey = dailySummary?.date ?? formatLocalDate(new Date());
 
   useEffect(() => {
     setCoachAdvice(coachAdvice);
@@ -468,7 +508,7 @@ export function HomeScreen() {
         <main className="screen-scroll home-sport-scroll">
           <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
           <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
-          <MealRows meals={meals} onEmptyChatClick={handleEmptyChatClick} />
+          <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
         </main>
       </SportScreen>
     </div>

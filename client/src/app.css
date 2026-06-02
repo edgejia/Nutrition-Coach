@@ -912,6 +912,7 @@ textarea {
 
 .home-sport-meal-row {
   display: flex;
+  width: 100%;
   min-width: 0;
   align-items: center;
   gap: 12px;
@@ -920,6 +921,26 @@ textarea {
   background: var(--sp-surface);
   color: var(--sp-ink);
   padding: 12px 14px;
+}
+
+.home-sport-meal-row[type="button"] {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-sport-meal-row[type="button"]:hover {
+  border-color: var(--sp-line-strong);
+  background: var(--sp-surface-2);
+}
+
+.home-sport-meal-row[type="button"]:active {
+  background: var(--sp-surface-3);
+}
+
+.home-sport-meal-row[type="button"]:focus-visible {
+  outline: 2px solid var(--sp-lime);
+  outline-offset: 2px;
 }
 
 .home-sport-meal-media {
@@ -972,6 +993,7 @@ textarea {
 }
 
 .home-sport-meal-title {
+  display: block;
   overflow: hidden;
   color: var(--sp-ink);
   font-family: var(--sp-font-zh);
@@ -983,6 +1005,7 @@ textarea {
 }
 
 .home-sport-meal-macros {
+  display: block;
   margin-top: 4px;
   letter-spacing: 0.04em;
   overflow-wrap: anywhere;
