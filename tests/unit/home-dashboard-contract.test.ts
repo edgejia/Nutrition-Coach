@@ -182,9 +182,19 @@ describe("Home dashboard display contracts", () => {
     assert.doesNotMatch(homeSource, /openSecondaryScreen\("mealEdit"/);
   });
 
-  it("Home meal rows stay read-only and empty state routes through Chat", async () => {
+  it("Home meal rows split eligible edit buttons from silent read-only fallbacks", async () => {
     const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
 
+    assert.match(homeSource, /buildMealEditPayloadIfComplete/);
+    assert.match(homeSource, /import \{ buildMealEditPayloadIfComplete \} from "\.\.\/meal-edit-payload\.js"/);
+    assert.match(homeSource, /const openMealEdit = useStore\(\(s\) => s\.openMealEdit\)/);
+    assert.match(homeSource, /const todayDateKey = dailySummary\?\.date \?\? formatLocalDate\(new Date\(\)\)/);
+    assert.match(homeSource, /<MealRows meals=\{meals\} todayDateKey=\{todayDateKey\}/);
+    assert.match(homeSource, /buildMealEditPayloadIfComplete\(meal, todayDateKey\)/);
+    assert.match(homeSource, /openMealEdit\(editPayload, "home"\)/);
+    assert.match(homeSource, /<button\s+type="button"\s+className="home-sport-meal-row"/);
+    assert.match(homeSource, /aria-label=\{`編輯 \$\{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\} \$\{meal\.foodName\}`\}/);
     assert.match(homeSource, /<article key=\{meal\.id\} className="home-sport-meal-row">/);
     assert.match(homeSource, /getMealBadge\(meal\.mealPeriod, meal\.loggedAt\)/);
     assert.match(homeSource, /formatMealRowTime\(meal\.loggedAt\)/);
@@ -193,8 +203,14 @@ describe("Home dashboard display contracts", () => {
     assert.match(homeSource, /Math\.max\(0, Math\.round\(meal\.calories\)\)/);
     assert.match(homeSource, /stageHomeTaskOptionPrompt\(prompt, setPendingHomeChatDraft, setActiveScreen\)/);
     assert.match(homeSource, /<button type="button" className="home-sport-empty-action" onClick=\{onEmptyChatClick\}>/);
-    assert.doesNotMatch(homeSource, /<button[^>]+home-sport-meal-row/);
+    assert.match(cssSource, /\.home-sport-meal-row\[type="button"\][\s\S]*cursor:\s*pointer/);
+    assert.match(cssSource, /\.home-sport-meal-row\[type="button"\]:hover[\s\S]*background:\s*var\(--sp-surface-2\)/);
+    assert.match(cssSource, /\.home-sport-meal-row\[type="button"\]:focus-visible[\s\S]*outline:\s*2px solid var\(--sp-lime\)/);
     assert.doesNotMatch(homeSource, /SportPlusIcon/);
+    assert.doesNotMatch(homeSource, /SportChevronRightIcon|SportEditIcon|EditIcon/);
+    assert.doesNotMatch(homeSource, /openSecondaryScreen\("mealEdit"/);
+    assert.doesNotMatch(homeSource, /homeMealEdit|HomeMealEdit|openHomeMealEdit/);
+    assert.doesNotMatch(homeSource, /disabled[^=]|暫不可編輯|不可編輯|無法編輯|tooltip|title=\{`編輯/);
   });
 
   it("scopes count-up animation to consumed calories and ring percent", async () => {
