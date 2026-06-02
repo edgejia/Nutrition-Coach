@@ -58,6 +58,13 @@ describe("Meal Edit source contract", () => {
     }
   });
 
+  it("uses origin-specific back labels for Home, Chat, and History Meal Edit entry", () => {
+    assert.match(source, /origin === "home"\s*\?\s*"返回首頁"/);
+    assert.match(source, /origin === "chat"\s*\?\s*"返回對話"/);
+    assert.match(source, /origin === "history"\s*\?\s*"返回歷史"/);
+    assert.match(source, escapedPattern("aria-label={backLabel}"));
+  });
+
   it("handles stale revision conflicts with deterministic copy and stale-editor blocking", () => {
     for (const expected of [
       "餐點已被更新，請重新載入最新餐點後再編輯。",
