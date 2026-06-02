@@ -1113,26 +1113,61 @@ describe("Meals API", () => {
       ],
     });
 
-    const updateRes = await app.inject({
-      method: "PATCH",
-      url: `/api/meals/${meal.id}`,
-      headers: { cookie: deviceCookieHeader },
-      payload: {
-        foodName: "雞腿飯",
-        calories: 540,
-        protein: 28,
-        carbs: 62,
-        fat: 12.5,
-        imageAssetId: null,
-        expectedMealRevisionId: meal.mealRevisionId,
-      },
-    });
+    let summaryCalls = 0;
+    let publishCalls = 0;
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.summaryService.getDailySummary = async (...args) => {
+      summaryCalls += 1;
+      return originalGetDailySummary(...args);
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
+    };
 
-    assert.equal(updateRes.statusCode, 409);
-    assert.deepEqual(updateRes.json(), {
-      error: "MEAL_REQUIRES_GROUPED_UPDATE",
-      message: "Grouped meals must be corrected through chat.",
+    try {
+      const updateRes = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          foodName: "雞腿飯",
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          imageAssetId: null,
+          expectedMealRevisionId: meal.mealRevisionId,
+        },
+      });
+
+      assert.equal(updateRes.statusCode, 409);
+      assert.deepEqual(updateRes.json(), {
+        error: "MEAL_REQUIRES_GROUPED_UPDATE",
+        message: "Grouped meals must be corrected through chat.",
+      });
+      assertNoSummaryFields(updateRes.json());
+      assert.equal(summaryCalls, 0);
+      assert.equal(publishCalls, 0);
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+
+    const currentMeals = await app.inject({
+      method: "GET",
+      url: "/api/meals",
+      headers: { cookie: deviceCookieHeader },
     });
+    assert.deepEqual(
+      currentMeals.json().meals.map((entry: { id: string; mealRevisionId: string; itemCount: number }) => ({
+        id: entry.id,
+        mealRevisionId: entry.mealRevisionId,
+        itemCount: entry.itemCount,
+      })),
+      [{ id: meal.id, mealRevisionId: meal.mealRevisionId, itemCount: 2 }],
+    );
   });
 
   it("PATCH /api/meals/:id returns 404 for another device", async () => {
