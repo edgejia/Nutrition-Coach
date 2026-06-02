@@ -264,7 +264,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
-  const backLabel = origin === "chat" ? "返回對話" : origin === "history" ? "返回歷史" : "返回";
+  const backLabel = origin === "home" ? "返回首頁" : origin === "chat" ? "返回對話" : origin === "history" ? "返回歷史" : "返回";
   const goToChatCorrection = () => {
     closeSecondaryScreen();
     setActiveScreen("chat");
