@@ -115,6 +115,20 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
   };
 }
 
+export function buildMealEditPayloadIfComplete(meal: MealEntry, dateKey: string): MealEditPayload | null {
+  try {
+    return buildHistoryMealEditPayload(meal, dateKey);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === "MEAL_REVISION_REQUIRED" || error.message === "MEAL_AUTHORITY_REQUIRED")
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | undefined): MealEditPayload | null {
   const mealRevisionId = getRequiredString(loggedMeal?.mealRevisionId);
   if (
