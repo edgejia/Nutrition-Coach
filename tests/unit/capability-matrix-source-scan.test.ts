@@ -229,6 +229,20 @@ describe("capability matrix source scanner", () => {
     }
   });
 
+  it("keeps declared Home visible copy source-backed when present", async () => {
+    for (const row of capabilityMatrix) {
+      if (row.surface !== "Home" || row.visibleCopy === null) {
+        continue;
+      }
+
+      const source = await readSource(row.sourceFile);
+      assert.ok(
+        source.includes(row.visibleCopy),
+        `${row.sourceFile} missing visibleCopy ${row.visibleCopy} for ${row.surface} ${row.affordance}`,
+      );
+    }
+  });
+
   it("maps every actionable handler to a matrix row or a reasoned scanner exclusion", async () => {
     for (const file of HANDLER_SCAN_FILES) {
       const source = await readSource(file);
