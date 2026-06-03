@@ -57,7 +57,7 @@ Details are archived in [`milestones/v2.5/ROADMAP.md`](milestones/v2.5/ROADMAP.m
 
 - [x] **Phase 74: Home Meal Edit Entry and Existing Edit Contract Review** - Make Home today meal rows open Meal Edit like Chat and History rows, and verify the current single-item edit/delete contract before expanding grouped behavior. (completed 2026-06-02)
 - [x] **Phase 75: Grouped Meal Direct CRUD Contract** - Add direct grouped meal item edit, add, and delete support through a server-owned contract that preserves revision, summary, and receipt authority. (completed 2026-06-03)
-- [ ] **Phase 76: Grouped Meal Edit UI and Conditional Item Media Decision** - Build the grouped Meal Edit UI for item CRUD and decide whether item-level photo mapping is required or explicitly deferred.
+- [x] **Phase 76: Grouped Meal Edit UI and Conditional Item Media Decision** - Build the grouped Meal Edit UI for item CRUD and decide whether item-level photo mapping is required or explicitly deferred. (completed 2026-06-03)
 - [ ] **Phase 77: History Loading Stabilization and Local Proof Gate** - Smooth cold week-switch loading behavior, close focused local verification, and record defer decisions without monthly goal scope.
 
 ## Phase Details
@@ -130,7 +130,7 @@ Plans:
 **Goal:** Meal Edit presents grouped meal items as editable rows with add/delete controls, validation feedback, and post-commit refresh behavior.
 **Depends on:** Phase 75
 **Requirements:** GROUP-UI-01, GROUP-UI-02, GROUP-UI-03, MEDIA-DECISION-01
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 **Wave 1**
 
@@ -139,7 +139,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 76-02-PLAN.md — Grouped draft helper, update input union, and compact Meal Edit grouped editor UI.
-- [ ] 76-03-PLAN.md — Existing `/api/meals` grouped item read-path projection and refresh proof.
+- [x] 76-03-PLAN.md — Existing `/api/meals` grouped item read-path projection and refresh proof.
 
 **Success Criteria** (what must be TRUE):
 
@@ -182,7 +182,7 @@ Phases execute in numeric order: 74 -> 75 -> 76 -> 77.
 |---|---|---:|---|---|
 | 74. Home Meal Edit Entry and Existing Edit Contract Review | v2.6 | 3/3 | Complete    | 2026-06-02 |
 | 75. Grouped Meal Direct CRUD Contract | v2.6 | 3/3 | Complete    | 2026-06-03 |
-| 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 2/3 | In Progress|  |
+| 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 3/3 | Complete   | 2026-06-03 |
 | 77. History Loading Stabilization and Local Proof Gate | v2.6 | 0/0 | Planned | — |
 
 ## Future Milestone Candidates

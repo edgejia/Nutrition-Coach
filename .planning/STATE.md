@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: Scope
-status: executing
-stopped_at: Completed 76-02-PLAN.md
-last_updated: "2026-06-03T14:21:12.228Z"
-last_activity: 2026-06-03 -- Phase 76 Plan 02 complete
+status: verifying
+last_updated: "2026-06-03T14:30:42.284Z"
+last_activity: 2026-06-03
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 9
-  completed_plans: 8
-  percent: 50
+  completed_plans: 9
+  percent: 75
 ---
 
 # Project State
@@ -27,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-06-02)
 
 Phase: 76 (grouped-meal-edit-ui-and-conditional-item-media-decision) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-06-03 -- Phase 76 Plan 02 complete
+Status: Phase complete — ready for verification
+Last activity: 2026-06-03
 
 ## Performance Metrics
 
@@ -126,6 +125,7 @@ Last activity: 2026-06-03 -- Phase 76 Plan 02 complete
 | 75 | 3 | - | - |
 | Phase 76 P01 | 3m25s | 2 tasks | 4 files |
 | Phase 76 P02 | 11m33s | 3 tasks | 8 files |
+| Phase 76 P03 | 4m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -300,6 +300,9 @@ Recent decisions affecting current work:
 - [Phase 76 Plan 02]: Grouped draft validation errors are machine-readable data; MealEditScreen owns Traditional Chinese field copy.
 - [Phase 76 Plan 02]: Grouped saves submit only expectedMealRevisionId plus complete ordered items[], with no scalar or media write fields.
 - [Phase 76 Plan 02]: Capability matrix now treats grouped Meal Edit item editing as supported, while missing item details remain a non-editable unsupported state.
+- [Phase 76]: [Phase 76 Plan 03]: Grouped item details reuse the existing authorized GET /api/meals path instead of adding a separate edit-detail endpoint. — Keeps Home and post-commit refresh on the existing authoritative DTO/store path.
+- [Phase 76]: [Phase 76 Plan 03]: MealHistoryEntry projects flat public item rows while keeping item media, crop, thumbnail, asset, and evidence fields out of the DTO. — Preserves the Phase 76 whole-meal media decision and narrows the public item projection.
+- [Phase 76]: [Phase 76 Plan 03]: Whole-meal image identity remains on imageAssetId/imageUrl at the meal row level. — Avoids implying item-level photo mapping before a future explicit media evidence contract exists.
 
 ### Pending Todos
 
@@ -335,8 +338,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T14:21:12.221Z
-Stopped at: Completed 76-02-PLAN.md
+Last session: 2026-06-03T14:30:42.235Z
+Stopped at: Completed 76-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
