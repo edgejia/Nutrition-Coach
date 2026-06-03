@@ -776,6 +776,16 @@ describe("Meals API", () => {
           items: [{ ...validItem, position: 1 }],
         }),
       },
+      {
+        name: "aggregate nutrition overflows finite totals",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [
+            { ...validItem, calories: 1e308 },
+            { ...validItem, position: 1, calories: 1e308 },
+          ],
+        }),
+      },
     ];
 
     let summaryCalls = 0;

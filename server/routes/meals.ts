@@ -114,6 +114,19 @@ function parseGroupedMealItems(value: unknown): MealTransactionItemInput[] | nul
     });
   }
 
+  const totals = items.reduce(
+    (sum, item) => ({
+      calories: sum.calories + item.calories,
+      protein: sum.protein + item.protein,
+      carbs: sum.carbs + item.carbs,
+      fat: sum.fat + item.fat,
+    }),
+    { calories: 0, protein: 0, carbs: 0, fat: 0 },
+  );
+  if (!Object.values(totals).every(Number.isFinite)) {
+    return null;
+  }
+
   return items;
 }
 
