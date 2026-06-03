@@ -285,6 +285,7 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
           imageAssetId,
           imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
           loggedAt: meal.loggedAt,
+          ...(meal.items ? { items: meal.items } : {}),
           ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
         };
       }),
