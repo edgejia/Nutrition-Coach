@@ -62,10 +62,10 @@ v2.6 expanded meal editing and history usability from the stabilized v2.5 bounda
 
 **Archives:**
 
-- Roadmap: `.planning/milestones/v2.6-ROADMAP.md`
-- Requirements: `.planning/milestones/v2.6-REQUIREMENTS.md`
-- Audit: `.planning/milestones/v2.6-MILESTONE-AUDIT.md`
-- Phases: `.planning/milestones/v2.6-phases/`
+- Roadmap: `.planning/milestones/v2.6/ROADMAP.md`
+- Requirements: `.planning/milestones/v2.6/REQUIREMENTS.md`
+- Audit: `.planning/milestones/v2.6/MILESTONE-AUDIT.md`
+- Phases: `.planning/milestones/v2.6/phases/`
 
 ## Requirements
 

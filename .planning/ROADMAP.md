@@ -9,7 +9,7 @@
 - **v2.3 Authoritative Mutation Outcomes and Fresh Meal State** - shipped locally 2026-05-20; archived in [`milestones/v2.3/ROADMAP.md`](milestones/v2.3/ROADMAP.md); no staging/main promotion performed
 - **v2.4 Correction Authority and Meal Intent Fidelity** - shipped locally 2026-05-30; archived in [`milestones/v2.4/ROADMAP.md`](milestones/v2.4/ROADMAP.md); no staging/main promotion performed
 - **v2.5 Structured LLM Boundaries and DTO Reliability** - shipped locally 2026-06-02; archived in [`milestones/v2.5/ROADMAP.md`](milestones/v2.5/ROADMAP.md); no staging/main promotion performed
-- **v2.6 Meal Editing and History Usability** - shipped locally 2026-06-03; archived in [`milestones/v2.6-ROADMAP.md`](milestones/v2.6-ROADMAP.md); no staging/main promotion performed
+- **v2.6 Meal Editing and History Usability** - shipped locally 2026-06-03; archived in [`milestones/v2.6/ROADMAP.md`](milestones/v2.6/ROADMAP.md); no staging/main promotion performed
 
 ## Current Status
 
@@ -26,7 +26,7 @@ Planning remains local ignored GSD state because `origin/staging` stopped tracki
 | v2.3 | Phases 60-64 | [`milestones/v2.3/phases/`](milestones/v2.3/phases/) | Local release proof only; no staging/main promotion. |
 | v2.4 | Phases 65-68 | [`milestones/v2.4/phases/`](milestones/v2.4/phases/) | Correction authority and meal intent fidelity; local release proof only. |
 | v2.5 | Phases 69-73 | [`milestones/v2.5/phases/`](milestones/v2.5/phases/) | Structured LLM boundaries and DTO reliability; local release proof only. |
-| v2.6 | Phases 74-77 | [`milestones/v2.6-phases/`](milestones/v2.6-phases/) | Meal editing and history usability; local release proof only. |
+| v2.6 | Phases 74-77 | [`milestones/v2.6/phases/`](milestones/v2.6/phases/) | Meal editing and history usability; local release proof only. |
 
 ## Completed v2.4 Scope
 
@@ -58,7 +58,7 @@ Details are archived in [`milestones/v2.5/ROADMAP.md`](milestones/v2.5/ROADMAP.m
 | 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 3/3 | Complete    | 2026-06-03 |
 | 77. History Loading Stabilization and Local Proof Gate | v2.6 | 4/4 | Complete    | 2026-06-03 |
 
-Details are archived in [`milestones/v2.6-ROADMAP.md`](milestones/v2.6-ROADMAP.md), [`milestones/v2.6-REQUIREMENTS.md`](milestones/v2.6-REQUIREMENTS.md), [`milestones/v2.6-MILESTONE-AUDIT.md`](milestones/v2.6-MILESTONE-AUDIT.md), and [`milestones/v2.6-phases/`](milestones/v2.6-phases/).
+Details are archived in [`milestones/v2.6/ROADMAP.md`](milestones/v2.6/ROADMAP.md), [`milestones/v2.6/REQUIREMENTS.md`](milestones/v2.6/REQUIREMENTS.md), [`milestones/v2.6/MILESTONE-AUDIT.md`](milestones/v2.6/MILESTONE-AUDIT.md), and [`milestones/v2.6/phases/`](milestones/v2.6/phases/).
 
 ## Future Milestone Candidates
 

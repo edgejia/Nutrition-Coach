@@ -22,10 +22,10 @@
 
 **Archives:**
 
-- Roadmap: `.planning/milestones/v2.6-ROADMAP.md`
-- Requirements: `.planning/milestones/v2.6-REQUIREMENTS.md`
-- Audit: `.planning/milestones/v2.6-MILESTONE-AUDIT.md`
-- Phases: `.planning/milestones/v2.6-phases/`
+- Roadmap: `.planning/milestones/v2.6/ROADMAP.md`
+- Requirements: `.planning/milestones/v2.6/REQUIREMENTS.md`
+- Audit: `.planning/milestones/v2.6/MILESTONE-AUDIT.md`
+- Phases: `.planning/milestones/v2.6/phases/`
 
 ---
 
