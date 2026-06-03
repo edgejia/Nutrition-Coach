@@ -1,19 +1,10 @@
 ---
 phase: 77-history-loading-stabilization-and-local-proof-gate
-reviewed: 2026-06-03T19:22:54Z
+reviewed: 2026-06-03T20:35:28Z
 depth: standard
-status: issues_found
-reviewed_files:
-  count: 4
-  list:
-    - client/src/components/HistoryScreen.tsx
-    - client/src/contracts/capability-matrix.ts
-    - tests/unit/history-screen-contract.test.ts
-    - tests/harness/scenarios/77-history-loading-visual.mjs
-files_reviewed: 4
+files_reviewed: 3
 files_reviewed_list:
   - client/src/components/HistoryScreen.tsx
-  - client/src/contracts/capability-matrix.ts
   - tests/unit/history-screen-contract.test.ts
   - tests/harness/scenarios/77-history-loading-visual.mjs
 findings:
@@ -21,88 +12,79 @@ findings:
   warning: 3
   info: 0
   total: 3
+status: issues_found
 ---
 
 # Phase 77: Code Review Report
 
-**Reviewed:** 2026-06-03T19:22:54Z
+**Reviewed:** 2026-06-03T20:35:28Z
 **Depth:** standard
-**Files Reviewed:** 4
+**Files Reviewed:** 3
 **Status:** issues_found
 
 ## Summary
 
-Reviewed the scoped Phase 77 History source, capability matrix row, source-contract unit test, and synthetic visual harness. The production `HistoryScreen.tsx` change preserves snapshot-backed rows, Meal Edit payloads, confirmed-empty detail activation, and scoped mutation refresh in the reviewed code. The concrete defects are in the capability-matrix contract and the visual proof harness: the matrix still misclassifies an active Meal Edit handoff as read-only History browsing, and the harness can falsely pass pending-row and external-network privacy regressions.
+Reviewed the Plan 77-04 source scope after applying the Nutrition-specific review checks. The `HistoryScreen.tsx` runtime path appears to close GAP-77-UAT-01: selected-day pending copy is gated by the delayed timer, longer cold loads can still show the inline copy, timeline rows remain snapshot-backed, and the page-level week loading card was not reintroduced. The findings are proof-layer defects: two false-pass risks in the tests/harness and one traceability gap in the generated visual manifest.
 
 ## Narrative Findings (AI reviewer)
 
 ## Warnings
 
-### WR-01: History capability row classifies an active Meal Edit handoff as read-only
+### WR-01: Fast-click harness can miss stale rows from the immediately previous selected day
 
 **Classification:** WARNING
-**File:** `client/src/contracts/capability-matrix.ts:229`
-**Issue:** The History row is declared `supported-read-only` and only lists `openDayDetail` as its store action, but its handler matchers include `onMealOpen(meal)` while `HistoryScreen.tsx:246-247` calls `openMealEdit(buildHistoryMealEditPayload(meal, selectedDateKey), "history")`. That means the matrix now covers the new confirmed-empty Day Detail handler by keeping it in a row that also silently covers an active edit affordance without declaring `openMealEdit` or the Meal Edit route/service contract. Downstream capability checks can treat History as read-only even though meal rows actively hand off to Meal Edit.
-**Fix:** Split the concerns into two rows, or update the existing row so its support state and backing contracts match the active handler. The safer shape is:
+**File:** `tests/harness/scenarios/77-history-loading-visual.mjs:553`
+**Issue:** The fast date-click sampler only flags stale meal rows matching the current-week labels `燕麥優格` and `雞胸飯`. The fast-click path runs after the harness has loaded `2026-04-29`, then clicks `2026-05-01`; if a regression kept the previous selected-day rows (`紫米飯糰` / `鮭魚藜麥碗`) visible under the new `5/1` target date until the fast snapshot resolved, `noStaleCurrentWeekMeals` at lines 572 and 596 would still pass. That leaves a false-pass hole for the requested "no stale rows" contract.
+**Fix:**
+```js
+const priorTargetMealPattern = /紫米飯糰|鮭魚藜麥碗/;
+// in each sample
+includesPriorSelectedDayStaleMeals:
+  priorTargetMealPattern.test(historyText) && !Boolean(state.fastSnapshotResolved),
 
+// in the resolved result
+noPriorSelectedDayStaleMeals:
+  !samples.some((item) => item.includesPriorSelectedDayStaleMeals),
+
+// after collection
+if (!value.noPriorSelectedDayStaleMeals) {
+  throw new Error("Phase 77 visual evidence failed: prior selected-day meal labels appeared during fast date click.");
+}
+```
+
+### WR-02: Source contract does not prove the timeout uses the delay constant or resets on date changes
+
+**Classification:** WARNING
+**File:** `tests/unit/history-screen-contract.test.ts:236`
+**Issue:** The delayed-pending contract checks that `window.setTimeout` eventually calls `setDelayedInlineDayPending(true)`, then separately checks that `DAY_PENDING_COPY_DELAY_MS` and `selectedDateKey` appear somewhere in the file. An implementation could call `window.setTimeout(..., 0)` or omit `selectedDateKey` from the effect dependencies while still passing this source contract, reopening fast flicker or stale timer behavior.
+**Fix:**
 ```ts
-{
-  surface: "History",
-  affordance: "Trend and day browsing",
-  sourceMatchers: ["getHistoryTrends", "getHistoryDaySnapshot", "openDayDetail", "openConfirmedEmptyDayDetail", "moveWeek"],
-  handlerMatchers: ["onSelect(day.dateKey)", "onTimelineOpen()", "handleTimelineKeyDown", "openConfirmedEmptyDayDetail", "moveWeek"],
-  supportState: "supported-read-only",
-  storeAction: ["openDayDetail"],
-  // ...
-},
-{
-  surface: "History",
-  affordance: "Meal Edit handoff",
-  sourceMatchers: ["buildHistoryMealEditPayload(meal, selectedDateKey)", "openMealEdit"],
-  handlerMatchers: ["onMealOpen(meal)"],
-  supportState: "supported",
-  storeAction: ["openMealEdit"],
-  backendRoute: ["/api/meals/:id"],
-  backendService: ["updateMeal"],
-  // ...
-}
+assert.match(
+  source,
+  /window\.setTimeout\(\(\) => \{[\s\S]*setDelayedInlineDayPending\(true\)[\s\S]*\}, DAY_PENDING_COPY_DELAY_MS\)/,
+);
+assert.match(
+  source,
+  /useEffect\(\(\) => \{[\s\S]*inlineDayPendingTimerRef[\s\S]*\}, \[dayError, loadingDay, selectedDateKey, selectedDaySnapshotPending\]\)/,
+);
 ```
 
-### WR-02: Pending visual proof does not fail when meal rows are rendered during loading
+### WR-03: Manifest interaction trace omits the fast date click
 
 **Classification:** WARNING
-**File:** `tests/harness/scenarios/77-history-loading-visual.mjs:438`
-**Issue:** The harness collects `.sp-history-meal-row` text but never asserts that pending state has zero meal rows. The only pending stale-row check is `includesCurrentWeekStaleMeals` for two synthetic current-week labels at `tests/harness/scenarios/77-history-loading-visual.mjs:449` and `tests/harness/scenarios/77-history-loading-visual.mjs:492`. A regression that renders disabled/skeleton rows, target-week trend-only rows, or stale rows with different labels would still pass while violating the Phase 77 contract that pending cold switches expose no meal row/edit affordances before the selected day snapshot resolves.
-**Fix:** Make pending proof assert the row boundary directly:
-
+**File:** `tests/harness/scenarios/77-history-loading-visual.mjs:748`
+**Issue:** `collectFastPendingCopySamples()` pushes `week-day:fast-2026-05-01` at line 539, but the manifest uses `loadedInspection.interactions`, which is captured before the fast click. The generated manifest therefore lists only `bottom-nav:history` and `week-control:previous`, even though it claims fast-date-click proof. The assertions still run, but the artifact trace is incomplete and less useful for auditing the exact user path that closed GAP-77-UAT-01.
+**Fix:**
 ```js
-if (phase === "pending") {
-  if (value.mealRows.length !== 0) {
-    throw new Error(`Phase 77 visual evidence failed: pending state rendered meal rows: ${value.mealRows.join(", ")}`);
-  }
-}
+// include this in collectFastPendingCopySamples() result
+interactions: state.interactions ?? [],
+
+// then write the post-fast-click trace
+interactions: fastDateClick.interactions,
 ```
-
-Also add manifest booleans such as `noPendingMealRows` and, if desired, `noPendingMealEditButtons`.
-
-### WR-03: External-network privacy claim only covers `fetch`, not browser resource requests
-
-**Classification:** WARNING
-**File:** `tests/harness/scenarios/77-history-loading-visual.mjs:326`
-**Issue:** The visual harness claims that "external and unmocked backend calls must fail the run" at `tests/harness/scenarios/77-history-loading-visual.mjs:686`, but the implementation only overrides `window.fetch`. Browser resource loads such as `<img src="https://...">`, CSS `url(...)`, preloads, or navigation requests are not routed through that override, so a client-bundle change could leak or depend on external resources while this privacy proof still passes.
-**Fix:** Enable CDP network monitoring before navigation and fail on non-loopback requests, for example:
-
-```js
-await send("Network.enable");
-const observedRequests = [];
-// Extend cdpSession to surface Network.requestWillBeSent events, push event.request.url
-// into observedRequests, and fail after capture if any URL origin differs from server.origin.
-```
-
-Alternatively, subscribe to `Network.requestWillBeSent` and collect every request URL, then assert all origins are the loopback server before writing the manifest.
 
 ---
 
-_Reviewed: 2026-06-03T19:22:54Z_
+_Reviewed: 2026-06-03T20:35:28Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
