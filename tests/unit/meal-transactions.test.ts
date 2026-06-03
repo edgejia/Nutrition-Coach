@@ -2,7 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
 import {
   assetReferences,
@@ -102,6 +102,30 @@ describe("MealTransactionsService", () => {
       deletedAt: transaction.deletedAt,
       revisionCount: revisions.length,
     };
+  }
+
+  async function getRevisionProof(revisionId: string) {
+    const revision = (
+      await db
+        .select()
+        .from(mealRevisions)
+        .where(eq(mealRevisions.id, revisionId))
+    )[0];
+    const items = await db
+      .select({
+        position: mealRevisionItems.position,
+        foodName: mealRevisionItems.foodName,
+        calories: mealRevisionItems.calories,
+        protein: mealRevisionItems.protein,
+        carbs: mealRevisionItems.carbs,
+        fat: mealRevisionItems.fat,
+      })
+      .from(mealRevisionItems)
+      .where(eq(mealRevisionItems.revisionId, revisionId))
+      .orderBy(asc(mealRevisionItems.position));
+
+    assert.ok(revision);
+    return { revision, items };
   }
 
   function assertMealRevisionPrecondition(
@@ -449,6 +473,97 @@ describe("MealTransactionsService", () => {
     assert.equal(updated.transactionId, created.transactionId);
     assert.equal(updated.revisionId, transaction!.currentRevisionId);
     assert.notEqual(updated.revisionId, created.revisionId);
+  });
+
+  it("persists full-list updates as ordered revision items while preserving image identity", async () => {
+    await createOwnedAsset("asset-breakfast");
+
+    const singleItem = await mealTransactionsService.createTransaction(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      imagePath: "asset:asset-breakfast",
+      items: [
+        {
+          foodName: "早餐盤",
+          calories: 410,
+          protein: 22,
+          carbs: 38,
+          fat: 18,
+        },
+      ],
+    });
+    const singleToGroupedItems = [
+      { foodName: "蛋餅", calories: 310, protein: 18, carbs: 32, fat: 12 },
+      { foodName: "無糖豆漿", calories: 120, protein: 9, carbs: 8, fat: 5 },
+    ];
+
+    const singleToGrouped = await mealTransactionsService.updateTransaction(deviceId, singleItem.transactionId, {
+      expectedMealRevisionId: singleItem.revisionId,
+      items: singleToGroupedItems,
+    });
+    const singleToGroupedProof = await getRevisionProof(singleToGrouped.revisionId);
+    assert.equal(singleToGrouped.transactionId, singleItem.transactionId);
+    assert.notEqual(singleToGrouped.revisionId, singleItem.revisionId);
+    assert.equal(singleToGroupedProof.revision.supersedesRevisionId, singleItem.revisionId);
+    assert.equal(singleToGroupedProof.revision.imageAssetId, "asset-breakfast");
+    assert.equal(singleToGrouped.imageAssetId, "asset-breakfast");
+    assert.deepEqual(singleToGrouped.items, singleToGroupedItems);
+    assert.deepEqual(singleToGroupedProof.items, [
+      { position: 0, ...singleToGroupedItems[0] },
+      { position: 1, ...singleToGroupedItems[1] },
+    ]);
+    assert.deepEqual(await getTransactionState(singleItem.transactionId), {
+      currentRevisionId: singleToGrouped.revisionId,
+      currentRevisionNumber: 2,
+      deletedAt: null,
+      revisionCount: 2,
+    });
+
+    const reorderedDuplicateItems = [
+      { foodName: "無糖豆漿", calories: 130, protein: 10, carbs: 9, fat: 5 },
+      { foodName: "蛋餅", calories: 300, protein: 17, carbs: 31, fat: 11 },
+      { foodName: "無糖豆漿", calories: 90, protein: 7, carbs: 5, fat: 3 },
+    ];
+    const reorderedDuplicate = await mealTransactionsService.updateTransaction(deviceId, singleItem.transactionId, {
+      expectedMealRevisionId: singleToGrouped.revisionId,
+      items: reorderedDuplicateItems,
+    });
+    const reorderedDuplicateProof = await getRevisionProof(reorderedDuplicate.revisionId);
+    assert.notEqual(reorderedDuplicate.revisionId, singleToGrouped.revisionId);
+    assert.equal(reorderedDuplicateProof.revision.supersedesRevisionId, singleToGrouped.revisionId);
+    assert.equal(reorderedDuplicateProof.revision.imageAssetId, "asset-breakfast");
+    assert.equal(reorderedDuplicate.imageAssetId, "asset-breakfast");
+    assert.deepEqual(reorderedDuplicate.items, reorderedDuplicateItems);
+    assert.deepEqual(reorderedDuplicateProof.items, [
+      { position: 0, ...reorderedDuplicateItems[0] },
+      { position: 1, ...reorderedDuplicateItems[1] },
+      { position: 2, ...reorderedDuplicateItems[2] },
+    ]);
+
+    const groupedItem = await mealTransactionsService.createTransaction(deviceId, {
+      loggedAt: "2026-03-25T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+      ],
+    });
+    const groupedToSingleItems = [
+      { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+    ];
+    const groupedToSingle = await mealTransactionsService.updateTransaction(deviceId, groupedItem.transactionId, {
+      expectedMealRevisionId: groupedItem.revisionId,
+      items: groupedToSingleItems,
+    });
+    const groupedToSingleProof = await getRevisionProof(groupedToSingle.revisionId);
+    assert.equal(groupedToSingle.transactionId, groupedItem.transactionId);
+    assert.notEqual(groupedToSingle.revisionId, groupedItem.revisionId);
+    assert.equal(groupedToSingleProof.revision.supersedesRevisionId, groupedItem.revisionId);
+    assert.equal(groupedToSingleProof.revision.imageAssetId, null);
+    assert.equal(groupedToSingle.imageAssetId, null);
+    assert.deepEqual(groupedToSingle.items, groupedToSingleItems);
+    assert.deepEqual(groupedToSingleProof.items, [
+      { position: 0, ...groupedToSingleItems[0] },
+    ]);
   });
 
   it("preserves existing mealPeriod when ordinary updates omit period changes", async () => {
