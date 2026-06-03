@@ -2521,13 +2521,25 @@ textarea {
   padding-bottom: calc(24px + var(--app-bottom-occlusion, 0px) + env(safe-area-inset-bottom));
 }
 
-.sp-meal-edit-grouped-lock {
+.sp-meal-edit-grouped-card {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 16px;
   border: 1px solid var(--sp-line);
   background: var(--sp-surface);
+}
+
+.sp-meal-edit-grouped-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sp-meal-edit-grouped-header > div:first-child {
+  min-width: 0;
 }
 
 .sp-meal-edit-grouped-label {
@@ -2538,8 +2550,9 @@ textarea {
   line-height: 1.25;
 }
 
-.sp-meal-edit-grouped-lock h2 {
-  margin: 0;
+.sp-meal-edit-grouped-header h2,
+.sp-meal-edit-grouped-empty h2 {
+  margin: 4px 0 0;
   color: var(--sp-ink);
   font-family: var(--sp-font-zh);
   font-size: 20px;
@@ -2547,72 +2560,162 @@ textarea {
   line-height: 1.2;
 }
 
-.sp-meal-edit-grouped-lock p {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
+.sp-meal-edit-grouped-totals {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 8px;
   color: var(--sp-ink-2);
-  font-family: var(--sp-font-zh);
-  font-size: 14px;
+  font-family: var(--sp-font-mono);
+  font-size: 12px;
   line-height: 1.5;
 }
 
-.sp-meal-edit-grouped-items {
+.sp-meal-edit-grouped-card > [aria-label="項目明細"] {
   display: grid;
   gap: 8px;
-  border: 1px solid var(--sp-line);
-  border-radius: var(--sp-r-md);
-  padding: 8px;
 }
 
-.sp-meal-edit-grouped-item {
+.sp-meal-edit-grouped-row {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: 10px;
+  border: 1px solid var(--sp-line);
   border-radius: var(--sp-r-sm);
   background: var(--sp-surface-2);
-  padding: 10px 12px;
+  padding: 10px;
 }
 
-.sp-meal-edit-grouped-item-name {
+.sp-meal-edit-grouped-row-expanded {
+  border-color: var(--sp-lime-line);
+}
+
+.sp-meal-edit-grouped-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-meal-edit-grouped-summary > button:first-child {
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--sp-ink);
+  padding: 0;
+  text-align: left;
+}
+
+.sp-meal-edit-grouped-summary > button:first-child span {
+  display: block;
   min-width: 0;
   overflow-wrap: anywhere;
-  color: var(--sp-ink);
   font-family: var(--sp-font-zh);
   font-size: 14px;
-  font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.45;
 }
 
-.sp-meal-edit-grouped-item-macros {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 8px;
+.sp-meal-edit-grouped-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sp-meal-edit-grouped-row-actions button {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--sp-line);
+  border-radius: var(--sp-r-pill);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--sp-ink-2);
+  padding: 0 10px;
   font-family: var(--sp-font-zh);
   font-size: 12px;
-  line-height: 1.35;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
-.sp-meal-edit-grouped-item-macros span {
-  min-width: 0;
-  overflow-wrap: anywhere;
+.sp-meal-edit-grouped-row-actions button:last-child {
+  border-color: rgba(255, 77, 77, 0.32);
+  color: #ffb3b3;
 }
 
-.sp-meal-edit-grouped-primary {
+.sp-meal-edit-grouped-row-actions button:disabled,
+.sp-meal-edit-grouped-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.sp-meal-edit-grouped-row-expanded > div:last-child {
+  display: grid;
+  gap: 10px;
+}
+
+.sp-meal-edit-grouped-add {
+  display: inline-flex;
   min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   border: 1px solid var(--sp-lime);
   border-radius: var(--sp-r-pill);
   background: var(--sp-lime);
   color: #0a0b0d;
-  padding: 0 24px;
+  padding: 0 18px;
   font-family: var(--sp-font-zh);
   font-size: 14px;
   font-weight: 700;
   line-height: 1.25;
 }
 
-.sp-meal-edit-grouped-primary:focus-visible {
+.sp-meal-edit-field-error {
+  border-color: rgba(255, 77, 77, 0.45);
+  background: rgba(255, 77, 77, 0.08);
+}
+
+.sp-meal-edit-field-error small[id] {
+  color: #ffb3b3;
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.sp-meal-edit-grouped-final-delete-error {
+  border: 1px solid rgba(255, 77, 77, 0.32);
+  border-radius: var(--sp-r-sm);
+  background: rgba(255, 77, 77, 0.10);
+  color: #ffb3b3;
+  padding: 8px 10px;
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sp-meal-edit-grouped-empty {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--sp-line);
+  background: var(--sp-surface);
+}
+
+.sp-meal-edit-grouped-empty p {
+  margin: 0;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.sp-meal-edit-grouped-add:focus-visible,
+.sp-meal-edit-grouped-summary > button:first-child:focus-visible,
+.sp-meal-edit-grouped-row-actions button:focus-visible {
   outline: 2px solid var(--sp-lime);
   outline-offset: 2px;
 }
