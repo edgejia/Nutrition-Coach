@@ -2,9 +2,8 @@
 gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: Scope
-status: executing
-stopped_at: Phase 76 complete
-last_updated: "2026-06-03T14:56:48.580Z"
+status: planning
+last_updated: "2026-06-03T17:01:35.753Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 4
@@ -340,9 +339,9 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T14:30:42.235Z
-Stopped at: Completed 76-03-PLAN.md
-Resume file: None
+Last session: 2026-06-03T17:01:35.743Z
+Stopped at: Phase 77 context gathered
+Resume file: .planning/phases/77-history-loading-stabilization-and-local-proof-gate/77-CONTEXT.md
 
 ## Operator Next Steps
 
