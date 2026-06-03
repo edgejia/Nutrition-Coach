@@ -675,6 +675,166 @@ describe("Meals API", () => {
     }
   });
 
+  it("PATCH /api/meals/:id rejects malformed grouped items replacement bodies without side effects", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    type InvalidGroupedBodyCase = {
+      name: string;
+      payload: (expectedMealRevisionId: string) => Record<string, unknown>;
+    };
+    const validItem = { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 12 };
+    const invalidBodies: InvalidGroupedBodyCase[] = [
+      {
+        name: "empty items",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [],
+        }),
+      },
+      {
+        name: "items plus complete scalar update shape",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          foodName: "雞腿飯",
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          imageAssetId: null,
+          items: [validItem],
+        }),
+      },
+      {
+        name: "items plus scalar nutrition",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          items: [validItem],
+        }),
+      },
+      {
+        name: "items plus imageAssetId",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          imageAssetId: null,
+          items: [validItem],
+        }),
+      },
+      {
+        name: "item uses persistence foodName alias",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [{ foodName: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 12 }],
+        }),
+      },
+      {
+        name: "item uses nested nutrition",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [{
+            name: "雞腿",
+            position: 0,
+            nutrition: { calories: 260, protein: 24, carbs: 0, fat: 12 },
+          }],
+        }),
+      },
+      {
+        name: "item has extra serving key",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [{ ...validItem, serving: "半份" }],
+        }),
+      },
+      {
+        name: "blank name",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [{ ...validItem, name: "   " }],
+        }),
+      },
+      {
+        name: "negative nutrition",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [{ ...validItem, calories: -1 }],
+        }),
+      },
+      {
+        name: "missing required nutrition",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [{ name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0 }],
+        }),
+      },
+      {
+        name: "position does not match zero-based array index",
+        payload: (expectedMealRevisionId: string) => ({
+          expectedMealRevisionId,
+          items: [{ ...validItem, position: 1 }],
+        }),
+      },
+    ];
+
+    let summaryCalls = 0;
+    let publishCalls = 0;
+    const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.summaryService.getDailySummary = async (...args) => {
+      summaryCalls += 1;
+      return originalGetDailySummary(...args);
+    };
+    services.publisher.publishDailySummary = (...args) => {
+      publishCalls += 1;
+      return originalPublishDailySummary(...args);
+    };
+
+    try {
+      for (const invalidBody of invalidBodies) {
+        const meal: { id: string; mealRevisionId: string } = await services.foodLoggingService.logGroupedMeal(deviceId, {
+          items: [
+            { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+            { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+          ],
+        });
+        summaryCalls = 0;
+        publishCalls = 0;
+
+        const updateRes: { statusCode: number; json: () => unknown } = await app.inject({
+          method: "PATCH",
+          url: `/api/meals/${meal.id}`,
+          headers: { cookie: deviceCookieHeader },
+          payload: invalidBody.payload(meal.mealRevisionId),
+        });
+        const body = updateRes.json() as Record<string, unknown>;
+
+        assert.equal(updateRes.statusCode, 400, invalidBody.name);
+        assert.deepEqual(body, { error: "Invalid meal update" }, invalidBody.name);
+        assertNoSummaryFields(body);
+        assert.equal(summaryCalls, 0, invalidBody.name);
+        assert.equal(publishCalls, 0, invalidBody.name);
+
+        const currentMeals = await app.inject({
+          method: "GET",
+          url: "/api/meals",
+          headers: { cookie: deviceCookieHeader },
+        });
+        const currentMeal = (currentMeals.json() as {
+          meals: Array<{ id: string; mealRevisionId: string; itemCount: number; foodName: string }>;
+        }).meals.find((entry) => entry.id === meal.id);
+        assert.ok(currentMeal, invalidBody.name);
+        assert.equal(currentMeal.mealRevisionId, meal.mealRevisionId, invalidBody.name);
+        assert.equal(currentMeal.itemCount, 2, invalidBody.name);
+        assert.equal(currentMeal.foodName, "雞腿、白飯", invalidBody.name);
+      }
+    } finally {
+      services.summaryService.getDailySummary = originalGetDailySummary;
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
   it("PATCH and DELETE /api/meals/:id fail closed on missing or stale expected revisions", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
