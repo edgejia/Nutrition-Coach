@@ -214,6 +214,41 @@ describe("History screen source contract", () => {
     assert.doesNotMatch(source, /selectedDayMealCount === 0[\s\S]*openDayDetail/);
   });
 
+  it("suppresses fast selected-day pending copy while preserving longer cold-load copy", () => {
+    for (const expected of [
+      "DAY_PENDING_COPY_DELAY_MS",
+      "delayedInlineDayPending",
+      "setDelayedInlineDayPending",
+      "inlineDayPendingTimerRef",
+      "window.setTimeout",
+      "window.clearTimeout",
+      "同步這天紀錄中...",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(source, /const DAY_PENDING_COPY_DELAY_MS = (18\d|19\d|2[0-4]\d|250)/);
+    assert.match(source, /useState\(false\)/);
+    assert.match(source, /useRef<ReturnType<typeof window\.setTimeout> \| null>\(null\)/);
+    assert.match(source, /window\.setTimeout\(\(\) => \{\s*setDelayedInlineDayPending\(true\)/);
+    assert.match(source, /DAY_PENDING_COPY_DELAY_MS/);
+    assert.match(source, /window\.clearTimeout\(inlineDayPendingTimerRef\.current\)/);
+    assert.match(source, /setDelayedInlineDayPending\(false\)/);
+    assert.match(
+      source,
+      /const showInlineDayPending =[\s\S]*selectedDaySnapshotPending[\s\S]*loadingDay[\s\S]*!dayError[\s\S]*delayedInlineDayPending/,
+    );
+    assert.match(
+      source,
+      /if \(!selectedDaySnapshotPending \|\| !loadingDay \|\| dayError\) \{[\s\S]*setDelayedInlineDayPending\(false\)/,
+    );
+    assert.match(source, /selectedDateKey/);
+
+    assert.doesNotMatch(source, /const showInlineDayPending = selectedDaySnapshotPending && !dayError/);
+    assert.doesNotMatch(source, /const showInlineDayPending = selectedSnapshot === null && !dayError/);
+    assert.doesNotMatch(source, /const showInlineDayPending = !hasSelectedDaySnapshot && !dayError/);
+  });
+
   it("uses day snapshots as the only timeline row and Meal Edit authority", () => {
     assert.match(source, /const meals = snapshot\?\.meals \?\? \[\]/);
     assert.match(source, /snapshot !== null && meals\.length > 0[\s\S]*<TimelineRows[\s\S]*meals=\{meals\}/);
