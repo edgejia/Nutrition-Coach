@@ -455,6 +455,9 @@ async function inspectHistoryLoadingState(send, phase) {
         .map(rectOf)
         .filter((rect) => rect.width > 0 && rect.height > 0);
       const mealRows = [...document.querySelectorAll('.sp-history-meal-row')].map((node) => node.innerText.trim());
+      const dayDetailAffordances = [...document.querySelectorAll('.sp-history-timeline[role="button"], .sp-history-empty[role="button"], [aria-label="開啟當日詳情"]')]
+        .map((node) => node.innerText.trim() || node.getAttribute("aria-label") || node.className)
+        .filter(Boolean);
       const state = window.__phase77VisualState ?? {};
       return {
         bodyTextLength: bodyText.length,
@@ -474,6 +477,9 @@ async function inspectHistoryLoadingState(send, phase) {
         coldDayRequests: state.coldDayRequests ?? 0,
         interactions: state.interactions ?? [],
         mealRows,
+        mealRowCount: mealRows.length,
+        dayDetailAffordanceCount: dayDetailAffordances.length,
+        dayDetailAffordances,
         phase: ${JSON.stringify(phase)}
       };
     })()`,
@@ -510,6 +516,12 @@ async function inspectHistoryLoadingState(send, phase) {
     }
     if (value.includesCurrentWeekStaleMeals) {
       throw new Error("Phase 77 visual evidence failed: stale cached current-week meals leaked into target-week pending state.");
+    }
+    if (value.mealRowCount > 0) {
+      throw new Error(`Phase 77 visual evidence failed: ${value.mealRowCount} meal edit row affordance(s) rendered during pending state.`);
+    }
+    if (value.dayDetailAffordanceCount > 0) {
+      throw new Error(`Phase 77 visual evidence failed: Day Detail affordance rendered during pending state: ${value.dayDetailAffordances.join(" | ")}`);
     }
     if (value.coldTrendRequests < 1 || value.coldDayRequests < 1) {
       throw new Error("Phase 77 visual evidence failed: cold target week/day requests were not exercised.");
@@ -707,6 +719,8 @@ async function runCase({ browser, url, outputDir, state }) {
             noTopLevelWeekLoadingCard: !pendingInspection.includesForbiddenWeekCard,
             noHistoryErrorBanner: !pendingInspection.includesHistoryError,
             noStaleCachedMealRows: !pendingInspection.includesCurrentWeekStaleMeals,
+            noPendingMealEditRows: pendingInspection.mealRowCount === 0,
+            noPendingDayDetailAffordance: pendingInspection.dayDetailAffordanceCount === 0,
             noUnsafeCalls: pendingInspection.unsafeCalls.length === 0,
             historyScreenNonempty: pendingInspection.historyNodeCount > 0,
             noHorizontalOverflow: !pendingInspection.hasHorizontalOverflow,
@@ -799,6 +813,8 @@ async function main() {
         "inline selected-day pending copy must be visible during delayed cold responses",
         "top-level week loading card must be absent",
         "stale cached current-week meal rows must be absent under target week pending state",
+        "meal edit row affordances must be absent during delayed pending state",
+        "Day Detail affordances must be absent during delayed pending state",
         "loaded target-week synthetic meals must appear after delayed responses resolve",
         "fastDateClick.noTransientInlinePendingCopy must remain true across animation-frame samples",
         "fast selected-day snapshot must resolve before the pending-copy delay",
