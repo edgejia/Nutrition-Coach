@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.6
-milestone_name: Meal Editing and History Usability
-status: planning
-last_updated: "2026-06-03T08:57:12.784Z"
-last_activity: 2026-06-02
+milestone_name: Scope
+status: verifying
+last_updated: "2026-06-03T10:08:57.810Z"
+last_activity: 2026-06-03
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 25
+  completed_phases: 2
+  total_plans: 6
+  completed_plans: 6
+  percent: 50
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Phase 75 — grouped meal direct crud contract
+**Current focus:** Phase 75 — grouped-meal-direct-crud-contract
 
 ## Current Position
 
-Phase: 75
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-06-02
+Phase: 75 (grouped-meal-direct-crud-contract) — EXECUTING
+Plan: 3 of 3
+Status: Phase complete — ready for verification
+Last activity: 2026-06-03
 
 ## Performance Metrics
 
@@ -119,6 +119,9 @@ Last activity: 2026-06-02
 | Phase 74 P02 | 3m 24s | 2 tasks | 4 files |
 | Phase 74 P03 | 4m 30s | 2 tasks | 4 files |
 | 74 | 3 | - | - |
+| Phase 75 P01 | 5m 50s | 2 tasks | 1 files |
+| Phase 75 P02 | 5 min | 2 tasks | 1 files |
+| Phase 75 P03 | 3m 28s | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -281,6 +284,12 @@ Recent decisions affecting current work:
 - [Phase 74]: Plan 03: Home meal-row metadata now cites buildMealEditPayloadIfComplete and openMealEdit(editPayload, "home") as concrete implementation evidence.
 - [Phase 74]: Plan 03: Capability matrix documentation was regenerated from source rather than hand-edited.
 - [Phase 74]: Plan 03: Day Detail remains supported-read-only and keeps only onBack as active handler evidence.
+- [Phase 75]: [Phase 75 Plan 01]: Red grouped PATCH contracts are test-only; GROUP-EDIT requirements remain active until route implementation and proof complete.
+- [Phase 75 Plan 02]: Grouped PATCH bodies are selected by an own `items` property and have no public discriminator.
+- [Phase 75 Plan 02]: Grouped item request rows stay strict and flat; public `name` maps to persistence `foodName`, positions must match zero-based array order, and duplicate names are allowed.
+- [Phase 75 Plan 02]: Grouped writes bypass the scalar grouped-lock and image validation path, then reuse the existing post-commit `summaryOutcome` and `daily_summary` publish block.
+- [Phase 75]: Direct grouped route edits remain represented by meal revision history and aggregate route responses, not chat receipts or compressed-history mutation outcomes. — D-29 keeps direct route edits out of chat persistence for Phase 75.
+- [Phase 75]: Plan 03 remained proof-only; no production route, service, schema, package, UI, media, staging, or main-promotion work was introduced. — Plan 02 implementation already satisfied the grouped direct CRUD route contract.
 
 ### Pending Todos
 
@@ -316,9 +325,9 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T08:57:12.753Z
-Stopped at: Phase 75 context gathered
-Resume file: .planning/phases/75-grouped-meal-direct-crud-contract/75-CONTEXT.md
+Last session: 2026-06-03T10:08:57.568Z
+Stopped at: Completed 75-03-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
