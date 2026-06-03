@@ -172,6 +172,8 @@ describe("Meal Edit source contract", () => {
     }
 
     assert.match(source, /items\.map/);
+    assert.match(source, /<GroupedMealRow\s+key=\{index\}/);
+    assert.doesNotMatch(source, /key=\{`[^`]*item\.name[^`]*`\}/);
     assert.match(source, /<input\b/);
     assert.match(source, /delete/i);
     assert.match(source, /edit/i);

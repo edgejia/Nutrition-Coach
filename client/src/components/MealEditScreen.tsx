@@ -235,7 +235,7 @@ function GroupedMealEditor({
       <div aria-label="項目明細">
         {items.map((item, index) => (
           <GroupedMealRow
-            key={`${index}-${item.name}`}
+            key={index}
             row={item}
             index={index}
             expanded={expandedIndex === index}
