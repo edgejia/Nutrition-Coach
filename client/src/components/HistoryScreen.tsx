@@ -311,31 +311,36 @@ function TimelineRows({
 function TimelinePanel({
   selectedDateKey,
   todayKey,
-  selectedDay,
   snapshot,
-  loadingDay,
   dayError,
   pending,
-  cacheMiss,
+  confirmedEmptyDay,
+  showInlineDayPending,
   openDayDetail,
+  openConfirmedEmptyDayDetail,
   openMealEdit,
 }: {
   selectedDateKey: string;
   todayKey: string;
-  selectedDay: HistoryWeekDay | undefined;
   snapshot: HistoryDaySnapshot | null;
-  loadingDay: boolean;
   dayError: string | null;
   pending: boolean;
-  cacheMiss: boolean;
+  confirmedEmptyDay: boolean;
+  showInlineDayPending: boolean;
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
+  openConfirmedEmptyDayDetail: () => void;
   openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
 }) {
   const meals = snapshot?.meals ?? [];
-  const selectedDayMealCount = selectedDay?.mealCount ?? null;
-  const displayMealCount = cacheMiss ? null : (snapshot?.meals.length ?? selectedDayMealCount);
-  const showPendingBoundary = cacheMiss && !dayError;
-  const pendingCopy = cacheMiss ? "同步這天紀錄中..." : "載入這天餐點中...";
+  const displayMealCount = snapshot === null ? null : meals.length;
+
+  function handleConfirmedEmptyKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openConfirmedEmptyDayDetail();
+    }
+  }
 
   return (
     <section className={pending ? "sp-history-pending" : undefined}>
@@ -344,9 +349,9 @@ function TimelinePanel({
         <span>{displayMealCount === null ? "--" : displayMealCount}筆</span>
       </div>
 
-      {showPendingBoundary ? (
+      {showInlineDayPending ? (
         <SportCard className="sp-history-state-card" variant="flat">
-          {pendingCopy}
+          同步這天紀錄中...
         </SportCard>
       ) : null}
       {dayError ? (
@@ -354,8 +359,17 @@ function TimelinePanel({
           {dayError}
         </SportCard>
       ) : null}
-      {!dayError && displayMealCount === 0 && meals.length === 0 ? (
-        <SportCard className="sp-history-empty" variant="flat">
+      {!dayError && confirmedEmptyDay ? (
+        <SportCard
+          className="sp-history-empty"
+          variant="flat"
+          role="button"
+          tabIndex={0}
+          aria-label="開啟當日詳情"
+          onClick={openConfirmedEmptyDayDetail}
+          onKeyDown={handleConfirmedEmptyKeyDown}
+          style={{ cursor: "pointer" }}
+        >
           <h3>這天還沒有餐點</h3>
           <p>選擇其他日期，或到「對話」記錄今天吃了什麼。</p>
         </SportCard>
@@ -394,6 +408,10 @@ export function HistoryScreen() {
   const currentTrends = trendsCache.get(weekStartKey) ?? null;
   const hasCurrentWeekCache = currentTrends !== null;
   const selectedSnapshot = dayCache.get(selectedDateKey) ?? null;
+  const hasSelectedDaySnapshot = selectedSnapshot !== null;
+  const selectedDaySnapshotPending = selectedSnapshot === null && !dayError;
+  const confirmedEmptyDay = selectedSnapshot !== null && selectedSnapshot.meals.length === 0;
+  const showInlineDayPending = selectedDaySnapshotPending && !dayError;
   const isWeekPending = loadingTrends && hasCurrentWeekCache;
   const weekDays = buildHistoryWeek({
     weekStartKey,
@@ -406,7 +424,7 @@ export function HistoryScreen() {
   const selectedWeekDay = weekDays.find((day) => day.dateKey === selectedDateKey);
   const hasSelectedWeekDayDisplay =
     selectedWeekDay?.status !== "pending" && selectedWeekDay?.calories !== null && selectedWeekDay?.mealCount !== null;
-  const hasSelectedDayDisplay = selectedSnapshot !== null || hasSelectedWeekDayDisplay;
+  const hasSelectedDayDisplay = hasSelectedDaySnapshot || hasSelectedWeekDayDisplay;
   const isSelectedDayPending = loadingDay && hasSelectedDayDisplay;
   const isSelectedDayCacheMiss = !hasSelectedDayDisplay;
   const weekStats = buildHistoryWeekStats({
@@ -416,6 +434,18 @@ export function HistoryScreen() {
   });
   const nextWeekStartKey = shiftHistoryWeek(weekStartKey, 1);
   const nextWeekIsFuture = nextWeekStartKey > todayKey;
+  const openConfirmedEmptyDayDetail = useCallback(() => {
+    if (!confirmedEmptyDay) {
+      return;
+    }
+    openDayDetail(
+      {
+        dateKey: selectedDateKey,
+        label: selectedDateKey === todayKey ? "today-live" : "history-snapshot",
+      },
+      "history",
+    );
+  }, [confirmedEmptyDay, openDayDetail, selectedDateKey, todayKey]);
 
   const loadTrends = useCallback(
     (cancelledRef?: { current: boolean }) => {
@@ -564,11 +594,6 @@ export function HistoryScreen() {
         </header>
 
         <main className="screen-scroll-safe sp-history-scroll">
-          {loadingTrends && !hasCurrentWeekCache ? (
-            <SportCard className="sp-history-state-card" variant="flat">
-              載入這週紀錄中...
-            </SportCard>
-          ) : null}
           {trendError ? (
             <SportCard className="sp-history-state-card sp-history-state-error" variant="flat">
               {trendError}
@@ -596,13 +621,13 @@ export function HistoryScreen() {
           <TimelinePanel
             selectedDateKey={selectedDateKey}
             todayKey={todayKey}
-            selectedDay={selectedWeekDay}
             snapshot={selectedSnapshot}
-            loadingDay={loadingDay}
             dayError={dayError}
-            pending={isSelectedDayPending}
-            cacheMiss={isSelectedDayCacheMiss}
+            pending={isSelectedDayPending || showInlineDayPending}
+            confirmedEmptyDay={confirmedEmptyDay}
+            showInlineDayPending={showInlineDayPending}
             openDayDetail={openDayDetail}
+            openConfirmedEmptyDayDetail={openConfirmedEmptyDayDetail}
             openMealEdit={openMealEdit}
           />
         </main>

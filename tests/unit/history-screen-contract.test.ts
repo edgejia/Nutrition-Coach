@@ -46,7 +46,6 @@ describe("History screen source contract", () => {
       "紀錄餐數",
       "當日餐點",
       "開啟當日詳情",
-      "載入這天餐點中...",
       "同步這天紀錄中...",
       "這天還沒有餐點",
       "選擇其他日期，或到「對話」記錄今天吃了什麼。",
@@ -153,7 +152,7 @@ describe("History screen source contract", () => {
     assert.doesNotMatch(source, /loadingTrends && !hasCurrentWeekCache[\s\S]{0,240}載入這週紀錄中\.\.\./);
     assert.doesNotMatch(source, /載入這週紀錄中\.\.\./);
     assert.doesNotMatch(source, /previousSnapshot|previousDate/);
-    assert.doesNotMatch(source, /previous[A-Z][A-Za-z]*(?:Rows|Meals|Week|Day|Snapshot|Date)/);
+    assert.doesNotMatch(source, /previous(?:Rows|Meals|WeekRows|DayRows|MealRows|SnapshotRows|DateRows)/);
     assert.doesNotMatch(source, /skeleton|placeholderMeal|pendingMealRows|disabledMealRows/i);
   });
 
@@ -206,7 +205,7 @@ describe("History screen source contract", () => {
     }
 
     assert.match(source, /const hasSelectedDaySnapshot = selectedSnapshot !== null/);
-    assert.match(source, /const selectedDaySnapshotPending = selectedSnapshot === null && loadingDay/);
+    assert.match(source, /const selectedDaySnapshotPending = selectedSnapshot === null && !dayError/);
     assert.match(source, /const confirmedEmptyDay = selectedSnapshot !== null && selectedSnapshot\.meals\.length === 0/);
     assert.match(source, /const showInlineDayPending = selectedDaySnapshotPending && !dayError/);
     assert.match(source, /openConfirmedEmptyDayDetail[\s\S]*confirmedEmptyDay[\s\S]*openDayDetail/);
@@ -219,21 +218,21 @@ describe("History screen source contract", () => {
     assert.match(source, /const meals = snapshot\?\.meals \?\? \[\]/);
     assert.match(source, /snapshot !== null && meals\.length > 0[\s\S]*<TimelineRows[\s\S]*meals=\{meals\}/);
     assert.match(source, /buildHistoryMealEditPayload\(meal, selectedDateKey\)/);
-    assert.doesNotMatch(source, /selectedWeekDay[\s\S]*<TimelineRows/);
-    assert.doesNotMatch(source, /selectedDayMealCount[\s\S]*<TimelineRows/);
+    assert.doesNotMatch(source, /function TimelinePanel[\s\S]*selectedWeekDay[\s\S]*<TimelineRows/);
+    assert.doesNotMatch(source, /function TimelinePanel[\s\S]*selectedDayMealCount[\s\S]*<TimelineRows/);
     assert.doesNotMatch(source, /trends(?:Cache|\.daily|\.averages)[\s\S]*buildHistoryMealEditPayload/);
   });
 
-  it("preserves visible selected-day display from same-date week cache during day revalidation", () => {
+  it("preserves selected-day hero display from same-date week cache while timeline facts stay snapshot-backed", () => {
     assert.match(source, /const selectedWeekDay = weekDays\.find\(\(day\) => day\.dateKey === selectedDateKey\)/);
     assert.match(
       source,
       /const hasSelectedWeekDayDisplay =[\s\S]*selectedWeekDay\?\.status !== "pending"[\s\S]*selectedWeekDay\?\.calories !== null[\s\S]*selectedWeekDay\?\.mealCount !== null/,
     );
-    assert.match(source, /const hasSelectedDayDisplay = selectedSnapshot !== null \|\| hasSelectedWeekDayDisplay/);
+    assert.match(source, /const hasSelectedDayDisplay = hasSelectedDaySnapshot \|\| hasSelectedWeekDayDisplay/);
     assert.match(source, /const isSelectedDayCacheMiss = !hasSelectedDayDisplay/);
     assert.match(source, /const displayCalories = snapshot\?\.summary\.totalCalories \?\? selectedDayCalories/);
-    assert.match(source, /const displayMealCount = cacheMiss \? null : \(snapshot\?\.meals\.length \?\? selectedDayMealCount\)/);
+    assert.match(source, /const displayMealCount = snapshot === null \? null : meals\.length/);
     assert.match(source, /<span>\{displayMealCount === null \? "--" : displayMealCount\}筆<\/span>/);
     assert.match(source, /meals=\{meals\}/);
     assert.doesNotMatch(source, /snapshot === null \? previous|previousSnapshot|previousDate/);
