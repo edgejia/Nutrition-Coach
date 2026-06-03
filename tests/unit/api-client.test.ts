@@ -1,5 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import type { IntakeData } from "../../client/src/types.js";
 
 // Minimal localStorage shim
@@ -18,6 +20,10 @@ const originalLocationDescriptor = Object.getOwnPropertyDescriptor(globalThis, "
 const originalCreateImageBitmap = globalThis.createImageBitmap;
 const originalDocument = globalThis.document;
 let fetchCalls: Array<{ url: string; init: RequestInit }> = [];
+
+async function readSource(relativePath: string) {
+  return readFile(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+}
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -83,6 +89,7 @@ const validHistoryMeal = {
 };
 
 const api = await import("../../client/src/api.js");
+const typesSource = await readSource("../../client/src/types.ts");
 
 describe("API Client", () => {
   beforeEach(() => {
@@ -999,6 +1006,41 @@ describe("API Client", () => {
     assert.equal(result.meal.mealRevisionId, "meal-1:r2");
   });
 
+  it("updateMeal sends grouped item replacement as an items-only PATCH body", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      meal: {
+        id: "meal-1",
+        mealRevisionId: "meal-1:r2",
+        foodName: "雞腿、白飯",
+        calories: 640,
+        protein: 38,
+        carbs: 78,
+        fat: 20,
+        itemCount: 2,
+        loggedAt: "2026-04-30T04:00:00.000Z",
+      },
+    });
+
+    const input = {
+      expectedMealRevisionId: "meal-1:r1",
+      items: [
+        { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+        { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 2 },
+      ],
+    };
+
+    await api.updateMeal("meal-1", input as any);
+
+    const body = JSON.parse(String(fetchCalls[0].init.body));
+    assert.deepEqual(body, input);
+    assert.deepEqual(Object.keys(body).sort(), ["expectedMealRevisionId", "items"]);
+    for (const rejected of ["foodName", "calories", "protein", "carbs", "fat", "imageAssetId"]) {
+      assert.equal(Object.hasOwn(body, rejected), false);
+    }
+  });
+
   it("preserves stable meal revision conflict metadata for update and delete errors", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(409, {
@@ -1046,6 +1088,42 @@ describe("API Client", () => {
         return true;
       },
     );
+  });
+
+  it("parses grouped update stale conflicts through MealRevisionConflictError", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(409, {
+      error: "MEAL_REVISION_STALE",
+      mealId: "meal-1",
+      affectedDate: "2026-04-30",
+      currentMealRevisionId: "meal-1:r2",
+    });
+
+    await assert.rejects(
+      () =>
+        api.updateMeal("meal-1", {
+          expectedMealRevisionId: "meal-1:r1",
+          items: [
+            { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+            { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 2 },
+          ],
+        } as any),
+      (error: unknown) => {
+        assert.ok(error instanceof api.MealRevisionConflictError);
+        assert.equal(error.code, "MEAL_REVISION_STALE");
+        assert.equal(error.mealId, "meal-1");
+        assert.equal(error.affectedDate, "2026-04-30");
+        assert.equal(error.currentMealRevisionId, "meal-1:r2");
+        return true;
+      },
+    );
+  });
+
+  it("declares separate scalar and grouped update input contracts", () => {
+    assert.match(typesSource, /export interface ScalarUpdateMealInput/);
+    assert.match(typesSource, /export interface GroupedUpdateMealInput/);
+    assert.match(typesSource, /export type UpdateMealInput\s*=\s*ScalarUpdateMealInput\s*\|\s*GroupedUpdateMealInput/);
+    assert.match(typesSource, /items:\s*MealItemDetail\[\]/);
   });
 
   it("updateMeal resolves committed unavailable summary outcomes without dailySummary", async () => {

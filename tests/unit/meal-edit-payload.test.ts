@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import {
   buildHistoryMealEditPayload,
   buildMealEditPayloadIfComplete,
@@ -9,6 +11,12 @@ import {
   normalizeHistoryMeal,
   normalizeLoggedMealReceipt,
 } from "../../client/src/api.js";
+
+async function readSource(relativePath: string) {
+  return readFile(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+}
+
+const typesSource = await readSource("../../client/src/types.ts");
 
 describe("meal edit payload builders", () => {
   it("normalizeHistoryMeal preserves valid grouped item detail from history DTOs", () => {
@@ -202,6 +210,18 @@ describe("meal edit payload builders", () => {
     assert.equal(payload?.imageUrl, "/api/assets/asset-grouped");
     assert.equal(payload?.loggedAt, "2026-05-06T12:00:00.000+08:00");
     assert.equal(payload?.mealPeriod, "lunch");
+  });
+
+  it("keeps MealItemDetail media-free as the grouped item DTO boundary", () => {
+    const mealItemDetailBody = typesSource.match(/export interface MealItemDetail \{(?<body>[\s\S]+?)\n\}/)?.groups?.body ?? "";
+    assert.ok(mealItemDetailBody, "MealItemDetail interface must be present");
+
+    const fields = [...mealItemDetailBody.matchAll(/^\s*(\w+)\??:/gm)].map((match) => match[1]);
+    assert.deepEqual(fields, ["name", "position", "calories", "protein", "carbs", "fat"]);
+
+    for (const rejected of ["image", "imageAssetId", "asset", "crop", "thumbnail", "evidence"]) {
+      assert.doesNotMatch(mealItemDetailBody, new RegExp(`\\b${rejected}\\b`, "i"));
+    }
   });
 
   it("buildHistoryMealEditPayload preserves explicit mealPeriod from history rows", () => {
