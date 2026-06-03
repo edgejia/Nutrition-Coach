@@ -12,6 +12,7 @@ MILESTONES.md
 node_modules/
 dist/
 output/
+.venv-webwright/
 data/*
 !data/.gitkeep
 server/uploads/
