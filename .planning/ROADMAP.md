@@ -182,7 +182,7 @@ Phases execute in numeric order: 74 -> 75 -> 76 -> 77.
 |---|---|---:|---|---|
 | 74. Home Meal Edit Entry and Existing Edit Contract Review | v2.6 | 3/3 | Complete    | 2026-06-02 |
 | 75. Grouped Meal Direct CRUD Contract | v2.6 | 3/3 | Complete    | 2026-06-03 |
-| 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 3/3 | Complete   | 2026-06-03 |
+| 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 3/3 | Complete    | 2026-06-03 |
 | 77. History Loading Stabilization and Local Proof Gate | v2.6 | 0/0 | Planned | — |
 
 ## Future Milestone Candidates

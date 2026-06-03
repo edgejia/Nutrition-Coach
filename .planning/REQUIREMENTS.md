@@ -72,10 +72,10 @@ v2.6 was initialized from the Notion Nutrition Coach Tracker on 2026-06-02.
 | GROUP-EDIT-02 | Phase 75 | Complete |
 | GROUP-EDIT-03 | Phase 75 | Complete |
 | GROUP-EDIT-04 | Phase 75 | Complete |
-| GROUP-UI-01 | Phase 76 | Planned |
-| GROUP-UI-02 | Phase 76 | Planned |
-| GROUP-UI-03 | Phase 76 | Planned |
-| MEDIA-DECISION-01 | Phase 76 | Planned |
+| GROUP-UI-01 | Phase 76 | Complete |
+| GROUP-UI-02 | Phase 76 | Complete |
+| GROUP-UI-03 | Phase 76 | Complete |
+| MEDIA-DECISION-01 | Phase 76 | Complete |
 | HIST-UX-01 | Phase 77 | Planned |
 | PROOF-01 | Phase 77 | Planned |
 | PROOF-02 | Phase 77 | Planned |
