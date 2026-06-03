@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: Scope
-status: planning
-last_updated: "2026-06-03T17:01:35.753Z"
+status: executing
+last_updated: "2026-06-03T18:53:15.539Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 12
+  completed_plans: 10
   percent: 75
 ---
 
@@ -24,9 +24,9 @@ See: .planning/PROJECT.md (updated 2026-06-02)
 
 ## Current Position
 
-Phase: 77
-Plan: Not started
-Status: Ready to plan
+Phase: 77 (history-loading-stabilization-and-local-proof-gate) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
 Last activity: 2026-06-03
 
 ## Performance Metrics
@@ -127,6 +127,7 @@ Last activity: 2026-06-03
 | Phase 76 P02 | 11m33s | 3 tasks | 8 files |
 | Phase 76 P03 | 4m | 2 tasks | 4 files |
 | 76 | 3 | - | - |
+| Phase 77 P01 | 5m21s | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -304,6 +305,9 @@ Recent decisions affecting current work:
 - [Phase 76]: [Phase 76 Plan 03]: Grouped item details reuse the existing authorized GET /api/meals path instead of adding a separate edit-detail endpoint. — Keeps Home and post-commit refresh on the existing authoritative DTO/store path.
 - [Phase 76]: [Phase 76 Plan 03]: MealHistoryEntry projects flat public item rows while keeping item media, crop, thumbnail, asset, and evidence fields out of the DTO. — Preserves the Phase 76 whole-meal media decision and narrows the public item projection.
 - [Phase 76]: [Phase 76 Plan 03]: Whole-meal image identity remains on imageAssetId/imageUrl at the meal row level. — Avoids implying item-level photo mapping before a future explicit media evidence contract exists.
+- [Phase 77]: [Phase 77 Plan 01]: History rows, Meal Edit activation, confirmed empty state, and Day Detail activation require /api/history/days/:date snapshots; trends remain display-only aggregate facts. — Preserves snapshot authority and prevents trends-only or stale pending data from unlocking History actions.
+- [Phase 77]: [Phase 77 Plan 01]: Cold History week switches use target-week placeholders and inline selected-day pending copy instead of the top-level week loading card. — Keeps target context visible during cold misses and removes the observed layout-jumping card.
+- [Phase 77]: [Phase 77 Plan 01]: Confirmed-empty History Day Detail activation stays within the supported read-only History capability matrix row. — The new actionable empty-day handler uses the existing read-only Day Detail surface and must remain matrix-tracked.
 
 ### Pending Todos
 
@@ -339,10 +343,10 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T17:01:35.743Z
-Stopped at: Phase 77 context gathered
-Resume file: .planning/phases/77-history-loading-stabilization-and-local-proof-gate/77-CONTEXT.md
+Last session: 2026-06-03T18:52:22.432Z
+Stopped at: Phase 77 planned; ready to execute
+Resume file: None
 
 ## Operator Next Steps
 
-- Plan Phase 77 with $gsd-plan-phase.
+- Execute Phase 77 with $gsd-execute-phase 77.
