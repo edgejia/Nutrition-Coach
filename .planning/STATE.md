@@ -322,4 +322,4 @@ Resume file: .planning/phases/75-grouped-meal-direct-crud-contract/75-CONTEXT.md
 
 ## Operator Next Steps
 
-- Start the next milestone with $gsd-new-milestone
+- Plan Phase 75 with $gsd-plan-phase.

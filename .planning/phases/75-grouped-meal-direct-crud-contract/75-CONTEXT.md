@@ -31,7 +31,7 @@ This phase does not build grouped Meal Edit UI controls, add item-level photo ma
 - **D-09:** Do not use nested `nutrition` in the grouped write request. Nested/tolerant item normalization remains a read-path projection style, not the write contract.
 - **D-10:** The grouped write parser should be strict. Accept only `name`, `position`, `calories`, `protein`, `carbs`, and `fat` per item. Reject aliases, per-item `foodName`, nested `nutrition`, and tolerant normalization in grouped writes.
 - **D-11:** Because `position` is included in the public item shape, require each item `position` to exactly match its zero-based array index. Caller mistakes fail closed.
-- **D-12:** Follow the Meal Edit/History zero-based item detail contract for grouped writes. Some chat receipt projections use `name` with 1-based display positions; those are not the Phase 75 write contract.
+- **D-12:** Phase 75 follows the History/persistence zero-based position contract. Receipt-origin Meal Edit can carry 1-based chat-receipt display positions; those are display values, not write authority. Any caller must submit zero-based contiguous positions and re-base receipt positions client-side before grouped submit because D-11 fails closed when `position` does not match the array index.
 
 ### Item Identity and Ordering
 
@@ -130,7 +130,7 @@ Planner may choose exact helper names, whether the grouped parser lives beside t
 
 - Extend `parseMealUpdateBody()` or replace it with a parser that distinguishes exactly one of the scalar update shape or grouped `items[]` shape.
 - Map grouped public request items from `{ name, position, calories, protein, carbs, fat }` to `MealTransactionItemInput` with persistence `foodName`.
-- Remove or bypass the current grouped edit rejection only for valid `items[]` replacement payloads; keep scalar grouped updates rejected or migrated according to the final parser design.
+- Remove or bypass the current grouped edit rejection only for valid `items[]` replacement payloads. A scalar payload targeting a multi-item meal stays rejected; keep the existing `MEAL_REQUIRES_GROUPED_UPDATE` guard, though its "correct through chat" message is now stale and may be updated. Do not auto-migrate scalar payloads to grouped.
 - Reuse the existing post-commit block in `server/routes/meals.ts` for affected-date summary recompute, `summaryOutcome`, optional `dailySummary`, publish, and aggregate meal response.
 - Add real SQLite integration coverage in `tests/integration/meals-api.test.ts` for valid replacement, 1 -> many, many -> one, invalid mixed shape, invalid item fields, empty list, stale/missing revision, no summary/publish on conflicts, image preservation, and unchanged chat persistence.
 - Add transaction/service unit coverage only where route tests cannot prove item ordering, revision history, and image preservation clearly enough.
