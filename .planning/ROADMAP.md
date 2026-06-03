@@ -130,15 +130,15 @@ Plans:
 **Goal:** Meal Edit presents grouped meal items as editable rows with add/delete controls, validation feedback, and post-commit refresh behavior.
 **Depends on:** Phase 75
 **Requirements:** GROUP-UI-01, GROUP-UI-02, GROUP-UI-03, MEDIA-DECISION-01
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 Plans:
 **Wave 1**
 
-- [ ] 76-01-PLAN.md — Red grouped editor, transport, and media-defer source contracts.
+- [x] 76-01-PLAN.md — Red grouped editor, transport, and media-defer source contracts.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 76-02-PLAN.md — Grouped draft helper, update input union, and compact Meal Edit grouped editor UI.
+- [x] 76-02-PLAN.md — Grouped draft helper, update input union, and compact Meal Edit grouped editor UI.
 - [ ] 76-03-PLAN.md — Existing `/api/meals` grouped item read-path projection and refresh proof.
 
 **Success Criteria** (what must be TRUE):
@@ -182,7 +182,7 @@ Phases execute in numeric order: 74 -> 75 -> 76 -> 77.
 |---|---|---:|---|---|
 | 74. Home Meal Edit Entry and Existing Edit Contract Review | v2.6 | 3/3 | Complete    | 2026-06-02 |
 | 75. Grouped Meal Direct CRUD Contract | v2.6 | 3/3 | Complete    | 2026-06-03 |
-| 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 0/3 | Planned | — |
+| 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 2/3 | In Progress|  |
 | 77. History Loading Stabilization and Local Proof Gate | v2.6 | 0/0 | Planned | — |
 
 ## Future Milestone Candidates

@@ -22,10 +22,10 @@ Requirements for the v2.6 meal editing and history usability milestone. Each req
 
 ### Grouped Meal Edit UI
 
-- [ ] **GROUP-UI-01**: Meal Edit renders grouped meal items as editable rows with clear controls for edit, add, and delete.
-- [ ] **GROUP-UI-02**: Meal Edit surfaces validation errors, stale revision conflicts, and unsupported states without implying a successful mutation.
-- [ ] **GROUP-UI-03**: Successful grouped edits refresh affected meal, summary, and history state through existing authoritative DTO and store paths.
-- [ ] **MEDIA-DECISION-01**: Item-level photo mapping is either implemented because grouped item editing requires it or explicitly deferred with a source-of-truth note.
+- [x] **GROUP-UI-01**: Meal Edit renders grouped meal items as editable rows with clear controls for edit, add, and delete.
+- [x] **GROUP-UI-02**: Meal Edit surfaces validation errors, stale revision conflicts, and unsupported states without implying a successful mutation.
+- [x] **GROUP-UI-03**: Successful grouped edits refresh affected meal, summary, and history state through existing authoritative DTO and store paths.
+- [x] **MEDIA-DECISION-01**: Item-level photo mapping is either implemented because grouped item editing requires it or explicitly deferred with a source-of-truth note.
 
 ### History Usability
 

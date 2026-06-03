@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: Scope
 status: executing
-stopped_at: Phase 76 context gathered
-last_updated: "2026-06-03T12:33:07.806Z"
-last_activity: 2026-06-03 -- Phase 76 planning complete
+stopped_at: Completed 76-02-PLAN.md
+last_updated: "2026-06-03T14:21:12.228Z"
+last_activity: 2026-06-03 -- Phase 76 Plan 02 complete
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 9
+  completed_plans: 8
   percent: 50
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Phase 75 — grouped-meal-direct-crud-contract
+**Current focus:** Phase 76 — grouped-meal-edit-ui-and-conditional-item-media-decision
 
 ## Current Position
 
-Phase: 76
-Plan: Not started
+Phase: 76 (grouped-meal-edit-ui-and-conditional-item-media-decision) — EXECUTING
+Plan: 3 of 3
 Status: Ready to execute
-Last activity: 2026-06-03 -- Phase 76 planning complete
+Last activity: 2026-06-03 -- Phase 76 Plan 02 complete
 
 ## Performance Metrics
 
@@ -124,6 +124,8 @@ Last activity: 2026-06-03 -- Phase 76 planning complete
 | Phase 75 P02 | 5 min | 2 tasks | 1 files |
 | Phase 75 P03 | 3m 28s | 2 tasks | 2 files |
 | 75 | 3 | - | - |
+| Phase 76 P01 | 3m25s | 2 tasks | 4 files |
+| Phase 76 P02 | 11m33s | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -292,6 +294,12 @@ Recent decisions affecting current work:
 - [Phase 75 Plan 02]: Grouped writes bypass the scalar grouped-lock and image validation path, then reuse the existing post-commit `summaryOutcome` and `daily_summary` publish block.
 - [Phase 75]: Direct grouped route edits remain represented by meal revision history and aggregate route responses, not chat receipts or compressed-history mutation outcomes. — D-29 keeps direct route edits out of chat persistence for Phase 75.
 - [Phase 75]: Plan 03 remained proof-only; no production route, service, schema, package, UI, media, staging, or main-promotion work was introduced. — Plan 02 implementation already satisfied the grouped direct CRUD route contract.
+- [Phase 76 Plan 01]: Red/source-contract layer only; no production files changed.
+- [Phase 76 Plan 01]: Grouped update transport requires expected-revision items-only PATCH bodies with no scalar or media over-posting.
+- [Phase 76 Plan 01]: MEDIA-DECISION-01 is pinned by whole-meal image copy and media-free MealItemDetail source proof before implementation.
+- [Phase 76 Plan 02]: Grouped draft validation errors are machine-readable data; MealEditScreen owns Traditional Chinese field copy.
+- [Phase 76 Plan 02]: Grouped saves submit only expectedMealRevisionId plus complete ordered items[], with no scalar or media write fields.
+- [Phase 76 Plan 02]: Capability matrix now treats grouped Meal Edit item editing as supported, while missing item details remain a non-editable unsupported state.
 
 ### Pending Todos
 
@@ -327,9 +335,9 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T11:38:58.795Z
-Stopped at: Phase 76 context gathered
-Resume file: .planning/phases/76-grouped-meal-edit-ui-and-conditional-item-media-decision/76-CONTEXT.md
+Last session: 2026-06-03T14:21:12.221Z
+Stopped at: Completed 76-02-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
