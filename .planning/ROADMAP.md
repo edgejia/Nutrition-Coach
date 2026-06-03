@@ -58,7 +58,7 @@ Details are archived in [`milestones/v2.5/ROADMAP.md`](milestones/v2.5/ROADMAP.m
 - [x] **Phase 74: Home Meal Edit Entry and Existing Edit Contract Review** - Make Home today meal rows open Meal Edit like Chat and History rows, and verify the current single-item edit/delete contract before expanding grouped behavior. (completed 2026-06-02)
 - [x] **Phase 75: Grouped Meal Direct CRUD Contract** - Add direct grouped meal item edit, add, and delete support through a server-owned contract that preserves revision, summary, and receipt authority. (completed 2026-06-03)
 - [x] **Phase 76: Grouped Meal Edit UI and Conditional Item Media Decision** - Build the grouped Meal Edit UI for item CRUD and decide whether item-level photo mapping is required or explicitly deferred. (completed 2026-06-03)
-- [x] **Phase 77: History Loading Stabilization and Local Proof Gate** - Smooth cold week-switch loading behavior, close focused local verification, and record defer decisions without monthly goal scope. (completed 2026-06-03)
+- [ ] **Phase 77: History Loading Stabilization and Local Proof Gate** - Smooth cold week-switch loading behavior, close focused local verification, and record defer decisions without monthly goal scope. (gaps found 2026-06-04)
 
 ## Phase Details
 
@@ -185,6 +185,7 @@ Plans:
 - `NC-BACKLOG-002` monthly records is not part of v2.6 unless later narrowed to a lightweight browse-only entry; monthly goals are explicitly out of scope.
 - Run `yarn tsc --noEmit` for TypeScript edits and targeted unit/integration/client checks selected by touched paths.
 - No staging or main promotion without explicit current-thread approval.
+- Human UAT on 2026-06-04 found quick History view shake/flicker when clicking week navigation or date buttons; close `GAP-77-UAT-01` before marking Phase 77 complete.
 
 ## Progress
 
@@ -196,7 +197,7 @@ Phases execute in numeric order: 74 -> 75 -> 76 -> 77.
 | 74. Home Meal Edit Entry and Existing Edit Contract Review | v2.6 | 3/3 | Complete    | 2026-06-02 |
 | 75. Grouped Meal Direct CRUD Contract | v2.6 | 3/3 | Complete    | 2026-06-03 |
 | 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 3/3 | Complete    | 2026-06-03 |
-| 77. History Loading Stabilization and Local Proof Gate | v2.6 | 3/3 | Complete   | 2026-06-03 |
+| 77. History Loading Stabilization and Local Proof Gate | v2.6 | 3/3 | Gaps Found | - |
 
 ## Future Milestone Candidates
 

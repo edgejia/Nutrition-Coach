@@ -29,7 +29,7 @@ Requirements for the v2.6 meal editing and history usability milestone. Each req
 
 ### History Usability
 
-- [x] **HIST-UX-01**: History week switching keeps a stable layout during cold pending loads and avoids disruptive loading jumps.
+- [ ] **HIST-UX-01**: History week switching keeps a stable layout during cold pending loads and avoids disruptive loading jumps.
 
 ### Proof and Release Gates
 
