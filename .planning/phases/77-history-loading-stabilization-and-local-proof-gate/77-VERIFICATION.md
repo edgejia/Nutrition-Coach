@@ -1,7 +1,7 @@
 ---
 phase: 77-history-loading-stabilization-and-local-proof-gate
-verified: 2026-06-03T19:24:00Z
-status: in_progress
+verified: 2026-06-03T19:35:00Z
+status: passed
 requirements:
   - HIST-UX-01
   - PROOF-01
@@ -27,8 +27,8 @@ Local proof and yarn release:check do not authorize staging or main promotion; p
 | Grouped Meal Edit UI states and media-free item transport | PROOF-01 | Unit/source contracts | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/meal-edit-screen.test.ts tests/unit/meal-edit-grouped-draft.test.ts tests/unit/api-client.test.ts tests/unit/meal-edit-payload.test.ts` | passed | 112 pass / 0 fail; representative Phase 76 grouped UI proof; paths: `tests/unit/meal-edit-screen.test.ts`, `tests/unit/meal-edit-grouped-draft.test.ts`, `tests/unit/api-client.test.ts`, `tests/unit/meal-edit-payload.test.ts` |
 | History source/unit loading and refresh behavior | HIST-UX-01, PROOF-01 | Unit/source contracts | `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/history-screen-contract.test.ts tests/unit/history-week.test.ts tests/unit/meal-edit-refresh.test.ts` | passed | 34 pass / 0 fail; Phase 77 History proof; paths: `tests/unit/history-screen-contract.test.ts`, `tests/unit/history-week.test.ts`, `tests/unit/meal-edit-refresh.test.ts` |
 | History mobile cold week visual proof | HIST-UX-01, PROOF-01, PROOF-02 | Synthetic browser visual harness | `node tests/harness/scenarios/77-history-loading-visual.mjs` | passed | Manifest regenerated at `tests/harness/artifacts/77-history-loading/latest/manifest.json`; screenshots referenced at `tests/harness/artifacts/77-history-loading/latest/history-cold-week-pending-mobile-390x844.png` and `tests/harness/artifacts/77-history-loading/latest/history-cold-week-loaded-mobile-390x844.png` |
-| TypeScript gate | PROOF-03 | Static verification | `yarn tsc --noEmit` | passed | Exit 0; current Task 1 run completed successfully |
-| Final release gate | PROOF-03 | Release verification | `yarn release:check` | pending Task 2 | Final current-run release metadata will be recorded after Task 2 runs the gate |
+| TypeScript gate | PROOF-03 | Static verification | `yarn tsc --noEmit` | passed | Exit 0; Task 1 and Task 2 current runs completed successfully |
+| Final release gate | PROOF-03 | Release verification | `yarn release:check` | passed | Exit 0; release script ran TypeScript, full Node test suite, and frontend build; 1361 pass / 0 fail in full suite |
 | Metadata-only evidence review | PROOF-02 | Artifact/policy review | `tests/harness/artifacts/77-history-loading/latest/manifest.json`; Phase 74-77 verification files | passed | Manifest records command, status, viewport, screenshot paths, assertion booleans, deterministic mock categories, privacy policy, and local-only promotion policy only |
 | No-promotion boundary | PROOF-03 | Policy verification | `promotion_authorized: false`; no staging/main action performed | passed | No push, merge, deploy, Railway smoke, staging promotion, or main promotion was performed |
 
@@ -39,7 +39,7 @@ Local proof and yarn release:check do not authorize staging or main promotion; p
 | HIST-UX-01 | passed | History source/unit command passed 34/34; mobile visual harness passed with metadata-only manifest and screenshot path references. |
 | PROOF-01 | passed | Representative Home edit, grouped CRUD, grouped Meal Edit UI, and History loading proof commands passed. |
 | PROOF-02 | passed | Verification evidence is limited to command/status/count/path metadata and the synthetic visual manifest's metadata-only policy. |
-| PROOF-03 | in_progress | `yarn tsc --noEmit` passed; `yarn release:check` remains the Task 2 final local gate before marking Phase 77 passed. |
+| PROOF-03 | passed | `yarn tsc --noEmit` passed; `yarn release:check` passed with TypeScript, full test suite, and frontend build. |
 
 ## Prior Phase Verification References
 
@@ -77,4 +77,4 @@ The following are explicitly excluded from this local closure and are not implem
 
 ## Current Status
 
-Phase 77 targeted proof is green through TypeScript. The final release gate remains to be run and recorded in Task 2 before this file is marked `status: passed`.
+Phase 77 targeted proof, TypeScript, and final local release gate are green. No push, merge, deploy, Railway smoke, staging promotion, or main promotion was performed.
