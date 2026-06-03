@@ -1,7 +1,10 @@
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply } from "fastify";
 import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
 import type { createFoodLoggingService } from "../services/food-logging.js";
-import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
+import {
+  MealRevisionPreconditionError,
+  type MealTransactionItemInput,
+} from "../services/meal-transactions.js";
 import type { createSummaryService, DailySummary } from "../services/summary.js";
 import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
@@ -24,7 +27,8 @@ interface Deps {
   publisher: RealtimePublisher;
 }
 
-interface MealUpdateBody {
+interface ScalarMealUpdateBody {
+  kind: "scalar";
   foodName: string;
   calories: number;
   protein: number;
@@ -34,16 +38,120 @@ interface MealUpdateBody {
   expectedMealRevisionId?: string;
 }
 
+interface GroupedMealUpdateBody {
+  kind: "items";
+  items: MealTransactionItemInput[];
+  expectedMealRevisionId?: string;
+}
+
+type ParsedMealUpdateBody = ScalarMealUpdateBody | GroupedMealUpdateBody;
+
 function isFiniteNonNegativeNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-function parseMealUpdateBody(body: unknown): MealUpdateBody | null {
-  if (!body || typeof body !== "object") {
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOwn(input: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(input, key);
+}
+
+function parseExpectedMealRevisionIdValue(value: unknown): string | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function parseGroupedMealItems(value: unknown): MealTransactionItemInput[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
     return null;
   }
 
-  const input = body as Record<string, unknown>;
+  const expectedKeys = ["calories", "carbs", "fat", "name", "position", "protein"].sort();
+  const items: MealTransactionItemInput[] = [];
+
+  for (const [index, item] of value.entries()) {
+    if (!isPlainRecord(item)) {
+      return null;
+    }
+
+    const itemKeys = Object.keys(item).sort();
+    if (itemKeys.length !== expectedKeys.length || itemKeys.some((key, i) => key !== expectedKeys[i])) {
+      return null;
+    }
+
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (!name) {
+      return null;
+    }
+
+    if (!Number.isInteger(item.position) || item.position !== index) {
+      return null;
+    }
+
+    if (
+      !isFiniteNonNegativeNumber(item.calories) ||
+      !isFiniteNonNegativeNumber(item.protein) ||
+      !isFiniteNonNegativeNumber(item.carbs) ||
+      !isFiniteNonNegativeNumber(item.fat)
+    ) {
+      return null;
+    }
+
+    items.push({
+      foodName: name,
+      calories: item.calories,
+      protein: item.protein,
+      carbs: item.carbs,
+      fat: item.fat,
+    });
+  }
+
+  return items;
+}
+
+function parseMealUpdateBody(body: unknown): ParsedMealUpdateBody | null {
+  if (!isPlainRecord(body)) {
+    return null;
+  }
+
+  const input = body;
+  if (hasOwn(input, "items")) {
+    const topLevelKeys = Object.keys(input).sort();
+    const expectedTopLevelKeys = hasOwn(input, "expectedMealRevisionId")
+      ? ["expectedMealRevisionId", "items"]
+      : ["items"];
+    if (
+      topLevelKeys.length !== expectedTopLevelKeys.length ||
+      topLevelKeys.some((key, i) => key !== expectedTopLevelKeys[i])
+    ) {
+      return null;
+    }
+
+    const expectedMealRevisionId = parseExpectedMealRevisionIdValue(input.expectedMealRevisionId);
+    if (expectedMealRevisionId === null) {
+      return null;
+    }
+
+    const items = parseGroupedMealItems(input.items);
+    if (!items) {
+      return null;
+    }
+
+    return {
+      kind: "items",
+      items,
+      ...(expectedMealRevisionId ? { expectedMealRevisionId } : {}),
+    };
+  }
+
   const foodName = typeof input.foodName === "string" ? input.foodName.trim() : "";
   const imageAssetId =
     typeof input.imageAssetId === "string" && input.imageAssetId.trim()
@@ -64,6 +172,7 @@ function parseMealUpdateBody(body: unknown): MealUpdateBody | null {
   }
 
   return {
+    kind: "scalar",
     foodName,
     calories: input.calories,
     protein: input.protein,
@@ -184,6 +293,9 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
 
     const update = parseMealUpdateBody(request.body);
     if (!update) {
+      return reply.code(400).send({ error: "Invalid meal update" });
+    }
+    if (update.kind !== "scalar") {
       return reply.code(400).send({ error: "Invalid meal update" });
     }
 
