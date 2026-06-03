@@ -159,7 +159,7 @@ Plans:
 **Goal:** History week switching avoids disruptive loading jumps on cold misses, and the milestone closes with focused local proof without monthly goal scope.
 **Depends on:** Phase 76
 **Requirements:** HIST-UX-01, PROOF-01, PROOF-02, PROOF-03
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 Plans:
 **Wave 1**
 
@@ -167,7 +167,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 77-02-PLAN.md — Synthetic mobile History visual proof and targeted source evidence.
+- [x] 77-02-PLAN.md — Synthetic mobile History visual proof and targeted source evidence.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -196,7 +196,7 @@ Phases execute in numeric order: 74 -> 75 -> 76 -> 77.
 | 74. Home Meal Edit Entry and Existing Edit Contract Review | v2.6 | 3/3 | Complete    | 2026-06-02 |
 | 75. Grouped Meal Direct CRUD Contract | v2.6 | 3/3 | Complete    | 2026-06-03 |
 | 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 3/3 | Complete    | 2026-06-03 |
-| 77. History Loading Stabilization and Local Proof Gate | v2.6 | 1/3 | In Progress|  |
+| 77. History Loading Stabilization and Local Proof Gate | v2.6 | 2/3 | In Progress|  |
 
 ## Future Milestone Candidates
 

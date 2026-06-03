@@ -29,12 +29,12 @@ Requirements for the v2.6 meal editing and history usability milestone. Each req
 
 ### History Usability
 
-- [ ] **HIST-UX-01**: History week switching keeps a stable layout during cold pending loads and avoids disruptive loading jumps.
+- [x] **HIST-UX-01**: History week switching keeps a stable layout during cold pending loads and avoids disruptive loading jumps.
 
 ### Proof and Release Gates
 
-- [ ] **PROOF-01**: v2.6 has targeted local proof for Home edit entry, grouped CRUD server behavior, grouped Meal Edit UI states, and History week-switch loading.
-- [ ] **PROOF-02**: Any generated trace, harness, screenshot, or verification evidence remains metadata-only and excludes raw prompts, user text, assistant final text, tool raw payloads, provider bodies, image data, session material, or database snapshots.
+- [x] **PROOF-01**: v2.6 has targeted local proof for Home edit entry, grouped CRUD server behavior, grouped Meal Edit UI states, and History week-switch loading.
+- [x] **PROOF-02**: Any generated trace, harness, screenshot, or verification evidence remains metadata-only and excludes raw prompts, user text, assistant final text, tool raw payloads, provider bodies, image data, session material, or database snapshots.
 - [ ] **PROOF-03**: Local closure runs `yarn tsc --noEmit` and the targeted test commands required by changed paths, with `yarn release:check` before any staging/main promotion request.
 
 ## Explicitly Deferred
