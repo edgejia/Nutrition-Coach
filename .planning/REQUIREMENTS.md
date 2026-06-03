@@ -15,10 +15,10 @@ Requirements for the v2.6 meal editing and history usability milestone. Each req
 
 ### Grouped Meal Direct Editing
 
-- [ ] **GROUP-EDIT-01**: Grouped meals support direct item updates for item name, serving/quantity, calories, and macros through a validated server contract.
-- [ ] **GROUP-EDIT-02**: Grouped meals support direct item additions without relying on model-authored estimates as committed authority.
-- [ ] **GROUP-EDIT-03**: Grouped meals support direct item deletion without deleting the entire meal unless the user chooses a whole-meal delete action.
-- [ ] **GROUP-EDIT-04**: Grouped direct edits preserve expected meal revision checks, affected-date freshness, `summaryOutcome`, and realtime publish behavior.
+- [x] **GROUP-EDIT-01**: Grouped meals support direct item updates for item name, calories, and macros through a validated server contract.
+- [x] **GROUP-EDIT-02**: Grouped meals support direct item additions without relying on model-authored estimates as committed authority.
+- [x] **GROUP-EDIT-03**: Grouped meals support direct item deletion without deleting the entire meal unless the user chooses a whole-meal delete action.
+- [x] **GROUP-EDIT-04**: Grouped direct edits preserve expected meal revision checks, affected-date freshness, `summaryOutcome`, and realtime publish behavior.
 
 ### Grouped Meal Edit UI
 
@@ -68,10 +68,10 @@ v2.6 was initialized from the Notion Nutrition Coach Tracker on 2026-06-02.
 | HOME-EDIT-01 | Phase 74 | Complete |
 | HOME-EDIT-02 | Phase 74 | Complete |
 | EDIT-BASE-01 | Phase 74 | Complete |
-| GROUP-EDIT-01 | Phase 75 | Planned |
-| GROUP-EDIT-02 | Phase 75 | Planned |
-| GROUP-EDIT-03 | Phase 75 | Planned |
-| GROUP-EDIT-04 | Phase 75 | Planned |
+| GROUP-EDIT-01 | Phase 75 | Complete |
+| GROUP-EDIT-02 | Phase 75 | Complete |
+| GROUP-EDIT-03 | Phase 75 | Complete |
+| GROUP-EDIT-04 | Phase 75 | Complete |
 | GROUP-UI-01 | Phase 76 | Planned |
 | GROUP-UI-02 | Phase 76 | Planned |
 | GROUP-UI-03 | Phase 76 | Planned |
