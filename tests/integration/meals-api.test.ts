@@ -251,10 +251,12 @@ describe("Meals API", () => {
     assert.ok(body.meals.every((meal: { mealRevisionId?: unknown }) => typeof meal.mealRevisionId === "string"));
   });
 
-  it("GET /api/meals preserves grouped itemCount from meal history service rows", async () => {
+  it("GET /api/meals preserves grouped itemCount and exposes media-free item details", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
+    const imageAsset = await createOwnedAsset(deviceId, "grouped-meal.png");
     const groupedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      imagePath: `asset:${imageAsset.id}`,
       items: [
         { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
         { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
@@ -269,7 +271,7 @@ describe("Meals API", () => {
     });
 
     assert.equal(res.statusCode, 200);
-    const body = res.json() as { meals: Array<{ id: string; foodName: string; itemCount?: number }> };
+    const body = res.json() as { meals: Array<{ id: string; foodName: string; itemCount?: number; items?: unknown[] }> };
     assert.deepEqual(body.meals, [
       {
         id: groupedMeal.id,
@@ -280,11 +282,36 @@ describe("Meals API", () => {
         protein: 30,
         carbs: 70,
         fat: 13.5,
-        imageAssetId: null,
-        imageUrl: null,
+        imageAssetId: imageAsset.id,
+        imageUrl: `/api/assets/${imageAsset.id}`,
         loggedAt: groupedMeal.loggedAt,
+        items: [
+          { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 12 },
+          { name: "白飯", position: 1, calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+          { name: "青菜", position: 2, calories: 40, protein: 2, carbs: 8, fat: 1 },
+        ],
       },
     ]);
+
+    const itemMediaFields = ["image", "imageAssetId", "asset", "crop", "thumbnail", "evidence"];
+    for (const item of body.meals[0]?.items ?? []) {
+      assert.deepEqual(Object.keys(item as Record<string, unknown>).sort(), [
+        "calories",
+        "carbs",
+        "fat",
+        "name",
+        "position",
+        "protein",
+      ]);
+      for (const field of itemMediaFields) {
+        assert.equal(
+          Object.prototype.hasOwnProperty.call(item, field),
+          false,
+          `grouped item DTO must not expose item-level media field ${field}`,
+        );
+      }
+    }
+    assertNoRawImageStorageFields(body);
   });
 
   it("GET /api/meals projects explicit mealPeriod without inferring legacy rows", async () => {
