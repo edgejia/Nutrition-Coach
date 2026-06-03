@@ -102,6 +102,8 @@ Field labels: `項目名稱`, `熱量`, `蛋白質`, `碳水`, `脂肪`. Field e
 | Add item | Place below the item list inside the grouped editor card. It appends an empty row, expands it immediately, and uses accent treatment plus `SportPlusIcon` if an icon is used. |
 | Footer actions | Preserve fixed footer: cancel on the left, primary save on the right. Save submits the full ordered draft only after validation passes. |
 
+Primary focal point is the grouped editor card header with live aggregate totals; the expanded row accent border is the secondary focus.
+
 ## Interaction Contract
 
 1. Opening a grouped meal with authoritative `items[]` shows the whole-meal image frame, live aggregate totals, collapsed item rows, Add item, whole-meal Delete, Cancel, and Save.
