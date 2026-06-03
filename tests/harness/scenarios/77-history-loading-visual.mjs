@@ -220,26 +220,60 @@ function phase77MockScript() {
       totalFat: 24,
       mealCount: 2
     };
-    const cachedWeek = {
-      daily: [
-        { date: "2026-05-04", calories: 1640, protein: 84, carbs: 190, fat: 48, mealCount: 3 },
-        { date: "2026-05-05", calories: 1900, protein: 98, carbs: 222, fat: 54, mealCount: 3 },
-        { date: "2026-05-06", calories: 820, protein: 52, carbs: 96, fat: 24, mealCount: 2 }
-      ],
-      averages: { calories: 1453, protein: 78, carbs: 169, fat: 42 }
+    const cachedDaily = [
+      { date: "2026-05-04", calories: 1640, protein: 84, carbs: 190, fat: 48, mealCount: 3 },
+      { date: "2026-05-05", calories: 1900, protein: 98, carbs: 222, fat: 54, mealCount: 3 },
+      { date: "2026-05-06", calories: 820, protein: 52, carbs: 96, fat: 24, mealCount: 2 }
+    ];
+    const targetDaily = [
+      { date: "2026-04-27", calories: 1510, protein: 82, carbs: 174, fat: 46, mealCount: 2 },
+      { date: "2026-04-28", calories: 1685, protein: 90, carbs: 186, fat: 50, mealCount: 3 },
+      { date: "2026-04-29", calories: 1760, protein: 93, carbs: 198, fat: 52, mealCount: 2 },
+      { date: "2026-04-30", calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
+      { date: "2026-05-01", calories: 1880, protein: 104, carbs: 211, fat: 55, mealCount: 3 },
+      { date: "2026-05-02", calories: 2050, protein: 110, carbs: 220, fat: 60, mealCount: 3 },
+      { date: "2026-05-03", calories: 1620, protein: 86, carbs: 181, fat: 47, mealCount: 2 }
+    ];
+    const totalsFor = (daily) => daily.reduce((totals, day) => ({
+      calories: totals.calories + day.calories,
+      protein: totals.protein + day.protein,
+      carbs: totals.carbs + day.carbs,
+      fat: totals.fat + day.fat,
+      mealCount: totals.mealCount + day.mealCount
+    }), { calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 });
+    const averagesFor = (daily) => {
+      const totals = totalsFor(daily);
+      const divisor = daily.length || 1;
+      return {
+        calories: Math.round(totals.calories / divisor),
+        protein: Math.round(totals.protein / divisor),
+        carbs: Math.round(totals.carbs / divisor),
+        fat: Math.round(totals.fat / divisor),
+        mealsPerDay: Math.round((totals.mealCount / divisor) * 10) / 10
+      };
     };
-    const targetWeek = {
+    const trendResponse = ({ from, to, daily }) => ({
+      from,
+      to,
+      completeness: "complete",
+      daily,
+      totals: totalsFor(daily),
+      averages: averagesFor(daily)
+    });
+    const cachedWeek = trendResponse({
+      from: "2026-05-04",
+      to: "2026-05-10",
       daily: [
-        { date: "2026-04-27", calories: 1510, protein: 82, carbs: 174, fat: 46, mealCount: 2 },
-        { date: "2026-04-28", calories: 1685, protein: 90, carbs: 186, fat: 50, mealCount: 3 },
-        { date: "2026-04-29", calories: 1760, protein: 93, carbs: 198, fat: 52, mealCount: 2 },
-        { date: "2026-04-30", calories: 0, protein: 0, carbs: 0, fat: 0, mealCount: 0 },
-        { date: "2026-05-01", calories: 1880, protein: 104, carbs: 211, fat: 55, mealCount: 3 },
-        { date: "2026-05-02", calories: 2050, protein: 110, carbs: 220, fat: 60, mealCount: 3 },
-        { date: "2026-05-03", calories: 1620, protein: 86, carbs: 181, fat: 47, mealCount: 2 }
-      ],
-      averages: { calories: 1578, protein: 89, carbs: 181, fat: 48 }
-    };
+        ...cachedDaily
+      ]
+    });
+    const targetWeek = trendResponse({
+      from: "2026-04-27",
+      to: "2026-05-03",
+      daily: [
+        ...targetDaily
+      ]
+    });
     const daySnapshots = {
       "2026-05-06": {
         date: "2026-05-06",
@@ -411,6 +445,7 @@ async function inspectHistoryLoadingState(send, phase) {
         includesTargetDate: /4\\/29|4月29|2026-04-29/.test(historyText),
         includesInlinePending: historyText.includes("同步這天紀錄中..."),
         includesForbiddenWeekCard: historyText.includes("載入這週紀錄中..."),
+        includesHistoryError: historyText.includes("歷史資料暫時載入失敗。請稍後再試。"),
         includesCurrentWeekStaleMeals: /燕麥優格|雞胸飯/.test(historyText),
         includesLoadedTargetMeal: /紫米飯糰|鮭魚藜麥碗/.test(historyText),
         hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1 || boxes.some((rect) => rect.right > window.innerWidth + 1),
@@ -443,6 +478,9 @@ async function inspectHistoryLoadingState(send, phase) {
   }
   if (value.includesForbiddenWeekCard) {
     throw new Error("Phase 77 visual evidence failed: forbidden top-level week loading card is visible.");
+  }
+  if (value.includesHistoryError) {
+    throw new Error(`Phase 77 visual evidence failed: History error banner is visible during ${phase}.`);
   }
   if (!value.includesTargetWeek || !value.includesTargetDate) {
     throw new Error(`Phase 77 visual evidence failed: missing target week/date context during ${phase}.`);
@@ -563,6 +601,7 @@ async function runCase({ browser, url, outputDir, state }) {
             targetDateContext: pendingInspection.includesTargetDate,
             inlineDayPending: pendingInspection.includesInlinePending,
             noTopLevelWeekLoadingCard: !pendingInspection.includesForbiddenWeekCard,
+            noHistoryErrorBanner: !pendingInspection.includesHistoryError,
             noStaleCachedMealRows: !pendingInspection.includesCurrentWeekStaleMeals,
             noUnsafeCalls: pendingInspection.unsafeCalls.length === 0,
             historyScreenNonempty: pendingInspection.historyNodeCount > 0,
@@ -574,6 +613,7 @@ async function runCase({ browser, url, outputDir, state }) {
             targetSyntheticMealsVisible: loadedInspection.includesLoadedTargetMeal,
             inlinePendingCleared: !loadedInspection.includesInlinePending,
             noTopLevelWeekLoadingCard: !loadedInspection.includesForbiddenWeekCard,
+            noHistoryErrorBanner: !loadedInspection.includesHistoryError,
             noUnsafeCalls: loadedInspection.unsafeCalls.length === 0,
             historyScreenNonempty: loadedInspection.historyNodeCount > 0,
             noHorizontalOverflow: !loadedInspection.hasHorizontalOverflow,
