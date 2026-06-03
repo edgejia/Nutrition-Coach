@@ -345,4 +345,4 @@ Resume file: .planning/phases/77-history-loading-stabilization-and-local-proof-g
 
 ## Operator Next Steps
 
-- Plan Phase 75 with $gsd-plan-phase.
+- Plan Phase 77 with $gsd-plan-phase.

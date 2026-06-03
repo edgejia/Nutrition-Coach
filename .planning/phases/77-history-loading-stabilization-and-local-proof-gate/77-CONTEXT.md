@@ -117,13 +117,15 @@ Planner may choose exact helper names, whether to extract cache-decision helpers
 - `buildHistoryWeek()` and `buildHistoryWeekStats()` in `client/src/lib/history-week.ts`: Already produce pending target-week days/stats without fake nutrition values.
 - `HistoryScreen` cache state: `trendsCache`, `dayCache`, `hasCurrentWeekCache`, `selectedSnapshot`, `selectedWeekDay`, and `lastMealMutation` already express the boundaries Phase 77 needs to tighten.
 - `SelectedDayHero` in `client/src/components/HistoryScreen.tsx`: Already can display selected-week trend aggregate facts before a day snapshot exists.
-- `TimelinePanel` in `client/src/components/HistoryScreen.tsx`: Already has the correct inline day pending shape: section stays in place, count can show `--筆`, and `同步這天紀錄中...` renders in the meal-list slot.
+- `TimelinePanel` in `client/src/components/HistoryScreen.tsx`: Already has the right slot/copy foundation, but Phase 77 must tighten pending/empty behavior so the timeline remains pending until the day snapshot resolves; empty state and Day Detail activation must be snapshot-backed.
 - `refreshAfterMealMutation()` in `client/src/meal-edit-refresh.ts`: Existing path for direct edit/delete success to record affected dates and refresh authoritative surfaces.
 
 ### Established Patterns
 
 - History uses component-local caches for week trends and day snapshots; refresh/invalidation should remain scoped rather than global.
 - Trends aggregates can support hero/count display, but actual meal rows, edit identity, confirmed empty state, and Day Detail require day snapshot facts.
+- Current `TimelinePanel` can derive `displayMealCount` from `selectedDayMealCount` before `snapshot` resolves. Phase 77 must ensure that trends-derived count/hero facts do not cause the empty state to appear before `/api/history/days/:date` proves `snapshot.meals`.
+- Current History code exposes date-level Day Detail activation through `TimelineRows`, and `TimelineRows` only renders when `snapshot !== null && meals.length > 0`. Phase 77 must plan an activation path for confirmed empty snapshots if date-level empty Day Detail remains desired.
 - Client UI must not manufacture editable meal identity. `buildHistoryMealEditPayload` needs complete authoritative row facts.
 - Source-contract tests are already used for History UI/loading/cache structure. Browser/mobile evidence should complement them only for visible layout stability.
 - Local proof remains metadata-only and does not authorize deployment or promotion.
@@ -133,7 +135,7 @@ Planner may choose exact helper names, whether to extract cache-decision helpers
 - Tighten the top-level week loading condition in `HistoryScreen` so uncached week switches use inline pending slots instead of the transient page-level `載入這週紀錄中...` card.
 - Preserve `buildHistoryWeek(... pending: !hasCurrentWeekCache)` and pending stats behavior as the target-week placeholder foundation.
 - Keep `TimelinePanel` pending/error/empty states snapshot-backed: pending until day snapshot returns, empty only after snapshot `meals.length === 0`, error after day snapshot failure.
-- Gate Day Detail and meal row edit activation on snapshot-backed state.
+- Gate Day Detail and meal row edit activation on snapshot-backed state. Add or adjust the confirmed-empty Day Detail activation path because current empty-card rendering does not expose `openDayDetail`.
 - Preserve or refine the `lastMealMutation` effect so visible affected day/week refresh and offscreen affected caches invalidate without active-tab gating or broad refresh churn.
 - Add or update source/unit contracts around the loading and snapshot-backed state rules. Add targeted browser/mobile proof for visible cold week-switch stability.
 
