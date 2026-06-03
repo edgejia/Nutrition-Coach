@@ -13,6 +13,7 @@ const DIST_ROOT = "dist/client";
 const DIST_INDEX = "dist/client/index.html";
 const MIN_SCREENSHOT_BYTES = 10000;
 const COLD_RESPONSE_DELAY_MS = 1400;
+const FAST_RESPONSE_DELAY_MS = 80;
 const CASES = [
   { id: "history-cold-week-mobile-390x844", width: 390, height: 844 },
 ];
@@ -290,6 +291,14 @@ function phase77MockScript() {
           { id: "p77-target-breakfast", mealRevisionId: "p77-target-breakfast-r1", foodName: "紫米飯糰", loggedAt: "2026-04-29T08:20:00+08:00", display: { title: "紫米飯糰" }, nutrition: { calories: 530, protein: 25, carbs: 70, fat: 15 }, asset: { imageAssetId: null, imageUrl: null }, itemCount: 1 },
           { id: "p77-target-dinner", mealRevisionId: "p77-target-dinner-r1", foodName: "鮭魚藜麥碗", loggedAt: "2026-04-29T18:45:00+08:00", display: { title: "鮭魚藜麥碗" }, nutrition: { calories: 710, protein: 42, carbs: 64, fat: 28 }, asset: { imageAssetId: null, imageUrl: null }, itemCount: 1 }
         ]
+      },
+      "2026-05-01": {
+        date: "2026-05-01",
+        summary: { date: "2026-05-01", totalCalories: 1880, totalProtein: 104, totalCarbs: 211, totalFat: 55, mealCount: 3 },
+        meals: [
+          { id: "p77-fast-lunch", mealRevisionId: "p77-fast-lunch-r1", foodName: "番茄牛肉麵", loggedAt: "2026-05-01T12:20:00+08:00", display: { title: "番茄牛肉麵" }, nutrition: { calories: 680, protein: 38, carbs: 82, fat: 20 }, asset: { imageAssetId: null, imageUrl: null }, itemCount: 1 },
+          { id: "p77-fast-snack", mealRevisionId: "p77-fast-snack-r1", foodName: "豆漿香蕉", loggedAt: "2026-05-01T16:10:00+08:00", display: { title: "豆漿香蕉" }, nutrition: { calories: 310, protein: 18, carbs: 42, fat: 7 }, asset: { imageAssetId: null, imageUrl: null }, itemCount: 1 }
+        ]
       }
     };
     const homeMeals = daySnapshots["2026-05-06"].meals.map((meal) => ({
@@ -320,6 +329,8 @@ function phase77MockScript() {
       targets,
       coldTrendRequests: 0,
       coldDayRequests: 0,
+      fastDayRequests: 0,
+      fastSnapshotResolved: false,
       unsafeCalls: [],
       interactions: []
     };
@@ -358,6 +369,14 @@ function phase77MockScript() {
         if (dateKey === "2026-04-29") {
           window.__phase77VisualState.coldDayRequests += 1;
           return new Promise((resolve) => setTimeout(() => resolve(jsonResponse(snapshot)), ${COLD_RESPONSE_DELAY_MS}));
+        }
+        if (dateKey === "2026-05-01") {
+          window.__phase77VisualState.fastDayRequests += 1;
+          window.__phase77VisualState.fastSnapshotResolved = false;
+          return new Promise((resolve) => setTimeout(() => {
+            window.__phase77VisualState.fastSnapshotResolved = true;
+            resolve(jsonResponse(snapshot));
+          }, ${FAST_RESPONSE_DELAY_MS}));
         }
         return Promise.resolve(jsonResponse(snapshot));
       }
@@ -508,6 +527,82 @@ async function inspectHistoryLoadingState(send, phase) {
   return value;
 }
 
+async function collectFastPendingCopySamples(send) {
+  const collection = await send("Runtime.evaluate", {
+    awaitPromise: true,
+    returnByValue: true,
+    expression: `(() => new Promise((resolve) => {
+      const weekButtons = [...document.querySelectorAll('.sp-history-week-day')];
+      const targetButton = weekButtons[4];
+      if (!targetButton) throw new Error("Fast date-click target button not found");
+      const state = window.__phase77VisualState ?? {};
+      state.interactions?.push("week-day:fast-2026-05-01");
+      state.fastSnapshotResolved = false;
+      targetButton.click();
+      const startedAt = performance.now();
+      const samples = [];
+      function sample() {
+        const historyText = document.querySelector('.sp-history-screen')?.innerText ?? "";
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        samples.push({
+          elapsedMs,
+          includesInlinePending: historyText.includes("同步這天紀錄中..."),
+          snapshotResolved: Boolean(state.fastSnapshotResolved),
+          includesTargetWeek: /4\\/27\\s*-\\s*5\\/3/.test(historyText),
+          includesTargetDate: /5\\/1|5月1|2026-05-01/.test(historyText),
+          includesCurrentWeekStaleMeals: /燕麥優格|雞胸飯/.test(historyText),
+          includesFastMeal: /番茄牛肉麵|豆漿香蕉/.test(historyText),
+          includesForbiddenWeekCard: historyText.includes("載入這週紀錄中..."),
+          includesHistoryError: historyText.includes("歷史資料暫時載入失敗。請稍後再試。"),
+          hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1
+        });
+        if (performance.now() - startedAt < 270) {
+          requestAnimationFrame(sample);
+          return;
+        }
+        resolve({
+          sampleCount: samples.length,
+          durationMs: elapsedMs,
+          observedInlineBeforeResolve: samples.some((item) => item.includesInlinePending && !item.snapshotResolved),
+          observedInlineAnyTime: samples.some((item) => item.includesInlinePending),
+          targetWeekContext: samples.every((item) => item.includesTargetWeek),
+          targetDateContext: samples.some((item) => item.includesTargetDate),
+          fastSnapshotResolved: samples.some((item) => item.snapshotResolved),
+          fastMealVisible: samples.some((item) => item.includesFastMeal),
+          noStaleCurrentWeekMeals: !samples.some((item) => item.includesCurrentWeekStaleMeals),
+          noForbiddenWeekCard: !samples.some((item) => item.includesForbiddenWeekCard),
+          noHistoryErrorBanner: !samples.some((item) => item.includesHistoryError),
+          noHorizontalOverflow: !samples.some((item) => item.hasHorizontalOverflow),
+          fastDayRequests: state.fastDayRequests ?? 0
+        });
+      }
+      requestAnimationFrame(sample);
+    }))()`,
+  });
+
+  const value = collection.result?.value;
+  if (!value || value.sampleCount < 2 || value.durationMs < 250) {
+    throw new Error("Phase 77 visual evidence failed: fast date-click sampling did not cover at least 250ms.");
+  }
+  if (value.observedInlineBeforeResolve || value.observedInlineAnyTime) {
+    throw new Error("Phase 77 visual evidence failed: transient selected-day pending copy appeared during fast date click.");
+  }
+  if (!value.targetWeekContext || !value.targetDateContext) {
+    throw new Error("Phase 77 visual evidence failed: fast date-click target context disappeared.");
+  }
+  if (!value.fastSnapshotResolved || !value.fastMealVisible || value.fastDayRequests < 1) {
+    throw new Error("Phase 77 visual evidence failed: fast selected-day snapshot did not resolve through mocked data.");
+  }
+  if (!value.noStaleCurrentWeekMeals) {
+    throw new Error("Phase 77 visual evidence failed: current-week stale meal labels appeared during fast date click.");
+  }
+  if (!value.noForbiddenWeekCard || !value.noHistoryErrorBanner || !value.noHorizontalOverflow) {
+    throw new Error("Phase 77 visual evidence failed: fast date-click visual guard failed.");
+  }
+
+  return value;
+}
+
 async function runCase({ browser, url, outputDir, state }) {
   await mkdir(outputDir, { recursive: true });
   const userDataDir = await mkdtemp(join(tmpdir(), "nc-77-visual-"));
@@ -587,6 +682,14 @@ async function runCase({ browser, url, outputDir, state }) {
         captureName: "loaded target week",
       });
 
+      const fastDateClick = await collectFastPendingCopySamples(send);
+      const fastFileName = "history-fast-date-click-mobile-390x844.png";
+      const fastShot = await captureScreenshot({
+        send,
+        output: join(outputDir, fastFileName),
+        captureName: "fast selected-day click",
+      });
+
       return {
         id: state.id,
         viewport: { width: state.width, height: state.height },
@@ -594,6 +697,7 @@ async function runCase({ browser, url, outputDir, state }) {
         screenshots: [
           { ...pendingShot, path: relativeOutputPath(outputDir, pendingFileName) },
           { ...loadedShot, path: relativeOutputPath(outputDir, loadedFileName) },
+          { ...fastShot, path: relativeOutputPath(outputDir, fastFileName) },
         ],
         assertions: {
           pending: {
@@ -618,6 +722,19 @@ async function runCase({ browser, url, outputDir, state }) {
             historyScreenNonempty: loadedInspection.historyNodeCount > 0,
             noHorizontalOverflow: !loadedInspection.hasHorizontalOverflow,
           },
+          fastDateClick: {
+            noTransientInlinePendingCopy: !fastDateClick.observedInlineBeforeResolve && !fastDateClick.observedInlineAnyTime,
+            sampledAtLeast250ms: fastDateClick.durationMs >= 250,
+            sampleCount: fastDateClick.sampleCount,
+            targetWeekContext: fastDateClick.targetWeekContext,
+            targetDateContext: fastDateClick.targetDateContext,
+            fastSnapshotResolved: fastDateClick.fastSnapshotResolved,
+            fastSyntheticMealsVisible: fastDateClick.fastMealVisible,
+            noStaleCachedMealRows: fastDateClick.noStaleCurrentWeekMeals,
+            noTopLevelWeekLoadingCard: fastDateClick.noForbiddenWeekCard,
+            noHistoryErrorBanner: fastDateClick.noHistoryErrorBanner,
+            noHorizontalOverflow: fastDateClick.noHorizontalOverflow,
+          },
         },
         deterministicMockCategories: [
           "device bootstrap",
@@ -625,6 +742,7 @@ async function runCase({ browser, url, outputDir, state }) {
           "current week history",
           "delayed target week history",
           "delayed target day snapshot",
+          "fast target day snapshot",
           "home meal rows",
         ],
         interactions: loadedInspection.interactions,
@@ -682,6 +800,8 @@ async function main() {
         "top-level week loading card must be absent",
         "stale cached current-week meal rows must be absent under target week pending state",
         "loaded target-week synthetic meals must appear after delayed responses resolve",
+        "fastDateClick.noTransientInlinePendingCopy must remain true across animation-frame samples",
+        "fast selected-day snapshot must resolve before the pending-copy delay",
         "horizontal overflow must be absent",
         "external and unmocked backend calls must fail the run",
       ],
