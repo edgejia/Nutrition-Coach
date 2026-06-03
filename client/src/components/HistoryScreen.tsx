@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { getHistoryDaySnapshot, getHistoryTrends } from "../api.js";
 import {
   buildHistoryWeek,
@@ -70,6 +70,8 @@ function getChipVariant(variant: ReturnType<typeof getHistorySportStatusMeta>["c
   if (variant === "warn" || variant === "danger") return "warn";
   return "default";
 }
+
+const DAY_PENDING_COPY_DELAY_MS = 200;
 
 function HistoryWeekStrip({
   days,
@@ -402,6 +404,8 @@ export function HistoryScreen() {
   const [dayError, setDayError] = useState<string | null>(null);
   const [loadingTrends, setLoadingTrends] = useState(false);
   const [loadingDay, setLoadingDay] = useState(false);
+  const [delayedInlineDayPending, setDelayedInlineDayPending] = useState(false);
+  const inlineDayPendingTimerRef = useRef<number | null>(null);
 
   const weekEndKey = addLocalDays(weekStartKey, 6);
   const targetCalories = dailyTargets?.calories ?? null;
@@ -411,7 +415,7 @@ export function HistoryScreen() {
   const hasSelectedDaySnapshot = selectedSnapshot !== null;
   const selectedDaySnapshotPending = selectedSnapshot === null && !dayError;
   const confirmedEmptyDay = selectedSnapshot !== null && selectedSnapshot.meals.length === 0;
-  const showInlineDayPending = selectedDaySnapshotPending && !dayError;
+  const showInlineDayPending = selectedDaySnapshotPending && loadingDay && !dayError && delayedInlineDayPending;
   const isWeekPending = loadingTrends && hasCurrentWeekCache;
   const weekDays = buildHistoryWeek({
     weekStartKey,
@@ -526,6 +530,31 @@ export function HistoryScreen() {
       cancelledRef.current = true;
     };
   }, [loadSelectedDay]);
+
+  useEffect(() => {
+    if (inlineDayPendingTimerRef.current !== null) {
+      window.clearTimeout(inlineDayPendingTimerRef.current);
+      inlineDayPendingTimerRef.current = null;
+    }
+
+    if (!selectedDaySnapshotPending || !loadingDay || dayError) {
+      setDelayedInlineDayPending(false);
+      return;
+    }
+
+    setDelayedInlineDayPending(false);
+    inlineDayPendingTimerRef.current = window.setTimeout(() => {
+      inlineDayPendingTimerRef.current = null;
+      setDelayedInlineDayPending(true);
+    }, DAY_PENDING_COPY_DELAY_MS);
+
+    return () => {
+      if (inlineDayPendingTimerRef.current !== null) {
+        window.clearTimeout(inlineDayPendingTimerRef.current);
+        inlineDayPendingTimerRef.current = null;
+      }
+    };
+  }, [dayError, loadingDay, selectedDateKey, selectedDaySnapshotPending]);
 
   useEffect(() => {
     if (!lastMealMutation) {

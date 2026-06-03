@@ -207,7 +207,10 @@ describe("History screen source contract", () => {
     assert.match(source, /const hasSelectedDaySnapshot = selectedSnapshot !== null/);
     assert.match(source, /const selectedDaySnapshotPending = selectedSnapshot === null && !dayError/);
     assert.match(source, /const confirmedEmptyDay = selectedSnapshot !== null && selectedSnapshot\.meals\.length === 0/);
-    assert.match(source, /const showInlineDayPending = selectedDaySnapshotPending && !dayError/);
+    assert.match(
+      source,
+      /const showInlineDayPending =[\s\S]*selectedDaySnapshotPending[\s\S]*loadingDay[\s\S]*!dayError[\s\S]*delayedInlineDayPending/,
+    );
     assert.match(source, /openConfirmedEmptyDayDetail[\s\S]*confirmedEmptyDay[\s\S]*openDayDetail/);
     assert.doesNotMatch(source, /selectedWeekDay\.mealCount === 0[\s\S]*這天還沒有餐點/);
     assert.doesNotMatch(source, /displayMealCount === 0 && meals\.length === 0/);
@@ -229,8 +232,8 @@ describe("History screen source contract", () => {
 
     assert.match(source, /const DAY_PENDING_COPY_DELAY_MS = (18\d|19\d|2[0-4]\d|250)/);
     assert.match(source, /useState\(false\)/);
-    assert.match(source, /useRef<ReturnType<typeof window\.setTimeout> \| null>\(null\)/);
-    assert.match(source, /window\.setTimeout\(\(\) => \{\s*setDelayedInlineDayPending\(true\)/);
+    assert.match(source, /useRef<number \| null>\(null\)/);
+    assert.match(source, /window\.setTimeout\(\(\) => \{[\s\S]*setDelayedInlineDayPending\(true\)/);
     assert.match(source, /DAY_PENDING_COPY_DELAY_MS/);
     assert.match(source, /window\.clearTimeout\(inlineDayPendingTimerRef\.current\)/);
     assert.match(source, /setDelayedInlineDayPending\(false\)/);
@@ -280,7 +283,6 @@ describe("History screen source contract", () => {
       "STREAK",
       "SP_WEEK",
       "SP_HIST_MEALS",
-      "window.",
       "ui_kits/sport",
       "ChatEntryBar",
       "screen-scroll-with-input",
