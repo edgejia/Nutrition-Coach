@@ -128,6 +128,32 @@ describe("MealHistoryService", () => {
       imagePath: null,
       loggedAt: "2026-03-25T05:00:00.000Z",
       mealPeriod: null,
+      items: [
+        {
+          name: "蛋餅",
+          position: 0,
+          calories: 320,
+          protein: 12,
+          carbs: 30,
+          fat: 16,
+        },
+        {
+          name: "豆漿",
+          position: 1,
+          calories: 180,
+          protein: 12,
+          carbs: 14,
+          fat: 8,
+        },
+        {
+          name: "香蕉",
+          position: 2,
+          calories: 90,
+          protein: 1,
+          carbs: 23,
+          fat: 0.3,
+        },
+      ],
     });
     assert.equal("currentRevisionId" in meals[1]!, false);
   });
