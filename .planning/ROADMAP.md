@@ -159,7 +159,7 @@ Plans:
 **Goal:** History week switching avoids disruptive loading jumps on cold misses, and the milestone closes with focused local proof without monthly goal scope.
 **Depends on:** Phase 76
 **Requirements:** HIST-UX-01, PROOF-01, PROOF-02, PROOF-03
-**Plans:** 3/3 plans complete
+**Plans:** 3/4 plans complete
 Plans:
 **Wave 1**
 
@@ -172,6 +172,10 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 77-03-PLAN.md — v2.6 local closure matrix, validation metadata, and final gates.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 77-04-PLAN.md — GAP-77-UAT-01 fast History pending-copy flicker closure.
 
 **Success Criteria** (what must be TRUE):
 
@@ -197,7 +201,7 @@ Phases execute in numeric order: 74 -> 75 -> 76 -> 77.
 | 74. Home Meal Edit Entry and Existing Edit Contract Review | v2.6 | 3/3 | Complete    | 2026-06-02 |
 | 75. Grouped Meal Direct CRUD Contract | v2.6 | 3/3 | Complete    | 2026-06-03 |
 | 76. Grouped Meal Edit UI and Conditional Item Media Decision | v2.6 | 3/3 | Complete    | 2026-06-03 |
-| 77. History Loading Stabilization and Local Proof Gate | v2.6 | 3/3 | Gaps Found | - |
+| 77. History Loading Stabilization and Local Proof Gate | v2.6 | 3/4 | Ready to Execute | - |
 
 ## Future Milestone Candidates
 

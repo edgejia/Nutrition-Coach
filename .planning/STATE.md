@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: Scope
-status: gaps_found
-last_updated: "2026-06-04T03:52:34+08:00"
-last_activity: 2026-06-04 -- Human UAT found quick History flicker on week/date clicks; Phase 77 requires gap closure
+status: executing
+last_updated: "2026-06-04T04:09:40+08:00"
+last_activity: 2026-06-04 -- Phase 77 gap-closure plan 77-04 created for GAP-77-UAT-01
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 12
+  total_plans: 13
   completed_plans: 12
   percent: 75
 ---
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-06-02)
 ## Current Position
 
 Phase: 77 (history-loading-stabilization-and-local-proof-gate) — EXECUTING
-Plan: 3 of 3
-Status: Gaps found — human UAT reported quick History flicker on week/date clicks
-Last activity: 2026-06-04 -- GAP-77-UAT-01 recorded; ready for gap-closure planning
+Plan: 4 of 4
+Status: Ready to execute
+Last activity: 2026-06-04 -- Phase 77 gap-closure plan 77-04 created for GAP-77-UAT-01
 
 ## Performance Metrics
 
