@@ -183,6 +183,7 @@ describe("Meal Edit source contract", () => {
   it("blocks invalid grouped saves, opens the first invalid row, and preserves stale recovery", () => {
     for (const expected of [
       "尚未儲存。請先修正標示的項目。",
+      "餐點已儲存，但畫面暫時無法更新。請重新整理後確認。",
       "MealRevisionConflictError",
       "refreshAfterMealMutation",
       "recoverGuestSession",
@@ -196,6 +197,7 @@ describe("Meal Edit source contract", () => {
     assert.match(source, /expanded.*firstInvalid|firstInvalid.*expanded/s);
     assert.match(source, /if \(err instanceof MealRevisionConflictError\)/);
     assert.match(source, /await refreshAfterMealMutation\(/);
+    assert.match(source, /catch \{\s*setError\(GROUPED_REFRESH_FAILED_COPY\);\s*return;\s*\}\s*onBack\(\);/);
     assert.match(source, /onBack\(\)/);
   });
 
