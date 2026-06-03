@@ -66,6 +66,8 @@ export type SummaryOutcome =
   | { status: "recovered"; dailySummary: DailySummary; reason: "recompute_failed" }
   | { status: "unavailable"; reason: "recompute_failed" };
 
+// Phase 76 keeps item rows media-free: whole-meal photos remain meal-level
+// evidence per D-01/D-03 until a future item-media contract exists.
 export interface MealItemDetail {
   name: string;
   position: number;
@@ -108,7 +110,7 @@ export interface MealEntry {
   mealPeriod?: MealPeriod;
 }
 
-export interface UpdateMealInput {
+export interface ScalarUpdateMealInput {
   expectedMealRevisionId: string;
   foodName: string;
   calories: number;
@@ -117,6 +119,13 @@ export interface UpdateMealInput {
   fat: number;
   imageAssetId?: string | null;
 }
+
+export interface GroupedUpdateMealInput {
+  expectedMealRevisionId: string;
+  items: MealItemDetail[];
+}
+
+export type UpdateMealInput = ScalarUpdateMealInput | GroupedUpdateMealInput;
 
 export interface DeleteMealOptions {
   expectedMealRevisionId: string;
