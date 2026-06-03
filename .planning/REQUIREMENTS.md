@@ -29,7 +29,7 @@ Requirements for the v2.6 meal editing and history usability milestone. Each req
 
 ### History Usability
 
-- [ ] **HIST-UX-01**: History week switching keeps a stable layout during cold pending loads and avoids disruptive loading jumps.
+- [x] **HIST-UX-01**: History week switching keeps a stable layout during cold pending loads and avoids disruptive loading jumps.
 
 ### Proof and Release Gates
 
@@ -76,10 +76,10 @@ v2.6 was initialized from the Notion Nutrition Coach Tracker on 2026-06-02.
 | GROUP-UI-02 | Phase 76 | Complete |
 | GROUP-UI-03 | Phase 76 | Complete |
 | MEDIA-DECISION-01 | Phase 76 | Complete |
-| HIST-UX-01 | Phase 77 | Planned |
-| PROOF-01 | Phase 77 | Planned |
-| PROOF-02 | Phase 77 | Planned |
-| PROOF-03 | Phase 77 | Planned |
+| HIST-UX-01 | Phase 77 | Complete |
+| PROOF-01 | Phase 77 | Complete |
+| PROOF-02 | Phase 77 | Complete |
+| PROOF-03 | Phase 77 | Complete |
 | DEFER-01 | Future milestone | Deferred |
 | DEFER-02 | Future milestone | Deferred |
 | DEFER-03 | Future milestone | Deferred |

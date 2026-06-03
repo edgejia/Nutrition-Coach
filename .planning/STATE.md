@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: Scope
-status: executing
-last_updated: "2026-06-04T04:09:40+08:00"
-last_activity: 2026-06-04 -- Phase 77 gap-closure plan 77-04 created for GAP-77-UAT-01
+status: completed
+last_updated: "2026-06-03T20:28:10.738Z"
+last_activity: 2026-06-03 -- Phase 77 Plan 04 complete
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 13
-  completed_plans: 12
-  percent: 75
+  completed_plans: 13
+  percent: 100
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-02)
 
 ## Current Position
 
-Phase: 77 (history-loading-stabilization-and-local-proof-gate) — EXECUTING
+Phase: 77 (history-loading-stabilization-and-local-proof-gate) — COMPLETE
 Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-06-04 -- Phase 77 gap-closure plan 77-04 created for GAP-77-UAT-01
+Status: Complete
+Last activity: 2026-06-03 -- Phase 77 Plan 04 complete
 
 ## Performance Metrics
 
@@ -130,6 +130,7 @@ Last activity: 2026-06-04 -- Phase 77 gap-closure plan 77-04 created for GAP-77-
 | Phase 77 P01 | 5m21s | 2 tasks | 3 files |
 | Phase 77 P02 | 7m18s | 2 tasks | 4 files |
 | Phase 77 P03 | 5m01s | 2 tasks | 3 files |
+| Phase 77 P04 | 10m41s | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -316,6 +317,9 @@ Recent decisions affecting current work:
 - [Phase 77]: [Phase 77 Plan 03]: v2.6 local closeout uses a representative targeted proof matrix instead of rerunning every prior phase command wholesale. — Matches D-29 and D-30 while avoiding unnecessary historical reruns.
 - [Phase 77]: [Phase 77 Plan 03]: Generated visual evidence is referenced by metadata and paths only; screenshots are not embedded in verification docs. — Preserves the PROOF-02 metadata-only evidence boundary.
 - [Phase 77]: [Phase 77 Plan 03]: Green local proof and yarn release:check do not authorize staging or main promotion. — Promotion remains a separate current-thread approval boundary.
+- [Phase 77]: [Phase 77 Plan 04]: History selected-day pending copy is delayed by 200ms so fast snapshot reloads do not flash inline pending copy while longer cold loads still show it.
+- [Phase 77]: [Phase 77 Plan 04]: Fast date-click proof remains synthetic and metadata-only; screenshots are regenerated locally and referenced by path only.
+- [Phase 77]: [Phase 77 Plan 04]: Phase 77 local proof and yarn release:check do not authorize staging or main promotion.
 
 ### Pending Todos
 
@@ -351,8 +355,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-03T19:17:53.997Z
-Stopped at: Completed 77-03-PLAN.md
+Last session: 2026-06-03T20:26:43.752Z
+Stopped at: Completed 77-04-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
