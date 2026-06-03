@@ -46,8 +46,8 @@ describe("History screen source contract", () => {
       "紀錄餐數",
       "當日餐點",
       "開啟當日詳情",
-      "載入這週紀錄中...",
       "載入這天餐點中...",
+      "同步這天紀錄中...",
       "這天還沒有餐點",
       "選擇其他日期，或到「對話」記錄今天吃了什麼。",
       "目標同步中，暫不顯示目標比較。",
@@ -140,12 +140,21 @@ describe("History screen source contract", () => {
     assert.doesNotMatch(source, /setSelectedSnapshot\(null\);\s+return getHistoryDaySnapshot\(selectedDateKey\)/);
   });
 
-  it("reserves weekly loading copy for true first load only", () => {
+  it("keeps cold week switches in target context with inline pending placeholders", () => {
     assert.match(source, /loadingTrends/);
     assert.match(
       source,
-      /loadingTrends && !hasCurrentWeekCache|loadingTrends && !trendsCache\.get\(weekStartKey\)|const hasCurrentWeekCache = Boolean\(trendsCache\.get\(weekStartKey\)\)/,
+      /buildHistoryWeek\(\{\s*weekStartKey,[\s\S]*?selectedDateKey,[\s\S]*?pending: !hasCurrentWeekCache,[\s\S]*?\}\)/,
     );
+    assert.match(
+      source,
+      /buildHistoryWeekStats\(\{\s*days: weekDays,[\s\S]*?pending: !hasCurrentWeekCache,[\s\S]*?\}\)/,
+    );
+    assert.doesNotMatch(source, /loadingTrends && !hasCurrentWeekCache[\s\S]{0,240}載入這週紀錄中\.\.\./);
+    assert.doesNotMatch(source, /載入這週紀錄中\.\.\./);
+    assert.doesNotMatch(source, /previousSnapshot|previousDate/);
+    assert.doesNotMatch(source, /previous[A-Z][A-Za-z]*(?:Rows|Meals|Week|Day|Snapshot|Date)/);
+    assert.doesNotMatch(source, /skeleton|placeholderMeal|pendingMealRows|disabledMealRows/i);
   });
 
   it("wires cache-hit weekly revalidation to neutral pending treatment", () => {
@@ -165,6 +174,10 @@ describe("History screen source contract", () => {
       source,
       /affectedWeekStartKey !== weekStartKey[\s\S]*?\.delete\(affectedWeekStartKey\)/,
     );
+    assert.doesNotMatch(source, /setDayCache\(\(\) => new Map\(\)\)/);
+    assert.doesNotMatch(source, /setDayCache\(new Map\(\)\)/);
+    assert.doesNotMatch(source, /setTrendsCache\(\(\) => new Map\(\)\)/);
+    assert.doesNotMatch(source, /setTrendsCache\(new Map\(\)\)/);
   });
 
   it("refreshes History only when the selected day or visible week matches the mutation date", () => {
@@ -178,6 +191,37 @@ describe("History screen source contract", () => {
     assert.doesNotMatch(source, /activeScreen === "history"[\s\S]*loadTrends/);
     assert.doesNotMatch(source, /secondaryScreen[\s\S]*loadSelectedDay/);
     assert.doesNotMatch(source, /secondaryScreen[\s\S]*loadTrends/);
+  });
+
+  it("keeps selected-day pending, empty, and detail activation snapshot-backed", () => {
+    for (const expected of [
+      "hasSelectedDaySnapshot",
+      "selectedDaySnapshotPending",
+      "confirmedEmptyDay",
+      "showInlineDayPending",
+      "openConfirmedEmptyDayDetail",
+      "同步這天紀錄中...",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(source, /const hasSelectedDaySnapshot = selectedSnapshot !== null/);
+    assert.match(source, /const selectedDaySnapshotPending = selectedSnapshot === null && loadingDay/);
+    assert.match(source, /const confirmedEmptyDay = selectedSnapshot !== null && selectedSnapshot\.meals\.length === 0/);
+    assert.match(source, /const showInlineDayPending = selectedDaySnapshotPending && !dayError/);
+    assert.match(source, /openConfirmedEmptyDayDetail[\s\S]*confirmedEmptyDay[\s\S]*openDayDetail/);
+    assert.doesNotMatch(source, /selectedWeekDay\.mealCount === 0[\s\S]*這天還沒有餐點/);
+    assert.doesNotMatch(source, /displayMealCount === 0 && meals\.length === 0/);
+    assert.doesNotMatch(source, /selectedDayMealCount === 0[\s\S]*openDayDetail/);
+  });
+
+  it("uses day snapshots as the only timeline row and Meal Edit authority", () => {
+    assert.match(source, /const meals = snapshot\?\.meals \?\? \[\]/);
+    assert.match(source, /snapshot !== null && meals\.length > 0[\s\S]*<TimelineRows[\s\S]*meals=\{meals\}/);
+    assert.match(source, /buildHistoryMealEditPayload\(meal, selectedDateKey\)/);
+    assert.doesNotMatch(source, /selectedWeekDay[\s\S]*<TimelineRows/);
+    assert.doesNotMatch(source, /selectedDayMealCount[\s\S]*<TimelineRows/);
+    assert.doesNotMatch(source, /trends(?:Cache|\.daily|\.averages)[\s\S]*buildHistoryMealEditPayload/);
   });
 
   it("preserves visible selected-day display from same-date week cache during day revalidation", () => {
