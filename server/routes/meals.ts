@@ -295,46 +295,50 @@ export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
     if (!update) {
       return reply.code(400).send({ error: "Invalid meal update" });
     }
-    if (update.kind !== "scalar") {
-      return reply.code(400).send({ error: "Invalid meal update" });
-    }
 
     const { id } = request.params as { id: string };
     let affectedDateKey: string;
     let updatedMeal: Awaited<ReturnType<typeof foodLoggingService.updateMeal>>;
     try {
-      const mutationGuard = await foodLoggingService.getMealMutationGuard(
-        deviceId,
-        id,
-        update.expectedMealRevisionId,
-      );
-      if (mutationGuard.itemCount > 1) {
-        return reply.code(409).send({
-          error: "MEAL_REQUIRES_GROUPED_UPDATE",
-          message: "Grouped meals must be corrected through chat.",
+      if (update.kind === "scalar") {
+        const mutationGuard = await foodLoggingService.getMealMutationGuard(
+          deviceId,
+          id,
+          update.expectedMealRevisionId,
+        );
+        if (mutationGuard.itemCount > 1) {
+          return reply.code(409).send({
+            error: "MEAL_REQUIRES_GROUPED_UPDATE",
+            message: "Grouped meals must be corrected through chat.",
+          });
+        }
+
+        if (update.imageAssetId) {
+          const ownedAsset = await assetService.getOwnedAsset(deviceId, update.imageAssetId);
+          if (!ownedAsset) {
+            return reply.code(400).send({ error: "Invalid meal image asset" });
+          }
+        }
+
+        updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
+          expectedMealRevisionId: update.expectedMealRevisionId,
+          imagePath: update.imageAssetId ? `asset:${update.imageAssetId}` : null,
+          items: [
+            {
+              foodName: update.foodName,
+              calories: update.calories,
+              protein: update.protein,
+              carbs: update.carbs,
+              fat: update.fat,
+            },
+          ],
+        });
+      } else {
+        updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
+          expectedMealRevisionId: update.expectedMealRevisionId,
+          items: update.items,
         });
       }
-
-      if (update.imageAssetId) {
-        const ownedAsset = await assetService.getOwnedAsset(deviceId, update.imageAssetId);
-        if (!ownedAsset) {
-          return reply.code(400).send({ error: "Invalid meal image asset" });
-        }
-      }
-
-      updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
-        expectedMealRevisionId: update.expectedMealRevisionId,
-        imagePath: update.imageAssetId ? `asset:${update.imageAssetId}` : null,
-        items: [
-          {
-            foodName: update.foodName,
-            calories: update.calories,
-            protein: update.protein,
-            carbs: update.carbs,
-            fat: update.fat,
-          },
-        ],
-      });
       affectedDateKey = formatLocalDate(new Date(updatedMeal.loggedAt));
     } catch (error) {
       if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
