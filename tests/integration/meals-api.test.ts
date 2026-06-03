@@ -136,6 +136,54 @@ describe("Meals API", () => {
     assert.equal(Object.prototype.hasOwnProperty.call(envelope, "mealRevisionId"), false);
   }
 
+  function assertFreshMealPatchResponse(
+    body: {
+      affectedDate?: unknown;
+      summaryOutcome?: unknown;
+      dailySummary?: { totalCalories?: unknown };
+      meal?: {
+        id?: unknown;
+        mealRevisionId?: unknown;
+        foodName?: unknown;
+        itemCount?: unknown;
+        calories?: unknown;
+        protein?: unknown;
+        carbs?: unknown;
+        fat?: unknown;
+      };
+    },
+    expected: {
+      mealId: string;
+      previousMealRevisionId: string;
+      affectedDate: string;
+      foodName: string;
+      itemCount: number;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    },
+  ) {
+    assert.equal(body.affectedDate, expected.affectedDate);
+    assert.ok(body.dailySummary, "expected fresh grouped replacement to return dailySummary");
+    assert.equal(body.dailySummary.totalCalories, expected.calories);
+    assert.deepEqual(body.summaryOutcome, {
+      status: "fresh",
+      dailySummary: body.dailySummary,
+    });
+    assert.ok(body.meal, "expected grouped replacement to return aggregate meal");
+    assert.equal(body.meal.id, expected.mealId);
+    assert.equal(typeof body.meal.mealRevisionId, "string");
+    assert.notEqual(body.meal.mealRevisionId, expected.previousMealRevisionId);
+    assert.equal(body.meal.foodName, expected.foodName);
+    assert.equal(body.meal.itemCount, expected.itemCount);
+    assert.equal(body.meal.calories, expected.calories);
+    assert.equal(body.meal.protein, expected.protein);
+    assert.equal(body.meal.carbs, expected.carbs);
+    assert.equal(body.meal.fat, expected.fat);
+    assertNoPublishFailureFields(body);
+  }
+
   async function readOptionalSSEChunk(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     timeoutMs: number,
@@ -469,6 +517,162 @@ describe("Meals API", () => {
     assert.equal(afterUpdateRes.statusCode, 200);
     const afterUpdateBody = afterUpdateRes.json() as { meals: Array<{ id: string; mealPeriod?: unknown }> };
     assert.equal(afterUpdateBody.meals.find((row) => row.id === meal.id)?.mealPeriod, "lunch");
+  });
+
+  it("PATCH /api/meals/:id accepts grouped items replacement from one item to many items", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logFood(deviceId, {
+      foodName: "早餐盤",
+      calories: 410,
+      protein: 22,
+      carbs: 38,
+      fat: 18,
+    });
+    const affectedDate = formatLocalDate(new Date(meal.loggedAt));
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      assert.equal(publishDeviceId, deviceId);
+      publishedPayloads.push(payload);
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+
+    try {
+      const updateRes = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          expectedMealRevisionId: meal.mealRevisionId,
+          items: [
+            { name: "蛋餅", position: 0, calories: 310, protein: 18, carbs: 32, fat: 12 },
+            { name: "無糖豆漿", position: 1, calories: 120, protein: 9, carbs: 8, fat: 5 },
+          ],
+        },
+      });
+
+      assert.equal(updateRes.statusCode, 200);
+      assertFreshMealPatchResponse(updateRes.json(), {
+        mealId: meal.id,
+        previousMealRevisionId: meal.mealRevisionId,
+        affectedDate,
+        foodName: "蛋餅、無糖豆漿",
+        itemCount: 2,
+        calories: 430,
+        protein: 27,
+        carbs: 40,
+        fat: 17,
+      });
+      assert.equal(publishedPayloads.length, 1);
+      assertMealMutationSummaryEnvelope(publishedPayloads[0], affectedDate);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
+  it("PATCH /api/meals/:id accepts grouped items replacement from many items to one item", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+      ],
+    });
+    const affectedDate = formatLocalDate(new Date(meal.loggedAt));
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      assert.equal(publishDeviceId, deviceId);
+      publishedPayloads.push(payload);
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+
+    try {
+      const updateRes = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          expectedMealRevisionId: meal.mealRevisionId,
+          items: [
+            { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 12 },
+          ],
+        },
+      });
+
+      assert.equal(updateRes.statusCode, 200);
+      assertFreshMealPatchResponse(updateRes.json(), {
+        mealId: meal.id,
+        previousMealRevisionId: meal.mealRevisionId,
+        affectedDate,
+        foodName: "雞腿",
+        itemCount: 1,
+        calories: 260,
+        protein: 24,
+        carbs: 0,
+        fat: 12,
+      });
+      assert.equal(publishedPayloads.length, 1);
+      assertMealMutationSummaryEnvelope(publishedPayloads[0], affectedDate);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
+  it("PATCH /api/meals/:id accepts grouped items replacement for update and reorder", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 1 },
+      ],
+    });
+    const affectedDate = formatLocalDate(new Date(meal.loggedAt));
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      assert.equal(publishDeviceId, deviceId);
+      publishedPayloads.push(payload);
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+
+    try {
+      const updateRes = await app.inject({
+        method: "PATCH",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: {
+          expectedMealRevisionId: meal.mealRevisionId,
+          items: [
+            { name: "青菜", position: 0, calories: 50, protein: 3, carbs: 9, fat: 1 },
+            { name: "雞腿", position: 1, calories: 240, protein: 23, carbs: 0, fat: 11 },
+            { name: "糙米飯", position: 2, calories: 260, protein: 5, carbs: 55, fat: 1.5 },
+          ],
+        },
+      });
+
+      assert.equal(updateRes.statusCode, 200);
+      assertFreshMealPatchResponse(updateRes.json(), {
+        mealId: meal.id,
+        previousMealRevisionId: meal.mealRevisionId,
+        affectedDate,
+        foodName: "青菜、雞腿、糙米飯",
+        itemCount: 3,
+        calories: 550,
+        protein: 31,
+        carbs: 64,
+        fat: 13.5,
+      });
+      assert.equal(publishedPayloads.length, 1);
+      assertMealMutationSummaryEnvelope(publishedPayloads[0], affectedDate);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
   });
 
   it("PATCH and DELETE /api/meals/:id fail closed on missing or stale expected revisions", async () => {
