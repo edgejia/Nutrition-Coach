@@ -411,17 +411,17 @@ This is the shared signal that Home-origin and grouped Meal Edit commits should 
 |---|-------|---------|---------------|
 | A1 | Phase 77 visual proof can adapt Phase 49’s CDP script pattern rather than adding a new browser-test dependency. [ASSUMED] | Architecture Patterns / Environment Availability | Low; if the existing script is too coupled, planner can create a similarly small `.mjs` script using the same local Edge/CDP pattern. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should helper extraction be required or optional?**  
+1. **RESOLVED: Should helper extraction be required or optional?**  
    - What we know: `77-CONTEXT.md` allows helper extraction at planner discretion and requires focused tests if extracted. [VERIFIED: `77-CONTEXT.md`]  
-   - What's unclear: Whether `HistoryScreen.tsx` can stay readable after tightening snapshot/pending logic without extraction. [VERIFIED: code inspection]  
-   - Recommendation: Start with source-contract assertions; extract pure helpers only if tests need observable decision functions for refresh/invalidation or pending state. [VERIFIED: existing source-contract pattern in `tests/unit/history-screen-contract.test.ts`]
+   - Resolution: Helper extraction is not required for Phase 77 and should be avoided unless needed to satisfy source-contract testability or keep the existing `HistoryScreen.tsx` contracts readable. [VERIFIED: `77-01-PLAN.md`]  
+   - Implementation guidance: Start with source-contract assertions and direct `HistoryScreen.tsx` changes; extract pure helpers only if tests need observable decision functions for refresh/invalidation or pending state. If extracted, add focused unit tests for selected-day refresh, visible-week refresh, offscreen cached day/week invalidation, and unrelated-date no-op. [VERIFIED: existing source-contract pattern in `tests/unit/history-screen-contract.test.ts`; VERIFIED: `77-CONTEXT.md`]
 
-2. **Where should the Phase 77 visual proof script live?**  
+2. **RESOLVED: Where should the Phase 77 visual proof script live?**  
    - What we know: Existing generated visual evidence lives both under `scripts/` and `tests/harness/scenarios/*.mjs`; direct browser `.mjs` scenarios are not run by `yarn verify:harness`. [VERIFIED: `.planning/codebase/TESTING.md`; VERIFIED: `AGENTS.md`; VERIFIED: repo file listing]  
-   - What's unclear: Whether the planner wants closure evidence under `output/playwright/phase-77-*` or harness artifact paths. [ASSUMED]  
-   - Recommendation: Use `tests/harness/scenarios/77-history-loading-visual.mjs` with artifacts under `tests/harness/artifacts/77-history-loading/latest` if the proof is milestone evidence; otherwise use `output/playwright/phase-77-history-loading/` if it is human-UAT style. [ASSUMED]
+   - Resolution: Phase 77 visual evidence lives at `tests/harness/scenarios/77-history-loading-visual.mjs`, with generated artifacts under `tests/harness/artifacts/77-history-loading/latest/`. [VERIFIED: `77-02-PLAN.md`]  
+   - Implementation guidance: Treat the `.mjs` script as a direct browser/visual harness command, not a `yarn verify:harness` scenario; record command/status metadata and relative screenshot paths in the metadata-only manifest. [VERIFIED: `AGENTS.md`; VERIFIED: `77-02-PLAN.md`]
 
 ## Environment Availability
 
@@ -529,7 +529,7 @@ OWASP ASVS is a web application verification standard and includes categories su
 - Standard stack: HIGH - existing package/tool versions and project commands are local and directly verified. [VERIFIED: `package.json`; VERIFIED: environment audit]
 - Architecture: HIGH - implementation boundaries are explicit in `AGENTS.md`, `77-CONTEXT.md`, and current source. [VERIFIED: `AGENTS.md`; VERIFIED: `77-CONTEXT.md`; VERIFIED: `client/src/components/HistoryScreen.tsx`]
 - Pitfalls: HIGH - each pitfall is tied to locked decisions or current code patterns. [VERIFIED: `77-CONTEXT.md`; VERIFIED: local source reads]
-- Visual proof location recommendation: MEDIUM - Phase 49 provides a strong analog, but the exact Phase 77 script location remains planner discretion. [VERIFIED: `tests/harness/scenarios/49-history-dashboard-polish-visual.mjs`; ASSUMED]
+- Visual proof location recommendation: HIGH - Phase 77 plan resolution fixes the script path at `tests/harness/scenarios/77-history-loading-visual.mjs` and artifacts under `tests/harness/artifacts/77-history-loading/latest/`. [VERIFIED: `77-02-PLAN.md`; VERIFIED: `tests/harness/scenarios/49-history-dashboard-polish-visual.mjs`]
 
 **Research date:** 2026-06-04  
 **Valid until:** 2026-07-04 for local architecture and project constraints; recheck if package versions or visual proof tooling changes. [ASSUMED]

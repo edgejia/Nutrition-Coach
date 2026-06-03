@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: Scope
-status: completed
+status: Awaiting next milestone
 stopped_at: Completed 77-04-PLAN.md
-last_updated: "2026-06-03T20:45:41.103Z"
-last_activity: 2026-06-03
+last_updated: "2026-06-03T21:53:38.539Z"
+last_activity: 2026-06-03 — Milestone v2.6 completed and archived
 progress:
   total_phases: 4
   completed_phases: 4
@@ -18,17 +18,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-02)
+See: .planning/PROJECT.md (updated 2026-06-04)
 
 **Core value:** 讓記錄比不記錄還要容易--說一句話、傳一張照片，AI 搞定剩下的。
-**Current focus:** Phase 77 — history-loading-stabilization-and-local-proof-gate
+**Current focus:** Planning next milestone or running the separate ship workflow.
 
 ## Current Position
 
-Phase: 77
-Plan: Not started
-Status: Complete
-Last activity: 2026-06-03
+Phase: Milestone v2.6 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-03 — Milestone v2.6 completed and archived
 
 ## Performance Metrics
 
@@ -363,4 +363,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Execute Phase 77 with $gsd-execute-phase 77.
+- Start the next milestone with $gsd-new-milestone

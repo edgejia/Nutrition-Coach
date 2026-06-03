@@ -1,5 +1,27 @@
 # 更新日誌
 
+## v2.6 - 2026-06-04
+
+### 新增
+
+- Home 今日餐點列現在可以直接開啟 Meal Edit，並沿用既有 public meal id / meal revision stale-protection contract。
+- Grouped meals 現在支援 direct item-level add、edit、delete，透過嚴格 `items[]` full-list replacement contract 保存新的 meal revision。
+- Meal Edit 新增 grouped meal editor，包含 item rows、驗證錯誤、stale conflict recovery、dirty discard，以及 media-free item DTO 邊界。
+- History 週切換與日期切換改用 snapshot-backed pending state，避免 cold switch 或 fast click 時出現 disruptive loading jump / pending-copy flicker。
+
+### 變更
+
+- `/api/meals/:id` grouped PATCH 會保留 expected revision checks、affected date freshness、`summaryOutcome` 與 realtime publish path；scalar grouped fallback 仍保留為 unsupported shape。
+- `/api/meals` read path 現在回傳 ordered、media-free grouped `items[]`，whole-meal image identity 保持在 meal level。
+- Item-level photo mapping、monthly goals/analytics、hydration tracking、motion polish、coaching copy 與 broader infrastructure cleanup 仍明確 deferred。
+- v2.6 closeout 維持本機驗證範圍；沒有 push、merge、deploy、Railway smoke、staging promotion 或 main promotion。
+
+### 驗證
+
+- Phase 74-77 verification 全部通過，涵蓋 Home edit entry、grouped CRUD server contract、grouped Meal Edit UI、History loading stabilization、metadata-only proof 與 no-promotion boundary。
+- v2.6 milestone audit 通過 `15/15` scoped requirements、`4/4` phases、cross-phase integration 與 E2E flow checks，並確認所有 phase 都有 Nyquist validation artifact。
+- Closeout 前本機 `yarn release:check` 重新通過：TypeScript、`1,362` tests、frontend production build 全部 green。Generated proof remains metadata-only.
+
 ## v2.5 - 2026-06-02
 
 ### 新增

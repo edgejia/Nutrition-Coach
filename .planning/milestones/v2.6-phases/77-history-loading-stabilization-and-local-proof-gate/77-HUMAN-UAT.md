@@ -1,5 +1,5 @@
 ---
-status: passed
+status: complete
 phase: 77-history-loading-stabilization-and-local-proof-gate
 source:
   - 77-VERIFICATION.md

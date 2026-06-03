@@ -10,8 +10,8 @@ Nutrition Coach is a chat-first nutrition logging app for personal beta use. Use
 
 ## Current State
 
-**Shipped version:** v2.5 Structured LLM Boundaries and DTO Reliability on 2026-06-02.
-**Active milestone:** v2.6 Meal Editing and History Usability. Phases 74, 75, 76, and 77 are complete locally with release-proof evidence. Staging/main promotion still requires a separate ship workflow and explicit approval.
+**Shipped version:** v2.6 Meal Editing and History Usability on 2026-06-03.
+**Active milestone:** None. v2.6 is archived locally with release-proof evidence. Staging/main promotion still requires a separate ship workflow and explicit approval.
 
 v2.3 made backend-committed mutation facts authoritative across goal updates, meal log/update/delete receipts, stale chat receipt edits, and `daily_summary` SSE freshness.
 
@@ -44,28 +44,28 @@ v2.6 expanded meal editing and history usability from the stabilized v2.5 bounda
 - Grouped meals can be updated directly through a strict full-list `items[]` server contract for item add/update/delete while preserving expected meal revision checks, summary freshness outcomes, realtime publish behavior, and chat-persistence boundaries.
 - Grouped Meal Edit now renders editable item rows with add/delete controls, validates grouped drafts before save, refreshes through `/api/meals` authoritative grouped item DTOs after successful saves, and keeps item-level media mapping explicitly deferred.
 - Capability matrix metadata and generated docs now reflect implemented Home edit entry and Day Detail read-only behavior.
+- History week/date switching keeps target context stable, suppresses fast transient selected-day pending-copy flicker, and preserves metadata-only local proof with no promotion authorization.
 
-## Last Completed Milestone: v2.5 Structured LLM Boundaries and DTO Reliability
+## Last Completed Milestone: v2.6 Meal Editing and History Usability
 
-**Goal:** Stabilize schema-backed LLM outputs, authoritative DTO validation, receipt persistence, and structured history state before product-polish milestones.
+**Goal:** Make logged meals easier to revisit and edit while keeping revision authority, grouped item writes, and History loading behavior stable.
 
-**Status:** Archived locally. All v2.5 phases are executed, the milestone audit passed, local release proof is green, phase directories are archived, and no staging/main promotion has been performed.
+**Status:** Archived locally. All v2.6 phases are executed, the milestone audit passed, local release proof is green, phase directories are archived, and no staging/main promotion has been performed.
 
 **Delivered features:**
 
-- Provider-level structured object output for non-streaming schema-backed LLM calls.
-- Onboarding target generation moved to a Zod-first structured-output path with sanitized failure telemetry.
-- Strict client/API/SSE DTO validation expansion for authoritative UI state.
-- Atomic assistant reply, meal receipt reference, and structured mutation outcome persistence.
-- Compressed history generated from structured tool outcomes instead of display strings.
-- Production guest-session secret guard, explicit local-only CORS behavior, route fallback redaction, and SSE keepalive cleanup.
+- Home today meal rows open existing revision-safe Meal Edit for complete authoritative meals.
+- Grouped meal direct item add/update/delete through strict server-owned `items[]` replacement.
+- Grouped Meal Edit item rows with validation, stale recovery, media-free DTOs, and authoritative post-commit refresh.
+- History cold week/date switching keeps stable target context and suppresses fast pending-copy flicker.
+- Metadata-only local proof, visual harness evidence, TypeScript, build, and `yarn release:check` passed without promotion.
 
 **Archives:**
 
-- Roadmap: `.planning/milestones/v2.5/ROADMAP.md`
-- Requirements: `.planning/milestones/v2.5/REQUIREMENTS.md`
-- Audit: `.planning/milestones/v2.5/MILESTONE-AUDIT.md`
-- Phases: `.planning/milestones/v2.5/phases/`
+- Roadmap: `.planning/milestones/v2.6-ROADMAP.md`
+- Requirements: `.planning/milestones/v2.6-REQUIREMENTS.md`
+- Audit: `.planning/milestones/v2.6-MILESTONE-AUDIT.md`
+- Phases: `.planning/milestones/v2.6-phases/`
 
 ## Requirements
 
@@ -109,8 +109,8 @@ v2.6 expanded meal editing and history usability from the stabilized v2.5 bounda
 
 - The backend remains Fastify + SQLite + TypeScript with route-owned HTTP/SSE boundaries and OpenAI access isolated behind the LLM provider boundary.
 - The frontend remains the Sport UI React/Vite client with Zustand as the single authoritative state boundary.
-- Active v2.6 planning is under `.planning/phases/`; planning history for v2.3, v2.4, and v2.5 is archived under `.planning/milestones/`.
-- v2.5 local closeout ran `yarn release:check` successfully with 1330 tests and did not perform staging or main promotion.
+- `.planning/phases/` is empty after v2.6 closeout; planning history for v2.3, v2.4, v2.5, and v2.6 is archived under `.planning/milestones/`.
+- v2.6 local closeout ran `yarn release:check` successfully with 1362 tests and did not perform staging or main promotion.
 - `origin/staging` remains the deployment/test branch and is ahead of `origin/main`; staging/main promotion is not authorized by milestone planning.
 - `.planning/**` is mostly local ignored GSD state after `origin/staging` stopped tracking planning artifacts; keep review summaries explicit about which changes are code/docs versus local planning status.
 
@@ -159,7 +159,7 @@ Known non-blocking debt carried forward:
 
 This document evolves at phase transitions and milestone boundaries.
 
-Last updated: 2026-06-03
+Last updated: 2026-06-04
 
 **After each phase transition**:
 1. Requirements invalidated? Move to Out of Scope with reason.
@@ -175,4 +175,4 @@ Last updated: 2026-06-03
 4. Update Context with current state.
 
 ---
-*Last updated: 2026-06-03 after Phase 76 completion*
+*Last updated: 2026-06-04 after v2.6 milestone closeout*
