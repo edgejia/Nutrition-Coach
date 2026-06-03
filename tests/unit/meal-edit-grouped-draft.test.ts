@@ -70,10 +70,10 @@ describe("grouped meal draft helper", () => {
 
     assert.equal(validation.valid, false);
     assert.equal(validation.firstInvalidIndex, 0);
-    assert.deepEqual(validation.rows[0], { name: "請填寫項目名稱。" });
-    assert.deepEqual(validation.rows[1], { calories: "請填寫熱量。" });
-    assert.deepEqual(validation.rows[2], { protein: "請輸入有效數值。" });
-    assert.deepEqual(validation.rows[3], { carbs: "數值不可為負。" });
+    assert.deepEqual(validation.rows[0], { name: "required" });
+    assert.deepEqual(validation.rows[1], { calories: "required" });
+    assert.deepEqual(validation.rows[2], { protein: "invalid" });
+    assert.deepEqual(validation.rows[3], { carbs: "negative" });
   });
 
   it("allows duplicate names and returns the first invalid nutrition row", () => {
@@ -87,7 +87,7 @@ describe("grouped meal draft helper", () => {
     assert.equal(validation.firstInvalidIndex, 2);
     assert.deepEqual(validation.rows[0], {});
     assert.deepEqual(validation.rows[1], {});
-    assert.deepEqual(validation.rows[2], { fat: "請填寫脂肪。" });
+    assert.deepEqual(validation.rows[2], { fat: "required" });
   });
 
   it("requires at least one item", () => {
@@ -96,7 +96,7 @@ describe("grouped meal draft helper", () => {
     assert.equal(validation.valid, false);
     assert.equal(validation.firstInvalidIndex, 0);
     assert.deepEqual(validation.rows, []);
-    assert.equal(validation.formError, "至少要保留一個項目。");
+    assert.equal(validation.formError, "empty");
   });
 
   it("builds media-free grouped update items with contiguous zero-based positions", () => {
