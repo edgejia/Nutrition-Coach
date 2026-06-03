@@ -427,17 +427,17 @@ This guard is needed unless the plan first guarantees grouped `items[]` through 
 |---|-------|---------|---------------|
 | A1 | Extracting `client/src/meal-edit-grouped-draft.ts` is recommended for testability, but the phase may also keep small helpers inside `MealEditScreen`. [ASSUMED] | Recommended Project Structure; Code Examples | Low: implementation can still satisfy the phase with local helpers, but validation tests may become more brittle. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should grouped item details be added to `/api/meals`, or should Meal Edit fetch a separate detail DTO?**
+1. **RESOLVED: Add grouped item details to the existing `/api/meals` DTO path.**
    - What we know: Home Meal Edit uses `/api/meals` rows and current route tests show aggregate grouped rows without `items[]`. [VERIFIED: tests/integration/meals-api.test.ts; VERIFIED: 74-CONTEXT.md]
-   - What's unclear: Whether the planner wants to keep Phase 76 purely client-side by showing unsupported state for item-missing payloads, or include the small backend DTO projection needed for Home grouped editing. [VERIFIED: .planning/REQUIREMENTS.md]
-   - Recommendation: Add flat `items[]` to the existing `/api/meals` authoritative DTO path for grouped rows, because GROUP-UI-01 applies to grouped meals and GROUP-UI-03 explicitly requires existing authoritative DTO/store paths. [VERIFIED: .planning/REQUIREMENTS.md; VERIFIED: client/src/meal-edit-refresh.ts]
+   - Resolution: Plans 02 and 03 choose the existing authoritative DTO/store path rather than a separate detail fetch. Add flat grouped `items[]` to `/api/meals` rows where item details are available, then keep `refreshAfterMealMutation` on the existing `getMeals` refresh path. [VERIFIED: .planning/REQUIREMENTS.md; VERIFIED: client/src/meal-edit-refresh.ts]
+   - Reason: GROUP-UI-01 applies to Home-opened grouped meals, and GROUP-UI-03 explicitly requires existing authoritative DTO/store paths. [VERIFIED: .planning/REQUIREMENTS.md]
 
-2. **How much source-of-truth note is needed for MEDIA-DECISION-01?**
+2. **RESOLVED: Cover MEDIA-DECISION-01 through test/source contracts and phase artifacts, without item-level media implementation.**
    - What we know: `76-CONTEXT.md` locks deferral, `MealItemDetail` has no media fields, and `MealEditImageFrame` already says the photo is whole-meal context. [VERIFIED: 76-CONTEXT.md; VERIFIED: client/src/types.ts; VERIFIED: client/src/components/MealEditScreen.tsx]
-   - What's unclear: Whether planner should add a test-only source contract, a short source comment, or a planning artifact note only. [VERIFIED: .planning/REQUIREMENTS.md]
-   - Recommendation: Add tests/source contract coverage that grouped rows do not introduce item media fields or per-item crop/upload copy, and keep the source-of-truth note in Phase 76 artifacts; add a code comment only if the UI copy alone is not enough. [VERIFIED: tests/unit/meal-edit-screen.test.ts; ASSUMED]
+   - Resolution: Plans cover media deferral by preserving media-free `MealItemDetail`, keeping grouped PATCH free of image fields, retaining whole-meal photo copy, and adding tests/source assertions that no row-level thumbnails, crop controls, media fields, or per-item evidence copy are introduced. [VERIFIED: tests/unit/meal-edit-screen.test.ts; VERIFIED: tests/unit/meal-edit-payload.test.ts]
+   - Reason: Phase 76 has no persistence, DTO, or evidence contract for item-level media; implementing mapping now would exceed the phase boundary. [VERIFIED: 76-CONTEXT.md]
 
 ## Environment Availability
 
