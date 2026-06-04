@@ -13,6 +13,7 @@ globalThis.localStorage = {
 } as Storage;
 
 const { useStore } = await import("../../client/src/store.js");
+const { normalizeLoggedMealReceipt } = await import("../../client/src/api.js");
 const { formatLocalDate } = await import("../../client/src/lib/time.js");
 const { buildReceiptMealEditPayload } = await import("../../client/src/meal-edit-payload.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
@@ -387,6 +388,7 @@ describe("AppStore", () => {
           mealId: "meal-1",
           mealRevisionId: "meal-1:r1",
           dateKey: "2026-04-30",
+          receiptStatus: "active",
           loggedAt: "2026-04-30T04:00:00.000Z",
           foodName: "雞腿便當",
           calories: 640,
@@ -408,6 +410,7 @@ describe("AppStore", () => {
           mealId: "meal-2",
           mealRevisionId: "meal-2:r1",
           dateKey: "2026-04-30",
+          receiptStatus: "active",
           loggedAt: "2026-04-30T08:00:00.000Z",
           foodName: "鮭魚飯糰",
           calories: 280,
@@ -427,13 +430,90 @@ describe("AppStore", () => {
     assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
     assert.equal(redactedMessage?.loggedMeal?.mealRevisionId, undefined);
     assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal((redactedMessage?.loggedMeal as any)?.receiptStatus, "deleted");
     assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(redactedMessage?.loggedMeal?.calories, 640);
+    assert.equal(redactedMessage?.loggedMeal?.protein, 30);
+    assert.equal(redactedMessage?.loggedMeal?.carbs, 78);
+    assert.equal(redactedMessage?.loggedMeal?.fat, 20);
+    assert.equal(redactedMessage?.loggedMeal?.itemCount, 1);
     assert.equal(redactedMessage?.loggedMeal?.imageAssetId, "asset-lunch");
+    assert.equal(redactedMessage?.loggedMeal?.imageUrl, "/api/assets/asset-lunch");
     assert.equal(buildReceiptMealEditPayload(redactedMessage?.loggedMeal), null);
     assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-2");
     assert.equal(untouchedMessage?.loggedMeal?.mealRevisionId, "meal-2:r1");
+    assert.equal((untouchedMessage?.loggedMeal as any)?.receiptStatus, "active");
     assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-2");
     assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealRevisionId, "meal-2:r1");
+  });
+
+  it("normalizes receiptStatus values and omits malformed transport statuses", () => {
+    const active = normalizeLoggedMealReceipt({
+      mealId: "meal-active",
+      mealRevisionId: "meal-active:r1",
+      dateKey: "2026-04-30",
+      receiptStatus: "active",
+      foodName: "雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+    } as any);
+    assert.equal((active as any).receiptStatus, "active");
+
+    const deleted = normalizeLoggedMealReceipt({
+      foodName: "已刪除雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+      receiptStatus: "deleted",
+    } as any);
+    assert.equal((deleted as any).receiptStatus, "deleted");
+
+    const stale = normalizeLoggedMealReceipt({
+      foodName: "舊版鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      itemCount: 1,
+      receiptStatus: "stale_revision",
+    } as any);
+    assert.equal((stale as any).receiptStatus, "stale_revision");
+
+    const malformed = normalizeLoggedMealReceipt({
+      foodName: "壞狀態便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+      receiptStatus: "removed",
+    } as any);
+    assert.equal((malformed as any).receiptStatus, undefined);
+  });
+
+  it("buildReceiptMealEditPayload rejects deleted receipts even when identity fields remain", () => {
+    const payload = buildReceiptMealEditPayload({
+      mealId: "meal-deleted",
+      mealRevisionId: "meal-deleted:r1",
+      dateKey: "2026-04-30",
+      receiptStatus: "deleted",
+      loggedAt: "2026-04-30T04:00:00.000Z",
+      foodName: "已刪除雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+      imageAssetId: "asset-lunch",
+      imageUrl: "/api/assets/asset-lunch",
+    } as any);
+
+    assert.equal(payload, null);
   });
 
   it("stores and clears the pending home chat draft", () => {
@@ -573,6 +653,7 @@ describe("ProvisionalBubble actions", () => {
           mealId: "meal-delete",
           mealRevisionId: "meal-delete:r1",
           dateKey: "2026-04-30",
+          receiptStatus: "active",
           loggedAt: "2026-04-30T04:00:00.000Z",
           foodName: "雞腿便當",
           calories: 640,
@@ -594,6 +675,7 @@ describe("ProvisionalBubble actions", () => {
           mealId: "meal-keep",
           mealRevisionId: "meal-keep:r1",
           dateKey: "2026-04-30",
+          receiptStatus: "active",
           loggedAt: "2026-04-30T08:00:00.000Z",
           foodName: "鮭魚飯糰",
           calories: 280,
@@ -622,6 +704,7 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
     assert.equal(redactedMessage?.loggedMeal?.mealRevisionId, undefined);
     assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal((redactedMessage?.loggedMeal as any)?.receiptStatus, "deleted");
     assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
     assert.equal(redactedMessage?.loggedMeal?.calories, 640);
     assert.equal(redactedMessage?.loggedMeal?.protein, 30);
@@ -635,6 +718,7 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-keep");
     assert.equal(untouchedMessage?.loggedMeal?.mealRevisionId, "meal-keep:r1");
     assert.equal(untouchedMessage?.loggedMeal?.dateKey, "2026-04-30");
+    assert.equal((untouchedMessage?.loggedMeal as any)?.receiptStatus, "active");
     assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-keep");
 
     assert.equal(deleteConfirmation?.id, "assistant-delete-confirmation");
