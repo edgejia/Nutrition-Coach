@@ -110,6 +110,7 @@ interface AppState {
   recordMealMutation: (affectedDate: string) => void;
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void;
   clearPendingHomeChatDraft: () => void;
+  clearDraftLinkedAssistantArtifact: (artifactId: string) => void;
   setShowSettings: (showSettings: boolean) => void;
   setDevice: (deviceId: string, goal: string, dailyTargets: DailyTargets) => void;
   bootstrapGuestSession: () => Promise<boolean>;
@@ -197,6 +198,11 @@ export const useStore = create<AppState>((set, get) => ({
     })),
   setPendingHomeChatDraft: (pendingHomeChatDraft) => set({ pendingHomeChatDraft }),
   clearPendingHomeChatDraft: () => set({ pendingHomeChatDraft: null }),
+  clearDraftLinkedAssistantArtifact: (artifactId) =>
+    set((state) => ({
+      messages: state.messages.filter((message) => !(message.role === "assistant" && message.id === artifactId)),
+      provisionalBubble: state.provisionalBubble?.id === artifactId ? null : state.provisionalBubble,
+    })),
   setShowSettings: (showSettings) => set({ showSettings }),
 
   setDevice: (deviceId, goal, dailyTargets) => {

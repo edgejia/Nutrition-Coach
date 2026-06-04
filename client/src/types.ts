@@ -209,6 +209,7 @@ export interface PendingHomeChatDraft {
   text: string;
   image?: File;
   status: "staged" | "sending" | "failed";
+  failedAssistantArtifactId?: string;
 }
 
 export interface ChatReply {

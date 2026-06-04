@@ -450,12 +450,17 @@ describe("chat stream contract", () => {
     const cleanupIndex = sendPendingDraftSource.indexOf(
       "clearDraftLinkedAssistantArtifact(draft.failedAssistantArtifactId)",
     );
-    const sendingIndex = sendPendingDraftSource.indexOf('setPendingHomeChatDraft({ ...draft, status: "sending"');
+    const sendingIndex = sendPendingDraftSource.indexOf("setPendingHomeChatDraft(");
     const handleSendIndex = sendPendingDraftSource.indexOf("await handleSend(");
 
     assert.notEqual(sendPendingDraftStart, -1, "sendPendingDraft source contract should locate the retry handler");
     assert.notEqual(failedArtifactReadIndex, -1, "D-07 retry must read explicit failedAssistantArtifactId");
     assert.notEqual(cleanupIndex, -1, "D-01/D-04 retry must call clearDraftLinkedAssistantArtifact with the draft id");
+    assert.match(
+      sendPendingDraftSource,
+      /const \{ failedAssistantArtifactId: _failedAssistantArtifactId, \.\.\.draftWithoutFailedArtifact \} = draft/,
+      "D-04/D-09 retry must omit stale failedAssistantArtifactId before storing sending draft state",
+    );
     assert.ok(
       cleanupIndex < sendingIndex,
       "D-04 cleanup must happen before the draft is marked sending",

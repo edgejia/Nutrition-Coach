@@ -114,6 +114,7 @@ export function ChatPanel() {
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
+  const clearDraftLinkedAssistantArtifact = useStore((s) => s.clearDraftLinkedAssistantArtifact);
   const meals = useStore((s) => s.meals);
   const openMealEdit = useStore((s) => s.openMealEdit);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -586,7 +587,7 @@ export function ChatPanel() {
             if (opts?.draftId) {
               const currentDraft = useStore.getState().pendingHomeChatDraft;
               if (currentDraft && currentDraft.id === opts.draftId) {
-                setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+                setPendingHomeChatDraft({ ...currentDraft, status: "failed", failedAssistantArtifactId: bubbleId });
               }
             }
             setSending(false);
@@ -637,7 +638,7 @@ export function ChatPanel() {
       if (opts?.draftId) {
         const currentDraft = useStore.getState().pendingHomeChatDraft;
         if (currentDraft && currentDraft.id === opts.draftId) {
-          setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+          setPendingHomeChatDraft({ ...currentDraft, status: "failed", failedAssistantArtifactId: bubbleId });
         }
       }
       setSending(false);
@@ -647,11 +648,22 @@ export function ChatPanel() {
 
   async function sendPendingDraft(draft: PendingHomeChatDraft) {
     attemptedDraftIdsRef.current.add(draft.id);
-    setPendingHomeChatDraft({ ...draft, status: "sending" });
+    if (draft.failedAssistantArtifactId) {
+      clearDraftLinkedAssistantArtifact(draft.failedAssistantArtifactId);
+    }
+    const { failedAssistantArtifactId: _failedAssistantArtifactId, ...draftWithoutFailedArtifact } = draft;
+    setPendingHomeChatDraft({ ...draftWithoutFailedArtifact, status: "sending" });
     await handleSend(draft.text, draft.image, {
       draftId: draft.id,
       appendUserBubble: draft.status !== "failed",
     });
+  }
+
+  function cancelFailedPendingDraft(draft: PendingHomeChatDraft) {
+    if (draft.failedAssistantArtifactId) {
+      clearDraftLinkedAssistantArtifact(draft.failedAssistantArtifactId);
+    }
+    clearPendingHomeChatDraft();
   }
 
   useEffect(() => {
@@ -886,7 +898,7 @@ export function ChatPanel() {
           <button type="button" onClick={() => sendPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
             重試送出
           </button>
-          <button type="button" onClick={clearPendingHomeChatDraft} className="ml-3 font-semibold underline">
+          <button type="button" onClick={() => cancelFailedPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
             取消送出
           </button>
         </div>
