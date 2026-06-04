@@ -80,6 +80,7 @@ describe("ChatService", () => {
 
     assert.equal(assistant?.didLogMeal, true);
     assert.ok(assistant?.loggedMeal);
+    assert.equal((assistant.loggedMeal as unknown as Record<string, unknown>).receiptStatus, "active");
     assert.match(assistant.loggedMeal.mealId ?? "", /^[0-9a-f-]{36}$/);
     assert.equal(assistant.loggedMeal.dateKey, formatLocalDate(new Date(assistant.loggedMeal.loggedAt ?? "")));
     assert.deepEqual(assistant.loggedMeal, {
@@ -209,6 +210,7 @@ describe("ChatService", () => {
 
     assert.equal(restoredAssistant?.didLogMeal, true);
     assert.ok(restoredAssistant?.loggedMeal);
+    assert.equal((restoredAssistant.loggedMeal as unknown as Record<string, unknown>).receiptStatus, "stale_revision");
     assert.equal(restoredAssistant.loggedMeal.mealId, undefined);
     assert.equal(restoredAssistant.loggedMeal.dateKey, undefined);
     assert.equal(restoredAssistant.loggedMeal.mealRevisionId, undefined);
@@ -246,12 +248,16 @@ describe("ChatService", () => {
 
     assert.equal(restoredAssistant?.didLogMeal, true);
     assert.ok(restoredAssistant?.loggedMeal);
+    assert.equal((restoredAssistant.loggedMeal as unknown as Record<string, unknown>).receiptStatus, "deleted");
     assert.equal(restoredAssistant.loggedMeal.mealId, undefined);
     assert.equal(restoredAssistant.loggedMeal.dateKey, undefined);
     assert.equal(restoredAssistant.loggedMeal.mealRevisionId, undefined);
     assert.equal(restoredAssistant.loggedMeal.foodName, "鮭魚飯糰");
     assert.equal(restoredAssistant.loggedMeal.itemCount, 1);
     assert.equal(restoredAssistant.loggedMeal.calories, 280);
+    assert.equal(restoredAssistant.loggedMeal.protein, 14);
+    assert.equal(restoredAssistant.loggedMeal.carbs, 36);
+    assert.equal(restoredAssistant.loggedMeal.fat, 8);
     assert.equal(restoredAssistant.loggedMeal.imageAssetId, "deleted-receipt");
     assert.equal(restoredAssistant.loggedMeal.imageUrl, "/api/assets/deleted-receipt");
   });
@@ -680,5 +686,57 @@ describe("ChatService", () => {
       assert.equal(message.loggedMeal.dateKey, undefined);
       assert.equal(message.loggedMeal.mealRevisionId, undefined);
     }
+  });
+
+  it("omits deleted log facts from compressed current-meal history while preserving delete confirmation", async () => {
+    const loggedMeal = await foodLoggingService.logFood(deviceId, {
+      foodName: "雞胸便當",
+      calories: 620,
+      protein: 42,
+      carbs: 72,
+      fat: 18,
+      loggedAt: "2026-03-25T04:30:00.000Z",
+    });
+    await chatService.saveMessage(deviceId, "user", "幫我記雞胸便當");
+    const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
+    await chatService.saveAssistantReplyWithReceipt({
+      deviceId,
+      content: "已幫你記錄雞胸便當。",
+      receipt: {
+        toolMessageId: tool.id,
+        mealTransactionId: loggedMeal.id,
+        mealRevisionId: loggedMeal.mealRevisionId,
+      },
+      mutationOutcomeFact: {
+        action: "log_food",
+        affectedDate: "2026-03-25",
+        foodName: "雞胸便當",
+        calories: 620,
+        protein: 42,
+        carbs: 72,
+        fat: 18,
+      },
+    });
+
+    await foodLoggingService.deleteMeal(deviceId, loggedMeal.id, loggedMeal.mealRevisionId);
+    await chatService.saveMessage(deviceId, "user", "刪掉剛剛那餐");
+    await chatService.saveAssistantReplyWithReceipt({
+      deviceId,
+      content: "已刪除這筆餐點。",
+      mutationOutcomeFact: {
+        action: "delete_meal",
+        affectedDate: "2026-03-25",
+        foodName: "雞胸便當",
+      },
+    });
+    await chatService.saveMessage(deviceId, "user", "今天吃了什麼？");
+
+    const compressed = await chatService.getCompressedHistory(deviceId, 10);
+    const allContent = compressed.map((message) => message.content).join("\n");
+
+    assert.match(allContent, /已刪除這筆餐點/);
+    assert.doesNotMatch(allContent, /已幫你記錄雞胸便當/);
+    assert.doesNotMatch(allContent, /系統已記錄餐點：2026-03-25 雞胸便當/);
+    assert.doesNotMatch(allContent, /620 kcal|蛋白質 42 g|碳水 72 g|脂肪 18 g/);
   });
 });
