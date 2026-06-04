@@ -205,6 +205,100 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(html, /aria-label="編輯 雞胸便當"/);
   });
 
+  it("renders deleted receipt snapshots with preserved evidence and no action affordance", () => {
+    let openMealEditCalls = 0;
+    const message: Message = {
+      id: "receipt-deleted-1",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-05-11T10:00:00.000Z",
+      loggedMeal: {
+        mealId: "meal-deleted-1",
+        mealRevisionId: "meal-deleted-1:r1",
+        dateKey: "2026-05-11",
+        receiptStatus: "deleted",
+        loggedAt: "2026-05-11T10:00:00.000Z",
+        foodName: "雞腿便當",
+        calories: 720,
+        protein: 34,
+        carbs: 88,
+        fat: 24,
+        itemCount: 2,
+        imageAssetId: "asset-deleted-lunch",
+        imageUrl: "/api/assets/asset-deleted-lunch",
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(MessageBubble, {
+        message,
+        onOpenMealEdit: () => {
+          openMealEditCalls += 1;
+        },
+      }),
+    );
+
+    assert.match(html, />已刪除</);
+    assert.match(html, /sp-receipt-deleted/);
+    assert.match(html, />雞腿便當</);
+    assert.match(html, />720</);
+    assert.match(html, />34 g</);
+    assert.match(html, />88 g</);
+    assert.match(html, />24 g</);
+    assert.match(html, /\/api\/assets\/asset-deleted-lunch/);
+    assert.match(html, /雞腿便當 整餐照片/);
+    assert.doesNotMatch(html, />已記錄</);
+    assert.doesNotMatch(html, /role="button"/);
+    assert.doesNotMatch(html, /tabindex="0"/i);
+    assert.doesNotMatch(html, /sp-receipt-button/);
+    assert.doesNotMatch(html, /sp-receipt-chevron/);
+    assert.doesNotMatch(html, /aria-label="編輯 雞腿便當"/);
+    assert.equal(openMealEditCalls, 0);
+  });
+
+  it("keeps stale revision receipts display-only without the deleted label", () => {
+    let openMealEditCalls = 0;
+    const message: Message = {
+      id: "receipt-stale-revision-1",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-05-11T10:00:00.000Z",
+      loggedMeal: {
+        mealId: "meal-stale-1",
+        mealRevisionId: "meal-stale-1:r1",
+        dateKey: "2026-05-11",
+        receiptStatus: "stale_revision",
+        loggedAt: "2026-05-11T10:00:00.000Z",
+        foodName: "舊版鮭魚飯糰",
+        calories: 330,
+        protein: 18,
+        carbs: 40,
+        fat: 10,
+        itemCount: 1,
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(MessageBubble, {
+        message,
+        onOpenMealEdit: () => {
+          openMealEditCalls += 1;
+        },
+      }),
+    );
+
+    assert.match(html, />已記錄</);
+    assert.match(html, />舊版鮭魚飯糰</);
+    assert.doesNotMatch(html, />已刪除</);
+    assert.doesNotMatch(html, /sp-receipt-deleted/);
+    assert.doesNotMatch(html, /role="button"/);
+    assert.doesNotMatch(html, /tabindex="0"/i);
+    assert.doesNotMatch(html, /sp-receipt-button/);
+    assert.doesNotMatch(html, /sp-receipt-chevron/);
+    assert.doesNotMatch(html, /aria-label="編輯 舊版鮭魚飯糰"/);
+    assert.equal(openMealEditCalls, 0);
+  });
+
   it("renders logged meal receipt thumbnails through the shared persisted asset primitive", async () => {
     const bubble = await readSource("client/src/components/MessageBubble.tsx");
     const css = await readSource("client/src/app.css");
@@ -232,7 +326,6 @@ describe("chat bubble source contract", () => {
 
     assert.match(bubble, /message\.loggedMeal/);
     assert.match(bubble, /sp-bubble-asst/);
-    assert.doesNotMatch(bubble, /deleted/);
     assert.doesNotMatch(bubble, /deletedMeal/);
     assert.doesNotMatch(bubble, /delete_meal/);
   });
