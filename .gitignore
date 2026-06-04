@@ -19,6 +19,7 @@ server/uploads/
 
 # Local GSD workflow state and generated planning evidence
 .planning/
+scripts/check-planning-closeout.mjs
 
 # Harness artifacts are generated evidence, not source
 tests/harness/artifacts/
