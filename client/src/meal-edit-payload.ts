@@ -130,6 +130,10 @@ export function buildMealEditPayloadIfComplete(meal: MealEntry, dateKey: string)
 }
 
 export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | undefined): MealEditPayload | null {
+  if (loggedMeal?.receiptStatus === "deleted" || loggedMeal?.receiptStatus === "stale_revision") {
+    return null;
+  }
+
   const mealRevisionId = getRequiredString(loggedMeal?.mealRevisionId);
   if (
     !loggedMeal ||

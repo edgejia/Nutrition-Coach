@@ -496,8 +496,8 @@ describe("AppStore", () => {
     assert.equal((malformed as any).receiptStatus, undefined);
   });
 
-  it("buildReceiptMealEditPayload rejects deleted receipts even when identity fields remain", () => {
-    const payload = buildReceiptMealEditPayload({
+  it("buildReceiptMealEditPayload rejects display-only receipts even when identity fields remain", () => {
+    assert.equal(buildReceiptMealEditPayload({
       mealId: "meal-deleted",
       mealRevisionId: "meal-deleted:r1",
       dateKey: "2026-04-30",
@@ -511,9 +511,21 @@ describe("AppStore", () => {
       itemCount: 1,
       imageAssetId: "asset-lunch",
       imageUrl: "/api/assets/asset-lunch",
-    } as any);
+    } as any), null);
 
-    assert.equal(payload, null);
+    assert.equal(buildReceiptMealEditPayload({
+      mealId: "meal-stale",
+      mealRevisionId: "meal-stale:r1",
+      dateKey: "2026-04-30",
+      receiptStatus: "stale_revision",
+      loggedAt: "2026-04-30T04:00:00.000Z",
+      foodName: "舊版雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+    } as any), null);
   });
 
   it("stores and clears the pending home chat draft", () => {

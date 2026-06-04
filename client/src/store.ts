@@ -59,7 +59,13 @@ function redactReceiptIdentityFromMessages(messages: Message[], mealId: string):
       dateKey: _dateKey,
       ...displayOnlyReceipt
     } = message.loggedMeal;
-    return { ...message, loggedMeal: displayOnlyReceipt };
+    return {
+      ...message,
+      loggedMeal: {
+        ...displayOnlyReceipt,
+        receiptStatus: "deleted",
+      },
+    };
   });
 }
 

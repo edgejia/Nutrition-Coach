@@ -10,6 +10,7 @@ import type {
   LoggedMealReceipt,
   MealEntry,
   MealPeriod,
+  MealReceiptStatus,
   MealItemDetail,
   Message,
   CoachCTAIntentId,
@@ -80,6 +81,10 @@ function normalizeItemCount(value: unknown): number {
 
 function normalizeMealPeriod(value: unknown): MealPeriod | undefined {
   return isValidMealPeriod(value) ? value : undefined;
+}
+
+function normalizeMealReceiptStatus(value: unknown): MealReceiptStatus | undefined {
+  return value === "active" || value === "deleted" || value === "stale_revision" ? value : undefined;
 }
 
 function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
@@ -393,19 +398,28 @@ export function withAuthorizedAssetUrl(
 }
 
 export function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMealReceipt {
-  const { mealPeriod: rawMealPeriod, items: _items, imageUrl: rawImageUrl, ...rest } = receipt as LoggedMealReceipt & {
+  const {
+    mealPeriod: rawMealPeriod,
+    receiptStatus: rawReceiptStatus,
+    items: _items,
+    imageUrl: rawImageUrl,
+    ...rest
+  } = receipt as LoggedMealReceipt & {
     mealPeriod?: unknown;
+    receiptStatus?: unknown;
     items?: unknown;
     imageUrl?: string | null;
   };
   const items = normalizeMealItems((receipt as { items?: unknown }).items);
   const mealPeriod = normalizeMealPeriod(rawMealPeriod);
+  const receiptStatus = normalizeMealReceiptStatus(rawReceiptStatus);
 
   return {
     ...rest,
     itemCount: normalizeItemCount(receipt.itemCount),
     ...(items ? { items } : {}),
     ...(mealPeriod ? { mealPeriod } : {}),
+    ...(receiptStatus ? { receiptStatus } : {}),
     ...(rawImageUrl === undefined
       ? {}
       : { imageUrl: withAuthorizedAssetUrl(rawImageUrl) ?? null }),
