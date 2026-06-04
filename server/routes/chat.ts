@@ -68,6 +68,7 @@ const SENSITIVE_IDENTIFIERS = [
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
+const STOPPED_EMPTY_COPY = "已停止生成。";
 const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
 type ReceiptIdentity = {
@@ -768,7 +769,7 @@ async function handleStreamingReply(
       guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal, {
         summaryHistoryFacts,
       }),
-    ) || "（已停止）";
+    ) || STOPPED_EMPTY_COPY;
     const persistedReply = await persistFinalReply(stoppedReply, { status: "stopped" });
     return {
       fullReply: persistedReply,

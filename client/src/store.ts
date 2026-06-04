@@ -77,9 +77,15 @@ function redactReceiptIdentityFromMessages(messages: Message[], mealId: string):
   });
 }
 
+const STOPPED_EMPTY_COPY = "已停止生成。";
+const RAW_STOPPED_PLACEHOLDER = "（已停止）";
+
 function getStoppedMessageContent(content: string) {
   const trimmedContent = content.trim();
-  return trimmedContent.length > 0 ? `${trimmedContent}\n\n已停止` : "已停止，沒有產生新的回覆。";
+  if (trimmedContent.length === 0 || trimmedContent === RAW_STOPPED_PLACEHOLDER) {
+    return STOPPED_EMPTY_COPY;
+  }
+  return content;
 }
 
 interface AppState {

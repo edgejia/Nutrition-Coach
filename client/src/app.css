@@ -1576,6 +1576,19 @@ textarea {
   color: #ffb3b3;
 }
 
+.sp-bubble-stopped {
+  border-color: var(--sp-line);
+  background: var(--sp-surface);
+  color: var(--sp-ink);
+}
+
+.sp-stopped-status {
+  margin-top: 8px;
+  color: var(--sp-ink-2);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .sp-turn-reference {
   margin-top: 8px;
   color: var(--sp-ink-2);

@@ -12,8 +12,34 @@ type ProvisionalBubbleProps = {
   isStatusLabel: boolean;
 };
 
+const STOPPED_EMPTY_COPY = "已停止生成。";
+const STOPPED_STATUS_LABEL = "已停止";
+const RAW_STOPPED_PLACEHOLDER = "（已停止）";
+
 function isImagePlaceholderContent(content: string): boolean {
   return content.trim() === "(圖片)";
+}
+
+function getStoppedPresentation(message: Message) {
+  if (message.status !== "stopped") {
+    return {
+      content: message.content,
+      showStoppedStatus: false,
+    };
+  }
+
+  const trimmedContent = message.content.trim();
+  if (trimmedContent.length === 0 || trimmedContent === RAW_STOPPED_PLACEHOLDER) {
+    return {
+      content: STOPPED_EMPTY_COPY,
+      showStoppedStatus: false,
+    };
+  }
+
+  return {
+    content: message.content,
+    showStoppedStatus: true,
+  };
 }
 
 function formatNutritionValue(value: number) {
@@ -152,7 +178,9 @@ function AssistantTextBubble(props: {
   isStatusLabel?: boolean;
 }) {
   const { message, isProvisional, isStatusLabel } = props;
-  const isFallbackOrError = message.status === "error" || message.content.includes("抱歉，發生錯誤");
+  const isStopped = message.status === "stopped";
+  const { content, showStoppedStatus } = getStoppedPresentation(message);
+  const isFallbackOrError = !isStopped && (message.status === "error" || content.includes("抱歉，發生錯誤"));
   const isError = !isProvisional && isFallbackOrError;
   const turnReference =
     !isProvisional &&
@@ -163,7 +191,7 @@ function AssistantTextBubble(props: {
       ? formatTurnReference(message.turnId)
       : null;
 
-  if (!message.content.trim()) {
+  if (!content.trim()) {
     return null;
   }
 
@@ -172,7 +200,7 @@ function AssistantTextBubble(props: {
       <div className="sp-message-row sp-message-row-assistant">
         <div className="sp-status-bubble">
           <SportBoltIcon size={14} stroke={2} />
-          <span>{message.content}</span>
+          <span>{content}</span>
           {isProvisional ? <i className="sp-status-dot" aria-hidden="true" /> : null}
         </div>
       </div>
@@ -181,17 +209,18 @@ function AssistantTextBubble(props: {
 
   return (
     <div className="sp-message-row sp-message-row-assistant">
-      <div className={`sp-bubble-asst${isError ? " sp-bubble-error" : ""}`}>
+      <div className={`sp-bubble-asst${isError ? " sp-bubble-error" : ""}${isStopped ? " sp-bubble-stopped" : ""}`}>
         {isProvisional ? (
           <p className="whitespace-pre-wrap">
-            {message.content}
+            {content}
             <span className="sp-stream-caret" aria-hidden="true">
               |
             </span>
           </p>
         ) : (
-          <AssistantMarkdown content={message.content} />
+          <AssistantMarkdown content={content} />
         )}
+        {showStoppedStatus ? <div className="sp-stopped-status">{STOPPED_STATUS_LABEL}</div> : null}
         {turnReference ? <div className="sp-turn-reference">引用碼 {turnReference}</div> : null}
       </div>
     </div>
@@ -239,7 +268,7 @@ export function MessageBubble(props: {
 
   const editPayload = getCompleteReceiptEditPayload(message);
   const shouldRenderReceipt = Boolean(message.loggedMeal);
-  const shouldRenderText = message.content.trim().length > 0;
+  const shouldRenderText = getStoppedPresentation(message).content.trim().length > 0;
 
   if (shouldRenderReceipt) {
     return (
