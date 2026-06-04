@@ -738,6 +738,9 @@ describe("ChatService", () => {
     const allContent = compressed.map((message) => message.content).join("\n");
 
     assert.match(allContent, /已刪除這筆餐點/);
+    assert.match(allContent, /刪掉剛剛那餐/);
+    assert.match(allContent, /今天吃了什麼/);
+    assert.doesNotMatch(allContent, /幫我記雞胸便當/);
     assert.doesNotMatch(allContent, /已幫你記錄雞胸便當/);
     assert.doesNotMatch(allContent, /系統已記錄餐點：2026-03-25 雞胸便當/);
     assert.doesNotMatch(allContent, /620 kcal|蛋白質 42 g|碳水 72 g|脂肪 18 g/);

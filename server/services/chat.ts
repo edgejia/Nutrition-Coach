@@ -607,6 +607,7 @@ export function createChatService(db: AppDatabase) {
         } else if (msg.role === "assistant") {
           if (receiptStatuses.get(msg.id) === "deleted") {
             pendingToolSummaries = [];
+            current = [];
             continue;
           }
           // Merge pending tool summaries into the assistant message
