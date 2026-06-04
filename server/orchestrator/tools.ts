@@ -450,6 +450,9 @@ type UpdateGoalsArgs =
   | ({ mode: "latest_proposal" } & Partial<DailyTargets>);
 
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
+const nonNegativeFiniteNumber = z
+  .number()
+  .refine((value) => Number.isFinite(value) && value >= 0, "must be non-negative");
 const quantityToolProperties = {
   quantity: { type: "number" },
   quantity_g: { type: "number" },
@@ -472,10 +475,10 @@ const proteinSourceSchema = z
 const logFoodItemSchema = z
   .object({
     food_name: z.string().min(1, "food_name must be non-empty"),
-    calories: finiteNumber,
-    protein: finiteNumber,
-    carbs: finiteNumber,
-    fat: finiteNumber,
+    calories: nonNegativeFiniteNumber,
+    protein: nonNegativeFiniteNumber,
+    carbs: nonNegativeFiniteNumber,
+    fat: nonNegativeFiniteNumber,
     quantity: finiteNumber.optional(),
     quantity_g: finiteNumber.optional(),
     quantity_ml: finiteNumber.optional(),

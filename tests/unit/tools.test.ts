@@ -1261,6 +1261,59 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(meals.length, 0);
   });
 
+  it("rejects mixed-sign grouped log_food items before persistence", async () => {
+    const contract = toolRegistry.get("log_food");
+    assert.ok(contract);
+
+    const mixedSignCall: ToolCall = {
+      id: "call_mixed_sign_grouped",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "壞資料餐點",
+              calories: -100,
+              protein: 10,
+              carbs: 20,
+              fat: 5,
+            },
+            {
+              food_name: "正常餐點",
+              calories: 500,
+              protein: 30,
+              carbs: 50,
+              fat: 12,
+            },
+          ],
+        }),
+      },
+    };
+
+    const outcome = await runContract(contract!, mixedSignCall, {
+      currentUserMessage: "",
+      previousAssistantMessage: undefined,
+      deps: { toolDeps: { foodLoggingService, summaryService }, deviceId },
+    });
+
+    assert.equal(outcome.success, false);
+    assert.equal(outcome.executed, false);
+    assert.equal(outcome.failureReason, "validation");
+    const parsed = JSON.parse(outcome.result);
+    assert.equal(parsed.failureReason, "validation");
+    assert.equal(parsed.reason, "schema_validation");
+    assert.ok(
+      (parsed.fields as string[]).some((field) => field.endsWith("items.0.calories")),
+      "validation fields must identify the negative grouped item calories",
+    );
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisionItems = await db.select().from(mealRevisionItems);
+    assert.equal(transactions.length, 0);
+    assert.equal(revisionItems.length, 0);
+  });
+
   it("Test 4: get_daily_summary returns persisted meal facts plus the macro summary text", async () => {
     // Seed one meal so totals are non-zero, easier to assert formatting.
     await foodLoggingService.logFood(deviceId, {
