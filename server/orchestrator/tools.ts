@@ -78,6 +78,8 @@ import type { DeletedMealSnapshot } from "./mutation-effects.js";
 // Public types preserved for the orchestrator (Phase 8/9 callers).
 // ---------------------------------------------------------------------------
 
+export const FAILED_RECOGNITION_NO_SAVE_REPLY = "我沒有把這張照片存成餐點紀錄。請先補充餐點內容和份量，我再幫你估算。";
+
 export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
@@ -114,7 +116,8 @@ export interface ToolExecutionResult {
       | "historical_summary_clarification"
       | "meal_numeric_authority_failure"
       | "meal_numeric_clarification"
-      | "meal_numeric_proposal";
+      | "meal_numeric_proposal"
+      | "failed_recognition_no_save";
     text: string;
   };
   updatedFields?: string[];
@@ -343,7 +346,11 @@ interface LogFoodSuccessResult {
   };
 }
 
-type LogFoodResult = LogFoodSuccessResult | HistoricalToolClarification;
+interface FailedRecognitionNoSaveResult {
+  status: "failed_recognition_no_save";
+}
+
+type LogFoodResult = LogFoodSuccessResult | HistoricalToolClarification | FailedRecognitionNoSaveResult;
 
 interface UpdateMealResult {
   dailySummary?: DailySummary;
@@ -830,6 +837,82 @@ export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): No
   };
 }
 
+function normalizeFailedRecognitionName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+const FAILED_RECOGNITION_PLACEHOLDER_NAMES = new Set([
+  "unknown",
+  "unknown food",
+  "unrecognized",
+  "unrecognized food",
+  "unidentified",
+  "unidentified food",
+  "無法辨識內容",
+  "無法辨識食物",
+  "無法辨識餐點",
+  "無法辨識的照片",
+  "未知食物",
+  "未知餐點",
+]);
+
+function isFailedRecognitionPlaceholderName(name: string): boolean {
+  const normalized = normalizeFailedRecognitionName(name);
+  if (!normalized) {
+    return false;
+  }
+
+  if (FAILED_RECOGNITION_PLACEHOLDER_NAMES.has(normalized)) {
+    return true;
+  }
+
+  return /^(?:cannot|can't|unable to|not able to)\s+(?:identify|recognize)/.test(normalized)
+    || /(?:無法|不能|未能).{0,4}(?:辨識|識別).{0,6}(?:內容|食物|餐點|照片)/.test(normalized);
+}
+
+function aggregateMealNutrition(items: LogFoodItemArgs[]) {
+  return items.reduce(
+    (sum, item) => ({
+      calories: sum.calories + item.calories,
+      protein: sum.protein + item.protein,
+      carbs: sum.carbs + item.carbs,
+      fat: sum.fat + item.fat,
+    }),
+    { calories: 0, protein: 0, carbs: 0, fat: 0 },
+  );
+}
+
+function isImpossibleMealAggregate(aggregate: {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}): boolean {
+  const values = [aggregate.calories, aggregate.protein, aggregate.carbs, aggregate.fat];
+  if (values.some((value) => value < 0)) {
+    return true;
+  }
+  if (values.every((value) => value === 0)) {
+    return true;
+  }
+  return aggregate.calories <= 0
+    && (aggregate.protein > 0 || aggregate.carbs > 0 || aggregate.fat > 0);
+}
+
+function getLogFoodNames(args: NormalizedLogFoodArgs, rawArgs: LogFoodArgs): string[] {
+  return [
+    ...args.items.map((item) => item.food_name),
+    ...("food_name" in rawArgs && rawArgs.food_name ? [rawArgs.food_name] : []),
+  ];
+}
+
+function isFailedRecognitionLogFood(args: NormalizedLogFoodArgs, rawArgs: LogFoodArgs): boolean {
+  if (getLogFoodNames(args, rawArgs).some(isFailedRecognitionPlaceholderName)) {
+    return true;
+  }
+  return isImpossibleMealAggregate(aggregateMealNutrition(args.items));
+}
+
 function resolveProteinSourceInputs(
   args: LogFoodArgs,
   sourceText?: string,
@@ -1276,6 +1359,13 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
 
     const mealPeriod = extractExplicitMealPeriodFromSourceText(context.currentUserMessage);
     const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
+    if (isFailedRecognitionLogFood(normalized, args)) {
+      return {
+        ok: true,
+        result: { status: "failed_recognition_no_save" as const },
+        toolMessage: JSON.stringify({ status: "failed_recognition_no_save" }),
+      };
+    }
     const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(
       normalized,
       context.currentUserMessage,
@@ -2221,6 +2311,20 @@ export async function executeTool(
   // Map contract-level success result back to ToolExecutionResult.
   if (toolCall.function.name === "log_food") {
     const contractResult = outcome.contractResult as LogFoodResult;
+    if (contractResult.status === "failed_recognition_no_save") {
+      return {
+        result: FAILED_RECOGNITION_NO_SAVE_REPLY,
+        summary: "failureReason: failed_recognition_no_save",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        controlledReply: {
+          source: "renderer",
+          reason: "failed_recognition_no_save",
+          text: FAILED_RECOGNITION_NO_SAVE_REPLY,
+        },
+      };
+    }
     if (contractResult.status === "needs_clarification") {
       const reply = renderHistoricalLogFoodClarificationCopy({
         prompt: contractResult.prompt,
