@@ -13,6 +13,7 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
+import { validJpegBytes } from "../../fixtures/image-bytes.js";
 import { buildHistoryMealEditPayload } from "../../../client/src/meal-edit-payload.js";
 import type { MealEntry } from "../../../client/src/types.js";
 import type {
@@ -131,13 +132,7 @@ function passResult(steps: ScenarioStepResult[], artifacts: Record<string, unkno
 }
 
 function makeJpegBytes(): ArrayBuffer {
-  const bytes = new Uint8Array([
-    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-    ...new Array(72).fill(0x00),
-    0xff, 0xd9,
-  ]);
-  return bytes.buffer as ArrayBuffer;
+  return validJpegBytes();
 }
 
 async function resetScenarioDirs(): Promise<void> {

@@ -456,6 +456,18 @@ describe("chat stream contract", () => {
     assert.match(chatPanel, /\.\.\.\(turnId \? \{ turnId \} : \{\}\)/);
   });
 
+  it("stop fallback keeps stop mode active until abort fallout commits stopped state", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const fallbackStart = chatPanel.indexOf("function armStopFallback()");
+    const nextFunctionStart = chatPanel.indexOf("function disarmEntrySettleWindow()", fallbackStart);
+    const fallbackSource = chatPanel.slice(fallbackStart, nextFunctionStart);
+
+    assert.match(fallbackSource, /activeAbortControllerRef\.current\?\.abort\(\)/);
+    assert.doesNotMatch(fallbackSource, /setStoppingMode\(false\)/);
+    assert.doesNotMatch(fallbackSource, /activeTurnIdRef\.current = null/);
+    assert.doesNotMatch(fallbackSource, /setActiveTurnId\(null\)/);
+  });
+
   it("CHAT-01 D-01..D-09 retries remove draft-linked artifacts before a new provisional bubble", async () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
     const sendPendingDraftStart = chatPanel.indexOf("async function sendPendingDraft(draft: PendingHomeChatDraft)");

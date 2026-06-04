@@ -25,6 +25,7 @@ import { formatLocalDate } from "../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
 import type { FastifyInstance } from "fastify";
+import { validJpegBytes, validPngBytes, validWebpBytes } from "../fixtures/image-bytes.js";
 
 interface SSEEvent {
   event: string;
@@ -1079,7 +1080,7 @@ describe("Chat API", () => {
   it("POST /api/chat accepts multipart image upload", async () => {
     const form = new FormData();
     form.append("message", "");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "meal.png");
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
@@ -1140,6 +1141,22 @@ describe("Chat API", () => {
     }
   });
 
+  it("POST /api/chat accepts browser-generated WebP upload bytes", async () => {
+    const form = new FormData();
+    form.append("message", "");
+    form.append("image", new Blob([validWebpBytes()], { type: "image/webp" }), "meal.webp");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.reply);
+  });
+
   it("POST /api/chat JSON keeps accepted failed-image recognition as no-save for small and large bodies", async () => {
     assert.ok(services, "expected app services");
 
@@ -1156,12 +1173,12 @@ describe("Chat API", () => {
     const acceptedFailedImages = [
       {
         name: "small",
-        bytes: new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]),
+        bytes: validPngBytes(),
         filename: "failed-small.png",
       },
       {
         name: "large",
-        bytes: new Uint8Array(1024 * 1024).fill(0x41),
+        bytes: validPngBytes(1024 * 1024),
         filename: "failed-large.png",
       },
     ];
@@ -1239,7 +1256,7 @@ describe("Chat API", () => {
   it("POST /api/chat cleans staged uploads when a later image part is rejected", async () => {
     const form = new FormData();
     form.append("message", "這是我的午餐");
-    form.append("image", new Blob(["first image"], { type: "image/png" }), "meal.png");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "meal.png");
     form.append("image", new Blob(["bad image"], { type: "image/heic" }), "meal.heic");
 
     const res = await fetch(`${address}/api/chat`, {
@@ -1257,8 +1274,8 @@ describe("Chat API", () => {
   it("POST /api/chat rejects duplicate valid image parts without leaking the first staged file", async () => {
     const form = new FormData();
     form.append("message", "這是我的午餐");
-    form.append("image", new Blob(["first image"], { type: "image/png" }), "meal.png");
-    form.append("image", new Blob(["second image"], { type: "image/jpeg" }), "meal.jpg");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "meal.png");
+    form.append("image", new Blob([validJpegBytes()], { type: "image/jpeg" }), "meal.jpg");
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
@@ -1281,7 +1298,7 @@ describe("Chat API", () => {
 
     const form = new FormData();
     form.append("message", "");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "meal.png");
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
@@ -1424,7 +1441,7 @@ describe("Chat API", () => {
   it("POST /api/chat rejects invalid image types", async () => {
     const form = new FormData();
     form.append("message", "");
-    form.append("image", new Blob(["not an image"], { type: "text/plain" }), "meal.txt");
+    form.append("image", new Blob(["not an image"], { type: "image/png" }), "meal.png");
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
@@ -1433,6 +1450,103 @@ describe("Chat API", () => {
     });
 
     assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Invalid image type. Allowed: jpeg, png, webp" });
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const malformedPng = new Uint8Array([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      ...new Array(16).fill(0x41),
+    ]);
+    const spoofedForm = new FormData();
+    spoofedForm.append("message", "");
+    spoofedForm.append("image", new Blob([malformedPng.buffer as ArrayBuffer], { type: "image/png" }), "spoofed.png");
+
+    const spoofedRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: spoofedForm,
+    });
+
+    assert.equal(spoofedRes.status, 400);
+    assert.deepEqual(await spoofedRes.json(), { error: "Invalid image type. Allowed: jpeg, png, webp" });
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const malformedWebp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x08, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x20,
+    ]);
+    const spoofedWebpForm = new FormData();
+    spoofedWebpForm.append("message", "");
+    spoofedWebpForm.append("image", new Blob([malformedWebp.buffer as ArrayBuffer], { type: "image/webp" }), "spoofed.webp");
+
+    const spoofedWebpRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: spoofedWebpForm,
+    });
+
+    assert.equal(spoofedWebpRes.status, 400);
+    assert.deepEqual(await spoofedWebpRes.json(), { error: "Invalid image type. Allowed: jpeg, png, webp" });
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const fakeLossyWebp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x16, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x20,
+      0x0A, 0x00, 0x00, 0x00,
+      0x10, 0x00, 0x00,
+      0x9D, 0x01, 0x2A,
+      0x01, 0x00,
+      0x01, 0x00,
+    ]);
+    const fakeLossyWebpForm = new FormData();
+    fakeLossyWebpForm.append("message", "");
+    fakeLossyWebpForm.append(
+      "image",
+      new Blob([fakeLossyWebp.buffer as ArrayBuffer], { type: "image/webp" }),
+      "fake-lossy.webp",
+    );
+
+    const fakeLossyWebpRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: fakeLossyWebpForm,
+    });
+
+    assert.equal(fakeLossyWebpRes.status, 400);
+    assert.deepEqual(await fakeLossyWebpRes.json(), { error: "Invalid image type. Allowed: jpeg, png, webp" });
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    const fakeLosslessWebp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x18, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x4C,
+      0x0C, 0x00, 0x00, 0x00,
+      0x2F, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00,
+    ]);
+    const fakeLosslessWebpForm = new FormData();
+    fakeLosslessWebpForm.append("message", "");
+    fakeLosslessWebpForm.append(
+      "image",
+      new Blob([fakeLosslessWebp.buffer as ArrayBuffer], { type: "image/webp" }),
+      "fake-lossless.webp",
+    );
+
+    const fakeLosslessWebpRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: fakeLosslessWebpForm,
+    });
+
+    assert.equal(fakeLosslessWebpRes.status, 400);
+    assert.deepEqual(await fakeLosslessWebpRes.json(), { error: "Invalid image type. Allowed: jpeg, png, webp" });
+    assert.equal(mockLLM.chatCalls.length, 0);
   });
 
   it("POST /api/chat rejects images larger than 5MB", async () => {
@@ -2260,7 +2374,7 @@ describe("Chat API", () => {
 
     const form = new FormData();
     form.append("message", "午餐我吃了蘋果");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), "apple.png");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "apple.png");
     const chatRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
@@ -3191,7 +3305,7 @@ describe("Chat API", () => {
 
     const form = new FormData();
     form.append("message", "這是燕麥粥");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), "oatmeal.png");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "oatmeal.png");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -3274,7 +3388,7 @@ describe("Chat API", () => {
     });
     const form = new FormData();
     form.append("message", "這是雞腿便當");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "meal.png");
 
     const res = await fetch(`${address}/api/chat`, {
       method: "POST",
@@ -3508,15 +3622,9 @@ describe("Chat API", () => {
     const obs04ImageCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
     const obs04ImageAddress = await obs04ImageApp.listen({ port: 0 });
 
-    // Create a minimal 1x1 JPEG in memory (smallest valid JPEG bytes)
-    const minimalJpeg = Buffer.from(
-      "ffd8ffe000104a46494600010100000100010000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b08000100010801ffC40014000100000000000000000000000000000007ffC40014100100000000000000000000000000000000ffda00080101000000013fcfffd9",
-      "hex"
-    );
-
     const form = new FormData();
     form.append("message", "這是測試圖片");
-    form.append("image", new Blob([minimalJpeg], { type: "image/jpeg" }), "test.jpg");
+    form.append("image", new Blob([validJpegBytes()], { type: "image/jpeg" }), "test.jpg");
 
     await fetch(`${obs04ImageAddress}/api/chat`, {
       method: "POST",
@@ -4483,7 +4591,7 @@ describe("Chat API", () => {
     try {
       const form = new FormData();
       form.append("message", rawMealText);
-      form.append("image", new Blob(["fake image"], { type: "image/png" }), "secret-meal.png");
+      form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "secret-meal.png");
       const res = await fetch(`${logAddress}/api/chat`, {
         method: "POST",
         headers: { cookie: logCookieHeader, Accept: "text/event-stream" },

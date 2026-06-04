@@ -25,6 +25,7 @@ import type {
   ToolCall,
   ToolDefinition,
 } from "../../server/llm/types.js";
+import { validJpegBytes, validPngBytes } from "../fixtures/image-bytes.js";
 
 type LLMCallOptions = { signal?: AbortSignal };
 type RoundQueueItem = LLMRoundResult | Error | ((opts?: LLMCallOptions) => LLMRoundResult);
@@ -822,7 +823,7 @@ describe("chat-streaming", () => {
 
     const form = new FormData();
     form.append("message", "午餐我吃了雞腿便當");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), "lunch.png");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "lunch.png");
 
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -941,12 +942,12 @@ describe("chat-streaming", () => {
     const acceptedFailedImages = [
       {
         name: "small",
-        bytes: new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]),
+        bytes: validPngBytes(),
         filename: "failed-small.png",
       },
       {
         name: "large",
-        bytes: new Uint8Array(64 * 1024).fill(0x41),
+        bytes: validPngBytes(64 * 1024),
         filename: "failed-large.png",
       },
     ];
@@ -2927,12 +2928,7 @@ describe("chat-streaming", () => {
 
     const form = new FormData();
     form.append("message", "這是什麼食物");
-    const jpegBytes = new Uint8Array([
-      0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-      ...new Array(50).fill(0x00),
-    ]);
-    form.append("image", new Blob([jpegBytes], { type: "image/jpeg" }), "food.jpg");
+    form.append("image", new Blob([validJpegBytes()], { type: "image/jpeg" }), "food.jpg");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -2998,12 +2994,7 @@ describe("chat-streaming", () => {
 
     const form = new FormData();
     form.append("message", "這是什麼食物");
-    const jpegBytes = new Uint8Array([
-      0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-      ...new Array(50).fill(0x00),
-    ]);
-    form.append("image", new Blob([jpegBytes], { type: "image/jpeg" }), "food.jpg");
+    form.append("image", new Blob([validJpegBytes()], { type: "image/jpeg" }), "food.jpg");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -3915,7 +3906,7 @@ describe("chat-streaming", () => {
 
     const form = new FormData();
     form.append("message", "raw-user-food-雞腿便當");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), "meal.png");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "meal.png");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);

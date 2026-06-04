@@ -16,6 +16,7 @@ import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
+import { validJpegBytes } from "../../fixtures/image-bytes.js";
 
 interface LoggedMealEvidence {
   foodName: string;
@@ -42,13 +43,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMP_ROOT = path.resolve(__dirname, "..", "tmp", "case-01-image-only");
 
 function makeJpegBytes(): ArrayBuffer {
-  const bytes = new Uint8Array([
-    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-    ...new Array(50).fill(0x00),
-    0xFF, 0xD9,
-  ]);
-  return bytes.buffer as ArrayBuffer;
+  return validJpegBytes();
 }
 
 function parseChunkText(events: Array<{ event: string; data: string }>): string {

@@ -11,6 +11,7 @@ import { buildApp } from "../../server/app.js";
 import type { AppServices } from "../../server/app.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { validPngBytes } from "../fixtures/image-bytes.js";
 
 describe("Meals API", () => {
   let app: FastifyInstance;
@@ -74,7 +75,7 @@ describe("Meals API", () => {
   async function postImageChatMessage(fileName: string) {
     const form = new FormData();
     form.append("message", "");
-    form.append("image", new Blob(["fake image"], { type: "image/png" }), fileName);
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), fileName);
     return fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: deviceCookieHeader },

@@ -15,6 +15,7 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { assertSSETerminalProof, collectEventSequence, parseSSEEvents, readStreamThroughClose } from "../sse.js";
+import { validJpegBytes, validPngBytes } from "../../fixtures/image-bytes.js";
 import type { CollectedSSEStream } from "../sse.js";
 import { LLMProviderError } from "../../../server/llm/errors.js";
 import type { ProviderErrorMetadata } from "../../../server/llm/types.js";
@@ -84,25 +85,11 @@ interface DonePayload {
 }
 
 function makeJpegBytes(): ArrayBuffer {
-  const bytes = new Uint8Array([
-    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-    ...new Array(50).fill(0x00),
-    0xFF, 0xD9,
-  ]);
-  return bytes.buffer as ArrayBuffer;
+  return validJpegBytes();
 }
 
-function makeLargeAcceptedImageBytes(): ArrayBuffer {
-  const bytes = new Uint8Array(64 * 1024);
-  bytes.fill(0x41);
-  bytes[0] = 0x89;
-  bytes[1] = 0x50;
-  bytes[2] = 0x4E;
-  bytes[3] = 0x47;
-  bytes[4] = 0x0D;
-  bytes[5] = 0x0A;
-  return bytes.buffer as ArrayBuffer;
+function makePngBytes(size = 8): ArrayBuffer {
+  return validPngBytes(size);
 }
 
 function stepOk(name: string, actual?: unknown): ScenarioStepResult {
@@ -856,7 +843,7 @@ const scenario: VerificationScenario = {
 
     const subD = await runFailedRecognitionNoSave(
       "sub_d_failed_recognition_small",
-      makeJpegBytes(),
+      makePngBytes(),
       "failed-recognition-small.png",
     );
     allSteps.push(...subD.steps);
@@ -865,7 +852,7 @@ const scenario: VerificationScenario = {
 
     const subE = await runFailedRecognitionNoSave(
       "sub_e_failed_recognition_large",
-      makeLargeAcceptedImageBytes(),
+      makePngBytes(64 * 1024),
       "failed-recognition-large.png",
     );
     allSteps.push(...subE.steps);

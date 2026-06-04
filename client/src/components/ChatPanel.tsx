@@ -254,18 +254,10 @@ export function ChatPanel() {
     clearStopFallbackTimeout();
     if (typeof window === "undefined") {
       activeAbortControllerRef.current?.abort();
-      activeAbortControllerRef.current = null;
-      activeTurnIdRef.current = null;
-      setActiveTurnId(null);
-      setStoppingMode(false);
       return;
     }
     stopFallbackTimeoutRef.current = window.setTimeout(() => {
       activeAbortControllerRef.current?.abort();
-      activeAbortControllerRef.current = null;
-      activeTurnIdRef.current = null;
-      setActiveTurnId(null);
-      setStoppingMode(false);
     }, STOP_FALLBACK_TIMEOUT_MS);
   }
 
