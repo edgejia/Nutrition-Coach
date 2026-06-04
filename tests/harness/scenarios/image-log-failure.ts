@@ -5,6 +5,7 @@
  *   A: Image analysis (chatRound round 1) throws -> fallback in history, didLogMeal false, no meal
  *   B: log_food tool throws (FatalToolError via invalid args) -> fallback in history, no meal
  *   C: log_food succeeds -> meal kept, projected successful-log reply in history
+ *   D/E: accepted failed-recognition images call log_food with placeholder/all-zero facts -> no meal saved
  */
 
 import path from "node:path";
@@ -18,12 +19,37 @@ import type { CollectedSSEStream } from "../sse.js";
 import { LLMProviderError } from "../../../server/llm/errors.js";
 import type { ProviderErrorMetadata } from "../../../server/llm/types.js";
 import { createLlmTraceRecorder, type LlmTraceArtifact, type LlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
+import { FAILED_RECOGNITION_NO_SAVE_REPLY } from "../../../server/orchestrator/tools.js";
+import type { createSummaryService, DailySummary } from "../../../server/services/summary.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log-failure", "uploads");
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const STEP_NAMES = [
+  "sub_a_analysis_fail_post_chat",
+  "sub_a_analysis_fail_sse_terminal_contract",
+  "sub_a_analysis_fail_route_upload_cleanup",
+  "sub_a_analysis_fail_assert",
+  "verify_llm_trace",
+  "sub_b_tool_fail_post_chat",
+  "sub_b_tool_fail_sse_terminal_contract",
+  "sub_b_tool_fail_route_upload_cleanup",
+  "sub_b_tool_fail_assert",
+  "sub_c_reply_fail_post_chat",
+  "sub_c_reply_fail_sse_terminal_contract",
+  "sub_c_reply_fail_route_upload_cleanup",
+  "sub_c_reply_fail_assert",
+  "sub_d_failed_recognition_small_post_chat",
+  "sub_d_failed_recognition_small_sse_terminal_contract",
+  "sub_d_failed_recognition_small_route_upload_cleanup",
+  "sub_d_failed_recognition_small_assert",
+  "sub_e_failed_recognition_large_post_chat",
+  "sub_e_failed_recognition_large_sse_terminal_contract",
+  "sub_e_failed_recognition_large_route_upload_cleanup",
+  "sub_e_failed_recognition_large_assert",
+] as const;
 const PROVIDER_METADATA_FIXTURE: ProviderErrorMetadata = {
   provider: "openai",
   operation: "chat",
@@ -40,6 +66,23 @@ interface DailySummaryPayload {
   date: string;
 }
 
+interface MealPayload {
+  foodName: string;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+}
+
+interface DonePayload {
+  didLogMeal?: boolean;
+  didMutateMeal?: boolean;
+  loggedMeal?: unknown;
+  dailySummary?: DailySummaryPayload;
+  summaryOutcome?: unknown;
+  deletedMealId?: unknown;
+}
+
 function makeJpegBytes(): ArrayBuffer {
   const bytes = new Uint8Array([
     0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
@@ -47,6 +90,18 @@ function makeJpegBytes(): ArrayBuffer {
     ...new Array(50).fill(0x00),
     0xFF, 0xD9,
   ]);
+  return bytes.buffer as ArrayBuffer;
+}
+
+function makeLargeAcceptedImageBytes(): ArrayBuffer {
+  const bytes = new Uint8Array(64 * 1024);
+  bytes.fill(0x41);
+  bytes[0] = 0x89;
+  bytes[1] = 0x50;
+  bytes[2] = 0x4E;
+  bytes[3] = 0x47;
+  bytes[4] = 0x0D;
+  bytes[5] = 0x0A;
   return bytes.buffer as ArrayBuffer;
 }
 
@@ -133,21 +188,21 @@ async function fetchHistory(address: string, cookieHeader: string): Promise<Arra
   return historyJson.messages;
 }
 
-async function fetchMeals(address: string, cookieHeader: string): Promise<Array<{ foodName: string }>> {
+async function fetchMeals(address: string, cookieHeader: string): Promise<MealPayload[]> {
   const mealsRes = await fetch(`${address}/api/meals`, {
     headers: { cookie: cookieHeader },
   });
-  const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
+  const mealsJson = await mealsRes.json() as { meals: MealPayload[] };
   return mealsJson.meals;
 }
 
-function parseDonePayload(rawSSE: string): { didLogMeal?: boolean; dailySummary?: DailySummaryPayload } | undefined {
+function parseDonePayload(rawSSE: string): DonePayload | undefined {
   const doneEvent = parseSSEEvents(rawSSE).find((e) => e.event === "done");
   if (!doneEvent) {
     return undefined;
   }
   try {
-    return JSON.parse(doneEvent.data) as { didLogMeal?: boolean; dailySummary?: DailySummaryPayload };
+    return JSON.parse(doneEvent.data) as DonePayload;
   } catch {
     return {};
   }
@@ -208,8 +263,25 @@ function parseLiveChunkText(rawSSE: string): {
   };
 }
 
+function summarizeSummary(summary: DailySummary) {
+  return {
+    mealCount: summary.mealCount,
+    totalCalories: summary.totalCalories,
+    totalProtein: summary.totalProtein,
+    totalCarbs: summary.totalCarbs,
+    totalFat: summary.totalFat,
+  };
+}
+
 function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boolean {
   return typeof summary?.date === "string" && DATE_KEY_PATTERN.test(summary.date);
+}
+
+async function loadTodaySummary(
+  summaryService: ReturnType<typeof createSummaryService>,
+  deviceId: string,
+) {
+  return summaryService.getDailySummary(deviceId, new Date());
 }
 
 function verifyFallbackTraceContract(
@@ -293,8 +365,16 @@ async function runSubScenario(
     address: string;
     deviceId: string;
     cookieHeader: string;
+    summaryService: ReturnType<typeof createSummaryService>;
+    llm: StreamingLLMProvider;
   }) => Promise<{ ok: boolean; error?: string; evidence: unknown }>,
-  options: { message?: string; llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined } = {},
+  options: {
+    message?: string;
+    imageBytes?: ArrayBuffer;
+    imageType?: string;
+    imageFilename?: string;
+    llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
+  } = {},
 ): Promise<{ steps: ScenarioStepResult[]; artifacts: Record<string, unknown>; ok: boolean; failedStep?: string }> {
   const steps: ScenarioStepResult[] = [];
   const artifacts: Record<string, unknown> = {};
@@ -315,7 +395,11 @@ async function runSubScenario(
   try {
     const form = new FormData();
     form.append("message", options.message ?? "(圖片)");
-    form.append("image", new Blob([makeJpegBytes()], { type: "image/jpeg" }), "meal.jpg");
+    form.append(
+      "image",
+      new Blob([options.imageBytes ?? makeJpegBytes()], { type: options.imageType ?? "image/jpeg" }),
+      options.imageFilename ?? "meal.jpg",
+    );
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -364,6 +448,8 @@ async function runSubScenario(
       address: scenarioCtx.address,
       deviceId: scenarioCtx.deviceId,
       cookieHeader: scenarioCtx.cookieHeader,
+      summaryService: scenarioCtx.services.summaryService,
+      llm,
     });
     artifacts[label] = result.evidence;
     const routeCleanupEvidence = await waitForRouteUploadCleanup(logLines, uploadsDir);
@@ -654,6 +740,139 @@ const scenario: VerificationScenario = {
     allSteps.push(...subC.steps);
     Object.assign(allArtifacts, subC.artifacts);
     if (!subC.ok) return buildResult(false, subC.failedStep, allSteps, allArtifacts);
+
+    const runFailedRecognitionNoSave = async (
+      label: "sub_d_failed_recognition_small" | "sub_e_failed_recognition_large",
+      imageBytes: ArrayBuffer,
+      imageFilename: string,
+    ) => runSubScenario(
+      label,
+      (llm) => {
+        llm.queueRoundResponse({
+          toolCalls: [{
+            id: `call_${label}`,
+            type: "function",
+            function: {
+              name: "log_food",
+              arguments: JSON.stringify({
+                food_name: "無法辨識內容",
+                calories: 0,
+                protein: 0,
+                carbs: 0,
+                fat: 0,
+              }),
+            },
+          }],
+        });
+      },
+      async ({ rawSSE, address, cookieHeader, deviceId, summaryService, llm }) => {
+        const donePayload = parseDonePayload(rawSSE);
+        const events = parseSSEEvents(rawSSE);
+        const doneEvents = events.filter((event) => event.event === "done");
+        const chunkEvents = events.filter((event) => event.event === "chunk");
+        const parsedLiveChunks = parseLiveChunkText(rawSSE);
+        const liveChunkText = parsedLiveChunks.text;
+        const assistantMsgs = (await fetchHistory(address, cookieHeader)).filter((m) => m.role === "assistant");
+        const meals = await fetchMeals(address, cookieHeader);
+        const afterSummary = await loadTodaySummary(summaryService, deviceId);
+        const falseLogChunkClaim = /已記錄|完成記錄/.test(liveChunkText);
+        const assistantContent = assistantMsgs[0]?.content ?? "";
+        const evidence = {
+          donePayload: {
+            didLogMeal: donePayload?.didLogMeal,
+            didMutateMeal: donePayload?.didMutateMeal,
+            hasLoggedMeal: donePayload ? Object.prototype.hasOwnProperty.call(donePayload, "loggedMeal") : false,
+            hasDailySummary: donePayload ? Object.prototype.hasOwnProperty.call(donePayload, "dailySummary") : false,
+            hasSummaryOutcome: donePayload ? Object.prototype.hasOwnProperty.call(donePayload, "summaryOutcome") : false,
+            hasDeletedMealId: donePayload ? Object.prototype.hasOwnProperty.call(donePayload, "deletedMealId") : false,
+          },
+          sse: {
+            eventSequence: collectEventSequence(rawSSE),
+            doneEventCount: doneEvents.length,
+            chunkEventCount: chunkEvents.length,
+            replyMatchedCanonical: liveChunkText === FAILED_RECOGNITION_NO_SAVE_REPLY,
+            replyLength: liveChunkText.length,
+            falseLogChunkClaim,
+          },
+          history: {
+            assistantCount: assistantMsgs.length,
+            assistantMatchedCanonical: assistantContent === FAILED_RECOGNITION_NO_SAVE_REPLY,
+            assistantTextLength: assistantContent.length,
+          },
+          persistence: {
+            mealCount: meals.length,
+            summary: summarizeSummary(afterSummary),
+          },
+          modelCalls: {
+            chatRoundCalls: llm.chatCalls.length,
+          },
+        };
+
+        if (!donePayload) return { ok: false, error: "missing done event", evidence };
+        if (doneEvents.length !== 1) return { ok: false, error: `expected exactly one done event, got ${doneEvents.length}`, evidence };
+        if (chunkEvents.length !== 1) return { ok: false, error: `expected exactly one chunk event, got ${chunkEvents.length}`, evidence };
+        if (liveChunkText !== FAILED_RECOGNITION_NO_SAVE_REPLY) {
+          return { ok: false, error: "expected canonical failed-recognition no-save copy", evidence };
+        }
+        if (falseLogChunkClaim) return { ok: false, error: "no-save chunk must not claim a meal was logged", evidence };
+        if (donePayload.didLogMeal !== false) return { ok: false, error: "expected didLogMeal false", evidence };
+        if (donePayload.didMutateMeal !== false) return { ok: false, error: "expected didMutateMeal false", evidence };
+        if (Object.prototype.hasOwnProperty.call(donePayload, "loggedMeal")) {
+          return { ok: false, error: "expected done payload to omit loggedMeal", evidence };
+        }
+        if (Object.prototype.hasOwnProperty.call(donePayload, "dailySummary")) {
+          return { ok: false, error: "expected done payload to omit dailySummary", evidence };
+        }
+        if (Object.prototype.hasOwnProperty.call(donePayload, "summaryOutcome")) {
+          return { ok: false, error: "expected done payload to omit summaryOutcome", evidence };
+        }
+        if (assistantMsgs.length !== 1) return { ok: false, error: `expected 1 assistant msg, got ${assistantMsgs.length}`, evidence };
+        if (assistantContent !== FAILED_RECOGNITION_NO_SAVE_REPLY) {
+          return { ok: false, error: "expected persisted assistant copy to match canonical no-save copy", evidence };
+        }
+        if (meals.length !== 0) return { ok: false, error: `expected 0 meals after no-save path, got ${meals.length}`, evidence };
+        if (
+          afterSummary.mealCount !== 0 ||
+          afterSummary.totalCalories !== 0 ||
+          afterSummary.totalProtein !== 0 ||
+          afterSummary.totalCarbs !== 0 ||
+          afterSummary.totalFat !== 0
+        ) {
+          return { ok: false, error: "expected unchanged zero daily summary totals after no-save path", evidence };
+        }
+        if (llm.chatCalls.length !== 1) {
+          return { ok: false, error: `expected one model round and no recovery call, got ${llm.chatCalls.length}`, evidence };
+        }
+
+        return { ok: true, evidence };
+      },
+      {
+        message: "",
+        imageBytes,
+        imageType: "image/png",
+        imageFilename,
+      },
+    );
+
+    const subD = await runFailedRecognitionNoSave(
+      "sub_d_failed_recognition_small",
+      makeJpegBytes(),
+      "failed-recognition-small.png",
+    );
+    allSteps.push(...subD.steps);
+    Object.assign(allArtifacts, subD.artifacts);
+    if (!subD.ok) return buildResult(false, subD.failedStep, allSteps, allArtifacts);
+
+    const subE = await runFailedRecognitionNoSave(
+      "sub_e_failed_recognition_large",
+      makeLargeAcceptedImageBytes(),
+      "failed-recognition-large.png",
+    );
+    allSteps.push(...subE.steps);
+    Object.assign(allArtifacts, subE.artifacts);
+    if (!subE.ok) return buildResult(false, subE.failedStep, allSteps, allArtifacts);
+
+    allArtifacts.stepContract = { stepNames: [...STEP_NAMES] };
 
     return buildResult(true, undefined, allSteps, allArtifacts, subALlmTrace);
   },
