@@ -850,6 +850,7 @@ describe("chat-streaming", () => {
         didMutateMeal?: boolean;
         dailySummary?: unknown;
         loggedMeal?: {
+          receiptStatus?: string;
           mealId?: string;
           mealRevisionId?: string;
           dateKey?: string;
@@ -867,6 +868,7 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.didLogMeal, true);
       assert.equal(donePayload.didMutateMeal, true);
       assert.ok(donePayload.dailySummary);
+      assert.equal(donePayload.loggedMeal?.receiptStatus, "active");
       assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
       assert.match(donePayload.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
       assert.match(donePayload.loggedMeal?.dateKey ?? "", /^\d{4}-\d{2}-\d{2}$/);
@@ -890,6 +892,7 @@ describe("chat-streaming", () => {
           role: string;
           content: string;
           loggedMeal?: {
+            receiptStatus?: string;
             mealId?: string;
             mealRevisionId?: string;
             imageAssetId?: string | null;
@@ -899,6 +902,7 @@ describe("chat-streaming", () => {
       };
       assert.equal(historyJson.messages.at(-1)?.role, "assistant");
       assert.match(historyJson.messages.at(-1)?.content ?? "", /已記錄雞腿便當/);
+      assert.equal(historyJson.messages.at(-1)?.loggedMeal?.receiptStatus, "active");
       assert.equal(historyJson.messages.at(-1)?.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
       assert.equal(
         historyJson.messages.at(-1)?.loggedMeal?.mealRevisionId,
@@ -2513,10 +2517,6 @@ describe("chat-streaming", () => {
         createDeleteMealToolCall(mealId),
       ],
     });
-    mockLLM.queueChatStream([
-      "方式1 直接刪除這筆餐點\n",
-      "方式2 先不要刪除",
-    ]);
 
     const form = new FormData();
     form.append("message", "刪除雞腿便當");
@@ -2543,6 +2543,70 @@ describe("chat-streaming", () => {
     assert.equal(donePayload.didMutateMeal, true);
     assert.equal(donePayload.deletedMealId, mealId);
     assert.equal(donePayload.loggedMeal, undefined);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyJson = await historyRes.json() as {
+      messages: Array<{
+        role: string;
+        content?: string;
+        loggedMeal?: {
+          receiptStatus?: string;
+          mealId?: string;
+          mealRevisionId?: string;
+          dateKey?: string;
+          foodName?: string;
+          calories?: number;
+        };
+      }>;
+    };
+    const loggedReceiptMessage = historyJson.messages.find((message) =>
+      message.role === "assistant" && message.loggedMeal?.foodName === "雞腿便當"
+    );
+    assert.equal(loggedReceiptMessage?.loggedMeal?.receiptStatus, "deleted");
+    assert.equal(loggedReceiptMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(loggedReceiptMessage?.loggedMeal?.mealRevisionId, undefined);
+    assert.equal(loggedReceiptMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal(loggedReceiptMessage?.loggedMeal?.calories, 620);
+
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_summary_after_delete",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["今天還有雞腿便當", "，約 620 kcal。"]);
+
+    const summaryForm = new FormData();
+    summaryForm.append("message", "今天吃了什麼？");
+    const summaryRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: summaryForm,
+    });
+    assert.ok(summaryRes.body);
+    const summaryText = await readStreamUntil(summaryRes.body.getReader(), "event: done");
+    const summaryEvents = parseSSEEvents(summaryText);
+    const chunkText = summaryEvents
+      .filter((event) => event.event === "chunk")
+      .map((event) => JSON.parse(event.data) as { token: string })
+      .map((payload) => payload.token)
+      .join("");
+    const summaryDonePayload = JSON.parse(summaryEvents.find((event) => event.event === "done")!.data) as {
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      dailySummary?: { mealCount?: number; totalCalories?: number };
+    };
+    assert.equal(summaryDonePayload.didLogMeal, false);
+    assert.equal(summaryDonePayload.didMutateMeal, false);
+    assert.equal(summaryDonePayload.dailySummary?.mealCount, 0);
+    assert.equal(summaryDonePayload.dailySummary?.totalCalories, 0);
+    assert.doesNotMatch(chunkText, /雞腿便當|620 kcal/);
   });
 
   it("POST /api/chat JSON path replaces delete_meal choice prompt after mutation", async () => {

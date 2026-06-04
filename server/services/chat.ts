@@ -23,6 +23,7 @@ import {
 
 type ChatMessageStatus = "complete" | "stopped" | "error";
 type ChatMessageRole = "user" | "assistant" | "tool" | string;
+export type MealReceiptStatus = "active" | "deleted" | "stale_revision";
 
 interface SavedChatMessage {
   id: string;
@@ -45,6 +46,7 @@ interface SaveAssistantReplyWithReceiptInput {
 }
 
 interface LoggedMealReceipt {
+  receiptStatus: MealReceiptStatus;
   mealId?: string;
   dateKey?: string;
   mealRevisionId?: string;
@@ -91,6 +93,17 @@ function formatToolSummary(toolName: string, content: string): string | undefine
 }
 
 export function createChatService(db: AppDatabase) {
+  function deriveReceiptStatus(input: {
+    deletedAt: string | null;
+    mealRevisionId: string;
+    currentRevisionId: string;
+  }): MealReceiptStatus {
+    if (input.deletedAt !== null) {
+      return "deleted";
+    }
+    return input.mealRevisionId === input.currentRevisionId ? "active" : "stale_revision";
+  }
+
   function mutationOutcomeFactToRow(
     fact: ChatMutationOutcomeFact,
   ): Pick<
@@ -191,11 +204,45 @@ export function createChatService(db: AppDatabase) {
     });
   }
 
-  async function loadMutationOutcomeSummaries(deviceId: string, assistantMessageIds: string[]) {
+  async function loadReceiptStatuses(deviceId: string, assistantMessageIds: string[]) {
+    if (assistantMessageIds.length === 0) {
+      return new Map<string, MealReceiptStatus>();
+    }
+
+    const rows = await db
+      .select({
+        assistantMessageId: chatMealReceipts.assistantMessageId,
+        currentRevisionId: mealTransactions.currentRevisionId,
+        deletedAt: mealTransactions.deletedAt,
+        mealRevisionId: chatMealReceipts.mealRevisionId,
+      })
+      .from(chatMealReceipts)
+      .innerJoin(mealTransactions, eq(mealTransactions.id, chatMealReceipts.mealTransactionId))
+      .where(
+        and(
+          eq(chatMealReceipts.deviceId, deviceId),
+          eq(mealTransactions.deviceId, deviceId),
+          inArray(chatMealReceipts.assistantMessageId, assistantMessageIds),
+        ),
+      );
+
+    const statuses = new Map<string, MealReceiptStatus>();
+    for (const row of rows) {
+      statuses.set(row.assistantMessageId, deriveReceiptStatus(row));
+    }
+    return statuses;
+  }
+
+  async function loadMutationOutcomeSummaries(
+    deviceId: string,
+    assistantMessageIds: string[],
+    receiptStatuses?: Map<string, MealReceiptStatus>,
+  ) {
     if (assistantMessageIds.length === 0) {
       return new Map<string, string>();
     }
 
+    const statuses = receiptStatuses ?? await loadReceiptStatuses(deviceId, assistantMessageIds);
     const rows = await db
       .select()
       .from(chatMutationOutcomes)
@@ -209,6 +256,13 @@ export function createChatService(db: AppDatabase) {
     const summaries = new Map<string, string>();
     for (const row of rows) {
       const fact = mutationOutcomeRowToFact(row);
+      if (
+        fact &&
+        (fact.action === "log_food" || fact.action === "update_meal") &&
+        statuses.get(row.assistantMessageId) === "deleted"
+      ) {
+        continue;
+      }
       const summary = fact ? formatChatMutationOutcomeForCompressedHistory(fact) : undefined;
       if (summary) {
         summaries.set(row.assistantMessageId, summary);
@@ -268,12 +322,13 @@ export function createChatService(db: AppDatabase) {
       return undefined;
     }
 
-    const isCurrentActiveReceipt =
-      receipt.deletedAt === null && receipt.mealRevisionId === receipt.currentRevisionId;
+    const receiptStatus = deriveReceiptStatus(receipt);
+    const isCurrentActiveReceipt = receiptStatus === "active";
     const mealPeriod = normalizeMealPeriod(receipt.mealPeriod);
     const display = projectMealDisplay(items);
 
     return {
+      receiptStatus,
       ...(isCurrentActiveReceipt
         ? {
             mealId: receipt.mealTransactionId,
@@ -518,9 +573,12 @@ export function createChatService(db: AppDatabase) {
         )
         .orderBy(asc(sql`rowid`));
 
+      const assistantMessageIds = msgs.filter((msg) => msg.role === "assistant").map((msg) => msg.id);
+      const receiptStatuses = await loadReceiptStatuses(deviceId, assistantMessageIds);
       const mutationOutcomeSummaries = await loadMutationOutcomeSummaries(
         deviceId,
-        msgs.filter((msg) => msg.role === "assistant").map((msg) => msg.id),
+        assistantMessageIds,
+        receiptStatuses,
       );
 
       // Group into turns: each turn starts with a user message.
@@ -547,6 +605,10 @@ export function createChatService(db: AppDatabase) {
         } else if (msg.role === "user" && msg.imagePath) {
           current.push({ role: "user", content: `${msg.content}\n[附帶圖片]` });
         } else if (msg.role === "assistant") {
+          if (receiptStatuses.get(msg.id) === "deleted") {
+            pendingToolSummaries = [];
+            continue;
+          }
           // Merge pending tool summaries into the assistant message
           const assistantSummaries = [
             ...pendingToolSummaries,

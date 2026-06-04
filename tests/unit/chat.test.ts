@@ -84,6 +84,7 @@ describe("ChatService", () => {
     assert.match(assistant.loggedMeal.mealId ?? "", /^[0-9a-f-]{36}$/);
     assert.equal(assistant.loggedMeal.dateKey, formatLocalDate(new Date(assistant.loggedMeal.loggedAt ?? "")));
     assert.deepEqual(assistant.loggedMeal, {
+      receiptStatus: "active",
       mealId: assistant.loggedMeal.mealId,
       dateKey: assistant.loggedMeal.dateKey,
       mealRevisionId: loggedMeal.mealRevisionId,
@@ -294,6 +295,7 @@ describe("ChatService", () => {
     assert.equal(assistant?.didLogMeal, true);
     assert.ok(assistant?.loggedMeal);
     assert.deepEqual(assistant.loggedMeal, {
+      receiptStatus: "active",
       mealId: updatedMeal.id,
       dateKey: "2026-03-25",
       mealRevisionId: updatedMeal.mealRevisionId,
@@ -348,6 +350,7 @@ describe("ChatService", () => {
 
     assert.equal(assistant?.didLogMeal, true);
     assert.deepEqual(assistant?.loggedMeal, {
+      receiptStatus: "active",
       mealId: loggedMeal.id,
       dateKey: "2026-03-25",
       mealRevisionId: loggedMeal.mealRevisionId,

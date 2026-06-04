@@ -8,7 +8,7 @@ import {
   type SummaryHistoryFacts,
 } from "../orchestrator/summary-history-renderer.js";
 import { buildAssetUrl, makeAssetRef, parseAssetRef, type createAssetService } from "../services/assets.js";
-import type { createChatService } from "../services/chat.js";
+import type { createChatService, MealReceiptStatus } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import type { DailySummary } from "../services/summary.js";
@@ -498,6 +498,13 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     carbs,
     fat,
   } = loggedMeal;
+  const explicitReceiptStatus = (loggedMeal as unknown as { receiptStatus?: unknown }).receiptStatus;
+  const hasActiveIdentity =
+    typeof mealId === "string" &&
+    typeof dateKey === "string" &&
+    typeof mealRevisionId === "string";
+  const receiptStatus = normalizeReceiptStatus(explicitReceiptStatus)
+    ?? (hasActiveIdentity ? "active" : undefined);
   const mealPeriod = normalizeMealPeriod(loggedMeal.mealPeriod);
   const items = Array.isArray(loggedMeal.items)
     ? loggedMeal.items
@@ -528,15 +535,17 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     !Number.isFinite(calories) ||
     !Number.isFinite(protein) ||
     !Number.isFinite(carbs) ||
-    !Number.isFinite(fat)
+    !Number.isFinite(fat) ||
+    !receiptStatus
   ) {
     return undefined;
   }
 
   return {
-    ...(typeof mealId === "string" ? { mealId } : {}),
-    ...(typeof dateKey === "string" ? { dateKey } : {}),
-    ...(typeof mealRevisionId === "string" ? { mealRevisionId } : {}),
+    receiptStatus,
+    ...(receiptStatus === "active" && typeof mealId === "string" ? { mealId } : {}),
+    ...(receiptStatus === "active" && typeof dateKey === "string" ? { dateKey } : {}),
+    ...(receiptStatus === "active" && typeof mealRevisionId === "string" ? { mealRevisionId } : {}),
     ...(typeof loggedAt === "string" ? { loggedAt } : {}),
     ...(mealPeriod ? { mealPeriod } : {}),
     ...(typeof imageAssetId === "string" || imageAssetId === null ? { imageAssetId } : {}),
@@ -549,6 +558,12 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     fat,
     ...(items && items.length > 0 ? { items } : {}),
   };
+}
+
+function normalizeReceiptStatus(value: unknown): MealReceiptStatus | undefined {
+  return value === "active" || value === "deleted" || value === "stale_revision"
+    ? value
+    : undefined;
 }
 
 function buildReceiptIdentity(
