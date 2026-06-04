@@ -56,7 +56,8 @@ describe("Chat bubble source contract", () => {
     assert.match(receiptCard, /src=\{loggedMeal\.imageUrl\}/);
     assert.match(receiptCard, /alt=\{`\$\{loggedMeal\.foodName\} 整餐照片`\}/);
     assert.match(messageBubble, /buildReceiptMealEditPayload\(message\.loggedMeal\)/);
-    assert.match(receiptCard, /aria-label=\{canEdit \? `編輯 \$\{loggedMeal\.foodName\}` : undefined\}/);
+    assert.match(receiptCard, /canEdit\s*\?\s*`編輯 \$\{loggedMeal\.foodName\}`/);
+    assert.match(receiptCard, /isDeletedReceipt\s*\?\s*`\$\{loggedMeal\.foodName\}，已刪除，歷史餐點快照`/);
     assert.doesNotMatch(receiptCard, /<img/);
     assert.doesNotMatch(receiptCard, /backgroundImage/);
     assert.doesNotMatch(receiptCard, /dangerouslySetInnerHTML/);

@@ -2312,6 +2312,7 @@ describe("Chat API", () => {
     assert.equal(assistantMessage.loggedMeal.mealRevisionId, chatBody.loggedMeal.mealRevisionId);
     assert.match(assistantMessage.loggedMeal.loggedAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.deepEqual(assistantMessage.loggedMeal, {
+      receiptStatus: "active",
       mealId: assistantMessage.loggedMeal.mealId,
       dateKey: assistantMessage.loggedMeal.dateKey,
       mealRevisionId: chatBody.loggedMeal.mealRevisionId,

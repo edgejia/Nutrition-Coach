@@ -3,7 +3,8 @@
  *
  * Proves that an image-backed meal can be deleted through
  * `DELETE /api/meals/:id` without breaking the original chat-side image
- * evidence, and that the affected-day summary drops the deleted meal.
+ * evidence, that the affected-day summary drops the deleted meal, and that
+ * follow-up summary context does not resurrect deleted meal facts.
  */
 
 import path from "node:path";
@@ -11,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { mkdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
-import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { collectEventSequence, parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -52,6 +53,20 @@ interface ChatHistoryMessage {
   content: string;
   imageAssetId?: string | null;
   imageUrl?: string | null;
+  loggedMeal?: {
+    receiptStatus?: string;
+    mealId?: string;
+    mealRevisionId?: string;
+    dateKey?: string;
+    foodName?: string;
+    itemCount?: number;
+    calories?: number;
+    protein?: number;
+    carbs?: number;
+    fat?: number;
+    imageAssetId?: string | null;
+    imageUrl?: string | null;
+  };
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -59,6 +74,21 @@ const SCENARIO_ROOT = path.resolve(__dirname, "..", "tmp", "meal-delete-consiste
 const SCENARIO_UPLOADS_DIR = path.join(SCENARIO_ROOT, "uploads");
 const SCENARIO_ASSETS_DIR = path.join(SCENARIO_ROOT, "assets");
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const STEP_NAMES = [
+  "bootstrap",
+  "subscribe_summary",
+  "post_chat",
+  "collect_stream",
+  "verify_pre_delete_meal",
+  "verify_summary_after_log",
+  "delete_meal",
+  "verify_summary_after_delete",
+  "verify_meals_after_delete",
+  "verify_deleted_receipt_reload",
+  "verify_history_image",
+  "verify_asset_fetch",
+  "verify_post_delete_followup",
+] as const;
 
 function pass(name: string, actual?: unknown): ScenarioStepResult {
   return { name, ok: true, actual };
@@ -99,6 +129,63 @@ function parseDailySummaryFrame(data: string): DailySummary {
     return parsed.summary;
   }
   return parsed as DailySummary;
+}
+
+function summarizeSummary(summary: DailySummary | undefined) {
+  if (!summary) return undefined;
+  return {
+    dateShapeValid: DATE_KEY_PATTERN.test(summary.date),
+    mealCount: summary.mealCount,
+    totalCalories: summary.totalCalories,
+    totalProtein: summary.totalProtein,
+    totalCarbs: summary.totalCarbs,
+    totalFat: summary.totalFat,
+  };
+}
+
+function summarizeMeal(meal: MealDto) {
+  return {
+    hasId: typeof meal.id === "string" && meal.id.length > 0,
+    hasMealRevisionId: typeof meal.mealRevisionId === "string" && meal.mealRevisionId.length > 0,
+    foodName: meal.foodName,
+    calories: meal.calories,
+    protein: meal.protein,
+    carbs: meal.carbs,
+    fat: meal.fat,
+    hasImageAssetId: typeof meal.imageAssetId === "string" && meal.imageAssetId.length > 0,
+    hasImageUrl: typeof meal.imageUrl === "string" && meal.imageUrl.length > 0,
+  };
+}
+
+function summarizeDeletedReceipt(receipt: NonNullable<ChatHistoryMessage["loggedMeal"]> | undefined) {
+  if (!receipt) return undefined;
+  return {
+    receiptStatus: receipt.receiptStatus,
+    hasMealId: typeof receipt.mealId === "string",
+    hasMealRevisionId: typeof receipt.mealRevisionId === "string",
+    hasDateKey: typeof receipt.dateKey === "string",
+    foodName: receipt.foodName,
+    itemCount: receipt.itemCount,
+    calories: receipt.calories,
+    protein: receipt.protein,
+    carbs: receipt.carbs,
+    fat: receipt.fat,
+    imageAssetIdMatched: receipt.imageAssetId,
+    imageUrlMatched: receipt.imageUrl,
+  };
+}
+
+function chunkTextFromEvents(events: Array<{ event: string; data: string }>): string {
+  return events
+    .filter((event) => event.event === "chunk")
+    .map((event) => {
+      try {
+        return (JSON.parse(event.data) as { token?: string }).token ?? "";
+      } catch {
+        return "";
+      }
+    })
+    .join("");
 }
 
 async function waitForDailySummaryCount(
@@ -204,7 +291,10 @@ const scenario: VerificationScenario = {
       sseReader = sseRes.body.getReader();
       const initialSummaryState = await waitForDailySummaryCount(sseReader, sseCollectedText, 1);
       sseCollectedText = initialSummaryState.collectedText;
-      artifacts.summaryEvents = initialSummaryState.events;
+      artifacts.summaryEvents = {
+        eventSequence: initialSummaryState.events.map((event) => event.event),
+        dailySummaryEventCount: initialSummaryState.dailySummaryEvents.length,
+      };
       if (!initialSummaryState.summary) {
         steps.push(fail("subscribe_summary", "Did not receive initial daily_summary event", initialSummaryState.events));
         return failResult(scenarioName, steps, "subscribe_summary", artifacts);
@@ -217,7 +307,7 @@ const scenario: VerificationScenario = {
         ));
         return failResult(scenarioName, steps, "subscribe_summary", artifacts);
       }
-      steps.push(pass("subscribe_summary", initialSummaryState.summary));
+      steps.push(pass("subscribe_summary", summarizeSummary(initialSummaryState.summary)));
 
       const form = new FormData();
       form.append("message", "這是我剛剛吃的午餐");
@@ -254,7 +344,11 @@ const scenario: VerificationScenario = {
           }
         });
 
-      artifacts.stream = { streamEvents, statusLabels };
+      artifacts.stream = {
+        eventSequence: collectEventSequence(streamText),
+        statusLabels,
+        doneEventCount: doneEvent ? 1 : 0,
+      };
       if (!doneEvent) {
         steps.push(fail("collect_stream", "Stream ended without event: done", streamEvents));
         return failResult(scenarioName, steps, "collect_stream", artifacts);
@@ -280,7 +374,13 @@ const scenario: VerificationScenario = {
         ));
         return failResult(scenarioName, steps, "collect_stream", artifacts);
       }
-      steps.push(pass("collect_stream", { statusLabels, donePayload }));
+      steps.push(pass("collect_stream", {
+        statusLabels,
+        donePayload: {
+          didLogMeal: donePayload.didLogMeal,
+          summary: summarizeSummary(donePayload.dailySummary),
+        },
+      }));
 
       const preDeleteMealsRes = await fetch(`${fixture.address}/api/meals`, {
         headers: { cookie: fixture.cookieHeader },
@@ -290,7 +390,10 @@ const scenario: VerificationScenario = {
         return failResult(scenarioName, steps, "verify_pre_delete_meal", artifacts);
       }
       const preDeleteMeals = (await preDeleteMealsRes.json() as { meals: MealDto[] }).meals;
-      artifacts.preDeleteMeals = preDeleteMeals;
+      artifacts.preDeleteMeals = {
+        mealCount: preDeleteMeals.length,
+        meals: preDeleteMeals.map(summarizeMeal),
+      };
       if (preDeleteMeals.length !== 1) {
         steps.push(fail("verify_pre_delete_meal", `Expected 1 meal before delete, got ${preDeleteMeals.length}`, preDeleteMeals));
         return failResult(scenarioName, steps, "verify_pre_delete_meal", artifacts);
@@ -300,11 +403,14 @@ const scenario: VerificationScenario = {
         steps.push(fail("verify_pre_delete_meal", "Expected image metadata on the pre-delete meal", deletedMeal));
         return failResult(scenarioName, steps, "verify_pre_delete_meal", artifacts);
       }
-      steps.push(pass("verify_pre_delete_meal", deletedMeal));
+      steps.push(pass("verify_pre_delete_meal", summarizeMeal(deletedMeal)));
 
       const postLogSummaryState = await waitForDailySummaryCount(sseReader, sseCollectedText, 2);
       sseCollectedText = postLogSummaryState.collectedText;
-      artifacts.summaryEvents = postLogSummaryState.events;
+      artifacts.summaryEvents = {
+        eventSequence: postLogSummaryState.events.map((event) => event.event),
+        dailySummaryEventCount: postLogSummaryState.dailySummaryEvents.length,
+      };
       if (!postLogSummaryState.summary) {
         steps.push(fail("verify_summary_after_log", "Did not receive the post-log daily_summary event", postLogSummaryState.events));
         return failResult(scenarioName, steps, "verify_summary_after_log", artifacts);
@@ -325,7 +431,7 @@ const scenario: VerificationScenario = {
         ));
         return failResult(scenarioName, steps, "verify_summary_after_log", artifacts);
       }
-      steps.push(pass("verify_summary_after_log", postLogSummaryState.summary));
+      steps.push(pass("verify_summary_after_log", summarizeSummary(postLogSummaryState.summary)));
 
       // DELETE /api/meals/:id is the transaction-level soft delete contract under test.
       const deleteRes = await fetch(`${fixture.address}/api/meals/${deletedMeal.id}`, {
@@ -337,7 +443,17 @@ const scenario: VerificationScenario = {
         affectedDate?: string;
         dailySummary?: { date?: string; mealCount?: number };
       };
-      artifacts.deleteResponse = { status: deleteRes.status, mealId: deletedMeal.id, body: deleteBody };
+      artifacts.deleteResponse = {
+        status: deleteRes.status,
+        mealIdMatched: typeof deletedMeal.id === "string" && deleteBody.affectedDate === postLogSummaryState.summary.date,
+        affectedDateShapeValid: typeof deleteBody.affectedDate === "string" && DATE_KEY_PATTERN.test(deleteBody.affectedDate),
+        summary: deleteBody.dailySummary
+          ? {
+              dateMatchesAffectedDate: deleteBody.dailySummary.date === deleteBody.affectedDate,
+              mealCount: deleteBody.dailySummary.mealCount,
+            }
+          : undefined,
+      };
       if (deleteRes.status !== 200) {
         steps.push(fail("delete_meal", `Expected 200 from DELETE /api/meals/:id, got ${deleteRes.status}`));
         return failResult(scenarioName, steps, "delete_meal", artifacts);
@@ -358,12 +474,15 @@ const scenario: VerificationScenario = {
         ));
         return failResult(scenarioName, steps, "delete_meal", artifacts);
       }
-      steps.push(pass("delete_meal", { mealId: deletedMeal.id, status: deleteRes.status, body: deleteBody }));
+      steps.push(pass("delete_meal", artifacts.deleteResponse));
 
       const postDeleteSummaryState = await waitForDailySummaryCount(sseReader, sseCollectedText, 3);
       sseCollectedText = postDeleteSummaryState.collectedText;
-      artifacts.summaryEvents = postDeleteSummaryState.events;
-      artifacts.summaryAfterDelete = postDeleteSummaryState.summary;
+      artifacts.summaryEvents = {
+        eventSequence: postDeleteSummaryState.events.map((event) => event.event),
+        dailySummaryEventCount: postDeleteSummaryState.dailySummaryEvents.length,
+      };
+      artifacts.summaryAfterDelete = summarizeSummary(postDeleteSummaryState.summary);
       if (!postDeleteSummaryState.summary) {
         steps.push(fail("verify_summary_after_delete", "Did not receive the post-delete daily_summary event", postDeleteSummaryState.events));
         return failResult(scenarioName, steps, "verify_summary_after_delete", artifacts);
@@ -384,7 +503,7 @@ const scenario: VerificationScenario = {
         ));
         return failResult(scenarioName, steps, "verify_summary_after_delete", artifacts);
       }
-      steps.push(pass("verify_summary_after_delete", postDeleteSummaryState.summary));
+      steps.push(pass("verify_summary_after_delete", summarizeSummary(postDeleteSummaryState.summary)));
 
       const postDeleteMealsRes = await fetch(`${fixture.address}/api/meals`, {
         headers: { cookie: fixture.cookieHeader },
@@ -394,12 +513,15 @@ const scenario: VerificationScenario = {
         return failResult(scenarioName, steps, "verify_meals_after_delete", artifacts);
       }
       const postDeleteMeals = (await postDeleteMealsRes.json() as { meals: MealDto[] }).meals;
-      artifacts.postDeleteMeals = postDeleteMeals;
+      artifacts.postDeleteMeals = {
+        mealCount: postDeleteMeals.length,
+        containsDeletedMeal: postDeleteMeals.some((meal) => meal.id === deletedMeal.id),
+      };
       if (postDeleteMeals.some((meal) => meal.id === deletedMeal.id)) {
         steps.push(fail("verify_meals_after_delete", "Deleted meal still appears in /api/meals", postDeleteMeals));
         return failResult(scenarioName, steps, "verify_meals_after_delete", artifacts);
       }
-      steps.push(pass("verify_meals_after_delete", { mealCount: postDeleteMeals.length, meals: postDeleteMeals }));
+      steps.push(pass("verify_meals_after_delete", artifacts.postDeleteMeals));
 
       const historyRes = await fetch(`${fixture.address}/api/chat/history?limit=10`, {
         headers: { cookie: fixture.cookieHeader },
@@ -412,7 +534,43 @@ const scenario: VerificationScenario = {
       const userImageMessage = historyMessages.find(
         (message) => message.role === "user" && message.imageAssetId,
       );
-      artifacts.historyAfterDelete = historyMessages;
+      const deletedReceiptMessage = historyMessages.find((message) =>
+        message.role === "assistant" && message.loggedMeal?.foodName === deletedMeal.foodName
+      );
+      const deletedReceipt = deletedReceiptMessage?.loggedMeal;
+      artifacts.historyAfterDelete = {
+        messageCount: historyMessages.length,
+        userImageMessageFound: Boolean(userImageMessage),
+        deletedReceipt: summarizeDeletedReceipt(deletedReceipt),
+      };
+      if (!deletedReceipt) {
+        steps.push(fail("verify_deleted_receipt_reload", "Expected deleted assistant receipt after history reload", artifacts.historyAfterDelete));
+        return failResult(scenarioName, steps, "verify_deleted_receipt_reload", artifacts);
+      }
+      if (deletedReceipt.receiptStatus !== "deleted") {
+        steps.push(fail("verify_deleted_receipt_reload", `Expected receiptStatus deleted, got ${String(deletedReceipt.receiptStatus)}`, artifacts.historyAfterDelete));
+        return failResult(scenarioName, steps, "verify_deleted_receipt_reload", artifacts);
+      }
+      if (deletedReceipt.mealId !== undefined || deletedReceipt.mealRevisionId !== undefined || deletedReceipt.dateKey !== undefined) {
+        steps.push(fail("verify_deleted_receipt_reload", "Expected deleted receipt to omit edit identity", artifacts.historyAfterDelete));
+        return failResult(scenarioName, steps, "verify_deleted_receipt_reload", artifacts);
+      }
+      if (
+        deletedReceipt.foodName !== deletedMeal.foodName ||
+        deletedReceipt.calories !== deletedMeal.calories ||
+        deletedReceipt.protein !== deletedMeal.protein ||
+        deletedReceipt.carbs !== deletedMeal.carbs ||
+        deletedReceipt.fat !== deletedMeal.fat ||
+        deletedReceipt.itemCount !== 1
+      ) {
+        steps.push(fail("verify_deleted_receipt_reload", "Expected deleted receipt to preserve historical nutrition evidence", artifacts.historyAfterDelete));
+        return failResult(scenarioName, steps, "verify_deleted_receipt_reload", artifacts);
+      }
+      if (deletedReceipt.imageAssetId !== deletedMeal.imageAssetId || deletedReceipt.imageUrl !== deletedMeal.imageUrl) {
+        steps.push(fail("verify_deleted_receipt_reload", "Expected deleted receipt to preserve image evidence", artifacts.historyAfterDelete));
+        return failResult(scenarioName, steps, "verify_deleted_receipt_reload", artifacts);
+      }
+      steps.push(pass("verify_deleted_receipt_reload", artifacts.historyAfterDelete));
       if (!userImageMessage) {
         steps.push(fail("verify_history_image", "Expected a user chat message with image evidence after delete", historyMessages));
         return failResult(scenarioName, steps, "verify_history_image", artifacts);
@@ -433,7 +591,10 @@ const scenario: VerificationScenario = {
         ));
         return failResult(scenarioName, steps, "verify_history_image", artifacts);
       }
-      steps.push(pass("verify_history_image", userImageMessage));
+      steps.push(pass("verify_history_image", {
+        imageAssetIdMatched: userImageMessage.imageAssetId === deletedMeal.imageAssetId,
+        imageUrlMatched: userImageMessage.imageUrl === deletedMeal.imageUrl,
+      }));
 
       if (!userImageMessage.imageUrl?.startsWith("/api/assets/")) {
         steps.push(fail(
@@ -456,6 +617,117 @@ const scenario: VerificationScenario = {
         return failResult(scenarioName, steps, "verify_asset_fetch", artifacts);
       }
       steps.push(pass("verify_asset_fetch", artifacts.assetFetch));
+
+      provider.queueRoundResponse({
+        toolCalls: [{
+          id: "call_summary_after_delete",
+          type: "function",
+          function: {
+            name: "get_daily_summary",
+            arguments: "{}",
+          },
+        }],
+      });
+      provider.queueChatStream(["目前今天沒有已記錄餐點。"]);
+
+      const followupForm = new FormData();
+      followupForm.append("message", "今天吃了什麼？");
+      const followupRes = await fetch(`${fixture.address}/api/chat`, {
+        method: "POST",
+        headers: {
+          cookie: fixture.cookieHeader,
+          Accept: "text/event-stream",
+        },
+        body: followupForm,
+      });
+      if (followupRes.status !== 200 || !followupRes.body) {
+        steps.push(fail("verify_post_delete_followup", `Expected 200 with body, got ${followupRes.status}`, { status: followupRes.status }));
+        return failResult(scenarioName, steps, "verify_post_delete_followup", artifacts);
+      }
+      const followupText = await readStreamUntilEvent(followupRes.body.getReader(), "done", 60);
+      const followupEvents = parseSSEEvents(followupText);
+      const followupChunkText = chunkTextFromEvents(followupEvents);
+      const followupDoneEvent = followupEvents.find((event) => event.event === "done");
+      const followupDonePayload = followupDoneEvent
+        ? JSON.parse(followupDoneEvent.data) as {
+            didLogMeal?: boolean;
+            didMutateMeal?: boolean;
+            dailySummary?: DailySummary;
+            loggedMeal?: unknown;
+          }
+        : undefined;
+      const currentSummary = await fixture.services.summaryService.getDailySummary(fixture.deviceId, new Date());
+      const deletedFactPattern = new RegExp(`${deletedMeal.foodName}|${deletedMeal.calories}\\s*kcal|${deletedMeal.calories}|${deletedMeal.protein}\\s*g|${deletedMeal.carbs}\\s*g|${deletedMeal.fat}\\s*g`);
+      const latestProviderCall = provider.chatCalls.at(-1);
+      const nonSystemContextMessages = latestProviderCall?.messages.filter((message) => message.role !== "system") ?? [];
+      const compressedContextText = JSON.stringify(nonSystemContextMessages);
+      artifacts.postDeleteFollowup = {
+        eventSequence: collectEventSequence(followupText),
+        chunkTextLength: followupChunkText.length,
+        chunkMentionsDeletedFacts: deletedFactPattern.test(followupChunkText),
+        compressedContextMentionsDeletedFacts: deletedFactPattern.test(compressedContextText),
+        donePayload: {
+          didLogMeal: followupDonePayload?.didLogMeal,
+          didMutateMeal: followupDonePayload?.didMutateMeal,
+          hasLoggedMeal: followupDonePayload
+            ? Object.prototype.hasOwnProperty.call(followupDonePayload, "loggedMeal")
+            : false,
+          summary: summarizeSummary(followupDonePayload?.dailySummary),
+        },
+        currentSummary: summarizeSummary(currentSummary),
+      };
+      if (!followupDonePayload) {
+        steps.push(fail("verify_post_delete_followup", "Expected follow-up done payload", artifacts.postDeleteFollowup));
+        return failResult(scenarioName, steps, "verify_post_delete_followup", artifacts);
+      }
+      if (deletedFactPattern.test(followupChunkText)) {
+        steps.push(fail("verify_post_delete_followup", "Follow-up assistant response mentioned deleted meal facts", artifacts.postDeleteFollowup));
+        return failResult(scenarioName, steps, "verify_post_delete_followup", artifacts);
+      }
+      if (deletedFactPattern.test(compressedContextText)) {
+        steps.push(fail("verify_post_delete_followup", "Compressed provider context mentioned deleted meal facts", artifacts.postDeleteFollowup));
+        return failResult(scenarioName, steps, "verify_post_delete_followup", artifacts);
+      }
+      if (followupDonePayload.didLogMeal !== false || followupDonePayload.didMutateMeal !== false) {
+        steps.push(fail("verify_post_delete_followup", "Expected non-mutating follow-up done payload", artifacts.postDeleteFollowup));
+        return failResult(scenarioName, steps, "verify_post_delete_followup", artifacts);
+      }
+      if (
+        followupDonePayload.dailySummary !== undefined &&
+        (
+          followupDonePayload.dailySummary.mealCount !== 0 ||
+          followupDonePayload.dailySummary.totalCalories !== 0 ||
+          followupDonePayload.dailySummary.totalProtein !== 0 ||
+          followupDonePayload.dailySummary.totalCarbs !== 0 ||
+          followupDonePayload.dailySummary.totalFat !== 0
+        )
+      ) {
+        steps.push(fail("verify_post_delete_followup", "Expected follow-up done summary, when present, to exclude deleted meal nutrition", artifacts.postDeleteFollowup));
+        return failResult(scenarioName, steps, "verify_post_delete_followup", artifacts);
+      }
+      if (
+        currentSummary.mealCount !== 0 ||
+        currentSummary.totalCalories !== 0 ||
+        currentSummary.totalProtein !== 0 ||
+        currentSummary.totalCarbs !== 0 ||
+        currentSummary.totalFat !== 0
+      ) {
+        steps.push(fail("verify_post_delete_followup", "Expected current summary totals to exclude deleted meal nutrition", artifacts.postDeleteFollowup));
+        return failResult(scenarioName, steps, "verify_post_delete_followup", artifacts);
+      }
+      steps.push(pass("verify_post_delete_followup", artifacts.postDeleteFollowup));
+
+      const missingStepNames = STEP_NAMES.filter((name) => !steps.some((step) => step.name === name));
+      artifacts.artifactContract = {
+        stepNames: [...STEP_NAMES],
+        missingStepNames,
+        metadataOnly: true,
+      };
+      if (missingStepNames.length > 0) {
+        steps.push(fail("verify_artifact_contract", `Missing step names: ${missingStepNames.join(", ")}`, artifacts.artifactContract));
+        return failResult(scenarioName, steps, "verify_artifact_contract", artifacts);
+      }
+      steps.push(pass("verify_artifact_contract", artifacts.artifactContract));
 
       return {
         ok: true,
