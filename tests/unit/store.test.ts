@@ -401,6 +401,26 @@ describe("AppStore", () => {
         },
       },
       {
+        id: "assistant-1-stale",
+        role: "assistant",
+        content: "舊版雞腿便當。",
+        createdAt: "2026-04-30T04:05:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          receiptMealId: "meal-1",
+          receiptStatus: "stale_revision",
+          loggedAt: "2026-04-30T04:00:00.000Z",
+          foodName: "舊版雞腿便當",
+          calories: 700,
+          protein: 32,
+          carbs: 84,
+          fat: 22,
+          itemCount: 1,
+          imageAssetId: "asset-lunch-old",
+          imageUrl: "/api/assets/asset-lunch-old",
+        },
+      },
+      {
         id: "assistant-2",
         role: "assistant",
         content: "已幫你記錄鮭魚飯糰。",
@@ -426,10 +446,11 @@ describe("AppStore", () => {
 
     useStore.getState().redactChatReceiptIdentity("meal-1");
 
-    const [redactedMessage, untouchedMessage] = useStore.getState().messages;
+    const [redactedMessage, redactedStaleMessage, untouchedMessage] = useStore.getState().messages;
     assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
     assert.equal(redactedMessage?.loggedMeal?.mealRevisionId, undefined);
     assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.receiptMealId, "meal-1");
     assert.equal((redactedMessage?.loggedMeal as any)?.receiptStatus, "deleted");
     assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
     assert.equal(redactedMessage?.loggedMeal?.calories, 640);
@@ -440,7 +461,19 @@ describe("AppStore", () => {
     assert.equal(redactedMessage?.loggedMeal?.imageAssetId, "asset-lunch");
     assert.equal(redactedMessage?.loggedMeal?.imageUrl, "/api/assets/asset-lunch");
     assert.equal(buildReceiptMealEditPayload(redactedMessage?.loggedMeal), null);
+
+    assert.equal(redactedStaleMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(redactedStaleMessage?.loggedMeal?.mealRevisionId, undefined);
+    assert.equal(redactedStaleMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal(redactedStaleMessage?.loggedMeal?.receiptMealId, "meal-1");
+    assert.equal((redactedStaleMessage?.loggedMeal as any)?.receiptStatus, "deleted");
+    assert.equal(redactedStaleMessage?.loggedMeal?.foodName, "舊版雞腿便當");
+    assert.equal(redactedStaleMessage?.loggedMeal?.calories, 700);
+    assert.equal(redactedStaleMessage?.loggedMeal?.imageAssetId, "asset-lunch-old");
+    assert.equal(buildReceiptMealEditPayload(redactedStaleMessage?.loggedMeal), null);
+
     assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-2");
+    assert.equal(untouchedMessage?.loggedMeal?.receiptMealId, undefined);
     assert.equal(untouchedMessage?.loggedMeal?.mealRevisionId, "meal-2:r1");
     assert.equal((untouchedMessage?.loggedMeal as any)?.receiptStatus, "active");
     assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-2");

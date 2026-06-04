@@ -49,7 +49,8 @@ type CommitProvisionalBubbleExtra = {
 
 function redactReceiptIdentityFromMessages(messages: Message[], mealId: string): Message[] {
   return messages.map((message) => {
-    if (message.loggedMeal?.mealId !== mealId) {
+    const receiptMealId = message.loggedMeal?.receiptMealId ?? message.loggedMeal?.mealId;
+    if (receiptMealId !== mealId) {
       return message;
     }
 
@@ -57,12 +58,14 @@ function redactReceiptIdentityFromMessages(messages: Message[], mealId: string):
       mealId: _mealId,
       mealRevisionId: _mealRevisionId,
       dateKey: _dateKey,
+      receiptMealId: _receiptMealId,
       ...displayOnlyReceipt
     } = message.loggedMeal;
     return {
       ...message,
       loggedMeal: {
         ...displayOnlyReceipt,
+        receiptMealId: mealId,
         receiptStatus: "deleted",
       },
     };

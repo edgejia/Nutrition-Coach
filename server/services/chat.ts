@@ -47,6 +47,7 @@ interface SaveAssistantReplyWithReceiptInput {
 
 interface LoggedMealReceipt {
   receiptStatus: MealReceiptStatus;
+  receiptMealId?: string;
   mealId?: string;
   dateKey?: string;
   mealRevisionId?: string;
@@ -329,6 +330,7 @@ export function createChatService(db: AppDatabase) {
 
     return {
       receiptStatus,
+      ...(!isCurrentActiveReceipt ? { receiptMealId: receipt.mealTransactionId } : {}),
       ...(isCurrentActiveReceipt
         ? {
             mealId: receipt.mealTransactionId,

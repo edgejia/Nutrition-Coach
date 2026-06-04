@@ -166,6 +166,7 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
   ) {
     return (
       (value.mealId === undefined || typeof value.mealId === "string") &&
+      (value.receiptMealId === undefined || typeof value.receiptMealId === "string") &&
       (value.mealRevisionId === undefined || typeof value.mealRevisionId === "string") &&
       (value.dateKey === undefined || typeof value.dateKey === "string") &&
       (value.loggedAt === undefined || typeof value.loggedAt === "string") &&
@@ -401,6 +402,7 @@ export function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMe
   const {
     mealPeriod: rawMealPeriod,
     receiptStatus: rawReceiptStatus,
+    receiptMealId: rawReceiptMealId,
     items: _items,
     imageUrl: rawImageUrl,
     ...rest
@@ -416,6 +418,7 @@ export function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMe
 
   return {
     ...rest,
+    ...(typeof rawReceiptMealId === "string" ? { receiptMealId: rawReceiptMealId } : {}),
     itemCount: normalizeItemCount(receipt.itemCount),
     ...(items ? { items } : {}),
     ...(mealPeriod ? { mealPeriod } : {}),

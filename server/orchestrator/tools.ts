@@ -136,6 +136,7 @@ export interface ToolExecutionResult {
   mealMutationKind?: "log" | "update" | "delete";
   deletedMeal?: DeletedMealSnapshot;
   loggedMeal?: {
+    receiptMealId?: string;
     mealId: string;
     mealRevisionId: string;
     dateKey: string;

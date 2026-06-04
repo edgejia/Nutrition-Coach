@@ -86,6 +86,7 @@ export interface LoggedMealReceipt {
   fat: number;
   itemCount: number;
   items?: MealItemDetail[];
+  receiptMealId?: string;
   mealId?: string;
   mealRevisionId?: string;
   dateKey?: string;

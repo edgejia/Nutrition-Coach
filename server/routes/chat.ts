@@ -498,6 +498,9 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
     carbs,
     fat,
   } = loggedMeal;
+  const receiptMealId = typeof loggedMeal.receiptMealId === "string"
+    ? loggedMeal.receiptMealId
+    : undefined;
   const explicitReceiptStatus = (loggedMeal as unknown as { receiptStatus?: unknown }).receiptStatus;
   const hasActiveIdentity =
     typeof mealId === "string" &&
@@ -543,6 +546,7 @@ function projectLoggedMealReceipt(loggedMeal: LoggedMealReceipt | undefined) {
 
   return {
     receiptStatus,
+    ...(typeof receiptMealId === "string" ? { receiptMealId } : {}),
     ...(receiptStatus === "active" && typeof mealId === "string" ? { mealId } : {}),
     ...(receiptStatus === "active" && typeof dateKey === "string" ? { dateKey } : {}),
     ...(receiptStatus === "active" && typeof mealRevisionId === "string" ? { mealRevisionId } : {}),
