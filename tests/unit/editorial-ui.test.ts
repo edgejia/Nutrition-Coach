@@ -166,6 +166,28 @@ describe("Editorial UI", () => {
     assert.doesNotMatch(chatPanelSource, /上一筆草稿送出失敗。|取消草稿/);
   });
 
+  it("CHAT-02 D-10..D-15 failed banner cancel uses named local cleanup instead of direct draft clearing", async () => {
+    const chatPanelSource = await readFile(
+      fileURLToPath(new URL("../../client/src/components/ChatPanel.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    assert.match(chatPanelSource, /上一筆任務送出失敗。/);
+    assert.match(chatPanelSource, /重試送出/);
+    assert.match(chatPanelSource, /取消送出/);
+    assert.match(
+      chatPanelSource,
+      /function cancelFailedPendingDraft\(draft: PendingHomeChatDraft\)/,
+      "D-10/D-12 cancel must use a named local cleanup handler that can remove only the draft-linked artifact",
+    );
+    assert.match(chatPanelSource, /onClick=\{\(\) => cancelFailedPendingDraft\(pendingHomeChatDraft\)\}/);
+    assert.doesNotMatch(
+      chatPanelSource,
+      /onClick=\{clearPendingHomeChatDraft\}/,
+      "D-13/D-14 cancel must not be a generic draft clear or active-stream abort path",
+    );
+  });
+
   it("prefers persisted imageUrl when restoring image-only user chat messages", () => {
     const presentation = getUserMessagePresentation({
       id: "msg-image",

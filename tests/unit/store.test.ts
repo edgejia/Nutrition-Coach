@@ -572,6 +572,96 @@ describe("AppStore", () => {
     useStore.getState().clearPendingHomeChatDraft();
     assert.equal(useStore.getState().pendingHomeChatDraft, null);
   });
+
+  it("CHAT-01 D-01..D-09 removes only the explicit draft-linked failed assistant message", () => {
+    useStore.getState().setMessages([
+      {
+        id: "artifact-draft-failed",
+        role: "assistant",
+        content: "抱歉，發生錯誤，請再試一次。",
+        createdAt: "2026-06-05T04:00:00.000Z",
+        status: "error",
+      },
+      {
+        id: "artifact-unrelated-error",
+        role: "assistant",
+        content: "另一筆較新的錯誤也要保留",
+        createdAt: "2026-06-05T04:01:00.000Z",
+        status: "error",
+      },
+      {
+        id: "user-draft",
+        role: "user",
+        content: "午餐吃了飯糰",
+        createdAt: "2026-06-05T04:00:00.000Z",
+      },
+    ]);
+
+    useStore.getState().clearDraftLinkedAssistantArtifact("artifact-draft-failed");
+
+    assert.deepEqual(
+      useStore.getState().messages.map((message) => message.id),
+      ["artifact-unrelated-error", "user-draft"],
+      "D-03/D-07/D-08 cleanup must key by explicit artifact id and preserve unrelated assistant errors plus user bubbles",
+    );
+  });
+
+  it("CHAT-02 D-10..D-15 clears only the matching draft-linked provisional artifact", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-history",
+        role: "assistant",
+        content: "歷史回覆保留",
+        createdAt: "2026-06-05T04:00:00.000Z",
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "artifact-provisional",
+      statusLabel: "",
+      content: "送出失敗",
+      isStreaming: false,
+      status: "error",
+    });
+
+    useStore.getState().clearDraftLinkedAssistantArtifact("artifact-provisional");
+
+    assert.equal(useStore.getState().provisionalBubble, null, "D-10 clears the linked provisional artifact");
+    assert.deepEqual(
+      useStore.getState().messages.map((message) => message.id),
+      ["assistant-history"],
+      "D-11/D-12 cancel cleanup must not delete durable messages",
+    );
+  });
+
+  it("CHAT-01/CHAT-02 D-07 and D-08 leave state unchanged for an unknown artifact id", () => {
+    const messages = [
+      {
+        id: "assistant-failed",
+        role: "assistant" as const,
+        content: "失敗訊息保留",
+        createdAt: "2026-06-05T04:00:00.000Z",
+        status: "error" as const,
+      },
+      {
+        id: "user-message",
+        role: "user" as const,
+        content: "午餐吃了飯糰",
+        createdAt: "2026-06-05T04:00:00.000Z",
+      },
+    ];
+    useStore.getState().setMessages(messages);
+    useStore.getState().setProvisionalBubble({
+      id: "artifact-live",
+      statusLabel: "思考中...",
+      content: "",
+      isStreaming: true,
+    });
+
+    useStore.getState().clearDraftLinkedAssistantArtifact("missing-artifact");
+
+    assert.deepEqual(useStore.getState().messages, messages);
+    assert.equal(useStore.getState().provisionalBubble?.id, "artifact-live");
+  });
 });
 
 describe("ProvisionalBubble actions", () => {

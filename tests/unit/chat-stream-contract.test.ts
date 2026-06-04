@@ -439,4 +439,31 @@ describe("chat stream contract", () => {
     assert.match(chatPanel, /\.\.\.\(isFallbackReply && fallbackTurnId \? \{ turnId: fallbackTurnId \} : \{\}\)/);
     assert.match(chatPanel, /\.\.\.\(turnId \? \{ turnId \} : \{\}\)/);
   });
+
+  it("CHAT-01 D-01..D-09 retries remove draft-linked artifacts before a new provisional bubble", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const sendPendingDraftStart = chatPanel.indexOf("async function sendPendingDraft(draft: PendingHomeChatDraft)");
+    const nextEffectStart = chatPanel.indexOf("useEffect(() =>", sendPendingDraftStart);
+    const sendPendingDraftSource = chatPanel.slice(sendPendingDraftStart, nextEffectStart);
+
+    const failedArtifactReadIndex = sendPendingDraftSource.indexOf("draft.failedAssistantArtifactId");
+    const cleanupIndex = sendPendingDraftSource.indexOf(
+      "clearDraftLinkedAssistantArtifact(draft.failedAssistantArtifactId)",
+    );
+    const sendingIndex = sendPendingDraftSource.indexOf('setPendingHomeChatDraft({ ...draft, status: "sending"');
+    const handleSendIndex = sendPendingDraftSource.indexOf("await handleSend(");
+
+    assert.notEqual(sendPendingDraftStart, -1, "sendPendingDraft source contract should locate the retry handler");
+    assert.notEqual(failedArtifactReadIndex, -1, "D-07 retry must read explicit failedAssistantArtifactId");
+    assert.notEqual(cleanupIndex, -1, "D-01/D-04 retry must call clearDraftLinkedAssistantArtifact with the draft id");
+    assert.ok(
+      cleanupIndex < sendingIndex,
+      "D-04 cleanup must happen before the draft is marked sending",
+    );
+    assert.ok(
+      cleanupIndex < handleSendIndex,
+      "D-05 cleanup must happen before handleSend creates a new provisional bubble",
+    );
+    assert.match(sendPendingDraftSource, /appendUserBubble:\s*draft\.status !== "failed"/);
+  });
 });
