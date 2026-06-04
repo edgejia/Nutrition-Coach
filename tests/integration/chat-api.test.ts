@@ -111,6 +111,7 @@ function assertMealMutationSummaryEnvelope(payload: unknown, affectedDate: strin
 }
 
 const TERMINAL_CLARIFICATION_SUCCESS_COPY = /已記錄|完成記錄|已更新|已刪除|成功/;
+const FAILED_RECOGNITION_NO_SAVE_REPLY = "我沒有把這張照片存成餐點紀錄。請先補充餐點內容和份量，我再幫你估算。";
 
 function assertNoTerminalClarificationSideEffects(body: {
   reply?: string;
@@ -1136,6 +1137,102 @@ describe("Chat API", () => {
       assert.equal(references[0]!.ownerId, chatMessage?.id);
     } finally {
       sqlite.close();
+    }
+  });
+
+  it("POST /api/chat JSON keeps accepted failed-image recognition as no-save for small and large bodies", async () => {
+    assert.ok(services, "expected app services");
+
+    const beforeMealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(beforeMealsRes.status, 200);
+    const beforeMealsBody = await beforeMealsRes.json() as {
+      meals: Array<{ calories?: number; protein?: number; carbs?: number; fat?: number }>;
+    };
+    const beforeSummary = await services.summaryService.getDailySummary(deviceId, new Date());
+    const beforeChatCalls = mockLLM.chatCalls.length;
+
+    const acceptedFailedImages = [
+      {
+        name: "small",
+        bytes: new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]),
+        filename: "failed-small.png",
+      },
+      {
+        name: "large",
+        bytes: new Uint8Array(1024 * 1024).fill(0x41),
+        filename: "failed-large.png",
+      },
+    ];
+
+    for (const [index, imageCase] of acceptedFailedImages.entries()) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `failed_recognition_no_save_${imageCase.name}`,
+          type: "function",
+          function: {
+            name: "log_food",
+            arguments: JSON.stringify({
+              food_name: "無法辨識內容",
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            }),
+          },
+        }],
+      });
+
+      const form = new FormData();
+      form.append("message", "");
+      form.append("image", new Blob([imageCase.bytes], { type: "image/png" }), imageCase.filename);
+
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200, imageCase.name);
+      const body = await res.json() as {
+        reply?: string;
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        loggedMeal?: unknown;
+        dailySummary?: unknown;
+        summaryOutcome?: unknown;
+        deletedMealId?: unknown;
+      };
+      assert.equal(body.reply, FAILED_RECOGNITION_NO_SAVE_REPLY, imageCase.name);
+      assert.equal(body.didLogMeal, false, imageCase.name);
+      assert.equal(body.didMutateMeal, false, imageCase.name);
+      assert.equal(Object.prototype.hasOwnProperty.call(body, "loggedMeal"), false, imageCase.name);
+      assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false, imageCase.name);
+      assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false, imageCase.name);
+      assert.equal(Object.prototype.hasOwnProperty.call(body, "deletedMealId"), false, imageCase.name);
+      assert.doesNotMatch(body.reply ?? "", TERMINAL_CLARIFICATION_SUCCESS_COPY, imageCase.name);
+
+      const mealsRes = await fetch(`${address}/api/meals`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(mealsRes.status, 200, imageCase.name);
+      const mealsBody = await mealsRes.json() as {
+        meals: Array<{ calories?: number; protein?: number; carbs?: number; fat?: number }>;
+      };
+      assert.deepEqual(mealsBody.meals, beforeMealsBody.meals, imageCase.name);
+
+      const afterSummary = await services.summaryService.getDailySummary(deviceId, new Date());
+      assert.equal(afterSummary.mealCount, beforeSummary.mealCount, imageCase.name);
+      assert.equal(afterSummary.totalCalories, beforeSummary.totalCalories, imageCase.name);
+      assert.equal(afterSummary.totalProtein, beforeSummary.totalProtein, imageCase.name);
+      assert.equal(afterSummary.totalCarbs, beforeSummary.totalCarbs, imageCase.name);
+      assert.equal(afterSummary.totalFat, beforeSummary.totalFat, imageCase.name);
+      assert.equal(
+        mockLLM.chatCalls.length,
+        beforeChatCalls + index + 1,
+        `${imageCase.name} failed-recognition no-save must not consume a recovery model call`,
+      );
     }
   });
 
