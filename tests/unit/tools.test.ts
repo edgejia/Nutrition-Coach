@@ -27,6 +27,8 @@ import type { ToolCall } from "../../server/llm/types.js";
 // the runContract layer so controlled `failureReason` values remain observable
 // where invalid input should not persist.
 
+const FAILED_RECOGNITION_NO_SAVE_REPLY = "我沒有把這張照片存成餐點紀錄。請先補充餐點內容和份量，我再幫你估算。";
+
 function assertClarificationFact(result: unknown): Record<string, unknown> {
   const clarification = (result as { clarification?: unknown }).clarification;
   assert.ok(clarification && typeof clarification === "object", "ToolExecutionResult.clarification must be present");
@@ -983,6 +985,144 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 0);
+  });
+
+  it("rejects failed-recognition placeholder names before image log_food persistence", async () => {
+    const placeholderCases = [
+      { id: "call_unknown", food_name: "unknown" },
+      { id: "call_unrecognized", food_name: "unrecognized" },
+      { id: "call_unrecognizable_zh", food_name: "無法辨識內容" },
+      { id: "call_unknown_food_zh", food_name: "未知食物" },
+    ];
+
+    for (const testCase of placeholderCases) {
+      const result = await executeTool({
+        id: testCase.id,
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: testCase.food_name,
+            calories: 0,
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+          }),
+        },
+      }, deviceId, {
+        foodLoggingService,
+        summaryService,
+        imagePath: `asset:${testCase.id}`,
+      }, {
+        currentUserMessage: "(圖片)",
+      });
+
+      assert.equal(result.success, false, testCase.food_name);
+      assert.equal(result.executed, false, testCase.food_name);
+      assert.equal(result.failureReason, "guard", testCase.food_name);
+      assert.equal(result.result, FAILED_RECOGNITION_NO_SAVE_REPLY, testCase.food_name);
+      assert.equal(result.summary, "failureReason: failed_recognition_no_save", testCase.food_name);
+      assert.deepEqual(result.controlledReply, {
+        source: "renderer",
+        reason: "failed_recognition_no_save",
+        text: FAILED_RECOGNITION_NO_SAVE_REPLY,
+      }, testCase.food_name);
+      assert.equal(result.dailySummary, undefined, testCase.food_name);
+      assert.equal(result.summaryOutcome, undefined, testCase.food_name);
+      assert.equal(result.loggedMeal, undefined, testCase.food_name);
+
+      const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+      assert.equal(meals.length, 0, `${testCase.food_name} must not persist a meal`);
+    }
+  });
+
+  it("rejects all-zero image log_food grouped aggregates before persistence", async () => {
+    const result = await executeTool({
+      id: "call_all_zero_grouped_image",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "無法辨識的照片",
+          calories: 0,
+          protein: 0,
+          carbs: 0,
+          fat: 0,
+          items: [
+            {
+              food_name: "照片中的餐點",
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      imagePath: "asset:all-zero-grouped",
+    }, {
+      currentUserMessage: "(圖片)",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.result, FAILED_RECOGNITION_NO_SAVE_REPLY);
+    assert.equal(result.summary, "failureReason: failed_recognition_no_save");
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "failed_recognition_no_save",
+      text: FAILED_RECOGNITION_NO_SAVE_REPLY,
+    });
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.loggedMeal, undefined);
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 0);
+  });
+
+  it("allows plausible image log_food with one zero macro to persist", async () => {
+    const result = await executeTool({
+      id: "call_zero_fat_valid_image",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "白飯",
+          calories: 280,
+          protein: 5,
+          carbs: 62,
+          fat: 0,
+          protein_sources: [
+            { name: "白飯", protein: 5, is_primary: false, certainty: "clear" },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      imagePath: "asset:valid-zero-fat",
+    }, {
+      currentUserMessage: "(圖片)",
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.equal(result.controlledReply, undefined);
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "白飯");
+    assert.equal(result.loggedMeal.calories, 280);
+    assert.equal(result.loggedMeal.fat, 0);
+    assert.ok(result.dailySummary);
+    assert.equal(result.dailySummary.mealCount, 1);
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0].foodName, "白飯");
+    assert.equal(meals[0].fat, 0);
   });
 
   it("Test 2: log_food summary recomputation failure still returns a committed meal receipt payload", async () => {
