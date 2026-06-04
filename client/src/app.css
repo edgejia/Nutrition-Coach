@@ -1922,6 +1922,16 @@ textarea {
   outline-offset: 2px;
 }
 
+.sp-chat-upload-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--sp-amber);
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .sp-chat-textarea {
   width: 100%;
   min-width: 0;

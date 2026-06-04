@@ -234,7 +234,7 @@ function getImageExtension(filename: string): string {
   return match?.[1]?.toLowerCase() ?? "";
 }
 
-function getSupportedImageMimeType(file: File): "image/jpeg" | "image/png" | "image/webp" | null {
+export function getSupportedImageMimeType(file: File): "image/jpeg" | "image/png" | "image/webp" | null {
   if (file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp") {
     return file.type;
   }
