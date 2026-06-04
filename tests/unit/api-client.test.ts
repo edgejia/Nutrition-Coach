@@ -299,6 +299,18 @@ describe("API Client", () => {
     );
   });
 
+  it("classifies supported chat image mime types without accepting unsupported files", () => {
+    const heic = new File(["x"], "meal.heic", { type: "image/heic" });
+    const extensionOnlyJpeg = new File(["jpeg"], "photo.jpg", { type: "" });
+    const png = new File(["png"], "meal.png", { type: "image/png" });
+    const webp = new File(["webp"], "meal.webp", { type: "image/webp" });
+
+    assert.equal(api.getSupportedImageMimeType(heic), null);
+    assert.equal(api.getSupportedImageMimeType(extensionOnlyJpeg), "image/jpeg");
+    assert.equal(api.getSupportedImageMimeType(png), "image/png");
+    assert.equal(api.getSupportedImageMimeType(webp), "image/webp");
+  });
+
   it("sendMessage preserves the top-level turnId returned by the backend", async () => {
     storage.set("deviceId", "d-1");
     const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";

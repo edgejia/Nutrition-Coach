@@ -51,6 +51,45 @@ describe("chat shell source contract", () => {
     assert.doesNotMatch(chatInput, /↑/);
   });
 
+  it("validates unsupported uploads before image chip state and renders composer-local copy", async () => {
+    const chatInput = await readSource("client/src/components/ChatInput.tsx");
+    const css = await readSource("client/src/app.css");
+    const warningCopy = "目前只支援 JPG、PNG、WebP 照片。iPhone HEIC 請先轉成 JPG 後再上傳。";
+
+    assert.match(chatInput, /getSupportedImageMimeType/);
+    assert.match(chatInput, /from "\.\.\/api\.js"/);
+    assert.match(chatInput, /function handleImageChange/);
+    assert.match(chatInput, /setUploadError/);
+    assert.ok(chatInput.includes(warningCopy));
+    assert.match(chatInput, /role="alert"/);
+    assert.match(chatInput, /sp-chat-upload-error/);
+    assert.match(css, /\.sp-chat-upload-error/);
+    assert.match(css, /var\(--sp-amber\)/);
+
+    const handlerStart = chatInput.indexOf("function handleImageChange");
+    assert.ok(handlerStart >= 0, "ChatInput should use a named file-change handler");
+    const handlerEnd = chatInput.indexOf("function ", handlerStart + "function ".length);
+    const handler = chatInput.slice(handlerStart, handlerEnd >= 0 ? handlerEnd : undefined);
+    const supportCheckIndex = handler.indexOf("getSupportedImageMimeType");
+    const setImageIndex = handler.indexOf("setImage");
+
+    assert.ok(supportCheckIndex >= 0, "file-change handler should call the shared support helper");
+    assert.ok(setImageIndex >= 0, "file-change handler should still accept supported images");
+    assert.ok(supportCheckIndex < setImageIndex, "support validation must run before accepted image state");
+    assert.match(handler, /setImage\(null\)/);
+    assert.match(handler, /fileRef\.current\.value = ""/);
+    assert.match(handler, /setUploadError\(UPLOAD_ERROR_COPY\)/);
+    assert.match(handler, /setUploadError\(""\)/);
+
+    const removeButtonStart = chatInput.indexOf('aria-label="移除照片"');
+    assert.ok(removeButtonStart >= 0, "remove-photo button should exist");
+    const removeButton = chatInput.slice(Math.max(0, removeButtonStart - 500), removeButtonStart + 300);
+    assert.match(removeButton, /setUploadError\(""\)/);
+
+    assert.match(chatInput, /onChange=\{handleImageChange\}/);
+    assert.doesNotMatch(chatInput, /onChange=\{\(e\) => setImage/);
+  });
+
   it("shows stable calorie and macro context labels", async () => {
     const miniBar = await readSource("client/src/components/DashboardMiniBar.tsx");
 

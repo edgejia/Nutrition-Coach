@@ -473,6 +473,15 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(html, /sp-stopped-status/);
   });
 
+  it("does not render pre-send unsupported upload validation through assistant bubbles", async () => {
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const uploadCopy = "目前只支援 JPG、PNG、WebP 照片。iPhone HEIC 請先轉成 JPG 後再上傳。";
+
+    assert.doesNotMatch(bubble, new RegExp(escapeRegExp(uploadCopy)));
+    assert.doesNotMatch(bubble, /sp-chat-upload-error/);
+    assert.doesNotMatch(bubble, /meal\.heic/);
+  });
+
   it("does not render reference codes for provisional status labels", () => {
     const message: Message = {
       id: "status-reference-free-1",
