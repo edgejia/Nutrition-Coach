@@ -1651,6 +1651,11 @@ textarea {
   outline-offset: 2px;
 }
 
+.sp-receipt-deleted {
+  border-color: var(--sp-line);
+  color: var(--sp-ink-2);
+}
+
 .sp-receipt-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -1692,6 +1697,11 @@ textarea {
   text-align: center;
 }
 
+.sp-receipt-deleted .sp-receipt-thumbnail {
+  opacity: 0.72;
+  filter: saturate(0.62);
+}
+
 .sp-receipt-title {
   min-width: 0;
 }
@@ -1709,6 +1719,13 @@ textarea {
 
 .sp-receipt-label {
   color: var(--sp-lime);
+}
+
+.sp-receipt-deleted .sp-receipt-label,
+.sp-receipt-deleted .sp-receipt-food,
+.sp-receipt-deleted .sp-receipt-kcal,
+.sp-receipt-deleted .sp-receipt-row span {
+  color: var(--sp-ink-2);
 }
 
 .sp-receipt-food {
@@ -1757,6 +1774,17 @@ textarea {
   font-size: 12px;
   line-height: 1.25;
   white-space: nowrap;
+}
+
+.sp-receipt-deleted .sp-receipt-title,
+.sp-receipt-deleted .sp-receipt-kcal,
+.sp-receipt-deleted .sp-receipt-macros {
+  opacity: 0.68;
+}
+
+.sp-receipt-deleted .sp-receipt-kcal small,
+.sp-receipt-deleted .sp-receipt-row span:first-child {
+  color: var(--sp-ink-3);
 }
 
 .sp-chat-jump {

@@ -70,7 +70,12 @@ function ReceiptCard(props: {
     return null;
   }
 
-  const canEdit = editPayload !== null && onOpenMealEdit !== undefined;
+  const isDeletedReceipt = loggedMeal.receiptStatus === "deleted";
+  const receiptLabel = isDeletedReceipt ? "已刪除" : "已記錄";
+  const canEdit = !isDeletedReceipt && editPayload !== null && onOpenMealEdit !== undefined;
+  const receiptClassName = `sp-receipt-card${canEdit ? " sp-receipt-button" : ""}${
+    isDeletedReceipt ? " sp-receipt-deleted" : ""
+  }`;
 
   function handleOpenReceipt() {
     if (!editPayload) {
@@ -91,8 +96,14 @@ function ReceiptCard(props: {
   return (
     <div className="sp-message-row sp-message-row-assistant">
       <SportReceipt
-        className={`sp-receipt-card${canEdit ? " sp-receipt-button" : ""}`}
-        aria-label={canEdit ? `編輯 ${loggedMeal.foodName}` : undefined}
+        className={receiptClassName}
+        aria-label={
+          canEdit
+            ? `編輯 ${loggedMeal.foodName}`
+            : isDeletedReceipt
+              ? `${loggedMeal.foodName}，已刪除，歷史餐點快照`
+              : undefined
+        }
         onClick={canEdit ? handleOpenReceipt : undefined}
         onKeyDown={canEdit ? handleReceiptKeyDown : undefined}
         role={canEdit ? "button" : undefined}
@@ -112,7 +123,7 @@ function ReceiptCard(props: {
             </div>
           ) : null}
           <div className="sp-receipt-title">
-            <div className="sp-receipt-label">已記錄</div>
+            <div className="sp-receipt-label">{receiptLabel}</div>
             <div className="sp-receipt-food">{loggedMeal.foodName}</div>
           </div>
           <div className="sp-receipt-kcal">

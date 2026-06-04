@@ -312,7 +312,9 @@ describe("chat bubble source contract", () => {
       /fallbackClassName="sp-receipt-thumbnail sp-receipt-thumbnail-fallback"/,
     );
     assert.match(bubble, /className="sp-receipt-thumbnail-frame"/);
-    assert.match(bubble, /aria-label=\{canEdit \? `編輯 \$\{loggedMeal\.foodName\}` : undefined\}/);
+    assert.match(bubble, /aria-label=\{/);
+    assert.match(bubble, /canEdit\s*\?\s*`編輯 \$\{loggedMeal\.foodName\}`/);
+    assert.match(bubble, /isDeletedReceipt\s*\?\s*`\$\{loggedMeal\.foodName\}，已刪除，歷史餐點快照`/);
 
     assert.match(css, /\.sp-receipt-thumbnail-frame/);
     assert.match(css, /width:\s*56px/);
@@ -453,7 +455,6 @@ describe("chat bubble source contract", () => {
       "confidence",
       "estimate",
       "調整",
-      "刪除",
       "查看今日餐點",
       'openSecondaryScreen("mealEdit"',
     ]) {
