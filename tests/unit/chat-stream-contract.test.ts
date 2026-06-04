@@ -345,7 +345,7 @@ describe("chat stream contract", () => {
     assert.equal(message?.loggedMeal?.dateKey, "2026-03-25");
   });
 
-  it("commitStoppedProvisionalBubble preserves partial text, stopped marker, receipt, and summary extras", () => {
+  it("commitStoppedProvisionalBubble preserves partial text without appending stopped copy", () => {
     const todayKey = formatLocalDate(new Date());
     useStore.getState().setProvisionalBubble({
       id: "bubble-stopped",
@@ -382,7 +382,8 @@ describe("chat stream contract", () => {
     const message = useStore.getState().messages[0];
     assert.equal(message?.status, "stopped");
     assert.equal(message?.turnId, "turn-stopped-1");
-    assert.equal(message?.content, "已記錄\n\n已停止");
+    assert.equal(message?.content, "已記錄");
+    assert.doesNotMatch(message?.content ?? "", /已停止/);
     assert.equal(message?.loggedMeal?.foodName, "雞腿便當");
     assert.equal(useStore.getState().dailySummary?.totalCalories, 720);
     assert.equal(useStore.getState().provisionalBubble, null);
@@ -400,7 +401,22 @@ describe("chat stream contract", () => {
 
     const message = useStore.getState().messages[0];
     assert.equal(message?.status, "stopped");
-    assert.equal(message?.content, "已停止，沒有產生新的回覆。");
+    assert.equal(message?.content, "已停止生成。");
+  });
+
+  it("commitStoppedProvisionalBubble normalizes raw stopped placeholder content", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "bubble-raw-stopped",
+      statusLabel: "",
+      content: "（已停止）",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitStoppedProvisionalBubble({});
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message?.status, "stopped");
+    assert.equal(message?.content, "已停止生成。");
   });
 
   it("clears unauthorized Chat sends out of the provisional sending state", async () => {

@@ -382,6 +382,97 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(html, /t-a1b2c3d4/);
   });
 
+  it("renders partial stopped assistant text with a separate neutral stopped label", () => {
+    const message: Message = {
+      id: "partial-stopped-1",
+      role: "assistant",
+      content: "這是一段已串流的回覆",
+      createdAt: "2026-05-14T09:32:00.000Z",
+      status: "stopped",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, />這是一段已串流的回覆</);
+    assert.match(html, /sp-bubble-stopped/);
+    assert.match(html, /sp-stopped-status/);
+    assert.match(html, />已停止</);
+    assert.doesNotMatch(html, /這是一段已串流的回覆\s*已停止/);
+    assert.doesNotMatch(html, /sp-bubble-error/);
+  });
+
+  it("renders empty stopped assistant messages with canonical stopped copy", () => {
+    const message: Message = {
+      id: "empty-stopped-1",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-05-14T09:32:00.000Z",
+      status: "stopped",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, />已停止生成。</);
+    assert.match(html, /sp-bubble-stopped/);
+    assert.doesNotMatch(html, /sp-stopped-status/);
+    assert.doesNotMatch(html, /sp-bubble-error/);
+  });
+
+  it("normalizes history-loaded raw stopped placeholder text", () => {
+    const message: Message = {
+      id: "raw-stopped-1",
+      role: "assistant",
+      content: "（已停止）",
+      createdAt: "2026-05-14T09:32:00.000Z",
+      status: "stopped",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, />已停止生成。</);
+    assert.doesNotMatch(html, /（已停止）/);
+    assert.doesNotMatch(html, /sp-stopped-status/);
+    assert.doesNotMatch(html, /sp-bubble-error/);
+  });
+
+  it("keeps stopped messages with turn ids out of error reference rendering", () => {
+    const message: Message = {
+      id: "turn-stopped-1",
+      role: "assistant",
+      content: "部分回覆內容",
+      createdAt: "2026-05-14T09:32:00.000Z",
+      status: "stopped",
+      turnId: "a1b2c3d4-1111-4222-8333-0123456789ab",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, /sp-bubble-stopped/);
+    assert.doesNotMatch(html, /引用碼/);
+    assert.doesNotMatch(html, /t-a1b2c3d4/);
+    assert.doesNotMatch(html, /sp-bubble-error/);
+    assert.doesNotMatch(html, /抱歉，發生錯誤/);
+  });
+
+  it("keeps true assistant errors on failure styling and reference behavior", () => {
+    const message: Message = {
+      id: "error-control-1",
+      role: "assistant",
+      content: "抱歉，發生錯誤，請再試一次。",
+      createdAt: "2026-05-14T09:32:00.000Z",
+      status: "error",
+      turnId: "a1b2c3d4-1111-4222-8333-0123456789ab",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, /sp-bubble-error/);
+    assert.match(html, /引用碼/);
+    assert.match(html, /t-a1b2c3d4/);
+    assert.doesNotMatch(html, /sp-bubble-stopped/);
+    assert.doesNotMatch(html, /sp-stopped-status/);
+  });
+
   it("does not render reference codes for provisional status labels", () => {
     const message: Message = {
       id: "status-reference-free-1",

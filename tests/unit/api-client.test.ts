@@ -1531,6 +1531,46 @@ describe("sendMessageStream", () => {
     assert.equal(doneDeletedMealId, undefined);
   });
 
+  it("dispatches stopped terminal payloads separately from done and error callbacks", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":0,"didLogMeal":false,"didMutateMeal":false,"turnId":"turn-stopped-separate"}\n\n',
+    ]);
+    let doneCalled = false;
+    const errors: string[] = [];
+    let stoppedPayload:
+      | {
+          stopped: true;
+          turnId?: string;
+          tokensStreamed: number;
+          didLogMeal?: boolean;
+          didMutateMeal?: boolean;
+        }
+      | undefined;
+
+    await api.sendMessageStream("stop", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {
+        doneCalled = true;
+      },
+      onStopped: (payload) => {
+        stoppedPayload = payload;
+      },
+      onError: (message) => errors.push(message),
+    });
+
+    assert.equal(doneCalled, false);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(stoppedPayload, {
+      stopped: true,
+      turnId: "turn-stopped-separate",
+      tokensStreamed: 0,
+      didLogMeal: false,
+      didMutateMeal: false,
+    });
+  });
+
   it("dispatches done loggedMeal image urls through withAuthorizedAssetUrl", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [
