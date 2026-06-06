@@ -98,11 +98,11 @@ describe("onboarding stepper UI", () => {
       "selectedNotes",
       "onQuickNoteClick",
       "setGoalClarificationDraft",
-      "onGoalClarificationNext(goalClarificationDraft.goalClarification)",
     ]) {
       assert.match(onboardingStepperSource, new RegExp(contract));
     }
 
+    assert.ok(onboardingStepperSource.includes("onGoalClarificationNext(goalClarificationDraft.goalClarification)"));
     assert.doesNotMatch(onboardingStepperSource, /selectedNotes:\s*parse/);
     assert.doesNotMatch(onboardingStepperSource, /goalClarification\.split/);
   });

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../../store.js";
 import { submitIntake } from "../../api.js";
 import {
+  applyGoalClarificationQuickNote,
   applyFieldEditRecovery,
   getAdvancedMetricsSkipData,
   getStepAdvanceOutcome,
@@ -9,6 +10,7 @@ import {
 } from "../../lib/onboarding-stepper-flow.js";
 import { SportBoltIcon, SportFlameIcon } from "../SportIcons.js";
 import type { IntakeData, IntakeResult, IntakeValidationIssue, OnboardingField, OnboardingStep } from "../../types.js";
+import type { GoalClarificationQuickNoteState } from "../../lib/onboarding-stepper-flow.js";
 
 type PartialIntake = Partial<IntakeData>;
 type StepState = OnboardingStep | 6;
@@ -321,18 +323,22 @@ function SpStepGoal({
   );
 }
 
-function SpStepGoalClarification({
+export function SpStepGoalClarification({
   goal,
   value,
   issues,
+  selectedNotes = [],
   onChange,
+  onQuickNoteClick,
   onNext,
   onBack,
 }: {
   goal?: string;
   value?: string;
   issues?: StepIssue[];
+  selectedNotes?: readonly string[];
   onChange?: (value: string) => void;
+  onQuickNoteClick?: (note: string) => void;
   onNext?: () => void;
   onBack?: () => void;
 }) {
@@ -382,17 +388,22 @@ function SpStepGoalClarification({
         </section>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {quickNotes.map((note) => (
-            <button
-              key={note}
-              type="button"
-              className="sp-chip"
-              onClick={() => onChange?.(text ? `${text}、${note}` : note)}
-              style={{ cursor: "pointer" }}
-            >
-              <span className="sp-chip-zh">{note}</span>
-            </button>
-          ))}
+          {quickNotes.map((note) => {
+            const isSelected = selectedNotes.includes(note);
+            return (
+              <button
+                key={note}
+                type="button"
+                className="sp-chip"
+                aria-pressed={isSelected}
+                aria-label={isSelected ? `${note}，已套用` : note}
+                onClick={() => onQuickNoteClick?.(note)}
+                style={{ cursor: "pointer" }}
+              >
+                <span className="sp-chip-zh">{note}</span>
+              </button>
+            );
+          })}
         </div>
       </main>
       <SpObActions onBack={onBack} onNext={onNext} nextLabel={text.trim() ? "繼續 →" : "略過 →"} />
@@ -911,7 +922,10 @@ export function OnboardingStepperPresentation({
   onRetry,
   onFieldEdit,
 }: OnboardingStepperPresentationProps) {
-  const [goalClarification, setGoalClarification] = useState(data.goalClarification ?? "");
+  const [goalClarificationDraft, setGoalClarificationDraft] = useState<GoalClarificationQuickNoteState>({
+    goalClarification: data.goalClarification ?? "",
+    selectedNotes: [],
+  });
   const [bodyData, setBodyData] = useState<BodyForm>({
     sex: data.sex ?? "male",
     age: String(data.age ?? "28"),
@@ -930,7 +944,14 @@ export function OnboardingStepperPresentation({
   });
 
   useEffect(() => {
-    setGoalClarification(data.goalClarification ?? "");
+    const nextGoalClarification = data.goalClarification ?? "";
+    setGoalClarificationDraft((current) => {
+      if (current.goalClarification === nextGoalClarification) {
+        return current;
+      }
+
+      return { goalClarification: nextGoalClarification, selectedNotes: [] };
+    });
     setBodyData({
       sex: data.sex ?? "male",
       age: String(data.age ?? "28"),
@@ -956,13 +977,27 @@ export function OnboardingStepperPresentation({
   if (step === 2) return (
     <SpStepGoalClarification
       goal={data.goal}
-      value={goalClarification}
+      value={goalClarificationDraft.goalClarification}
       issues={issuesForStep(2)}
+      selectedNotes={goalClarificationDraft.selectedNotes}
       onChange={(value) => {
-        setGoalClarification(value);
+        setGoalClarificationDraft((current) => ({
+          ...current,
+          goalClarification: value,
+        }));
         onFieldEdit("goalClarification");
       }}
-      onNext={() => onGoalClarificationNext(goalClarification)}
+      onQuickNoteClick={(note) => {
+        const outcome = applyGoalClarificationQuickNote(goalClarificationDraft, note);
+        setGoalClarificationDraft({
+          goalClarification: outcome.goalClarification,
+          selectedNotes: outcome.selectedNotes,
+        });
+        if (outcome.inserted) {
+          onFieldEdit("goalClarification");
+        }
+      }}
+      onNext={() => onGoalClarificationNext(goalClarificationDraft.goalClarification)}
       onBack={() => onBack(1)}
     />
   );
