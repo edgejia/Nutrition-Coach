@@ -86,8 +86,17 @@ describe("onboarding stepper UI", () => {
     assert.match(html, /aria-pressed="true"/);
     assert.match(html, /aria-label="不想影響重訓表現，已套用"/);
     assert.match(html, />不想影響重訓表現</);
-    assert.match(html, /aria-pressed="false"/);
-    assert.doesNotMatch(html, /disabled/);
+    const selectedButton = html.match(/<button[^>]+aria-pressed="true"[^>]*>[\s\S]*?不想影響重訓表現[\s\S]*?<\/button>/)?.[0] ?? "";
+    const unselectedButtons = html.match(/<button[^>]+aria-pressed="false"[^>]*>[\s\S]*?<\/button>/g) ?? [];
+
+    assert.match(selectedButton, /sp-chip-applied/);
+    assert.doesNotMatch(selectedButton, /sp-chip-on/);
+    assert.doesNotMatch(selectedButton, /disabled/);
+    assert.equal(unselectedButtons.length, 2);
+    for (const button of unselectedButtons) {
+      assert.doesNotMatch(button, /sp-chip-applied/);
+      assert.doesNotMatch(button, /sp-chip-on/);
+    }
   });
 
   it("wires Step 2 quick-note taps through the selectedNotes draft helper", () => {
