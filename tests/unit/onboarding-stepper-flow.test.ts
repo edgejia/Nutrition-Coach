@@ -27,6 +27,47 @@ function makeIntake(overrides: Partial<IntakeData> = {}): IntakeData {
 }
 
 describe("onboarding-stepper-flow", () => {
+  it("inserts a goal clarification quick note on first tap", () => {
+    const outcome = stepperFlow.applyGoalClarificationQuickNote({
+      goalClarification: "",
+      selectedNotes: [],
+    }, "不想影響重訓表現");
+
+    assert.equal(outcome.goalClarification, "不想影響重訓表現");
+    assert.deepEqual(outcome.selectedNotes, ["不想影響重訓表現"]);
+    assert.equal(outcome.inserted, true);
+  });
+
+  it("ignores repeated selected goal clarification quick-note taps", () => {
+    const firstOutcome = stepperFlow.applyGoalClarificationQuickNote({
+      goalClarification: "",
+      selectedNotes: [],
+    }, "不想影響重訓表現");
+
+    const repeatedOutcome = stepperFlow.applyGoalClarificationQuickNote(firstOutcome, "不想影響重訓表現");
+
+    assert.equal(repeatedOutcome.goalClarification, "不想影響重訓表現");
+    assert.deepEqual(repeatedOutcome.selectedNotes, ["不想影響重訓表現"]);
+    assert.equal(repeatedOutcome.inserted, false);
+  });
+
+  it("preserves manual goal clarification edits after quick-note insertion", () => {
+    const insertedOutcome = stepperFlow.applyGoalClarificationQuickNote({
+      goalClarification: "",
+      selectedNotes: [],
+    }, "不想影響重訓表現");
+
+    const manuallyEditedState = {
+      ...insertedOutcome,
+      goalClarification: "我想維持肌力，但晚餐常外食",
+    };
+    const repeatedOutcome = stepperFlow.applyGoalClarificationQuickNote(manuallyEditedState, "不想影響重訓表現");
+
+    assert.equal(repeatedOutcome.goalClarification, "我想維持肌力，但晚餐常外食");
+    assert.deepEqual(repeatedOutcome.selectedNotes, ["不想影響重訓表現"]);
+    assert.equal(repeatedOutcome.inserted, false);
+  });
+
   it("returns same-step issues when step validation fails", () => {
     const outcome = stepperFlow.getStepAdvanceOutcome(3, {
       sex: "female",
