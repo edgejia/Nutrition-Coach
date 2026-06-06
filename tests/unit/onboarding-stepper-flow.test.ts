@@ -68,6 +68,37 @@ describe("onboarding-stepper-flow", () => {
     assert.equal(repeatedOutcome.inserted, false);
   });
 
+  it("treats matching freeform text as unselected when selectedNotes is empty", () => {
+    const outcome = stepperFlow.applyGoalClarificationQuickNote({
+      goalClarification: "不想影響重訓表現",
+      selectedNotes: [],
+    }, "不想影響重訓表現");
+
+    assert.equal(outcome.goalClarification, "不想影響重訓表現、不想影響重訓表現");
+    assert.deepEqual(outcome.selectedNotes, ["不想影響重訓表現"]);
+    assert.equal(outcome.inserted, true);
+  });
+
+  it("does not reject or rewrite repeated freeform goal clarification text during validation", () => {
+    const repeatedFreeformText = "不想影響重訓表現、不想影響重訓表現";
+    const stepDraft = {
+      goal: "fat_loss" as const,
+      goalClarification: repeatedFreeformText,
+    };
+    const stepOutcome = stepperFlow.getStepAdvanceOutcome(2, stepDraft);
+
+    assert.equal(stepOutcome.nextStep, 3);
+    assert.deepEqual(stepOutcome.issues, []);
+    assert.equal(stepDraft.goalClarification, repeatedFreeformText);
+
+    const submitDraft = makeIntake({ goalClarification: repeatedFreeformText });
+    const submitOutcome = stepperFlow.getSubmitGateOutcome(submitDraft);
+
+    assert.equal(submitOutcome.nextStep, 6);
+    assert.deepEqual(submitOutcome.issues, []);
+    assert.equal(submitDraft.goalClarification, repeatedFreeformText);
+  });
+
   it("returns same-step issues when step validation fails", () => {
     const outcome = stepperFlow.getStepAdvanceOutcome(3, {
       sex: "female",
