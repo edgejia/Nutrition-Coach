@@ -463,6 +463,17 @@ textarea {
   text-transform: none;
 }
 
+.sp-onboarding-quick-note .sp-chip-zh {
+  font-size: 10px;
+  line-height: 1.25;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.sp-onboarding-quick-note.sp-chip-applied .sp-chip-zh {
+  color: var(--sp-ink);
+}
+
 .sp-header {
   display: flex;
   flex-shrink: 0;
