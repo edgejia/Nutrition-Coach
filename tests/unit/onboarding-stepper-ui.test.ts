@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -21,8 +23,13 @@ globalThis.localStorage = {
   key: (index: number) => [...storage.keys()][index] ?? null,
 } as Storage;
 
-const { OnboardingStepperPresentation } = await import("../../client/src/components/onboarding/OnboardingStepper.js");
+const onboardingStepperModule = await import("../../client/src/components/onboarding/OnboardingStepper.js");
+const { OnboardingStepperPresentation, SpStepGoalClarification } = onboardingStepperModule;
 const { StepCoachHandoff } = await import("../../client/src/components/onboarding/StepCoachHandoff.js");
+const onboardingStepperSource = await readFile(
+  fileURLToPath(new URL("../../client/src/components/onboarding/OnboardingStepper.tsx", import.meta.url)),
+  "utf8",
+);
 
 function renderStepSix(props: {
   loading?: boolean;
@@ -63,6 +70,43 @@ function renderStepSix(props: {
 }
 
 describe("onboarding stepper UI", () => {
+  it("renders Step 2 quick-note selected state from selectedNotes without changing visible text", () => {
+    assert.equal(typeof SpStepGoalClarification, "function");
+
+    const html = renderToStaticMarkup(createElement(SpStepGoalClarification, {
+      goal: "fat_loss",
+      value: "不想影響重訓表現",
+      selectedNotes: ["不想影響重訓表現"],
+      onChange: () => undefined,
+      onQuickNoteClick: () => undefined,
+      onNext: () => undefined,
+      onBack: () => undefined,
+    }));
+
+    assert.match(html, /aria-pressed="true"/);
+    assert.match(html, /aria-label="不想影響重訓表現，已套用"/);
+    assert.match(html, />不想影響重訓表現</);
+    assert.match(html, /aria-pressed="false"/);
+    assert.doesNotMatch(html, /disabled/);
+  });
+
+  it("wires Step 2 quick-note taps through the selectedNotes draft helper", () => {
+    for (const contract of [
+      "applyGoalClarificationQuickNote",
+      "GoalClarificationQuickNoteState",
+      "goalClarificationDraft",
+      "selectedNotes",
+      "onQuickNoteClick",
+      "setGoalClarificationDraft",
+      "onGoalClarificationNext(goalClarificationDraft.goalClarification)",
+    ]) {
+      assert.match(onboardingStepperSource, new RegExp(contract));
+    }
+
+    assert.doesNotMatch(onboardingStepperSource, /selectedNotes:\s*parse/);
+    assert.doesNotMatch(onboardingStepperSource, /goalClarification\.split/);
+  });
+
   it("renders Step 1 goal recovery with validation copy and selectable goals", () => {
     const html = renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
       step: 1,
