@@ -423,6 +423,15 @@ textarea {
   text-transform: uppercase;
 }
 
+.sp-onboarding-quick-note {
+  min-height: 44px;
+  max-width: 100%;
+  justify-content: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
 .sp-chip-on {
   border-color: var(--sp-lime);
   background: var(--sp-lime);
@@ -436,6 +445,12 @@ textarea {
 }
 
 .sp-chip-good {
+  border-color: var(--sp-lime-line);
+  background: var(--sp-lime-soft);
+  color: var(--sp-lime);
+}
+
+.sp-chip-applied {
   border-color: var(--sp-lime-line);
   background: var(--sp-lime-soft);
   color: var(--sp-lime);

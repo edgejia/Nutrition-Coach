@@ -394,7 +394,11 @@ export function SpStepGoalClarification({
               <button
                 key={note}
                 type="button"
-                className="sp-chip"
+                className={[
+                  "sp-chip",
+                  "sp-onboarding-quick-note",
+                  isSelected ? "sp-chip-applied" : "",
+                ].filter(Boolean).join(" ")}
                 aria-pressed={isSelected}
                 aria-label={isSelected ? `${note}，已套用` : note}
                 onClick={() => onQuickNoteClick?.(note)}
