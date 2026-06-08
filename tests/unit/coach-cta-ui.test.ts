@@ -36,6 +36,13 @@ async function readSource(relativePath: string) {
   return readFile(sourcePath(relativePath), "utf8");
 }
 
+function cssBlock(source: string, selector: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escapedSelector}\\s*\\{([^}]+)\\}`).exec(source);
+  assert.ok(match, `${selector} should be defined`);
+  return match[1] ?? "";
+}
+
 const fakeDialoguePattern = new RegExp(
   [
     `問我${"怎麼"}`,
@@ -201,5 +208,22 @@ describe("CoachCTAControls", () => {
     }
 
     assert.deepEqual(selected, ["protein"]);
+  });
+
+  it("MOB-02 preserves Coach CTA two-step flow with 44px options and 8px option gaps", async () => {
+    const componentSource = await readSource("../../client/src/components/CoachAdviceCard.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
+    const controlsBlock = cssBlock(cssSource, ".sp-coach-cta-controls");
+    const optionsBlock = cssBlock(cssSource, ".sp-coach-cta-options");
+    const optionBlock = cssBlock(cssSource, ".sp-coach-cta-option");
+
+    assert.match(componentSource, /selectedIntentId/);
+    assert.match(componentSource, /aria-expanded=\{selected\}/);
+    assert.match(componentSource, /id=\{`coach-cta-options-\$\{selectedIntent\.id\}`\}/);
+    assert.match(componentSource, /onTaskOptionClick\(option, selectedIntent\)/);
+    assert.match(controlsBlock, /gap:\s*8px/);
+    assert.match(optionsBlock, /gap:\s*8px/);
+    assert.match(optionBlock, /min-height:\s*44px/, "MOB-02 Home CTA options must preserve 44px tap targets");
+    assert.doesNotMatch(componentSource, /mobile action strip|collapsed mobile options|bottom action strip/i);
   });
 });

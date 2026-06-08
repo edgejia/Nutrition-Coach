@@ -14,6 +14,26 @@ function escapedPattern(text: string) {
   return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
 
+function functionBody(sourceText: string, functionName: string) {
+  const startToken = `function ${functionName}`;
+  const startIndex = sourceText.indexOf(startToken);
+  assert.notEqual(startIndex, -1, `${functionName} should exist`);
+  const bodyStart = sourceText.indexOf("{", startIndex);
+  assert.notEqual(bodyStart, -1, `${functionName} should have a body`);
+
+  let depth = 0;
+  for (let index = bodyStart; index < sourceText.length; index += 1) {
+    const char = sourceText[index];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      return sourceText.slice(bodyStart + 1, index);
+    }
+  }
+
+  assert.fail(`${functionName} body should be closed`);
+}
+
 describe("Meal Edit source contract", () => {
   it("renders the required sport meal edit structure and copy", () => {
     for (const expected of [
@@ -175,11 +195,43 @@ describe("Meal Edit source contract", () => {
     assert.match(source, /<GroupedMealRow\s+key=\{index\}/);
     assert.doesNotMatch(source, /key=\{`[^`]*item\.name[^`]*`\}/);
     assert.match(source, /<input\b/);
-    assert.match(source, /delete/i);
-    assert.match(source, /edit/i);
     assert.doesNotMatch(source, escapedPattern("sp-meal-edit-grouped-lock"));
     assert.doesNotMatch(source, escapedPattern("到對話修正"));
     assert.doesNotMatch(source, escapedPattern("這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。"));
+  });
+
+  it("MOB-03 keeps grouped row actions icon-only with localized stateful labels", () => {
+    const groupedRow = functionBody(source, "GroupedMealRow");
+    const actionsStart = groupedRow.indexOf('className="sp-meal-edit-grouped-row-actions"');
+    assert.notEqual(actionsStart, -1, "MOB-03 grouped row action container should exist");
+    const actionsSource = groupedRow.slice(actionsStart);
+
+    assert.doesNotMatch(actionsSource, />\s*edit\s*</i, "MOB-03 forbids visible English grouped action label edit");
+    assert.doesNotMatch(actionsSource, />\s*delete\s*</i, "MOB-03 forbids visible English grouped action label delete");
+    assert.match(
+      actionsSource,
+      /aria-label=\{`\$\{expanded \? "收合項目：" : "展開項目："\}\$\{rowName\}`\}/,
+      "MOB-03 edit action should expose stateful localized aria-labels",
+    );
+    assert.match(
+      actionsSource,
+      /aria-label=\{`刪除項目：\$\{rowName\}`\}/,
+      "MOB-03 delete action should keep the fixed localized aria-label",
+    );
+    assert.match(actionsSource, /aria-hidden="true"/, "MOB-03 grouped action icons should be hidden from accessible text");
+    assert.match(actionsSource, /<Sport[A-Za-z]+Icon\b/, "MOB-03 grouped actions should render icon components");
+  });
+
+  it("MOB-03 grouped edit action toggles expansion while preserving final-item delete blocking", () => {
+    assert.match(source, escapedPattern("至少要保留一個項目；若要移除整筆餐點，請使用刪除餐點。"));
+    assert.match(source, /setGroupedFinalDeleteError\(GROUPED_FINAL_DELETE_COPY\)/);
+    assert.match(source, /setExpandedGroupedRowIndex\(index\)/);
+    assert.match(
+      source,
+      /setExpandedGroupedRowIndex\(\(currentIndex\) => currentIndex === index \? null : index\)/,
+      "MOB-03 edit action should toggle expanded/collapsed state instead of expand-only behavior",
+    );
+    assert.doesNotMatch(source, /onClick=\{\(\) => onExpand\(index\)\}[\s\S]{0,80}>\s*edit\s*</i);
   });
 
   it("blocks invalid grouped saves, opens the first invalid row, and preserves stale recovery", () => {

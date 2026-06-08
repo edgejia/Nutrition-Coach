@@ -31,6 +31,13 @@ async function readSource(relativePath: string) {
   return readFile(sourcePath(relativePath), "utf8");
 }
 
+function cssBlock(source: string, selector: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escapedSelector}\\s*\\{([^}]+)\\}`).exec(source);
+  assert.ok(match, `${selector} should be defined`);
+  return match[1] ?? "";
+}
+
 describe("Home dashboard display contracts", () => {
   it("prefers explicit mealPeriod before falling back to loggedAt labels", () => {
     assert.equal(getDisplayMealLabel("lunch", "2026-04-29T07:30:00+08:00"), "午餐");
@@ -249,5 +256,24 @@ describe("Home dashboard display contracts", () => {
     assert.doesNotMatch(homeSource, /coachFade/);
     assert.doesNotMatch(homeSource, /CoachAdviceCard[\s\S]{0,160}transition/);
     assert.doesNotMatch(homeSource, /targetAnimation/);
+  });
+
+  it("MOB-02 keeps Home CTA inside the primary scroller with bottom-nav reserve", async () => {
+    const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
+    const homeScrollBlock = cssBlock(cssSource, ".home-sport-scroll");
+
+    assert.match(homeSource, /<main className="screen-scroll home-sport-scroll">/);
+    assert.match(homeSource, /<CoachAdviceCard advice=\{coachAdvice\} cta=\{cta\}/);
+    assert.match(homeSource, /sendHomeCtaTaskOption\(option, intent, setPendingHomeChatDraft, setActiveScreen\)/);
+    assert.match(homeScrollBlock, /display:\s*flex/);
+    assert.match(homeScrollBlock, /flex-direction:\s*column/);
+    assert.match(homeScrollBlock, /gap:\s*16px/);
+    assert.match(
+      homeScrollBlock,
+      /calc\(128px \+ var\(--app-bottom-occlusion,\s*0px\) \+ env\(safe-area-inset-bottom\)\)/,
+      "MOB-02 Home scroller must reserve enough bottom space above the fixed nav for expanded CTA options",
+    );
+    assert.doesNotMatch(homeSource, /new mobile action strip|collapse choices|sp-home-action-strip/i);
   });
 });
