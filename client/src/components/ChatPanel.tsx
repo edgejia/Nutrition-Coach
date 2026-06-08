@@ -25,6 +25,11 @@ const UPLOAD_SETTLE_WINDOW_MS = 320;
 const STOP_FALLBACK_TIMEOUT_MS = 1000;
 const PHASE40_INCOMPLETE_RECEIPT_FLAG = "phase40IncompleteReceipt";
 const PHASE40_INCOMPLETE_RECEIPT_ID = "phase40-incomplete-receipt-mock";
+const CHAT_EMPTY_STARTER_PROMPTS = [
+  "我想記錄今天吃的東西",
+  "示範怎麼描述一餐",
+  "我不確定份量怎麼說",
+] as const;
 
 function getNowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -71,7 +76,7 @@ function createPhase40IncompleteReceiptMock(): Message {
     content: "",
     createdAt: new Date().toISOString(),
     loggedMeal: {
-      foodName: "鮭魚飯糰",
+      foodName: "本機測試餐點",
       calories: 780,
       protein: 38,
       carbs: 82,
@@ -153,6 +158,7 @@ export function ChatPanel() {
     hasMessages: messages.length > 0,
     hasProvisionalBubble: provisionalBubble !== null,
   });
+  const showChatStarter = messages.length === 0 && provisionalBubble === null && pendingHomeChatDraft === null;
 
   function setLocalFollowMode(nextMode: FollowMode) {
     followModeRef.current = nextMode;
@@ -638,6 +644,10 @@ export function ChatPanel() {
     }
   }
 
+  function handleStarterPromptClick(prompt: string) {
+    void handleSend(prompt);
+  }
+
   async function sendPendingDraft(draft: PendingHomeChatDraft) {
     attemptedDraftIdsRef.current.add(draft.id);
     if (draft.failedAssistantArtifactId) {
@@ -899,6 +909,31 @@ export function ChatPanel() {
       <div className="relative min-h-0 flex-1">
         <div ref={scrollContainerRef} className="screen-scroll-with-input sp-chat-scroll">
           <div ref={contentRef} className="sp-chat-stack">
+            {showChatStarter && (
+              <section className="sp-chat-starter sp-chat-empty-starter" aria-labelledby="chat-empty-starter-heading">
+                <div>
+                  <h3 id="chat-empty-starter-heading" className="sp-chat-empty-starter-heading">
+                    從第一餐開始
+                  </h3>
+                  <p className="sp-chat-empty-starter-body">
+                    描述你吃了什麼，我會幫你整理成今天的紀錄。也可以點下方相機附加照片。
+                  </p>
+                </div>
+                <div className="sp-chat-empty-starter-chips" aria-label="快速開始記錄">
+                  {CHAT_EMPTY_STARTER_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="sp-chat-empty-starter-chip"
+                      onClick={() => handleStarterPromptClick(prompt)}
+                      disabled={isChatLocked}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
             {messages.map((m) => (
               <MessageBubble
                 key={m.id}

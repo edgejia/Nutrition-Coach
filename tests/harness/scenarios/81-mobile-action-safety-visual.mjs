@@ -501,7 +501,7 @@ async function openMealEdit(send, mealName) {
 async function navigateToChat(send) {
   const clicked = await evaluate(send, `(() => {
     const chatControl = [...document.querySelectorAll('button, [role="button"]')]
-      .find((node) => /對話/.test(node.innerText || node.getAttribute("aria-label") || ""));
+      .find((node) => /對話|記錄餐點/.test(node.innerText || node.getAttribute("aria-label") || ""));
     if (!chatControl || typeof chatControl.click !== "function") return false;
     chatControl.click();
     window.__phase81VisualState?.interactions?.push("bottom-nav:chat");

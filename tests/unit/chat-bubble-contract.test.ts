@@ -166,7 +166,7 @@ describe("chat bubble source contract", () => {
     assert.match(chatPanel, /PHASE40_INCOMPLETE_RECEIPT_FLAG/);
     assert.match(chatPanel, /phase40IncompleteReceipt/);
     assert.match(chatPanel, /createPhase40IncompleteReceiptMock/);
-    assert.match(chatPanel, /foodName: "鮭魚飯糰"/);
+    assert.match(chatPanel, /foodName: "本機測試餐點"/);
     assert.match(chatPanel, /content: ""/);
     assert.doesNotMatch(chatPanel, /缺少可編輯/);
     assert.doesNotMatch(chatPanel, /Incomplete receipt mock/);
