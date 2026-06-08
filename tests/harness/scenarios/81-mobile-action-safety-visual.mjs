@@ -360,6 +360,10 @@ function phase81MockScript() {
       if (url.pathname === "/api/chat/history") {
         return Promise.resolve(jsonResponse({ messages: [] }));
       }
+      if (url.pathname === "/api/observability/client-event") {
+        window.__phase81VisualState.interactions.push("observability:" + (init?.method ?? "GET"));
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
       if (url.pathname === "/api/meals") {
         return Promise.resolve(jsonResponse({ meals }));
       }
@@ -394,7 +398,13 @@ function phase81MockScript() {
         this.url = url;
         if (url !== "/api/sse") throw new Error("unmocked EventSource route: " + url);
         setTimeout(() => {
-          this.dispatchEvent(new MessageEvent("daily_summary", { data: JSON.stringify(dailySummary) }));
+          this.dispatchEvent(new MessageEvent("daily_summary", {
+            data: JSON.stringify({
+              summary: dailySummary,
+              affectedDate: dailySummary.date,
+              source: "initial"
+            })
+          }));
           this.dispatchEvent(new MessageEvent("goals_update", { data: JSON.stringify({ targets }) }));
         }, 80);
       }
@@ -502,15 +512,23 @@ async function prepareCase(send, stateCase) {
       await evaluate(send, `document.querySelector('.sp-meal-edit-grouped-scroll')?.scrollTo({ top: 9999 })`);
     }
   } else if (stateCase === "homeExpandedCtaOptions") {
-    await evaluate(send, `(() => {
-      const target = [...document.querySelectorAll('.sp-coach-cta-intent')]
-        .find((node) => /記錄飲食|補蛋白質|安排下一餐|控制熱量/.test(node.innerText || ""));
-      if (!target) return false;
-      target.click();
-      document.querySelector('.sp-coach-cta')?.scrollIntoView({ block: "end" });
-      window.__phase81VisualState?.interactions?.push("home-cta:expanded");
-      return true;
-    })()`);
+    let expanded = false;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      expanded = await evaluate(send, `(() => {
+        const target = [...document.querySelectorAll('.sp-coach-cta-intent')]
+          .find((node) => /記錄飲食|補蛋白質|安排下一餐|控制熱量/.test(node.innerText || ""));
+        if (!target) return false;
+        if (!document.querySelector('.sp-coach-cta-option')) {
+          target.click();
+        }
+        document.querySelector('.sp-coach-cta')?.scrollIntoView({ block: "end" });
+        window.__phase81VisualState?.interactions?.push("home-cta:expanded");
+        return document.querySelectorAll('.sp-coach-cta-option').length >= 3;
+      })()`);
+      if (expanded) break;
+      await delay(120);
+    }
+    assertTrue(expanded, "Phase 81 visual evidence failed: could not expand Home CTA options.");
     await delay(240);
   } else if (stateCase === "chatEmptyStarter") {
     await navigateToChat(send);

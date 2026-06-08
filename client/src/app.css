@@ -624,6 +624,7 @@ textarea {
 .sp-coach-cta-intent,
 .sp-coach-cta-option {
   min-width: 0;
+  min-height: 44px;
   border-radius: var(--sp-r-pill);
   cursor: pointer;
   font-family: var(--sp-font-zh);
@@ -715,7 +716,7 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 8px 18px calc(88px + env(safe-area-inset-bottom));
+  padding: 8px 18px calc(128px + var(--app-bottom-occlusion, 0px) + env(safe-area-inset-bottom));
 }
 
 .home-sport-header {
