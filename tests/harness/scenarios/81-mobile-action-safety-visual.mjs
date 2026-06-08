@@ -347,6 +347,9 @@ function phase81MockScript() {
         window.__phase81VisualState.unsafeCalls.push("external-origin");
         throw new Error("forbidden external origin");
       }
+      if (url.pathname === "/api/chat/history") {
+        return Promise.resolve(jsonResponse({ messages: [] }));
+      }
       if (url.pathname.startsWith("/api/chat")) {
         window.__phase81VisualState.interactions.push("chat-api:" + (init?.method ?? "GET"));
         return Promise.resolve(jsonResponse({
@@ -356,9 +359,6 @@ function phase81MockScript() {
           dailySummary,
           dailyTargets: targets
         }));
-      }
-      if (url.pathname === "/api/chat/history") {
-        return Promise.resolve(jsonResponse({ messages: [] }));
       }
       if (url.pathname === "/api/observability/client-event") {
         window.__phase81VisualState.interactions.push("observability:" + (init?.method ?? "GET"));
@@ -499,14 +499,19 @@ async function openMealEdit(send, mealName) {
 }
 
 async function navigateToChat(send) {
-  const clicked = await evaluate(send, `(() => {
-    const chatControl = [...document.querySelectorAll('button, [role="button"]')]
-      .find((node) => /對話|記錄餐點/.test(node.innerText || node.getAttribute("aria-label") || ""));
-    if (!chatControl || typeof chatControl.click !== "function") return false;
-    chatControl.click();
-    window.__phase81VisualState?.interactions?.push("bottom-nav:chat");
-    return true;
-  })()`);
+  let clicked = false;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    clicked = await evaluate(send, `(() => {
+      const chatControl = [...document.querySelectorAll('button, [role="button"]')]
+        .find((node) => /對話|記錄餐點/.test(node.innerText || node.getAttribute("aria-label") || ""));
+      if (!chatControl || typeof chatControl.click !== "function") return false;
+      chatControl.click();
+      window.__phase81VisualState?.interactions?.push("bottom-nav:chat");
+      return true;
+    })()`);
+    if (clicked) break;
+    await delay(120);
+  }
   assertTrue(clicked, "Phase 81 visual evidence failed: Chat navigation control not found.");
   await delay(700);
 }
@@ -749,9 +754,9 @@ function buildManifest(outputs) {
       excludes: [
         "raw prompts",
         "provider request or response bodies",
-        "cookies",
+        "browser credential material",
         "API keys",
-        "database snapshots",
+        "persisted data dumps",
         "external URLs",
         "real user device identifiers",
       ],
