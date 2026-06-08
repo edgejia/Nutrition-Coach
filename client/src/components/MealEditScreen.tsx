@@ -12,7 +12,7 @@ import type {
   GroupedMealDraftRow,
 } from "../meal-edit-grouped-draft.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportChevronLeftIcon, SportCloseIcon, SportPlusIcon } from "./SportIcons.js";
+import { SportChevronLeftIcon, SportCloseIcon, SportEditIcon, SportPlusIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
 type DraftState = {
@@ -76,27 +76,30 @@ function getGroupedFieldErrorCopy(field: GroupedMealDraftField, error: GroupedMe
   return GROUPED_FIELD_ERROR_COPY[error];
 }
 
-function GroupedMealRow({
-  row,
-  index,
-  expanded,
-  pending,
-  errors,
-  finalDeleteError,
-  onExpand,
-  onChange,
-  onDelete,
-}: {
+type GroupedMealRowProps = {
   row: GroupedMealDraftRow;
   index: number;
   expanded: boolean;
   pending: boolean;
   errors: GroupedMealDraftFieldErrors;
   finalDeleteError: string | null;
-  onExpand: (index: number) => void;
+  onToggle: (index: number) => void;
   onChange: (index: number, field: GroupedMealDraftField, value: string) => void;
   onDelete: (index: number) => void;
-}) {
+};
+
+function GroupedMealRow(props: GroupedMealRowProps) {
+  const {
+    row,
+    index,
+    expanded,
+    pending,
+    errors,
+    finalDeleteError,
+    onToggle,
+    onChange,
+    onDelete,
+  } = props;
   const rowName = row.name.trim() || `項目 ${index + 1}`;
   const expandedClassName = expanded ? " sp-meal-edit-grouped-row-expanded" : "";
 
@@ -108,22 +111,29 @@ function GroupedMealRow({
           aria-expanded={expanded}
           aria-label={`${expanded ? "收合" : "展開"}項目：${rowName}`}
           disabled={pending}
-          onClick={() => onExpand(index)}
+          onClick={() => onToggle(index)}
         >
           <span>{formatGroupedItemSummary(row)}</span>
         </button>
         <div className="sp-meal-edit-grouped-row-actions">
-          <button type="button" disabled={pending} onClick={() => onExpand(index)}>
-            edit
+          <button
+            type="button"
+            className="sp-meal-edit-grouped-row-action"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? "收合項目：" : "展開項目："}${rowName}`}
+            disabled={pending}
+            onClick={() => onToggle(index)}
+          >
+            <SportEditIcon size={16} stroke={2} aria-hidden="true" />
           </button>
           <button
             type="button"
+            className="sp-meal-edit-grouped-row-action sp-meal-edit-grouped-row-action-delete"
             aria-label={`刪除項目：${rowName}`}
             disabled={pending}
             onClick={() => onDelete(index)}
           >
-            <SportCloseIcon size={16} stroke={2} />
-            <span>delete</span>
+            <SportCloseIcon size={16} stroke={2} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -197,7 +207,7 @@ function GroupedMealEditor({
   expandedIndex,
   rowErrors,
   finalDeleteError,
-  onExpand,
+  onToggle,
   onChange,
   onAdd,
   onDelete,
@@ -209,7 +219,7 @@ function GroupedMealEditor({
   expandedIndex: number | null;
   rowErrors: GroupedMealDraftFieldErrors[];
   finalDeleteError: string | null;
-  onExpand: (index: number) => void;
+  onToggle: (index: number) => void;
   onChange: (index: number, field: GroupedMealDraftField, value: string) => void;
   onAdd: () => void;
   onDelete: (index: number) => void;
@@ -242,7 +252,7 @@ function GroupedMealEditor({
             pending={pending || staleBlocked}
             errors={rowErrors[index] ?? {}}
             finalDeleteError={finalDeleteError && expandedIndex === index ? finalDeleteError : null}
-            onExpand={onExpand}
+            onToggle={onToggle}
             onChange={onChange}
             onDelete={onDelete}
           />
@@ -435,6 +445,11 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     setExpandedGroupedRowIndex(nextRows.length - 1);
     setGroupedFinalDeleteError(null);
     setError(null);
+  }
+
+  function handleGroupedToggleRow(index: number) {
+    setExpandedGroupedRowIndex((currentIndex) => currentIndex === index ? null : index);
+    setGroupedFinalDeleteError(null);
   }
 
   function handleGroupedDeleteRow(index: number) {
@@ -667,10 +682,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
                   expandedIndex={expandedGroupedRowIndex}
                   rowErrors={groupedRowErrors}
                   finalDeleteError={groupedFinalDeleteError}
-                  onExpand={(index) => {
-                    setExpandedGroupedRowIndex(index);
-                    setGroupedFinalDeleteError(null);
-                  }}
+                  onToggle={handleGroupedToggleRow}
                   onChange={updateGroupedRow}
                   onAdd={handleGroupedAddItem}
                   onDelete={handleGroupedDeleteRow}

@@ -2700,7 +2700,7 @@ textarea {
   gap: 4px;
 }
 
-.sp-meal-edit-grouped-row-actions button {
+.sp-meal-edit-grouped-row-action {
   display: inline-flex;
   min-width: 44px;
   min-height: 44px;
@@ -2710,19 +2710,19 @@ textarea {
   border-radius: var(--sp-r-pill);
   background: rgba(255, 255, 255, 0.03);
   color: var(--sp-ink-2);
-  padding: 0 10px;
+  padding: 0;
   font-family: var(--sp-font-zh);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.25;
 }
 
-.sp-meal-edit-grouped-row-actions button:last-child {
+.sp-meal-edit-grouped-row-action-delete {
   border-color: rgba(255, 77, 77, 0.32);
   color: #ffb3b3;
 }
 
-.sp-meal-edit-grouped-row-actions button:disabled,
+.sp-meal-edit-grouped-row-action:disabled,
 .sp-meal-edit-grouped-add:disabled {
   cursor: not-allowed;
   opacity: 0.62;
@@ -2792,7 +2792,7 @@ textarea {
 
 .sp-meal-edit-grouped-add:focus-visible,
 .sp-meal-edit-grouped-summary > button:first-child:focus-visible,
-.sp-meal-edit-grouped-row-actions button:focus-visible {
+.sp-meal-edit-grouped-row-action:focus-visible {
   outline: 2px solid var(--sp-lime);
   outline-offset: 2px;
 }
