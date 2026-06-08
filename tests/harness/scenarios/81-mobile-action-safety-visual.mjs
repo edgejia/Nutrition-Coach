@@ -83,7 +83,7 @@ function parseArgs(argv) {
     outputDir: DEFAULT_OUTPUT_DIR,
     include360: false,
     validateHarness: false,
-    caseId: null,
+    caseIds: [],
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -91,7 +91,7 @@ function parseArgs(argv) {
     if (arg === "--output-dir") {
       args.outputDir = argv[++index] ?? DEFAULT_OUTPUT_DIR;
     } else if (arg === "--case") {
-      args.caseId = argv[++index] ?? null;
+      args.caseIds.push(argv[++index] ?? "");
     } else if (arg === "--include-360") {
       args.include360 = true;
     } else if (arg === "--validate-harness") {
@@ -420,10 +420,16 @@ function allCases(include360) {
 
 function selectedCases(args) {
   const cases = allCases(args.include360);
-  if (!args.caseId) return cases;
-  const selected = cases.filter((state) => state.id === args.caseId);
+  if (args.caseIds.length === 0) return cases;
+  const selected = args.caseIds.map((caseId) => {
+    const state = cases.find((candidate) => candidate.id === caseId);
+    if (!state) {
+      throw new Error(`Unknown Phase 81 visual case: ${caseId}`);
+    }
+    return state;
+  });
   if (selected.length === 0) {
-    throw new Error(`Unknown Phase 81 visual case: ${args.caseId}`);
+    throw new Error("No Phase 81 visual cases selected.");
   }
   return selected;
 }
@@ -474,15 +480,20 @@ function assertTrue(value, message) {
 }
 
 async function openMealEdit(send, mealName) {
-  const opened = await evaluate(send, `(() => {
-    const row = [...document.querySelectorAll('.home-sport-meal-row')]
-      .find((node) => (node.innerText || node.getAttribute("aria-label") || "").includes(${JSON.stringify(mealName)}));
-    if (!row || typeof row.click !== "function") return false;
-    row.scrollIntoView({ block: "center" });
-    row.click();
-    window.__phase81VisualState?.interactions?.push("open-meal-edit:${mealName}");
-    return true;
-  })()`);
+  let opened = false;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    opened = await evaluate(send, `(() => {
+      const row = [...document.querySelectorAll('.home-sport-meal-row')]
+        .find((node) => (node.innerText || node.getAttribute("aria-label") || "").includes(${JSON.stringify(mealName)}));
+      if (!row || typeof row.click !== "function") return false;
+      row.scrollIntoView({ block: "center" });
+      row.click();
+      window.__phase81VisualState?.interactions?.push("open-meal-edit:${mealName}");
+      return true;
+    })()`);
+    if (opened) break;
+    await delay(120);
+  }
   assertTrue(opened, `Phase 81 visual evidence failed: could not open Meal Edit for ${mealName}.`);
   await delay(500);
 }
