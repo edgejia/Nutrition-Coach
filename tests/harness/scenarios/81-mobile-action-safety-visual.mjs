@@ -284,6 +284,10 @@ function phase81MockScript() {
     window.Date = Phase81Date;
 
     const targets = { calories: 2100, protein: 130, carbs: 240, fat: 70 };
+    const groupedItems = [
+      { name: "豆腐", position: 0, calories: 180, protein: 14, carbs: 12, fat: 8 },
+      { name: "青菜", position: 1, calories: 120, protein: 6, carbs: 18, fat: 4 }
+    ];
     const dailySummary = {
       date: "2026-06-08",
       totalCalories: 980,
@@ -315,14 +319,12 @@ function phase81MockScript() {
         protein: 20,
         carbs: 50,
         fat: 15,
-        itemCount: 2,
+        itemCount: groupedItems.length,
         loggedAt: "2026-06-08T18:30:00+08:00",
         mealPeriod: "dinner",
         imageAssetId: null,
         imageUrl: null,
-        items: [
-          { name: "豆腐青菜", position: 0, calories: 360, protein: 20, carbs: 50, fat: 15 }
-        ]
+        items: groupedItems
       }
     ];
     const originalFetch = window.fetch.bind(window);
@@ -523,7 +525,17 @@ async function prepareCase(send, stateCase) {
   } else if (stateCase === "mealEditGroupedFinalDeleteBlocking" || stateCase === "groupedRowIconControls") {
     await openMealEdit(send, "豆腐青菜組合");
     if (stateCase === "mealEditGroupedFinalDeleteBlocking") {
-      await evaluate(send, `document.querySelector('.sp-meal-edit-grouped-row-actions button:last-child')?.click()`);
+      await evaluate(send, `(() => {
+        const deleteButton = [...document.querySelectorAll('.sp-meal-edit-grouped-row-actions button')]
+          .find((node) => (node.getAttribute("aria-label") || "").startsWith("刪除項目："));
+        deleteButton?.click();
+      })()`);
+      await delay(120);
+      await evaluate(send, `(() => {
+        const deleteButton = [...document.querySelectorAll('.sp-meal-edit-grouped-row-actions button')]
+          .find((node) => (node.getAttribute("aria-label") || "").startsWith("刪除項目："));
+        deleteButton?.click();
+      })()`);
       await delay(120);
       await evaluate(send, `document.querySelector('.sp-meal-edit-grouped-scroll')?.scrollTo({ top: 9999 })`);
     }
@@ -575,6 +587,7 @@ async function inspectCase(send, stateCase) {
       ariaLabel: node.getAttribute("aria-label") || "",
       rect: rectOf(node)
     }));
+    const groupedRowCount = document.querySelectorAll('.sp-meal-edit-grouped-row').length;
     const chatStarter = rectOf(document.querySelector('.sp-chat-starter'));
     const composer = rectOf(document.querySelector('.sp-chat-composer-bar'));
     const starterChips = [...document.querySelectorAll('.sp-chat-starter button')].map((node) => node.innerText.trim());
@@ -595,6 +608,7 @@ async function inspectCase(send, stateCase) {
       homeCtaOptionsGap8: ctaOptions.length < 2 || ctaOptions.every((option, index) => index === 0 || option.rect.top - ctaOptions[index - 1].rect.bottom >= 7),
       homeLastCtaGapFromNav: Boolean(ctaOptions.length > 0 && tabbar && ctaOptions[ctaOptions.length - 1].rect.bottom <= tabbar.top - 8),
       groupedActionCount: groupedActions.length,
+      groupedRowCount,
       groupedActionsMin44: groupedActions.every((action) => action.rect && action.rect.width >= 44 && action.rect.height >= 44),
       groupedActionsLocalized: groupedActions.some((action) => action.ariaLabel.startsWith("展開項目：") || action.ariaLabel.startsWith("收合項目：")) && groupedActions.some((action) => action.ariaLabel.startsWith("刪除項目：")),
       noVisibleEnglishGroupedActions,
@@ -633,7 +647,8 @@ async function inspectCase(send, stateCase) {
     assertTrue(inspection.homeCtaOptionsGap8, "MOB-02 visual failed: Home CTA option gap is below 8px.");
     assertTrue(inspection.homeLastCtaGapFromNav, "MOB-02 visual failed: final Home CTA option crowds the bottom nav.");
   } else if (stateCase === "groupedRowIconControls") {
-    assertTrue(inspection.groupedActionCount >= 2, "MOB-03 visual failed: grouped row action controls missing.");
+    assertTrue(inspection.groupedRowCount >= 2, "MOB-03 visual failed: multi-row grouped proof did not render.");
+    assertTrue(inspection.groupedActionCount >= inspection.groupedRowCount * 2, "MOB-03 visual failed: each grouped row needs edit/delete actions.");
     assertTrue(inspection.groupedActionsMin44, "MOB-03 visual failed: grouped row action target is below 44px.");
     assertTrue(inspection.groupedActionsLocalized, "MOB-03 visual failed: grouped action accessible labels are not localized.");
     assertTrue(inspection.noVisibleEnglishGroupedActions, "MOB-03 visual failed: visible English grouped action text remains.");
@@ -752,7 +767,7 @@ function buildManifest(outputs) {
     privacyPolicy: {
       kind: "metadata-only",
       excludes: [
-        "raw prompts",
+      "model input content",
         "provider request or response bodies",
         "browser credential material",
         "API keys",

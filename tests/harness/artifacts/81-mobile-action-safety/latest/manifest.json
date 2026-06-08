@@ -53,7 +53,7 @@
         "height": 844
       },
       "screenshotPath": "tests/harness/artifacts/81-mobile-action-safety/latest/meal-edit-grouped-final-delete-blocking-mobile-390x844.png",
-      "screenshotBytes": 58872,
+      "screenshotBytes": 56280,
       "browserName": "Microsoft Edge",
       "localMockCategories": [
         "device bootstrap",
@@ -91,7 +91,7 @@
         "height": 844
       },
       "screenshotPath": "tests/harness/artifacts/81-mobile-action-safety/latest/home-expanded-cta-options-mobile-390x844.png",
-      "screenshotBytes": 86403,
+      "screenshotBytes": 86373,
       "browserName": "Microsoft Edge",
       "localMockCategories": [
         "device bootstrap",
@@ -129,7 +129,7 @@
         "height": 844
       },
       "screenshotPath": "tests/harness/artifacts/81-mobile-action-safety/latest/grouped-row-icon-controls-mobile-390x844.png",
-      "screenshotBytes": 52884,
+      "screenshotBytes": 56320,
       "browserName": "Microsoft Edge",
       "localMockCategories": [
         "device bootstrap",
@@ -167,7 +167,7 @@
         "height": 844
       },
       "screenshotPath": "tests/harness/artifacts/81-mobile-action-safety/latest/chat-empty-starter-mobile-390x844.png",
-      "screenshotBytes": 38643,
+      "screenshotBytes": 38625,
       "browserName": "Microsoft Edge",
       "localMockCategories": [
         "device bootstrap",
@@ -212,7 +212,7 @@
   "privacyPolicy": {
     "kind": "metadata-only",
     "excludes": [
-      "raw prompts",
+      "model input content",
       "provider request or response bodies",
       "browser credential material",
       "API keys",

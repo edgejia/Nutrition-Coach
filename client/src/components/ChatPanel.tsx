@@ -144,6 +144,7 @@ export function ChatPanel() {
   const [followMode, setFollowMode] = useState<FollowMode>("attached");
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const isChatLocked = sending;
   const todayKey = formatLocalDate(new Date());
@@ -158,7 +159,8 @@ export function ChatPanel() {
     hasMessages: messages.length > 0,
     hasProvisionalBubble: provisionalBubble !== null,
   });
-  const showChatStarter = messages.length === 0 && provisionalBubble === null && pendingHomeChatDraft === null;
+  const showChatStarter =
+    historyLoaded && messages.length === 0 && provisionalBubble === null && pendingHomeChatDraft === null;
 
   function setLocalFollowMode(nextMode: FollowMode) {
     followModeRef.current = nextMode;
@@ -455,7 +457,9 @@ export function ChatPanel() {
   }
 
   async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
-    const activeDeviceId = useStore.getState().deviceId;
+    const state = useStore.getState();
+    if (state.sending) return;
+    const activeDeviceId = state.deviceId;
     if (!activeDeviceId) return;
 
     if (
@@ -645,6 +649,7 @@ export function ChatPanel() {
   }
 
   function handleStarterPromptClick(prompt: string) {
+    if (useStore.getState().sending) return;
     void handleSend(prompt);
   }
 
@@ -669,6 +674,7 @@ export function ChatPanel() {
   }
 
   useEffect(() => {
+    setHistoryLoaded(false);
     if (!deviceId) return;
     let cancelled = false;
     const activeDeviceId = deviceId;
@@ -686,6 +692,7 @@ export function ChatPanel() {
         });
         setMessages(messages);
         addPhase40IncompleteReceiptMockIfNeeded(messages, addMessage);
+        setHistoryLoaded(true);
         const draft = useStore.getState().pendingHomeChatDraft;
         if (draft && draft.status === "staged" && !attemptedDraftIdsRef.current.has(draft.id)) {
           await sendPendingDraft(draft);
@@ -697,6 +704,7 @@ export function ChatPanel() {
           void recoverGuestSession();
           return;
         }
+        setHistoryLoaded(false);
         const draft = useStore.getState().pendingHomeChatDraft;
         if (draft && draft.status === "staged" && !attemptedDraftIdsRef.current.has(draft.id)) {
           await sendPendingDraft(draft);

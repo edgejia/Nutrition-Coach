@@ -345,6 +345,11 @@ describe("mobile shell source contract", () => {
     );
     assert.match(
       sources.chatPanel,
+      /historyLoaded && messages\.length === 0/,
+      "MOB-04 starter must wait for chat history hydration before treating chat as empty",
+    );
+    assert.match(
+      sources.chatPanel,
       /provisionalBubble === null/,
       "MOB-04 starter must hide when a provisional bubble exists",
     );
@@ -359,6 +364,21 @@ describe("mobile shell source contract", () => {
       "MOB-04 failed draft banner should take precedence before any starter block",
     );
     assert.match(sources.chatPanel, /handleSend\(/, "MOB-04 starter chips must reuse the existing handleSend path");
+    assert.match(
+      sources.chatPanel,
+      /async function handleSend[\s\S]*const state = useStore\.getState\(\);[\s\S]*if \(state\.sending\) return;/,
+      "MOB-04 starter chips and composer sends must share an in-flight send guard",
+    );
+    assert.match(
+      functionBody(sources.chatPanel, "handleStarterPromptClick"),
+      /if \(useStore\.getState\(\)\.sending\) return;/,
+      "MOB-04 starter chip taps must fail closed during an active send before React disables the buttons",
+    );
+    assert.match(
+      sources.chatPanel,
+      /setHistoryLoaded\(false\);[\s\S]*loadHistory\(\)[\s\S]*setHistoryLoaded\(true\);/s,
+      "MOB-04 starter must stay hidden until loadHistory succeeds",
+    );
     assert.doesNotMatch(sources.chatPanel, /stageHomeTaskOptionPrompt|recordHomeCtaOptionSent/);
   });
 
