@@ -375,6 +375,16 @@ describe("mobile shell source contract", () => {
       "MOB-04 starter chip taps must fail closed during an active send before React disables the buttons",
     );
     assert.match(
+      functionBody(sources.chatPanel, "sendPendingDraft"),
+      /if \(useStore\.getState\(\)\.sending\) return;[\s\S]*setPendingHomeChatDraft\(\{ \.\.\.draftWithoutFailedArtifact, status: "sending" \}\)/,
+      "MOB-04 failed draft retry must check active sending before mutating retry state",
+    );
+    assert.match(
+      sources.chatPanel,
+      /onClick=\{\(\) => sendPendingDraft\(pendingHomeChatDraft\)\}[\s\S]*disabled=\{isChatLocked\}/,
+      "MOB-04 failed draft retry button must be disabled while Chat is locked",
+    );
+    assert.match(
       sources.chatPanel,
       /setHistoryLoaded\(false\);[\s\S]*loadHistory\(\)[\s\S]*setHistoryLoaded\(true\);/s,
       "MOB-04 starter must stay hidden until loadHistory succeeds",

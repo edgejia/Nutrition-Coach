@@ -654,6 +654,7 @@ export function ChatPanel() {
   }
 
   async function sendPendingDraft(draft: PendingHomeChatDraft) {
+    if (useStore.getState().sending) return;
     attemptedDraftIdsRef.current.add(draft.id);
     if (draft.failedAssistantArtifactId) {
       clearDraftLinkedAssistantArtifact(draft.failedAssistantArtifactId);
@@ -905,7 +906,12 @@ export function ChatPanel() {
           }}
         >
           上一筆任務送出失敗。
-          <button type="button" onClick={() => sendPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
+          <button
+            type="button"
+            onClick={() => sendPendingDraft(pendingHomeChatDraft)}
+            disabled={isChatLocked}
+            className="ml-3 font-semibold underline disabled:opacity-60"
+          >
             重試送出
           </button>
           <button type="button" onClick={() => cancelFailedPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
