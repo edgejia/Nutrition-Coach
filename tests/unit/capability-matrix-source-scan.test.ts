@@ -254,7 +254,7 @@ describe("capability matrix source scanner", () => {
     }
   });
 
-  it("requires Home and Day Detail matchers to describe their actual component handlers", async () => {
+  it("requires Home, NAV-01 History, and NAV-02 Day Detail matchers to describe their actual component handlers", async () => {
     const homeRow = findMatrixRow("Home", "Today meal rows and authorized thumbnails");
     const homeSource = await readSource(homeRow.sourceFile);
     const homeOpenMealEditIndex = homeSource.indexOf("openMealEdit(editPayload, \"home\")");
@@ -270,16 +270,52 @@ describe("capability matrix source scanner", () => {
       "Home sourceMatchers must all exist in HomeScreen.tsx",
     );
 
+    const historyRow = findMatrixRow("History", "Trend and day browsing");
+    const historySource = await readSource(historyRow.sourceFile);
+    assert.deepEqual(historyRow.storeAction, ["openDayDetail"], "NAV-01 History matrix must route rows through openDayDetail");
+    assert.ok(
+      historyRow.sourceMatchers.includes("開啟餐點詳情"),
+      "NAV-01 History matrix must cite read-only meal detail row labels",
+    );
+    assert.ok(
+      historyRow.sourceMatchers.includes("targetMealId: meal.id"),
+      "NAV-01 History matrix must cite focused Day Detail targetMealId",
+    );
+    assert.doesNotMatch(
+      historyRow.sourceMatchers.join(" "),
+      /\bopenMealEdit\b/,
+      "NAV-01 History matrix must reject direct row edit evidence",
+    );
+    assert.doesNotMatch(
+      historySource,
+      /aria-label=\{`編輯/,
+      "NAV-01 History source must not expose 編輯 row labels",
+    );
+
     const dayDetailRow = findMatrixRow("Day Detail", "Read-only day snapshot");
     const dayDetailSource = await readSource(dayDetailRow.sourceFile);
-    const onBackIndex = dayDetailSource.indexOf("onClick={onBack}");
-    assert.notEqual(onBackIndex, -1, "Day Detail source must contain the real back handler");
-    const dayDetailContext = contextAroundLine(dayDetailSource, lineNumberForIndex(dayDetailSource, onBackIndex));
+    const openMealEditIndex = dayDetailSource.indexOf('openMealEdit(editPayload, "history"');
+    assert.notEqual(openMealEditIndex, -1, "NAV-02 Day Detail source must contain the focused openMealEdit handoff");
+    const dayDetailContext = contextAroundLine(dayDetailSource, lineNumberForIndex(dayDetailSource, openMealEditIndex), 18);
 
-    assert.deepEqual(dayDetailRow.handlerMatchers, ["onBack"]);
-    assert.ok(sourceIncludesMatcher(dayDetailContext, "onBack"), "Day Detail handler matcher must match near onBack");
-    assert.doesNotMatch(dayDetailRow.sourceMatchers.join(" "), /\bopenMealEdit\b/);
-    assert.doesNotMatch(dayDetailRow.handlerMatchers.join(" "), /\bopenMealEdit\b/);
+    assert.notDeepEqual(dayDetailRow.handlerMatchers, ["onBack"], "NAV-02 stale Day Detail matcher set ['onBack'] must fail");
+    for (const expected of [
+      "buildMealEditPayloadIfComplete",
+      "targetMealId",
+      "openMealEdit",
+      "returnToDayDetail",
+    ]) {
+      assert.ok(dayDetailRow.sourceMatchers.includes(expected), `NAV-02 Day Detail sourceMatchers must include ${expected}`);
+      assert.ok(sourceIncludesMatcher(dayDetailSource, expected), `NAV-02 Day Detail source must include ${expected}`);
+    }
+    assert.ok(
+      dayDetailRow.handlerMatchers?.some((matcher) => sourceIncludesMatcher(dayDetailContext, matcher)),
+      "NAV-02 Day Detail handlerMatchers must match near the focused edit handler",
+    );
+    for (const rejected of ["handleDelete", "deleteMeal", "刪除"]) {
+      assert.doesNotMatch(dayDetailRow.sourceMatchers.join(" "), new RegExp(rejected), `NAV-02 Day Detail matrix must reject ${rejected}`);
+      assert.doesNotMatch(dayDetailRow.handlerMatchers?.join(" ") ?? "", new RegExp(rejected), `NAV-02 Day Detail handlers must reject ${rejected}`);
+    }
   });
 
   it("documents meaningful action-level onChange handling policy", () => {

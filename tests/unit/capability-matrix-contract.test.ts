@@ -265,17 +265,57 @@ describe("capability matrix contract", () => {
     );
   });
 
-  it("keeps Day Detail read-only without Meal Edit handoff claims", () => {
+  it("NAV-01 keeps History meal rows as read-only Day Detail browsing", () => {
+    const row = findMatrixRow("History", "Trend and day browsing");
+
+    assert.equal(row.supportState, "supported-read-only");
+    assert.deepEqual(row.storeAction, ["openDayDetail"], "NAV-01 History rows route through openDayDetail only");
+    assert.doesNotMatch(row.sourceMatchers.join(" "), /\bopenMealEdit\b/, "NAV-01 History matrix must not cite row openMealEdit");
+    assert.doesNotMatch(row.handlerMatchers?.join(" ") ?? "", /\bopenMealEdit\b/, "NAV-01 History handlers must not cite direct edit");
+    assert.doesNotMatch(row.handlingDecision, /edit/i, "NAV-01 History handling text must not describe direct edit evidence");
+    assert.match(
+      row.handlingDecision,
+      /read-only.*meal evidence browsing/i,
+      "NAV-01 History handling text must name read-only meal evidence browsing",
+    );
+    assert.ok(
+      row.sourceMatchers.includes("開啟餐點詳情"),
+      "NAV-01 History source matchers must cite the read-only meal detail accessible label",
+    );
+    assert.ok(
+      row.sourceMatchers.includes("targetMealId: meal.id"),
+      "NAV-01 History source matchers must cite targetMealId: meal.id",
+    );
+  });
+
+  it("NAV-02 updates Day Detail from back-only read-only to focused eligible edit handoff", () => {
     const row = findMatrixRow("Day Detail", "Read-only day snapshot");
 
     assert.equal(row.supportState, "supported-read-only");
     assert.equal(row.activeHandler, "present");
-    assert.deepEqual(row.handlerMatchers, ["onBack"]);
-    assert.deepEqual(row.storeAction, []);
-    assert.doesNotMatch(row.sourceMatchers.join(" "), /\bopenMealEdit\b/);
-    assert.doesNotMatch(row.handlerMatchers.join(" "), /\bopenMealEdit\b/);
-    assert.doesNotMatch(row.storeAction.join(" "), /\bopenMealEdit\b/);
-    assert.match(row.handlingDecision, /read-only/i);
-    assert.doesNotMatch(row.handlingDecision, /meal edit handoff/i);
+    assert.notDeepEqual(
+      row.handlerMatchers,
+      ["onBack"],
+      "NAV-02 stale Day Detail matcher set ['onBack'] must fail; expected focused openMealEdit handoff",
+    );
+    assert.deepEqual(row.storeAction, ["openMealEdit"], "NAV-02 Day Detail focused edit uses openMealEdit");
+
+    for (const expected of [
+      "buildMealEditPayloadIfComplete",
+      "targetMealId",
+      "openMealEdit",
+      "returnToDayDetail",
+    ]) {
+      assert.ok(row.sourceMatchers.includes(expected), `NAV-02 Day Detail sourceMatchers must cite ${expected}`);
+    }
+
+    assert.ok(row.handlerMatchers?.includes('openMealEdit(editPayload, "history"'), "NAV-02 Day Detail handler must cite openMealEdit");
+    assert.match(row.handlingDecision, /focused eligible edit handoff/i);
+    assert.match(row.handlingDecision, /delete remains in Meal Edit/i);
+
+    for (const rejected of ["handleDelete", "deleteMeal", "刪除"]) {
+      assert.doesNotMatch(row.sourceMatchers.join(" "), literalPattern(rejected), `NAV-02 Day Detail matrix must not cite ${rejected}`);
+      assert.doesNotMatch(row.handlerMatchers?.join(" ") ?? "", literalPattern(rejected), `NAV-02 Day Detail handlers must not cite ${rejected}`);
+    }
   });
 });
