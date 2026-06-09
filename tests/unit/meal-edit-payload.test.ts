@@ -245,6 +245,55 @@ describe("meal edit payload builders", () => {
       null,
       "NAV-02 grouped History-origin rows with invalid items must fail closed",
     );
+    assert.equal(
+      buildMealEditPayloadIfComplete(
+        {
+          ...groupedWithoutItems,
+          id: "history-grouped-partial-items",
+          mealRevisionId: "history-grouped-partial-items:r1",
+          itemCount: 3,
+          items: [
+            { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+            { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 4 },
+          ],
+        } as any,
+        "2026-05-06",
+      ),
+      null,
+      "NAV-02 grouped History-origin rows with a partial item subset must fail closed",
+    );
+    assert.equal(
+      buildMealEditPayloadIfComplete(
+        {
+          ...groupedWithoutItems,
+          id: "history-grouped-duplicate-items",
+          mealRevisionId: "history-grouped-duplicate-items:r1",
+          items: [
+            { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+            { name: "白飯", position: 0, calories: 300, protein: 6, carbs: 76, fat: 4 },
+          ],
+        } as any,
+        "2026-05-06",
+      ),
+      null,
+      "NAV-02 grouped History-origin rows with duplicate item positions must fail closed",
+    );
+    assert.equal(
+      buildMealEditPayloadIfComplete(
+        {
+          ...groupedWithoutItems,
+          id: "history-grouped-position-gap",
+          mealRevisionId: "history-grouped-position-gap:r1",
+          items: [
+            { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+            { name: "白飯", position: 2, calories: 300, protein: 6, carbs: 76, fat: 4 },
+          ],
+        } as any,
+        "2026-05-06",
+      ),
+      null,
+      "NAV-02 grouped History-origin rows with missing item positions must fail closed",
+    );
   });
 
   it("keeps MealItemDetail media-free as the grouped item DTO boundary", () => {
@@ -307,7 +356,7 @@ describe("meal edit payload builders", () => {
       protein: 14,
       carbs: 36,
       fat: 8,
-      itemCount: 3,
+      itemCount: 2,
       items: [
         { name: "鮭魚", position: 0, calories: 160, protein: 12, carbs: 0, fat: 8 },
         { name: "飯糰", position: 1, calories: 120, protein: 2, carbs: 36, fat: 0 },
@@ -325,7 +374,7 @@ describe("meal edit payload builders", () => {
       protein: 14,
       carbs: 36,
       fat: 8,
-      itemCount: 3,
+      itemCount: 2,
       items: [
         { name: "鮭魚", position: 0, calories: 160, protein: 12, carbs: 0, fat: 8 },
         { name: "飯糰", position: 1, calories: 120, protein: 2, carbs: 36, fat: 0 },
@@ -349,6 +398,51 @@ describe("meal edit payload builders", () => {
       protein: 1,
       carbs: 1,
       fat: 1,
+    } as any), null);
+    assert.equal(buildReceiptMealEditPayload({
+      mealId: "receipt-partial-items",
+      mealRevisionId: "receipt-partial-items:r1",
+      dateKey: "2026-05-06",
+      foodName: "鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      itemCount: 3,
+      items: [
+        { name: "鮭魚", position: 0, calories: 160, protein: 12, carbs: 0, fat: 8 },
+        { name: "飯糰", position: 1, calories: 120, protein: 2, carbs: 36, fat: 0 },
+      ],
+    } as any), null);
+    assert.equal(buildReceiptMealEditPayload({
+      mealId: "receipt-duplicate-items",
+      mealRevisionId: "receipt-duplicate-items:r1",
+      dateKey: "2026-05-06",
+      foodName: "鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      itemCount: 2,
+      items: [
+        { name: "鮭魚", position: 0, calories: 160, protein: 12, carbs: 0, fat: 8 },
+        { name: "飯糰", position: 0, calories: 120, protein: 2, carbs: 36, fat: 0 },
+      ],
+    } as any), null);
+    assert.equal(buildReceiptMealEditPayload({
+      mealId: "receipt-position-gap",
+      mealRevisionId: "receipt-position-gap:r1",
+      dateKey: "2026-05-06",
+      foodName: "鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      itemCount: 2,
+      items: [
+        { name: "鮭魚", position: 0, calories: 160, protein: 12, carbs: 0, fat: 8 },
+        { name: "飯糰", position: 2, calories: 120, protein: 2, carbs: 36, fat: 0 },
+      ],
     } as any), null);
   });
 

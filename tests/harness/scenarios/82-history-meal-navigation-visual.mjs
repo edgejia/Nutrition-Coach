@@ -125,7 +125,14 @@ function startStaticServer() {
   const root = resolve(DIST_ROOT);
   const server = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
-    const requestedPath = decodeURIComponent(requestUrl.pathname);
+    let requestedPath;
+    try {
+      requestedPath = decodeURIComponent(requestUrl.pathname);
+    } catch {
+      response.writeHead(400);
+      response.end("bad request");
+      return;
+    }
     const relativePath = requestedPath === "/" ? "index.html" : requestedPath.slice(1);
     const filePath = resolve(root, relativePath);
     if (!isPathInside(root, filePath) || hasDotfileSegment(relative(root, filePath))) {
@@ -756,6 +763,12 @@ async function validateHarness(args) {
   const browser = await findBrowser();
   const server = await startStaticServer();
   try {
+    const malformedResponse = await fetch(`${server.origin}/%E0%A4%A`);
+    if (malformedResponse.status !== 400) {
+      throw new Error(
+        `Phase 82 validate-harness failed: expected malformed URL response 400, got ${malformedResponse.status}.`,
+      );
+    }
     const indexResponse = await fetch(`${server.origin}/`);
     if (indexResponse.status !== 200) {
       throw new Error(`Phase 82 validate-harness failed: expected index response 200, got ${indexResponse.status}.`);

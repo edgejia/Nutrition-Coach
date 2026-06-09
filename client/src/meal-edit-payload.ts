@@ -69,6 +69,25 @@ function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
+function getCompleteMealItems(value: unknown, itemCount: number): MealItemDetail[] | undefined {
+  const items = normalizeMealItems(value);
+  if (itemCount <= 1) {
+    return items;
+  }
+  if (!items || items.length !== itemCount) {
+    return undefined;
+  }
+
+  const expectedPositions = new Set(Array.from({ length: itemCount }, (_, index) => index));
+  for (const item of items) {
+    if (!expectedPositions.delete(item.position)) {
+      return undefined;
+    }
+  }
+
+  return expectedPositions.size === 0 ? items : undefined;
+}
+
 export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): MealEditPayload {
   const mealRevisionId = getRequiredString(meal.mealRevisionId);
   if (!mealRevisionId) {
@@ -93,7 +112,7 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
   }
 
   const itemCount = normalizeItemCount(meal.itemCount);
-  const items = normalizeMealItems((meal as { items?: unknown }).items);
+  const items = getCompleteMealItems((meal as { items?: unknown }).items, itemCount);
   if (itemCount > 1 && !items) {
     throw new Error("MEAL_AUTHORITY_REQUIRED");
   }
@@ -153,7 +172,11 @@ export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | unde
     return null;
   }
 
-  const items = normalizeMealItems((loggedMeal as { items?: unknown }).items);
+  const itemCount = normalizeItemCount(loggedMeal.itemCount);
+  const items = getCompleteMealItems((loggedMeal as { items?: unknown }).items, itemCount);
+  if (itemCount > 1 && !items) {
+    return null;
+  }
 
   return {
     mealId: loggedMeal.mealId,
@@ -164,7 +187,7 @@ export function buildReceiptMealEditPayload(loggedMeal: LoggedMealReceipt | unde
     protein: loggedMeal.protein,
     carbs: loggedMeal.carbs,
     fat: loggedMeal.fat,
-    itemCount: normalizeItemCount(loggedMeal.itemCount),
+    itemCount,
     ...(items ? { items } : {}),
     imageAssetId: loggedMeal.imageAssetId ?? null,
     imageUrl: loggedMeal.imageUrl ?? null,
