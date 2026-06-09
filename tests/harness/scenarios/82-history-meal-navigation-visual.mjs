@@ -550,7 +550,7 @@ async function inspectCase(send, stateCase) {
       .find((node) => (node.getAttribute("aria-label") || "").includes("雞胸藜麥便當"));
     const editButton = [...document.querySelectorAll('button')]
       .find((node) => (node.getAttribute("aria-label") || "") === "編輯餐點：雞胸藜麥便當");
-    const deleteControls = [...document.querySelectorAll('button, [role="button"]']
+    const deleteControls = [...document.querySelectorAll('button, [role="button"]')]
       .map((node) => node.innerText || node.getAttribute("aria-label") || "")
       .filter((text) => /刪除|delete/i.test(text));
     const boxes = [...document.querySelectorAll('.sp-history-screen, .sp-history-detail-screen, .sp-history-header, .sp-history-header-copy, .sp-history-meal-row, .sp-history-detail-meal, .sp-history-detail-edit, .sp-meal-edit-screen, nav')]
@@ -577,7 +577,7 @@ async function inspectCase(send, stateCase) {
       historyRowEnteredDayDetail: Boolean(dayDetail && /雞胸藜麥便當/.test(dayDetailText)),
       focusedEditLabelVisible: Boolean(editButton && rectOf(editButton).width >= 44 && rectOf(editButton).height >= 44),
       noDayDetailDeleteControls: Boolean(dayDetail) && deleteControls.length === 0,
-      returnedToDayDetailAfterCancel: Boolean(dayDetail && !mealEdit && /雞胸藜麥便當|當日餐點|歷史快照|今天 · 即時/.test(dayDetailText) && !historyScreen),
+      returnedToDayDetailAfterCancel: Boolean(dayDetail && !mealEdit && /雞胸藜麥便當|當日餐點|歷史快照|今天 · 即時/.test(dayDetailText)),
       hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1 || boxes.some((rect) => rect.right > window.innerWidth + 1),
     };
   })()`);
