@@ -27,6 +27,7 @@ describe("History screen source contract", () => {
       "SportChevronRightIcon",
       "buildHistoryWeek",
       "buildHistoryWeekStats",
+      "getHistoryWeekHeaderLabel",
       "getHistorySportStatusMeta",
       "getHistoryTrends",
       "getHistoryDaySnapshot",
@@ -38,7 +39,6 @@ describe("History screen source contract", () => {
 
   it("renders locked Traditional Chinese sport History copy", () => {
     for (const expected of [
-      "本週",
       "查看上一週",
       "查看下一週",
       "平均熱量",
@@ -54,6 +54,22 @@ describe("History screen source contract", () => {
     ]) {
       assert.match(source, escapedPattern(expected));
     }
+  });
+
+  it("NAV-03 renders relative week label with the visible date range", () => {
+    assert.match(
+      source,
+      /<h1>\{getHistoryWeekHeaderLabel\(weekStartKey, todayKey\)\}<\/h1>/,
+      "NAV-03 History header label must come from relative week helper",
+    );
+    assert.match(
+      source,
+      /<div>\{formatHistoryDateRange\(weekStartKey, weekEndKey\)\}<\/div>/,
+      "NAV-03 History header must keep the visible date range subtitle",
+    );
+    assert.match(source, /const nextWeekIsFuture = nextWeekStartKey > todayKey/);
+    assert.match(source, /disabled=\{nextWeekIsFuture\}/);
+    assert.doesNotMatch(source, /<h1>本週<\/h1>/);
   });
 
   it("NAV-01 opens History meal rows as read-only Day Detail targets", () => {

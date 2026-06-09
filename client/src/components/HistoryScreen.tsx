@@ -3,6 +3,7 @@ import { getHistoryDaySnapshot, getHistoryTrends } from "../api.js";
 import {
   buildHistoryWeek,
   buildHistoryWeekStats,
+  getHistoryWeekHeaderLabel,
   getHistorySportStatusMeta,
   getMondayWeekStart,
   selectSameWeekdayOrClosestAvailable,
@@ -11,7 +12,6 @@ import {
   type HistoryWeekDay,
 } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
-import { buildHistoryMealEditPayload } from "../meal-edit-payload.js";
 import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, HistoryTrendResponse, MealEntry } from "../types.js";
 import { formatMealRowTime, getDisplayMealLabel, getMealMacroSummary } from "./HomeScreen.js";
@@ -222,13 +222,11 @@ function TimelineRows({
   selectedDateKey,
   todayKey,
   openDayDetail,
-  openMealEdit,
 }: {
   meals: MealEntry[];
   selectedDateKey: string;
   todayKey: string;
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
-  openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
 }) {
   const sortedMeals = [...meals].sort(
     (left, right) => new Date(left.loggedAt).getTime() - new Date(right.loggedAt).getTime(),
@@ -246,7 +244,8 @@ function TimelineRows({
   }
 
   function onMealOpen(meal: MealEntry) {
-    openMealEdit(buildHistoryMealEditPayload(meal, selectedDateKey), "history");
+    const label = selectedDateKey === todayKey ? "today-live" : "history-snapshot";
+    openDayDetail({ dateKey: selectedDateKey, targetMealId: meal.id, label }, "history");
   }
 
   function handleTimelineKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -272,7 +271,7 @@ function TimelineRows({
           <button
             type="button"
             className="sp-history-meal-row"
-            aria-label={`編輯 ${getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)} ${meal.foodName}`}
+            aria-label={`開啟餐點詳情：${meal.foodName}`}
             onClick={(event) => {
               event.stopPropagation();
               onMealOpen(meal);
@@ -320,7 +319,6 @@ function TimelinePanel({
   showInlineDayPending,
   openDayDetail,
   openConfirmedEmptyDayDetail,
-  openMealEdit,
 }: {
   selectedDateKey: string;
   todayKey: string;
@@ -331,7 +329,6 @@ function TimelinePanel({
   showInlineDayPending: boolean;
   openDayDetail: ReturnType<typeof useStore.getState>["openDayDetail"];
   openConfirmedEmptyDayDetail: () => void;
-  openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
 }) {
   const meals = snapshot?.meals ?? [];
   const displayMealCount = snapshot === null ? null : meals.length;
@@ -382,7 +379,6 @@ function TimelinePanel({
           selectedDateKey={selectedDateKey}
           todayKey={todayKey}
           openDayDetail={openDayDetail}
-          openMealEdit={openMealEdit}
         />
       ) : null}
     </section>
@@ -393,7 +389,6 @@ export function HistoryScreen() {
   const dailyTargets = useStore((s) => s.dailyTargets);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const openDayDetail = useStore((s) => s.openDayDetail);
-  const openMealEdit = useStore((s) => s.openMealEdit);
   const lastMealMutation = useStore((s) => s.lastMealMutation);
   const todayKey = useMemo(() => formatLocalDate(new Date()), []);
   const [weekStartKey, setWeekStartKey] = useState(() => getMondayWeekStart(todayKey));
@@ -614,7 +609,7 @@ export function HistoryScreen() {
             <SportChevronLeftIcon size={18} />
           </SportIconButton>
           <div className="sp-history-header-copy">
-            <h1>本週</h1>
+            <h1>{getHistoryWeekHeaderLabel(weekStartKey, todayKey)}</h1>
             <div>{formatHistoryDateRange(weekStartKey, weekEndKey)}</div>
           </div>
           <SportIconButton aria-label="查看下一週" onClick={() => moveWeek(1)} disabled={nextWeekIsFuture}>
@@ -657,7 +652,6 @@ export function HistoryScreen() {
             showInlineDayPending={showInlineDayPending}
             openDayDetail={openDayDetail}
             openConfirmedEmptyDayDetail={openConfirmedEmptyDayDetail}
-            openMealEdit={openMealEdit}
           />
         </main>
       </SportScreen>
