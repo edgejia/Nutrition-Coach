@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getHistoryDaySnapshot } from "../api.js";
 import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
+import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
 import { useStore } from "../store.js";
+import type { DayDetailPayload } from "../types.js";
 import type { HistoryDaySnapshot, MealEntry } from "../types.js";
 import { formatMealRowTime, getDisplayMealLabel } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportChevronLeftIcon } from "./SportIcons.js";
+import { SportChevronLeftIcon, SportEditIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportProgressBar, SportScreen } from "./SportPrimitives.js";
 
 function formatDetailDate(dateKey: string): string {
@@ -44,14 +46,25 @@ function getProgressVariant(tone: ReturnType<typeof getHistorySportStatusMeta>["
   return "default";
 }
 
+function getFocusedEditPayload(meal: MealEntry, dateKey: string, targetMealId: string | undefined) {
+  if (targetMealId === meal.id) {
+    const editPayload = buildMealEditPayloadIfComplete(meal, dateKey);
+    return editPayload;
+  }
+
+  return null;
+}
+
 function MealDetailRow({
   meal,
   registerRef,
   highlighted,
+  onEdit,
 }: {
   meal: MealEntry;
   registerRef: (node: HTMLDivElement | null) => void;
   highlighted: boolean;
+  onEdit?: () => void;
 }) {
   return (
     <article
@@ -81,6 +94,15 @@ function MealDetailRow({
           <span>{Math.round(meal.calories).toLocaleString("en-US")}</span>
           <small>kcal</small>
         </div>
+        {onEdit ? (
+          <SportIconButton
+            aria-label={`編輯餐點：${meal.foodName}`}
+            className="sp-history-detail-edit"
+            onClick={onEdit}
+          >
+            <SportEditIcon />
+          </SportIconButton>
+        ) : null}
       </div>
       <div className="sp-history-detail-meal-macros">
         <div>
@@ -104,6 +126,7 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const lastMealMutation = useStore((s) => s.lastMealMutation);
+  const openMealEdit = useStore((s) => s.openMealEdit);
   const todayKey = useMemo(() => formatLocalDate(new Date()), []);
   const payload = secondaryScreen?.screen === "dayDetail" ? secondaryScreen.payload : undefined;
   const dateKey = payload?.dateKey ?? todayKey;
@@ -244,9 +267,7 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
               </div>
             </div>
             <p className="sp-history-detail-note">
-              {isToday
-                ? "今天的資料會隨記錄更新；此頁仍維持只讀檢視。"
-                : "這是當日營養快照；點選歷史中的餐點可修改內容。"}
+              {isToday ? "今天的資料會隨記錄更新。" : "這是當日營養快照。"}
             </p>
           </SportCard>
 
@@ -273,17 +294,36 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
             </SportCard>
           ) : null}
           <div className="sp-history-detail-meal-list">
-            {snapshot?.meals.map((meal) => (
-              <MealDetailRow
-                key={meal.id}
-                meal={meal}
-                highlighted={highlightedMealId === meal.id}
-                registerRef={(node) => {
-                  if (node) mealRefs.current.set(meal.id, node);
-                  else mealRefs.current.delete(meal.id);
-                }}
-              />
-            ))}
+            {snapshot?.meals.map((meal) => {
+              const editPayload = getFocusedEditPayload(meal, dateKey, targetMealId);
+              const returnToDayDetail: DayDetailPayload | null =
+                editPayload && targetMealId
+                  ? {
+                      dateKey,
+                      targetMealId,
+                      label: payloadLabel,
+                    }
+                  : null;
+              const onEdit =
+                editPayload && returnToDayDetail
+                  ? () => {
+                      openMealEdit(editPayload, "history", { returnToDayDetail });
+                    }
+                  : undefined;
+
+              return (
+                <MealDetailRow
+                  key={meal.id}
+                  meal={meal}
+                  highlighted={highlightedMealId === meal.id}
+                  onEdit={onEdit}
+                  registerRef={(node) => {
+                    if (node) mealRefs.current.set(meal.id, node);
+                    else mealRefs.current.delete(meal.id);
+                  }}
+                />
+              );
+            })}
           </div>
         </main>
       </SportScreen>
