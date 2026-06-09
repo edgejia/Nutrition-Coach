@@ -155,6 +155,24 @@ export function shiftHistoryWeek(weekStartKey: string, deltaWeeks: -1 | 1): stri
   return addDays(weekStartKey, deltaWeeks * 7);
 }
 
+export function getHistoryWeekHeaderLabel(
+  weekStartKey: string,
+  todayKey: string,
+): "本週" | "上週" | "歷史紀錄" {
+  const currentWeekStartKey = getMondayWeekStart(todayKey);
+  const previousWeekStartKey = shiftHistoryWeek(currentWeekStartKey, -1);
+
+  if (weekStartKey === currentWeekStartKey) {
+    return "本週";
+  }
+
+  if (weekStartKey === previousWeekStartKey) {
+    return "上週";
+  }
+
+  return "歷史紀錄";
+}
+
 export function buildHistoryWeek(input: {
   weekStartKey: string;
   selectedDateKey: string;
