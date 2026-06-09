@@ -4353,6 +4353,15 @@ textarea {
   align-items: flex-end;
 }
 
+.sp-history-detail-edit {
+  min-width: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+  border-color: var(--sp-lime-line);
+  background: var(--sp-surface-3);
+  color: var(--sp-lime);
+}
+
 .sp-history-detail-meal-energy span {
   color: var(--sp-ink);
   font-family: var(--sp-font-display);
