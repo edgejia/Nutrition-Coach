@@ -92,7 +92,11 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
     throw new Error("MEAL_AUTHORITY_REQUIRED");
   }
 
+  const itemCount = normalizeItemCount(meal.itemCount);
   const items = normalizeMealItems((meal as { items?: unknown }).items);
+  if (itemCount > 1 && !items) {
+    throw new Error("MEAL_AUTHORITY_REQUIRED");
+  }
   const mealPeriod = isValidMealPeriod((meal as { mealPeriod?: unknown }).mealPeriod)
     ? meal.mealPeriod
     : undefined;
@@ -106,7 +110,7 @@ export function buildHistoryMealEditPayload(meal: MealEntry, dateKey: string): M
     protein: meal.protein,
     carbs: meal.carbs,
     fat: meal.fat,
-    itemCount: normalizeItemCount(meal.itemCount),
+    itemCount,
     ...(items ? { items } : {}),
     imageAssetId: meal.imageAssetId ?? null,
     imageUrl: meal.imageUrl ?? null,
