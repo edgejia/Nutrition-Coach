@@ -352,6 +352,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const payload = secondaryScreen?.screen === "mealEdit" ? secondaryScreen.payload : undefined;
   const origin = secondaryScreen?.screen === "mealEdit" ? secondaryScreen.origin : undefined;
+  const returnToDayDetail = secondaryScreen?.screen === "mealEdit" ? secondaryScreen.returnToDayDetail : undefined;
   const isGroupedPayload = Boolean(payload && payload.itemCount > 1);
   const [draft, setDraft] = useState<DraftState | null>(() => (payload && !isGroupedPayload ? createDraft(payload) : null));
   const [groupedDraftRows, setGroupedDraftRows] = useState<GroupedMealDraftRow[]>(() =>
@@ -628,7 +629,15 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     }
   }
 
-  const backLabel = origin === "home" ? "返回首頁" : origin === "chat" ? "返回對話" : origin === "history" ? "返回歷史" : "返回";
+  const backLabel = returnToDayDetail
+    ? "返回詳情"
+    : origin === "home"
+      ? "返回首頁"
+      : origin === "chat"
+        ? "返回對話"
+        : origin === "history"
+          ? "返回歷史"
+          : "返回";
 
   if (!payload) {
     return (
@@ -710,7 +719,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
           {hasAuthoritativeItems ? (
             <footer className="sp-meal-edit-footer">
               <button type="button" className="sp-meal-edit-cancel" onClick={handleGroupedExit} disabled={pending}>
-                取消
+                取消編輯
               </button>
               <button type="button" className="sp-meal-edit-save" onClick={handleSave} disabled={pending || staleBlocked}>
                 {pending ? "儲存餐點中..." : "儲存餐點"}
@@ -832,7 +841,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
 
         <footer className="sp-meal-edit-footer">
           <button type="button" className="sp-meal-edit-cancel" onClick={onBack} disabled={pending}>
-            取消
+            取消編輯
           </button>
           <button type="button" className="sp-meal-edit-save" onClick={handleSave} disabled={pending || staleBlocked}>
             {pending ? "儲存餐點中..." : "儲存餐點"}
