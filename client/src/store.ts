@@ -107,7 +107,11 @@ interface AppState {
   setActiveScreen: (screen: ActiveScreen) => void;
   openSecondaryScreen: (screen: Exclude<SecondaryScreen, "mealEdit">, origin?: PrimaryTab) => void;
   openDayDetail: (payload: DayDetailPayload, origin?: PrimaryTab) => void;
-  openMealEdit: (payload: MealEditPayload, origin?: PrimaryTab) => void;
+  openMealEdit: (
+    payload: MealEditPayload,
+    origin?: PrimaryTab,
+    options?: { returnToDayDetail?: DayDetailPayload },
+  ) => void;
   closeSecondaryScreen: () => void;
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
@@ -174,15 +178,29 @@ export const useStore = create<AppState>((set, get) => ({
         payload,
       },
     })),
-  openMealEdit: (payload, origin) =>
+  openMealEdit: (payload, origin, options) =>
     set((state) => ({
       secondaryScreen: {
         screen: "mealEdit",
         origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
         payload,
+        ...(options?.returnToDayDetail ? { returnToDayDetail: options.returnToDayDetail } : {}),
       },
     })),
-  closeSecondaryScreen: () => set({ secondaryScreen: null }),
+  closeSecondaryScreen: () =>
+    set((state) => {
+      const current = state.secondaryScreen;
+      if (current?.screen === "mealEdit" && current.returnToDayDetail) {
+        return {
+          secondaryScreen: {
+            screen: "dayDetail",
+            origin: current.origin,
+            payload: current.returnToDayDetail,
+          },
+        };
+      }
+      return { secondaryScreen: null };
+    }),
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
   setMeals: (meals) => {
     if (!isAuthoritativeMealEntryArray(meals)) {

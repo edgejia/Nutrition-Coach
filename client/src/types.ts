@@ -26,7 +26,7 @@ export interface MealEditPayload {
 export type SecondaryScreenState =
   | { screen: "dayDetail"; origin: PrimaryTab; payload?: DayDetailPayload }
   | { screen: "settings"; origin: PrimaryTab }
-  | { screen: "mealEdit"; origin: PrimaryTab; payload: MealEditPayload }
+  | { screen: "mealEdit"; origin: PrimaryTab; payload: MealEditPayload; returnToDayDetail?: DayDetailPayload }
   | null;
 export type ActiveScreen = PrimaryTab | "onboarding";
 
