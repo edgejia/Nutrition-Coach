@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import * as historyWeek from "../../client/src/lib/history-week.js";
 import {
   buildHistoryWeek,
   buildHistoryWeekStats,
@@ -12,6 +13,12 @@ import {
   type HistoryWeekDay,
 } from "../../client/src/lib/history-week.js";
 
+const getHistoryWeekHeaderLabel = (
+  historyWeek as typeof historyWeek & {
+    getHistoryWeekHeaderLabel?: (weekStartKey: string, todayKey: string) => string;
+  }
+).getHistoryWeekHeaderLabel;
+
 describe("history week helpers", () => {
   it("returns the Monday start for a date key", () => {
     assert.equal(getMondayWeekStart("2026-04-30"), "2026-04-27");
@@ -20,6 +27,22 @@ describe("history week helpers", () => {
   it("shifts week starts by whole weeks", () => {
     assert.equal(shiftHistoryWeek("2026-04-27", -1), "2026-04-20");
     assert.equal(shiftHistoryWeek("2026-04-27", 1), "2026-05-04");
+  });
+
+  it("NAV-03 labels visible History weeks relative to today without future copy", () => {
+    assert.equal(
+      typeof getHistoryWeekHeaderLabel,
+      "function",
+      "NAV-03 expected getHistoryWeekHeaderLabel helper to preserve 本週 / 上週 / 歷史紀錄 semantics",
+    );
+    assert.equal(getHistoryWeekHeaderLabel?.("2026-05-04", "2026-05-06"), "本週", "NAV-03 current week label");
+    assert.equal(getHistoryWeekHeaderLabel?.("2026-04-27", "2026-05-06"), "上週", "NAV-03 previous week label");
+    assert.equal(getHistoryWeekHeaderLabel?.("2026-04-20", "2026-05-06"), "歷史紀錄", "NAV-03 older week label");
+    assert.notEqual(
+      getHistoryWeekHeaderLabel?.("2026-05-11", "2026-05-06"),
+      "下週",
+      "NAV-03 Phase 82 preserves the future-week guard and has no 下週 support",
+    );
   });
 
   it("validates real local date keys without throwing", () => {

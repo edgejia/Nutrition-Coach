@@ -56,16 +56,33 @@ describe("History screen source contract", () => {
     }
   });
 
-  it("opens Meal Edit from meal rows with complete History-origin payload", () => {
+  it("NAV-01 opens History meal rows as read-only Day Detail targets", () => {
     for (const expected of [
-      "buildHistoryMealEditPayload",
-      "openMealEdit",
+      "openDayDetail",
       "event.stopPropagation()",
-      "buildHistoryMealEditPayload(meal, selectedDateKey)",
+      "targetMealId: meal.id",
+      "openDayDetail({ dateKey: selectedDateKey, targetMealId: meal.id, label }, \"history\")",
+      "開啟餐點詳情",
       '"history"',
     ]) {
-      assert.match(source, escapedPattern(expected));
+      assert.match(source, escapedPattern(expected), `NAV-01 History row entry must include ${expected}`);
     }
+
+    assert.doesNotMatch(
+      source,
+      /function onMealOpen[\s\S]*openMealEdit/,
+      "NAV-01 History row tap must not call openMealEdit directly",
+    );
+    assert.doesNotMatch(
+      source,
+      escapedPattern("buildHistoryMealEditPayload(meal, selectedDateKey)"),
+      "NAV-01 History row tap must reject buildHistoryMealEditPayload(meal, selectedDateKey)",
+    );
+    assert.doesNotMatch(
+      source,
+      /aria-label=\{`編輯/,
+      "NAV-01 History row aria-label must not begin with 編輯",
+    );
   });
 
   it("renders History timeline thumbnails from meal-level imageUrl inside the row target", () => {
@@ -76,7 +93,7 @@ describe("History screen source contract", () => {
       "sp-history-meal-fallback",
       "meal.imageUrl",
       "無照片",
-      "buildHistoryMealEditPayload(meal, selectedDateKey)",
+      "開啟餐點詳情",
     ]) {
       assert.match(source, escapedPattern(expected));
     }
@@ -104,7 +121,11 @@ describe("History screen source contract", () => {
     assert.match(source, /sortedMeals\.map\(\(meal\) =>/);
     assert.match(source, /import \{ formatMealRowTime, getDisplayMealLabel, getMealMacroSummary \} from "\.\/HomeScreen\.js";/);
     assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\} · \{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\}/);
-    assert.match(source, /aria-label=\{`編輯 \$\{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\} \$\{meal\.foodName\}`\}/);
+    assert.match(
+      source,
+      /aria-label=\{`開啟餐點詳情：\$\{meal\.foodName\}`\}/,
+      "NAV-01 History row accessible label must describe detail browsing",
+    );
     assert.doesNotMatch(source, /getDisplayMealLabel\(meal\.loggedAt\)/);
     assert.match(source, /\{displayMealCount === null \? "--" : displayMealCount\}筆/);
     assert.doesNotMatch(source, /\{meals\.length\} entries/);
@@ -255,7 +276,7 @@ describe("History screen source contract", () => {
   it("uses day snapshots as the only timeline row and Meal Edit authority", () => {
     assert.match(source, /const meals = snapshot\?\.meals \?\? \[\]/);
     assert.match(source, /snapshot !== null && meals\.length > 0[\s\S]*<TimelineRows[\s\S]*meals=\{meals\}/);
-    assert.match(source, /buildHistoryMealEditPayload\(meal, selectedDateKey\)/);
+    assert.match(source, /openDayDetail[\s\S]*targetMealId: meal\.id/);
     assert.doesNotMatch(source, /function TimelinePanel[\s\S]*selectedWeekDay[\s\S]*<TimelineRows/);
     assert.doesNotMatch(source, /function TimelinePanel[\s\S]*selectedDayMealCount[\s\S]*<TimelineRows/);
     assert.doesNotMatch(source, /trends(?:Cache|\.daily|\.averages)[\s\S]*buildHistoryMealEditPayload/);
