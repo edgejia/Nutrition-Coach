@@ -1,5 +1,28 @@
 # 更新日誌
 
+## v2.7 - 2026-06-09
+
+### 新增
+
+- 失敗的圖片辨識現在在 `log_food` 工具邊界就被拒絕,不會建立假的餐點列、收據或 summary 變動欄位;大圖與小圖失敗路徑都顯示一致的 no-save 引導。
+- 已刪除的餐點收據現在 fail-closed:無法與目前攝取總量矛盾,後續聊天追問也無法復活已刪除狀態。
+- Home 暫存聊天草稿的 retry 與 cancel 現在最多只留一個可見的失敗 artifact,取消會清掉失敗橫幅與其連結的失敗/暫存內容。
+- Onboarding 偏好 chip 重複點擊不再重複產生文字,選取狀態更清楚且保留 freeform 輸入。
+- History 餐點列改為 detail-first 導覽:點列先進唯讀 Day Detail 並帶入 `targetMealId`,僅在有 authoritative 編輯權限時露出聚焦編輯,刪除仍限制在 Meal Edit 內。
+
+### 變更
+
+- 使用者主動停止的串流改顯示中性的「已停止」狀態文案,真正的失敗仍保留失敗文案;不支援的上傳檔在出現看似成功的附件狀態前就被拒絕。
+- 390x844 行動視窗的 Meal Edit 控制項與展開的 Home 快捷動作不再被底部導覽遮擋且維持可點按;餐點 item 編輯/刪除控制項移除英文可見標籤並保留本地化無障礙標籤。
+- 空 Chat starter 引導改為精簡、gated、行動端乾淨呈現;History 週標題改用相對標籤區分本週、上週與更早日期範圍。
+- v2.7 closeout 維持本機驗證範圍;沒有 push、merge、deploy、Railway smoke、staging promotion 或 main promotion。
+
+### 驗證
+
+- Phase 78-82 verification 全部通過,涵蓋 failed-recognition no-save、deleted receipt integrity、chat draft/stream/upload lifecycle、onboarding 去重、mobile action safety 與 History detail-first navigation。
+- v2.7 milestone audit 通過 `17/17` scoped requirements、`5/5` phases、cross-phase integration 與 E2E flow checks;Nyquist validation 為 partial-nonblocking(Phase 81 保留為 planning metadata,非 release blocker)。
+- Closeout 前本機 `yarn release:check` 通過:TypeScript、`1,414` node tests、frontend production build 全部 green。Generated proof remains metadata-only.
+
 ## v2.6 - 2026-06-04
 
 ### 新增
