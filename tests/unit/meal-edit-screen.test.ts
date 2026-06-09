@@ -50,7 +50,7 @@ describe("Meal Edit source contract", () => {
       "尚未附上餐點照片",
       "這筆餐點是文字記錄，仍可編輯名稱與營養數值。",
       "圖片載入失敗，餐點資料仍可編輯。請稍後再試。",
-      "取消",
+      "取消編輯",
       "儲存",
       "PersistedAssetImage",
     ]) {
@@ -81,8 +81,31 @@ describe("Meal Edit source contract", () => {
   it("uses origin-specific back labels for Home, Chat, and History Meal Edit entry", () => {
     assert.match(source, /origin === "home"\s*\?\s*"返回首頁"/);
     assert.match(source, /origin === "chat"\s*\?\s*"返回對話"/);
-    assert.match(source, /origin === "history"\s*\?\s*"返回歷史"/);
+    assert.match(
+      source,
+      /returnToDayDetail[\s\S]{0,240}"返回詳情"/,
+      "NAV-02 Meal Edit opened from Day Detail should use 返回詳情",
+    );
+    assert.match(source, /origin === "history"[\s\S]{0,240}"返回歷史"/);
     assert.match(source, escapedPattern("aria-label={backLabel}"));
+  });
+
+  it("NAV-02 preserves Day Detail return context while keeping delete inside Meal Edit", () => {
+    for (const expected of [
+      "returnToDayDetail",
+      "返回詳情",
+      "取消編輯",
+      "deleteMeal",
+      "刪除這筆餐點？系統會保留歷史紀錄。",
+    ]) {
+      assert.match(source, escapedPattern(expected), `NAV-02 Meal Edit source must include ${expected}`);
+    }
+
+    assert.match(
+      source,
+      /onBack\(\)/,
+      "NAV-02 save/cancel/back still routes through the existing Meal Edit exit boundary",
+    );
   });
 
   it("handles stale revision conflicts with deterministic copy and stale-editor blocking", () => {

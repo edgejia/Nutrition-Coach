@@ -100,4 +100,32 @@ describe("History Day Detail source contract", () => {
       /<PersistedAssetImage[\s\S]*src=\{meal\.imageUrl\}[\s\S]*imgClassName="sp-history-detail-meal-image"[\s\S]*fallbackClassName="sp-history-detail-meal-image sp-history-detail-meal-fallback"/,
     );
   });
+
+  it("NAV-02 wires focused-row Day Detail edit to complete payload authority", async () => {
+    const dayDetail = await readSource("../../client/src/components/HistoryDayDetailScreen.tsx");
+
+    for (const expected of [
+      'import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";',
+      "SportEditIcon",
+      "SportIconButton",
+      "sp-history-detail-edit",
+      "編輯餐點：",
+      "targetMealId === meal.id",
+      "const editPayload = buildMealEditPayloadIfComplete(meal, dateKey)",
+      'openMealEdit(editPayload, "history"',
+      "returnToDayDetail",
+    ]) {
+      assert.match(dayDetail, escapedPattern(expected), `NAV-02 focused edit source must include ${expected}`);
+    }
+
+    assert.doesNotMatch(
+      dayDetail,
+      /highlightedMealId === meal\.id[\s\S]{0,240}(?:buildMealEditPayloadIfComplete|openMealEdit|sp-history-detail-edit)/,
+      "NAV-02 edit visibility must stay tied to targetMealId after the temporary highlight fades",
+    );
+
+    for (const rejected of ["handleDelete", "deleteMeal", "window.confirm", "刪除", "setDailySummary", "setMeals"]) {
+      assert.doesNotMatch(dayDetail, escapedPattern(rejected), `NAV-02 Day Detail must not introduce ${rejected}`);
+    }
+  });
 });

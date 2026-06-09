@@ -63,6 +63,8 @@ describe("AppStore", () => {
       meals: [],
       pendingHomeChatDraft: null,
       lastMealMutation: null,
+      showSettings: false,
+      secondaryScreen: null,
       sending: false,
       provisionalBubble: null,
     });
@@ -364,6 +366,49 @@ describe("AppStore", () => {
       },
     });
     assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-3");
+  });
+
+  it("NAV-02 returns Meal Edit launched from Day Detail back to the same detail context", () => {
+    const returnToDayDetail = {
+      dateKey: "2026-05-06",
+      targetMealId: "meal-focused",
+      label: "history-snapshot" as const,
+    };
+    const payload = {
+      mealId: "meal-focused",
+      dateKey: "2026-05-06",
+      foodName: "雞腿便當",
+      mealRevisionId: "meal-focused:r1",
+      calories: 640,
+      protein: 36,
+      carbs: 72,
+      fat: 18,
+      itemCount: 1,
+    };
+
+    useStore.getState().openMealEdit(payload, "history", { returnToDayDetail });
+
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "mealEdit",
+      origin: "history",
+      payload,
+      returnToDayDetail,
+    }, "NAV-02 openMealEdit(payload, \"history\", { returnToDayDetail }) must retain focused Day Detail context");
+
+    useStore.getState().closeSecondaryScreen();
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "dayDetail",
+      origin: "history",
+      payload: returnToDayDetail,
+    }, "NAV-02 closeSecondaryScreen() must restore Day Detail when Meal Edit has returnToDayDetail");
+
+    useStore.getState().openMealEdit(payload, "home");
+    useStore.getState().closeSecondaryScreen();
+    assert.equal(useStore.getState().secondaryScreen, null, "NAV-02 Home Meal Edit closes to null");
+
+    useStore.getState().openMealEdit(payload, "chat");
+    useStore.getState().closeSecondaryScreen();
+    assert.equal(useStore.getState().secondaryScreen, null, "NAV-02 Chat Meal Edit closes to null");
   });
 
   it("recordMealMutation tracks affected date with a monotonic nonce", () => {

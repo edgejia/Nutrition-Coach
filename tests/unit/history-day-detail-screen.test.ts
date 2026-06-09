@@ -30,8 +30,8 @@ describe("History Day Detail source contract", () => {
       "歷史快照",
       "今天 · 即時",
       "當日餐點",
-      "這是當日營養快照；點選歷史中的餐點可修改內容。",
-      "今天的資料會隨記錄更新；此頁仍維持只讀檢視。",
+      "這是當日營養快照。",
+      "今天的資料會隨記錄更新。",
       "<span>蛋白質</span>",
       "<span>碳水</span>",
       "<span>脂肪</span>",
@@ -75,20 +75,48 @@ describe("History Day Detail source contract", () => {
     assert.doesNotMatch(detailSource, /new Intl\.DateTimeFormat\("zh-TW", \{ hour: "2-digit", minute: "2-digit", hour12: false \}\)\.format\(\s*new Date\(meal\.loggedAt\),\s*\)/);
   });
 
-  it("does not expose edit, delete, save, correction, or live-summary mutation controls", () => {
+  it("NAV-02 exposes one focused eligible Day Detail edit handoff", () => {
+    for (const expected of [
+      "buildMealEditPayloadIfComplete",
+      "openMealEdit(editPayload, \"history\"",
+      "returnToDayDetail",
+      "targetMealId === meal.id",
+      "sp-history-detail-edit",
+      "編輯餐點：",
+      "SportIconButton",
+      "SportEditIcon",
+    ]) {
+      assert.match(detailSource, escapedPattern(expected), `NAV-02 focused Day Detail edit must include ${expected}`);
+    }
+
+    assert.doesNotMatch(
+      detailSource,
+      /highlightedMealId === meal\.id[\s\S]{0,240}(?:openMealEdit|sp-history-detail-edit|編輯餐點)/,
+      "NAV-02 edit visibility must use targetMealId, not highlightedMealId",
+    );
+  });
+
+  it("NAV-02 keeps Day Detail destructive controls confined to Meal Edit", () => {
     for (const rejected of [
       "deleteMeal",
+      "handleDelete",
+      "window.confirm",
       "onDelete",
       "調整",
       "刪除",
       "儲存",
       "新增餐點",
       "date picker",
-      "openMealEdit",
       "setDailySummary",
       "setMeals",
     ]) {
-      assert.doesNotMatch(detailSource, escapedPattern(rejected));
+      assert.doesNotMatch(detailSource, escapedPattern(rejected), `NAV-02 Day Detail must not expose ${rejected}`);
+    }
+  });
+
+  it("NAV-02 does not add disabled edit guidance for valid read-only snapshots", () => {
+    for (const rejected of ["找不到項目明細", "無法編輯", "暫時不能編輯", "請重新整理後再編輯", "disabled"]) {
+      assert.doesNotMatch(detailSource, escapedPattern(rejected), `NAV-02 read-only snapshot should not show ${rejected}`);
     }
   });
 

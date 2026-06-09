@@ -212,6 +212,41 @@ describe("meal edit payload builders", () => {
     assert.equal(payload?.mealPeriod, "lunch");
   });
 
+  it("NAV-02 grouped History-origin rows without authoritative item details fail closed", () => {
+    const groupedWithoutItems = {
+      id: "history-grouped-missing-items",
+      mealRevisionId: "history-grouped-missing-items:r1",
+      foodName: "雞腿、白飯",
+      calories: 640,
+      protein: 36,
+      carbs: 72,
+      fat: 18,
+      itemCount: 2,
+      imageAssetId: null,
+      imageUrl: null,
+      loggedAt: "2026-05-06T12:00:00.000+08:00",
+    };
+
+    assert.equal(
+      buildMealEditPayloadIfComplete(groupedWithoutItems, "2026-05-06"),
+      null,
+      "NAV-02 grouped History-origin rows with itemCount > 1 and no items must not open 找不到項目明細",
+    );
+    assert.equal(
+      buildMealEditPayloadIfComplete(
+        {
+          ...groupedWithoutItems,
+          id: "history-grouped-invalid-items",
+          mealRevisionId: "history-grouped-invalid-items:r1",
+          items: [{ name: "", position: 0, calories: 100, protein: 10, carbs: 10, fat: 4 }],
+        } as any,
+        "2026-05-06",
+      ),
+      null,
+      "NAV-02 grouped History-origin rows with invalid items must fail closed",
+    );
+  });
+
   it("keeps MealItemDetail media-free as the grouped item DTO boundary", () => {
     const mealItemDetailBody = typesSource.match(/export interface MealItemDetail \{(?<body>[\s\S]+?)\n\}/)?.groups?.body ?? "";
     assert.ok(mealItemDetailBody, "MealItemDetail interface must be present");
