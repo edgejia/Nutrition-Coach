@@ -103,6 +103,12 @@ export interface ToolExecutionResult {
   success?: boolean;
   executed?: boolean;
   failureReason?: "validation" | "guard" | "execute";
+  // Phase 83: typed diagnostic facts for controlled validation failures so the
+  // orchestrator never reparses serialized tool JSON (Phase 68 D-01/D-07).
+  validationDiagnostic?: {
+    reason: string; // e.g. "schema_validation" — redacted diagnostic only
+    fields?: string[]; // redacted validation field paths only
+  };
   clarification?: ToolClarificationFact;
   controlledReply?: {
     source: "renderer";
@@ -2249,10 +2255,17 @@ export async function executeTool(
       && outcome.failureReason === "validation"
     ) {
       let failureKind: string | undefined;
+      let failureFields: string[] | undefined;
       try {
         const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
         if (typeof parsed.reason === "string") {
           failureKind = parsed.reason;
+        }
+        if (
+          Array.isArray(parsed.fields)
+          && parsed.fields.every((field) => typeof field === "string")
+        ) {
+          failureFields = parsed.fields as string[];
         }
       } catch {
         // result was not JSON; fall through to the FatalToolError conversion
@@ -2264,6 +2277,10 @@ export async function executeTool(
           success: false,
           executed: false,
           failureReason: outcome.failureReason,
+          validationDiagnostic: {
+            reason: failureKind,
+            ...(failureFields ? { fields: failureFields } : {}),
+          },
         };
       }
     }

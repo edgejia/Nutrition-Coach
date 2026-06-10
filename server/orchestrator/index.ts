@@ -1083,6 +1083,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 deletedMeal,
                 summaryHistoryFacts: toolSummaryHistoryFacts,
                 controlledReply,
+                validationDiagnostic,
               } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
@@ -1119,27 +1120,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (success === false) {
                 // Phase 83 (D-02): log_food schema_validation failures now reach
                 // this controlled feedback path instead of the FatalToolError
-                // catch below. Carry the redacted diagnostic reason/fields from
-                // the controlled failure JSON so the log_food_validation_failed
-                // event keeps its sanitized field metadata (T-83-03).
-                let failureDiagnosticReason: string | undefined;
-                let failureDiagnosticFields: string[] | undefined;
-                if (toolCall.function.name === "log_food" && failureReason === "validation") {
-                  try {
-                    const parsedFailure = JSON.parse(result) as Record<string, unknown>;
-                    if (typeof parsedFailure.reason === "string") {
-                      failureDiagnosticReason = parsedFailure.reason;
-                    }
-                    if (
-                      Array.isArray(parsedFailure.fields)
-                      && parsedFailure.fields.every((field) => typeof field === "string")
-                    ) {
-                      failureDiagnosticFields = parsedFailure.fields as string[];
-                    }
-                  } catch {
-                    // result was not JSON; emit the payload without diagnostics
-                  }
-                }
+                // catch below. executeTool supplies typed, redacted diagnostics
+                // (no serialized tool JSON is reparsed here — Phase 68 D-01) so
+                // the log_food_validation_failed event keeps its sanitized
+                // field metadata (T-83-03).
                 opts?.hooks?.onToolResult?.({
                   tool: toolCall.function.name,
                   success: false,
@@ -1147,8 +1131,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   failureReason,
                   summary,
                   updatedFields,
-                  ...(failureDiagnosticReason ? { reason: failureDiagnosticReason } : {}),
-                  ...(failureDiagnosticFields ? { fields: failureDiagnosticFields } : {}),
+                  ...(validationDiagnostic ? { reason: validationDiagnostic.reason } : {}),
+                  ...(validationDiagnostic?.fields ? { fields: validationDiagnostic.fields } : {}),
                 });
                 await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
                 toolResults.push({ toolCall, result });
