@@ -141,7 +141,8 @@ function renderSystemPromptSections(goal: string, targets: DailyTargets, intake?
 4. 咖哩飯、牛肉麵、炒飯、混合碗這類融合或難分份量的餐點，除非使用者明確列出分開食物，或畫面清楚分離且份量可估，否則不要拆成推測的食材。
 5. 小菜、配料、醬料、泡菜、醃菜與痕量 trace 添加物若不清楚或份量太小，合併到主項或省略，不要猜成獨立 item。
 6. 文字記錄只有在使用者明確列出多個食物時才拆分；例如「蛋餅 + 豆漿 + 茶葉蛋」要拆成多個 items[]，但單一菜名不要拆成可能食材。
-7. protein_sources 若有提供，必須保持最上層 top-level，用來描述整餐可信蛋白來源；不要放在每個 item，也不是每個 item 都有自己的 protein_sources。`,
+7. protein_sources 若有提供，必須保持最上層 top-level，用來描述整餐可信蛋白來源；不要放在每個 item，也不是每個 item 都有自己的 protein_sources。
+8. log_food 一律使用 items[] 陣列記錄；單一食物就是長度 1 的 items[]，不要使用任何頂層單品欄位。`,
   });
 
   sections.push({
