@@ -111,22 +111,18 @@ describe("ChatService", () => {
   });
 
   it("uses stored mealRevisionId despite rapid log and edit collision", async () => {
-    const olderMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "早餐蛋餅",
-      calories: 390,
-      protein: 14,
-      carbs: 42,
-      fat: 18,
+    const olderMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T00:30:00.000Z",
+      items: [
+        { foodName: "早餐蛋餅", calories: 390, protein: 14, carbs: 42, fat: 18 },
+      ],
     });
     await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "asset:collision-target" });
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 640,
-      protein: 30,
-      carbs: 78,
-      fat: 20,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: "asset:collision-target",
+      items: [
+        { foodName: "雞腿便當", calories: 640, protein: 30, carbs: 78, fat: 20 },
+      ],
     });
     const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     const assistant = await chatService.saveMessage(deviceId, "assistant", "已先依照片做保守估算並完成記錄。");
@@ -137,13 +133,11 @@ describe("ChatService", () => {
       mealTransactionId: loggedMeal.id,
       mealRevisionId: loggedMeal.mealRevisionId,
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "最新一餐",
-      calories: 900,
-      protein: 50,
-      carbs: 90,
-      fat: 36,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: "asset:newest-collision",
+      items: [
+        { foodName: "最新一餐", calories: 900, protein: 50, carbs: 90, fat: 36 },
+      ],
     });
     await foodLoggingService.updateMeal(deviceId, olderMeal.id, {
       expectedMealRevisionId: olderMeal.mealRevisionId,
@@ -179,14 +173,12 @@ describe("ChatService", () => {
   });
 
   it("keeps stale historical receipts display-only after a later meal update", async () => {
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 640,
-      protein: 30,
-      carbs: 78,
-      fat: 20,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: "asset:original-lunch",
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿便當", calories: 640, protein: 30, carbs: 78, fat: 20 },
+      ],
     });
     const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     const assistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄雞腿便當。");
@@ -223,14 +215,12 @@ describe("ChatService", () => {
   });
 
   it("keeps historical receipts display-only after the meal is deleted", async () => {
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯糰",
-      calories: 280,
-      protein: 14,
-      carbs: 36,
-      fat: 8,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: "asset:deleted-receipt",
       loggedAt: "2026-03-25T08:30:00.000Z",
+      items: [
+        { foodName: "鮭魚飯糰", calories: 280, protein: 14, carbs: 36, fat: 8 },
+      ],
     });
     const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     const assistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄鮭魚飯糰。");
@@ -264,13 +254,11 @@ describe("ChatService", () => {
   });
 
   it("projects loggedMeal receipt for persisted update_meal assistant replies", async () => {
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T12:00:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
     await chatService.saveMessage(deviceId, "user", "把 2026-03-25 的牛肉麵改成半碗");
     const updatedMeal = await foodLoggingService.updateMeal(deviceId, loggedMeal.id, {
@@ -321,14 +309,12 @@ describe("ChatService", () => {
   });
 
   it("projects explicit loggedMeal receipts even when the tool row is outside the fetched history window", async () => {
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯糰",
-      calories: 280,
-      protein: 14,
-      carbs: 36,
-      fat: 8,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T08:30:00.000Z",
       imagePath: "asset:salmon-rice",
+      items: [
+        { foodName: "鮭魚飯糰", calories: 280, protein: 14, carbs: 36, fat: 8 },
+      ],
     });
     await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
 
@@ -370,24 +356,20 @@ describe("ChatService", () => {
   });
 
   it("does not rehydrate receipts without explicit identity for legacy successful tools", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸便當",
-      calories: 620,
-      protein: 42,
-      carbs: 72,
-      fat: 18,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: "asset:legacy-log",
+      items: [
+        { foodName: "雞胸便當", calories: 620, protein: 42, carbs: 72, fat: 18 },
+      ],
     });
     await chatService.saveMessage(deviceId, "user", "我剛剛傳了照片");
     await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     await chatService.saveMessage(deviceId, "assistant", "已幫你記錄。");
 
-    const mealToEdit = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉飯",
-      calories: 700,
-      protein: 32,
-      carbs: 88,
-      fat: 22,
+    const mealToEdit = await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "牛肉飯", calories: 700, protein: 32, carbs: 88, fat: 22 },
+      ],
     });
     await foodLoggingService.updateMeal(deviceId, mealToEdit.id, {
       expectedMealRevisionId: mealToEdit.mealRevisionId,
@@ -408,12 +390,10 @@ describe("ChatService", () => {
   });
 
   it("does not project failed log_food tool attempts as editable receipts", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸便當",
-      calories: 620,
-      protein: 42,
-      carbs: 72,
-      fat: 18,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸便當", calories: 620, protein: 42, carbs: 72, fat: 18 },
+      ],
     });
     await chatService.saveMessage(deviceId, "user", "我吃了不確定的東西");
     await chatService.saveMessage(deviceId, "tool", "需要更多資訊", { toolName: "log_food" });
@@ -452,13 +432,11 @@ describe("ChatService", () => {
   });
 
   it("D-01/D-04/D-28 commits assistant reply, receipt, and structured outcome together", async () => {
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸便當",
-      calories: 620,
-      protein: 42,
-      carbs: 72,
-      fat: 18,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞胸便當", calories: 620, protein: 42, carbs: 72, fat: 18 },
+      ],
     });
     await chatService.saveMessage(deviceId, "user", "幫我記雞胸便當");
     const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
@@ -538,12 +516,10 @@ describe("ChatService", () => {
   });
 
   it("D-04 rolls back assistant and receipt rows when structured outcome persistence fails", async () => {
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉飯",
-      calories: 700,
-      protein: 32,
-      carbs: 88,
-      fat: 22,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "牛肉飯", calories: 700, protein: 32, carbs: 88, fat: 22 },
+      ],
     });
     const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     const beforeAssistants = await db
@@ -595,13 +571,11 @@ describe("ChatService", () => {
   });
 
   it("D-19/D-21/D-23 keeps legacy receipt display but omits compressed mutation claims without structured outcomes", async () => {
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯糰",
-      calories: 280,
-      protein: 14,
-      carbs: 36,
-      fat: 8,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T08:30:00.000Z",
+      items: [
+        { foodName: "鮭魚飯糰", calories: 280, protein: 14, carbs: 36, fat: 8 },
+      ],
     });
     const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
     const assistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄鮭魚飯糰。");
@@ -641,13 +615,11 @@ describe("ChatService", () => {
   });
 
   it("D-22/D-26 keeps stale and deleted legacy receipt identity display-only", async () => {
-    const staleMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 640,
-      protein: 30,
-      carbs: 78,
-      fat: 20,
+    const staleMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿便當", calories: 640, protein: 30, carbs: 78, fat: 20 },
+      ],
     });
     const staleAssistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄雞腿便當。");
     await chatService.saveMealReceiptReference({
@@ -661,13 +633,11 @@ describe("ChatService", () => {
       items: [{ foodName: "雞腿便當半份", calories: 360, protein: 20, carbs: 45, fat: 10 }],
     });
 
-    const deletedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯糰",
-      calories: 280,
-      protein: 14,
-      carbs: 36,
-      fat: 8,
+    const deletedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T08:30:00.000Z",
+      items: [
+        { foodName: "鮭魚飯糰", calories: 280, protein: 14, carbs: 36, fat: 8 },
+      ],
     });
     const deletedAssistant = await chatService.saveMessage(deviceId, "assistant", "已幫你記錄鮭魚飯糰。");
     await chatService.saveMealReceiptReference({
@@ -692,13 +662,11 @@ describe("ChatService", () => {
   });
 
   it("omits deleted log facts from compressed current-meal history while preserving delete confirmation", async () => {
-    const loggedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸便當",
-      calories: 620,
-      protein: 42,
-      carbs: 72,
-      fat: 18,
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞胸便當", calories: 620, protein: 42, carbs: 72, fat: 18 },
+      ],
     });
     await chatService.saveMessage(deviceId, "user", "幫我記雞胸便當");
     const tool = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });

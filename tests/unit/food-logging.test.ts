@@ -61,14 +61,12 @@ describe("FoodLoggingService", () => {
   it("logs a compatibility meal entry while writing only canonical transaction rows", async () => {
     await createOwnedAsset("asset-apple");
 
-    const meal = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const meal = await foodService.logGroupedMeal(deviceId, {
       imagePath: "asset:asset-apple",
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
 
     const transactions = await db.select().from(mealTransactions);
@@ -169,26 +167,22 @@ describe("FoodLoggingService", () => {
   });
 
   it("exposes null mealPeriod on compatibility entries without explicit authority", async () => {
-    const meal = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const meal = await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
 
     assert.equal(meal.mealPeriod, null);
   });
 
   it("returns the current revision identity when updating a compatibility meal entry", async () => {
-    const created = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const created = await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
 
     const updated = await foodService.updateMeal(deviceId, created.id, {
@@ -251,13 +245,11 @@ describe("FoodLoggingService", () => {
   });
 
   it("preserves the MEAL_NOT_FOUND contract for foreign deletes while soft-deleting the owner row", async () => {
-    const meal = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const meal = await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
 
     await assert.rejects(
@@ -292,15 +284,13 @@ describe("FoodLoggingService", () => {
   });
 
   it("passes expected revision through for compatibility updates and deletes only", async () => {
-    const meal = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const meal = await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
       expectedMealRevisionId: "ignored-create-token",
-    } as Parameters<typeof foodService.logFood>[1] & { expectedMealRevisionId: string });
+    } as Parameters<typeof foodService.logGroupedMeal>[1] & { expectedMealRevisionId: string });
 
     assert.equal(meal.mealRevisionId, `${meal.id}:r1`);
 

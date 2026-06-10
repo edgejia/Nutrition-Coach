@@ -55,21 +55,17 @@ describe("summary outcome helper", () => {
     const foodLoggingService = createFoodLoggingService(db);
     const deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
 
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "meal one",
-      calories: 240,
-      protein: 20,
-      carbs: 22,
-      fat: 8,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T03:30:00.000Z",
+      items: [
+        { foodName: "meal one", calories: 240, protein: 20, carbs: 22, fat: 8 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "meal two",
-      calories: 160,
-      protein: 10,
-      carbs: 18,
-      fat: 5,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T10:00:00.000Z",
+      items: [
+        { foodName: "meal two", calories: 160, protein: 10, carbs: 18, fat: 5 },
+      ],
     });
 
     const outcome = await buildSummaryOutcomeAfterMealCommit({

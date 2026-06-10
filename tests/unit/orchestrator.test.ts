@@ -715,13 +715,11 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("returns affectedDate for non-today summary queries", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 220,
-      protein: 32,
-      carbs: 0,
-      fat: 5,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 32, carbs: 0, fat: 5 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -1120,12 +1118,10 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("returns the update receipt when a later tool in the same batch fails fatally", async () => {
-    const seeded = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 620,
-      protein: 24,
-      carbs: 70,
-      fat: 18,
+    const seeded = await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [
@@ -1182,12 +1178,10 @@ describe("Orchestrator - didLogMeal", () => {
     const localChatService = createChatService(db);
     const localLLM = new MockLLMProvider();
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
-    const seeded = await localFoodLoggingService.logFood(localDeviceId, {
-      foodName: "雞腿便當",
-      calories: 620,
-      protein: 24,
-      carbs: 70,
-      fat: 18,
+    const seeded = await localFoodLoggingService.logGroupedMeal(localDeviceId, {
+      items: [
+        { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
+      ],
     });
 
     orchestrator = createOrchestrator({
@@ -1265,12 +1259,10 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("returns the delete receipt when a later tool in the same batch fails fatally", async () => {
-    const seeded = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 620,
-      protein: 24,
-      carbs: 70,
-      fat: 18,
+    const seeded = await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [
@@ -1318,12 +1310,10 @@ describe("Orchestrator - didLogMeal", () => {
     const localChatService = createChatService(db);
     const localLLM = new MockLLMProvider();
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
-    const seeded = await localFoodLoggingService.logFood(localDeviceId, {
-      foodName: "雞腿便當",
-      calories: 620,
-      protein: 24,
-      carbs: 70,
-      fat: 18,
+    const seeded = await localFoodLoggingService.logGroupedMeal(localDeviceId, {
+      items: [
+        { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
+      ],
     });
 
     orchestrator = createOrchestrator({
@@ -1428,13 +1418,11 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("D-11/D-13/D-14 exposes a safe structured outcome fact for successful update_meal", async () => {
-    const seeded = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 620,
-      protein: 24,
-      carbs: 70,
-      fat: 18,
+    const seeded = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [
@@ -1488,13 +1476,11 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("D-11/D-13/D-14 exposes a safe structured outcome fact for successful delete_meal", async () => {
-    const seeded = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 620,
-      protein: 24,
-      carbs: 70,
-      fat: 18,
+    const seeded = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [
@@ -1596,12 +1582,10 @@ describe("Orchestrator - didLogMeal", () => {
     const controlledReplyResult = await orchestrator.handleMessage(deviceId, "幫我補昨天和前天吃蛋餅");
     assert.equal(getMutationOutcomeFact(controlledReplyResult), undefined);
 
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 220,
-      protein: 32,
-      carbs: 0,
-      fat: 5,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 32, carbs: 0, fat: 5 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -1952,12 +1936,10 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("recovers locally when the user replies 2 to a previously hallucinated choice prompt", async () => {
-    const meal = await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 540,
-      protein: 34,
-      carbs: 58,
-      fat: 18,
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 540, protein: 34, carbs: 58, fat: 18 },
+      ],
     });
     await chatService.saveMessage(deviceId, "user", "(圖片)", { imagePath: "asset:meal-image" });
     const toolMessage = await chatService.saveMessage(deviceId, "tool", "成功", { toolName: "log_food" });
@@ -2131,19 +2113,15 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("preserves get_daily_summary replies that mention recorded meals without mutation", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 450,
-      protein: 45,
-      carbs: 30,
-      fat: 10,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉", calories: 450, protein: 45, carbs: 30, fat: 10 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 450,
-      protein: 35,
-      carbs: 45,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 450, protein: 35, carbs: 45, fat: 14 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -2220,12 +2198,10 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("preserves summary history replies after get_daily_summary without mutation", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "豆腐飯",
-      calories: 520,
-      protein: 24,
-      carbs: 70,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐飯", calories: 520, protein: 24, carbs: 70, fat: 14 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -2248,19 +2224,15 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("composes summary history replies from persisted meal facts instead of unsafe model facts", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "豆腐飯",
-      calories: 520,
-      protein: 24,
-      carbs: 70,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐飯", calories: 520, protein: 24, carbs: 70, fat: 14 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 380,
-      protein: 28,
-      carbs: 42,
-      fat: 12,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 380, protein: 28, carbs: 42, fat: 12 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -2286,19 +2258,15 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("appends safe generic advice after deterministic summary history facts", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "豆腐飯",
-      calories: 520,
-      protein: 24,
-      carbs: 70,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐飯", calories: 520, protein: 24, carbs: 70, fat: 14 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 380,
-      protein: 28,
-      carbs: 42,
-      fat: 12,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 380, protein: 28, carbs: 42, fat: 12 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -2343,12 +2311,10 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("marks summary history plain replies as renderer owned", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "豆腐飯",
-      calories: 520,
-      protein: 24,
-      carbs: 70,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐飯", calories: 520, protein: 24, carbs: 70, fat: 14 },
+      ],
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -2658,13 +2624,11 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("fails closed on bare consent when goal and meal proposals are both active", async () => {
-    const meal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await goalProposalService.putLatest(deviceId, {
       calories: 1750,
@@ -2697,13 +2661,11 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("clears goal and meal proposals on broad cancel before any model call", async () => {
-    const meal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await goalProposalService.putLatest(deviceId, {
       calories: 1750,
@@ -2734,13 +2696,11 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("clears only the meal proposal on kind-specific meal cancel", async () => {
-    const meal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await goalProposalService.putLatest(deviceId, {
       calories: 1750,
@@ -2767,13 +2727,11 @@ describe("Orchestrator - didLogMeal", () => {
   });
 
   it("applies only the stored meal proposal on kind-specific meal approval without a model round", async () => {
-    const meal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await goalProposalService.putLatest(deviceId, {
       calories: 1750,

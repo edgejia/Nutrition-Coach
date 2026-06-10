@@ -69,21 +69,17 @@ describe("meal correction service", () => {
   });
 
   it("resolves recent-reference shorthand to the latest active meal", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "燕麥",
-      calories: 220,
-      protein: 10,
-      carbs: 35,
-      fat: 4,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T08:00:00.000Z",
+      items: [
+        { foodName: "燕麥", calories: 220, protein: 10, carbs: 35, fat: 4 },
+      ],
     });
-    const latest = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 680,
-      protein: 32,
-      carbs: 84,
-      fat: 22,
+    const latest = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 680, protein: 32, carbs: 84, fat: 22 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "update", "把剛剛那筆改成 500 卡");
@@ -96,29 +92,23 @@ describe("meal correction service", () => {
   });
 
   it("uses recent-reference shorthand as a recency tie-breaker instead of overriding a named food target", async () => {
-    const target = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const target = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 220,
-      protein: 30,
-      carbs: 0,
-      fat: 5,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:30:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 30, carbs: 0, fat: 5 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 220,
-      protein: 31,
-      carbs: 0,
-      fat: 5,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T13:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 31, carbs: 0, fat: 5 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(
@@ -133,13 +123,11 @@ describe("meal correction service", () => {
   });
 
   it("keeps a uniquely resolved target available for the next vague follow-up turn", async () => {
-    const target = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const target = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
 
     const firstPass = await mealCorrectionService.findMeals(
@@ -159,29 +147,23 @@ describe("meal correction service", () => {
   });
 
   it("accepts shared historical date phrases for meal targeting", async () => {
-    const marchMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const marchMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const lastFridayMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const lastFridayMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-10T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 28,
-      carbs: 76,
-      fat: 18,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
     });
 
     const slashDateResult = await mealCorrectionService.findMeals(
@@ -205,13 +187,11 @@ describe("meal correction service", () => {
   });
 
   it("clarifies unsupported or multi-date mutation targets instead of defaulting to today", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     const unsupported = await mealCorrectionService.findMeals(deviceId, "delete", "把前幾天的雞腿飯刪掉");
@@ -224,13 +204,11 @@ describe("meal correction service", () => {
   });
 
   it("supports partial single-item updates by preserving unspecified fields", async () => {
-    const original = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const original = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
 
     const result = await mealCorrectionService.updateMeal(deviceId, original.id, {
@@ -276,13 +254,11 @@ describe("meal correction service", () => {
         { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
       ],
     });
-    const unrelatedLunch = await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    const unrelatedLunch = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
 
     const itemOnly = await mealCorrectionService.findMeals(deviceId, "update", "滷蛋改成兩顆水煮蛋");
@@ -303,13 +279,11 @@ describe("meal correction service", () => {
   });
 
   it("clarifies instead of resolving a period-only candidate when named food terms are unmatched", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "update", "把中午鴨腿便當改成 500 卡");
@@ -319,21 +293,17 @@ describe("meal correction service", () => {
   });
 
   it("still allows meal-period-only targeting when the query has no named food terms", async () => {
-    const lunch = await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    const lunch = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "燕麥",
-      calories: 220,
-      protein: 10,
-      carbs: 35,
-      fat: 4,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T00:00:00.000Z",
+      items: [
+        { foodName: "燕麥", calories: 220, protein: 10, carbs: 35, fat: 4 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐那餐刪掉");
@@ -360,13 +330,11 @@ describe("meal correction service", () => {
   });
 
   it("projects inferred mealPeriod source for legacy correction candidates", async () => {
-    const breakfast = await foodLoggingService.logFood(deviceId, {
-      foodName: "燕麥",
-      calories: 220,
-      protein: 10,
-      carbs: 35,
-      fat: 4,
+    const breakfast = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T00:30:00.000Z",
+      items: [
+        { foodName: "燕麥", calories: 220, protein: 10, carbs: 35, fat: 4 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "delete", "把早餐那餐刪掉");
@@ -378,21 +346,17 @@ describe("meal correction service", () => {
   });
 
   it("does not coerce snack wording to a late-night correction target", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "鬆餅",
-      calories: 320,
-      protein: 7,
-      carbs: 48,
-      fat: 10,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T15:30:00+08:00",
+      items: [
+        { foodName: "鬆餅", calories: 320, protein: 7, carbs: 48, fat: 10 },
+      ],
     });
-    const lateNight = await foodLoggingService.logFood(deviceId, {
-      foodName: "鹽酥雞",
-      calories: 520,
-      protein: 24,
-      carbs: 38,
-      fat: 28,
+    const lateNight = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T23:30:00+08:00",
+      items: [
+        { foodName: "鹽酥雞", calories: 520, protein: 24, carbs: 38, fat: 28 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天下午茶那餐刪掉");
@@ -402,21 +366,17 @@ describe("meal correction service", () => {
   });
 
   it("does not reuse a pending late-night target for snack wording", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "鬆餅",
-      calories: 320,
-      protein: 7,
-      carbs: 48,
-      fat: 10,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T15:30:00+08:00",
+      items: [
+        { foodName: "鬆餅", calories: 320, protein: 7, carbs: 48, fat: 10 },
+      ],
     });
-    const lateNight = await foodLoggingService.logFood(deviceId, {
-      foodName: "鹽酥雞",
-      calories: 520,
-      protein: 24,
-      carbs: 38,
-      fat: 28,
+    const lateNight = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T23:30:00+08:00",
+      items: [
+        { foodName: "鹽酥雞", calories: 520, protein: 24, carbs: 38, fat: 28 },
+      ],
     });
 
     const pendingSeed = await mealCorrectionService.findMeals(deviceId, "delete", "把宵夜那餐刪掉");
@@ -430,21 +390,17 @@ describe("meal correction service", () => {
   });
 
   it("does not reuse a pending late-night target for snack wording with the same food label", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 320,
-      protein: 12,
-      carbs: 30,
-      fat: 16,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T15:30:00+08:00",
+      items: [
+        { foodName: "蛋餅", calories: 320, protein: 12, carbs: 30, fat: 16 },
+      ],
     });
-    const lateNight = await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 360,
-      protein: 13,
-      carbs: 34,
-      fat: 18,
+    const lateNight = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T23:30:00+08:00",
+      items: [
+        { foodName: "蛋餅", calories: 360, protein: 13, carbs: 34, fat: 18 },
+      ],
     });
 
     const pendingSeed = await mealCorrectionService.findMeals(deviceId, "delete", "把宵夜那餐刪掉");
@@ -458,21 +414,17 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-01/D-09 hard-scopes an explicit date before considering newer matching candidates", async () => {
-    const scopedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const scopedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-18T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 28,
-      carbs: 76,
-      fat: 18,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "update", "把 4/18 的雞腿飯改成 500 卡");
@@ -483,23 +435,19 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 gap resolves an explicit historical-date meal before the newest candidate cap", async () => {
-    const scopedMeal = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const scopedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-18T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     for (let index = 0; index < 21; index += 1) {
-      await foodLoggingService.logFood(deviceId, {
-        foodName: `新餐${index + 1}`,
-        calories: 300 + index,
-        protein: 10,
-        carbs: 40,
-        fat: 8,
+      await foodLoggingService.logGroupedMeal(deviceId, {
         loggedAt: `2026-04-19T${String(index).padStart(2, "0")}:00:00.000Z`,
+        items: [
+          { foodName: `新餐${index + 1}`, calories: 300 + index, protein: 10, carbs: 40, fat: 8 },
+        ],
       });
     }
 
@@ -511,13 +459,11 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 gap treats unmatched Latin food evidence as blocking weak period fallback", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐 burger 改成 500 卡");
@@ -527,22 +473,18 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-07/D-08 explicit persisted mealPeriod outranks inferred loggedAt period", async () => {
-    const explicitLunch = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 680,
-      protein: 32,
-      carbs: 84,
-      fat: 22,
+    const explicitLunch = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T00:30:00.000Z",
       mealPeriod: "lunch",
+      items: [
+        { foodName: "雞腿便當", calories: 680, protein: 32, carbs: 84, fat: 22 },
+      ],
     });
-    const inferredLunch = await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    const inferredLunch = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐改成 600 卡");
@@ -555,21 +497,17 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-16 resolves 午餐那餐 inside the lunch set instead of the newest non-matching meal", async () => {
-    const lunch = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 680,
-      protein: 32,
-      carbs: 84,
-      fat: 22,
+    const lunch = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿便當", calories: 680, protein: 32, carbs: 84, fat: 22 },
+      ],
     });
-    const dinner = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const dinner = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T11:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐那餐刪掉");
@@ -591,13 +529,11 @@ describe("meal correction service", () => {
       });
       matchedIds.push(meal.id);
     }
-    const unrelatedLunch = await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    const unrelatedLunch = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:45:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐滷蛋改成兩顆水煮蛋");
@@ -614,13 +550,11 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-19 does not fall back to a period-only candidate when a likely food label is unmatched", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐鴨腿便當改成 500 卡");
@@ -631,29 +565,23 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-30/D-31 reuses clear single-date scope for same-date recovery choices without cross-date candidates", async () => {
-    const sameDateLunch = await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    const sameDateLunch = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-18T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
-    const sameDateDinner = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const sameDateDinner = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-18T11:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "鴨胸飯",
-      calories: 610,
-      protein: 31,
-      carbs: 72,
-      fat: 18,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "鴨胸飯", calories: 610, protein: 31, carbs: 72, fat: 18 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "update", "把 4/18 的鴨腿便當改成 500 卡");
@@ -672,13 +600,11 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-30 returns deterministic date-specific no-meals copy when a clear explicit date has no meals", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     const result = await mealCorrectionService.findMeals(deviceId, "delete", "把 4/17 的鴨腿便當刪掉");
@@ -708,13 +634,11 @@ describe("meal correction service", () => {
   });
 
   it("returns affectedDate for historical updates and keeps it in sync with dailySummary.date", async () => {
-    const original = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     const result = await mealCorrectionService.updateMeal(deviceId, original.id, {
@@ -735,13 +659,11 @@ describe("meal correction service", () => {
         },
       },
     });
-    const original = await foodLoggingService.logFood(deviceId, {
-      foodName: "chicken rice",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "chicken rice", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     const result = await localMealCorrectionService.updateMeal(deviceId, original.id, {
@@ -759,21 +681,17 @@ describe("meal correction service", () => {
   });
 
   it("creates a pending clarification state when multiple meals match and resolves the next numbered reply", async () => {
-    const first = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const first = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const second = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 29,
-      carbs: 78,
-      fat: 18,
+    const second = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
     });
 
     const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
@@ -790,21 +708,17 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-22/D-23/D-24/D-38 re-shows the same rendered options with valid numbers for an invalid selection", async () => {
-    const first = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const first = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const second = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 29,
-      carbs: 78,
-      fat: 18,
+    const second = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
     });
 
     const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
@@ -825,21 +739,17 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-39/D-40 resolves a delayed valid option with the originally rendered revision", async () => {
-    const older = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const older = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const newer = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 29,
-      carbs: 78,
-      fat: 18,
+    const newer = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
     });
 
     const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐的雞腿飯蛋白質改 28g");
@@ -855,21 +765,17 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-41/D-46a rejects stale delayed selections and re-renders current scoped options", async () => {
-    const older = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const older = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const newer = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 29,
-      carbs: 78,
-      fat: 18,
+    const newer = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
     });
 
     const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐的雞腿飯蛋白質改 28g");
@@ -901,33 +807,27 @@ describe("meal correction service", () => {
   });
 
   it("Phase 67 D-46 never auto-retargets a deleted selected option to a same-label replacement", async () => {
-    const selectedTarget = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const selectedTarget = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const newer = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 29,
-      carbs: 78,
-      fat: 18,
+    const newer = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
     });
 
     const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
     assert.equal(firstPass.status, "needs_clarification");
     await foodLoggingService.deleteMeal(deviceId, selectedTarget.id, selectedTarget.mealRevisionId);
-    const replacement = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 700,
-      protein: 35,
-      carbs: 82,
-      fat: 24,
+    const replacement = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T05:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 700, protein: 35, carbs: 82, fat: 24 },
+      ],
     });
 
     const staleSelection = await mealCorrectionService.findMeals(deviceId, "delete", "2");
@@ -941,21 +841,17 @@ describe("meal correction service", () => {
   });
 
   it("does not reuse a pending selection for a different mutation action", async () => {
-    const first = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const first = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 29,
-      carbs: 78,
-      fat: 18,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
     });
 
     const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
@@ -970,13 +866,11 @@ describe("meal correction service", () => {
   });
 
   it("does not reuse a uniquely resolved pending target for a new named correction", async () => {
-    const target = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const target = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
 
     const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "剛剛的雞腿蛋白質降低");
@@ -992,13 +886,11 @@ describe("meal correction service", () => {
   });
 
   it("returns affectedDate for historical deletes and keeps it in sync with dailySummary.date", async () => {
-    const meal = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
 
     await assert.rejects(
@@ -1037,13 +929,11 @@ describe("meal correction service", () => {
         },
       },
     });
-    const meal = await foodLoggingService.logFood(deviceId, {
-      foodName: "beef noodles",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
+      items: [
+        { foodName: "beef noodles", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
 
     const result = await localMealCorrectionService.deleteMeal(deviceId, meal.id, meal.mealRevisionId);
@@ -1057,21 +947,17 @@ describe("meal correction service", () => {
   });
 
   it("requires resolver-owned expected revisions for update and delete calls", async () => {
-    const updateTarget = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const updateTarget = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
-    const deleteTarget = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const deleteTarget = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T13:00:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
 
     await assert.rejects(
@@ -1104,13 +990,11 @@ describe("meal correction service", () => {
   });
 
   it("returns stale revision metadata when a patch update target was deleted", async () => {
-    const meal = await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 610,
-      protein: 34,
-      carbs: 58,
-      fat: 24,
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T12:00:00.000Z",
+      items: [
+        { foodName: "鮭魚飯", calories: 610, protein: 34, carbs: 58, fat: 24 },
+      ],
     });
     const deleted = await foodLoggingService.deleteMeal(deviceId, meal.id, meal.mealRevisionId);
 

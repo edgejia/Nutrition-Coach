@@ -33,9 +33,24 @@ describe("SummaryService", () => {
   });
 
   it("sums nutrients from multiple meals", async () => {
-    await foodService.logFood(deviceId, { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3, loggedAt: "2026-03-24T16:30:00.000Z" });
-    await foodService.logFood(deviceId, { foodName: "雞胸肉", calories: 165, protein: 31, carbs: 0, fat: 3.6, loggedAt: "2026-03-25T15:00:00.000Z" });
-    await foodService.logFood(deviceId, { foodName: "隔天早餐", calories: 400, protein: 20, carbs: 30, fat: 15, loggedAt: "2026-03-25T16:30:00.000Z" });
+    await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-24T16:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
+    });
+    await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T15:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 165, protein: 31, carbs: 0, fat: 3.6 },
+      ],
+    });
+    await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T16:30:00.000Z",
+      items: [
+        { foodName: "隔天早餐", calories: 400, protein: 20, carbs: 30, fat: 15 },
+      ],
+    });
     const summary = await summaryService.getDailySummary(deviceId, new Date("2026-03-25T12:00:00+08:00"));
     assert.ok(Math.abs(summary.totalCalories - 260) < 0.01);
     assert.ok(Math.abs(summary.totalProtein - 31.5) < 0.01);
@@ -45,13 +60,11 @@ describe("SummaryService", () => {
   });
 
   it("counts meals in the daily summary", async () => {
-    await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
 
     const summary = await summaryService.getDailySummary(deviceId, new Date("2026-03-25T12:00:00+08:00"));
@@ -61,13 +74,11 @@ describe("SummaryService", () => {
   });
 
   it("excludes deleted transactions from the daily summary", async () => {
-    const deletedMeal = await foodService.logFood(deviceId, {
-      foodName: "早餐",
-      calories: 420,
-      protein: 18,
-      carbs: 44,
-      fat: 16,
+    const deletedMeal = await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T02:30:00.000Z",
+      items: [
+        { foodName: "早餐", calories: 420, protein: 18, carbs: 44, fat: 16 },
+      ],
     });
     await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T06:00:00.000Z",
@@ -102,22 +113,18 @@ describe("SummaryService", () => {
 
   it("isolates meals logged across the Asia/Taipei midnight boundary (D-17)", async () => {
     // TPE 23:59 on 2026-03-25 (pre-midnight, belongs to 2026-03-25 local day)
-    await foodService.logFood(deviceId, {
-      foodName: "宵夜",
-      calories: 200,
-      protein: 10,
-      carbs: 20,
-      fat: 8,
+    await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T15:59:00.000Z",
+      items: [
+        { foodName: "宵夜", calories: 200, protein: 10, carbs: 20, fat: 8 },
+      ],
     });
     // TPE 00:01 on 2026-03-26 (post-midnight, belongs to 2026-03-26 local day)
-    await foodService.logFood(deviceId, {
-      foodName: "早餐",
-      calories: 350,
-      protein: 15,
-      carbs: 45,
-      fat: 10,
+    await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T16:01:00.000Z",
+      items: [
+        { foodName: "早餐", calories: 350, protein: 15, carbs: 45, fat: 10 },
+      ],
     });
 
     const march25 = await summaryService.getDailySummary(deviceId, new Date("2026-03-25T12:00:00+08:00"));

@@ -1387,19 +1387,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
   it("Test 4: get_daily_summary returns persisted meal facts plus the macro summary text", async () => {
     // Seed one meal so totals are non-zero, easier to assert formatting.
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋白餐",
-      calories: 450,
-      protein: 35,
-      carbs: 40,
-      fat: 12,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "蛋白餐", calories: 450, protein: 35, carbs: 40, fat: 12 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "豆腐飯",
-      calories: 520,
-      protein: 24,
-      carbs: 70,
-      fat: 14,
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐飯", calories: 520, protein: 24, carbs: 70, fat: 14 },
+      ],
     });
 
     const call: ToolCall = {
@@ -1468,14 +1464,12 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("returns the updated current revision identity from update_meal loggedMeal", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       mealPeriod: "lunch",
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
 
@@ -1524,13 +1518,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("stores resolver-owned meal id and revision identity from find_meals", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const toolSessionState = {
@@ -1564,29 +1556,23 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("Phase 68 D-02-D-06 extends renderer-owned find_meals clarification with typed facts", async () => {
-    const sameDateLunch = await foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    const sameDateLunch = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-18T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
-    const sameDateDinner = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const sameDateDinner = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-18T11:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "鴨胸飯",
-      calories: 610,
-      protein: 31,
-      carbs: 72,
-      fat: 18,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "鴨胸飯", calories: 610, protein: 31, carbs: 72, fat: 18 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const toolSessionState = {
@@ -1654,13 +1640,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("Phase 67 D-30 returns renderer-owned date-specific no-meals copy for clear single-date find_meals misses", async () => {
-    await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const toolSessionState = {
@@ -1697,13 +1681,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("rejects update_meal when only id-only resolved state is present", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
 
@@ -1743,13 +1725,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("rejects delete_meal when only id-only resolved state is present", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
 
@@ -1789,21 +1769,17 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("returns stable stale revision codes for stale update_meal and delete_meal targets", async () => {
-    const updateTarget = await foodLoggingService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const updateTarget = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
-    const deleteTarget = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const deleteTarget = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const updated = await foodLoggingService.updateMeal(deviceId, updateTarget.id, {
@@ -1898,13 +1874,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("returns stable stale revision codes when update_meal target was deleted", async () => {
-    const updateTarget = await foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 610,
-      protein: 34,
-      carbs: 58,
-      fat: 24,
+    const updateTarget = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "鮭魚飯", calories: 610, protein: 34, carbs: 58, fat: 24 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const deleted = await foodLoggingService.deleteMeal(deviceId, updateTarget.id, updateTarget.mealRevisionId);
@@ -1948,21 +1922,17 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("Phase 67 D-44/D-45 returns renderer-owned no-mutation copy when a selected pending update target goes stale before write", async () => {
-    const older = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const older = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const newer = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 29,
-      carbs: 78,
-      fat: 18,
+    const newer = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const toolSessionState = {
@@ -2056,13 +2026,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("returns update_meal committed facts with unavailable summaryOutcome and no compatibility dailySummary", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
     const unavailableMealCorrectionService = createMealCorrectionService(db, {
       summaryService: {
@@ -2111,13 +2079,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("returns committed deleted meal facts from delete_meal", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
 
@@ -2155,13 +2121,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("returns delete_meal service-provided recovered summaryOutcome with compatibility dailySummary", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
     const recoveredMealCorrectionService = createMealCorrectionService(db, {
       summaryService: {
@@ -2544,13 +2508,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("allows explicit current-turn update_meal numeric evidence and preserves the resolver revision", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const calls: string[] = [];
@@ -2593,13 +2555,11 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("blocks vague model-estimated update_meal numeric patches before service writes", async () => {
-    const created = await foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
     let updateCalls = 0;
