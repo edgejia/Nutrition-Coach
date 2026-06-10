@@ -36,11 +36,33 @@ describe("grouped meal display source contract", () => {
     }
   });
 
-  it("keeps foodLoggingService.logFood as the approved compatibility shim", async () => {
-    const source = await readSource("server/services/food-logging.ts");
+  // Plan 83-03 (D-04/D-05): the logFood single-item shim and its vocabulary are
+  // deleted. This inverted audit is the standing negative proof that the shim
+  // symbols stay out of the audited server sources.
+  it("keeps the deleted logFood shim symbols out of server sources", async () => {
+    const shimPatterns: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+      { pattern: /\.logFood\(/, label: ".logFood( call" },
+      { pattern: /\bFoodData\b/, label: "FoodData type" },
+      { pattern: /LogFoodLegacyArgs/, label: "LogFoodLegacyArgs type" },
+      { pattern: /MealCompatibilityEntry/, label: "MealCompatibilityEntry type" },
+      { pattern: /projectCompatibilityEntry/, label: "projectCompatibilityEntry projection" },
+    ];
 
-    assert.match(source, /async logFood\(deviceId: string, food: FoodData\)/);
-    assert.match(source, /createTransaction\(deviceId,\s*\{[\s\S]*items:\s*\[/);
+    for (const relativePath of GROUPED_DISPLAY_SOURCE_PATHS) {
+      const source = await readSource(relativePath);
+      for (const { pattern, label } of shimPatterns) {
+        assert.doesNotMatch(
+          source,
+          pattern,
+          `${relativePath} must not reintroduce the deleted ${label}`,
+        );
+      }
+    }
+
+    const foodLoggingSource = await readSource("server/services/food-logging.ts");
+    assert.match(foodLoggingSource, /export interface LoggedMealEntry/);
+    assert.match(foodLoggingSource, /async logGroupedMeal\(deviceId: string, input: GroupedMealData\)/);
+    assert.match(foodLoggingSource, /return projectLoggedMealEntry\(/);
   });
 
   it("prevents direct log_food execution writes through the logFood shim", async () => {

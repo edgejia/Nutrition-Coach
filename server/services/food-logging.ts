@@ -14,18 +14,7 @@ import type { MealPeriod } from "../lib/meal-period.js";
 import { createMealHistoryService } from "./meal-history.js";
 import { projectMealDisplay } from "./meal-display.js";
 
-export interface FoodData {
-  foodName: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  imagePath?: string | null;
-  loggedAt?: string;
-  mealPeriod?: MealPeriod | null;
-}
-
-export interface MealCompatibilityEntry {
+export interface LoggedMealEntry {
   id: string;
   mealRevisionId: string;
   deviceId: string;
@@ -50,7 +39,7 @@ export function createFoodLoggingService(db: AppDatabase) {
   const mealTransactionsService = createMealTransactionsService(db);
   const mealHistoryService = createMealHistoryService(db);
 
-  function projectCompatibilityEntry(
+  function projectLoggedMealEntry(
     deviceId: string,
     transactionId: string,
     revisionId: string,
@@ -58,7 +47,7 @@ export function createFoodLoggingService(db: AppDatabase) {
     mealPeriod: MealPeriod | null,
     imagePath: string | null | undefined,
     items: MealTransactionItemInput[],
-  ): MealCompatibilityEntry {
+  ): LoggedMealEntry {
     const display = projectMealDisplay(items);
 
     return {
@@ -78,36 +67,9 @@ export function createFoodLoggingService(db: AppDatabase) {
   }
 
   return {
-    async logFood(deviceId: string, food: FoodData) {
-      const created = await mealTransactionsService.createTransaction(deviceId, {
-        loggedAt: food.loggedAt,
-        mealPeriod: food.mealPeriod,
-        imagePath: food.imagePath ?? null,
-        items: [
-          {
-            foodName: food.foodName,
-            calories: food.calories,
-            protein: food.protein,
-            carbs: food.carbs,
-            fat: food.fat,
-          },
-        ],
-      });
-
-      return projectCompatibilityEntry(
-        deviceId,
-        created.transactionId,
-        created.revisionId,
-        created.loggedAt,
-        created.mealPeriod,
-        created.imagePath,
-        created.items,
-      );
-    },
-
     async logGroupedMeal(deviceId: string, input: GroupedMealData) {
       const created = await mealTransactionsService.createTransaction(deviceId, input);
-      return projectCompatibilityEntry(
+      return projectLoggedMealEntry(
         deviceId,
         created.transactionId,
         created.revisionId,
@@ -164,7 +126,7 @@ export function createFoodLoggingService(db: AppDatabase) {
 
     async updateMeal(deviceId: string, mealId: string, input: GroupedMealUpdateData) {
       const updated = await mealTransactionsService.updateTransaction(deviceId, mealId, input);
-      return projectCompatibilityEntry(
+      return projectLoggedMealEntry(
         deviceId,
         updated.transactionId,
         updated.revisionId,
