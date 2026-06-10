@@ -140,15 +140,17 @@ describe("log_food_validation_failed on the Phase 83 controlled feedback path", 
     } as Parameters<typeof createOrchestrator>[0]);
 
     const rawMealText = "我吃了機密雞胸肉";
-    // Negative calories on the single-shape branch yields the whitelisted
-    // top-level "calories" field path from schema validation.
+    // Plan 83-03: grouped-only schema — negative item calories yields the
+    // "items.0.calories" path, sanitized to the whitelisted "calories" leaf.
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "feedback_event_call",
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "雞胸肉", calories: -100, protein: 8, carbs: 10, fat: 4 }),
+          arguments: JSON.stringify({
+            items: [{ food_name: "雞胸肉", calories: -100, protein: 8, carbs: 10, fat: 4 }],
+          }),
         },
       }],
     });

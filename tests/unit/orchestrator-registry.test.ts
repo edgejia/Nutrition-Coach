@@ -74,11 +74,15 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "蘋果",
-            calories: 100,
-            protein: 1,
-            carbs: 20,
-            fat: 0.5,
+            items: [
+              {
+                food_name: "蘋果",
+                calories: 100,
+                protein: 1,
+                carbs: 20,
+                fat: 0.5,
+              },
+            ],
           }),
         },
       };

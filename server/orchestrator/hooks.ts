@@ -45,7 +45,14 @@ const LOG_FOOD_VALIDATION_FIELDS = ["calories", "protein", "carbs", "fat"] as co
 const LOG_FOOD_VALIDATION_FIELD_SET = new Set<string>(LOG_FOOD_VALIDATION_FIELDS);
 
 function sanitizeLogFoodValidationFields(fields: readonly string[]): string[] {
-  return [...new Set(fields.filter((field) => LOG_FOOD_VALIDATION_FIELD_SET.has(field)))].sort();
+  // Plan 83-03: the grouped-only logFoodSchema reports numeric violations as
+  // item-level paths (e.g. "items.0.calories"). Map paths to their leaf name
+  // before whitelisting so the event still identifies the failing macro field
+  // while staying metadata-only (no indices, no raw values).
+  const sanitized = fields
+    .map((field) => field.split(".").at(-1) ?? field)
+    .filter((field) => LOG_FOOD_VALIDATION_FIELD_SET.has(field));
+  return [...new Set(sanitized)].sort();
 }
 
 export function createStructuredHooks(log: FastifyBaseLogger): OrchestratorHooks {
