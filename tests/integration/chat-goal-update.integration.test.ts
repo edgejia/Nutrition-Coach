@@ -451,13 +451,11 @@ describe("chat goal update integration", () => {
   });
 
   it("fails closed for bare approval when goal and meal proposals coexist", async () => {
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
     await services.mealNumericProposalService.putLatest(deviceId, {
@@ -484,13 +482,11 @@ describe("chat goal update integration", () => {
   });
 
   it("cancels goal and meal proposals together before the model runs", async () => {
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
     await services.mealNumericProposalService.putLatest(deviceId, {
@@ -517,13 +513,11 @@ describe("chat goal update integration", () => {
   });
 
   it("applies a kind-specific meal proposal through the stored revision and clears only meal state", async () => {
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
     await services.mealNumericProposalService.putLatest(deviceId, {
@@ -548,13 +542,11 @@ describe("chat goal update integration", () => {
   });
 
   it("leaves meal proposal untouched when kind-specific goal approval uses the existing goal path", async () => {
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
     await services.mealNumericProposalService.putLatest(deviceId, {
@@ -587,13 +579,11 @@ describe("chat goal update integration", () => {
   });
 
   it("rejects stale meal proposal approval through the existing meal revision precondition", async () => {
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await services.mealNumericProposalService.putLatest(deviceId, {
       mealId: meal.id,

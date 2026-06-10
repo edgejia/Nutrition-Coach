@@ -140,13 +140,11 @@ describe("chat meal correction integration", () => {
   }
 
   it("updates a resolved meal only when the current turn supplies the explicit numeric target", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -193,13 +191,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("blocks vague model-estimated numeric updates without revision or daily_summary publish", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -249,13 +245,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("creates a relative numeric proposal without mutating the meal", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -312,13 +306,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("rejects stale meal proposal approval without revision or daily_summary publish", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await services.mealNumericProposalService.putLatest(deviceId, {
       mealId: original.id,
@@ -356,13 +348,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("clears stale resolved meal selection after stored proposal approval", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -444,13 +434,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("fails closed for cross-kind bare approval and broad cancel clears active proposals", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     await services.goalProposalService.putLatest(deviceId, {
       calories: 1400,
@@ -498,13 +486,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("updates the original meal transaction instead of appending a duplicate", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T01:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -554,13 +540,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("returns affectedDate for historical updates resolved through shared date parsing", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -614,21 +598,17 @@ describe("chat meal correction integration", () => {
   });
 
   it("asks for clarification and does not mutate when multiple historical meals match", async () => {
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 28,
-      carbs: 76,
-      fat: 18,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -660,29 +640,23 @@ describe("chat meal correction integration", () => {
   });
 
   it("respects the named food target even when the user also says recent-reference shorthand", async () => {
-    const target = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const target = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
-    const breastOne = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 220,
-      protein: 30,
-      carbs: 0,
-      fat: 5,
+    const breastOne = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 30, carbs: 0, fat: 5 },
+      ],
     });
-    const breastTwo = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 220,
-      protein: 31,
-      carbs: 0,
-      fat: 5,
+    const breastTwo = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T05:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 31, carbs: 0, fat: 5 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -740,29 +714,23 @@ describe("chat meal correction integration", () => {
   });
 
   it("carries a uniquely resolved target across turns and applies a partial nutrient patch", async () => {
-    const target = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿",
-      calories: 220,
-      protein: 24,
-      carbs: 0,
-      fat: 9,
+    const target = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 220, protein: 24, carbs: 0, fat: 9 },
+      ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 220,
-      protein: 30,
-      carbs: 0,
-      fat: 5,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 30, carbs: 0, fat: 5 },
+      ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 220,
-      protein: 31,
-      carbs: 0,
-      fat: 5,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T05:00:00.000Z",
+      items: [
+        { foodName: "雞胸肉", calories: 220, protein: 31, carbs: 0, fat: 5 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -890,13 +858,11 @@ describe("chat meal correction integration", () => {
         { foodName: "青菜", calories: 80, protein: 2, carbs: 10, fat: 4 },
       ],
     });
-    const unrelatedLunch = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 330,
-      protein: 12,
-      carbs: 38,
-      fat: 14,
+    const unrelatedLunch = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 330, protein: 12, carbs: 38, fat: 14 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -998,21 +964,17 @@ describe("chat meal correction integration", () => {
   });
 
   it("Phase 67 D-39/D-40/D-42 mutates only after a mixed numbered selection revalidates the rendered option and explicit numeric evidence", async () => {
-    const first = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const first = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const second = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 28,
-      carbs: 76,
-      fat: 18,
+    const second = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -1082,21 +1044,17 @@ describe("chat meal correction integration", () => {
   });
 
   it("Phase 67 D-43 resolves a mixed numbered vague follow-up without direct mutation or daily_summary publish", async () => {
-    const first = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const first = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const second = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 28,
-      carbs: 76,
-      fat: 18,
+    const second = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -1163,21 +1121,17 @@ describe("chat meal correction integration", () => {
   });
 
   it("Phase 67 D-38 route re-shows rendered options for an invalid number without mutation or publish", async () => {
-    const first = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const first = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const second = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 28,
-      carbs: 76,
-      fat: 18,
+    const second = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -1234,21 +1188,17 @@ describe("chat meal correction integration", () => {
   });
 
   it("Phase 67 D-41/D-45/D-46 route rejects a deleted delayed selection without same-label auto-retargeting", async () => {
-    const selectedTarget = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const selectedTarget = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const newer = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 28,
-      carbs: 76,
-      fat: 18,
+    const newer = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -1269,13 +1219,11 @@ describe("chat meal correction integration", () => {
     assert.match(firstTurn.body.reply, /請直接回覆編號/);
 
     await services.foodLoggingService.deleteMeal(deviceId, selectedTarget.id, selectedTarget.mealRevisionId);
-    const replacement = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 700,
-      protein: 35,
-      carbs: 82,
-      fat: 24,
+    const replacement = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T05:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 700, protein: 35, carbs: 82, fat: 24 },
+      ],
     });
 
     const beforeSecondTurnCalls = mockLLM.chatCalls.length;
@@ -1326,21 +1274,17 @@ describe("chat meal correction integration", () => {
   });
 
   it("consumes the pending selection on the next chat turn and deletes the chosen meal", async () => {
-    const first = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const first = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
-    const second = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 620,
-      protein: 28,
-      carbs: 76,
-      fat: 18,
+    const second = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -1405,13 +1349,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("returns affectedDate for historical deletes resolved through shared date parsing", async () => {
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -1457,13 +1399,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("fails closed when a resolved update target is stale before mutation", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
 
     mockLLM.queueChatResponse({
@@ -1547,13 +1487,11 @@ describe("chat meal correction integration", () => {
   });
 
   it("fails closed when a resolved delete target is stale before mutation", async () => {
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉麵",
-      calories: 520,
-      protein: 24,
-      carbs: 68,
-      fat: 16,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
     });
 
     mockLLM.queueChatResponse({

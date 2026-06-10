@@ -1359,14 +1359,12 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat/stop omits receipt identity when stopped receipt persistence fails after log_food", async () => {
     assert.ok(services, "expected app services");
-    const loggedMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 620,
-      protein: 24,
-      carbs: 70,
-      fat: 18,
+    const loggedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
       mealPeriod: "lunch",
+      items: [
+        { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
+      ],
     });
     installAtomicReceiptPersistenceFailure(services.chatService);
     const originalHandleMessage = services.orchestrator.handleMessage.bind(services.orchestrator);
@@ -2310,13 +2308,11 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat SSE blocked numeric correction emits renderer no-update terminal payload", async () => {
     assert.ok(services, "expected app services");
-    const original = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 650,
-      protein: 30,
-      carbs: 80,
-      fat: 20,
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
     });
     mockLLM.queueRoundResponse({
       toolCalls: [
@@ -3282,12 +3278,10 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat summary-context stream preserves legitimate one-meal summary replies", async () => {
     assert.ok(services);
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "豆腐飯",
-      calories: 520,
-      protein: 24,
-      carbs: 70,
-      fat: 14,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐飯", calories: 520, protein: 24, carbs: 70, fat: 14 },
+      ],
     });
     mockLLM.queueRoundResponse({
       toolCalls: [{
@@ -3349,19 +3343,15 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat summary-context stream preserves legitimate aggregate summary replies", async () => {
     assert.ok(services);
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 450,
-      protein: 45,
-      carbs: 30,
-      fat: 10,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉", calories: 450, protein: 45, carbs: 30, fat: 10 },
+      ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 450,
-      protein: 35,
-      carbs: 45,
-      fat: 14,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 450, protein: 35, carbs: 45, fat: 14 },
+      ],
     });
     mockLLM.queueRoundResponse({
       toolCalls: [{
@@ -3423,19 +3413,15 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat summary-context stream emits composed persisted facts without unsafe model meal facts", async () => {
     assert.ok(services);
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "豆腐飯",
-      calories: 520,
-      protein: 24,
-      carbs: 70,
-      fat: 14,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐飯", calories: 520, protein: 24, carbs: 70, fat: 14 },
+      ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 380,
-      protein: 30,
-      carbs: 42,
-      fat: 12,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 380, protein: 30, carbs: 42, fat: 12 },
+      ],
     });
     mockLLM.queueRoundResponse({
       toolCalls: [{
@@ -3500,19 +3486,15 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat summary-context stream rejects assigning the daily total to one named meal", async () => {
     assert.ok(services);
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 450,
-      protein: 45,
-      carbs: 30,
-      fat: 10,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉", calories: 450, protein: 45, carbs: 30, fat: 10 },
+      ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 450,
-      protein: 35,
-      carbs: 45,
-      fat: 14,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 450, protein: 35, carbs: 45, fat: 14 },
+      ],
     });
     mockLLM.queueRoundResponse({
       toolCalls: [{
@@ -3576,19 +3558,15 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat summary-context stream rejects fake meal lists even when count and total match", async () => {
     assert.ok(services);
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 450,
-      protein: 45,
-      carbs: 30,
-      fat: 10,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉", calories: 450, protein: 45, carbs: 30, fat: 10 },
+      ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 450,
-      protein: 35,
-      carbs: 45,
-      fat: 14,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 450, protein: 35, carbs: 45, fat: 14 },
+      ],
     });
     mockLLM.queueRoundResponse({
       toolCalls: [{
@@ -3652,19 +3630,15 @@ describe("chat-streaming", () => {
 
   it("POST /api/chat summary-context stream rejects aggregate summary count and calorie mismatches", async () => {
     assert.ok(services);
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉",
-      calories: 450,
-      protein: 45,
-      carbs: 30,
-      fat: 10,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉", calories: 450, protein: 45, carbs: 30, fat: 10 },
+      ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 450,
-      protein: 35,
-      carbs: 45,
-      fat: 14,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 450, protein: 35, carbs: 45, fat: 14 },
+      ],
     });
     mockLLM.queueRoundResponse({
       toolCalls: [{

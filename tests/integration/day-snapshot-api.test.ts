@@ -138,13 +138,11 @@ describe("Day snapshot API", () => {
   it("GET /api/day-snapshot returns summary and meals for the same selected local day", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const boundaryMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午夜點心",
-      calories: 120,
-      protein: 6,
-      carbs: 14,
-      fat: 4,
+    const boundaryMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-24T16:30:00.000Z",
+      items: [
+        { foodName: "午夜點心", calories: 120, protein: 6, carbs: 14, fat: 4 },
+      ],
     });
     const groupedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: "asset:asset-1",
@@ -155,13 +153,11 @@ describe("Day snapshot API", () => {
         { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "隔天早餐",
-      calories: 300,
-      protein: 18,
-      carbs: 28,
-      fat: 10,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T16:30:00.000Z",
+      items: [
+        { foodName: "隔天早餐", calories: 300, protein: 18, carbs: 28, fat: 10 },
+      ],
     });
 
     const res = await app.inject({
@@ -244,22 +240,18 @@ describe("Day snapshot API", () => {
   it("GET /api/day-snapshot projects explicit mealPeriod without inferring legacy rows", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const explicitLunch = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 650,
-      protein: 36,
-      carbs: 72,
-      fat: 24,
+    const explicitLunch = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T00:30:00.000Z",
       mealPeriod: "lunch",
+      items: [
+        { foodName: "雞腿便當", calories: 650, protein: 36, carbs: 72, fat: 24 },
+      ],
     });
-    const legacyBreakfastHour = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 360,
-      protein: 18,
-      carbs: 42,
-      fat: 14,
+    const legacyBreakfastHour = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T00:45:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 360, protein: 18, carbs: 42, fat: 14 },
+      ],
     });
 
     const res = await app.inject({

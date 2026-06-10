@@ -320,22 +320,18 @@ describe("Meals API", () => {
 
     const todayKey = formatLocalDate(new Date());
     const breakfastHourLoggedAt = `${todayKey}T00:30:00.000Z`;
-    const explicitLunch = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 650,
-      protein: 36,
-      carbs: 72,
-      fat: 24,
+    const explicitLunch = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: breakfastHourLoggedAt,
       mealPeriod: "lunch",
+      items: [
+        { foodName: "雞腿便當", calories: 650, protein: 36, carbs: 72, fat: 24 },
+      ],
     });
-    const legacyBreakfastHour = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 360,
-      protein: 18,
-      carbs: 42,
-      fat: 14,
+    const legacyBreakfastHour = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: breakfastHourLoggedAt,
+      items: [
+        { foodName: "蛋餅", calories: 360, protein: 18, carbs: 42, fat: 14 },
+      ],
     });
 
     const res = await app.inject({
@@ -451,12 +447,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id updates the meal for the owner and returns the affected daily summary", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
 
     const publishedPayloads: unknown[] = [];
@@ -506,13 +500,11 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id preserves and returns existing explicit mealPeriod when ordinary edits omit it", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午餐便當",
-      calories: 620,
-      protein: 34,
-      carbs: 70,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       mealPeriod: "lunch",
+      items: [
+        { foodName: "午餐便當", calories: 620, protein: 34, carbs: 70, fat: 22 },
+      ],
     });
 
     const updateRes = await app.inject({
@@ -550,12 +542,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id accepts grouped items replacement from one item to many items", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "早餐盤",
-      calories: 410,
-      protein: 22,
-      carbs: 38,
-      fat: 18,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "早餐盤", calories: 410, protein: 22, carbs: 38, fat: 18 },
+      ],
     });
     const affectedDate = formatLocalDate(new Date(meal.loggedAt));
     const publishedPayloads: unknown[] = [];
@@ -985,12 +975,10 @@ describe("Meals API", () => {
   it("PATCH and DELETE /api/meals/:id fail closed on missing or stale expected revisions", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
 
     let summaryCalls = 0;
@@ -1142,12 +1130,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id returns stale revision before grouped-shape rejection for single-to-current-grouped edits", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿飯",
-      calories: 540,
-      protein: 28,
-      carbs: 62,
-      fat: 12.5,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿飯", calories: 540, protein: 28, carbs: 62, fat: 12.5 },
+      ],
     });
 
     const groupedCurrentMeal = await services.foodLoggingService.updateMeal(deviceId, meal.id, {
@@ -1220,12 +1206,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id returns stale revision when grouping commits after the mutation guard", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "牛肉飯",
-      calories: 620,
-      protein: 31,
-      carbs: 70,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "牛肉飯", calories: 620, protein: 31, carbs: 70, fat: 22 },
+      ],
     });
 
     let groupedCurrentMeal: Awaited<ReturnType<typeof services.foodLoggingService.updateMeal>> | undefined;
@@ -1308,19 +1292,15 @@ describe("Meals API", () => {
   it("PATCH and DELETE /api/meals/:id return stale revision after another flow deletes the meal", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const patchMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "鮭魚飯",
-      calories: 610,
-      protein: 34,
-      carbs: 58,
-      fat: 24,
+    const patchMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "鮭魚飯", calories: 610, protein: 34, carbs: 58, fat: 24 },
+      ],
     });
-    const deleteMealTarget = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "豆腐餐",
-      calories: 390,
-      protein: 24,
-      carbs: 36,
-      fat: 16,
+    const deleteMealTarget = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐餐", calories: 390, protein: 24, carbs: 36, fat: 16 },
+      ],
     });
     const deletedPatch = await services.foodLoggingService.deleteMeal(
       deviceId,
@@ -1397,12 +1377,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id returns committed facts with recovered summaryOutcome when recompute fails", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
     const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
     services.summaryService.getDailySummary = async () => {
@@ -1443,12 +1421,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id returns committed facts without dailySummary when recompute and recovery fail", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
     const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
     const originalGetMealsByDate = services.foodLoggingService.getMealsByDate.bind(services.foodLoggingService);
@@ -1500,12 +1476,10 @@ describe("Meals API", () => {
   it("DELETE /api/meals/:id returns committed delete facts without dailySummary when recompute and recovery fail", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午餐",
-      calories: 600,
-      protein: 35,
-      carbs: 55,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "午餐", calories: 600, protein: 35, carbs: 55, fat: 22 },
+      ],
     });
     const originalGetDailySummary = services.summaryService.getDailySummary.bind(services.summaryService);
     const originalGetMealsByDate = services.foodLoggingService.getMealsByDate.bind(services.foodLoggingService);
@@ -1548,12 +1522,10 @@ describe("Meals API", () => {
   it("DELETE /api/meals/:id keeps publish failures metadata-only outside the response body", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午餐",
-      calories: 600,
-      protein: 35,
-      carbs: 55,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "午餐", calories: 600, protein: 35, carbs: 55, fat: 22 },
+      ],
     });
     const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
     services.publisher.publishDailySummary = () => {
@@ -1583,12 +1555,10 @@ describe("Meals API", () => {
   it("PATCH and DELETE /api/meals/:id require signed guest-session cookies", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
 
     const updateRes = await app.inject({
@@ -1684,12 +1654,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id returns 404 for another device", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
 
     const updateRes = await app.inject({
@@ -1714,12 +1682,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id rejects negative nutrition values", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
 
     const updateRes = await app.inject({
@@ -1744,12 +1710,10 @@ describe("Meals API", () => {
   it("PATCH /api/meals/:id rejects nonexistent or foreign image assets", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
     const foreignAsset = await createOwnedAsset(otherDeviceId, "foreign.png");
 
@@ -1779,20 +1743,16 @@ describe("Meals API", () => {
 
     const dateKey = formatLocalDate(new Date());
     const imageAsset = await createOwnedAsset(deviceId, "continuity.png");
-    const imageMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "照片便當",
-      calories: 640,
-      protein: 32,
-      carbs: 78,
-      fat: 21,
+    const imageMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       imagePath: `asset:${imageAsset.id}`,
+      items: [
+        { foodName: "照片便當", calories: 640, protein: 32, carbs: 78, fat: 21 },
+      ],
     });
-    const textMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "文字點心",
-      calories: 120,
-      protein: 6,
-      carbs: 14,
-      fat: 4,
+    const textMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "文字點心", calories: 120, protein: 6, carbs: 14, fat: 4 },
+      ],
     });
 
     const updateRes = await app.inject({
@@ -1906,12 +1866,10 @@ describe("Meals API", () => {
     assert.deepEqual(foreignRead.json(), { error: "Asset not found" });
 
     const foreignAsset = await createOwnedAsset(otherDeviceId, "foreign-owner-image.png");
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸肉沙拉",
-      calories: 420,
-      protein: 32,
-      carbs: 14,
-      fat: 22,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
     });
     const updateRes = await app.inject({
       method: "PATCH",
@@ -1935,13 +1893,11 @@ describe("Meals API", () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
     const loggedAt = "2026-03-25T04:00:00.000Z";
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "回補早餐",
-      calories: 420,
-      protein: 20,
-      carbs: 50,
-      fat: 14,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt,
+      items: [
+        { foodName: "回補早餐", calories: 420, protein: 20, carbs: 50, fat: 14 },
+      ],
     });
 
     const requestedDates: string[] = [];
@@ -1974,13 +1930,11 @@ describe("Meals API", () => {
   it("DELETE /api/meals/:id publishes historical affected-date daily_summary envelopes", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const meal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "回補早餐",
-      calories: 420,
-      protein: 20,
-      carbs: 50,
-      fat: 14,
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "回補早餐", calories: 420, protein: 20, carbs: 50, fat: 14 },
+      ],
     });
 
     const controller = new AbortController();

@@ -194,29 +194,23 @@ describe("History API", () => {
   async function seedPaginationMeals() {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const newest = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "晚餐",
-      calories: 650,
-      protein: 36,
-      carbs: 70,
-      fat: 22,
+    const newest = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T12:30:00.000Z",
+      items: [
+        { foodName: "晚餐", calories: 650, protein: 36, carbs: 70, fat: 22 },
+      ],
     });
-    const middle = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午餐",
-      calories: 520,
-      protein: 28,
-      carbs: 58,
-      fat: 18,
+    const middle = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T05:30:00.000Z",
+      items: [
+        { foodName: "午餐", calories: 520, protein: 28, carbs: 58, fat: 18 },
+      ],
     });
-    const oldest = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "早餐",
-      calories: 330,
-      protein: 18,
-      carbs: 36,
-      fat: 10,
+    const oldest = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T00:30:00.000Z",
+      items: [
+        { foodName: "早餐", calories: 330, protein: 18, carbs: 36, fat: 10 },
+      ],
     });
 
     return { newest, middle, oldest };
@@ -225,13 +219,11 @@ describe("History API", () => {
   async function seedDaySnapshotMeals() {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const boundaryMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午夜點心",
-      calories: 120,
-      protein: 6,
-      carbs: 14,
-      fat: 4,
+    const boundaryMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-24T16:30:00.000Z",
+      items: [
+        { foodName: "午夜點心", calories: 120, protein: 6, carbs: 14, fat: 4 },
+      ],
     });
     const assetMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
@@ -242,21 +234,17 @@ describe("History API", () => {
         { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "隔天早餐",
-      calories: 300,
-      protein: 18,
-      carbs: 28,
-      fat: 10,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T16:30:00.000Z",
+      items: [
+        { foodName: "隔天早餐", calories: 300, protein: 18, carbs: 28, fat: 10 },
+      ],
     });
-    await services.foodLoggingService.logFood(foreignDeviceId, {
-      foodName: "外部裝置餐點",
-      calories: 999,
-      protein: 99,
-      carbs: 99,
-      fat: 99,
+    await services.foodLoggingService.logGroupedMeal(foreignDeviceId, {
       loggedAt: "2026-03-25T10:00:00.000Z",
+      items: [
+        { foodName: "外部裝置餐點", calories: 999, protein: 99, carbs: 99, fat: 99 },
+      ],
     });
 
     return { boundaryMeal, assetMeal };
@@ -265,13 +253,11 @@ describe("History API", () => {
   it("GET /api/history/meals returns owner-only current active meals with safe nested projections", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const boundaryMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午夜點心",
-      calories: 120,
-      protein: 6,
-      carbs: 14,
-      fat: 4,
+    const boundaryMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-24T16:30:00.000Z",
+      items: [
+        { foodName: "午夜點心", calories: 120, protein: 6, carbs: 14, fat: 4 },
+      ],
     });
     const assetMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
@@ -282,21 +268,17 @@ describe("History API", () => {
         { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
-    const nearbyMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "鄰近茶葉蛋",
-      calories: 80,
-      protein: 7,
-      carbs: 1,
-      fat: 5,
+    const nearbyMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T03:59:00.000Z",
+      items: [
+        { foodName: "鄰近茶葉蛋", calories: 80, protein: 7, carbs: 1, fat: 5 },
+      ],
     });
-    const updatedMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "待修正便當",
-      calories: 500,
-      protein: 20,
-      carbs: 65,
-      fat: 18,
+    const updatedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T08:00:00.000Z",
+      items: [
+        { foodName: "待修正便當", calories: 500, protein: 20, carbs: 65, fat: 18 },
+      ],
     });
     const correctedMeal = await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
       expectedMealRevisionId: updatedMeal.mealRevisionId,
@@ -305,30 +287,24 @@ describe("History API", () => {
         { foodName: "修正雞腿便當", calories: 620, protein: 34, carbs: 70, fat: 22 },
       ],
     });
-    const deletedMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "已刪除餐點",
-      calories: 400,
-      protein: 16,
-      carbs: 50,
-      fat: 14,
+    const deletedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T09:00:00.000Z",
+      items: [
+        { foodName: "已刪除餐點", calories: 400, protein: 16, carbs: 50, fat: 14 },
+      ],
     });
     await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "隔天早餐",
-      calories: 300,
-      protein: 18,
-      carbs: 28,
-      fat: 10,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T16:30:00.000Z",
+      items: [
+        { foodName: "隔天早餐", calories: 300, protein: 18, carbs: 28, fat: 10 },
+      ],
     });
-    await services.foodLoggingService.logFood(foreignDeviceId, {
-      foodName: "外部裝置餐點",
-      calories: 999,
-      protein: 99,
-      carbs: 99,
-      fat: 99,
+    await services.foodLoggingService.logGroupedMeal(foreignDeviceId, {
       loggedAt: "2026-03-25T10:00:00.000Z",
+      items: [
+        { foodName: "外部裝置餐點", calories: 999, protein: 99, carbs: 99, fat: 99 },
+      ],
     });
 
     const res = await app.inject({
@@ -418,22 +394,18 @@ describe("History API", () => {
   it("projects explicit mealPeriod through history list, search, and day detail without inferring legacy rows", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const explicitLunch = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞腿便當",
-      calories: 650,
-      protein: 36,
-      carbs: 72,
-      fat: 24,
+    const explicitLunch = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T00:30:00.000Z",
       mealPeriod: "lunch",
+      items: [
+        { foodName: "雞腿便當", calories: 650, protein: 36, carbs: 72, fat: 24 },
+      ],
     });
-    const legacyBreakfastHour = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "蛋餅",
-      calories: 360,
-      protein: 18,
-      carbs: 42,
-      fat: 14,
+    const legacyBreakfastHour = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T00:45:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 360, protein: 18, carbs: 42, fat: 14 },
+      ],
     });
 
     const listRes = await app.inject({
