@@ -2298,6 +2298,186 @@ describe("Chat API", () => {
     }
   });
 
+  it("POST /api/chat JSON legacy single-item log_food shape + grouped retry logs exactly one meal", async () => {
+    // SHIM-01 criterion 1 / D-02: the pre-collapse legacy single-item shape
+    // (top-level snake_case aggregates, no items key) is a schema_validation
+    // failure that feeds back to the model; a grouped items[] retry within
+    // MAX_ROUNDS logs exactly one meal and the failed first attempt is invisible.
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    // Round 1: legacy single-item shape exactly as it existed pre-collapse.
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_legacy_shape_retry_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+          }),
+        },
+      }],
+    });
+    // Round 2: the model self-corrects with the grouped items[] shape.
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_grouped_retry_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿便當", calories: 620, protein: 30, carbs: 70, fat: 18 },
+            ],
+          }),
+        },
+      }],
+    });
+    // No third round is queued: committed log_food replies are projected from
+    // the receipt (renderer-owned), so the grouped success terminates the turn.
+
+    try {
+      const form = new FormData();
+      form.append("message", "我吃了雞腿便當");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        reply: string;
+        didLogMeal?: boolean;
+        loggedMeal?: {
+          mealId?: string;
+          mealRevisionId?: string;
+          foodName?: string;
+          itemCount?: number;
+        };
+      };
+      assert.equal(body.didLogMeal, true, "grouped retry must commit a normal meal log");
+      assert.match(body.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.match(body.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
+      assert.equal(body.loggedMeal?.foodName, "雞腿便當");
+      assert.equal(body.loggedMeal?.itemCount, 1);
+      assert.notEqual(body.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
+      assert.equal(
+        mockLLM.chatCalls.length,
+        2,
+        "legacy failure must consume exactly one feedback round before the grouped success terminates the turn",
+      );
+
+      const sqlite = new Database(dbPath, { readonly: true });
+      try {
+        const mealCount = sqlite
+          .prepare("SELECT COUNT(*) AS count FROM meal_transactions WHERE device_id = ?")
+          .get(deviceId) as { count: number };
+        assert.equal(mealCount.count, 1, "exactly one meal_transactions row after legacy-then-grouped rounds");
+        const itemCount = sqlite
+          .prepare("SELECT COUNT(*) AS count FROM meal_revision_items WHERE revision_id = ?")
+          .get(body.loggedMeal?.mealRevisionId ?? "") as { count: number };
+        assert.equal(itemCount.count, 1, "grouped retry persists its meal_revision_items rows");
+      } finally {
+        sqlite.close();
+      }
+
+      assert.equal(publishedPayloads.length, 1, "daily_summary must publish exactly once for the single committed meal");
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
+  it("POST /api/chat JSON legacy single-item log_food shape without recovery fails closed with FALLBACK copy and zero mutation", async () => {
+    // SHIM-01 criterion 1 / D-03: when the model never self-corrects within
+    // MAX_ROUNDS, the terminal reply is the canonical backend FALLBACK copy and
+    // no meal, receipt, or daily-summary mutation exists. Every queued round is
+    // a tool call (no logging-claim text), so NO_MUTATION_LOGGING_FALLBACK
+    // cannot fire (83-RESEARCH OQ-3).
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `call_legacy_shape_exhaust_json_${i}`,
+          type: "function",
+          function: {
+            name: "log_food",
+            arguments: JSON.stringify({
+              food_name: "雞腿便當",
+              calories: 620,
+              protein: 30,
+              carbs: 70,
+              fat: 18,
+            }),
+          },
+        }],
+      });
+    }
+
+    try {
+      const form = new FormData();
+      form.append("message", "我吃了雞腿便當");
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        reply: string;
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+      };
+      assert.equal(body.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
+      assert.equal(body.didLogMeal, false);
+      assert.equal(Object.prototype.hasOwnProperty.call(body, "loggedMeal"), false, "no receipt may project on the fail-closed path");
+      assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+      assert.equal(mockLLM.chatCalls.length, 3, "rounds-exhausted path must consume every retry round");
+
+      const sqlite = new Database(dbPath, { readonly: true });
+      try {
+        const mealCount = sqlite
+          .prepare("SELECT COUNT(*) AS count FROM meal_transactions WHERE device_id = ?")
+          .get(deviceId) as { count: number };
+        assert.equal(mealCount.count, 0, "legacy single-item shape must never create a meal_transactions row");
+        const failedToolRows = sqlite
+          .prepare("SELECT COUNT(*) AS count FROM chat_messages WHERE device_id = ? AND role = 'tool' AND tool_name = 'log_food'")
+          .get(deviceId) as { count: number };
+        assert.equal(failedToolRows.count, 3, "each failed validation round persists a tool row");
+      } finally {
+        sqlite.close();
+      }
+
+      assert.deepEqual(publishedPayloads, [], "no daily_summary publish may happen without a committed mutation");
+
+      // Phase 72 contract: failed tool rows exist but compressed history carries
+      // no committed-mutation marker, so future model context cannot treat the
+      // failed legacy call as logged.
+      const compressed = await services.chatService.getCompressedHistory(deviceId, 10);
+      const compressedText = compressed.map((message) => message.content).join("\n");
+      assert.doesNotMatch(compressedText, /系統已記錄餐點|系統已更新餐點|系統已刪除餐點|系統已完成餐點記錄/);
+      assert.doesNotMatch(compressedText, /log_food/);
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
   it("POST /api/chat does not include dailySummary when no food is logged", async () => {
     mockLLM.queueChatResponse({ content: "今天狀態不錯，記得多喝水。" });
 

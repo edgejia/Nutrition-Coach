@@ -4120,6 +4120,226 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat SSE legacy single-item log_food shape + grouped retry logs exactly one meal", async () => {
+    // SHIM-01 criterion 1 / D-02 SSE parity twin: the pre-collapse legacy
+    // single-item shape fails schema validation and feeds back; the grouped
+    // items[] retry logs exactly one meal with a normal receipt while frame
+    // order (status before chunk/done) is preserved.
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    // Round 1: legacy single-item shape exactly as it existed pre-collapse.
+    mockLLM.queueRoundResponse({
+      toolCalls: [createLogFoodToolCallWithArguments(JSON.stringify({
+        food_name: "雞腿便當",
+        calories: 620,
+        protein: 30,
+        carbs: 70,
+        fat: 18,
+      }))],
+    });
+    // Round 2: the model self-corrects with the grouped items[] shape.
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_grouped_retry_sse",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿便當", calories: 620, protein: 30, carbs: 70, fat: 18 },
+            ],
+          }),
+        },
+      }],
+    });
+    // Round 3: streamed final reply.
+    mockLLM.queueChatStream(["已記錄", "雞腿便當。"]);
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+
+      // SSE invariant: status frames precede chunk and done frames.
+      const firstStatusIndex = events.findIndex((event) => event.event === "status");
+      const firstChunkIndex = events.findIndex((event) => event.event === "chunk");
+      const doneIndex = events.findIndex((event) => event.event === "done");
+      assert.ok(firstStatusIndex >= 0, "expected a status frame");
+      assert.ok(doneIndex >= 0, "expected a done frame");
+      assert.ok(firstChunkIndex > firstStatusIndex, "status must precede the first chunk");
+      assert.ok(doneIndex > firstStatusIndex, "status must precede done");
+
+      const donePayload = JSON.parse(events[doneIndex]!.data) as {
+        didLogMeal?: boolean;
+        dailySummary?: unknown;
+        loggedMeal?: {
+          mealId?: string;
+          mealRevisionId?: string;
+          foodName?: string;
+          itemCount?: number;
+        };
+      };
+      assert.equal(donePayload.didLogMeal, true, "grouped retry must commit a normal meal log");
+      assert.ok(donePayload.dailySummary, "committed log must carry a daily summary");
+      assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
+      assert.match(donePayload.loggedMeal?.mealRevisionId ?? "", /^[0-9a-f-]{36}:r\d+$/);
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
+      assert.equal(donePayload.loggedMeal?.itemCount, 1);
+
+      const mealsRes = await fetch(`${address}/api/meals`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(mealsRes.status, 200);
+      const mealsJson = await mealsRes.json() as { meals: Array<{ foodName: string }> };
+      assert.equal(mealsJson.meals.length, 1, "exactly one meal row after legacy-then-grouped rounds");
+      assert.equal(mealsJson.meals[0]?.foodName, "雞腿便當");
+
+      assert.equal(publishedPayloads.length, 1, "daily_summary must publish exactly once for the single committed meal");
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat SSE legacy single-item log_food shape without recovery fails closed with FALLBACK copy and zero mutation", async () => {
+    // SHIM-01 criterion 1 / D-03 SSE parity twin: rounds exhaust without a
+    // grouped retry, the canonical backend FALLBACK terminates the turn, and
+    // the done frame carries no loggedMeal and no mutation summary fields.
+    // Every queued round is a tool call (no logging-claim text), so
+    // NO_MUTATION_LOGGING_FALLBACK cannot fire (83-RESEARCH OQ-3).
+    assert.ok(services, "expected app services");
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueRoundResponse({
+        toolCalls: [createLogFoodToolCallWithArguments(JSON.stringify({
+          food_name: "雞腿便當",
+          calories: 620,
+          protein: 30,
+          carbs: 70,
+          fat: 18,
+        }))],
+      });
+    }
+
+    const form = new FormData();
+    form.append("message", "我吃了雞腿便當");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+
+      // SSE invariant: status frames precede chunk and done frames.
+      const firstStatusIndex = events.findIndex((event) => event.event === "status");
+      const firstChunkIndex = events.findIndex((event) => event.event === "chunk");
+      const doneIndex = events.findIndex((event) => event.event === "done");
+      assert.ok(firstStatusIndex >= 0, "expected a status frame");
+      assert.ok(doneIndex >= 0, "expected a done frame");
+      assert.ok(firstChunkIndex > firstStatusIndex, "status must precede the first chunk");
+      assert.ok(doneIndex > firstStatusIndex, "status must precede done");
+
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => (JSON.parse(event.data) as { token: string }).token)
+        .join("");
+      assert.equal(chunkText, "抱歉，我現在無法完成這個請求，請稍後再試。");
+
+      const donePayload = JSON.parse(events[doneIndex]!.data) as {
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+      };
+      assert.equal(donePayload.didLogMeal, false);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(donePayload, "loggedMeal"),
+        false,
+        "done frame must omit loggedMeal on the fail-closed path",
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(donePayload, "dailySummary"),
+        false,
+        "done frame must omit dailySummary on the fail-closed path",
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(donePayload, "summaryOutcome"),
+        false,
+        "done frame must omit mutation summaryOutcome on the fail-closed path",
+      );
+
+      const mealsRes = await fetch(`${address}/api/meals`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(mealsRes.status, 200);
+      const mealsJson = await mealsRes.json() as { meals: unknown[] };
+      assert.equal(mealsJson.meals.length, 0, "legacy single-item shape must never create a meal row");
+
+      assert.deepEqual(publishedPayloads, [], "no daily_summary publish may happen without a committed mutation");
+
+      // Each failed round still produced a controlled failed tool result.
+      const failedToolResults = observabilityEvents(logLines, "tool_result").filter((record) =>
+        record.tool === "log_food" && record.success === false && record.executed === false,
+      );
+      assert.equal(failedToolResults.length, 3, "each round must fail as a controlled validation result");
+
+      // Phase 72 contract: no committed-mutation marker after failed legacy calls.
+      const compressed = await services.chatService.getCompressedHistory(deviceId, 10);
+      const compressedText = compressed.map((message) => message.content).join("\n");
+      assert.doesNotMatch(compressedText, /系統已記錄餐點|系統已更新餐點|系統已刪除餐點|系統已完成餐點記錄/);
+      assert.doesNotMatch(compressedText, /log_food/);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const latestAssistant = latestAssistantMessage(historyJson.messages);
+      assert.equal(latestAssistant?.content, "抱歉，我現在無法完成這個請求，請稍後再試。");
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat D-09: when log_food succeeds but chatRound final-reply throws, meal is kept and partial-success fallback written to history", async () => {
     mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
     const form = new FormData();
