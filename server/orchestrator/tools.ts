@@ -257,32 +257,14 @@ interface HistoricalDateToolArgs {
   meal_period?: HistoricalMealPeriod;
 }
 
-interface LogFoodLegacyArgs extends LogFoodItemArgs, HistoricalDateToolArgs {
-  protein_sources?: ProteinSourceArgs[];
-}
-
-interface LogFoodGroupedArgs extends HistoricalDateToolArgs {
+export interface LogFoodArgs extends HistoricalDateToolArgs {
   items: LogFoodItemArgs[];
   protein_sources?: ProteinSourceArgs[];
-  food_name?: string;
-  calories?: number;
-  protein?: number;
-  carbs?: number;
-  fat?: number;
-  quantity?: number;
-  quantity_g?: number;
-  quantity_ml?: number;
-  amount?: string;
-  unit?: string;
-  serving_size?: string;
 }
 
-export type LogFoodArgs = LogFoodLegacyArgs | LogFoodGroupedArgs;
 type QuantityUncertaintyReason = "missing_quantity";
 
-interface NormalizedLogFoodArgs extends HistoricalDateToolArgs {
-  items: LogFoodItemArgs[];
-  protein_sources?: ProteinSourceArgs[];
+interface NormalizedLogFoodArgs extends LogFoodArgs {
   quantityUncertaintyReason?: QuantityUncertaintyReason;
 }
 
@@ -494,34 +476,14 @@ const logFoodItemSchema = z
   })
   .strict();
 
-const logFoodSchema = z.union([
-  logFoodItemSchema
-    .extend({
-      date_text: historicalDateTextSchema,
-      meal_period: historicalMealPeriodSchema,
-      protein_sources: z.array(proteinSourceSchema).min(1).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      items: z.array(logFoodItemSchema).min(1, "items must contain at least one entry"),
-      date_text: historicalDateTextSchema,
-      meal_period: historicalMealPeriodSchema,
-      protein_sources: z.array(proteinSourceSchema).min(1).optional(),
-      food_name: z.string().min(1).optional(),
-      calories: finiteNumber.optional(),
-      protein: finiteNumber.optional(),
-      carbs: finiteNumber.optional(),
-      fat: finiteNumber.optional(),
-      quantity: finiteNumber.optional(),
-      quantity_g: finiteNumber.optional(),
-      quantity_ml: finiteNumber.optional(),
-      amount: z.string().optional(),
-      unit: z.string().optional(),
-      serving_size: z.string().optional(),
-    })
-    .strict(),
-]);
+const logFoodSchema = z
+  .object({
+    items: z.array(logFoodItemSchema).min(1, "items must contain at least one entry"),
+    date_text: historicalDateTextSchema,
+    meal_period: historicalMealPeriodSchema,
+    protein_sources: z.array(proteinSourceSchema).min(1).optional(),
+  })
+  .strict();
 
 const findMealsSchema = z
   .object({
@@ -759,25 +721,10 @@ function hasQuantityLikeNumberInText(text: string): boolean {
   return /(?:\d|[０-９]|[一二三四五六七八九十兩半])\s*(?:g|克|公斤|kg|ml|毫升|杯|碗|份|顆|片|根|條|個|包|盒|匙|湯匙|茶匙|碗|盤|瓶|罐|塊|枚|串|球|卷|張|把)?/i.test(text);
 }
 
-function hasGroupedQuantityEvidence(args: LogFoodArgs): boolean {
-  return "items" in args && (
-    args.quantity !== undefined
-    || args.quantity_g !== undefined
-    || args.quantity_ml !== undefined
-    || hasQuantityLikeNumberInText(args.amount ?? "")
-    || hasQuantityLikeNumberInText(args.unit ?? "")
-    || hasQuantityLikeNumberInText(args.serving_size ?? "")
-  );
-}
-
 function shouldMarkMissingQuantity(
   items: LogFoodItemArgs[],
   sourceText?: string,
-  hasTopLevelQuantityEvidence = false,
 ): boolean {
-  if (hasTopLevelQuantityEvidence) {
-    return false;
-  }
   if (sourceText && hasQuantityLikeNumberInText(sourceText)) {
     return false;
   }
@@ -816,32 +763,14 @@ function repairGenericDrinkItemsFromSourceText(
 }
 
 export function normalizeLogFoodArgs(args: LogFoodArgs, sourceText?: string): NormalizedLogFoodArgs {
-  // When items[] is present it is authoritative; top-level aggregate fields are compatibility noise.
-  const rawItems = "items" in args
-    ? args.items
-    : [
-        {
-          food_name: args.food_name,
-          calories: args.calories,
-          protein: args.protein,
-          carbs: args.carbs,
-          fat: args.fat,
-          ...(args.quantity !== undefined ? { quantity: args.quantity } : {}),
-          ...(args.quantity_g !== undefined ? { quantity_g: args.quantity_g } : {}),
-          ...(args.quantity_ml !== undefined ? { quantity_ml: args.quantity_ml } : {}),
-          ...(args.amount !== undefined ? { amount: args.amount } : {}),
-          ...(args.unit !== undefined ? { unit: args.unit } : {}),
-          ...(args.serving_size !== undefined ? { serving_size: args.serving_size } : {}),
-        },
-      ];
-  const items = repairGenericDrinkItemsFromSourceText(rawItems, sourceText);
+  const items = repairGenericDrinkItemsFromSourceText(args.items, sourceText);
 
   return {
     items,
     ...(args.date_text !== undefined ? { date_text: args.date_text } : {}),
     ...(args.meal_period !== undefined ? { meal_period: args.meal_period } : {}),
     ...(args.protein_sources !== undefined ? { protein_sources: args.protein_sources } : {}),
-    ...(shouldMarkMissingQuantity(items, sourceText, hasGroupedQuantityEvidence(args))
+    ...(shouldMarkMissingQuantity(items, sourceText)
       ? { quantityUncertaintyReason: "missing_quantity" as const }
       : {}),
   };
@@ -909,15 +838,12 @@ function isImpossibleMealAggregate(aggregate: {
     && (aggregate.protein > 0 || aggregate.carbs > 0 || aggregate.fat > 0);
 }
 
-function getLogFoodNames(args: NormalizedLogFoodArgs, rawArgs: LogFoodArgs): string[] {
-  return [
-    ...args.items.map((item) => item.food_name),
-    ...("food_name" in rawArgs && rawArgs.food_name ? [rawArgs.food_name] : []),
-  ];
+function getLogFoodNames(args: NormalizedLogFoodArgs): string[] {
+  return args.items.map((item) => item.food_name);
 }
 
-function isFailedRecognitionLogFood(args: NormalizedLogFoodArgs, rawArgs: LogFoodArgs): boolean {
-  if (getLogFoodNames(args, rawArgs).some(isFailedRecognitionPlaceholderName)) {
+function isFailedRecognitionLogFood(args: NormalizedLogFoodArgs): boolean {
+  if (getLogFoodNames(args).some(isFailedRecognitionPlaceholderName)) {
     return true;
   }
   return isImpossibleMealAggregate(aggregateMealNutrition(args.items));
@@ -927,9 +853,7 @@ function resolveProteinSourceInputs(
   args: LogFoodArgs,
   sourceText?: string,
 ): { proteinSources: ProteinSourceInput[]; usedExplicitProteinSources: boolean } {
-  const inferredSources = "items" in args
-    ? args.items.flatMap((item) => inferProteinSourcesFromItem(item))
-    : inferProteinSourcesFromItem(args);
+  const inferredSources = args.items.flatMap((item) => inferProteinSourcesFromItem(item));
 
   if (args.protein_sources && args.protein_sources.length > 0) {
     const explicitSources = args.protein_sources.map((source) => ({
@@ -955,9 +879,7 @@ function resolveProteinSourceInputs(
 }
 
 function totalProposedProtein(args: LogFoodArgs): number {
-  return "items" in args
-    ? roundProtein(args.items.reduce((sum, item) => sum + item.protein, 0))
-    : roundProtein(args.protein);
+  return roundProtein(args.items.reduce((sum, item) => sum + item.protein, 0));
 }
 
 function shouldRejectTrustedProteinPersistence(
@@ -973,7 +895,7 @@ function shouldRejectTrustedProteinPersistence(
     return false;
   }
 
-  const labels = "items" in args ? args.items.map((item) => item.food_name) : [args.food_name];
+  const labels = args.items.map((item) => item.food_name);
   const categories = labels.map((label) => classifyProteinSource(label));
   return !categories.every((category) => category === "trace");
 }
@@ -1023,7 +945,7 @@ function scaleGroupedProteinValues(
 }
 
 function buildNormalizedGroupedItems(
-  args: LogFoodGroupedArgs,
+  args: LogFoodArgs,
   countedSources: TrustedProteinSource[],
   trustedProtein: number,
   usedExplicitProteinSources: boolean,
@@ -1260,12 +1182,6 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
   parameters: {
     type: "object",
     properties: {
-      food_name: { type: "string" },
-      calories: { type: "number" },
-      protein: { type: "number" },
-      carbs: { type: "number" },
-      fat: { type: "number" },
-      ...quantityToolProperties,
       protein_sources: {
         type: "array",
         description: "Optional parse-time evidence. Provide only when credible protein-source anchors exist; omit when no credible anchors are available.",
@@ -1306,6 +1222,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
         },
       },
     },
+    required: ["items"],
     additionalProperties: false,
   },
   zodSchema: logFoodSchema,
@@ -1313,10 +1230,10 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
   // user text; the assistant computes them.
   logSummary: (args) => ({
     tool: "log_food",
-    calories: "items" in args ? args.items.reduce((sum, item) => sum + item.calories, 0) : args.calories,
-    protein: "items" in args ? args.items.reduce((sum, item) => sum + item.protein, 0) : args.protein,
-    carbs: "items" in args ? args.items.reduce((sum, item) => sum + item.carbs, 0) : args.carbs,
-    fat: "items" in args ? args.items.reduce((sum, item) => sum + item.fat, 0) : args.fat,
+    calories: args.items.reduce((sum, item) => sum + item.calories, 0),
+    protein: args.items.reduce((sum, item) => sum + item.protein, 0),
+    carbs: args.items.reduce((sum, item) => sum + item.carbs, 0),
+    fat: args.items.reduce((sum, item) => sum + item.fat, 0),
     proteinSourceCount: args.protein_sources?.length ?? 0,
   }),
   execute: async (args, context) => {
@@ -1369,7 +1286,7 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
 
     const mealPeriod = extractExplicitMealPeriodFromSourceText(context.currentUserMessage);
     const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
-    if (isFailedRecognitionLogFood(normalized, args)) {
+    if (isFailedRecognitionLogFood(normalized)) {
       return {
         ok: true,
         result: { status: "failed_recognition_no_save" as const },

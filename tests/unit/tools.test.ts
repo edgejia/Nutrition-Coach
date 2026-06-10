@@ -19,7 +19,7 @@ import {
   FatalToolError,
   type ToolDeps,
 } from "../../server/orchestrator/tools.js";
-import { runContract } from "../../server/orchestrator/tool-contract.js";
+import { runContract, type ToolExecuteResult } from "../../server/orchestrator/tool-contract.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import type { ToolCall } from "../../server/llm/types.js";
 
@@ -85,11 +85,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
   });
 
-  it("normalizes single-shape log_food calls through the canonical grouped path while preserving top-level protein_sources", async () => {
-    // Union ACCEPTANCE contract: this fixture deliberately stays single-item-shape.
-    // Plan 83-03 flips this test to a rejection case when the union collapses.
+  // Plan 83-03 (D-01): the single-item union half is gone. A top-level
+  // food_name shape is now an ordinary schema_validation failure that mutates
+  // nothing — it inherits Plan 83-01's controlled retry/fail-closed path.
+  it("rejects single-shape log_food calls with schema_validation and zero mutation", async () => {
+    const contract = toolRegistry.get("log_food");
+    assert.ok(contract);
+
     const singleShapeLogFoodCall: ToolCall = {
-      id: "call_single_shape_acceptance",
+      id: "call_single_shape_rejected",
       type: "function",
       function: {
         name: "log_food",
@@ -102,90 +106,56 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
         }),
       },
     };
-    const calls: Array<{ method: "logFood" | "logGroupedMeal"; input: unknown }> = [];
+
+    const outcome = await runContract(contract!, singleShapeLogFoodCall, {
+      currentUserMessage: "",
+      previousAssistantMessage: undefined,
+      deps: { toolDeps: { foodLoggingService, summaryService }, deviceId },
+    });
+
+    assert.equal(outcome.success, false);
+    assert.equal(outcome.executed, false);
+    assert.equal(outcome.failureReason, "validation");
+    const parsed = JSON.parse(outcome.result);
+    assert.equal(parsed.failureReason, "validation");
+    assert.equal(parsed.reason, "schema_validation");
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisionItems = await db.select().from(mealRevisionItems);
+    assert.equal(transactions.length, 0);
+    assert.equal(revisionItems.length, 0);
+
+    // Lockstep JSON-definition surface: grouped-only, per-item quantity fields stay.
     const toolDefs = Object.fromEntries(
       getToolDefinitions().map((definition) => [definition.function.name, definition.function.parameters]),
     ) as Record<string, any>;
-
-    const result = await executeTool(singleShapeLogFoodCall, deviceId, {
-      foodLoggingService: {
-        async logFood(_deviceId: string, input: unknown) {
-          calls.push({ method: "logFood", input });
-          return {
-            id: "meal-single",
-            mealRevisionId: "rev-single",
-            foodName: "蘋果",
-            calories: 100,
-            protein: 0,
-            carbs: 20,
-            fat: 0.5,
-            imagePath: null,
-            loggedAt: new Date().toISOString(),
-          };
-        },
-        async logGroupedMeal(_deviceId: string, input: unknown) {
-          calls.push({ method: "logGroupedMeal", input });
-          return {
-            id: "meal-single",
-            mealRevisionId: "rev-single",
-            foodName: "蘋果",
-            calories: 100,
-            protein: 0,
-            carbs: 20,
-            fat: 0.5,
-            imagePath: null,
-            loggedAt: new Date().toISOString(),
-          };
-        },
-      } as any,
-      summaryService: {
-        async getDailySummary() {
-          return {
-            date: formatLocalDate(new Date()),
-            totalCalories: 100,
-            totalProtein: 0,
-            totalCarbs: 20,
-            totalFat: 0.5,
-            mealCount: 1,
-          };
-        },
-      } as any,
-    });
-
-    assert.equal(result.summary, "成功");
-    assert.deepEqual(calls.map((call) => call.method), ["logGroupedMeal"]);
-    assert.deepEqual(calls[0]?.input, {
-      imagePath: undefined,
-      loggedAt: undefined,
-      items: [{
-        foodName: "蘋果",
-        calories: 100,
-        protein: 0,
-        carbs: 20,
-        fat: 0.5,
-      }],
-    });
+    assert.ok(toolDefs.log_food.properties.items, "items[] must remain the logging input");
     assert.ok(toolDefs.log_food.properties.protein_sources, "protein_sources must stay top-level");
-    assert.ok(toolDefs.log_food.properties.items, "items[] must remain accepted");
     assert.equal(toolDefs.log_food.properties.items.items.properties.protein_sources, undefined);
     for (const quantityField of ["quantity", "quantity_g", "quantity_ml", "amount", "unit", "serving_size"]) {
-      assert.ok(toolDefs.log_food.properties[quantityField], `${quantityField} must be exposed for single-shape log_food`);
+      assert.equal(
+        toolDefs.log_food.properties[quantityField],
+        undefined,
+        `${quantityField} must not be exposed at the log_food top level`,
+      );
       assert.ok(
         toolDefs.log_food.properties.items.items.properties[quantityField],
-        `${quantityField} must be exposed for items[] log_food entries`,
+        `${quantityField} must stay exposed for items[] log_food entries`,
       );
     }
   });
 
-  it("normalizes items[] log_food calls through the same canonical grouped path and ignores top-level aggregates", async () => {
-    const calls: Array<{ method: "logFood" | "logGroupedMeal"; input: any }> = [];
-    const groupedCall: ToolCall = {
-      id: "call_items_authoritative",
+  it("rejects items[] log_food calls that carry top-level aggregate fields", async () => {
+    const contract = toolRegistry.get("log_food");
+    assert.ok(contract);
+
+    const groupedCallWithAggregates: ToolCall = {
+      id: "call_items_with_top_level_aggregates",
       type: "function",
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "should be ignored",
+          food_name: "no longer accepted",
           calories: 999,
           protein: 999,
           carbs: 999,
@@ -214,47 +184,29 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       },
     };
 
-    await executeTool(groupedCall, deviceId, {
-      foodLoggingService: {
-        async logFood(_deviceId: string, input: unknown) {
-          calls.push({ method: "logFood", input });
-          throw new Error("single-shape shim must not be used for items[]");
-        },
-        async logGroupedMeal(_deviceId: string, input: any) {
-          calls.push({ method: "logGroupedMeal", input });
-          return {
-            id: "meal-grouped",
-            mealRevisionId: "rev-grouped",
-            foodName: "蛋餅、豆漿",
-            calories: 500,
-            protein: 24,
-            carbs: 44,
-            fat: 24,
-            imagePath: null,
-            loggedAt: new Date().toISOString(),
-          };
-        },
-      } as any,
-      summaryService: {
-        async getDailySummary() {
-          return {
-            date: formatLocalDate(new Date()),
-            totalCalories: 500,
-            totalProtein: 24,
-            totalCarbs: 44,
-            totalFat: 24,
-            mealCount: 1,
-          };
-        },
-      } as any,
+    const outcome = await runContract(contract!, groupedCallWithAggregates, {
+      currentUserMessage: "",
+      previousAssistantMessage: undefined,
+      deps: { toolDeps: { foodLoggingService, summaryService }, deviceId },
     });
 
-    assert.deepEqual(calls.map((call) => call.method), ["logGroupedMeal"]);
-    assert.deepEqual(calls[0]?.input.items.map((item: { foodName: string }) => item.foodName), ["蛋餅", "豆漿"]);
-    assert.equal(calls[0]?.input.items.reduce((sum: number, item: { calories: number }) => sum + item.calories, 0), 500);
+    assert.equal(outcome.success, false);
+    assert.equal(outcome.executed, false);
+    assert.equal(outcome.failureReason, "validation");
+    const parsed = JSON.parse(outcome.result);
+    assert.equal(parsed.failureReason, "validation");
+    assert.equal(parsed.reason, "schema_validation");
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisionItems = await db.select().from(mealRevisionItems);
+    assert.equal(transactions.length, 0);
+    assert.equal(revisionItems.length, 0);
   });
 
-  it("accepts grouped log_food incident args with top-level serving metadata while keeping items authoritative", async () => {
+  it("rejects grouped log_food incident args that carry top-level serving metadata", async () => {
+    const contract = toolRegistry.get("log_food");
+    assert.ok(contract);
+
     const incidentCall: ToolCall = {
       id: "call_breakfast_chicken_rice",
       type: "function",
@@ -294,28 +246,22 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       },
     };
 
-    const result = await executeTool(incidentCall, deviceId, {
-      foodLoggingService,
-      summaryService,
-    }, {
+    const outcome = await runContract(contract!, incidentCall, {
       currentUserMessage: "早餐吃雞胸肉150g和一碗白飯",
+      previousAssistantMessage: undefined,
+      deps: { toolDeps: { foodLoggingService, summaryService }, deviceId },
     });
 
-    assert.ok(result.loggedMeal);
-    assert.equal(result.loggedMeal.itemCount, 2);
-    assert.equal(result.loggedMeal.foodName, "雞胸肉、白飯");
-    assert.equal(result.loggedMeal.quantityUncertaintyReason, undefined);
-    assert.deepEqual(result.loggedMeal.countedSources.map((source) => source.name), ["雞胸肉"]);
-    assert.deepEqual(result.loggedMeal.excludedSources.map((source) => source.name), ["白飯"]);
-    assert.deepEqual(result.loggedMeal.items, [
-      { name: "雞胸肉", position: 1, calories: 248, protein: 46.5, carbs: 0, fat: 5.4 },
-      { name: "白飯", position: 2, calories: 207, protein: 0, carbs: 46, fat: 0.4 },
-    ]);
+    assert.equal(outcome.success, false);
+    assert.equal(outcome.executed, false);
+    assert.equal(outcome.failureReason, "validation");
+    const parsed = JSON.parse(outcome.result);
+    assert.equal(parsed.reason, "schema_validation");
 
     const transactions = await db.select().from(mealTransactions);
     const revisionItems = await db.select().from(mealRevisionItems);
-    assert.equal(transactions.length, 1);
-    assert.equal(revisionItems.length, 2);
+    assert.equal(transactions.length, 0);
+    assert.equal(revisionItems.length, 0);
   });
 
   it("Test 1: log_food persists meal and returns result/summary/dailySummary.date/loggedMeal", async () => {
@@ -434,18 +380,13 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     );
   });
 
-  it("accepts grouped log_food calls that include aggregate totals and serving metadata", async () => {
+  it("accepts grouped log_food calls with per-item quantity metadata and no top-level aggregates", async () => {
     const groupedCall: ToolCall = {
       id: "call_grouped_with_totals",
       type: "function",
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "高蛋白粉、肌酸、燕麥片、低糖豆漿",
-          calories: 390,
-          protein: 34,
-          carbs: 34,
-          fat: 9,
           items: [
             {
               food_name: "高蛋白粉",
@@ -876,7 +817,10 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(quantityTextResult.loggedMeal.quantityUncertaintyReason, undefined);
   });
 
-  it("omits transient missing_quantity metadata for grouped top-level Chinese serving metadata", async () => {
+  it("rejects grouped log_food calls that carry top-level Chinese serving metadata", async () => {
+    const contract = toolRegistry.get("log_food");
+    assert.ok(contract);
+
     const cases: Array<{
       id: string;
       args: Record<string, unknown>;
@@ -930,16 +874,23 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
         },
       };
 
-      const result = await executeTool(groupedCall, deviceId, {
-        foodLoggingService,
-        summaryService,
-      }, {
+      const outcome: ToolExecuteResult = await runContract(contract!, groupedCall, {
         currentUserMessage: testCase.sourceText,
+        previousAssistantMessage: undefined,
+        deps: { toolDeps: { foodLoggingService, summaryService }, deviceId },
       });
 
-      assert.ok(result.loggedMeal);
-      assert.equal(result.loggedMeal.quantityUncertaintyReason, undefined, testCase.id);
+      assert.equal(outcome.success, false, testCase.id);
+      assert.equal(outcome.executed, false, testCase.id);
+      assert.equal(outcome.failureReason, "validation", testCase.id);
+      const parsed = JSON.parse(outcome.result);
+      assert.equal(parsed.reason, "schema_validation", testCase.id);
     }
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisionItems = await db.select().from(mealRevisionItems);
+    assert.equal(transactions.length, 0);
+    assert.equal(revisionItems.length, 0);
   });
 
   it("omits transient missing_quantity metadata when the source user text carries the quantity", async () => {
@@ -1116,11 +1067,6 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "無法辨識的照片",
-          calories: 0,
-          protein: 0,
-          carbs: 0,
-          fat: 0,
           items: [
             {
               food_name: "照片中的餐點",

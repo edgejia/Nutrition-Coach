@@ -328,11 +328,8 @@ const scenario: VerificationScenario = {
         stepName: "carb_dominant_small_protein",
         message: "我晚餐吃咖哩飯",
         toolArgs: {
-          food_name: "咖哩飯",
-          calories: 560,
-          protein: 16,
-          carbs: 85,
-          fat: 14,
+          // Plan 83-03: top-level aggregates removed — the grouped-only strict
+          // logFoodSchema rejects them; items[] is the sole input shape.
           items: [
             { food_name: "雞肉", calories: 90, protein: 6, carbs: 0, fat: 4 },
             { food_name: "白飯", calories: 360, protein: 6, carbs: 78, fat: 1 },

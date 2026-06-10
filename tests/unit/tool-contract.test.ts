@@ -77,6 +77,51 @@ describe("runContract wrapper", () => {
     assert.ok(!required?.includes("protein_sources"));
   });
 
+  // Plan 83-03 (D-01, Pitfall 2): the LLM-facing JSON parameters must stay in
+  // lockstep with the grouped-only Zod schema — required items[], no top-level
+  // single-item aggregate or quantity fields. Standing test for the WR-01
+  // drift class.
+  it("log_food JSON schema advertises grouped-only input in lockstep with the Zod schema", () => {
+    const logFood = getToolDefinitions().find((definition) => definition.function.name === "log_food");
+    assert.ok(logFood, "log_food definition must exist");
+
+    const parameters = logFood.function.parameters as {
+      required?: unknown;
+      additionalProperties?: unknown;
+      properties: Record<string, unknown>;
+    };
+
+    assert.deepEqual(parameters.required, ["items"], "items must be the only required log_food parameter");
+    assert.equal(parameters.additionalProperties, false);
+
+    for (const forbiddenTopLevelField of [
+      "food_name",
+      "calories",
+      "protein",
+      "carbs",
+      "fat",
+      "quantity",
+      "quantity_g",
+      "quantity_ml",
+      "amount",
+      "unit",
+      "serving_size",
+    ]) {
+      assert.equal(
+        parameters.properties[forbiddenTopLevelField],
+        undefined,
+        `log_food JSON parameters must not expose top-level ${forbiddenTopLevelField}`,
+      );
+    }
+
+    for (const expectedField of ["items", "date_text", "meal_period", "protein_sources"]) {
+      assert.ok(
+        parameters.properties[expectedField],
+        `log_food JSON parameters must keep ${expectedField}`,
+      );
+    }
+  });
+
   it("Test 1: invalid JSON returns validation failure with structured JSON result", async () => {
     const contract = makeFakeGoalContract();
     const call = makeCall(null, "fake_goal", "not-json");
