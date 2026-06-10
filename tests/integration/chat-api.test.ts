@@ -3679,6 +3679,10 @@ describe("Chat API", () => {
         },
       }],
     });
+    // Phase 83 (D-02): schema_validation feeds back to the model instead of
+    // throwing to the route catch; queue a terminal reply that does NOT claim
+    // logging so the turn ends deterministically (83-RESEARCH OQ-3).
+    logLLM.queueChatResponse({ content: "請再提供餐點內容和份量，我再幫你估算。" });
 
     const logApp = await buildApp({
       dbPath: ":memory:",
@@ -3697,11 +3701,14 @@ describe("Chat API", () => {
     try {
       const form = new FormData();
       form.append("message", rawMealText);
-      await fetch(`${logAddress}/api/chat`, {
+      const res = await fetch(`${logAddress}/api/chat`, {
         method: "POST",
         headers: { cookie: logCookieHeader, Accept: "text/event-stream" },
         body: form,
       });
+      // Consume the stream so all turn log lines are flushed before asserting.
+      assert.ok(res.body);
+      await readUntilEventCount(res.body.getReader(), "done", 1);
 
       const toolResults = observabilityEvents(logLines, "tool_result");
       const failedLogFood = toolResults.find((record) =>

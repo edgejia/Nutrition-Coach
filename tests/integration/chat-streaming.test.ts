@@ -4045,16 +4045,23 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat treats invalid log_food required fields as fatal and writes unified route fallback", async () => {
-    mockLLM.queueRoundResponse({
-      toolCalls: [createLogFoodToolCallWithArguments(JSON.stringify({
-        food_name: {},
-        calories: null,
-        protein: "",
-        carbs: null,
-        fat: null,
-      }))],
-    });
+  it("POST /api/chat feeds invalid log_food required fields back for retry and falls back deterministically when rounds exhaust", async () => {
+    // Phase 83 (D-02): schema_validation no longer throws to the route catch.
+    // Every round queues the same schema-invalid call so MAX_ROUNDS exhausts and
+    // the deterministic orchestrator FALLBACK copy terminates the turn (D-03).
+    // No terminal model text is queued, so guardNoMutationLoggingClaim cannot
+    // fire (83-RESEARCH OQ-3).
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueRoundResponse({
+        toolCalls: [createLogFoodToolCallWithArguments(JSON.stringify({
+          food_name: {},
+          calories: null,
+          protein: "",
+          carbs: null,
+          fat: null,
+        }))],
+      });
+    }
 
     const form = new FormData();
     form.append("message", "我吃了蘋果");
@@ -4075,14 +4082,20 @@ describe("chat-streaming", () => {
       const text = await readStreamUntil(reader, "event: done");
 
       assert.match(text, /event: done/);
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        didLogMeal?: boolean;
+        dailySummary?: unknown;
+      };
+      assert.equal(donePayload.didLogMeal, false, "failed validation rounds must not log a meal");
+      assert.equal(donePayload.dailySummary, undefined, "no daily summary may be projected without a mutation");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
       });
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
-      assert.equal(assistantMsgs.length, 1, "invalid log_food fields must write exactly one route fallback");
-      assert.match(assistantMsgs[0]!.content, /這次無法完成請求/);
+      assert.equal(assistantMsgs.length, 1, "rounds-exhausted fallback must write exactly one assistant reply");
+      assert.match(assistantMsgs[0]!.content, /我現在無法完成這個請求/);
       assert.doesNotMatch(assistantMsgs[0]!.content, /log_food|FatalToolError|object|null/);
     } finally {
       clearTimeout(timeout);
