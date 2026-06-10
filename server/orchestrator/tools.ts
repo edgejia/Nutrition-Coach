@@ -2196,11 +2196,13 @@ function buildHistoricalSummaryClarificationFact(
 // Orchestrator-facing dispatch (registry-first per D-03). Adapts the
 // controlled `runContract` result back to the legacy `ToolExecutionResult`
 // shape expected by `server/orchestrator/index.ts` (Phase 8 hooks + Phase 9
-// dailySummary contract). Controlled non-success outcomes are surfaced as
-// `FatalToolError` so the orchestrator's `executed:false` hook path stays
-// intact for log_food / get_daily_summary; future contracts that prefer
-// controlled failures (e.g. update_goals in 10-03) should call `runContract`
-// directly.
+// dailySummary contract). Validation failures for find_meals / update_goals /
+// update_meal / delete_meal — and, since Phase 83, log_food schema_validation
+// failures — return controlled failures (`success:false, executed:false`) so
+// the orchestrator feeds the error back to the model for retry within
+// MAX_ROUNDS. log_food `invalid_json` (unparseable args), execute failures,
+// and get_daily_summary non-success outcomes are still surfaced as
+// `FatalToolError` so the route-level fallback path stays intact.
 // ---------------------------------------------------------------------------
 
 export async function executeTool(
@@ -2235,6 +2237,35 @@ export async function executeTool(
         executed: false,
         failureReason: outcome.failureReason,
       };
+    }
+
+    // Phase 83 (D-02): log_food schema_validation failures return a controlled
+    // failure so the model can retry (e.g. with grouped items[]) within
+    // MAX_ROUNDS. Keyed on the generic failure reason only — no legacy-shape
+    // detection (D-01). `invalid_json` and execute failures fall through to the
+    // FatalToolError conversion below (route UNIFIED_FALLBACK unchanged).
+    if (
+      toolCall.function.name === "log_food"
+      && outcome.failureReason === "validation"
+    ) {
+      let failureKind: string | undefined;
+      try {
+        const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
+        if (typeof parsed.reason === "string") {
+          failureKind = parsed.reason;
+        }
+      } catch {
+        // result was not JSON; fall through to the FatalToolError conversion
+      }
+      if (failureKind === "schema_validation") {
+        return {
+          result: outcome.result,
+          summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
+          success: false,
+          executed: false,
+          failureReason: outcome.failureReason,
+        };
+      }
     }
 
     if (
