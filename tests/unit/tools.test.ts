@@ -16,6 +16,7 @@ import {
   executeTool,
   getToolDefinitions,
   toolRegistry,
+  FatalToolError,
   type ToolDeps,
 } from "../../server/orchestrator/tools.js";
 import { runContract } from "../../server/orchestrator/tool-contract.js";
@@ -1306,6 +1307,76 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.ok(
       (parsed.fields as string[]).some((field) => field.endsWith("items.0.calories")),
       "validation fields must identify the negative grouped item calories",
+    );
+
+    const transactions = await db.select().from(mealTransactions);
+    const revisionItems = await db.select().from(mealRevisionItems);
+    assert.equal(transactions.length, 0);
+    assert.equal(revisionItems.length, 0);
+  });
+
+  // Phase 83-01 (D-02): log_food schema_validation failures return a controlled
+  // failure from executeTool (feedback to the model) instead of throwing
+  // FatalToolError to the route catch.
+  it("Phase 83: executeTool returns a controlled schema_validation failure for log_food instead of throwing", async () => {
+    const invalidGroupedCall: ToolCall = {
+      id: "call_83_schema_validation",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "", // empty name fails the strict item schema
+              calories: 320,
+              protein: 18,
+              carbs: 40,
+              fat: 9,
+            },
+          ],
+        }),
+      },
+    };
+
+    const result = await executeTool(invalidGroupedCall, deviceId, {
+      foodLoggingService,
+      summaryService,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "validation");
+    assert.equal(result.summary, "failureReason: validation");
+    const parsed = JSON.parse(result.result) as Record<string, unknown>;
+    assert.equal(parsed.reason, "schema_validation");
+    assert.equal(parsed.failureReason, "validation");
+    assert.ok(Array.isArray(parsed.fields), "validation fields list must be present");
+    assert.ok(
+      (parsed.fields as string[]).some((field) => field.endsWith("items.0.food_name")),
+      "validation fields must identify the empty item food_name",
+    );
+
+    // No mutation on any validation failure path.
+    const transactions = await db.select().from(mealTransactions);
+    const revisionItems = await db.select().from(mealRevisionItems);
+    assert.equal(transactions.length, 0);
+    assert.equal(revisionItems.length, 0);
+  });
+
+  it("Phase 83: executeTool still throws FatalToolError for unparseable log_food args (invalid_json)", async () => {
+    const unparseableCall: ToolCall = {
+      id: "call_83_invalid_json",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: "{not json",
+      },
+    };
+
+    await assert.rejects(
+      () => executeTool(unparseableCall, deviceId, { foodLoggingService, summaryService }),
+      (error: unknown) => error instanceof FatalToolError,
+      "invalid_json must stay on the FatalToolError throw path",
     );
 
     const transactions = await db.select().from(mealTransactions);

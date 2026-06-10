@@ -328,6 +328,78 @@ describe("Orchestrator", () => {
     assert.equal(secondRound[secondRound.length - 1].role, "tool");
   });
 
+  // Phase 83-01 (D-02): a log_food schema_validation failure is fed back to the
+  // model as a controlled tool failure so it can retry within MAX_ROUNDS.
+  it("Phase 83: failed log_food schema validation feeds back so the model retries with grouped items", async () => {
+    // Round 1: legacy-style call that fails Zod schema validation (empty food_name).
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "retry_round_1_invalid",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ food_name: "", calories: 600, protein: 35, carbs: 70, fat: 15 }),
+        },
+      }],
+    });
+    // Round 2: valid grouped items[] retry.
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "retry_round_2_grouped",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [{ food_name: "雞胸肉飯", calories: 600, protein: 35, carbs: 70, fat: 15 }],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "我吃了雞胸肉飯", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.equal(result.didLogMeal, true);
+    assert.match(result.reply, /已記錄雞胸肉飯/);
+
+    // Round arithmetic: the failed round consumed one model round, the retry the second.
+    assert.equal(mockLLM.chatCalls.length, 2);
+    const secondRound = mockLLM.chatCalls[1].messages;
+    assert.equal(secondRound[secondRound.length - 1].role, "tool", "validation feedback must reach the model as a tool message");
+
+    // Exactly ONE meal row — the failed legacy-style call never mutated state.
+    const transactions = await db.select().from(mealTransactions);
+    assert.equal(transactions.length, 1);
+  });
+
+  it("Phase 83: rounds exhausted on repeated log_food schema failures returns the deterministic FALLBACK with zero meals", async () => {
+    // Every round queues a schema-invalid log_food call until MAX_ROUNDS (3) exhausts.
+    // No terminal text is queued, so the deterministic backend-owned FALLBACK copy
+    // is asserted without guardNoMutationLoggingClaim interference (83-RESEARCH OQ-3).
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `exhaust_round_${i}`,
+          type: "function",
+          function: {
+            name: "log_food",
+            arguments: JSON.stringify({ food_name: "", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+          },
+        }],
+      });
+    }
+
+    const result = await orchestrator.handleMessage(deviceId, "記錄這餐", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.equal(result.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
+    assert.equal(result.finalReplySource, "fallback");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(mockLLM.chatCalls.length, 3);
+
+    // Zero mutation across every failed validation round.
+    const transactions = await db.select().from(mealTransactions);
+    assert.equal(transactions.length, 0);
+  });
+
   it("persists uploaded image metadata while sending the data URI to the LLM", async () => {
     // Round 1: previously simulated `analyze_food` (legacy lenient unknown-tool
     // path); Phase 10-02 D-03 makes unknown tools fatal, so we now model the
@@ -787,8 +859,9 @@ describe("Orchestrator", () => {
     assert.ok(argsRedacted.includes("kcal"), `argsRedacted should contain 'kcal' from redactToolArgs: ${argsRedacted}`);
   });
 
-  it("HOOK-01: fires onToolResult with executed:false when validation fails (FatalToolError)", async () => {
-    // Queue a tool call with invalid log_food arguments (missing required numeric fields)
+  it("HOOK-01: fires onToolResult with executed:false when log_food schema validation fails (controlled feedback)", async () => {
+    // Phase 83-01 (D-02): log_food schema_validation no longer throws FatalToolError;
+    // the controlled failure feeds back to the model and handleMessage resolves.
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "c1",
@@ -799,16 +872,15 @@ describe("Orchestrator", () => {
         },
       }],
     });
-    // FatalToolError propagates — do NOT queue a second reply
+    // Round 2: terminal text that does NOT claim logging (83-RESEARCH OQ-3).
+    mockLLM.queueChatResponse({ content: "請再提供餐點內容和份量，我再幫你估算。" });
 
-    // Assert that handleMessage REJECTS (error propagates)
-    await assert.rejects(
-      () => orchestrator.handleMessage(deviceId, "記錄一個壞食物", undefined, undefined, { hooks: spyHooks }),
-      (err: unknown) => err instanceof Error,
-      "handleMessage should reject when FatalToolError is not caught"
-    );
+    const result = await orchestrator.handleMessage(deviceId, "記錄一個壞食物", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.equal(result.reply, "請再提供餐點內容和份量，我再幫你估算。");
+    assert.equal(result.didLogMeal, false);
 
-    // Despite the rejection, onToolResult must have fired BEFORE the error propagated
+    // onToolResult must have fired on the controlled feedback path
     assert.equal(spyHooks.onToolResult.mock.callCount(), 1, "onToolResult should fire once for the validation failure");
     const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
     assert.equal(payload.tool, "log_food");
@@ -816,6 +888,10 @@ describe("Orchestrator", () => {
     assert.equal(payload.executed, false, "executed:false — tool validation failed before execution");
     assert.ok(typeof payload.failureReason === "string" && payload.failureReason.length > 0);
     assert.ok(!payload.failureReason?.includes(deviceId), "failureReason must not contain deviceId");
+
+    // No mutation from the failed validation round.
+    const transactions = await db.select().from(mealTransactions);
+    assert.equal(transactions.length, 0);
   });
 
   it("GOAL-06: passes current user text and immediately previous assistant message to update_goals", async () => {
