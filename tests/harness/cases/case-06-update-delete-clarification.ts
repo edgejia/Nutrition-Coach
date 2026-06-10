@@ -169,30 +169,28 @@ async function runAmbiguousMealSubCase(subCase: ClarificationSubCase): Promise<{
 async function seedSharedMultiCandidateMeals(
   deviceId: string,
   foodLoggingService: {
-    logFood(deviceId: string, input: {
-      foodName: string;
-      calories: number;
-      protein: number;
-      carbs: number;
-      fat: number;
+    logGroupedMeal(deviceId: string, input: {
+      items: Array<{
+        foodName: string;
+        calories: number;
+        protein: number;
+        carbs: number;
+        fat: number;
+      }>;
       loggedAt?: string;
     }): Promise<unknown>;
   },
 ): Promise<void> {
-  await foodLoggingService.logFood(deviceId, {
-    foodName: "雞腿飯",
-    calories: 650,
-    protein: 30,
-    carbs: 80,
-    fat: 20,
+  await foodLoggingService.logGroupedMeal(deviceId, {
+    items: [
+      { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+    ],
     loggedAt: "2026-04-19T04:00:00.000Z",
   });
-  await foodLoggingService.logFood(deviceId, {
-    foodName: "雞腿飯",
-    calories: 620,
-    protein: 28,
-    carbs: 76,
-    fat: 18,
+  await foodLoggingService.logGroupedMeal(deviceId, {
+    items: [
+      { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+    ],
     loggedAt: "2026-04-19T04:30:00.000Z",
   });
 }

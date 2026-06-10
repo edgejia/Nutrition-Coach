@@ -84,12 +84,16 @@ async function runLogSubflow(): Promise<SubflowResult> {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "雞胸便當",
-          calories: 520,
-          protein: 38,
-          carbs: 58,
-          fat: 14,
-          amount: "1 份",
+          items: [
+            {
+              food_name: "雞胸便當",
+              calories: 520,
+              protein: 38,
+              carbs: 58,
+              fat: 14,
+              amount: "1 份",
+            },
+          ],
           protein_sources: [{ name: "雞胸", protein: 38, is_primary: true, certainty: "clear" }],
         }),
       },
@@ -153,12 +157,10 @@ async function runUpdateSubflow(): Promise<SubflowResult> {
   });
 
   try {
-    const seededMeal = await fixture.services.foodLoggingService.logFood(fixture.deviceId, {
-      foodName: "鮪魚飯",
-      calories: 620,
-      protein: 31,
-      carbs: 76,
-      fat: 18,
+    const seededMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+      items: [
+        { foodName: "鮪魚飯", calories: 620, protein: 31, carbs: 76, fat: 18 },
+      ],
     });
     const message = "把今天鮪魚飯改成 500 kcal，蛋白質 40 g";
     llmProvider.queueRoundResponse({
@@ -238,12 +240,10 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
   });
 
   try {
-    const seededMeal = await fixture.services.foodLoggingService.logFood(fixture.deviceId, {
-      foodName: "拿鐵",
-      calories: 180,
-      protein: 9,
-      carbs: 14,
-      fat: 8,
+    const seededMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+      items: [
+        { foodName: "拿鐵", calories: 180, protein: 9, carbs: 14, fat: 8 },
+      ],
     });
     const message = "刪掉今天的拿鐵";
     llmProvider.queueRoundResponse({

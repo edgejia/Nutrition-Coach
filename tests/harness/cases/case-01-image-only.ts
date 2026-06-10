@@ -171,12 +171,15 @@ export async function runCase01ImageOnly(): Promise<BehaviorCaseOutcome> {
   const llm = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   const foodName = "豬肉燒烤飯盒";
-  const toolArgs = {
+  const toolArgsItem = {
     food_name: foodName,
     calories: 680,
     protein: 35,
     carbs: 86,
     fat: 22,
+  };
+  const toolArgs = {
+    items: [toolArgsItem],
     protein_sources: [
       { name: "豬肉", protein: 35, is_primary: true, certainty: "clear" },
     ],
@@ -259,7 +262,7 @@ export async function runCase01ImageOnly(): Promise<BehaviorCaseOutcome> {
       : undefined;
     const trace = recorder.build({ scenario: "CASE-01", status: "pass" });
     const sources = buildNumberSources({
-      toolArgs: [toolArgs.calories, toolArgs.protein, toolArgs.carbs, toolArgs.fat],
+      toolArgs: [toolArgsItem.calories, toolArgsItem.protein, toolArgsItem.carbs, toolArgsItem.fat],
       donePayload,
       persistedMeal: persistedEvidence,
     });

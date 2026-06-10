@@ -162,11 +162,15 @@ const textLogScenario: VerificationScenario = {
           function: {
             name: "log_food",
             arguments: JSON.stringify({
-              food_name: "蘋果",
-              calories: 95,
-              protein: 0.5,
-              carbs: 25,
-              fat: 0.3,
+              items: [
+                {
+                  food_name: "蘋果",
+                  calories: 95,
+                  protein: 0.5,
+                  carbs: 25,
+                  fat: 0.3,
+                },
+              ],
             }),
           },
         },

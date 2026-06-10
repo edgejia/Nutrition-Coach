@@ -153,12 +153,15 @@ export async function runCase04HistoricalDate(): Promise<BehaviorCaseOutcome> {
   const foodName = "牛肉飯";
   const requestedDateKey = "2026-05-01";
   const requestedDateText = "2026-05-01";
-  const toolArgs = {
+  const toolArgsItem = {
     food_name: foodName,
     calories: 620,
     protein: 30,
     carbs: 82,
     fat: 18,
+  };
+  const toolArgs = {
+    items: [toolArgsItem],
     date_text: requestedDateText,
     meal_period: "dinner",
     protein_sources: [
@@ -236,7 +239,7 @@ export async function runCase04HistoricalDate(): Promise<BehaviorCaseOutcome> {
       : undefined;
     const trace = recorder.build({ scenario: "CASE-04", status: "pass" });
     const sources = buildNumberSources({
-      toolArgs: [toolArgs.calories, toolArgs.protein, toolArgs.carbs, toolArgs.fat],
+      toolArgs: [toolArgsItem.calories, toolArgsItem.protein, toolArgsItem.carbs, toolArgsItem.fat],
       requestedDateKey,
       donePayload,
       persistedMeal: persistedEvidence,

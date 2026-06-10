@@ -291,11 +291,9 @@ const scenario: VerificationScenario = {
         stepName: "mixed_lunchbox",
         message: "我午餐吃雞腿便當",
         toolArgs: {
-          food_name: "雞腿便當",
-          calories: 640,
-          protein: 30,
-          carbs: 78,
-          fat: 20,
+          items: [
+            { food_name: "雞腿便當", calories: 640, protein: 30, carbs: 78, fat: 20 },
+          ],
           protein_sources: [
             { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
             { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
@@ -312,11 +310,9 @@ const scenario: VerificationScenario = {
         stepName: "plant_protein",
         message: "我吃了豆腐和豆漿",
         toolArgs: {
-          food_name: "豆腐豆漿餐",
-          calories: 420,
-          protein: 30,
-          carbs: 24,
-          fat: 20,
+          items: [
+            { food_name: "豆腐豆漿餐", calories: 420, protein: 30, carbs: 24, fat: 20 },
+          ],
           protein_sources: [
             { name: "豆腐", protein: 20, is_primary: true, certainty: "clear" },
             { name: "豆漿", protein: 10, is_primary: true, certainty: "clear" },
@@ -361,11 +357,9 @@ const scenario: VerificationScenario = {
         message: "",
         imageMode: true,
         toolArgs: {
-          food_name: "豆腐便當",
-          calories: 520,
-          protein: 18,
-          carbs: 60,
-          fat: 18,
+          items: [
+            { food_name: "豆腐便當", calories: 520, protein: 18, carbs: 60, fat: 18 },
+          ],
           protein_sources: [
             { name: "豆腐", protein: 18, is_primary: true, certainty: "uncertain" },
             { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },

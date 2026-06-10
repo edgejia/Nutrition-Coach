@@ -190,7 +190,7 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
       type: "function",
       function: {
         name: "log_food",
-        arguments: JSON.stringify({ food_name: "蛋炒飯", calories: 450, protein: 12, carbs: 65, fat: 14 }),
+        arguments: JSON.stringify({ items: [{ food_name: "蛋炒飯", calories: 450, protein: 12, carbs: 65, fat: 14 }] }),
       },
     }],
   });

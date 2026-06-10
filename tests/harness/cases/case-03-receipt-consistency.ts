@@ -381,12 +381,16 @@ export async function runCase03ReceiptConsistency(): Promise<BehaviorCaseOutcome
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: DETERMINISTIC_MEAL.foodName,
-            calories: DETERMINISTIC_MEAL.calories,
-            protein: DETERMINISTIC_MEAL.protein,
-            carbs: DETERMINISTIC_MEAL.carbs,
-            fat: DETERMINISTIC_MEAL.fat,
-            amount: "1 份",
+            items: [
+              {
+                food_name: DETERMINISTIC_MEAL.foodName,
+                calories: DETERMINISTIC_MEAL.calories,
+                protein: DETERMINISTIC_MEAL.protein,
+                carbs: DETERMINISTIC_MEAL.carbs,
+                fat: DETERMINISTIC_MEAL.fat,
+                amount: "1 份",
+              },
+            ],
             protein_sources: [
               {
                 name: "雞胸",

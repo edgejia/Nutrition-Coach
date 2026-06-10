@@ -76,6 +76,7 @@ interface ChatHistoryResponse {
 
 interface MealRecordDto {
   id: string;
+  mealRevisionId?: string;
   foodName?: string;
   calories?: number;
   protein?: number;
@@ -198,6 +199,7 @@ function getMealImageUrl(meal: MealRecordDto): string | null {
 function toClientMealEntry(meal: MealRecordDto): MealEntry {
   return {
     id: meal.id,
+    mealRevisionId: meal.mealRevisionId,
     foodName: meal.display?.title ?? meal.foodName ?? "未命名餐點",
     calories: meal.nutrition?.calories ?? meal.calories ?? 0,
     protein: meal.nutrition?.protein ?? meal.protein ?? 0,
@@ -282,11 +284,15 @@ const scenario: VerificationScenario = {
           function: {
             name: "log_food",
             arguments: JSON.stringify({
-              food_name: "雞腿便當",
-              calories: 720,
-              protein: 42,
-              carbs: 88,
-              fat: 24,
+              items: [
+                {
+                  food_name: "雞腿便當",
+                  calories: 720,
+                  protein: 42,
+                  carbs: 88,
+                  fat: 24,
+                },
+              ],
             }),
           },
         },

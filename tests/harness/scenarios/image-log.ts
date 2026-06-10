@@ -220,11 +220,15 @@ const scenario: VerificationScenario = {
           function: {
             name: "log_food",
             arguments: JSON.stringify({
-              food_name: "豬肉燒烤飯盒",
-              calories: 680,
-              protein: 35,
-              carbs: 86,
-              fat: 22,
+              items: [
+                {
+                  food_name: "豬肉燒烤飯盒",
+                  calories: 680,
+                  protein: 35,
+                  carbs: 86,
+                  fat: 22,
+                },
+              ],
             }),
           },
         },

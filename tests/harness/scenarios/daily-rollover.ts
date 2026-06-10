@@ -77,20 +77,16 @@ const dailyRolloverScenario: VerificationScenario = {
       }
 
       try {
-        const beforeMeal = await fixture.services.foodLoggingService.logFood(fixture.deviceId, {
-          foodName: "TPE 23:59 meal",
-          calories: 100,
-          protein: 10,
-          carbs: 12,
-          fat: 3,
+        const beforeMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+          items: [
+            { foodName: "TPE 23:59 meal", calories: 100, protein: 10, carbs: 12, fat: 3 },
+          ],
           loggedAt: beforeMidnightLoggedAt,
         });
-        const afterMeal = await fixture.services.foodLoggingService.logFood(fixture.deviceId, {
-          foodName: "TPE 00:01 meal",
-          calories: 200,
-          protein: 20,
-          carbs: 24,
-          fat: 6,
+        const afterMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+          items: [
+            { foodName: "TPE 00:01 meal", calories: 200, protein: 20, carbs: 24, fat: 6 },
+          ],
           loggedAt: afterMidnightLoggedAt,
         });
         artifacts.seededMealTimestamps = {

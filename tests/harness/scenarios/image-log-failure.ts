@@ -671,11 +671,15 @@ const scenario: VerificationScenario = {
             function: {
               name: "log_food",
               arguments: JSON.stringify({
-                food_name: "測試餐點C",
-                calories: 300,
-                protein: 10,
-                carbs: 40,
-                fat: 8,
+                items: [
+                  {
+                    food_name: "測試餐點C",
+                    calories: 300,
+                    protein: 10,
+                    carbs: 40,
+                    fat: 8,
+                  },
+                ],
                 protein_sources: [
                   { name: "雞腿", protein: 10, is_primary: true, certainty: "clear" },
                   { name: "白飯", protein: 2, is_primary: false, certainty: "clear" },
@@ -742,11 +746,15 @@ const scenario: VerificationScenario = {
             function: {
               name: "log_food",
               arguments: JSON.stringify({
-                food_name: "無法辨識內容",
-                calories: 0,
-                protein: 0,
-                carbs: 0,
-                fat: 0,
+                items: [
+                  {
+                    food_name: "無法辨識內容",
+                    calories: 0,
+                    protein: 0,
+                    carbs: 0,
+                    fat: 0,
+                  },
+                ],
               }),
             },
           }],
