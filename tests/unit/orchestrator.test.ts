@@ -658,7 +658,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }] }),
         },
       }],
     });
@@ -693,11 +693,15 @@ describe("Orchestrator - didLogMeal", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "牛肉麵",
-            calories: 520,
-            protein: 24,
-            carbs: 68,
-            fat: 16,
+            items: [
+              {
+                food_name: "牛肉麵",
+                calories: 520,
+                protein: 24,
+                carbs: 68,
+                fat: 16,
+              },
+            ],
             date_text: "2026-03-25",
             meal_period: "dinner",
           }),
@@ -749,11 +753,15 @@ describe("Orchestrator - didLogMeal", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "蛋餅",
-            calories: 320,
-            protein: 7,
-            carbs: 48,
-            fat: 10,
+            items: [
+              {
+                food_name: "蛋餅",
+                calories: 320,
+                protein: 7,
+                carbs: 48,
+                fat: 10,
+              },
+            ],
             date_text: "昨天和前天",
             protein_sources: [
               { name: "蛋餅", protein: 7, is_primary: true, certainty: "clear" },
@@ -843,11 +851,15 @@ describe("Orchestrator - didLogMeal", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "雞腿便當",
-            calories: 620,
-            protein: 30,
-            carbs: 70,
-            fat: 18,
+            items: [
+              {
+                food_name: "雞腿便當",
+                calories: 620,
+                protein: 30,
+                carbs: 70,
+                fat: 18,
+              },
+            ],
             protein_sources: [
               { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
               { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
@@ -877,7 +889,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }] }),
         },
       }],
     });
@@ -935,7 +947,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }] }),
         },
       }],
     });
@@ -1084,11 +1096,15 @@ describe("Orchestrator - didLogMeal", () => {
           function: {
             name: "log_food",
             arguments: JSON.stringify({
-              food_name: "雞腿便當",
-              calories: 620,
-              protein: 30,
-              carbs: 70,
-              fat: 18,
+              items: [
+                {
+                  food_name: "雞腿便當",
+                  calories: 620,
+                  protein: 30,
+                  carbs: 70,
+                  fat: 18,
+                },
+              ],
               protein_sources: [
                 { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
                 { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
@@ -1387,11 +1403,15 @@ describe("Orchestrator - didLogMeal", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "牛肉麵",
-            calories: 520,
-            protein: 24,
-            carbs: 68,
-            fat: 16,
+            items: [
+              {
+                food_name: "牛肉麵",
+                calories: 520,
+                protein: 24,
+                carbs: 68,
+                fat: 16,
+              },
+            ],
             date_text: "2026-03-25",
           }),
         },
@@ -1569,11 +1589,15 @@ describe("Orchestrator - didLogMeal", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "蛋餅",
-            calories: 320,
-            protein: 7,
-            carbs: 48,
-            fat: 10,
+            items: [
+              {
+                food_name: "蛋餅",
+                calories: 320,
+                protein: 7,
+                carbs: 48,
+                fat: 10,
+              },
+            ],
             date_text: "昨天和前天",
           }),
         },
@@ -1610,11 +1634,15 @@ describe("Orchestrator - didLogMeal", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "豬肉燒烤飯盒",
-            calories: 680,
-            protein: 35,
-            carbs: 86,
-            fat: 22,
+            items: [
+              {
+                food_name: "豬肉燒烤飯盒",
+                calories: 680,
+                protein: 35,
+                carbs: 86,
+                fat: 22,
+              },
+            ],
             protein_sources: [
               { name: "豬肉", protein: 28, is_primary: true, certainty: "clear" },
               { name: "白飯", protein: 5, is_primary: false, certainty: "clear" },
@@ -1862,13 +1890,17 @@ describe("Orchestrator - didLogMeal", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "牛肉麵",
-            calories: 650,
-            protein: 31,
-            carbs: 82,
-            fat: 20,
-            quantity: 1,
-            unit: "碗",
+            items: [
+              {
+                food_name: "牛肉麵",
+                calories: 650,
+                protein: 31,
+                carbs: 82,
+                fat: 20,
+                quantity: 1,
+                unit: "碗",
+              },
+            ],
             protein_sources: [
               { name: "牛肉", protein: 31, is_primary: true, certainty: "clear" },
             ],
@@ -1902,13 +1934,17 @@ describe("Orchestrator - didLogMeal", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "鮭魚飯",
-            calories: 520,
-            protein: 34,
-            carbs: 58,
-            fat: 16,
-            quantity: 1,
-            unit: "份",
+            items: [
+              {
+                food_name: "鮭魚飯",
+                calories: 520,
+                protein: 34,
+                carbs: 58,
+                fat: 16,
+                quantity: 1,
+                unit: "份",
+              },
+            ],
             date_text: "2026-03-25",
             meal_period: "dinner",
             protein_sources: [
@@ -2034,7 +2070,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }] }),
         },
       }],
     });
@@ -2044,7 +2080,7 @@ describe("Orchestrator - didLogMeal", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 1, carbs: 20, fat: 0.5 }] }),
         },
       }],
     });

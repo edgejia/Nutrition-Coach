@@ -177,11 +177,15 @@ describe("Orchestrator", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "蘋果",
-            calories: 100,
-            protein: 1,
-            carbs: 25,
-            fat: 0.5,
+            items: [
+              {
+                food_name: "蘋果",
+                calories: 100,
+                protein: 1,
+                carbs: 25,
+                fat: 0.5,
+              },
+            ],
           }),
         },
       }],
@@ -201,11 +205,15 @@ describe("Orchestrator", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "雞腿便當",
-            calories: 640,
-            protein: 30,
-            carbs: 78,
-            fat: 20,
+            items: [
+              {
+                food_name: "雞腿便當",
+                calories: 640,
+                protein: 30,
+                carbs: 78,
+                fat: 20,
+              },
+            ],
             date_text: "2026-03-25",
             meal_period: "breakfast",
             protein_sources: [
@@ -305,7 +313,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 5, carbs: 20, fat: 2 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 5, carbs: 20, fat: 2 }] }),
         },
       }],
     });
@@ -331,14 +339,14 @@ describe("Orchestrator", () => {
   // Phase 83-01 (D-02): a log_food schema_validation failure is fed back to the
   // model as a controlled tool failure so it can retry within MAX_ROUNDS.
   it("Phase 83: failed log_food schema validation feeds back so the model retries with grouped items", async () => {
-    // Round 1: legacy-style call that fails Zod schema validation (empty food_name).
+    // Round 1: schema-invalid grouped call (empty item food_name) that fails Zod validation.
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "retry_round_1_invalid",
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "", calories: 600, protein: 35, carbs: 70, fat: 15 }),
+          arguments: JSON.stringify({ items: [{ food_name: "", calories: 600, protein: 35, carbs: 70, fat: 15 }] }),
         },
       }],
     });
@@ -382,7 +390,7 @@ describe("Orchestrator", () => {
           type: "function",
           function: {
             name: "log_food",
-            arguments: JSON.stringify({ food_name: "", calories: 100, protein: 1, carbs: 20, fat: 0.5 }),
+            arguments: JSON.stringify({ items: [{ food_name: "", calories: 100, protein: 1, carbs: 20, fat: 0.5 }] }),
           },
         }],
       });
@@ -421,11 +429,15 @@ describe("Orchestrator", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "雞肉沙拉",
-            calories: 180,
-            protein: 8,
-            carbs: 12,
-            fat: 10,
+            items: [
+              {
+                food_name: "雞肉沙拉",
+                calories: 180,
+                protein: 8,
+                carbs: 12,
+                fat: 10,
+              },
+            ],
             protein_sources: [
               { name: "雞肉", protein: 8, is_primary: true, certainty: "clear" },
               { name: "生菜", protein: 1, is_primary: false, certainty: "clear" },
@@ -836,7 +848,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 25, fat: 0.5 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 1, carbs: 25, fat: 0.5 }] }),
         },
       }],
     });
@@ -868,7 +880,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "bad food" }), // missing calories, protein, carbs, fat
+          arguments: JSON.stringify({ items: [{ food_name: "bad food" }] }), // missing calories, protein, carbs, fat
         },
       }],
     });

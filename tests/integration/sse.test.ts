@@ -424,7 +424,7 @@ describe("SSE API", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 }] }),
         },
       }],
     });
@@ -473,7 +473,7 @@ describe("SSE API", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "沙拉", calories: 180, protein: 8, carbs: 12, fat: 10 }),
+          arguments: JSON.stringify({ items: [{ food_name: "沙拉", calories: 180, protein: 8, carbs: 12, fat: 10 }] }),
         },
       }],
     });

@@ -176,11 +176,15 @@ function createLogFoodToolCall(): ToolCall {
     function: {
       name: "log_food",
       arguments: JSON.stringify({
-        food_name: "蘋果",
-        calories: 95,
-        protein: 0.5,
-        carbs: 25,
-        fat: 0.3,
+        items: [
+          {
+            food_name: "蘋果",
+            calories: 95,
+            protein: 0.5,
+            carbs: 25,
+            fat: 0.3,
+          },
+        ],
       }),
     },
   };
@@ -193,11 +197,15 @@ function createTrustedLogFoodToolCall(): ToolCall {
     function: {
       name: "log_food",
       arguments: JSON.stringify({
-        food_name: "雞腿便當",
-        calories: 620,
-        protein: 30,
-        carbs: 70,
-        fat: 18,
+        items: [
+          {
+            food_name: "雞腿便當",
+            calories: 620,
+            protein: 30,
+            carbs: 70,
+            fat: 18,
+          },
+        ],
         protein_sources: [
           { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
           { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
@@ -250,11 +258,15 @@ function createFailedRecognitionLogFoodToolCall(id: string): ToolCall {
     function: {
       name: "log_food",
       arguments: JSON.stringify({
-        food_name: "無法辨識內容",
-        calories: 0,
-        protein: 0,
-        carbs: 0,
-        fat: 0,
+        items: [
+          {
+            food_name: "無法辨識內容",
+            calories: 0,
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+          },
+        ],
       }),
     },
   };
@@ -1188,12 +1200,16 @@ describe("chat-streaming", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "豆漿",
-            quantity_ml: 300,
-            calories: 120,
-            protein: 8,
-            carbs: 10,
-            fat: 4,
+            items: [
+              {
+                food_name: "豆漿",
+                quantity_ml: 300,
+                calories: 120,
+                protein: 8,
+                carbs: 10,
+                fat: 4,
+              },
+            ],
             protein_sources: [
               { name: "豆漿", protein: 8, is_primary: true, certainty: "clear" },
             ],
@@ -1761,11 +1777,15 @@ describe("chat-streaming", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "牛肉麵",
-            calories: 520,
-            protein: 24,
-            carbs: 68,
-            fat: 16,
+            items: [
+              {
+                food_name: "牛肉麵",
+                calories: 520,
+                protein: 24,
+                carbs: 68,
+                fat: 16,
+              },
+            ],
             date_text: "2026-03-25",
             meal_period: "dinner",
           }),
@@ -1830,11 +1850,15 @@ describe("chat-streaming", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "牛肉麵",
-            calories: 520,
-            protein: 24,
-            carbs: 68,
-            fat: 16,
+            items: [
+              {
+                food_name: "牛肉麵",
+                calories: 520,
+                protein: 24,
+                carbs: 68,
+                fat: 16,
+              },
+            ],
             date_text: "2026-03-25 和 2026-03-26",
           }),
         },
@@ -2028,11 +2052,15 @@ describe("chat-streaming", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "豆漿",
-            calories: 120,
-            protein: 8,
-            carbs: 12,
-            fat: 4,
+            items: [
+              {
+                food_name: "豆漿",
+                calories: 120,
+                protein: 8,
+                carbs: 12,
+                fat: 4,
+              },
+            ],
           }),
         },
       }],
@@ -2092,11 +2120,15 @@ describe("chat-streaming", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "牛肉麵",
-            calories: 520,
-            protein: 24,
-            carbs: 68,
-            fat: 16,
+            items: [
+              {
+                food_name: "牛肉麵",
+                calories: 520,
+                protein: 24,
+                carbs: 68,
+                fat: 16,
+              },
+            ],
             date_text: "2026-03-25",
             meal_period: "dinner",
           }),
@@ -2235,11 +2267,15 @@ describe("chat-streaming", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "牛肉麵",
-            calories: 520,
-            protein: 24,
-            carbs: 68,
-            fat: 16,
+            items: [
+              {
+                food_name: "牛肉麵",
+                calories: 520,
+                protein: 24,
+                carbs: 68,
+                fat: 16,
+              },
+            ],
             date_text: "2026-03-25",
             meal_period: "dinner",
           }),
@@ -2803,11 +2839,15 @@ describe("chat-streaming", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "牛肉麵",
-            calories: 520,
-            protein: 24,
-            carbs: 68,
-            fat: 16,
+            items: [
+              {
+                food_name: "牛肉麵",
+                calories: 520,
+                protein: 24,
+                carbs: 68,
+                fat: 16,
+              },
+            ],
             date_text: "2026-03-25",
             meal_period: "dinner",
           }),
@@ -4028,11 +4068,15 @@ describe("chat-streaming", () => {
     for (let i = 0; i < 3; i += 1) {
       mockLLM.queueRoundResponse({
         toolCalls: [createLogFoodToolCallWithArguments(JSON.stringify({
-          food_name: {},
-          calories: null,
-          protein: "",
-          carbs: null,
-          fat: null,
+          items: [
+            {
+              food_name: {},
+              calories: null,
+              protein: "",
+              carbs: null,
+              fat: null,
+            },
+          ],
         }))],
       });
     }

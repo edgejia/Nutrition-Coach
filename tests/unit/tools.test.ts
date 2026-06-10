@@ -64,11 +64,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     function: {
       name: "log_food",
       arguments: JSON.stringify({
-        food_name: "蘋果",
-        calories: 100,
-        protein: 1,
-        carbs: 20,
-        fat: 0.5,
+        items: [
+          {
+            food_name: "蘋果",
+            calories: 100,
+            protein: 1,
+            carbs: 20,
+            fat: 0.5,
+          },
+        ],
       }),
     },
   };
@@ -82,12 +86,28 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   });
 
   it("normalizes single-shape log_food calls through the canonical grouped path while preserving top-level protein_sources", async () => {
+    // Union ACCEPTANCE contract: this fixture deliberately stays single-item-shape.
+    // Plan 83-03 flips this test to a rejection case when the union collapses.
+    const singleShapeLogFoodCall: ToolCall = {
+      id: "call_single_shape_acceptance",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          food_name: "蘋果",
+          calories: 100,
+          protein: 1,
+          carbs: 20,
+          fat: 0.5,
+        }),
+      },
+    };
     const calls: Array<{ method: "logFood" | "logGroupedMeal"; input: unknown }> = [];
     const toolDefs = Object.fromEntries(
       getToolDefinitions().map((definition) => [definition.function.name, definition.function.parameters]),
     ) as Record<string, any>;
 
-    const result = await executeTool(logFoodCall, deviceId, {
+    const result = await executeTool(singleShapeLogFoodCall, deviceId, {
       foodLoggingService: {
         async logFood(_deviceId: string, input: unknown) {
           calls.push({ method: "logFood", input });
@@ -495,11 +515,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "雞腿便當",
-          calories: 640,
-          protein: 30,
-          carbs: 78,
-          fat: 20,
+          items: [
+            {
+              food_name: "雞腿便當",
+              calories: 640,
+              protein: 30,
+              carbs: 78,
+              fat: 20,
+            },
+          ],
           protein_sources: [
             { name: "雞腿", protein: 24, is_primary: true, certainty: "uncertain" },
           ],
@@ -524,12 +548,16 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "豆漿",
-          quantity_ml: 300,
-          calories: 120,
-          protein: 8,
-          carbs: 10,
-          fat: 4,
+          items: [
+            {
+              food_name: "豆漿",
+              quantity_ml: 300,
+              calories: 120,
+              protein: 8,
+              carbs: 10,
+              fat: 4,
+            },
+          ],
           protein_sources: [
             { name: "黃豆", protein: 8, is_primary: true, certainty: "clear" },
           ],
@@ -557,12 +585,16 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "低糖豆漿",
-          quantity_ml: 400,
-          calories: 190,
-          protein: 14,
-          carbs: 15,
-          fat: 6,
+          items: [
+            {
+              food_name: "低糖豆漿",
+              quantity_ml: 400,
+              calories: 190,
+              protein: 14,
+              carbs: 15,
+              fat: 6,
+            },
+          ],
           protein_sources: [
             { name: "大豆", protein: 14, is_primary: true, certainty: "clear" },
           ],
@@ -575,12 +607,16 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "珍珠奶茶",
-          quantity_ml: 500,
-          calories: 420,
-          protein: 9,
-          carbs: 76,
-          fat: 10,
+          items: [
+            {
+              food_name: "珍珠奶茶",
+              quantity_ml: 500,
+              calories: 420,
+              protein: 9,
+              carbs: 76,
+              fat: 10,
+            },
+          ],
           protein_sources: [
             { name: "珍珠", protein: 9, is_primary: true, certainty: "clear" },
           ],
@@ -613,12 +649,16 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "飲品",
-          quantity_ml: 300,
-          calories: 120,
-          protein: 8,
-          carbs: 10,
-          fat: 4,
+          items: [
+            {
+              food_name: "飲品",
+              quantity_ml: 300,
+              calories: 120,
+              protein: 8,
+              carbs: 10,
+              fat: 4,
+            },
+          ],
           protein_sources: [
             { name: "植物性飲料", protein: 8, is_primary: true, certainty: "clear" },
           ],
@@ -631,12 +671,16 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "飲品",
-          quantity_ml: 300,
-          calories: 120,
-          protein: 8,
-          carbs: 10,
-          fat: 4,
+          items: [
+            {
+              food_name: "飲品",
+              quantity_ml: 300,
+              calories: 120,
+              protein: 8,
+              carbs: 10,
+              fat: 4,
+            },
+          ],
           protein_sources: [
             { name: "植物性飲料", protein: 8, is_primary: true, certainty: "clear" },
           ],
@@ -649,12 +693,16 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "珍珠奶茶",
-          quantity_ml: 500,
-          calories: 420,
-          protein: 9,
-          carbs: 76,
-          fat: 10,
+          items: [
+            {
+              food_name: "珍珠奶茶",
+              quantity_ml: 500,
+              calories: 420,
+              protein: 9,
+              carbs: 76,
+              fat: 10,
+            },
+          ],
         }),
       },
     };
@@ -699,11 +747,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "麵",
-          calories: 450,
-          protein: 12,
-          carbs: 70,
-          fat: 10,
+          items: [
+            {
+              food_name: "麵",
+              calories: 450,
+              protein: 12,
+              carbs: 70,
+              fat: 10,
+            },
+          ],
           protein_sources: [
             { name: "麵", protein: 12, is_primary: true, certainty: "clear" },
           ],
@@ -771,12 +823,16 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "豆漿",
-          quantity_ml: 400,
-          calories: 180,
-          protein: 12,
-          carbs: 14,
-          fat: 8,
+          items: [
+            {
+              food_name: "豆漿",
+              quantity_ml: 400,
+              calories: 180,
+              protein: 12,
+              carbs: 14,
+              fat: 8,
+            },
+          ],
           protein_sources: [
             { name: "豆漿", protein: 12, is_primary: true, certainty: "clear" },
           ],
@@ -893,11 +949,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "白飯",
-          calories: 280,
-          protein: 5,
-          carbs: 62,
-          fat: 1,
+          items: [
+            {
+              food_name: "白飯",
+              calories: 280,
+              protein: 5,
+              carbs: 62,
+              fat: 1,
+            },
+          ],
           protein_sources: [
             { name: "白飯", protein: 5, is_primary: false, certainty: "clear" },
           ],
@@ -923,11 +983,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "雞腿便當",
-          calories: 640,
-          protein: 30,
-          carbs: 78,
-          fat: 20,
+          items: [
+            {
+              food_name: "雞腿便當",
+              calories: 640,
+              protein: 30,
+              carbs: 78,
+              fat: 20,
+            },
+          ],
           protein_sources: [
             { name: "雞腿", protein: 18, is_primary: true, certainty: "clear" },
             { name: "滷蛋", protein: 6, is_primary: true, certainty: "clear" },
@@ -963,11 +1027,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "照片餐點",
-          calories: 760,
-          protein: 12,
-          carbs: 92,
-          fat: 38,
+          items: [
+            {
+              food_name: "照片餐點",
+              calories: 760,
+              protein: 12,
+              carbs: 92,
+              fat: 38,
+            },
+          ],
         }),
       },
     };
@@ -1003,11 +1071,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: testCase.food_name,
-            calories: 0,
-            protein: 0,
-            carbs: 0,
-            fat: 0,
+            items: [
+              {
+                food_name: testCase.food_name,
+                calories: 0,
+                protein: 0,
+                carbs: 0,
+                fat: 0,
+              },
+            ],
           }),
         },
       }, deviceId, {
@@ -1093,11 +1165,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "白飯",
-          calories: 280,
-          protein: 5,
-          carbs: 62,
-          fat: 0,
+          items: [
+            {
+              food_name: "白飯",
+              calories: 280,
+              protein: 5,
+              carbs: 62,
+              fat: 0,
+            },
+          ],
           protein_sources: [
             { name: "白飯", protein: 5, is_primary: false, certainty: "clear" },
           ],
@@ -1233,11 +1309,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "", // empty name fails strict zod schema
-          calories: "not-a-number",
-          protein: 1,
-          carbs: 20,
-          fat: 0.5,
+          items: [
+            {
+              food_name: "", // empty name fails the strict item schema
+              calories: "not-a-number",
+              protein: 1,
+              carbs: 20,
+              fat: 0.5,
+            },
+          ],
         }),
       },
     };
@@ -2174,11 +2254,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "牛肉麵",
-          calories: 520,
-          protein: 24,
-          carbs: 68,
-          fat: 16,
+          items: [
+            {
+              food_name: "牛肉麵",
+              calories: 520,
+              protein: 24,
+              carbs: 68,
+              fat: 16,
+            },
+          ],
           date_text: "2026-03-25",
           meal_period: "dinner",
         }),
@@ -2204,11 +2288,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "雞腿便當",
-          calories: 640,
-          protein: 30,
-          carbs: 78,
-          fat: 20,
+          items: [
+            {
+              food_name: "雞腿便當",
+              calories: 640,
+              protein: 30,
+              carbs: 78,
+              fat: 20,
+            },
+          ],
           date_text: "2026-03-25",
           meal_period: "breakfast",
           protein_sources: [
@@ -2246,11 +2334,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "雞腿便當",
-          calories: 640,
-          protein: 30,
-          carbs: 78,
-          fat: 20,
+          items: [
+            {
+              food_name: "雞腿便當",
+              calories: 640,
+              protein: 30,
+              carbs: 78,
+              fat: 20,
+            },
+          ],
           date_text: "2026-03-25",
           meal_period: "lunch",
           protein_sources: [
@@ -2289,11 +2381,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "蛋餅",
-          calories: 320,
-          protein: 7,
-          carbs: 48,
-          fat: 10,
+          items: [
+            {
+              food_name: "蛋餅",
+              calories: 320,
+              protein: 7,
+              carbs: 48,
+              fat: 10,
+            },
+          ],
           date_text: "2026-03-25",
           protein_sources: [
             { name: "蛋餅", protein: 7, is_primary: true, certainty: "clear" },
@@ -2323,11 +2419,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       function: {
         name: "log_food",
         arguments: JSON.stringify({
-          food_name: "蛋餅",
-          calories: 320,
-          protein: 7,
-          carbs: 48,
-          fat: 10,
+          items: [
+            {
+              food_name: "蛋餅",
+              calories: 320,
+              protein: 7,
+              carbs: 48,
+              fat: 10,
+            },
+          ],
           date_text: "昨天和前天",
           protein_sources: [
             { name: "蛋餅", protein: 7, is_primary: true, certainty: "clear" },
@@ -2477,11 +2577,15 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "蛋餅",
-            calories: 320,
-            protein: 7,
-            carbs: 48,
-            fat: 10,
+            items: [
+              {
+                food_name: "蛋餅",
+                calories: 320,
+                protein: 7,
+                carbs: 48,
+                fat: 10,
+              },
+            ],
             protein_sources: [
               { name: "蛋餅", protein: 7, is_primary: true, certainty: "clear" },
             ],
