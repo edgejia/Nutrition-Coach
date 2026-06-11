@@ -5,12 +5,15 @@ import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import {
+  assertRegistryPolicies,
   executeTool,
   FatalToolError,
   getToolDefinitions,
+  KNOWN_TOOL_POLICY_CLASSES,
   toolRegistry,
 } from "../../server/orchestrator/tools.js";
 import type { ToolCall } from "../../server/llm/types.js";
+import type { ToolContract } from "../../server/orchestrator/tool-contract.js";
 
 describe("Phase 10-02: orchestrator tool registry", () => {
   describe("getToolDefinitions() derives definitions from toolRegistry", () => {
@@ -51,6 +54,62 @@ describe("Phase 10-02: orchestrator tool registry", () => {
           );
         }
       }
+    });
+  });
+
+  describe("side-effect policy metadata", () => {
+    it("Test 2c: every registered tool exposes the locked side-effect policy class", () => {
+      assert.deepEqual(KNOWN_TOOL_POLICY_CLASSES, {
+        log_food: "execute-and-report",
+        get_daily_summary: "direct-execute",
+        find_meals: "clarify-first",
+        propose_goals: "confirm-first",
+        update_goals: "direct-execute",
+        propose_meal_numeric_correction: "confirm-first",
+        update_meal: "direct-execute",
+        delete_meal: "direct-execute",
+      });
+
+      assert.doesNotThrow(() => assertRegistryPolicies(toolRegistry, KNOWN_TOOL_POLICY_CLASSES));
+
+      for (const [toolName, expectedClass] of Object.entries(KNOWN_TOOL_POLICY_CLASSES)) {
+        const contract = toolRegistry.get(toolName);
+        assert.ok(contract, `contract must exist for ${toolName}`);
+        assert.equal(contract.policyClass, expectedClass);
+      }
+    });
+
+    it("Test 2d: registered policy drift fails closed instead of receiving a default class", () => {
+      const baseContract = toolRegistry.get("log_food");
+      assert.ok(baseContract, "log_food contract must exist");
+
+      const missingPolicyContract = {
+        ...baseContract,
+        name: "log_food",
+      } as unknown as ToolContract<any, any>;
+      delete (missingPolicyContract as Partial<ToolContract<any, any>>).policyClass;
+
+      const missingPolicyRegistry = new Map<string, ToolContract<any, any>>([
+        ["log_food", missingPolicyContract],
+      ]);
+      assert.throws(
+        () => assertRegistryPolicies(missingPolicyRegistry, { log_food: "execute-and-report" }),
+        /missing side-effect policy/i,
+      );
+
+      const invalidPolicyRegistry = new Map<string, ToolContract<any, any>>([
+        [
+          "log_food",
+          {
+            ...baseContract,
+            policyClass: "confirm-first",
+          } as ToolContract<any, any>,
+        ],
+      ]);
+      assert.throws(
+        () => assertRegistryPolicies(invalidPolicyRegistry, { log_food: "execute-and-report" }),
+        /side-effect policy mismatch/i,
+      );
     });
   });
 
