@@ -633,7 +633,7 @@ describe("chat goal update integration", () => {
     const current = meals.find((candidate) => candidate.id === meal.id);
     assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
     assert.equal(current?.protein, 31);
-    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
