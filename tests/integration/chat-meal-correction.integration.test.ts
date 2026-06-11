@@ -11,6 +11,7 @@ import {
   renderMealNumericProposalCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
+import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 
 const REAL_DATE = Date;
 const FIXED_NOW = new REAL_DATE("2026-04-19T12:00:00+08:00");
@@ -62,6 +63,10 @@ describe("chat meal correction integration", () => {
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
     return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
+
+  function defaultSessionKey() {
+    return { deviceId, sessionId: DEFAULT_SESSION_ID };
   }
 
   beforeEach(async () => {
@@ -293,7 +298,7 @@ describe("chat meal correction integration", () => {
     assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
     assert.deepEqual(publishDailySummaryCalls, []);
 
-    const proposal = await services.mealNumericProposalService.getLatest(deviceId);
+    const proposal = await services.mealNumericProposalService.getLatest(defaultSessionKey());
     assert.ok(proposal);
     assert.equal(proposal.mealId, original.id);
     assert.equal(proposal.expectedMealRevisionId, original.mealRevisionId);
@@ -312,12 +317,15 @@ describe("chat meal correction integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.mealNumericProposalService.putLatest(deviceId, {
-      mealId: original.id,
-      expectedMealRevisionId: original.mealRevisionId,
-      updateInput: { protein: 15 },
-      affectedFields: [{ field: "protein", before: 30, after: 15 }],
-      sourceOperator: "half",
+    await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: original.id,
+        expectedMealRevisionId: original.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
     });
     const externalUpdate = await services.foodLoggingService.updateMeal(deviceId, original.id, {
       expectedMealRevisionId: original.mealRevisionId,
@@ -344,7 +352,7 @@ describe("chat meal correction integration", () => {
     const current = meals.find((meal) => meal.id === original.id);
     assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
     assert.equal(current?.protein, 31);
-    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
   });
 
   it("clears stale resolved meal selection after stored proposal approval", async () => {
@@ -386,12 +394,12 @@ describe("chat meal correction integration", () => {
     const proposed = await postChat("雞腿飯蛋白質減半");
     assert.equal(proposed.status, 200);
     assert.equal(proposed.body.didMutateMeal, false);
-    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
 
     const approved = await postChat("套用餐點修改");
     assert.equal(approved.status, 200);
     assert.equal(approved.body.didMutateMeal, true);
-    assert.equal(await services.mealNumericProposalService.getLatest(deviceId), undefined);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
 
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -440,18 +448,24 @@ describe("chat meal correction integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.goalProposalService.putLatest(deviceId, {
-      calories: 1400,
-      protein: 125,
-      carbs: 130,
-      fat: 45,
+    await services.goalProposalService.putLatest({
+      ...defaultSessionKey(),
+      targets: {
+        calories: 1400,
+        protein: 125,
+        carbs: 130,
+        fat: 45,
+      },
     });
-    await services.mealNumericProposalService.putLatest(deviceId, {
-      mealId: original.id,
-      expectedMealRevisionId: original.mealRevisionId,
-      updateInput: { protein: 15 },
-      affectedFields: [{ field: "protein", before: 30, after: 15 }],
-      sourceOperator: "half",
+    await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: original.id,
+        expectedMealRevisionId: original.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
     });
     mockLLM.queueChatResponse({ content: "模型不應該選擇提案。" });
 
@@ -462,8 +476,8 @@ describe("chat meal correction integration", () => {
     assert.equal(ambiguous.body.didLogMeal, false);
     assert.equal(ambiguous.body.didMutateMeal, false);
     assert.doesNotMatch(ambiguous.body.reply, SUCCESS_STYLE_COPY);
-    assert.ok(await services.goalProposalService.getLatest(deviceId));
-    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.ok(await services.goalProposalService.getLatest(defaultSessionKey()));
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
     assert.deepEqual(publishDailySummaryCalls, []);
     assert.equal(mockLLM.chatCalls.length, 0);
 
@@ -474,8 +488,8 @@ describe("chat meal correction integration", () => {
     assert.equal(cancelled.body.didLogMeal, false);
     assert.equal(cancelled.body.didMutateMeal, false);
     assert.doesNotMatch(cancelled.body.reply, SUCCESS_STYLE_COPY);
-    assert.equal(await services.goalProposalService.getLatest(deviceId), undefined);
-    assert.equal(await services.mealNumericProposalService.getLatest(deviceId), undefined);
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
     assert.deepEqual(publishDailySummaryCalls, []);
     assert.equal(mockLLM.chatCalls.length, 0);
 

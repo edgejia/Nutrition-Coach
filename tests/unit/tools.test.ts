@@ -8,6 +8,7 @@ import { createMealCorrectionService } from "../../server/services/meal-correcti
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
+import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import {
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericProposalCopy,
@@ -2758,7 +2759,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     } as ToolDeps, {
       currentUserMessage: "蛋白質減半",
     });
-    const proposal = await mealNumericProposalService.getLatest(deviceId);
+    const proposal = await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
     const revisions = await db.select().from(mealRevisions);
 
     assert.ok(proposal);

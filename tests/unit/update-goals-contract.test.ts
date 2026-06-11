@@ -13,6 +13,7 @@ import {
   toolRegistry,
   type ToolDeps,
 } from "../../server/orchestrator/tools.js";
+import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import {
   isGoalProposalCancel,
   isGoalProposalConsent,
@@ -129,7 +130,10 @@ describe("update_goals ToolContract", () => {
       text: renderGoalProposalCopy(proposed),
     });
     assert.deepEqual(await readTargets(deviceService, deviceId), before);
-    assert.deepEqual((await goalProposalService.getLatest(deviceId))?.targets, proposed);
+    assert.deepEqual(
+      (await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.targets,
+      proposed,
+    );
     assert.equal(published.length, 0);
   });
 
@@ -159,7 +163,11 @@ describe("update_goals ToolContract", () => {
   });
 
   it("Test 4: current_turn_values uses only current-user numeric fields, clears proposals, and publishes once", async () => {
-    await goalProposalService.putLatest(deviceId, { calories: 1900, protein: 140, carbs: 170, fat: 65 });
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: { calories: 1900, protein: 140, carbs: 170, fat: 65 },
+    });
     const result = await executeTool(
       updateGoalsCall({ mode: "current_turn_values", calories: 1800, protein: 130 }),
       deviceId,
@@ -180,7 +188,7 @@ describe("update_goals ToolContract", () => {
       carbs: 150,
       fat: 50,
     });
-    assert.equal(await goalProposalService.getLatest(deviceId), undefined);
+    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
     assert.equal(published.length, 1);
     assert.deepEqual(published[0], {
       deviceId,
@@ -218,7 +226,7 @@ describe("update_goals ToolContract", () => {
 
   it("Test 6: latest_proposal requires backend consent and active proposal without consuming retryable state", async () => {
     const proposed = { calories: 1850, protein: 135, carbs: 165, fat: 60 };
-    await goalProposalService.putLatest(deviceId, proposed);
+    await goalProposalService.putLatest({ deviceId, sessionId: DEFAULT_SESSION_ID, targets: proposed });
 
     const missingConsent = await executeTool(updateGoalsCall({ mode: "latest_proposal" }), deviceId, deps, {
       currentUserMessage: "我再想想",
@@ -231,7 +239,10 @@ describe("update_goals ToolContract", () => {
       reason: "goal_authority_failure",
       text: renderGoalAuthorityFailureCopy(),
     });
-    assert.deepEqual((await goalProposalService.getLatest(deviceId))?.targets, proposed);
+    assert.deepEqual(
+      (await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.targets,
+      proposed,
+    );
     assert.deepEqual(await readTargets(deviceService, deviceId), {
       calories: 1500,
       protein: 120,
@@ -251,10 +262,14 @@ describe("update_goals ToolContract", () => {
   });
 
   it("Test 7: expired proposals fail closed without mutation or publish", async () => {
-    await goalProposalService.putLatest(deviceId, { calories: 1850, protein: 135, carbs: 165, fat: 60 });
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: { calories: 1850, protein: 135, carbs: 165, fat: 60 },
+    });
     db.$client
-      .prepare("UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND kind = ?")
-      .run("2000-01-01T00:00:00.000Z", deviceId, GOAL_PROPOSAL_KIND);
+      .prepare("UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND session_id = ? AND kind = ?")
+      .run("2000-01-01T00:00:00.000Z", deviceId, DEFAULT_SESSION_ID, GOAL_PROPOSAL_KIND);
 
     const result = await executeTool(updateGoalsCall({ mode: "latest_proposal" }), deviceId, deps, {
       currentUserMessage: "好",
@@ -268,7 +283,7 @@ describe("update_goals ToolContract", () => {
       reason: "goal_authority_failure",
       text: renderGoalAuthorityFailureCopy(),
     });
-    assert.equal(await goalProposalService.getLatest(deviceId), undefined);
+    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
     assert.deepEqual(await readTargets(deviceService, deviceId), {
       calories: 1500,
       protein: 120,
@@ -279,17 +294,25 @@ describe("update_goals ToolContract", () => {
   });
 
   it("Test 8: stale or mismatched proposal identifiers fail closed without selecting replaced proposals", async () => {
-    const first = await goalProposalService.putLatest(deviceId, {
-      calories: 1850,
-      protein: 135,
-      carbs: 165,
-      fat: 60,
+    const first = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: {
+        calories: 1850,
+        protein: 135,
+        carbs: 165,
+        fat: 60,
+      },
     });
-    const replacement = await goalProposalService.putLatest(deviceId, {
-      calories: 1650,
-      protein: 125,
-      carbs: 145,
-      fat: 50,
+    const replacement = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: {
+        calories: 1650,
+        protein: 125,
+        carbs: 145,
+        fat: 50,
+      },
     });
 
     const staleIdResult = await executeTool(
@@ -316,7 +339,10 @@ describe("update_goals ToolContract", () => {
         text: renderGoalAuthorityFailureCopy(),
       });
     }
-    assert.deepEqual((await goalProposalService.getLatest(deviceId))?.targets, replacement.targets);
+    assert.deepEqual(
+      (await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.targets,
+      replacement.targets,
+    );
     assert.deepEqual(await readTargets(deviceService, deviceId), {
       calories: 1500,
       protein: 120,
@@ -327,7 +353,11 @@ describe("update_goals ToolContract", () => {
   });
 
   it("Test 9: latest_proposal applies active proposal with current-turn numeric overrides then clears state", async () => {
-    await goalProposalService.putLatest(deviceId, { calories: 1850, protein: 135, carbs: 165, fat: 60 });
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: { calories: 1850, protein: 135, carbs: 165, fat: 60 },
+    });
 
     const result = await executeTool(
       updateGoalsCall({ mode: "latest_proposal", protein: 130 }),
@@ -347,7 +377,7 @@ describe("update_goals ToolContract", () => {
       carbs: 165,
       fat: 60,
     });
-    assert.equal(await goalProposalService.getLatest(deviceId), undefined);
+    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
     assert.equal(published.length, 1);
     assert.deepEqual(published[0], {
       deviceId,
@@ -357,7 +387,11 @@ describe("update_goals ToolContract", () => {
 
   it("Test 10: cancel terms clear proposal without mutating or publishing and never count as consent", async () => {
     for (const term of ["不要", "取消", "先不用", "不好", "不可以", "不行", "no"]) {
-      await goalProposalService.putLatest(deviceId, { calories: 1850, protein: 135, carbs: 165, fat: 60 });
+      await goalProposalService.putLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        targets: { calories: 1850, protein: 135, carbs: 165, fat: 60 },
+      });
       published = [];
 
       assert.equal(isGoalProposalCancel(term), true);
@@ -374,7 +408,7 @@ describe("update_goals ToolContract", () => {
         reason: "goal_cancel",
         text: renderGoalCancelCopy(),
       });
-      assert.equal(await goalProposalService.getLatest(deviceId), undefined);
+      assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
       assert.deepEqual(await readTargets(deviceService, deviceId), {
         calories: 1500,
         protein: 120,
@@ -387,7 +421,7 @@ describe("update_goals ToolContract", () => {
 
   it("Test 11: validation range failure returns field copy without mutation publish or proposal consumption", async () => {
     const proposed = { calories: 1850, protein: 135, carbs: 165, fat: 60 };
-    await goalProposalService.putLatest(deviceId, proposed);
+    await goalProposalService.putLatest({ deviceId, sessionId: DEFAULT_SESSION_ID, targets: proposed });
 
     const result = await executeTool(
       updateGoalsCall({ mode: "latest_proposal", protein: 401 }),
@@ -405,7 +439,10 @@ describe("update_goals ToolContract", () => {
       reason: "goal_validation_failure",
       text: renderGoalValidationFailureCopy(["protein"]),
     });
-    assert.deepEqual((await goalProposalService.getLatest(deviceId))?.targets, proposed);
+    assert.deepEqual(
+      (await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.targets,
+      proposed,
+    );
     assert.deepEqual(await readTargets(deviceService, deviceId), {
       calories: 1500,
       protein: 120,

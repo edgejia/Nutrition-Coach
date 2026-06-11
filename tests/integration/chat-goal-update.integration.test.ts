@@ -14,6 +14,7 @@ import {
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import type { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
+import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import type { FastifyInstance } from "fastify";
 
 interface DailyTargets {
@@ -86,6 +87,10 @@ describe("chat goal update integration", () => {
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
     return values.map((value) => value.split(";", 1)[0]).join("; ");
+  }
+
+  function defaultSessionKey() {
+    return { deviceId, sessionId: DEFAULT_SESSION_ID };
   }
 
   beforeEach(async () => {
@@ -457,13 +462,16 @@ describe("chat goal update integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
-    await services.mealNumericProposalService.putLatest(deviceId, {
-      mealId: meal.id,
-      expectedMealRevisionId: meal.mealRevisionId,
-      updateInput: { protein: 15 },
-      affectedFields: [{ field: "protein", before: 30, after: 15 }],
-      sourceOperator: "half",
+    await services.goalProposalService.putLatest({ ...defaultSessionKey(), targets: PROPOSAL_TARGETS });
+    await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
     });
     mockLLM.queueChatResponse({ content: "模型不應該選擇提案。" });
 
@@ -476,8 +484,8 @@ describe("chat goal update integration", () => {
     assert.equal(body.dailyTargets, undefined);
     assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
-    assert.ok(await services.goalProposalService.getLatest(deviceId));
-    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.ok(await services.goalProposalService.getLatest(defaultSessionKey()));
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
@@ -488,13 +496,16 @@ describe("chat goal update integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
-    await services.mealNumericProposalService.putLatest(deviceId, {
-      mealId: meal.id,
-      expectedMealRevisionId: meal.mealRevisionId,
-      updateInput: { protein: 15 },
-      affectedFields: [{ field: "protein", before: 30, after: 15 }],
-      sourceOperator: "half",
+    await services.goalProposalService.putLatest({ ...defaultSessionKey(), targets: PROPOSAL_TARGETS });
+    await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
     });
     mockLLM.queueChatResponse({ content: "模型不應該看到取消回合。" });
 
@@ -507,8 +518,8 @@ describe("chat goal update integration", () => {
     assert.equal(body.dailyTargets, undefined);
     assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
-    assert.equal(await services.goalProposalService.getLatest(deviceId), undefined);
-    assert.equal(await services.mealNumericProposalService.getLatest(deviceId), undefined);
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
@@ -519,13 +530,16 @@ describe("chat goal update integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
-    await services.mealNumericProposalService.putLatest(deviceId, {
-      mealId: meal.id,
-      expectedMealRevisionId: meal.mealRevisionId,
-      updateInput: { protein: 15 },
-      affectedFields: [{ field: "protein", before: 30, after: 15 }],
-      sourceOperator: "half",
+    await services.goalProposalService.putLatest({ ...defaultSessionKey(), targets: PROPOSAL_TARGETS });
+    await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
     });
 
     const { status, body } = await postChat("套用餐點修改");
@@ -536,8 +550,8 @@ describe("chat goal update integration", () => {
     assert.equal(body.didMutateMeal, true);
     assert.equal(body.dailyTargets, undefined);
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
-    assert.ok(await services.goalProposalService.getLatest(deviceId));
-    assert.equal(await services.mealNumericProposalService.getLatest(deviceId), undefined);
+    assert.ok(await services.goalProposalService.getLatest(defaultSessionKey()));
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
@@ -548,13 +562,16 @@ describe("chat goal update integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.goalProposalService.putLatest(deviceId, PROPOSAL_TARGETS);
-    await services.mealNumericProposalService.putLatest(deviceId, {
-      mealId: meal.id,
-      expectedMealRevisionId: meal.mealRevisionId,
-      updateInput: { protein: 15 },
-      affectedFields: [{ field: "protein", before: 30, after: 15 }],
-      sourceOperator: "half",
+    await services.goalProposalService.putLatest({ ...defaultSessionKey(), targets: PROPOSAL_TARGETS });
+    await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -573,8 +590,8 @@ describe("chat goal update integration", () => {
     assert.equal(body.reply, PROPOSAL_SUCCESS_RECEIPT);
     assert.deepEqual(body.dailyTargets, PROPOSAL_TARGETS);
     assert.deepEqual(await readTargets(), PROPOSAL_TARGETS);
-    assert.equal(await services.goalProposalService.getLatest(deviceId), undefined);
-    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
     assert.equal(mockLLM.chatCalls.length, 1);
   });
 
@@ -585,12 +602,15 @@ describe("chat goal update integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.mealNumericProposalService.putLatest(deviceId, {
-      mealId: meal.id,
-      expectedMealRevisionId: meal.mealRevisionId,
-      updateInput: { protein: 15 },
-      affectedFields: [{ field: "protein", before: 30, after: 15 }],
-      sourceOperator: "half",
+    await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
     });
     const externalUpdate = await services.foodLoggingService.updateMeal(deviceId, meal.id, {
       expectedMealRevisionId: meal.mealRevisionId,
@@ -613,7 +633,7 @@ describe("chat goal update integration", () => {
     const current = meals.find((candidate) => candidate.id === meal.id);
     assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
     assert.equal(current?.protein, 31);
-    assert.ok(await services.mealNumericProposalService.getLatest(deviceId));
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
