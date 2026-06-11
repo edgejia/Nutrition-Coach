@@ -208,4 +208,148 @@ describe("turn state service", () => {
       { count: 1 },
     );
   });
+
+  it("consumes a matching active proposal once", async () => {
+    const payload = {
+      proposalId: "proposal-a",
+      expectedMealRevisionId: "rev-a",
+      calories: 1400,
+    };
+    await service.putState({
+      deviceId,
+      sessionId: SESSION_A,
+      kind: KIND,
+      payload,
+      ttlMs: 60_000,
+    });
+
+    assert.deepEqual(
+      await service.consumeState<typeof payload>({
+        deviceId,
+        sessionId: SESSION_A,
+        kind: KIND,
+        proposalId: "proposal-a",
+      }),
+      payload,
+    );
+    assert.equal(
+      await service.consumeState({
+        deviceId,
+        sessionId: SESSION_A,
+        kind: KIND,
+        proposalId: "proposal-a",
+      }),
+      undefined,
+    );
+    assert.equal(await service.getState({ deviceId, sessionId: SESSION_A, kind: KIND }), undefined);
+  });
+
+  it("does not expose another session when consuming by proposal id", async () => {
+    const payload = { proposalId: "proposal-a", calories: 1400 };
+    await service.putState({
+      deviceId,
+      sessionId: SESSION_A,
+      kind: KIND,
+      payload,
+      ttlMs: 60_000,
+    });
+
+    assert.equal(
+      await service.consumeState({
+        deviceId,
+        sessionId: SESSION_B,
+        kind: KIND,
+        proposalId: "proposal-a",
+      }),
+      undefined,
+    );
+    assert.deepEqual(await service.getState<typeof payload>({ deviceId, sessionId: SESSION_A, kind: KIND }), payload);
+  });
+
+  it("returns undefined for the wrong proposal id without deleting the active row", async () => {
+    const payload = { proposalId: "proposal-a", calories: 1400 };
+    await service.putState({
+      deviceId,
+      sessionId: SESSION_A,
+      kind: KIND,
+      payload,
+      ttlMs: 60_000,
+    });
+
+    assert.equal(
+      await service.consumeState({
+        deviceId,
+        sessionId: SESSION_A,
+        kind: KIND,
+        proposalId: "proposal-b",
+      }),
+      undefined,
+    );
+    assert.deepEqual(await service.getState<typeof payload>({ deviceId, sessionId: SESSION_A, kind: KIND }), payload);
+  });
+
+  it("requires the expected meal revision when provided", async () => {
+    const payload = {
+      proposalId: "proposal-a",
+      expectedMealRevisionId: "rev-a",
+      calories: 1400,
+    };
+    await service.putState({
+      deviceId,
+      sessionId: SESSION_A,
+      kind: KIND,
+      payload,
+      ttlMs: 60_000,
+    });
+
+    assert.equal(
+      await service.consumeState({
+        deviceId,
+        sessionId: SESSION_A,
+        kind: KIND,
+        proposalId: "proposal-a",
+        expectedMealRevisionId: "rev-b",
+      }),
+      undefined,
+    );
+    assert.deepEqual(
+      await service.consumeState<typeof payload>({
+        deviceId,
+        sessionId: SESSION_A,
+        kind: KIND,
+        proposalId: "proposal-a",
+        expectedMealRevisionId: "rev-a",
+      }),
+      payload,
+    );
+  });
+
+  it("does not consume expired proposal state", async () => {
+    const payload = { proposalId: "proposal-a", calories: 1400 };
+    await service.putState({
+      deviceId,
+      sessionId: SESSION_A,
+      kind: KIND,
+      payload,
+      ttlMs: 60_000,
+    });
+    db.$client
+      .prepare(
+        `UPDATE turn_states
+         SET expires_at = ?
+         WHERE device_id = ? AND session_id = ? AND kind = ?`,
+      )
+      .run("2026-05-16T00:00:00.000Z", deviceId, SESSION_A, KIND);
+
+    assert.equal(
+      await service.consumeState({
+        deviceId,
+        sessionId: SESSION_A,
+        kind: KIND,
+        proposalId: "proposal-a",
+      }),
+      undefined,
+    );
+    assert.equal(await service.getState({ deviceId, sessionId: SESSION_A, kind: KIND }), undefined);
+  });
 });
