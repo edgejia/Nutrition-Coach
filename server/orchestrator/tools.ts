@@ -19,7 +19,7 @@ import {
   type createMealNumericProposalService,
 } from "../services/meal-numeric-proposals.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
-import type { createGoalProposalService } from "../services/goal-proposals.js";
+import type { createGoalProposalService, GoalProposalPayload } from "../services/goal-proposals.js";
 import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
@@ -438,6 +438,11 @@ type ProposeMealNumericCorrectionResult = MealNumericControlledResult & {
 type UpdateGoalsArgs =
   | ({ mode: "current_turn_values" } & Partial<DailyTargets>)
   | ({ mode: "latest_proposal" } & Partial<DailyTargets>);
+
+export interface GoalProposalPolicyAuthorization {
+  proposalId: string;
+  proposal: GoalProposalPayload;
+}
 
 const finiteNumber = z.number().refine(Number.isFinite, "must be finite");
 const nonNegativeFiniteNumber = z
@@ -1907,6 +1912,11 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       decision: "blocked",
       description: "Latest-proposal commits escalate to confirm-first proposal authorization.",
     },
+    {
+      id: "update_goals_latest_proposal_cancel",
+      decision: "allowed",
+      description: "Latest-proposal cancellation may clear pending proposal state without committing goals.",
+    },
   ],
   description:
     "更新使用者每日營養目標。必須提供 mode：current_turn_values 只用目前使用者訊息中的具體數字；latest_proposal 只套用目前有效的後端目標提案且需要使用者明確同意。空參數或沒有 mode 都無效。",
@@ -1925,6 +1935,98 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
     mode: args.mode,
     updatedFields: updatedGoalFields(args),
   }),
+  policyGate: async (args, context) => {
+    if (args.mode === "current_turn_values") {
+      return {
+        allowed: true,
+        fact: {
+          tool: "update_goals",
+          policyClass: "direct-execute",
+          decision: "allowed",
+          ruleId: "update_goals_current_turn_source_guard",
+        },
+      };
+    }
+
+    if (isGoalProposalCancel(context.currentUserMessage)) {
+      return {
+        allowed: true,
+        fact: {
+          tool: "update_goals",
+          policyClass: "direct-execute",
+          decision: "allowed",
+          ruleId: "update_goals_latest_proposal_cancel",
+        },
+      };
+    }
+
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.goalProposalService || !deviceId || !isGoalProposalConsent(context.currentUserMessage)) {
+      return {
+        allowed: false,
+        fact: {
+          tool: "update_goals",
+          policyClass: "direct-execute",
+          decision: "blocked",
+          ruleId: "update_goals_latest_proposal_confirm_first",
+        },
+      };
+    }
+
+    const activeProposal = await deps.goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    });
+    if (!activeProposal) {
+      return {
+        allowed: false,
+        fact: {
+          tool: "update_goals",
+          policyClass: "direct-execute",
+          decision: "blocked",
+          ruleId: "update_goals_latest_proposal_confirm_first",
+        },
+      };
+    }
+
+    const consumedProposal = await deps.goalProposalService.consumeLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      proposalId: activeProposal.proposalId,
+    });
+    if (!consumedProposal) {
+      return {
+        allowed: false,
+        fact: {
+          tool: "update_goals",
+          policyClass: "direct-execute",
+          decision: "blocked",
+          ruleId: "update_goals_latest_proposal_confirm_first",
+          proposalId: activeProposal.proposalId,
+        },
+      };
+    }
+
+    context.policyAuthorization = {
+      ...context.policyAuthorization,
+      updateGoalsLatestProposal: {
+        proposalId: consumedProposal.proposalId,
+        proposal: consumedProposal,
+      } satisfies GoalProposalPolicyAuthorization,
+    };
+
+    return {
+      allowed: true,
+      fact: {
+        tool: "update_goals",
+        policyClass: "direct-execute",
+        decision: "allowed",
+        ruleId: "update_goals_latest_proposal_confirm_first",
+        proposalId: consumedProposal.proposalId,
+      },
+    };
+  },
   execute: async (args, context) => {
     const deps = context.deps?.toolDeps as ToolDeps | undefined;
     const deviceId = context.deps?.deviceId as string | undefined;
@@ -1962,8 +2064,10 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
     if (args.mode === "current_turn_values") {
       updatePatch = overridePatch;
     } else {
-      const proposal = await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
-      if (!proposal || !isGoalProposalConsent(context.currentUserMessage)) {
+      const authorization = context.policyAuthorization?.updateGoalsLatestProposal as
+        | GoalProposalPolicyAuthorization
+        | undefined;
+      if (!authorization) {
         const reply = renderGoalAuthorityFailureCopy();
         return {
           ok: true,
@@ -1972,17 +2076,19 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
         };
       }
       updatePatch = {
-        ...proposal.targets,
+        ...authorization.proposal.targets,
         ...overridePatch,
       };
     }
 
     const updatedFields = updatedGoalFields(updatePatch);
     const targets = await deps.deviceService.updateGoals(deviceId, updatePatch);
-    try {
-      await deps.goalProposalService.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
-    } catch {
-      // Targets are already committed; cleanup failure must not alter the user-visible outcome.
+    if (args.mode === "current_turn_values") {
+      try {
+        await deps.goalProposalService.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
+      } catch {
+        // Targets are already committed; cleanup failure must not alter the user-visible outcome.
+      }
     }
 
     let publishedEvents: Array<"goals_update"> = [];
