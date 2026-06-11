@@ -90,6 +90,7 @@ export interface ToolExecuteResult<Result = unknown> {
   success: boolean;
   executed: boolean;
   failureReason?: RunContractFailureReason;
+  policyFact?: ToolPolicyDecisionFact;
   /**
    * Stringified tool message returned to the LLM loop. On success it is the
    * contract's toolMessage; on failure it is a structured JSON payload.
@@ -144,6 +145,25 @@ export function summarizeContractArgsForLog<Args, Result>(
     return `<${contract.name} args>`;
   }
   return contract.logSummary(validated.data);
+}
+
+export async function evaluateToolPolicy<Args, Result>(
+  contract: ToolContract<Args, Result>,
+  args: Args,
+  context: RunContractContext,
+): Promise<ToolPolicyGateResult> {
+  if (contract.policyGate) {
+    return contract.policyGate(args, context);
+  }
+  return {
+    allowed: true,
+    fact: {
+      tool: contract.name,
+      policyClass: contract.policyClass,
+      decision: "allowed",
+      ruleId: "base_policy_allowed",
+    },
+  };
 }
 
 /**
@@ -220,12 +240,35 @@ export async function runContract<Args, Result>(
     }
   }
 
-  // 4. Execute (controlled execute failure only for FatalToolError)
+  // 4. Side-effect policy gate (controlled guard failure)
+  const policyGateResult = await evaluateToolPolicy(contract, args, context);
+  if (!policyGateResult.allowed) {
+    return {
+      success: false,
+      executed: false,
+      failureReason: "guard",
+      policyFact: policyGateResult.fact,
+      result: stringifyFailure({
+        reason: "policy_gate",
+        failureReason: "guard",
+        policyClass: policyGateResult.fact.policyClass,
+        decision: policyGateResult.fact.decision,
+        ruleId: policyGateResult.fact.ruleId,
+        ...(policyGateResult.fact.proposalId
+          ? { proposalId: policyGateResult.fact.proposalId }
+          : {}),
+      }),
+      logSummary: contract.logSummary(args),
+    };
+  }
+
+  // 5. Execute (controlled execute failure only for FatalToolError)
   try {
     const executed = await contract.execute(args, context);
     return {
       success: true,
       executed: true,
+      policyFact: policyGateResult.fact,
       result: executed.toolMessage,
       contractResult: executed.result,
       logSummary: contract.logSummary(args),
@@ -237,6 +280,7 @@ export async function runContract<Args, Result>(
         success: false,
         executed: false,
         failureReason: "execute",
+        policyFact: policyGateResult.fact,
         result: stringifyFailure({
           reason: "execute_failed",
           failureReason: "execute",
