@@ -3,6 +3,7 @@ import type { AppDatabase } from "../db/client.js";
 interface TurnStateRow {
   id: string;
   deviceId: string;
+  sessionId: string;
   kind: string;
   payload: string;
   expiresAt: string;
@@ -10,14 +11,29 @@ interface TurnStateRow {
   updatedAt: string;
 }
 
+export const DEFAULT_SESSION_ID = "__default__";
+
+export interface TurnStateKey {
+  deviceId: string;
+  sessionId: string;
+  kind: string;
+}
+
 export function createTurnStateService(db: AppDatabase) {
+  async function clearState({ deviceId, sessionId, kind }: TurnStateKey): Promise<void> {
+    db.$client
+      .prepare("DELETE FROM turn_states WHERE device_id = ? AND session_id = ? AND kind = ?")
+      .run(deviceId, sessionId, kind);
+  }
+
   return {
-    async putState<T>(
-      deviceId: string,
-      kind: string,
-      payload: T,
-      ttlMs: number,
-    ): Promise<void> {
+    async putState<T>({
+      deviceId,
+      sessionId,
+      kind,
+      payload,
+      ttlMs,
+    }: TurnStateKey & { payload: T; ttlMs: number }): Promise<void> {
       const now = new Date();
       const createdAt = now.toISOString();
       const updatedAt = createdAt;
@@ -29,22 +45,24 @@ export function createTurnStateService(db: AppDatabase) {
             INSERT INTO turn_states (
               id,
               device_id,
+              session_id,
               kind,
               payload,
               expires_at,
               created_at,
               updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(device_id, kind) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(device_id, session_id, kind) DO UPDATE SET
               payload = excluded.payload,
               expires_at = excluded.expires_at,
               updated_at = excluded.updated_at
           `,
         )
         .run(
-          `${deviceId}:${kind}`,
+          `${deviceId}:${sessionId}:${kind}`,
           deviceId,
+          sessionId,
           kind,
           JSON.stringify(payload),
           expiresAt,
@@ -53,41 +71,38 @@ export function createTurnStateService(db: AppDatabase) {
         );
     },
 
-    async getState<T>(deviceId: string, kind: string): Promise<T | undefined> {
+    async getState<T>({ deviceId, sessionId, kind }: TurnStateKey): Promise<T | undefined> {
       const row = db.$client
         .prepare(
           `
             SELECT
               id,
               device_id AS deviceId,
+              session_id AS sessionId,
               kind,
               payload,
               expires_at AS expiresAt,
               created_at AS createdAt,
               updated_at AS updatedAt
             FROM turn_states
-            WHERE device_id = ? AND kind = ?
+            WHERE device_id = ? AND session_id = ? AND kind = ?
             LIMIT 1
           `,
         )
-        .get(deviceId, kind) as TurnStateRow | undefined;
+        .get(deviceId, sessionId, kind) as TurnStateRow | undefined;
 
       if (!row) {
         return undefined;
       }
 
       if (new Date(row.expiresAt).getTime() <= Date.now()) {
-        await this.clearState(deviceId, kind);
+        await clearState({ deviceId, sessionId, kind });
         return undefined;
       }
 
       return JSON.parse(row.payload) as T;
     },
 
-    async clearState(deviceId: string, kind: string): Promise<void> {
-      db.$client
-        .prepare("DELETE FROM turn_states WHERE device_id = ? AND kind = ?")
-        .run(deviceId, kind);
-    },
+    clearState,
   };
 }
