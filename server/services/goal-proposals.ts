@@ -15,29 +15,55 @@ export function createGoalProposalService(db: AppDatabase) {
   const turnStateService = createTurnStateService(db);
 
   return {
-    async putLatest(deviceId: string, targets: DailyTargets): Promise<GoalProposalPayload> {
+    async putLatest({
+      deviceId,
+      sessionId,
+      targets,
+    }: {
+      deviceId: string;
+      sessionId: string;
+      targets: DailyTargets;
+    }): Promise<GoalProposalPayload> {
       const proposal: GoalProposalPayload = {
         proposalId: crypto.randomUUID(),
         targets: { ...targets },
         createdAt: new Date().toISOString(),
       };
 
-      await turnStateService.putState(
+      await turnStateService.putState({
         deviceId,
-        GOAL_PROPOSAL_KIND,
-        proposal,
-        GOAL_PROPOSAL_TTL_MS,
-      );
+        sessionId,
+        kind: GOAL_PROPOSAL_KIND,
+        payload: proposal,
+        ttlMs: GOAL_PROPOSAL_TTL_MS,
+      });
 
       return proposal;
     },
 
-    async getLatest(deviceId: string): Promise<GoalProposalPayload | undefined> {
-      return turnStateService.getState<GoalProposalPayload>(deviceId, GOAL_PROPOSAL_KIND);
+    async getLatest({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }): Promise<GoalProposalPayload | undefined> {
+      const payload = await turnStateService.getState({
+        deviceId,
+        sessionId,
+        kind: GOAL_PROPOSAL_KIND,
+      });
+      return payload as GoalProposalPayload | undefined;
     },
 
-    async clear(deviceId: string): Promise<void> {
-      await turnStateService.clearState(deviceId, GOAL_PROPOSAL_KIND);
+    async clear({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }): Promise<void> {
+      await turnStateService.clearState({ deviceId, sessionId, kind: GOAL_PROPOSAL_KIND });
     },
   };
 }
