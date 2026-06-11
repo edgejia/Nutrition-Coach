@@ -8,6 +8,7 @@ import { mealRevisions, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import { MealRevisionPreconditionError } from "../../server/services/meal-transactions.js";
 
 const REAL_DATE = Date;
@@ -82,7 +83,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把剛剛那筆改成 500 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把剛剛那筆改成 500 卡",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, latest.id);
@@ -111,11 +117,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(
+    const result = await mealCorrectionService.findMeals({
       deviceId,
-      "update",
-      "幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高",
-    );
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, target.id);
@@ -130,16 +137,22 @@ describe("meal correction service", () => {
       ],
     });
 
-    const firstPass = await mealCorrectionService.findMeals(
+    const firstPass = await mealCorrectionService.findMeals({
       deviceId,
-      "update",
-      "幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高",
-    );
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "幫我把剛剛的雞腿蛋白質降低，我覺得沒這麼高",
+    });
 
     assert.equal(firstPass.status, "resolved");
     assert.equal(firstPass.resolvedMealId, target.id);
 
-    const secondPass = await mealCorrectionService.findMeals(deviceId, "update", "正常平均幾g就幾g");
+    const secondPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "正常平均幾g就幾g",
+    });
 
     assert.equal(secondPass.status, "resolved");
     assert.equal(secondPass.resolvedMealId, target.id);
@@ -166,21 +179,26 @@ describe("meal correction service", () => {
       ],
     });
 
-    const slashDateResult = await mealCorrectionService.findMeals(
+    const slashDateResult = await mealCorrectionService.findMeals({
       deviceId,
-      "update",
-      "把 3/25 的雞腿飯改成 500 卡",
-    );
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把 3/25 的雞腿飯改成 500 卡",
+    });
     assert.equal(slashDateResult.status, "resolved");
     assert.equal(slashDateResult.resolvedMealId, marchMeal.id);
     assert.equal(slashDateResult.candidate.dateKey, "2026-03-25");
-    await mealCorrectionService.clearPendingSelection(deviceId);
-
-    const relativeWeekResult = await mealCorrectionService.findMeals(
+    await mealCorrectionService.clearPendingSelection({
       deviceId,
-      "delete",
-      "把上週五的牛肉麵刪掉",
-    );
+      sessionId: DEFAULT_SESSION_ID,
+    });
+
+    const relativeWeekResult = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把上週五的牛肉麵刪掉",
+    });
     assert.equal(relativeWeekResult.status, "resolved");
     assert.equal(relativeWeekResult.resolvedMealId, lastFridayMeal.id);
     assert.equal(relativeWeekResult.candidate.dateKey, "2026-04-10");
@@ -194,11 +212,21 @@ describe("meal correction service", () => {
       ],
     });
 
-    const unsupported = await mealCorrectionService.findMeals(deviceId, "delete", "把前幾天的雞腿飯刪掉");
+    const unsupported = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把前幾天的雞腿飯刪掉",
+    });
     assert.equal(unsupported.status, "needs_clarification");
     assert.match(unsupported.prompt, /再說一次日期|哪一天/);
 
-    const multiDate = await mealCorrectionService.findMeals(deviceId, "delete", "把昨天和前天的雞腿飯刪掉");
+    const multiDate = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把昨天和前天的雞腿飯刪掉",
+    });
     assert.equal(multiDate.status, "needs_clarification");
     assert.match(multiDate.prompt, /一個日期|哪一天/);
   });
@@ -261,17 +289,26 @@ describe("meal correction service", () => {
       ],
     });
 
-    const itemOnly = await mealCorrectionService.findMeals(deviceId, "update", "滷蛋改成兩顆水煮蛋");
+    const itemOnly = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "滷蛋改成兩顆水煮蛋",
+    });
     assert.equal(itemOnly.status, "resolved");
     assert.equal(itemOnly.resolvedMealId, grouped.id);
     assert.notEqual(itemOnly.resolvedMealId, unrelatedLunch.id);
-    await mealCorrectionService.clearPendingSelection(deviceId);
-
-    const withModelPeriodHint = await mealCorrectionService.findMeals(
+    await mealCorrectionService.clearPendingSelection({
       deviceId,
-      "update",
-      "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
-    );
+      sessionId: DEFAULT_SESSION_ID,
+    });
+
+    const withModelPeriodHint = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把中午雞腿便當的滷蛋改成兩顆水煮蛋",
+    });
     assert.equal(withModelPeriodHint.status, "resolved");
     assert.equal(withModelPeriodHint.resolvedMealId, grouped.id);
     assert.notEqual(withModelPeriodHint.resolvedMealId, unrelatedLunch.id);
@@ -286,7 +323,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把中午鴨腿便當改成 500 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把中午鴨腿便當改成 500 卡",
+    });
 
     assert.equal(result.status, "needs_clarification");
     assert.match(result.prompt, /補充日期、餐別或食物名稱|不能確定/);
@@ -306,7 +348,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐那餐刪掉");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天午餐那餐刪掉",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, lunch.id);
@@ -321,7 +368,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把午餐那餐改成 600 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把午餐那餐改成 600 卡",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, lunch.id);
@@ -337,7 +389,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把早餐那餐刪掉");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把早餐那餐刪掉",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, breakfast.id);
@@ -359,7 +416,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天下午茶那餐刪掉");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天下午茶那餐刪掉",
+    });
 
     assert.notEqual(result.status === "resolved" ? result.resolvedMealId : undefined, lateNight.id);
     assert.equal(result.status, "needs_clarification");
@@ -379,11 +441,21 @@ describe("meal correction service", () => {
       ],
     });
 
-    const pendingSeed = await mealCorrectionService.findMeals(deviceId, "delete", "把宵夜那餐刪掉");
+    const pendingSeed = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把宵夜那餐刪掉",
+    });
     assert.equal(pendingSeed.status, "resolved");
     assert.equal(pendingSeed.resolvedMealId, lateNight.id);
 
-    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天下午茶那餐刪掉");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天下午茶那餐刪掉",
+    });
 
     assert.notEqual(result.status === "resolved" ? result.resolvedMealId : undefined, lateNight.id);
     assert.equal(result.status, "needs_clarification");
@@ -403,11 +475,21 @@ describe("meal correction service", () => {
       ],
     });
 
-    const pendingSeed = await mealCorrectionService.findMeals(deviceId, "delete", "把宵夜那餐刪掉");
+    const pendingSeed = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把宵夜那餐刪掉",
+    });
     assert.equal(pendingSeed.status, "resolved");
     assert.equal(pendingSeed.resolvedMealId, lateNight.id);
 
-    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天下午茶蛋餅刪掉");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天下午茶蛋餅刪掉",
+    });
 
     assert.notEqual(result.status === "resolved" ? result.resolvedMealId : undefined, lateNight.id);
     assert.equal(result.status, "needs_clarification");
@@ -427,7 +509,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把 4/18 的雞腿飯改成 500 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把 4/18 的雞腿飯改成 500 卡",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, scopedMeal.id);
@@ -451,7 +538,12 @@ describe("meal correction service", () => {
       });
     }
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把 4/18 的雞腿飯改成 500 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把 4/18 的雞腿飯改成 500 卡",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, scopedMeal.id);
@@ -466,7 +558,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐 burger 改成 500 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把今天午餐 burger 改成 500 卡",
+    });
 
     assert.notEqual(result.status, "resolved");
     assert.equal("resolvedMealId" in result, false);
@@ -487,7 +584,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐改成 600 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把今天午餐改成 600 卡",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, explicitLunch.id);
@@ -510,7 +612,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐那餐刪掉");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天午餐那餐刪掉",
+    });
 
     assert.equal(result.status, "resolved");
     assert.equal(result.resolvedMealId, lunch.id);
@@ -536,7 +643,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐滷蛋改成兩顆水煮蛋");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把今天午餐滷蛋改成兩顆水煮蛋",
+    });
 
     assert.equal(result.status, "needs_clarification");
     assert.equal(result.candidates.length, 5);
@@ -557,7 +669,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐鴨腿便當改成 500 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把今天午餐鴨腿便當改成 500 卡",
+    });
 
     assert.equal(result.status, "needs_clarification");
     assert.equal("resolvedMealId" in result, false);
@@ -584,7 +701,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "update", "把 4/18 的鴨腿便當改成 500 卡");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把 4/18 的鴨腿便當改成 500 卡",
+    });
 
     assert.equal(result.status, "needs_clarification");
     assert.deepEqual(
@@ -607,7 +729,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const result = await mealCorrectionService.findMeals(deviceId, "delete", "把 4/17 的鴨腿便當刪掉");
+    const result = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把 4/17 的鴨腿便當刪掉",
+    });
 
     assert.equal(result.status, "needs_clarification");
     assert.deepEqual(result.candidates, []);
@@ -694,17 +821,185 @@ describe("meal correction service", () => {
       ],
     });
 
-    const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
+    const firstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天午餐的雞腿飯刪掉",
+    });
     assert.equal(firstPass.status, "needs_clarification");
     assert.equal(firstPass.candidates.length, 2);
     assert.match(firstPass.prompt, /請直接回覆編號/);
 
-    const secondPass = await mealCorrectionService.findMeals(deviceId, "delete", "第二個");
+    const secondPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "第二個",
+    });
     assert.equal(secondPass.status, "resolved");
     assert.equal(secondPass.action, "delete");
     assert.equal(secondPass.resolvedMealId, first.id);
     assert.notEqual(secondPass.resolvedMealId, second.id);
     assert.equal(secondPass.fromPending, true);
+  });
+
+  it("does not resolve a numbered reply from another session's pending selection", async () => {
+    const older = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const newer = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
+    });
+
+    const sessionAFirstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-a",
+      action: "delete",
+      query: "把今天午餐的雞腿飯刪掉",
+    });
+    assert.equal(sessionAFirstPass.status, "needs_clarification");
+    assert.deepEqual(sessionAFirstPass.candidates.map((candidate) => candidate.mealId), [newer.id, older.id]);
+
+    const sessionBSelection = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-b",
+      action: "delete",
+      query: "1",
+    });
+
+    assert.equal(sessionBSelection.status, "not_found");
+    assert.equal("fromPending" in sessionBSelection, false);
+    assert.equal("resolvedMealId" in sessionBSelection, false);
+  });
+
+  it("keeps session A pending selection alive after session B numbered reply", async () => {
+    const older = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const newer = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
+    });
+
+    const sessionAFirstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-a",
+      action: "delete",
+      query: "把今天午餐的雞腿飯刪掉",
+    });
+    assert.equal(sessionAFirstPass.status, "needs_clarification");
+    await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-b",
+      action: "delete",
+      query: "1",
+    });
+
+    const sessionASelection = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-a",
+      action: "delete",
+      query: "1",
+    });
+
+    assert.equal(sessionASelection.status, "resolved");
+    assert.equal(sessionASelection.fromPending, true);
+    assert.equal(sessionASelection.resolvedMealId, newer.id);
+    assert.notEqual(sessionASelection.resolvedMealId, older.id);
+  });
+
+  it("does not clear session A pending selection from session B", async () => {
+    const older = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const newer = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
+    });
+
+    const sessionAFirstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-a",
+      action: "delete",
+      query: "把今天午餐的雞腿飯刪掉",
+    });
+    assert.equal(sessionAFirstPass.status, "needs_clarification");
+
+    await mealCorrectionService.clearPendingSelection({
+      deviceId,
+      sessionId: "session-b",
+    });
+
+    const sessionASelection = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-a",
+      action: "delete",
+      query: "1",
+    });
+
+    assert.equal(sessionASelection.status, "resolved");
+    assert.equal(sessionASelection.fromPending, true);
+    assert.equal(sessionASelection.resolvedMealId, newer.id);
+    assert.notEqual(sessionASelection.resolvedMealId, older.id);
+  });
+
+  it("does not recover session A pending selection from session B", async () => {
+    const older = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const newer = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 29, carbs: 78, fat: 18 },
+      ],
+    });
+
+    const sessionAFirstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-a",
+      action: "delete",
+      query: "把今天午餐的雞腿飯刪掉",
+    });
+    assert.equal(sessionAFirstPass.status, "needs_clarification");
+
+    const sessionBRecovery = await mealCorrectionService.recoverStalePendingSelection({
+      deviceId,
+      sessionId: "session-b",
+      action: "delete",
+    });
+    assert.equal(sessionBRecovery, undefined);
+
+    const sessionASelection = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: "session-a",
+      action: "delete",
+      query: "1",
+    });
+
+    assert.equal(sessionASelection.status, "resolved");
+    assert.equal(sessionASelection.fromPending, true);
+    assert.equal(sessionASelection.resolvedMealId, newer.id);
+    assert.notEqual(sessionASelection.resolvedMealId, older.id);
   });
 
   it("Phase 67 D-22/D-23/D-24/D-38 re-shows the same rendered options with valid numbers for an invalid selection", async () => {
@@ -721,11 +1016,21 @@ describe("meal correction service", () => {
       ],
     });
 
-    const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
+    const firstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天午餐的雞腿飯刪掉",
+    });
     assert.equal(firstPass.status, "needs_clarification");
     assert.deepEqual(firstPass.candidates.map((candidate) => candidate.mealId), [second.id, first.id]);
 
-    const invalidSelection = await mealCorrectionService.findMeals(deviceId, "delete", "3");
+    const invalidSelection = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "3",
+    });
 
     assert.equal(invalidSelection.status, "needs_clarification");
     assert.deepEqual(invalidSelection.candidates.map((candidate) => candidate.mealId), [second.id, first.id]);
@@ -752,11 +1057,21 @@ describe("meal correction service", () => {
       ],
     });
 
-    const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐的雞腿飯蛋白質改 28g");
+    const firstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把今天午餐的雞腿飯蛋白質改 28g",
+    });
     assert.equal(firstPass.status, "needs_clarification");
     assert.deepEqual(firstPass.candidates.map((candidate) => candidate.mealId), [newer.id, older.id]);
 
-    const selected = await mealCorrectionService.findMeals(deviceId, "update", "2，蛋白質改 28g");
+    const selected = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "2，蛋白質改 28g",
+    });
 
     assert.equal(selected.status, "resolved");
     assert.equal(selected.fromPending, true);
@@ -778,7 +1093,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "把今天午餐的雞腿飯蛋白質改 28g");
+    const firstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把今天午餐的雞腿飯蛋白質改 28g",
+    });
     assert.equal(firstPass.status, "needs_clarification");
     await foodLoggingService.updateMeal(deviceId, older.id, {
       expectedMealRevisionId: older.mealRevisionId,
@@ -791,7 +1111,12 @@ describe("meal correction service", () => {
       }],
     });
 
-    const staleSelection = await mealCorrectionService.findMeals(deviceId, "update", "2，蛋白質改 28g");
+    const staleSelection = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "2，蛋白質改 28g",
+    });
 
     assert.equal(staleSelection.status, "needs_clarification");
     assert.equal("resolvedMealId" in staleSelection, false);
@@ -820,7 +1145,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
+    const firstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天午餐的雞腿飯刪掉",
+    });
     assert.equal(firstPass.status, "needs_clarification");
     await foodLoggingService.deleteMeal(deviceId, selectedTarget.id, selectedTarget.mealRevisionId);
     const replacement = await foodLoggingService.logGroupedMeal(deviceId, {
@@ -830,7 +1160,12 @@ describe("meal correction service", () => {
       ],
     });
 
-    const staleSelection = await mealCorrectionService.findMeals(deviceId, "delete", "2");
+    const staleSelection = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "2",
+    });
 
     assert.equal(staleSelection.status, "needs_clarification");
     assert.equal("resolvedMealId" in staleSelection, false);
@@ -854,10 +1189,20 @@ describe("meal correction service", () => {
       ],
     });
 
-    const firstPass = await mealCorrectionService.findMeals(deviceId, "delete", "把今天午餐的雞腿飯刪掉");
+    const firstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "delete",
+      query: "把今天午餐的雞腿飯刪掉",
+    });
     assert.equal(firstPass.status, "needs_clarification");
 
-    const staleAction = await mealCorrectionService.findMeals(deviceId, "update", "第二個");
+    const staleAction = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "第二個",
+    });
 
     assert.notEqual(staleAction.status, "resolved");
     if (staleAction.status === "resolved") {
@@ -873,11 +1218,21 @@ describe("meal correction service", () => {
       ],
     });
 
-    const firstPass = await mealCorrectionService.findMeals(deviceId, "update", "剛剛的雞腿蛋白質降低");
+    const firstPass = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "剛剛的雞腿蛋白質降低",
+    });
     assert.equal(firstPass.status, "resolved");
     assert.equal(firstPass.resolvedMealId, target.id);
 
-    const staleTarget = await mealCorrectionService.findMeals(deviceId, "update", "把豆漿改成無糖");
+    const staleTarget = await mealCorrectionService.findMeals({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      action: "update",
+      query: "把豆漿改成無糖",
+    });
 
     assert.notEqual(staleTarget.status, "resolved");
     if (staleTarget.status === "resolved") {
