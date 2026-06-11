@@ -74,6 +74,7 @@ describe("chat meal correction integration", () => {
     globalThis.Date = FixedDate as DateConstructor;
     mockLLM = new MockLLMProvider();
     publishDailySummaryCalls = [];
+    publishGoalsUpdateCalls = [];
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: mockLLM,
@@ -82,6 +83,11 @@ describe("chat meal correction integration", () => {
         ready.publisher.publishDailySummary = (...args) => {
           publishDailySummaryCalls.push(args);
           return originalPublishDailySummary(...args);
+        };
+        const originalPublishGoalsUpdate = ready.publisher.publishGoalsUpdate.bind(ready.publisher);
+        ready.publisher.publishGoalsUpdate = (...args) => {
+          publishGoalsUpdateCalls.push(args);
+          return originalPublishGoalsUpdate(...args);
         };
         services = ready;
       },
