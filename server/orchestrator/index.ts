@@ -27,6 +27,7 @@ import {
 import { CHOICE_PROMPT_PATTERN } from "./patterns.js";
 import type { OrchestratorHooks } from "./hooks.js";
 import type { FallbackPayload } from "./hooks.js";
+import type { ToolPolicyDecisionFact } from "./tool-contract.js";
 import type {
   LlmTraceFinalReplyShape,
   LlmTraceFinalReplySource,
@@ -103,6 +104,22 @@ interface FinalReplyTraceMetadata {
   finalReplyShape?: LlmTraceFinalReplyShape;
   providerFallbackContext?: ProviderFallbackContext;
   fallbackOutcomeContext?: FallbackOutcomeContext;
+}
+
+function policyFactPayload(
+  policyFact: ToolPolicyDecisionFact | undefined,
+  turnId: string | undefined,
+) {
+  if (!policyFact) {
+    return {};
+  }
+  return {
+    policyClass: policyFact.policyClass,
+    decision: policyFact.decision,
+    ruleId: policyFact.ruleId,
+    ...(policyFact.proposalId !== undefined ? { proposalId: policyFact.proposalId } : {}),
+    ...(turnId !== undefined ? { turnId } : {}),
+  };
 }
 
 export type OrchestratorResult =
@@ -644,6 +661,7 @@ export interface HandleMessageOpts {
   hooks?: OrchestratorHooks;  // injected per-call; per-request reqId binding via createStructuredHooks
   onUserMessageSaved?: () => void;
   signal?: AbortSignal;
+  turnId?: string;
 }
 
 export function createOrchestrator(deps: OrchestratorDeps) {
@@ -762,6 +780,19 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           expectedMealRevisionId: activeMealProposal.expectedMealRevisionId,
         });
         if (!consumedMealProposal) {
+          opts?.hooks?.onToolResult?.({
+            tool: "propose_meal_numeric_correction",
+            success: false,
+            executed: false,
+            summary: "policyDecision: blocked",
+            ...policyFactPayload({
+              tool: "propose_meal_numeric_correction",
+              policyClass: "confirm-first",
+              decision: "blocked",
+              ruleId: "meal_numeric_proposal_approval_consume",
+              proposalId: activeMealProposal.proposalId,
+            }, opts?.turnId),
+          });
           const reply = renderMealNumericAuthorityFailureCopy();
           return {
             reply,
@@ -771,6 +802,19 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             finalReplyShape: classifyPlainReplyShape(reply),
           };
         }
+        opts?.hooks?.onToolResult?.({
+          tool: "propose_meal_numeric_correction",
+          success: true,
+          executed: false,
+          summary: "policyDecision: allowed",
+          ...policyFactPayload({
+            tool: "propose_meal_numeric_correction",
+            policyClass: "confirm-first",
+            decision: "allowed",
+            ruleId: "meal_numeric_proposal_approval_consume",
+            proposalId: consumedMealProposal.proposalId,
+          }, opts?.turnId),
+        });
 
         try {
           const updated = await deps.mealCorrectionService.updateMeal(
@@ -1110,6 +1154,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 summaryHistoryFacts: toolSummaryHistoryFacts,
                 controlledReply,
                 validationDiagnostic,
+                policyFact,
               } = await executeTool(toolCall, deviceId, {
                 foodLoggingService: deps.foodLoggingService,
                 summaryService: deps.summaryService,
@@ -1133,6 +1178,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   summary,
                   updatedFields,
                   publishedEvents,
+                  ...policyFactPayload(policyFact, opts?.turnId),
                 });
                 opts?.hooks?.onLLMEnd?.(round + 1, true);
                 return {
@@ -1159,6 +1205,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   updatedFields,
                   ...(validationDiagnostic ? { reason: validationDiagnostic.reason } : {}),
                   ...(validationDiagnostic?.fields ? { fields: validationDiagnostic.fields } : {}),
+                  ...policyFactPayload(policyFact, opts?.turnId),
                 });
                 await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
                 toolResults.push({ toolCall, result });
@@ -1255,6 +1302,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 summary,
                 updatedFields,
                 publishedEvents,
+                ...policyFactPayload(policyFact, opts?.turnId),
               });
               const toolMessage = await chatService.saveMessage(deviceId, "tool", summary, { toolName: toolCall.function.name });
               if (toolLoggedMeal) {
@@ -1272,6 +1320,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   failureReason: toolErr.diagnostic?.failureReason ?? errorStr,
                   reason: toolErr.diagnostic?.reason,
                   fields: toolErr.diagnostic?.fields,
+                  ...policyFactPayload(toolErr.diagnostic?.policyFact, opts?.turnId),
                 });
                 if (mutationReceiptText && mutationEffects) {
                   return {
@@ -1292,7 +1341,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 }
                 throw toolErr;
               }
-              opts?.hooks?.onToolResult?.({ tool: toolCall.function.name, success: false, executed: true, failureReason: errorStr });
+              opts?.hooks?.onToolResult?.({
+                tool: toolCall.function.name,
+                success: false,
+                executed: true,
+                failureReason: errorStr,
+              });
               toolResults.push({ toolCall, result: `Error: ${errorStr}` });
             }
           }

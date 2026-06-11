@@ -1051,6 +1051,7 @@ async function handleOrchestratorSSE(
         },
         hooks,
         signal: stopControl?.signal,
+        turnId: stopControl.turnId,
       }
     );
 
@@ -1502,6 +1503,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
               userMessagePersisted = true;
             },
             hooks,
+            turnId,
           },
         );
         jsonDidLogMeal = result.didLogMeal;

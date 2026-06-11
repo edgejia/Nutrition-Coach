@@ -39,6 +39,7 @@ import {
   type ToolContract,
   type RunContractContext,
   type SideEffectPolicyClass,
+  type ToolPolicyDecisionFact,
 } from "./tool-contract.js";
 import {
   checkSourceFields,
@@ -130,6 +131,7 @@ export interface ToolExecutionResult {
   };
   updatedFields?: string[];
   publishedEvents?: string[];
+  policyFact?: ToolPolicyDecisionFact;
   dailyTargets?: DailyTargets;
   dailySummary?: DailySummary;
   summaryOutcome?: SummaryOutcome;
@@ -212,6 +214,7 @@ export interface FatalToolDiagnostic {
   failureReason?: "validation" | "guard" | "execute";
   reason?: string;
   fields?: string[];
+  policyFact?: ToolPolicyDecisionFact;
 }
 
 export class FatalToolError extends Error {
@@ -2437,6 +2440,17 @@ export async function executeTool(
   };
 
   const outcome = await runContract(contract, toolCall, ctx);
+  const attachPolicyFact = <T extends Omit<ToolExecutionResult, "policyFact">>(result: T): T & {
+    policyFact?: ToolPolicyDecisionFact;
+  } => {
+    if (!outcome.policyFact) {
+      return result;
+    }
+    return {
+      ...result,
+      policyFact: outcome.policyFact,
+    };
+  };
 
   if (!outcome.success) {
     if (
@@ -2444,13 +2458,13 @@ export async function executeTool(
       && deps.imagePath
       && isMissingTrustedProteinBasisFailure(outcome)
     ) {
-      return {
+      return attachPolicyFact({
         result: outcome.result,
         summary: "failureReason: execute",
         success: false,
         executed: false,
         failureReason: outcome.failureReason,
-      };
+      });
     }
 
     // Phase 83 (D-02): log_food schema_validation failures return a controlled
@@ -2479,7 +2493,7 @@ export async function executeTool(
         // result was not JSON; fall through to the FatalToolError conversion
       }
       if (failureKind === "schema_validation") {
-        return {
+        return attachPolicyFact({
           result: outcome.result,
           summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
           success: false,
@@ -2489,7 +2503,7 @@ export async function executeTool(
             reason: failureKind,
             ...(failureFields ? { fields: failureFields } : {}),
           },
-        };
+        });
       }
     }
 
@@ -2513,7 +2527,7 @@ export async function executeTool(
         const reply = hasValidationFields
           ? renderGoalValidationFailureCopy(validationFields)
           : renderGoalAuthorityFailureCopy();
-        return {
+        return attachPolicyFact({
           result: reply,
           summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
           success: false,
@@ -2525,16 +2539,16 @@ export async function executeTool(
             reason: hasValidationFields ? "goal_validation_failure" : "goal_authority_failure",
             text: reply,
           },
-        };
+        });
       }
-      return {
+      return attachPolicyFact({
         result: outcome.result,
         summary: `failureReason: ${outcome.failureReason ?? "validation"}`,
         success: false,
         executed: false,
         failureReason: outcome.failureReason,
         updatedFields,
-      };
+      });
     }
 
     // Convert controlled failures into FatalToolError so the existing
@@ -2561,9 +2575,15 @@ export async function executeTool(
         ...(Array.isArray(parsed.fields) && parsed.fields.every((field) => typeof field === "string")
           ? { fields: parsed.fields as string[] }
           : {}),
+        ...(outcome.policyFact ? { policyFact: outcome.policyFact } : {}),
       };
     } catch {
-      diagnostic = outcome.failureReason ? { failureReason: outcome.failureReason } : undefined;
+      diagnostic = outcome.failureReason || outcome.policyFact
+        ? {
+            ...(outcome.failureReason ? { failureReason: outcome.failureReason } : {}),
+            ...(outcome.policyFact ? { policyFact: outcome.policyFact } : {}),
+          }
+        : undefined;
     }
     throw new FatalToolError(failureMessage, { diagnostic });
   }
@@ -2572,7 +2592,7 @@ export async function executeTool(
   if (toolCall.function.name === "log_food") {
     const contractResult = outcome.contractResult as LogFoodResult;
     if (contractResult.status === "failed_recognition_no_save") {
-      return {
+      return attachPolicyFact({
         result: FAILED_RECOGNITION_NO_SAVE_REPLY,
         summary: "failureReason: failed_recognition_no_save",
         success: false,
@@ -2583,13 +2603,13 @@ export async function executeTool(
           reason: "failed_recognition_no_save",
           text: FAILED_RECOGNITION_NO_SAVE_REPLY,
         },
-      };
+      });
     }
     if (contractResult.status === "needs_clarification") {
       const reply = renderHistoricalLogFoodClarificationCopy({
         prompt: contractResult.prompt,
       });
-      return {
+      return attachPolicyFact({
         result: reply,
         summary: "status: needs_clarification",
         success: false,
@@ -2601,9 +2621,9 @@ export async function executeTool(
           reason: "historical_date_clarification",
           text: reply,
         },
-      };
+      });
     }
-    return {
+    return attachPolicyFact({
       result: outcome.result,
       summary: "成功",
       mealMutationKind: "log",
@@ -2611,14 +2631,14 @@ export async function executeTool(
       summaryOutcome: contractResult.summaryOutcome,
       affectedDate: contractResult.affectedDate,
       loggedMeal: contractResult.loggedMeal,
-    };
+    });
   }
 
   if (toolCall.function.name === "find_meals") {
     const contractResult = outcome.contractResult as FindMealsResult;
     if (contractResult.status !== "resolved") {
       const reply = renderFindMealsControlledReply(contractResult);
-      return {
+      return attachPolicyFact({
         result: reply,
         summary: `status: ${contractResult.status}`,
         success: false,
@@ -2630,19 +2650,19 @@ export async function executeTool(
           reason: "meal_target_clarification",
           text: reply,
         },
-      };
+      });
     }
 
-    return {
+    return attachPolicyFact({
       result: outcome.result,
       summary: `status: ${contractResult.status}`,
-    };
+    });
   }
 
   if (toolCall.function.name === "update_meal") {
     const contractResult = outcome.contractResult as UpdateMealContractResult;
     if (isMealControlledResult(contractResult)) {
-      return {
+      return attachPolicyFact({
         result: contractResult.reply,
         summary: "failureReason: guard",
         success: false,
@@ -2653,9 +2673,9 @@ export async function executeTool(
           reason: contractResult.reason,
           text: contractResult.reply,
         },
-      };
+      });
     }
-    return {
+    return attachPolicyFact({
       result: outcome.result,
       summary: "成功",
       mealMutationKind: "update",
@@ -2675,13 +2695,13 @@ export async function executeTool(
         excludedSources: [],
         usedConservativeAssumption: false,
       },
-    };
+    });
   }
 
   if (toolCall.function.name === "delete_meal") {
     const contractResult = outcome.contractResult as DeleteMealContractResult;
     if (isMealControlledResult(contractResult)) {
-      return {
+      return attachPolicyFact({
         result: contractResult.reply,
         summary: "failureReason: guard",
         success: false,
@@ -2692,9 +2712,9 @@ export async function executeTool(
           reason: contractResult.reason,
           text: contractResult.reply,
         },
-      };
+      });
     }
-    return {
+    return attachPolicyFact({
       result: outcome.result,
       summary: "成功",
       mealMutationKind: "delete",
@@ -2702,7 +2722,7 @@ export async function executeTool(
       summaryOutcome: contractResult.summaryOutcome,
       affectedDate: contractResult.affectedDate,
       deletedMeal: contractResult.deletedMeal,
-    };
+    });
   }
 
   if (toolCall.function.name === "get_daily_summary") {
@@ -2711,7 +2731,7 @@ export async function executeTool(
       const reply = renderHistoricalSummaryClarificationCopy({
         prompt: summary.prompt,
       });
-      return {
+      return attachPolicyFact({
         result: reply,
         summary: "status: needs_clarification",
         success: false,
@@ -2723,13 +2743,13 @@ export async function executeTool(
           reason: "historical_summary_clarification",
           text: reply,
         },
-      };
+      });
     }
     if (summary.status === "multiple_targets") {
       const reply = renderHistoricalSummaryMultipleTargetsCopy({
         dateKeys: summary.dateKeys,
       });
-      return {
+      return attachPolicyFact({
         result: reply,
         summary: "status: multiple_targets",
         success: false,
@@ -2741,9 +2761,9 @@ export async function executeTool(
           reason: "historical_summary_clarification",
           text: reply,
         },
-      };
+      });
     }
-    return {
+    return attachPolicyFact({
       result: outcome.result,
       summary: `熱量 ${summary.dailySummary.totalCalories}kcal, P${summary.dailySummary.totalProtein}g, C${summary.dailySummary.totalCarbs}g, F${summary.dailySummary.totalFat}g`,
       dailySummary: summary.dailySummary,
@@ -2752,12 +2772,12 @@ export async function executeTool(
         meals: summary.meals,
       },
       affectedDate: summary.affectedDate,
-    };
+    });
   }
 
   if (toolCall.function.name === "propose_goals") {
     const contractResult = outcome.contractResult as ProposeGoalsResult;
-    return {
+    return attachPolicyFact({
       result: contractResult.reply,
       summary: "status: proposal",
       success: true,
@@ -2767,13 +2787,13 @@ export async function executeTool(
         reason: contractResult.reason,
         text: contractResult.reply,
       },
-    };
+    });
   }
 
   if (toolCall.function.name === "propose_meal_numeric_correction") {
     const contractResult = outcome.contractResult as ProposeMealNumericCorrectionResult;
     const isProposal = contractResult.reason === "meal_numeric_proposal";
-    return {
+    return attachPolicyFact({
       result: contractResult.reply,
       summary: isProposal ? "status: proposal" : "failureReason: guard",
       success: isProposal,
@@ -2784,7 +2804,7 @@ export async function executeTool(
         reason: contractResult.reason,
         text: contractResult.reply,
       },
-    };
+    });
   }
 
   if (toolCall.function.name === "update_goals") {
@@ -2793,7 +2813,7 @@ export async function executeTool(
       const failureReason = contractResult.reason === "goal_validation_failure"
         ? "validation"
         : "guard";
-      return {
+      return attachPolicyFact({
         result: contractResult.reply,
         summary: `failureReason: ${failureReason}`,
         success: false,
@@ -2810,10 +2830,10 @@ export async function executeTool(
           reason: contractResult.reason,
           text: contractResult.reply,
         },
-      };
+      });
     }
     const updateResult = contractResult as UpdateGoalsResult;
-    return {
+    return attachPolicyFact({
       result: outcome.result,
       summary: `updatedFields: ${updateResult.updatedFields.join(",")}`,
       success: true,
@@ -2821,14 +2841,14 @@ export async function executeTool(
       updatedFields: [...updateResult.updatedFields],
       publishedEvents: [...(updateResult.publishedEvents ?? [])],
       dailyTargets: updateResult.targets,
-    };
+    });
   }
 
   // Defensive: any contract added to the registry without a wrapper case here
   // returns the contract's toolMessage and an empty summary. Future tools
   // (e.g. update_goals in 10-03) are expected to call `runContract` directly.
-  return {
+  return attachPolicyFact({
     result: outcome.result,
     summary: "",
-  };
+  });
 }

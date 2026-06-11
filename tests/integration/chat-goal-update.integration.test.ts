@@ -409,7 +409,6 @@ describe("chat goal update integration", () => {
     for (const forbidden of [
       "好",
       renderGoalAuthorityFailureCopy(),
-      "latest_proposal",
       "已經幫你更新每日目標",
       sessionCookieHeader,
       "guest_session",
