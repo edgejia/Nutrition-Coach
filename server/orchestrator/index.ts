@@ -39,6 +39,7 @@ import {
 import {
   assertNoForbiddenReceiptTerms,
   renderGoalCancelCopy,
+  renderMealNumericAuthorityFailureCopy,
   renderMealNumericCancelCopy,
   renderMutationReceipt,
   renderProposalKindAmbiguityCopy,
@@ -751,20 +752,37 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       if (
         activeMealProposal
         && deps.mealCorrectionService
+        && deps.mealNumericProposalService
         && (isMealProposalApproval(userMessage) || (!activeGoalProposal && isGoalProposalConsent(userMessage)))
       ) {
+        const consumedMealProposal = await deps.mealNumericProposalService.consumeLatest({
+          deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+          proposalId: activeMealProposal.proposalId,
+          expectedMealRevisionId: activeMealProposal.expectedMealRevisionId,
+        });
+        if (!consumedMealProposal) {
+          const reply = renderMealNumericAuthorityFailureCopy();
+          return {
+            reply,
+            didLogMeal: false,
+            didMutateMeal: false,
+            finalReplySource: "renderer",
+            finalReplyShape: classifyPlainReplyShape(reply),
+          };
+        }
+
         try {
           const updated = await deps.mealCorrectionService.updateMeal(
             deviceId,
-            activeMealProposal.mealId,
-            buildMealNumericProposalUpdateInput(activeMealProposal),
-            activeMealProposal.expectedMealRevisionId,
+            consumedMealProposal.mealId,
+            buildMealNumericProposalUpdateInput(consumedMealProposal),
+            consumedMealProposal.expectedMealRevisionId,
           );
           await deps.mealCorrectionService.clearPendingSelection({
             deviceId,
             sessionId: DEFAULT_SESSION_ID,
           });
-          await deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
           const loggedMeal = buildLoggedMealFromMealProposalUpdate(updated.updatedMeal);
           const mutationEffects: MutationEffects = {
             kind: "update",
