@@ -27,6 +27,11 @@ export type LlmTraceTimelineEvent =
       fields?: string[];
       updatedFields?: string[];
       publishedEvents?: string[];
+      policyClass?: string;
+      decision?: string;
+      ruleId?: string;
+      proposalId?: string;
+      turnId?: string;
     }
   | {
       type: "llm_error";
@@ -328,6 +333,21 @@ function buildToolResultEvent(
   }
   if (payload.publishedEvents !== undefined) {
     event.publishedEvents = sanitizeTraceLabels(payload.publishedEvents);
+  }
+  if (payload.policyClass !== undefined) {
+    event.policyClass = sanitizeTraceLabel(payload.policyClass);
+  }
+  if (payload.decision !== undefined) {
+    event.decision = sanitizeTraceLabel(payload.decision);
+  }
+  if (payload.ruleId !== undefined) {
+    event.ruleId = sanitizeTraceLabel(payload.ruleId);
+  }
+  if (payload.proposalId !== undefined) {
+    event.proposalId = sanitizeTraceLabel(payload.proposalId);
+  }
+  if (payload.turnId !== undefined) {
+    event.turnId = sanitizeTraceLabel(payload.turnId);
   }
 
   return event;

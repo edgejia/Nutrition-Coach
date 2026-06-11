@@ -1,5 +1,10 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { ProviderErrorMetadata } from "../llm/types.js";
+import type {
+  SideEffectPolicyClass,
+  ToolPolicyDecisionKind,
+  ToolPolicyRuleId,
+} from "./tool-contract.js";
 
 export interface OrchestratorHooks {
   onLLMStart?(round: number): void;
@@ -33,6 +38,11 @@ export interface ToolResultPayload {
   summary?: string;       // e.g. "成功" or "熱量 450kcal"
   updatedFields?: string[];
   publishedEvents?: string[];
+  policyClass?: SideEffectPolicyClass;
+  decision?: ToolPolicyDecisionKind;
+  ruleId?: ToolPolicyRuleId;
+  proposalId?: string;
+  turnId?: string;
 }
 
 export type FallbackReason =
