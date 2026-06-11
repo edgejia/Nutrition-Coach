@@ -59,6 +59,7 @@ describe("chat meal correction integration", () => {
   let sessionCookieHeader: string;
   let services: AppServices;
   let publishDailySummaryCalls: unknown[];
+  let publishGoalsUpdateCalls: unknown[];
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -1680,6 +1681,8 @@ describe("chat meal correction integration", () => {
     assert.match(body.reply, /排骨、白飯、滷蛋、青菜/);
     assert.doesNotMatch(body.reply, /中午雞腿便當|滷蛋改成|已更新|已套用|kcal|蛋白質/);
     assert.deepEqual(publishDailySummaryCalls, []);
+    assert.deepEqual(publishGoalsUpdateCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1, "terminal clarification must not consume a second model reply");
 
     const meals = await getMeals();
     assert.equal(meals.length, 2);
