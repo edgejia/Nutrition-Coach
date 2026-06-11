@@ -100,6 +100,27 @@ export function createMealNumericProposalService(db: AppDatabase) {
       return payload as MealNumericProposalPayload | undefined;
     },
 
+    async consumeLatest({
+      deviceId,
+      sessionId,
+      proposalId,
+      expectedMealRevisionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+      proposalId: string;
+      expectedMealRevisionId: string;
+    }): Promise<MealNumericProposalPayload | undefined> {
+      const payload = await turnStateService.consumeState({
+        deviceId,
+        sessionId,
+        kind: MEAL_NUMERIC_PROPOSAL_KIND,
+        proposalId,
+        expectedMealRevisionId,
+      });
+      return payload as MealNumericProposalPayload | undefined;
+    },
+
     async clear({
       deviceId,
       sessionId,

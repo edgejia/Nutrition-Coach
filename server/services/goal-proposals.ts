@@ -56,6 +56,24 @@ export function createGoalProposalService(db: AppDatabase) {
       return payload as GoalProposalPayload | undefined;
     },
 
+    async consumeLatest({
+      deviceId,
+      sessionId,
+      proposalId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+      proposalId: string;
+    }): Promise<GoalProposalPayload | undefined> {
+      const payload = await turnStateService.consumeState({
+        deviceId,
+        sessionId,
+        kind: GOAL_PROPOSAL_KIND,
+        proposalId,
+      });
+      return payload as GoalProposalPayload | undefined;
+    },
+
     async clear({
       deviceId,
       sessionId,
