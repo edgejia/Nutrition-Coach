@@ -236,6 +236,62 @@ describe("createLlmTraceRecorder", () => {
     }
   });
 
+  it("records metadata-only policy facts on tool result trace events", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+
+    hooks.onLLMStart?.(2);
+    hooks.onToolResult?.({
+      tool: "update_goals",
+      success: false,
+      executed: false,
+      failureReason: "guard",
+      policyClass: "direct-execute",
+      decision: "blocked",
+      ruleId: "update_goals_latest_proposal_consume",
+      proposalId: "proposal-safe-123",
+      turnId: "turn-safe-456",
+      args: { calories: 1800 },
+      rawUserText: "我今天想把熱量改成 1800",
+      payload: { provider: "raw provider body" },
+      candidateId: "meal-secret-candidate",
+      sessionMaterial: "guest_session=secret",
+      databaseSnapshot: "meal_transactions row dump",
+    } as never);
+
+    const trace = recorder.build({ scenario: "unit-policy-trace", status: "pass" });
+
+    assert.deepEqual(trace.timeline, [
+      { type: "llm_round_start", round: 2 },
+      {
+        type: "tool_result",
+        round: 2,
+        tool: "update_goals",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        policyClass: "direct-execute",
+        decision: "blocked",
+        ruleId: "update_goals_latest_proposal_consume",
+        proposalId: "proposal-safe-123",
+        turnId: "turn-safe-456",
+      },
+    ]);
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "calories",
+      "1800",
+      "我今天想把熱量改成 1800",
+      "raw provider body",
+      "meal-secret-candidate",
+      "guest_session=secret",
+      "meal_transactions row dump",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
   it("records route fallback as a dedicated terminal trace fact", () => {
     const recorder = createLlmTraceRecorder();
     const unsafeProviderMetadata: ProviderErrorMetadata = {
