@@ -352,7 +352,50 @@ describe("chat meal correction integration", () => {
     const current = meals.find((meal) => meal.id === original.id);
     assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
     assert.equal(current?.protein, 31);
-    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+  });
+
+  it("fails closed when active meal proposal is concurrently consumed before approval commit", async () => {
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: original.id,
+        expectedMealRevisionId: original.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
+    });
+    const realConsumeLatest = services.mealNumericProposalService.consumeLatest.bind(
+      services.mealNumericProposalService,
+    );
+    services.mealNumericProposalService.consumeLatest = async (params) => {
+      await realConsumeLatest(params);
+      return undefined;
+    };
+
+    const { status, body } = await postChat("套用餐點修改");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderMealNumericAuthorityFailureCopy());
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, original.mealRevisionId);
+    assert.equal(current?.protein, 30);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
   });
 
   it("clears stale resolved meal selection after stored proposal approval", async () => {
