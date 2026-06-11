@@ -19,6 +19,11 @@ export interface TurnStateKey {
   kind: string;
 }
 
+export interface ConsumeTurnStateParams extends TurnStateKey {
+  proposalId: string;
+  expectedMealRevisionId?: string;
+}
+
 export function createTurnStateService(db: AppDatabase) {
   async function clearState({ deviceId, sessionId, kind }: TurnStateKey): Promise<void> {
     db.$client
@@ -104,5 +109,42 @@ export function createTurnStateService(db: AppDatabase) {
     },
 
     clearState,
+
+    async consumeState<T>({
+      deviceId,
+      sessionId,
+      kind,
+      proposalId,
+      expectedMealRevisionId,
+    }: ConsumeTurnStateParams): Promise<T | undefined> {
+      const row = db.$client
+        .prepare(
+          `
+            DELETE FROM turn_states
+            WHERE device_id = ?
+              AND session_id = ?
+              AND kind = ?
+              AND expires_at > ?
+              AND json_extract(payload, '$.proposalId') = ?
+              AND (? IS NULL OR json_extract(payload, '$.expectedMealRevisionId') = ?)
+            RETURNING payload
+          `,
+        )
+        .get(
+          deviceId,
+          sessionId,
+          kind,
+          new Date().toISOString(),
+          proposalId,
+          expectedMealRevisionId ?? null,
+          expectedMealRevisionId ?? null,
+        ) as Pick<TurnStateRow, "payload"> | undefined;
+
+      if (!row) {
+        return undefined;
+      }
+
+      return JSON.parse(row.payload) as T;
+    },
   };
 }
