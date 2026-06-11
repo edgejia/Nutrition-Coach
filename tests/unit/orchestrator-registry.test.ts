@@ -58,6 +58,30 @@ describe("Phase 10-02: orchestrator tool registry", () => {
   });
 
   describe("side-effect policy metadata", () => {
+    function policyRuleIdsFor(toolName: string): string[] {
+      const contract = toolRegistry.get(toolName);
+      assert.ok(contract, `contract must exist for ${toolName}`);
+      return (contract.policyRules ?? []).map((rule) => rule.id).sort();
+    }
+
+    function assertRules(toolName: string, expectedRuleIds: string[]) {
+      const actualRuleIds = policyRuleIdsFor(toolName);
+      for (const ruleId of expectedRuleIds) {
+        assert.ok(
+          actualRuleIds.includes(ruleId),
+          `${toolName} policyRules must include ${ruleId}`,
+        );
+      }
+    }
+
+    function assertRuleOnlyOn(ruleId: string, expectedToolName: string) {
+      const owners = [...toolRegistry.values()]
+        .filter((contract) => contract.policyRules?.some((rule) => rule.id === ruleId))
+        .map((contract) => contract.name);
+
+      assert.deepEqual(owners, [expectedToolName], `${ruleId} must only be declared on ${expectedToolName}`);
+    }
+
     it("Test 2c: every registered tool exposes the locked side-effect policy class", () => {
       assert.deepEqual(KNOWN_TOOL_POLICY_CLASSES, {
         log_food: "execute-and-report",
@@ -110,6 +134,53 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         () => assertRegistryPolicies(invalidPolicyRegistry, { log_food: "execute-and-report" }),
         /side-effect policy mismatch/i,
       );
+    });
+
+    it("Test 2e: named policy rules cover existing guard and escalation behavior without split contracts", () => {
+      assertRules("log_food", [
+        "log_food_failed_recognition_no_save",
+        "log_food_historical_date_clarification",
+        "log_food_trusted_protein_basis_guard",
+      ]);
+      assertRules("get_daily_summary", [
+        "get_daily_summary_historical_date_clarification",
+      ]);
+      assertRules("find_meals", [
+        "find_meals_target_clarification",
+        "find_meals_pending_selection_helper_state",
+      ]);
+      assertRules("update_meal", [
+        "update_meal_requires_resolved_target",
+        "update_meal_numeric_authority_guard",
+        "update_meal_revision_precondition_guard",
+      ]);
+      assertRules("delete_meal", [
+        "delete_meal_requires_resolved_target",
+        "delete_meal_revision_precondition_guard",
+      ]);
+      assertRules("propose_goals", ["propose_goals_setup_only"]);
+      assertRules("propose_meal_numeric_correction", [
+        "propose_meal_numeric_correction_setup_only",
+        "propose_meal_numeric_correction_requires_resolved_target",
+      ]);
+      assertRules("update_goals", [
+        "update_goals_current_turn_source_guard",
+        "update_goals_latest_proposal_confirm_first",
+        "update_goals_latest_proposal_cancel",
+      ]);
+
+      assert.equal(toolRegistry.get("delete_meal")?.policyClass, "direct-execute");
+      assert.equal(getToolDefinitions().filter((definition) => definition.function.name === "find_meals").length, 1);
+      assert.equal(getToolDefinitions().filter((definition) => definition.function.name === "delete_meal").length, 1);
+    });
+
+    it("Test 2f: concrete policy rule ids are scoped to their owning tool", () => {
+      assertRuleOnlyOn("log_food_failed_recognition_no_save", "log_food");
+      assertRuleOnlyOn("get_daily_summary_historical_date_clarification", "get_daily_summary");
+      assertRuleOnlyOn("find_meals_target_clarification", "find_meals");
+      assertRuleOnlyOn("update_meal_revision_precondition_guard", "update_meal");
+      assertRuleOnlyOn("delete_meal_revision_precondition_guard", "delete_meal");
+      assertRuleOnlyOn("update_goals_latest_proposal_confirm_first", "update_goals");
     });
   });
 
