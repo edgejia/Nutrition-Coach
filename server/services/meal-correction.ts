@@ -108,6 +108,23 @@ interface FindMealsOptions {
   previousDateKey?: string;
 }
 
+interface MealCorrectionSessionKey {
+  deviceId: string;
+  sessionId: string;
+}
+
+interface FindMealsParams extends MealCorrectionSessionKey {
+  action: "update" | "delete";
+  query: string;
+  options?: FindMealsOptions;
+}
+
+interface ClearPendingSelectionParams extends MealCorrectionSessionKey {}
+
+interface RecoverStalePendingSelectionParams extends MealCorrectionSessionKey {
+  action: "update" | "delete";
+}
+
 interface CandidateHeaderRow {
   id: string;
   loggedAt: string;
@@ -641,20 +658,21 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
   }
 
   async function rememberResolvedCandidate(
-    deviceId: string,
+    { deviceId, sessionId }: MealCorrectionSessionKey,
     action: "update" | "delete",
     candidate: MealCorrectionCandidate,
   ): Promise<void> {
-    await turnStateService.putState(
+    await turnStateService.putState({
       deviceId,
-      PENDING_SELECTION_KIND,
-      {
+      sessionId,
+      kind: PENDING_SELECTION_KIND,
+      payload: {
         action,
         renderedOptions: createRenderedOptions([candidate]),
         scope: { evidenceTier: "resolved" },
       } satisfies PendingMealSelectionState,
-      PENDING_SELECTION_TTL_MS,
-    );
+      ttlMs: PENDING_SELECTION_TTL_MS,
+    });
   }
 
   function getPendingRenderedOptions(pending: PendingMealSelectionState): PendingMealSelectionOption[] {
@@ -707,13 +725,13 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
   }
 
   async function buildStalePendingSelectionRecovery(
-    deviceId: string,
+    { deviceId, sessionId }: MealCorrectionSessionKey,
     pending: PendingMealSelectionState,
   ): Promise<FindMealsClarificationResult> {
     const currentCandidates = await loadActiveCandidates(deviceId);
     const scopedCandidates = recoverScopedCandidates(pending, currentCandidates);
     if (scopedCandidates.length === 0) {
-      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+      await turnStateService.clearState({ deviceId, sessionId, kind: PENDING_SELECTION_KIND });
       return {
         status: "needs_clarification",
         action: pending.action,
@@ -723,16 +741,17 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     }
 
     const renderedOptions = createRenderedOptions(scopedCandidates);
-    await turnStateService.putState(
+    await turnStateService.putState({
       deviceId,
-      PENDING_SELECTION_KIND,
-      {
+      sessionId,
+      kind: PENDING_SELECTION_KIND,
+      payload: {
         action: pending.action,
         renderedOptions,
         scope: pending.scope,
       } satisfies PendingMealSelectionState,
-      PENDING_SELECTION_TTL_MS,
-    );
+      ttlMs: PENDING_SELECTION_TTL_MS,
+    });
 
     return {
       status: "needs_clarification",
@@ -743,18 +762,22 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
   }
 
   async function tryResolvePendingSelection(
-    deviceId: string,
+    { deviceId, sessionId }: MealCorrectionSessionKey,
     action: "update" | "delete",
     query: string,
     options?: FindMealsOptions,
   ): Promise<FindMealsResolvedResult | FindMealsClarificationResult | undefined> {
-    const pending = await turnStateService.getState<PendingMealSelectionState>(deviceId, PENDING_SELECTION_KIND);
+    const pending = await turnStateService.getState({
+      deviceId,
+      sessionId,
+      kind: PENDING_SELECTION_KIND,
+    }) as PendingMealSelectionState | undefined;
     if (!pending) {
       return undefined;
     }
 
     if (pending.action !== action) {
-      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+      await turnStateService.clearState({ deviceId, sessionId, kind: PENDING_SELECTION_KIND });
       return undefined;
     }
 
@@ -783,7 +806,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         return resolveOption(option);
       }
 
-      return buildStalePendingSelectionRecovery(deviceId, pending);
+      return buildStalePendingSelectionRecovery({ deviceId, sessionId }, pending);
     };
 
     const index = extractSelectionIndex(query);
@@ -849,7 +872,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       extractMealPeriod(query) !== undefined ||
       hasUnsupportedMealPeriodReference(query)
     ) {
-      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+      await turnStateService.clearState({ deviceId, sessionId, kind: PENDING_SELECTION_KIND });
       return undefined;
     }
 
@@ -899,13 +922,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
   }
 
   return {
-    async findMeals(
-      deviceId: string,
-      action: "update" | "delete",
-      query: string,
-      options?: FindMealsOptions,
-    ): Promise<FindMealsResult> {
-      const pendingSelection = await tryResolvePendingSelection(deviceId, action, query, options);
+    async findMeals({ deviceId, sessionId, action, query, options }: FindMealsParams): Promise<FindMealsResult> {
+      const pendingSelection = await tryResolvePendingSelection({ deviceId, sessionId }, action, query, options);
       if (pendingSelection) {
         return pendingSelection;
       }
@@ -951,7 +969,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       if (tierResult.status === "resolved") {
         const candidate = tierResult.candidates[0]!;
         if (tierResult.rememberResolved) {
-          await rememberResolvedCandidate(deviceId, action, candidate);
+          await rememberResolvedCandidate({ deviceId, sessionId }, action, candidate);
         }
         return {
           status: "resolved",
@@ -967,10 +985,11 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       const renderedOptions = createRenderedOptions(narrowed);
       if (narrowed.length > 0) {
         const targetMealPeriod = extractMealPeriod(query);
-        await turnStateService.putState(
+        await turnStateService.putState({
           deviceId,
-          PENDING_SELECTION_KIND,
-          {
+          sessionId,
+          kind: PENDING_SELECTION_KIND,
+          payload: {
             action,
             renderedOptions,
             scope: {
@@ -985,8 +1004,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
               ...(targetMealPeriod ? { targetMealPeriod } : {}),
             },
           } satisfies PendingMealSelectionState,
-          PENDING_SELECTION_TTL_MS,
-        );
+          ttlMs: PENDING_SELECTION_TTL_MS,
+        });
       }
 
       return {
@@ -1001,20 +1020,25 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       };
     },
 
-    async clearPendingSelection(deviceId: string): Promise<void> {
-      await turnStateService.clearState(deviceId, PENDING_SELECTION_KIND);
+    async clearPendingSelection({ deviceId, sessionId }: ClearPendingSelectionParams): Promise<void> {
+      await turnStateService.clearState({ deviceId, sessionId, kind: PENDING_SELECTION_KIND });
     },
 
-    async recoverStalePendingSelection(
-      deviceId: string,
-      action: "update" | "delete",
-    ): Promise<FindMealsClarificationResult | undefined> {
-      const pending = await turnStateService.getState<PendingMealSelectionState>(deviceId, PENDING_SELECTION_KIND);
+    async recoverStalePendingSelection({
+      deviceId,
+      sessionId,
+      action,
+    }: RecoverStalePendingSelectionParams): Promise<FindMealsClarificationResult | undefined> {
+      const pending = await turnStateService.getState({
+        deviceId,
+        sessionId,
+        kind: PENDING_SELECTION_KIND,
+      }) as PendingMealSelectionState | undefined;
       if (!pending || pending.action !== action) {
         return undefined;
       }
 
-      return buildStalePendingSelectionRecovery(deviceId, pending);
+      return buildStalePendingSelectionRecovery({ deviceId, sessionId }, pending);
     },
 
     async loadCurrentMealFacts(
