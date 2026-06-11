@@ -385,6 +385,62 @@ describe("update_goals ToolContract", () => {
     });
   });
 
+  it("Test 9b: latest_proposal consumes active backend proposal before goal mutation", async () => {
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: { calories: 1850, protein: 135, carbs: 165, fat: 60 },
+    });
+    const order: string[] = [];
+    const policyGoalProposalService = {
+      ...goalProposalService,
+      async getLatest(params: Parameters<typeof goalProposalService.getLatest>[0]) {
+        order.push("getLatest");
+        return goalProposalService.getLatest(params);
+      },
+      async consumeLatest(params: Parameters<typeof goalProposalService.consumeLatest>[0]) {
+        order.push("consumeLatest");
+        return goalProposalService.consumeLatest(params);
+      },
+      async clear(params: Parameters<typeof goalProposalService.clear>[0]) {
+        order.push("clear");
+        return goalProposalService.clear(params);
+      },
+    } as typeof goalProposalService;
+    const policyDeviceService = {
+      ...deviceService,
+      async updateGoals(id: string, patch: Partial<DailyTargets>) {
+        order.push("updateGoals");
+        assert.equal(
+          await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+          undefined,
+          "proposal must be consumed before device goals mutate",
+        );
+        return deviceService.updateGoals(id, patch);
+      },
+    } as typeof deviceService;
+    const localDeps = {
+      ...deps,
+      deviceService: policyDeviceService,
+      goalProposalService: policyGoalProposalService,
+    } as ToolDeps;
+
+    const result = await executeTool(updateGoalsCall({ mode: "latest_proposal" }), deviceId, localDeps, {
+      currentUserMessage: "好",
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.executed, true);
+    assert.deepEqual(order, ["getLatest", "consumeLatest", "updateGoals"]);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1850,
+      protein: 135,
+      carbs: 165,
+      fat: 60,
+    });
+    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
   it("Test 10: cancel terms clear proposal without mutating or publishing and never count as consent", async () => {
     for (const term of ["不要", "取消", "先不用", "不好", "不可以", "不行", "no"]) {
       await goalProposalService.putLatest({
