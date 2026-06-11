@@ -226,6 +226,7 @@ export const turnStates = sqliteTable(
     deviceId: text("device_id")
       .notNull()
       .references(() => devices.id),
+    sessionId: text("session_id").notNull(),
     kind: text("kind").notNull(),
     payload: text("payload").notNull(),
     expiresAt: text("expires_at").notNull(),
@@ -233,7 +234,7 @@ export const turnStates = sqliteTable(
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [
-    uniqueIndex("turn_states_device_kind_uq").on(table.deviceId, table.kind),
+    uniqueIndex("turn_states_device_session_kind_uq").on(table.deviceId, table.sessionId, table.kind),
     index("turn_states_device_expires_idx").on(table.deviceId, table.expiresAt),
   ],
 );
