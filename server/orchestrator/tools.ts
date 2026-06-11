@@ -20,6 +20,7 @@ import {
 } from "../services/meal-numeric-proposals.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
+import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
@@ -1387,18 +1388,19 @@ const findMealsContract: ToolContract<FindMealsArgs, FindMealsResult> = {
     }
 
     const currentDate = currentAppDate();
-    const result = await deps.mealCorrectionService.findMeals(
+    const result = await deps.mealCorrectionService.findMeals({
       deviceId,
-      args.action,
-      args.query.trim(),
-      {
+      sessionId: DEFAULT_SESSION_ID,
+      action: args.action,
+      query: args.query.trim(),
+      options: {
         currentDate,
         previousDateKey: extractPreviousHistoricalDateKey(
           context.previousAssistantMessage,
           currentDate,
         ),
       },
-    );
+    });
     if (deps.toolSessionState) {
       deps.toolSessionState.resolvedMealTargets = result.status === "resolved"
         ? [{ mealId: result.resolvedMealId, mealRevisionId: result.mealRevisionId }]
@@ -1585,7 +1587,11 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealContractResult>
       );
     } catch (error) {
       if (error instanceof MealRevisionPreconditionError) {
-        const recovery = await deps.mealCorrectionService.recoverStalePendingSelection?.(deviceId, "update");
+        const recovery = await deps.mealCorrectionService.recoverStalePendingSelection?.({
+          deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+          action: "update",
+        });
         if (recovery) {
           const reply = renderFindMealsControlledReply(recovery);
           return {
@@ -1603,7 +1609,10 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealContractResult>
       throw error;
     }
 
-    await deps.mealCorrectionService.clearPendingSelection(deviceId);
+    await deps.mealCorrectionService.clearPendingSelection({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    });
     if (deps.toolSessionState) {
       deps.toolSessionState.resolvedMealTargets = [];
     }
@@ -1679,15 +1688,19 @@ const proposeMealNumericCorrectionContract: ToolContract<
         currentFacts,
         toMealNumericOperatorIntent(args),
       );
-      const proposal = await deps.mealNumericProposalService.putLatest(deviceId, {
+      const proposal = await deps.mealNumericProposalService.putLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
         mealId: preview.mealId,
         expectedMealRevisionId: preview.expectedMealRevisionId,
         updateInput: preview.updateInput,
         affectedFields: preview.affectedFields,
         sourceOperator: preview.sourceOperator,
+        },
       });
       const otherProposalKindActive = deps.goalProposalService
-        ? Boolean(await deps.goalProposalService.getLatest(deviceId))
+        ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
         : false;
       const reply = renderMealNumericProposalCopy({
         mealLabel: preview.mealLabel,
@@ -1744,7 +1757,11 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
       deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id, resolvedTarget.mealRevisionId);
     } catch (error) {
       if (error instanceof MealRevisionPreconditionError) {
-        const recovery = await deps.mealCorrectionService.recoverStalePendingSelection?.(deviceId, "delete");
+        const recovery = await deps.mealCorrectionService.recoverStalePendingSelection?.({
+          deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+          action: "delete",
+        });
         if (recovery) {
           const reply = renderFindMealsControlledReply(recovery);
           return {
@@ -1758,7 +1775,10 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
       throw error;
     }
 
-    await deps.mealCorrectionService.clearPendingSelection(deviceId);
+    await deps.mealCorrectionService.clearPendingSelection({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    });
     if (deps.toolSessionState) {
       deps.toolSessionState.resolvedMealTargets = [];
     }
@@ -1793,7 +1813,11 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       throw new Error("propose_goals contract missing goalProposalService/deviceId in context");
     }
 
-    await deps.goalProposalService.putLatest(deviceId, args);
+    await deps.goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: args,
+    });
     const reply = renderGoalProposalCopy(args);
 
     return {
@@ -1834,7 +1858,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
     }
 
     if (args.mode === "latest_proposal" && isGoalProposalCancel(context.currentUserMessage)) {
-      await deps.goalProposalService.clear(deviceId);
+      await deps.goalProposalService.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
       const reply = renderGoalCancelCopy();
       return {
         ok: true,
@@ -1863,7 +1887,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
     if (args.mode === "current_turn_values") {
       updatePatch = overridePatch;
     } else {
-      const proposal = await deps.goalProposalService.getLatest(deviceId);
+      const proposal = await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
       if (!proposal || !isGoalProposalConsent(context.currentUserMessage)) {
         const reply = renderGoalAuthorityFailureCopy();
         return {
@@ -1881,7 +1905,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
     const updatedFields = updatedGoalFields(updatePatch);
     const targets = await deps.deviceService.updateGoals(deviceId, updatePatch);
     try {
-      await deps.goalProposalService.clear(deviceId);
+      await deps.goalProposalService.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
     } catch {
       // Targets are already committed; cleanup failure must not alter the user-visible outcome.
     }

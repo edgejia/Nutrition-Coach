@@ -13,6 +13,7 @@ import type {
   MealNumericProposalPayload,
 } from "../services/meal-numeric-proposals.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
+import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -681,14 +682,14 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       }
 
       const activeGoalProposal = deps.goalProposalService
-        ? await deps.goalProposalService.getLatest(deviceId)
+        ? await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID })
         : undefined;
       const activeMealProposal = deps.mealNumericProposalService
-        ? await deps.mealNumericProposalService.getLatest(deviceId)
+        ? await deps.mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID })
         : undefined;
 
       if (activeMealProposal && isMealProposalCancel(userMessage)) {
-        await deps.mealNumericProposalService?.clear(deviceId);
+        await deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
         const reply = renderMealNumericCancelCopy();
         return {
           reply,
@@ -700,7 +701,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       }
 
       if (activeGoalProposal && isGoalKindCancel(userMessage)) {
-        await deps.goalProposalService?.clear(deviceId);
+        await deps.goalProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
         const reply = renderGoalCancelCopy();
         return {
           reply,
@@ -713,8 +714,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       if (isGoalProposalCancel(userMessage) && (activeGoalProposal || activeMealProposal)) {
         await Promise.all([
-          activeGoalProposal ? deps.goalProposalService?.clear(deviceId) : undefined,
-          activeMealProposal ? deps.mealNumericProposalService?.clear(deviceId) : undefined,
+          activeGoalProposal
+            ? deps.goalProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID })
+            : undefined,
+          activeMealProposal
+            ? deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID })
+            : undefined,
         ]);
         const reply = activeMealProposal ? renderMealNumericCancelCopy() : renderGoalCancelCopy();
         return {
@@ -755,8 +760,11 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             buildMealNumericProposalUpdateInput(activeMealProposal),
             activeMealProposal.expectedMealRevisionId,
           );
-          await deps.mealCorrectionService.clearPendingSelection(deviceId);
-          await deps.mealNumericProposalService?.clear(deviceId);
+          await deps.mealCorrectionService.clearPendingSelection({
+            deviceId,
+            sessionId: DEFAULT_SESSION_ID,
+          });
+          await deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
           const loggedMeal = buildLoggedMealFromMealProposalUpdate(updated.updatedMeal);
           const mutationEffects: MutationEffects = {
             kind: "update",
