@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import {
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericCancelCopy,
@@ -60,6 +61,7 @@ describe("chat meal correction integration", () => {
   let services: AppServices;
   let publishDailySummaryCalls: unknown[];
   let publishGoalsUpdateCalls: unknown[];
+  let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -75,9 +77,15 @@ describe("chat meal correction integration", () => {
     mockLLM = new MockLLMProvider();
     publishDailySummaryCalls = [];
     publishGoalsUpdateCalls = [];
+    traceRecorders = [];
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: mockLLM,
+      llmTraceRecorderFactory() {
+        const recorder = createLlmTraceRecorder();
+        traceRecorders.push(recorder);
+        return recorder;
+      },
       onServicesReady: (ready) => {
         const originalPublishDailySummary = ready.publisher.publishDailySummary.bind(ready.publisher);
         ready.publisher.publishDailySummary = (...args) => {
@@ -324,7 +332,7 @@ describe("chat meal correction integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.mealNumericProposalService.putLatest({
+    const proposal = await services.mealNumericProposalService.putLatest({
       ...defaultSessionKey(),
       input: {
         mealId: original.id,
@@ -360,6 +368,19 @@ describe("chat meal correction integration", () => {
     assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
     assert.equal(current?.protein, 31);
     assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+
+    const trace = traceRecorders.at(-1)?.build({ scenario: "meal-stale-policy", status: "pass" });
+    assert.ok(trace);
+    const toolResult = trace.timeline.find((event) => event.type === "tool_result");
+    assert.ok(toolResult);
+    assert.equal(toolResult.tool, "propose_meal_numeric_correction");
+    assert.equal(toolResult.success, true);
+    assert.equal(toolResult.executed, false);
+    assert.equal(toolResult.policyClass, "confirm-first");
+    assert.equal(toolResult.decision, "allowed");
+    assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
+    assert.equal(toolResult.proposalId, proposal.proposalId);
+    assert.equal(typeof toolResult.turnId, "string");
   });
 
   it("fails closed when active meal proposal is concurrently consumed before approval commit", async () => {
@@ -369,7 +390,7 @@ describe("chat meal correction integration", () => {
         { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
       ],
     });
-    await services.mealNumericProposalService.putLatest({
+    const proposal = await services.mealNumericProposalService.putLatest({
       ...defaultSessionKey(),
       input: {
         mealId: original.id,
@@ -403,6 +424,19 @@ describe("chat meal correction integration", () => {
     assert.equal(current?.mealRevisionId, original.mealRevisionId);
     assert.equal(current?.protein, 30);
     assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+
+    const trace = traceRecorders.at(-1)?.build({ scenario: "meal-concurrent-policy", status: "pass" });
+    assert.ok(trace);
+    const toolResult = trace.timeline.find((event) => event.type === "tool_result");
+    assert.ok(toolResult);
+    assert.equal(toolResult.tool, "propose_meal_numeric_correction");
+    assert.equal(toolResult.success, false);
+    assert.equal(toolResult.executed, false);
+    assert.equal(toolResult.policyClass, "confirm-first");
+    assert.equal(toolResult.decision, "blocked");
+    assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
+    assert.equal(toolResult.proposalId, proposal.proposalId);
+    assert.equal(typeof toolResult.turnId, "string");
   });
 
   it("clears stale resolved meal selection after stored proposal approval", async () => {

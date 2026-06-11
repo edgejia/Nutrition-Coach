@@ -282,6 +282,8 @@ describe("chat goal update integration", () => {
     assert.equal(proposal.status, 200);
     assert.equal(proposal.body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS));
     assert.deepEqual(publishCalls, []);
+    const activeProposal = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeProposal);
 
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -300,6 +302,15 @@ describe("chat goal update integration", () => {
     assert.deepEqual(confirmed.body.dailyTargets, PROPOSAL_TARGETS);
     assert.deepEqual(await readTargets(), PROPOSAL_TARGETS);
     assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+    const confirmedTrace = traceRecorders.at(-1)?.build({ scenario: "goal-confirm-policy", status: "pass" });
+    assert.ok(confirmedTrace);
+    const confirmedToolResult = confirmedTrace.timeline.find((event) => event.type === "tool_result");
+    assert.ok(confirmedToolResult);
+    assert.equal(confirmedToolResult.policyClass, "direct-execute");
+    assert.equal(confirmedToolResult.decision, "allowed");
+    assert.equal(confirmedToolResult.ruleId, "update_goals_latest_proposal_confirm_first");
+    assert.equal(confirmedToolResult.proposalId, activeProposal.proposalId);
+    assert.equal(typeof confirmedToolResult.turnId, "string");
 
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -320,6 +331,15 @@ describe("chat goal update integration", () => {
     assert.doesNotMatch(replayed.body.reply, SUCCESS_STYLE_COPY);
     assert.deepEqual(await readTargets(), PROPOSAL_TARGETS);
     assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+    const replayedTrace = traceRecorders.at(-1)?.build({ scenario: "goal-replay-policy", status: "pass" });
+    assert.ok(replayedTrace);
+    const replayedToolResult = replayedTrace.timeline.find((event) => event.type === "tool_result");
+    assert.ok(replayedToolResult);
+    assert.equal(replayedToolResult.policyClass, "direct-execute");
+    assert.equal(replayedToolResult.decision, "blocked");
+    assert.equal(replayedToolResult.ruleId, "update_goals_latest_proposal_confirm_first");
+    assert.equal("proposalId" in replayedToolResult, false);
+    assert.equal(typeof replayedToolResult.turnId, "string");
   });
 
   it("fails closed for missing proposal confirmation without publishing or success prose", async () => {
@@ -378,7 +398,12 @@ describe("chat goal update integration", () => {
       executed: false,
       failureReason: "guard",
       updatedFields: [],
+      policyClass: "direct-execute",
+      decision: "blocked",
+      ruleId: "update_goals_latest_proposal_confirm_first",
+      turnId: toolResult && "turnId" in toolResult ? toolResult.turnId : undefined,
     });
+    assert.equal(typeof toolResult.turnId, "string");
 
     const traceJson = JSON.stringify(trace);
     for (const forbidden of [
