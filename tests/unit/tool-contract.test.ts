@@ -24,6 +24,7 @@ const fakeGoalSchema = z
 
 function makeFakeGoalContract(overrides: {
   execute?: ToolContract<FakeGoalArgs, { ok: true }>["execute"];
+  policyGate?: ToolContract<FakeGoalArgs, { ok: true }>["policyGate"];
   sourceFields?: readonly (keyof FakeGoalArgs)[];
   logSummary?: (args: FakeGoalArgs) => Record<string, unknown>;
 } = {}): ToolContract<FakeGoalArgs, { ok: true }> {
@@ -40,6 +41,7 @@ function makeFakeGoalContract(overrides: {
       additionalProperties: false,
     },
     zodSchema: fakeGoalSchema,
+    policyGate: overrides.policyGate,
     sourceFields: overrides.sourceFields,
     logSummary:
       overrides.logSummary ??
@@ -244,5 +246,160 @@ describe("runContract wrapper", () => {
     assert.equal(parsed.reason, "source_text_guard");
     assert.equal(parsed.failureReason, "guard");
     assert.deepEqual(parsed.guardedFields, ["calories"]);
+  });
+
+  it("Test 8: invalid JSON returns before policy gate", async () => {
+    let policyGateCalls = 0;
+    const contract = makeFakeGoalContract({
+      policyGate: () => {
+        policyGateCalls += 1;
+        return {
+          allowed: true,
+          fact: {
+            tool: "fake_goal",
+            policyClass: "direct-execute",
+            decision: "allowed",
+            ruleId: "base_policy_allowed",
+          },
+        };
+      },
+    });
+
+    const res = await runContract(contract, makeCall(null, "fake_goal", "not-json"), emptyContext());
+
+    assert.equal(res.success, false);
+    assert.equal(res.failureReason, "validation");
+    assert.equal(policyGateCalls, 0);
+  });
+
+  it("Test 9: Zod failures return before policy gate", async () => {
+    let policyGateCalls = 0;
+    const contract = makeFakeGoalContract({
+      policyGate: () => {
+        policyGateCalls += 1;
+        return {
+          allowed: true,
+          fact: {
+            tool: "fake_goal",
+            policyClass: "direct-execute",
+            decision: "allowed",
+            ruleId: "base_policy_allowed",
+          },
+        };
+      },
+    });
+
+    const res = await runContract(contract, makeCall({ calories: "1800" }), emptyContext());
+
+    assert.equal(res.success, false);
+    assert.equal(res.failureReason, "validation");
+    assert.equal(policyGateCalls, 0);
+  });
+
+  it("Test 10: source-field guard failures return before policy gate", async () => {
+    let policyGateCalls = 0;
+    const contract = makeFakeGoalContract({
+      sourceFields: ["calories"],
+      policyGate: () => {
+        policyGateCalls += 1;
+        return {
+          allowed: true,
+          fact: {
+            tool: "fake_goal",
+            policyClass: "direct-execute",
+            decision: "allowed",
+            ruleId: "base_policy_allowed",
+          },
+        };
+      },
+    });
+
+    const res = await runContract(contract, makeCall({ calories: 1800 }), {
+      currentUserMessage: "幫我提高一點",
+      previousAssistantMessage: "要調整嗎?",
+    });
+
+    assert.equal(res.success, false);
+    assert.equal(res.failureReason, "guard");
+    assert.equal(policyGateCalls, 0);
+  });
+
+  it("Test 11: blocked policy decision returns guard failure without executing", async () => {
+    let executed = false;
+    const contract = makeFakeGoalContract({
+      policyGate: () => ({
+        allowed: false,
+        fact: {
+          tool: "fake_goal",
+          policyClass: "direct-execute",
+          decision: "blocked",
+          ruleId: "blocked_by_test_policy",
+          proposalId: "proposal_test",
+        },
+      }),
+      execute: async () => {
+        executed = true;
+        return { ok: true, result: { ok: true }, toolMessage: "done" };
+      },
+    });
+
+    const res = await runContract(contract, makeCall({ calories: 1800 }), emptyContext());
+
+    assert.equal(res.success, false);
+    assert.equal(res.executed, false);
+    assert.equal(res.failureReason, "guard");
+    assert.equal(executed, false);
+    assert.deepEqual(res.policyFact, {
+      tool: "fake_goal",
+      policyClass: "direct-execute",
+      decision: "blocked",
+      ruleId: "blocked_by_test_policy",
+      proposalId: "proposal_test",
+    });
+    const parsed = JSON.parse(res.result);
+    assert.deepEqual(parsed, {
+      reason: "policy_gate",
+      failureReason: "guard",
+      policyClass: "direct-execute",
+      decision: "blocked",
+      ruleId: "blocked_by_test_policy",
+      proposalId: "proposal_test",
+    });
+  });
+
+  it("Test 12: allowed policy decision reaches execute exactly once", async () => {
+    let policyGateCalls = 0;
+    let executeCalls = 0;
+    const contract = makeFakeGoalContract({
+      policyGate: () => {
+        policyGateCalls += 1;
+        return {
+          allowed: true,
+          fact: {
+            tool: "fake_goal",
+            policyClass: "direct-execute",
+            decision: "allowed",
+            ruleId: "base_policy_allowed",
+          },
+        };
+      },
+      execute: async () => {
+        executeCalls += 1;
+        return { ok: true, result: { ok: true }, toolMessage: "done" };
+      },
+    });
+
+    const res = await runContract(contract, makeCall({ calories: 1800 }), emptyContext());
+
+    assert.equal(res.success, true);
+    assert.equal(res.executed, true);
+    assert.equal(policyGateCalls, 1);
+    assert.equal(executeCalls, 1);
+    assert.deepEqual(res.policyFact, {
+      tool: "fake_goal",
+      policyClass: "direct-execute",
+      decision: "allowed",
+      ruleId: "base_policy_allowed",
+    });
   });
 });
