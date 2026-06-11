@@ -1188,9 +1188,19 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
   policyClass: "execute-and-report",
   policyRules: [
     {
-      id: "log_food_existing_no_save_guards",
+      id: "log_food_failed_recognition_no_save",
       decision: "blocked",
-      description: "Historical ambiguity, failed recognition, and missing trusted protein basis stay non-mutating guard paths.",
+      description: "Failed image recognition returns a renderer-owned no-save reply without meal or summary mutation.",
+    },
+    {
+      id: "log_food_historical_date_clarification",
+      decision: "blocked",
+      description: "Historical date ambiguity returns one controlled clarification without meal or summary mutation.",
+    },
+    {
+      id: "log_food_trusted_protein_basis_guard",
+      decision: "blocked",
+      description: "Unsupported trusted-protein inputs fail closed before persistence.",
     },
   ],
   description: "將已分析的一項或多項食物記錄到今日，或記錄到明確指定的一個過去日期。歷史記錄只能對單一日期執行。",
@@ -1379,6 +1389,11 @@ const findMealsContract: ToolContract<FindMealsArgs, FindMealsResult> = {
   policyClass: "clarify-first",
   policyRules: [
     {
+      id: "find_meals_target_clarification",
+      decision: "blocked",
+      description: "Ambiguous update/delete targets return renderer-owned clarification instead of mutating meals.",
+    },
+    {
       id: "find_meals_pending_selection_helper_state",
       decision: "allowed",
       description: "May write session-scoped pending target-selection metadata, never meal, goal, or summary mutations.",
@@ -1445,7 +1460,7 @@ const getDailySummaryContract: ToolContract<
   policyClass: "direct-execute",
   policyRules: [
     {
-      id: "get_daily_summary_historical_clarification",
+      id: "get_daily_summary_historical_date_clarification",
       decision: "blocked",
       description: "Ambiguous or multi-date summary queries return controlled clarification without publish side effects.",
     },
@@ -1536,12 +1551,17 @@ const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealContractResult>
     {
       id: "update_meal_requires_resolved_target",
       decision: "blocked",
-      description: "Direct meal updates require a same-turn resolved target and revision precondition.",
+      description: "Direct meal updates require a same-turn resolved target.",
     },
     {
       id: "update_meal_numeric_authority_guard",
       decision: "blocked",
       description: "Numeric changes must pass current-turn source authority before write.",
+    },
+    {
+      id: "update_meal_revision_precondition_guard",
+      decision: "blocked",
+      description: "Direct meal updates require the resolved target revision to remain current.",
     },
   ],
   description: "更新已解析出的歷史餐點內容。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。若只調整單一欄位，可只提供該欄位，其餘沿用原紀錄；對多項餐點，數字欄位會視為整餐總量 patch 並由系統按原比例分配到 items。items 只用於整筆多項餐點 replacement。",
@@ -1680,6 +1700,11 @@ const proposeMealNumericCorrectionContract: ToolContract<
       decision: "allowed",
       description: "Writes pending proposal authority but does not mutate meals.",
     },
+    {
+      id: "propose_meal_numeric_correction_requires_resolved_target",
+      decision: "blocked",
+      description: "Proposal setup requires a same-turn resolved target before writing pending helper state.",
+    },
   ],
   description:
     "建立一組待確認的餐點數字修正提案，不會更新餐點。只接受已解析 meal_id、受影響欄位和可計算操作；具體 before/after 由後端從目前餐點資料計算。",
@@ -1783,7 +1808,12 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
     {
       id: "delete_meal_requires_resolved_target",
       decision: "blocked",
-      description: "Direct delete requires a same-turn resolved target and revision precondition; no delete proposal path exists in Phase 85.",
+      description: "Direct delete requires a same-turn resolved target; no delete proposal path exists in Phase 85.",
+    },
+    {
+      id: "delete_meal_revision_precondition_guard",
+      decision: "blocked",
+      description: "Direct delete requires the resolved target revision to remain current.",
     },
   ],
   description: "刪除已解析出的歷史餐點。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
