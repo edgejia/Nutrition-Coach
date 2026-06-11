@@ -268,4 +268,81 @@ describe("meal numeric proposal service", () => {
       sessionBProposal,
     );
   });
+
+  it("consumes a matching meal numeric proposal once by proposal id and revision", async () => {
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 20 },
+        affectedFields: [{ field: "protein", before: 40, after: 20 }],
+        sourceOperator: "half",
+      },
+    });
+
+    assert.deepEqual(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: proposal.proposalId,
+        expectedMealRevisionId: "rev-1",
+      }),
+      proposal,
+    );
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: proposal.proposalId,
+        expectedMealRevisionId: "rev-1",
+      }),
+      undefined,
+    );
+    assert.equal(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
+  it("does not consume when proposal id, session, or expected revision does not match", async () => {
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: "session-a",
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 20 },
+        affectedFields: [{ field: "protein", before: 40, after: 20 }],
+        sourceOperator: "half",
+      },
+    });
+
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: "session-a",
+        proposalId: "wrong-proposal",
+        expectedMealRevisionId: "rev-1",
+      }),
+      undefined,
+    );
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: "session-a",
+        proposalId: proposal.proposalId,
+        expectedMealRevisionId: "rev-2",
+      }),
+      undefined,
+    );
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: "session-b",
+        proposalId: proposal.proposalId,
+        expectedMealRevisionId: "rev-1",
+      }),
+      undefined,
+    );
+    assert.deepEqual(await service.getLatest({ deviceId, sessionId: "session-a" }), proposal);
+  });
 });

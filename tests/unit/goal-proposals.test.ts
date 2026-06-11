@@ -202,4 +202,66 @@ describe("goal proposal service", () => {
       sessionBProposal,
     );
   });
+
+  it("consumes a matching proposal once by session and proposal id", async () => {
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: {
+        calories: 1400,
+        protein: 120,
+        carbs: 130,
+        fat: 45,
+      },
+    });
+
+    assert.deepEqual(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: proposal.proposalId,
+      }),
+      proposal,
+    );
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: proposal.proposalId,
+      }),
+      undefined,
+    );
+    assert.equal(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
+  it("does not consume when the proposal id or session does not match", async () => {
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: "session-a",
+      targets: {
+        calories: 1400,
+        protein: 120,
+        carbs: 130,
+        fat: 45,
+      },
+    });
+
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: "session-a",
+        proposalId: "wrong-proposal",
+      }),
+      undefined,
+    );
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: "session-b",
+        proposalId: proposal.proposalId,
+      }),
+      undefined,
+    );
+    assert.deepEqual(await service.getLatest({ deviceId, sessionId: "session-a" }), proposal);
+  });
 });
