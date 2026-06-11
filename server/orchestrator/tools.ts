@@ -38,6 +38,7 @@ import {
   summarizeContractArgsForLog,
   type ToolContract,
   type RunContractContext,
+  type SideEffectPolicyClass,
 } from "./tool-contract.js";
 import {
   checkSourceFields,
@@ -1179,6 +1180,14 @@ function mealNumericRendererOperator(operator: string): string {
 
 const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
   name: "log_food",
+  policyClass: "execute-and-report",
+  policyRules: [
+    {
+      id: "log_food_existing_no_save_guards",
+      decision: "blocked",
+      description: "Historical ambiguity, failed recognition, and missing trusted protein basis stay non-mutating guard paths.",
+    },
+  ],
   description: "將已分析的一項或多項食物記錄到今日，或記錄到明確指定的一個過去日期。歷史記錄只能對單一日期執行。",
   parameters: {
     type: "object",
@@ -1362,6 +1371,14 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
 
 const findMealsContract: ToolContract<FindMealsArgs, FindMealsResult> = {
   name: "find_meals",
+  policyClass: "clarify-first",
+  policyRules: [
+    {
+      id: "find_meals_pending_selection_helper_state",
+      decision: "allowed",
+      description: "May write session-scoped pending target-selection metadata, never meal, goal, or summary mutations.",
+    },
+  ],
   description: "解析要修改或刪除的歷史餐點目標，只能回傳資料庫候選或要求澄清。",
   parameters: {
     type: "object",
@@ -1420,6 +1437,14 @@ const getDailySummaryContract: ToolContract<
   GetDailySummaryResult
 > = {
   name: "get_daily_summary",
+  policyClass: "direct-execute",
+  policyRules: [
+    {
+      id: "get_daily_summary_historical_clarification",
+      decision: "blocked",
+      description: "Ambiguous or multi-date summary queries return controlled clarification without publish side effects.",
+    },
+  ],
   description: "查詢今日或明確指定單一日期的營養素總量。多日期問題請分別呼叫多次，每次只帶一個日期片語。",
   parameters: {
     type: "object",
@@ -1501,6 +1526,19 @@ const getDailySummaryContract: ToolContract<
 
 const updateMealContract: ToolContract<UpdateMealArgs, UpdateMealContractResult> = {
   name: "update_meal",
+  policyClass: "direct-execute",
+  policyRules: [
+    {
+      id: "update_meal_requires_resolved_target",
+      decision: "blocked",
+      description: "Direct meal updates require a same-turn resolved target and revision precondition.",
+    },
+    {
+      id: "update_meal_numeric_authority_guard",
+      decision: "blocked",
+      description: "Numeric changes must pass current-turn source authority before write.",
+    },
+  ],
   description: "更新已解析出的歷史餐點內容。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。若只調整單一欄位，可只提供該欄位，其餘沿用原紀錄；對多項餐點，數字欄位會視為整餐總量 patch 並由系統按原比例分配到 items。items 只用於整筆多項餐點 replacement。",
   parameters: {
     type: "object",
@@ -1630,6 +1668,14 @@ const proposeMealNumericCorrectionContract: ToolContract<
   ProposeMealNumericCorrectionResult
 > = {
   name: "propose_meal_numeric_correction",
+  policyClass: "confirm-first",
+  policyRules: [
+    {
+      id: "propose_meal_numeric_correction_setup_only",
+      decision: "allowed",
+      description: "Writes pending proposal authority but does not mutate meals.",
+    },
+  ],
   description:
     "建立一組待確認的餐點數字修正提案，不會更新餐點。只接受已解析 meal_id、受影響欄位和可計算操作；具體 before/after 由後端從目前餐點資料計算。",
   parameters: {
@@ -1727,6 +1773,14 @@ const proposeMealNumericCorrectionContract: ToolContract<
 
 const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult> = {
   name: "delete_meal",
+  policyClass: "direct-execute",
+  policyRules: [
+    {
+      id: "delete_meal_requires_resolved_target",
+      decision: "blocked",
+      description: "Direct delete requires a same-turn resolved target and revision precondition; no delete proposal path exists in Phase 85.",
+    },
+  ],
   description: "刪除已解析出的歷史餐點。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
   parameters: {
     type: "object",
@@ -1793,6 +1847,14 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
 
 const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
   name: "propose_goals",
+  policyClass: "confirm-first",
+  policyRules: [
+    {
+      id: "propose_goals_setup_only",
+      decision: "allowed",
+      description: "Writes pending proposal authority but does not mutate device goals.",
+    },
+  ],
   description:
     "建立一組待確認的每日營養目標提案，不會更新使用者目標。必須提供完整 calories/protein/carbs/fat 數字；使用者確認後才可由 update_goals 套用。",
   parameters: {
@@ -1833,6 +1895,19 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
 
 const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResult> = {
   name: "update_goals",
+  policyClass: "direct-execute",
+  policyRules: [
+    {
+      id: "update_goals_current_turn_source_guard",
+      decision: "blocked",
+      description: "Current-turn target updates require source-text evidence for numeric fields.",
+    },
+    {
+      id: "update_goals_latest_proposal_confirm_first",
+      decision: "blocked",
+      description: "Latest-proposal commits escalate to confirm-first proposal authorization.",
+    },
+  ],
   description:
     "更新使用者每日營養目標。必須提供 mode：current_turn_values 只用目前使用者訊息中的具體數字；latest_proposal 只套用目前有效的後端目標提案且需要使用者明確同意。空參數或沒有 mode 都無效。",
   parameters: {
@@ -1934,6 +2009,30 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
 // Registry (D-02). Single source of truth.
 // ---------------------------------------------------------------------------
 
+export const KNOWN_TOOL_NAMES = [
+  "log_food",
+  "get_daily_summary",
+  "find_meals",
+  "propose_goals",
+  "update_goals",
+  "propose_meal_numeric_correction",
+  "update_meal",
+  "delete_meal",
+] as const;
+
+export type KnownToolName = (typeof KNOWN_TOOL_NAMES)[number];
+
+export const KNOWN_TOOL_POLICY_CLASSES = {
+  log_food: "execute-and-report",
+  get_daily_summary: "direct-execute",
+  find_meals: "clarify-first",
+  propose_goals: "confirm-first",
+  update_goals: "direct-execute",
+  propose_meal_numeric_correction: "confirm-first",
+  update_meal: "direct-execute",
+  delete_meal: "direct-execute",
+} satisfies Record<KnownToolName, SideEffectPolicyClass>;
+
 export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [logFoodContract.name, logFoodContract as ToolContract<any, any>],
   [findMealsContract.name, findMealsContract as ToolContract<any, any>],
@@ -1944,6 +2043,38 @@ export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [proposeGoalsContract.name, proposeGoalsContract as ToolContract<any, any>],
   [updateGoalsContract.name, updateGoalsContract as ToolContract<any, any>],
 ]);
+
+export function assertRegistryPolicies(
+  registry: ReadonlyMap<string, ToolContract<any, any>>,
+  expectedPolicyClasses: Record<string, SideEffectPolicyClass>,
+): void {
+  for (const [toolName, contract] of registry.entries()) {
+    const expectedClass = expectedPolicyClasses[toolName];
+    if (!expectedClass) {
+      throw new Error(`Unknown registered tool policy: ${toolName}`);
+    }
+    if (!contract.policyClass) {
+      throw new Error(`Missing side-effect policy for registered tool: ${toolName}`);
+    }
+    if (contract.policyClass !== expectedClass) {
+      throw new Error(
+        `Side-effect policy mismatch for ${toolName}: expected ${expectedClass}, got ${contract.policyClass}`,
+      );
+    }
+  }
+
+  for (const toolName of Object.keys(expectedPolicyClasses)) {
+    if (!registry.has(toolName)) {
+      throw new Error(`Missing registered tool for side-effect policy: ${toolName}`);
+    }
+  }
+
+  if (registry.size !== Object.keys(expectedPolicyClasses).length) {
+    throw new Error("Registered tool count does not match side-effect policy table");
+  }
+}
+
+assertRegistryPolicies(toolRegistry, KNOWN_TOOL_POLICY_CLASSES);
 
 export function getToolDefinitions(): ToolDefinition[] {
   const defs: ToolDefinition[] = [];

@@ -29,6 +29,7 @@ function makeFakeGoalContract(overrides: {
 } = {}): ToolContract<FakeGoalArgs, { ok: true }> {
   return {
     name: "fake_goal",
+    policyClass: "direct-execute",
     description: "fake goal updater",
     parameters: {
       type: "object",
