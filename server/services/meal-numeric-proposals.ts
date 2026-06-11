@@ -50,10 +50,15 @@ export function createMealNumericProposalService(db: AppDatabase) {
   const turnStateService = createTurnStateService(db);
 
   return {
-    async putLatest(
-      deviceId: string,
-      input: MealNumericProposalInput,
-    ): Promise<MealNumericProposalPayload> {
+    async putLatest({
+      deviceId,
+      sessionId,
+      input,
+    }: {
+      deviceId: string;
+      sessionId: string;
+      input: MealNumericProposalInput;
+    }): Promise<MealNumericProposalPayload> {
       assertValidProposalInput(input);
 
       const now = new Date();
@@ -69,25 +74,44 @@ export function createMealNumericProposalService(db: AppDatabase) {
         expiresAt: new Date(now.getTime() + MEAL_NUMERIC_PROPOSAL_TTL_MS).toISOString(),
       };
 
-      await turnStateService.putState(
+      await turnStateService.putState({
         deviceId,
-        MEAL_NUMERIC_PROPOSAL_KIND,
-        proposal,
-        MEAL_NUMERIC_PROPOSAL_TTL_MS,
-      );
+        sessionId,
+        kind: MEAL_NUMERIC_PROPOSAL_KIND,
+        payload: proposal,
+        ttlMs: MEAL_NUMERIC_PROPOSAL_TTL_MS,
+      });
 
       return proposal;
     },
 
-    async getLatest(deviceId: string): Promise<MealNumericProposalPayload | undefined> {
-      return turnStateService.getState<MealNumericProposalPayload>(
+    async getLatest({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }): Promise<MealNumericProposalPayload | undefined> {
+      const payload = await turnStateService.getState({
         deviceId,
-        MEAL_NUMERIC_PROPOSAL_KIND,
-      );
+        sessionId,
+        kind: MEAL_NUMERIC_PROPOSAL_KIND,
+      });
+      return payload as MealNumericProposalPayload | undefined;
     },
 
-    async clear(deviceId: string): Promise<void> {
-      await turnStateService.clearState(deviceId, MEAL_NUMERIC_PROPOSAL_KIND);
+    async clear({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }): Promise<void> {
+      await turnStateService.clearState({
+        deviceId,
+        sessionId,
+        kind: MEAL_NUMERIC_PROPOSAL_KIND,
+      });
     },
   };
 }

@@ -12,6 +12,7 @@ import {
   MEAL_NUMERIC_PROPOSAL_KIND,
   createMealNumericProposalService,
 } from "../../server/services/meal-numeric-proposals.js";
+import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 
 const REAL_DATE = Date;
 const FIXED_NOW = new REAL_DATE("2026-05-17T08:30:00+08:00");
@@ -67,12 +68,16 @@ describe("meal numeric proposal service", () => {
   });
 
   it("stores and reads the active backend-computed patch proposal", async () => {
-    const proposal = await service.putLatest(deviceId, {
-      mealId: "meal-1",
-      expectedMealRevisionId: "rev-1",
-      updateInput: { protein: 20 },
-      affectedFields: [{ field: "protein", before: 40, after: 20 }],
-      sourceOperator: "half",
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 20 },
+        affectedFields: [{ field: "protein", before: 40, after: 20 }],
+        sourceOperator: "half",
+      },
     });
 
     assert.match(proposal.proposalId, /^[0-9a-f-]{36}$/);
@@ -84,19 +89,23 @@ describe("meal numeric proposal service", () => {
     assert.equal(proposal.sourceOperator, "half");
     assert.equal(proposal.createdAt, FIXED_NOW.toISOString());
     assert.equal(proposal.expiresAt, new REAL_DATE(FIXED_NOW.getTime() + 30 * 60 * 1000).toISOString());
-    assert.deepEqual(await service.getLatest(deviceId), proposal);
+    assert.deepEqual(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), proposal);
   });
 
   it("stores and reads a backend-computed grouped items proposal", async () => {
-    const proposal = await service.putLatest(deviceId, {
-      mealId: "meal-1",
-      expectedMealRevisionId: "rev-1",
-      items: [
-        { foodName: "雞腿", calories: 300, protein: 25, carbs: 0, fat: 18 },
-        { foodName: "白飯", calories: 220, protein: 5, carbs: 48, fat: 1 },
-      ],
-      affectedFields: [{ field: "calories", before: 700, after: 520 }],
-      sourceOperator: "subtract",
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        items: [
+          { foodName: "雞腿", calories: 300, protein: 25, carbs: 0, fat: 18 },
+          { foodName: "白飯", calories: 220, protein: 5, carbs: 48, fat: 1 },
+        ],
+        affectedFields: [{ field: "calories", before: 700, after: 520 }],
+        sourceOperator: "subtract",
+      },
     });
 
     assert.deepEqual(proposal.items, [
@@ -104,38 +113,58 @@ describe("meal numeric proposal service", () => {
       { foodName: "白飯", calories: 220, protein: 5, carbs: 48, fat: 1 },
     ]);
     assert.equal(proposal.updateInput, undefined);
-    assert.deepEqual(await service.getLatest(deviceId), proposal);
+    assert.deepEqual(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), proposal);
   });
 
   it("replaces only the same meal proposal kind for the device", async () => {
-    const goalProposal = await createGoalProposalService(db).putLatest(deviceId, {
-      calories: 1400,
-      protein: 120,
-      carbs: 130,
-      fat: 45,
+    const goalProposal = await createGoalProposalService(db).putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: {
+        calories: 1400,
+        protein: 120,
+        carbs: 130,
+        fat: 45,
+      },
     });
-    const first = await service.putLatest(deviceId, {
-      mealId: "meal-1",
-      expectedMealRevisionId: "rev-1",
-      updateInput: { protein: 20 },
-      affectedFields: [{ field: "protein", before: 40, after: 20 }],
-      sourceOperator: "half",
+    const first = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 20 },
+        affectedFields: [{ field: "protein", before: 40, after: 20 }],
+        sourceOperator: "half",
+      },
     });
-    const second = await service.putLatest(deviceId, {
-      mealId: "meal-2",
-      expectedMealRevisionId: "rev-2",
-      updateInput: { calories: 450 },
-      affectedFields: [{ field: "calories", before: 500, after: 450 }],
-      sourceOperator: "subtract",
+    const second = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-2",
+        expectedMealRevisionId: "rev-2",
+        updateInput: { calories: 450 },
+        affectedFields: [{ field: "calories", before: 500, after: 450 }],
+        sourceOperator: "subtract",
+      },
     });
 
     assert.notEqual(second.proposalId, first.proposalId);
-    assert.deepEqual(await service.getLatest(deviceId), second);
-    assert.deepEqual(await createGoalProposalService(db).getLatest(deviceId), goalProposal);
+    assert.deepEqual(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), second);
+    assert.deepEqual(
+      await createGoalProposalService(db).getLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      }),
+      goalProposal,
+    );
 
     const rows = db.$client
-      .prepare("SELECT kind, COUNT(*) AS count FROM turn_states WHERE device_id = ? GROUP BY kind")
-      .all(deviceId) as Array<{ kind: string; count: number }>;
+      .prepare(
+        "SELECT kind, COUNT(*) AS count FROM turn_states WHERE device_id = ? AND session_id = ? GROUP BY kind",
+      )
+      .all(deviceId, DEFAULT_SESSION_ID) as Array<{ kind: string; count: number }>;
     assert.deepEqual(
       rows.sort((a, b) => a.kind.localeCompare(b.kind)),
       [
@@ -146,32 +175,97 @@ describe("meal numeric proposal service", () => {
   });
 
   it("returns undefined after the row expires", async () => {
-    await service.putLatest(deviceId, {
-      mealId: "meal-1",
-      expectedMealRevisionId: "rev-1",
-      updateInput: { protein: 20 },
-      affectedFields: [{ field: "protein", before: 40, after: 20 }],
-      sourceOperator: "half",
+    await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 20 },
+        affectedFields: [{ field: "protein", before: 40, after: 20 }],
+        sourceOperator: "half",
+      },
     });
 
     db.$client
-      .prepare("UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND kind = ?")
-      .run("2026-05-16T00:00:00.000Z", deviceId, MEAL_NUMERIC_PROPOSAL_KIND);
+      .prepare(
+        "UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND session_id = ? AND kind = ?",
+      )
+      .run(
+        "2026-05-16T00:00:00.000Z",
+        deviceId,
+        DEFAULT_SESSION_ID,
+        MEAL_NUMERIC_PROPOSAL_KIND,
+      );
 
-    assert.equal(await service.getLatest(deviceId), undefined);
+    assert.equal(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
   });
 
   it("clears the active meal proposal", async () => {
-    await service.putLatest(deviceId, {
-      mealId: "meal-1",
-      expectedMealRevisionId: "rev-1",
-      updateInput: { protein: 20 },
-      affectedFields: [{ field: "protein", before: 40, after: 20 }],
-      sourceOperator: "half",
+    await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 20 },
+        affectedFields: [{ field: "protein", before: 40, after: 20 }],
+        sourceOperator: "half",
+      },
     });
 
-    await service.clear(deviceId);
+    await service.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
 
-    assert.equal(await service.getLatest(deviceId), undefined);
+    assert.equal(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
+  it("treats a pending meal numeric proposal as missing from a different session", async () => {
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: "session-a",
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 20 },
+        affectedFields: [{ field: "protein", before: 40, after: 20 }],
+        sourceOperator: "half",
+      },
+    });
+
+    assert.equal(await service.getLatest({ deviceId, sessionId: "session-b" }), undefined);
+    assert.deepEqual(await service.getLatest({ deviceId, sessionId: "session-a" }), proposal);
+  });
+
+  it("isolates same-kind meal numeric pendings across sessions (coexist, clear does not leak)", async () => {
+    await service.putLatest({
+      deviceId,
+      sessionId: "session-a",
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 20 },
+        affectedFields: [{ field: "protein", before: 40, after: 20 }],
+        sourceOperator: "half",
+      },
+    });
+    const sessionBProposal = await service.putLatest({
+      deviceId,
+      sessionId: "session-b",
+      input: {
+        mealId: "meal-2",
+        expectedMealRevisionId: "rev-2",
+        updateInput: { calories: 450 },
+        affectedFields: [{ field: "calories", before: 500, after: 450 }],
+        sourceOperator: "subtract",
+      },
+    });
+
+    await service.clear({ deviceId, sessionId: "session-a" });
+
+    assert.equal(await service.getLatest({ deviceId, sessionId: "session-a" }), undefined);
+    assert.deepEqual(
+      await service.getLatest({ deviceId, sessionId: "session-b" }),
+      sessionBProposal,
+    );
   });
 });
