@@ -285,7 +285,7 @@ describe("onboarding stepper UI", () => {
     assert.match(onboardingStepperSource, /type="button"/);
     assert.match(onboardingStepperSource, /aria-current=\{active \? "true" : undefined\}/);
     assert.match(onboardingStepperSource, /if \(item\.value === activeValue\) return;/);
-    assert.match(onboardingStepperSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
+    assert.doesNotMatch(onboardingStepperSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
     assert.match(onboardingStepperSource, /visibleCount = minimal \? 3 : 5/);
     assert.match(onboardingStepperSource, /label="體脂率"[\s\S]*compact=\{true\}/);
     assert.match(onboardingStepperSource, /label="每日消耗"[\s\S]*step=\{50\}[\s\S]*compact=\{true\}[\s\S]*minimal=\{true\}/);

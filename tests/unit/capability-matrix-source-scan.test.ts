@@ -97,12 +97,6 @@ const SCANNER_EXCLUSIONS: readonly ScannerExclusion[] = [
     reason: "ordinary onboarding advanced-notes input onChange covered by Onboarding intake row",
   },
   {
-    file: "client/src/components/onboarding/OnboardingStepper.tsx",
-    lineContains: "onPointerDown={(event) => event.stopPropagation()}",
-    kind: "onPointerDown",
-    reason: "internal number-wheel item pointer guard covered by Onboarding intake row click handling",
-  },
-  {
     file: "client/src/components/ChatPanel.tsx",
     lineContains: "onClick={handleBackToHome}",
     kind: "onClick",

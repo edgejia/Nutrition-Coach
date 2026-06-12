@@ -127,7 +127,6 @@ function WheelValueItem({
       type="button"
       className={item.className}
       aria-current={active ? "true" : undefined}
-      onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.stopPropagation();
         if (item.value === activeValue) return;
