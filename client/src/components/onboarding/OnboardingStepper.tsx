@@ -19,6 +19,14 @@ type LifestyleForm = Pick<IntakeData, "activityLevel" | "trainingFrequency"> & P
 type AdvancedForm = { bodyFatPercent: string; tdee: string; advancedNotes: string };
 type StepIssue = Pick<IntakeValidationIssue, "message" | "field">;
 
+const ONBOARDING_NUMERIC_BOUNDS = {
+  age: { min: 10, max: 120 },
+  heightCm: { min: 50, max: 300 },
+  weightKg: { min: 20, max: 500 },
+  bodyFatPercent: { min: 2, max: 70 },
+  tdee: { min: 500, max: 8000, step: 50 },
+} as const;
+
 interface OnboardingStepperPresentationProps {
   step: StepState;
   data: PartialIntake;
@@ -535,9 +543,9 @@ function SpStepBody({
           </div>
         </div>
 
-        <SpNumberWheel label="年齡" value={v.age} unit="歲" min={12} max={90} onChange={(val) => set("age", val)} />
-        <SpNumberWheel label="身高" value={v.heightCm} unit="cm" min={120} max={220} onChange={(val) => set("heightCm", val)} />
-        <SpNumberWheel label="體重" value={v.weightKg} unit="kg" min={35} max={180} onChange={(val) => set("weightKg", val)} />
+        <SpNumberWheel label="年齡" value={v.age} unit="歲" min={ONBOARDING_NUMERIC_BOUNDS.age.min} max={ONBOARDING_NUMERIC_BOUNDS.age.max} onChange={(val) => set("age", val)} />
+        <SpNumberWheel label="身高" value={v.heightCm} unit="cm" min={ONBOARDING_NUMERIC_BOUNDS.heightCm.min} max={ONBOARDING_NUMERIC_BOUNDS.heightCm.max} onChange={(val) => set("heightCm", val)} />
+        <SpNumberWheel label="體重" value={v.weightKg} unit="kg" min={ONBOARDING_NUMERIC_BOUNDS.weightKg.min} max={ONBOARDING_NUMERIC_BOUNDS.weightKg.max} onChange={(val) => set("weightKg", val)} />
       </main>
       <SpObActions onBack={onBack} onNext={onNext} />
     </div>
@@ -734,8 +742,8 @@ function SpStepAdvancedMetrics({
             label="體脂率"
             value={v.bodyFatPercent || "20"}
             unit="%"
-            min={5}
-            max={45}
+            min={ONBOARDING_NUMERIC_BOUNDS.bodyFatPercent.min}
+            max={ONBOARDING_NUMERIC_BOUNDS.bodyFatPercent.max}
             compact={true}
             hideHeader={true}
             onChange={(val) => set("bodyFatPercent", val)}
@@ -754,9 +762,9 @@ function SpStepAdvancedMetrics({
             label="每日消耗"
             value={v.tdee || "2200"}
             unit="kcal"
-            min={1200}
-            max={4200}
-            step={50}
+            min={ONBOARDING_NUMERIC_BOUNDS.tdee.min}
+            max={ONBOARDING_NUMERIC_BOUNDS.tdee.max}
+            step={ONBOARDING_NUMERIC_BOUNDS.tdee.step}
             compact={true}
             minimal={true}
             hideHeader={true}

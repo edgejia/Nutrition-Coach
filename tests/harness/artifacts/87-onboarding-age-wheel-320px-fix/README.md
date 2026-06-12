@@ -16,8 +16,8 @@ yarn build && node tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-vis
 
 The fixed viewport is `320x760`, `deviceScaleFactor: 1`, and mobile mode enabled. The required generated cases are:
 
-- `age-12-lower-bound`
-- `age-90-upper-bound`
+- `age-10-lower-bound`
+- `age-120-upper-bound`
 - `tap-age-selection`
 - `drag-age-selection`
 

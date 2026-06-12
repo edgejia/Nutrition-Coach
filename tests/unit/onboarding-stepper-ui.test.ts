@@ -247,7 +247,7 @@ describe("onboarding stepper UI", () => {
     assert.match(html, /身體資料/);
     assert.match(html, /第 03 步 \/ 共 06 步/);
     assert.match(html, /aria-valuenow="9"/);
-    assert.match(html, />12</);
+    assert.match(html, />10</);
     assert.match(html, />165</);
     assert.match(html, />58</);
     assert.match(html, /sp-num-wheel/);
@@ -256,21 +256,21 @@ describe("onboarding stepper UI", () => {
   });
 
   it("renders tappable duplicate-free Sport UI number wheel values", () => {
-    const lowerHtml = renderStepThree({ age: 12 });
-    const upperHtml = renderStepThree({ age: 90 });
+    const lowerHtml = renderStepThree({ age: 10 });
+    const upperHtml = renderStepThree({ age: 120 });
 
     const lowerAgeValues = wheelButtonValues(lowerHtml, "年齡");
     const upperAgeValues = wheelButtonValues(upperHtml, "年齡");
 
-    assert.deepEqual(lowerAgeValues, [12, 13, 14, 15, 16]);
-    assert.deepEqual(upperAgeValues, [86, 87, 88, 89, 90]);
+    assert.deepEqual(lowerAgeValues, [10, 11, 12, 13, 14]);
+    assert.deepEqual(upperAgeValues, [116, 117, 118, 119, 120]);
     assertUnique(lowerAgeValues);
     assertUnique(upperAgeValues);
-    assert.equal(lowerAgeValues.filter((value) => value === 12).length, 1);
-    assert.equal(upperAgeValues.filter((value) => value === 90).length, 1);
+    assert.equal(lowerAgeValues.filter((value) => value === 10).length, 1);
+    assert.equal(upperAgeValues.filter((value) => value === 120).length, 1);
 
-    assert.match(lowerHtml, /<button type="button" class="sp-num-wheel-item active" aria-current="true">12<\/button>/);
-    assert.match(lowerHtml, /<button type="button" class="sp-num-wheel-item near">13<\/button>/);
+    assert.match(lowerHtml, /<button type="button" class="sp-num-wheel-item active" aria-current="true">10<\/button>/);
+    assert.match(lowerHtml, /<button type="button" class="sp-num-wheel-item near">11<\/button>/);
     assert.doesNotMatch(lowerHtml, /<span[^>]*class="sp-num-wheel-item/);
 
     const defaultHtml = renderStepThree({ age: 31, heightCm: 165, weightKg: 58 });
@@ -282,13 +282,19 @@ describe("onboarding stepper UI", () => {
   it("keeps shared wheel source contracts for tap, compact/minimal variants, and TDEE steps", () => {
     assert.match(onboardingStepperSource, /function buildVisibleWheelValues/);
     assert.match(onboardingStepperSource, /function WheelValueItem/);
+    assert.match(onboardingStepperSource, /ONBOARDING_NUMERIC_BOUNDS/);
+    assert.match(onboardingStepperSource, /age: \{ min: 10, max: 120 \}/);
+    assert.match(onboardingStepperSource, /heightCm: \{ min: 50, max: 300 \}/);
+    assert.match(onboardingStepperSource, /weightKg: \{ min: 20, max: 500 \}/);
+    assert.match(onboardingStepperSource, /bodyFatPercent: \{ min: 2, max: 70 \}/);
+    assert.match(onboardingStepperSource, /tdee: \{ min: 500, max: 8000, step: 50 \}/);
     assert.match(onboardingStepperSource, /type="button"/);
     assert.match(onboardingStepperSource, /aria-current=\{active \? "true" : undefined\}/);
     assert.match(onboardingStepperSource, /if \(item\.value === activeValue\) return;/);
     assert.doesNotMatch(onboardingStepperSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
     assert.match(onboardingStepperSource, /visibleCount = minimal \? 3 : 5/);
     assert.match(onboardingStepperSource, /label="體脂率"[\s\S]*compact=\{true\}/);
-    assert.match(onboardingStepperSource, /label="每日消耗"[\s\S]*step=\{50\}[\s\S]*compact=\{true\}[\s\S]*minimal=\{true\}/);
+    assert.match(onboardingStepperSource, /label="每日消耗"[\s\S]*step=\{ONBOARDING_NUMERIC_BOUNDS\.tdee\.step\}[\s\S]*compact=\{true\}[\s\S]*minimal=\{true\}/);
     assert.doesNotMatch(onboardingStepperSource, /label\s*===\s*["']年齡["']/);
   });
 

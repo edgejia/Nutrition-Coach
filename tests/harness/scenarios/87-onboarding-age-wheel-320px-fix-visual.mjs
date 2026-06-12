@@ -15,8 +15,8 @@ const DIST_INDEX = "dist/client/index.html";
 const MIN_SCREENSHOT_BYTES = 10000;
 const VIEWPORT = { width: 320, height: 760, deviceScaleFactor: 1, mobile: true };
 const CASES = [
-  { id: "age-12-lower-bound", action: "tap", startAge: 14, targetAge: 12, screenshot: "age-12-lower-bound.png" },
-  { id: "age-90-upper-bound", action: "tap", startAge: 88, targetAge: 90, screenshot: "age-90-upper-bound.png" },
+  { id: "age-10-lower-bound", action: "tap", startAge: 12, targetAge: 10, screenshot: "age-10-lower-bound.png" },
+  { id: "age-120-upper-bound", action: "tap", startAge: 118, targetAge: 120, screenshot: "age-120-upper-bound.png" },
   { id: "tap-age-selection", action: "tap-non-active", startAge: 28, screenshot: "tap-age-selection.png" },
   { id: "drag-age-selection", action: "drag", startAge: 28, screenshot: "drag-age-selection.png" },
 ];
@@ -426,7 +426,7 @@ async function tapVisibleAge(send, targetAge) {
 }
 
 async function setAgeWithWheel(send, targetAge) {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     const current = await inspectAgeWheel(send);
     if (current.selectedValue === targetAge) return current;
     const visible = current.actionableValues.includes(targetAge);
@@ -505,7 +505,7 @@ async function runAgeCase({ send, outputDir, state }) {
   }
 
   const afterAction = await inspectAgeWheel(send);
-  if (state.id === "age-12-lower-bound" || state.id === "age-90-upper-bound") {
+  if (state.id === "age-10-lower-bound" || state.id === "age-120-upper-bound") {
     if (afterAction.selectedValue !== state.targetAge) {
       throw new Error(`Phase 87 visual evidence failed: ${state.id} selected ${afterAction.selectedValue}, expected ${state.targetAge}.`);
     }
