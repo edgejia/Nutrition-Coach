@@ -561,6 +561,7 @@ export const capabilityMatrix = [
       "setLifestyle",
       "setAdvanced",
       "startDrag",
+      "onChange?.(String(item.value))",
     ],
     supportState: "supported",
     placeholderShape: "none",
