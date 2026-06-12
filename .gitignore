@@ -19,6 +19,7 @@ server/uploads/
 
 # Local GSD workflow state and generated planning evidence
 .planning/
+graphify-out/
 scripts/check-planning-closeout.mjs
 
 # Harness artifacts are generated evidence, not source
@@ -31,12 +32,8 @@ docs/superpowers/
 docs/local/
 docs/notes/
 docs/personal/
-docs/workflow/
-docs/workflows/
 docs/README.md
 docs/codex.md
-docs/*.local.md
-docs/*-notes.md
 
 # Secrets, databases, OS files, and browser/tool cache
 .env
