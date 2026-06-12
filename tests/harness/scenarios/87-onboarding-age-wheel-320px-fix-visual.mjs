@@ -433,8 +433,13 @@ async function setAgeWithWheel(send, targetAge) {
     if (visible) {
       await tapVisibleAge(send, targetAge);
     } else {
-      const direction = targetAge > current.selectedValue ? -1 : 1;
-      await dragAgeWheel(send, direction * 130);
+      const nextVisibleValue = targetAge > current.selectedValue
+        ? Math.max(...current.actionableValues)
+        : Math.min(...current.actionableValues);
+      if (nextVisibleValue === current.selectedValue) {
+        throw new Error(`Phase 87 visual evidence failed: no visible tap path from age ${current.selectedValue} toward ${targetAge}.`);
+      }
+      await tapVisibleAge(send, nextVisibleValue);
     }
     await delay(180);
   }
@@ -443,37 +448,29 @@ async function setAgeWithWheel(send, targetAge) {
 }
 
 async function dragAgeWheel(send, deltaX = -130) {
-  const dragged = await evaluate(send, `(() => {
+  const trackRect = await evaluate(send, `(() => {
     const track = document.querySelector('.sp-num-wheel-track[aria-label="年齡"]');
-    if (!track) return false;
+    if (!track) return null;
     const rect = track.getBoundingClientRect();
-    const startX = rect.left + rect.width / 2;
-    const startY = rect.top + rect.height / 2;
-    const pointerId = 8702;
-    track.dispatchEvent(new PointerEvent("pointerdown", {
-      bubbles: true,
-      pointerId,
-      pointerType: "touch",
-      clientX: startX,
-      clientY: startY
-    }));
-    window.dispatchEvent(new PointerEvent("pointermove", {
-      bubbles: true,
-      pointerId,
-      pointerType: "touch",
-      clientX: startX + ${JSON.stringify(deltaX)},
-      clientY: startY
-    }));
-    window.dispatchEvent(new PointerEvent("pointerup", {
-      bubbles: true,
-      pointerId,
-      pointerType: "touch",
-      clientX: startX + ${JSON.stringify(deltaX)},
-      clientY: startY
-    }));
-    return true;
+    return { x: rect.left + rect.width / 2, y: rect.top + 3 };
   })()`);
-  assertTrue(dragged, "Phase 87 visual evidence failed: age wheel track could not be dragged.");
+  if (!trackRect) {
+    throw new Error("Phase 87 visual evidence failed: age wheel track could not be located for drag.");
+  }
+  await send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: trackRect.x, y: trackRect.y, radiusX: 4, radiusY: 4, force: 1, id: 87 }],
+  });
+  await delay(40);
+  await send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ x: trackRect.x + deltaX, y: trackRect.y, radiusX: 4, radiusY: 4, force: 1, id: 87 }],
+  });
+  await delay(40);
+  await send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
   await delay(300);
 }
 
@@ -577,8 +574,10 @@ async function withBrowserPage({ browser, url, outputDir, run }) {
       const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
       const send = (method, params = {}) => cdp.send(method, params, sessionId);
       await send("Emulation.setDeviceMetricsOverride", VIEWPORT);
+      await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
       await send("Page.enable");
       await send("Runtime.enable");
+      await send("Page.bringToFront");
       await send("Page.addScriptToEvaluateOnNewDocument", { source: phase87MockScript() });
       await send("Page.navigate", { url });
       await delay(1200);
