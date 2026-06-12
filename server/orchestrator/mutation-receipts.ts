@@ -75,6 +75,7 @@ const MEAL_NUMERIC_FIELD_COPY: Record<MealNumericField, { label: string; unit: s
 
 const MEAL_NUMERIC_OPERATOR_COPY: Record<string, string> = {
   half: "減半",
+  set: "指定目標數字",
   reduce_percent: "按比例減少",
   add: "增加固定數值",
   subtract: "減少固定數值",

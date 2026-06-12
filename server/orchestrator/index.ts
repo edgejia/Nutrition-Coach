@@ -923,6 +923,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         | undefined;
       let loggedMealToolMessageId: string | undefined;
       let lastTool: string | undefined;
+      let lastValidationFailureTool: string | undefined;
 
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
@@ -1190,6 +1191,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 };
               }
               if (success === false) {
+                lastValidationFailureTool = validationDiagnostic ? toolCall.function.name : undefined;
                 // Phase 83 (D-02): log_food schema_validation failures now reach
                 // this controlled feedback path instead of the FatalToolError
                 // catch below. executeTool supplies typed, redacted diagnostics
@@ -1211,6 +1213,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 toolResults.push({ toolCall, result });
                 continue;
               }
+              lastValidationFailureTool = undefined;
               if (affectedDate) {
                 resolvedAffectedDate = affectedDate;
               }
@@ -1472,6 +1475,24 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 ...deletedMealIdFields(deletedMealId),
           finalReplySource: "renderer",
           finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
+          fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
+        };
+      }
+      if (lastValidationFailureTool === "propose_meal_estimate") {
+        const reply = renderMealNumericAuthorityFailureCopy();
+        return {
+          reply,
+          didLogMeal,
+          didMutateMeal,
+          dailySummary: logMealSummary,
+          summaryOutcome: mealSummaryOutcome,
+          affectedDate: resolvedAffectedDate,
+          loggedMeal,
+          loggedMealToolMessageId,
+          ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(reply),
           fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
         };
       }

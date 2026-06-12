@@ -166,6 +166,7 @@ export interface CurrentMealFacts {
 
 export type MealNumericOperatorIntent =
   | { fields: MealNumericField[]; operator: "half" }
+  | { fields: MealNumericField[]; operator: "set"; value: number }
   | { fields: MealNumericField[]; operator: "subtract_percent"; value: number }
   | { fields: MealNumericField[]; operator: "add_amount"; value: number }
   | { fields: MealNumericField[]; operator: "subtract_amount"; value: number };
@@ -883,6 +884,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     switch (intent.operator) {
       case "half":
         return roundNonNegativePatchValue(before / 2);
+      case "set":
+        return roundNonNegativePatchValue(intent.value);
       case "subtract_percent":
         return roundNonNegativePatchValue(before * (1 - intent.value / 100));
       case "add_amount":

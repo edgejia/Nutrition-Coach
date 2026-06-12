@@ -50,6 +50,7 @@ import {
 import {
   authorizeMealNumericUpdate,
   classifyMealNumericAdjustment,
+  extractMealNumericEvidence,
   type MealNumericAdjustmentClassification,
   type MealNumericUpdate,
 } from "./meal-numeric-authority.js";
@@ -293,7 +294,7 @@ type UpdateMealArgs = UpdateMealPatchArgs | { meal_id: string; items: LogFoodIte
 interface ProposeMealNumericCorrectionArgs {
   meal_id: string;
   fields: MealNumericField[];
-  operator: "half" | "subtract_percent" | "add_amount" | "subtract_amount";
+  operator: "half" | "set" | "subtract_percent" | "add_amount" | "subtract_amount";
   value?: number;
 }
 
@@ -626,7 +627,7 @@ const proposeMealNumericCorrectionSchema = z
   .object({
     meal_id: z.string().uuid("meal_id must be a uuid"),
     fields: z.array(mealNumericFieldSchema).min(1, "fields must contain at least one field"),
-    operator: z.enum(["half", "subtract_percent", "add_amount", "subtract_amount"]),
+    operator: z.enum(["half", "set", "subtract_percent", "add_amount", "subtract_amount"]),
     value: finiteNumber.optional(),
   })
   .strict()
@@ -1226,7 +1227,16 @@ function makeMealTargetControlledResult(reply: string): MealTargetControlledResu
 function classificationMatchesOperator(
   classification: MealNumericAdjustmentClassification,
   args: ProposeMealNumericCorrectionArgs,
+  currentUserMessage: string,
 ): boolean {
+  if (args.operator === "set") {
+    if (classification.kind !== "explicit_final_value" || args.value === undefined) {
+      return false;
+    }
+    const evidence = extractMealNumericEvidence(currentUserMessage);
+    return args.fields.every((field) => evidence[field].includes(args.value!));
+  }
+
   if (classification.kind !== "proposal_candidate" || classification.operator !== args.operator) {
     return false;
   }
@@ -1240,6 +1250,7 @@ function toMealNumericOperatorIntent(args: ProposeMealNumericCorrectionArgs) {
   switch (args.operator) {
     case "half":
       return { fields: args.fields, operator: args.operator } as const;
+    case "set":
     case "subtract_percent":
     case "add_amount":
     case "subtract_amount":
@@ -1789,7 +1800,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
     },
   ],
   description:
-    "建立一組待確認的餐點數字修正提案，不會更新餐點。只接受已解析 meal_id、受影響欄位和可計算操作；具體 before/after 由後端從目前餐點資料計算。",
+    "建立一組待確認的餐點數字修正提案，不會更新餐點。只接受已解析 meal_id、受影響欄位和本輪文字支持的操作；具體 before/after 由後端從目前餐點資料計算。",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -1801,7 +1812,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
       },
       operator: {
         type: "string",
-        enum: ["half", "subtract_percent", "add_amount", "subtract_amount"],
+        enum: ["half", "set", "subtract_percent", "add_amount", "subtract_amount"],
       },
       value: { type: "number" },
     },
@@ -1827,7 +1838,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
     }
 
     const classification = classifyMealNumericAdjustment(context.currentUserMessage);
-    if (!classificationMatchesOperator(classification, args)) {
+    if (!classificationMatchesOperator(classification, args, context.currentUserMessage)) {
       const reply = renderMealNumericClarificationCopy({ field: args.fields[0] });
       return {
         ok: true,
