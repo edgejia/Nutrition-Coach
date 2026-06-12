@@ -143,6 +143,38 @@ describe("onboarding stepper UI", () => {
     }
   });
 
+  it("renders goal-aware Step 2 quick notes and placeholders", () => {
+    const fatLossHtml = renderToStaticMarkup(createElement(SpStepGoalClarification, {
+      goal: "fat_loss",
+      value: "",
+      selectedNotes: [],
+      onChange: () => undefined,
+      onQuickNoteClick: () => undefined,
+      onNext: () => undefined,
+      onBack: () => undefined,
+    }));
+    const muscleGainHtml = renderToStaticMarkup(createElement(SpStepGoalClarification, {
+      goal: "muscle_gain",
+      value: "",
+      selectedNotes: [],
+      onChange: () => undefined,
+      onQuickNoteClick: () => undefined,
+      onNext: () => undefined,
+      onBack: () => undefined,
+    }));
+
+    assert.match(fatLossHtml, /你選了「減脂」/);
+    assert.match(fatLossHtml, /想慢慢減，不要太激進/);
+    assert.match(fatLossHtml, /想慢慢減不要太激進/);
+
+    assert.match(muscleGainHtml, /你選了「增肌」/);
+    assert.match(muscleGainHtml, /想增加肌肉量/);
+    assert.match(muscleGainHtml, /怕吃太多變胖/);
+    assert.match(muscleGainHtml, /訓練日需要多一點碳水/);
+    assert.doesNotMatch(muscleGainHtml, /想慢慢減/);
+    assert.doesNotMatch(muscleGainHtml, /不要太激進/);
+  });
+
   it("wires Step 2 quick-note taps through the selectedNotes draft helper", () => {
     for (const contract of [
       "applyGoalClarificationQuickNote",

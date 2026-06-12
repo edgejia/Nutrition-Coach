@@ -399,6 +399,42 @@ function SpStepGoal({
   );
 }
 
+function getGoalClarificationContent(goal?: string) {
+  if (goal === "muscle_gain") {
+    return {
+      goalLabel: "增肌",
+      placeholder: "例如：想增加肌肉量、怕吃太多變胖、訓練日需要多一點碳水...",
+      quickNotes: [
+        "想增加肌肉量",
+        "怕吃太多變胖",
+        "訓練日需要多一點碳水",
+      ],
+    };
+  }
+
+  if (goal === "maintain") {
+    return {
+      goalLabel: "維持",
+      placeholder: "例如：想穩定體態、外食很多需要好執行、訓練表現不要掉...",
+      quickNotes: [
+        "想穩定體態",
+        "外食很多，需要好執行",
+        "訓練表現不要掉",
+      ],
+    };
+  }
+
+  return {
+    goalLabel: "減脂",
+    placeholder: "例如：不想影響重訓表現、想慢慢減不要太激進、外食很多需要好執行...",
+    quickNotes: [
+      "不想影響重訓表現",
+      "想慢慢減，不要太激進",
+      "外食很多，需要好執行",
+    ],
+  };
+}
+
 export function SpStepGoalClarification({
   goal,
   value,
@@ -418,13 +454,8 @@ export function SpStepGoalClarification({
   onNext?: () => void;
   onBack?: () => void;
 }) {
-  const goalLabel = goal === "muscle_gain" ? "增肌" : goal === "maintain" ? "維持" : "減脂";
+  const { goalLabel, quickNotes, placeholder } = getGoalClarificationContent(goal);
   const text = value ?? "";
-  const quickNotes = [
-    "不想影響重訓表現",
-    "想慢慢減，不要太激進",
-    "外食很多，需要好執行",
-  ];
   return (
     <div className="sp-screen">
       <SpObHeader />
@@ -446,7 +477,7 @@ export function SpStepGoalClarification({
           <textarea
             value={text}
             onChange={(e) => onChange?.(e.target.value)}
-            placeholder="例如：不想影響重訓表現、想慢慢減不要太激進..."
+            placeholder={placeholder}
             rows={4}
             style={{
               width: "100%",
