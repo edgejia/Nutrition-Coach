@@ -1,7 +1,12 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Writable } from "node:stream";
+import Database from "better-sqlite3";
 import { buildApp } from "../../server/app.js";
+import { applyMigrations } from "../../server/db/migrate.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
 import { getGoalDefaults, type Goal } from "../../server/services/device.js";
@@ -110,6 +115,33 @@ function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKe
   const allowed = new Set(allowedKeys);
   for (const key of Object.keys(event)) {
     assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+  }
+}
+
+function extractTargetGenerationUserContent(mockLLM: MockLLMProvider, callIndex = 0): string {
+  const content = mockLLM.objectCalls[callIndex]?.messages[1]?.content;
+  if (typeof content !== "string") {
+    throw new Error(`Missing target-generation user content for object call ${callIndex}`);
+  }
+  return content;
+}
+
+function readPersistedDeviceAge(dbPath: string, deviceId: string): number | null {
+  const sqlite = new Database(dbPath, { readonly: true });
+  try {
+    const row = sqlite.prepare("select age from devices where id = ?").get(deviceId) as { age: number | null } | undefined;
+    return row?.age ?? null;
+  } finally {
+    sqlite.close();
+  }
+}
+
+function createMigratedDeviceTestDb(dbPath: string) {
+  const sqlite = new Database(dbPath);
+  try {
+    applyMigrations(sqlite);
+  } finally {
+    sqlite.close();
   }
 }
 
@@ -325,6 +357,61 @@ describe("Device API", () => {
       dailyTargets: body.dailyTargets,
       establishedBy: "active",
     });
+  });
+
+  it("POST /api/device sends submitted age to target generation and persists it", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-device-age-"));
+    const dbPath = path.join(tempRoot, "nutrition.db");
+    let ageApp: FastifyInstance | undefined;
+
+    try {
+      createMigratedDeviceTestDb(dbPath);
+
+      const llmProvider = new MockLLMProvider();
+      llmProvider.queueObjectContent(JSON.stringify({
+        calories: 1800,
+        protein: 120,
+        carbs: 210,
+        fat: 53,
+        coachExplanation: "以目前資料建立第一版目標。",
+      }));
+      ageApp = await buildApp({ dbPath, llmProvider });
+
+      const res = await ageApp.inject({
+        method: "POST",
+        url: "/api/device",
+        payload: {
+          goal: "fat_loss",
+          sex: "female",
+          age: 41,
+          heightCm: 165,
+          weightKg: 60,
+          activityLevel: "moderate",
+          trainingFrequency: "3_4",
+        },
+      });
+
+      assert.equal(res.statusCode, 200, `Expected 200 but got ${res.statusCode}: ${res.body}`);
+      const body = res.json() as {
+        coachExplanation: string;
+        dailyTargets: unknown;
+        deviceId: string;
+        usedFallback: boolean;
+      };
+      assert.deepEqual(Object.keys(body).sort(), ["coachExplanation", "dailyTargets", "deviceId", "usedFallback"]);
+      assertDailyTargetsDto(body.dailyTargets);
+      assert.equal(body.usedFallback, false);
+      assert.equal(llmProvider.objectCalls.length, 1);
+      assert.equal(llmProvider.chatCalls.length, 0);
+
+      const userContent = extractTargetGenerationUserContent(llmProvider);
+      assert.match(userContent, /"age": 41/);
+      assert.doesNotMatch(userContent, /"age": 30/);
+      assert.equal(readPersistedDeviceAge(dbPath, body.deviceId), 41);
+    } finally {
+      await ageApp?.close();
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("POST /api/device returns usedFallback true when target generation falls back", async () => {
