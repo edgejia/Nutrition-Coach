@@ -16,6 +16,7 @@ import {
 import {
   executeTool,
   getToolDefinitions,
+  redactToolArgsForHook,
   toolRegistry,
   FatalToolError,
   type ToolDeps,
@@ -2781,5 +2782,161 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(revisions.length, 1);
     assert.equal(result.mealMutationKind, undefined);
     assert.equal(result.summaryOutcome, undefined);
+  });
+
+  it("registers propose_meal_estimate with strict bounded confirm-first schema", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      ],
+    });
+    const contract = toolRegistry.get("propose_meal_estimate");
+    assert.ok(contract, "propose_meal_estimate contract must be registered");
+    assert.equal(contract.policyClass, "confirm-first");
+    assert.ok(
+      getToolDefinitions().some((definition) => definition.function.name === "propose_meal_estimate"),
+      "propose_meal_estimate must be exposed to the model",
+    );
+    assert.equal(contract.parameters.additionalProperties, false);
+    assert.deepEqual(contract.parameters.required, ["meal_id", "fields", "estimated"]);
+    assert.equal(
+      ((contract.parameters.properties as any).estimated as Record<string, unknown>).additionalProperties,
+      false,
+    );
+
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      fields: ["calories", "protein"],
+      estimated: { calories: 600, protein: 30 },
+    }).success, true);
+    for (const invalid of [
+      { meal_id: created.id, fields: ["protein"], estimated: {} },
+      { meal_id: created.id, fields: ["protein", "protein"], estimated: { protein: 30 } },
+      { meal_id: created.id, fields: ["protein"], estimated: { protein: -1 } },
+      { meal_id: created.id, fields: ["calories"], estimated: { calories: 5001 } },
+      { meal_id: created.id, fields: ["protein"], estimated: { protein: 401 } },
+      { meal_id: created.id, fields: ["carbs"], estimated: { carbs: 801 } },
+      { meal_id: created.id, fields: ["fat"], estimated: { fat: 401 } },
+      { meal_id: created.id, fields: ["protein"], estimated: { protein: 30, note: "raw meal text" } },
+      { meal_id: created.id, fields: ["protein"], estimated: { protein: 30 }, note: "raw meal text" },
+    ]) {
+      assert.equal(contract.zodSchema.safeParse(invalid).success, false, JSON.stringify(invalid));
+    }
+  });
+
+  it("stores a bounded model-estimate proposal without mutating meals or summaries", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const mealNumericProposalService = createMealNumericProposalService(db);
+    let updateCalls = 0;
+
+    const result = await executeTool({
+      id: "call_propose_meal_estimate",
+      type: "function",
+      function: {
+        name: "propose_meal_estimate",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          fields: ["calories", "protein"],
+          estimated: { calories: 600, protein: 30 },
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: {
+        ...mealCorrectionService,
+        async updateMeal(...args: Parameters<typeof mealCorrectionService.updateMeal>) {
+          updateCalls += 1;
+          return mealCorrectionService.updateMeal(...args);
+        },
+      },
+      mealNumericProposalService,
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    } as ToolDeps, {
+      currentUserMessage: "雞腿飯幫我估合理一點然後更新",
+    });
+    const proposal = await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.ok(proposal);
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(proposal.mealId, created.id);
+    assert.equal(proposal.expectedMealRevisionId, created.mealRevisionId);
+    assert.deepEqual(proposal.updateInput, { calories: 600, protein: 30 });
+    assert.deepEqual(proposal.affectedFields, [
+      { field: "calories", before: 540, after: 600 },
+      { field: "protein", before: 28, after: 30 },
+    ]);
+    assert.equal(result.result, renderMealNumericProposalCopy({
+      mealLabel: "雞腿、白飯",
+      affectedFields: proposal.affectedFields,
+    }));
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_numeric_proposal",
+      text: result.result,
+    });
+    assert.equal(result.policyFact?.policyClass, "confirm-first");
+    assert.equal(updateCalls, 0);
+    assert.equal(revisions.length, 1);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+  });
+
+  it("returns sanitized retryable validation diagnostics for invalid estimate proposals", async () => {
+    const result = await executeTool({
+      id: "call_invalid_estimate",
+      type: "function",
+      function: {
+        name: "propose_meal_estimate",
+        arguments: JSON.stringify({
+          meal_id: "not-a-uuid",
+          fields: ["protein"],
+          estimated: { protein: 999, note: "raw meal text" },
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: createMealCorrectionService(db),
+      mealNumericProposalService: createMealNumericProposalService(db),
+    } as ToolDeps, {
+      currentUserMessage: "雞腿飯蛋白質幫我估",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "validation");
+    assert.deepEqual(result.validationDiagnostic, {
+      reason: "schema_validation",
+      fields: ["meal_id", "estimated.protein", "estimated.note"],
+    });
+    assert.doesNotMatch(result.result, /999|raw meal text|雞腿飯/);
+    assert.equal(
+      await createMealNumericProposalService(db).getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+      undefined,
+    );
+  });
+
+  it("redacts estimate hook args to field metadata without raw estimates", () => {
+    const redacted = redactToolArgsForHook("propose_meal_estimate", JSON.stringify({
+      meal_id: "11111111-1111-4111-8111-111111111111",
+      fields: ["calories", "protein"],
+      estimated: { calories: 610, protein: 31 },
+    }));
+
+    assert.equal(redacted, "fields: calories,protein");
+    assert.doesNotMatch(redacted, /610|31|11111111/);
   });
 });

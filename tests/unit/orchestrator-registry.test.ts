@@ -26,6 +26,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         "get_daily_summary",
         "log_food",
         "propose_goals",
+        "propose_meal_estimate",
         "propose_meal_numeric_correction",
         "update_goals",
         "update_meal",
@@ -88,6 +89,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         get_daily_summary: "direct-execute",
         find_meals: "clarify-first",
         propose_goals: "confirm-first",
+        propose_meal_estimate: "confirm-first",
         update_goals: "direct-execute",
         propose_meal_numeric_correction: "confirm-first",
         update_meal: "direct-execute",
@@ -159,6 +161,11 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         "delete_meal_revision_precondition_guard",
       ]);
       assertRules("propose_goals", ["propose_goals_setup_only"]);
+      assertRules("propose_meal_estimate", [
+        "propose_meal_estimate_setup_only",
+        "propose_meal_estimate_requires_resolved_target",
+        "propose_meal_estimate_bounds_validation",
+      ]);
       assertRules("propose_meal_numeric_correction", [
         "propose_meal_numeric_correction_setup_only",
         "propose_meal_numeric_correction_requires_resolved_target",
@@ -181,6 +188,9 @@ describe("Phase 10-02: orchestrator tool registry", () => {
       assertRuleOnlyOn("update_meal_revision_precondition_guard", "update_meal");
       assertRuleOnlyOn("delete_meal_revision_precondition_guard", "delete_meal");
       assertRuleOnlyOn("update_goals_latest_proposal_confirm_first", "update_goals");
+      assertRuleOnlyOn("propose_meal_estimate_setup_only", "propose_meal_estimate");
+      assertRuleOnlyOn("propose_meal_estimate_requires_resolved_target", "propose_meal_estimate");
+      assertRuleOnlyOn("propose_meal_estimate_bounds_validation", "propose_meal_estimate");
     });
   });
 
