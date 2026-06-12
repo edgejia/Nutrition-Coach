@@ -297,6 +297,8 @@ describe("onboarding stepper UI", () => {
     assert.match(onboardingStepperSource, /age: clampNumericValue\(bodyData\.age, ONBOARDING_NUMERIC_BOUNDS\.age\.min, ONBOARDING_NUMERIC_BOUNDS\.age\.max, 28\)/);
     assert.match(onboardingStepperSource, /heightCm: clampNumericValue\(\s*bodyData\.heightCm,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.max,\s*175,\s*\)/);
     assert.match(onboardingStepperSource, /weightKg: clampNumericValue\(\s*bodyData\.weightKg,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.max,\s*70,\s*\)/);
+    assert.match(onboardingStepperSource, /bodyFatPercent: advanced\.bodyFatPercent === ""\s*\?\s*undefined\s*:\s*clampNumericValue\(\s*advanced\.bodyFatPercent,\s*ONBOARDING_NUMERIC_BOUNDS\.bodyFatPercent\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.bodyFatPercent\.max,\s*20,\s*\)/);
+    assert.match(onboardingStepperSource, /tdee: advanced\.tdee === ""\s*\?\s*undefined\s*:\s*clampNumericValue\(\s*advanced\.tdee,\s*ONBOARDING_NUMERIC_BOUNDS\.tdee\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.tdee\.max,\s*2200,\s*\)/);
     assert.doesNotMatch(onboardingStepperSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
     assert.match(onboardingStepperSource, /visibleCount = minimal \? 3 : 5/);
     assert.match(onboardingStepperSource, /label="體脂率"[\s\S]*compact=\{true\}/);

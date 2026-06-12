@@ -1136,8 +1136,22 @@ export function OnboardingStepperPresentation({
         setAdvanced(value);
       }}
       onNext={() => onAdvancedMetricsNext({
-        bodyFatPercent: advanced.bodyFatPercent === "" ? undefined : Number(advanced.bodyFatPercent),
-        tdee: advanced.tdee === "" ? undefined : Number(advanced.tdee),
+        bodyFatPercent: advanced.bodyFatPercent === ""
+          ? undefined
+          : clampNumericValue(
+              advanced.bodyFatPercent,
+              ONBOARDING_NUMERIC_BOUNDS.bodyFatPercent.min,
+              ONBOARDING_NUMERIC_BOUNDS.bodyFatPercent.max,
+              20,
+            ),
+        tdee: advanced.tdee === ""
+          ? undefined
+          : clampNumericValue(
+              advanced.tdee,
+              ONBOARDING_NUMERIC_BOUNDS.tdee.min,
+              ONBOARDING_NUMERIC_BOUNDS.tdee.max,
+              2200,
+            ),
         advancedNotes: advanced.advancedNotes,
       })}
       onSkip={onAdvancedMetricsSkip}
