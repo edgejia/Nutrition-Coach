@@ -1993,6 +1993,25 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       };
     }
 
+    const overridePatch = pickTargetPatch(args);
+    const overrideFields = updatedGoalFields(overridePatch);
+    if (overrideFields.length > 0) {
+      const guardResult = checkSourceFields(overridePatch as Record<string, unknown>, overrideFields, {
+        currentUserMessage: context.currentUserMessage,
+      });
+      if (!guardResult.ok) {
+        return {
+          allowed: false,
+          fact: {
+            tool: "update_goals",
+            policyClass: "direct-execute",
+            decision: "blocked",
+            ruleId: "update_goals_current_turn_source_guard",
+          },
+        };
+      }
+    }
+
     const deps = context.deps?.toolDeps as ToolDeps | undefined;
     const deviceId = context.deps?.deviceId as string | undefined;
     if (!deps?.goalProposalService || !deviceId || !isGoalProposalConsent(context.currentUserMessage)) {
