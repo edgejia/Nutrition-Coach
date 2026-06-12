@@ -277,7 +277,7 @@ export function renderMealNumericClarificationCopy(
   const fieldText = input.field
     ? `如果要調整${mealNumericFieldLabel(input.field)}，`
     : "如果要調整餐點數字，";
-  return `這次沒有更新餐點紀錄。${fieldText}請給明確目標數字，或說「減半」、「少 20%」、「偏高」這類方向讓我再確認。`;
+  return `這次沒有更新餐點紀錄。${fieldText}請給明確目標數字，或說「減半」、「少 20%」、「偏高」這類方向讓我再確認；也可以請我幫你估合理值。`;
 }
 
 export function renderMealNumericCancelCopy(): string {
