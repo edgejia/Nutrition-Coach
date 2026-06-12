@@ -22,6 +22,7 @@ export interface MealNumericProposalItem {
 }
 
 export type MealNumericUpdateInput = Partial<Record<MealNumericField, number>>;
+export type MealNumericProposalProvenance = "model_estimate";
 
 export interface MealNumericProposalInput {
   mealId: string;
@@ -30,6 +31,7 @@ export interface MealNumericProposalInput {
   items?: MealNumericProposalItem[];
   affectedFields: MealNumericAffectedField[];
   sourceOperator: string;
+  provenance?: MealNumericProposalProvenance;
 }
 
 export interface MealNumericProposalPayload extends MealNumericProposalInput {
@@ -70,6 +72,7 @@ export function createMealNumericProposalService(db: AppDatabase) {
         ...(input.items ? { items: input.items.map((item) => ({ ...item })) } : {}),
         affectedFields: input.affectedFields.map((field) => ({ ...field })),
         sourceOperator: input.sourceOperator,
+        ...(input.provenance ? { provenance: input.provenance } : {}),
         createdAt: now.toISOString(),
         expiresAt: new Date(now.getTime() + MEAL_NUMERIC_PROPOSAL_TTL_MS).toISOString(),
       };
