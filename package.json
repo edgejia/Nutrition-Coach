@@ -19,7 +19,10 @@
     "matrix:gen:check": "node --import tsx scripts/generate-capability-matrix-doc.mjs --check",
     "matrix:check": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/capability-matrix-contract.test.ts tests/unit/capability-matrix-source-scan.test.ts && yarn matrix:gen:check",
     "behavior-matrix:gen": "node --import tsx scripts/generate-behavior-matrix-doc.mjs",
-    "behavior-matrix:gen:check": "node --import tsx scripts/generate-behavior-matrix-doc.mjs --check"
+    "behavior-matrix:gen:check": "node --import tsx scripts/generate-behavior-matrix-doc.mjs --check",
+    "policy-taxonomy:gen": "node --import tsx scripts/generate-policy-taxonomy-doc.mjs",
+    "policy-taxonomy:gen:check": "node --import tsx scripts/generate-policy-taxonomy-doc.mjs --check",
+    "policy-taxonomy:check": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/policy-taxonomy-doc.test.ts && yarn policy-taxonomy:gen:check"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
