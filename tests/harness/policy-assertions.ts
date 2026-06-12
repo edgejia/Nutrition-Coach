@@ -18,6 +18,21 @@ export interface PolicyFactExpectation {
   requireTurnId?: boolean;
 }
 
+export interface PolicyDbInvariantExpectation {
+  mealCountBefore?: number;
+  mealCountAfter?: number;
+  targetsChanged?: boolean;
+  pendingConsumed?: boolean;
+  pendingPreserved?: boolean;
+  dailySummaryPublishCount?: number;
+  goalsPublishCount?: number;
+}
+
+export interface VisibleOutcomeExpectation {
+  keyLabels?: Record<string, boolean>;
+  meaning?: Record<string, boolean>;
+}
+
 export const POLICY_EVIDENCE_FORBIDDEN_KEYS = new Set([
   "args",
   "arguments",
@@ -81,6 +96,21 @@ const POLICY_FACT_ALLOWED_KEYS = new Set([
   "turnId",
 ]);
 
+const POLICY_DB_INVARIANT_ALLOWED_KEYS = new Set([
+  "mealCountBefore",
+  "mealCountAfter",
+  "targetsChanged",
+  "pendingConsumed",
+  "pendingPreserved",
+  "dailySummaryPublishCount",
+  "goalsPublishCount",
+]);
+
+const VISIBLE_OUTCOME_ALLOWED_KEYS = new Set([
+  "keyLabels",
+  "meaning",
+]);
+
 const NORMALIZED_FORBIDDEN_KEYS = new Map(
   [...POLICY_EVIDENCE_FORBIDDEN_KEYS].map((key) => [normalizeKey(key), key]),
 );
@@ -130,8 +160,87 @@ export function assertPolicyFact(
   }
 }
 
+export function assertPolicyDbInvariant(
+  actual: Record<string, unknown>,
+  expected: PolicyDbInvariantExpectation,
+): void {
+  assertPolicyEvidenceHasNoForbiddenFields(actual);
+  assertOnlyAllowlistedKeys(actual, POLICY_DB_INVARIANT_ALLOWED_KEYS, "policy DB invariant");
+
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    assert.equal(
+      actual[field],
+      expectedValue,
+      `policy DB invariant ${field} mismatch`,
+    );
+  }
+}
+
+export function assertVisibleOutcomeSummary(
+  actual: Record<string, unknown>,
+  expected: VisibleOutcomeExpectation,
+): void {
+  assertPolicyEvidenceHasNoForbiddenFields(actual);
+  assertOnlyAllowlistedKeys(actual, VISIBLE_OUTCOME_ALLOWED_KEYS, "visible outcome");
+
+  assertBooleanMap(
+    readOptionalRecord(actual.keyLabels, "keyLabels"),
+    expected.keyLabels,
+    "keyLabels",
+  );
+  assertBooleanMap(
+    readOptionalRecord(actual.meaning, "meaning"),
+    expected.meaning,
+    "meaning",
+  );
+}
+
 export function assertPolicyEvidenceHasNoForbiddenFields(value: unknown): void {
   visitEvidence(value, []);
+}
+
+function assertOnlyAllowlistedKeys(
+  actual: Record<string, unknown>,
+  allowedKeys: Set<string>,
+  label: string,
+): void {
+  for (const key of Object.keys(actual)) {
+    assert.equal(
+      allowedKeys.has(key),
+      true,
+      `${label} ${key} is not an allowlisted metadata field`,
+    );
+  }
+}
+
+function readOptionalRecord(value: unknown, field: string): Record<string, unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  assert.equal(
+    value !== null && typeof value === "object" && !Array.isArray(value),
+    true,
+    `visible outcome ${field} must be an object`,
+  );
+  return value as Record<string, unknown>;
+}
+
+function assertBooleanMap(
+  actual: Record<string, unknown> | undefined,
+  expected: Record<string, boolean> | undefined,
+  label: string,
+): void {
+  if (expected === undefined) {
+    return;
+  }
+  assert.notEqual(actual, undefined, `visible outcome ${label} missing`);
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    assert.equal(
+      actual?.[field],
+      expectedValue,
+      `visible outcome ${label}.${field} mismatch`,
+    );
+  }
 }
 
 function visitEvidence(value: unknown, path: string[]): void {
