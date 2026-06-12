@@ -69,6 +69,49 @@ function renderStepSix(props: {
   }));
 }
 
+function renderStepThree(data: PartialIntake) {
+  return renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
+    step: 3,
+    data: {
+      goal: "fat_loss",
+      sex: "female",
+      age: 31,
+      heightCm: 165,
+      weightKg: 58,
+      ...data,
+    },
+    validationIssues: [],
+    loading: false,
+    transportError: null,
+    result: null,
+    onGoalSelect: () => undefined,
+    onGoalClarificationNext: () => undefined,
+    onBodyDataNext: () => undefined,
+    onLifestyleNext: () => undefined,
+    onAdvancedMetricsNext: () => undefined,
+    onAdvancedMetricsSkip: () => undefined,
+    onBack: () => undefined,
+    onStart: () => undefined,
+    onRetry: () => undefined,
+    onFieldEdit: () => undefined,
+  }));
+}
+
+function wheelButtonValues(html: string, ariaLabel: string) {
+  const track = html.match(new RegExp(`<div class="sp-num-wheel-track"[^>]*aria-label="${ariaLabel}"[\\s\\S]*?</div>`))?.[0] ?? "";
+  assert.ok(track, `expected ${ariaLabel} wheel track`);
+  const buttonMatches = track.match(/<button\b[^>]*class="[^"]*\bsp-num-wheel-item\b[^"]*"[^>]*>[\s\S]*?<\/button>/g) ?? [];
+  return buttonMatches.map((button) => {
+    const value = button.match(/>(-?\d+)</)?.[1];
+    assert.ok(value, `expected numeric wheel button value in ${button}`);
+    return Number(value);
+  });
+}
+
+function assertUnique(values: readonly number[]) {
+  assert.deepEqual([...new Set(values)], values);
+}
+
 describe("onboarding stepper UI", () => {
   it("renders Step 2 quick-note selected state from selectedNotes without changing visible text", () => {
     assert.equal(typeof SpStepGoalClarification, "function");
@@ -209,6 +252,43 @@ describe("onboarding stepper UI", () => {
     assert.match(html, /sp-num-wheel/);
     assert.doesNotMatch(html, /連線失敗/);
     assert.doesNotMatch(html, /重試/);
+  });
+
+  it("renders tappable duplicate-free Sport UI number wheel values", () => {
+    const lowerHtml = renderStepThree({ age: 12 });
+    const upperHtml = renderStepThree({ age: 90 });
+
+    const lowerAgeValues = wheelButtonValues(lowerHtml, "年齡");
+    const upperAgeValues = wheelButtonValues(upperHtml, "年齡");
+
+    assert.deepEqual(lowerAgeValues, [12, 13, 14, 15, 16]);
+    assert.deepEqual(upperAgeValues, [86, 87, 88, 89, 90]);
+    assertUnique(lowerAgeValues);
+    assertUnique(upperAgeValues);
+    assert.equal(lowerAgeValues.filter((value) => value === 12).length, 1);
+    assert.equal(upperAgeValues.filter((value) => value === 90).length, 1);
+
+    assert.match(lowerHtml, /<button type="button" class="sp-num-wheel-item active" aria-current="true">12<\/button>/);
+    assert.match(lowerHtml, /<button type="button" class="sp-num-wheel-item near">13<\/button>/);
+    assert.doesNotMatch(lowerHtml, /<span[^>]*class="sp-num-wheel-item/);
+
+    const defaultHtml = renderStepThree({ age: 31, heightCm: 165, weightKg: 58 });
+    assert.deepEqual(wheelButtonValues(defaultHtml, "年齡"), [29, 30, 31, 32, 33]);
+    assert.deepEqual(wheelButtonValues(defaultHtml, "身高"), [163, 164, 165, 166, 167]);
+    assert.deepEqual(wheelButtonValues(defaultHtml, "體重"), [56, 57, 58, 59, 60]);
+  });
+
+  it("keeps shared wheel source contracts for tap, compact/minimal variants, and TDEE steps", () => {
+    assert.match(onboardingStepperSource, /function buildVisibleWheelValues/);
+    assert.match(onboardingStepperSource, /function WheelValueItem/);
+    assert.match(onboardingStepperSource, /type="button"/);
+    assert.match(onboardingStepperSource, /aria-current=\{active \? "true" : undefined\}/);
+    assert.match(onboardingStepperSource, /if \(item\.value === activeValue\) return;/);
+    assert.match(onboardingStepperSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
+    assert.match(onboardingStepperSource, /visibleCount=\{minimal \? 3 : 5\}/);
+    assert.match(onboardingStepperSource, /label="體脂率"[\s\S]*compact=\{true\}/);
+    assert.match(onboardingStepperSource, /label="每日消耗"[\s\S]*step=\{50\}[\s\S]*compact=\{true\}[\s\S]*minimal=\{true\}/);
+    assert.doesNotMatch(onboardingStepperSource, /label\s*===\s*["']年齡["']/);
   });
 
   it("renders transport retry copy only in StepCoachHandoff transport mode", () => {
