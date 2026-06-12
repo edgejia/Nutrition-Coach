@@ -31,6 +31,27 @@ function readStoredJson<T>(key: string): T | null {
   }
 }
 
+function buildSummaryFromCurrentMeals(meals: MealEntry[]): DailySummary {
+  return meals.reduce<DailySummary>(
+    (summary, meal) => ({
+      date: summary.date,
+      totalCalories: summary.totalCalories + meal.calories,
+      totalProtein: summary.totalProtein + meal.protein,
+      totalCarbs: summary.totalCarbs + meal.carbs,
+      totalFat: summary.totalFat + meal.fat,
+      mealCount: summary.mealCount + 1,
+    }),
+    {
+      date: formatLocalDate(new Date()),
+      totalCalories: 0,
+      totalProtein: 0,
+      totalCarbs: 0,
+      totalFat: 0,
+      mealCount: 0,
+    },
+  );
+}
+
 // Rollover refresh handler: fire-and-forget callback invoked when a stale/future-dated
 // summary is rejected by the store's date guard. Stored at module scope (not in state)
 // so SSE/chat callers never see it as a reactive field and tests can reset per case (D-13, D-19).
@@ -206,7 +227,7 @@ export const useStore = create<AppState>((set, get) => ({
     if (!isAuthoritativeMealEntryArray(meals)) {
       return;
     }
-    set({ meals });
+    set({ meals, dailySummary: buildSummaryFromCurrentMeals(meals) });
   },
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
   redactChatReceiptIdentity: (mealId) =>

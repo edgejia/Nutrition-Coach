@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createSSESummaryCoordinator } from "../../client/src/sse-summary-coordinator.js";
+import { formatLocalDate } from "../../client/src/lib/time.js";
 import type { DailySummary, DailySummarySSEPayload, MealEntry } from "../../client/src/types.js";
 
 type Meal = Pick<MealEntry, "id" | "foodName" | "calories" | "protein" | "carbs" | "fat" | "itemCount" | "loggedAt">;
@@ -159,7 +160,30 @@ describe("SSE summary coordinator", () => {
     assert.deepEqual(commits, [{ type: "summary", summary: payload.summary }]);
   });
 
-  it("refetches rows first for initial same-day reconnect when rows are already loaded", async () => {
+  it("commits initial summary using the fixed Asia/Taipei app date key", async () => {
+    const appToday = formatLocalDate(new Date("2026-05-17T16:30:00.000Z"));
+    const getMealsCalls: Array<{ refreshReason?: "day_rollover" | "meal_mutation" }> = [];
+    const commits: Array<{ type: "summary"; summary: DailySummary } | { type: "historical"; affectedDate: string }> = [];
+    const coordinator = createSSESummaryCoordinator<Meal>({
+      getMeals: (options) => {
+        getMealsCalls.push(options ?? {});
+        return Promise.resolve({ meals: [] });
+      },
+      setMeals: () => undefined,
+      setDailySummary: (summary) => commits.push({ type: "summary", summary }),
+      recordMealMutation: (affectedDate) => commits.push({ type: "historical", affectedDate }),
+      todayKey: () => appToday,
+    });
+    const payload = envelopeForDate("2026-05-18", 720, "initial");
+
+    await coordinator.handleSummary(payload);
+
+    assert.equal(appToday, "2026-05-18");
+    assert.deepEqual(getMealsCalls, []);
+    assert.deepEqual(commits, [{ type: "summary", summary: payload.summary }]);
+  });
+
+  it("commits initial same-day reconnect summary before refreshing already-loaded rows", async () => {
     const { coordinator, pendingMeals, commits } = createHarness();
     const initialRows = [meal("loaded", 450)];
     const reconnectRows = [meal("reconnect", 560)];
@@ -170,12 +194,41 @@ describe("SSE summary coordinator", () => {
     await initialLoad;
 
     const reconnect = coordinator.handleSummary(payload);
+    assert.deepEqual(commits, [
+      { type: "meals", rows: initialRows },
+      { type: "summary", summary: payload.summary },
+    ]);
+
     pendingMeals[1]?.resolve({ meals: reconnectRows });
     await reconnect;
 
     assert.deepEqual(commits, [
       { type: "meals", rows: initialRows },
+      { type: "summary", summary: payload.summary },
       { type: "meals", rows: reconnectRows },
+    ]);
+  });
+
+  it("keeps initial same-day reconnect summary when row refresh fails", async () => {
+    const { coordinator, pendingMeals, commits } = createHarness();
+    const initialRows = [meal("loaded", 450)];
+    const payload = envelopeForDate("2026-05-18", 560, "initial");
+
+    const initialLoad = coordinator.runInitialMealsLoad();
+    pendingMeals[0]?.resolve({ meals: initialRows });
+    await initialLoad;
+
+    const reconnect = coordinator.handleSummary(payload);
+    assert.deepEqual(commits, [
+      { type: "meals", rows: initialRows },
+      { type: "summary", summary: payload.summary },
+    ]);
+
+    pendingMeals[1]?.reject(new Error("network unavailable"));
+    await assert.doesNotReject(reconnect);
+
+    assert.deepEqual(commits, [
+      { type: "meals", rows: initialRows },
       { type: "summary", summary: payload.summary },
     ]);
   });

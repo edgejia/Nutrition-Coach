@@ -61,6 +61,16 @@ export function createSSESummaryCoordinator<Meal>(
     }
   };
 
+  const refreshTodayRowsAfterInitialSummary = async () => {
+    const token = nextToken();
+    try {
+      const { meals } = await deps.getMeals({ refreshReason: "meal_mutation" });
+      commitRowsIfLatest(token, meals);
+    } catch (error) {
+      handleLoadError(error);
+    }
+  };
+
   return {
     async handleSummary(payload) {
       const today = deps.todayKey();
@@ -77,15 +87,13 @@ export function createSSESummaryCoordinator<Meal>(
         return;
       }
 
-      if (rowsLoaded) {
-        await reconcileTodayRowsBeforeSummary(payload);
-        return;
-      }
-
       if (!sameDayCommitSeen) {
         sameDayCommitSeen = true;
       }
       deps.setDailySummary(payload.summary);
+      if (rowsLoaded) {
+        await refreshTodayRowsAfterInitialSummary();
+      }
     },
 
     async runInitialMealsLoad(options) {

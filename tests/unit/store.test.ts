@@ -289,6 +289,20 @@ describe("AppStore", () => {
     assert.deepEqual(useStore.getState().meals, sampleMeals);
   });
 
+  it("setMeals derives a same-day daily summary fallback for reload before SSE arrives", () => {
+    useStore.getState().setMeals(sampleMeals);
+
+    assert.deepEqual(useStore.getState().meals, sampleMeals);
+    assert.deepEqual(useStore.getState().dailySummary, {
+      date: formatLocalDate(new Date()),
+      totalCalories: 700,
+      totalProtein: 54,
+      totalCarbs: 68,
+      totalFat: 24,
+      mealCount: 2,
+    });
+  });
+
   it("tracks activeScreen changes and meal collection helpers", () => {
     useStore.getState().setActiveScreen("history");
     useStore.getState().setMeals(sampleMeals);
