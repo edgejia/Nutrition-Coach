@@ -349,6 +349,32 @@ describe("meal numeric proposal and rejection renderers", () => {
     assertNoMealNumericInternalTerms(clarification);
   });
 
+  it("renders estimate-compatible proposal copy from affected fields only without internal provenance terms", () => {
+    const text = renderMealNumericProposalCopy({
+      mealLabel: "雞腿飯",
+      affectedFields: [
+        { field: "protein", before: 30, after: 28 },
+      ],
+    });
+
+    assert.equal(
+      text,
+      "我可以幫你把雞腿飯這樣調整：\n• 蛋白質：30 g 改為 28 g\n如果要套用，請回覆「好」；如果要調整，請直接給新的目標數字。",
+    );
+    assert.doesNotMatch(text, /卡路里|碳水|脂肪/);
+    assert.doesNotMatch(text, /model_estimate|provenance|propose_meal_estimate|AI 估計/);
+    assertNoMealNumericInternalTerms(text);
+  });
+
+  it("adds a deterministic estimate hint to vague numeric clarification without implying mutation", () => {
+    const text = renderMealNumericClarificationCopy();
+
+    assert.match(text, /^這次沒有更新餐點紀錄。/);
+    assert.match(text, /也可以請我幫你估合理/);
+    assert.doesNotMatch(text, /已更新|已套用|model_estimate|propose_meal_estimate/);
+    assertNoMealNumericInternalTerms(text);
+  });
+
   it("renders cancel and cross-kind ambiguity copy without success wording", () => {
     const cancel = renderMealNumericCancelCopy();
     const ambiguity = renderProposalKindAmbiguityCopy();

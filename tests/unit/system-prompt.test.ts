@@ -544,6 +544,36 @@ describe("buildSystemPrompt", () => {
     assert.match(section, /不要從模型判斷補出使用者沒有說出的數字後直接套用/);
   });
 
+  it("routes explicit meal estimate requests through propose_meal_estimate after target resolution", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /propose_meal_estimate/);
+    assert.match(section, /幫我估合理值|幫我估合理一點/);
+    assert.match(section, /find_meals.*唯一目標.*propose_meal_estimate/s);
+    assert.match(section, /未指定欄位.*卡路里.*蛋白質.*碳水.*脂肪/s);
+    assert.match(section, /只要求.*單一欄位.*只估.*該欄位/s);
+  });
+
+  it("keeps vague non-estimate corrections out of estimated direct update paths", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /太高了/);
+    assert.match(section, /改合理一點/);
+    assert.match(section, /沒有明確要求.*估.*不得.*propose_meal_estimate/s);
+    assert.match(section, /不得直接.*update_meal|不要直接.*update_meal/);
+    assert.match(section, /不要從模型判斷補出使用者沒有說出的數字後直接套用/);
+  });
+
   it("routes computable meal numeric adjustments through backend-owned proposal guidance", () => {
     const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
       calories: 1500,
