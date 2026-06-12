@@ -2920,7 +2920,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.failureReason, "validation");
     assert.deepEqual(result.validationDiagnostic, {
       reason: "schema_validation",
-      fields: ["meal_id", "estimated.protein", "estimated.note"],
+      fields: ["meal_id", "estimated.protein", "estimated"],
     });
     assert.doesNotMatch(result.result, /999|raw meal text|雞腿飯/);
     assert.equal(

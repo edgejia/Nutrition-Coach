@@ -16,6 +16,7 @@ import type {
 import {
   MEAL_NUMERIC_FIELDS,
   type MealNumericField,
+  type MealNumericUpdateInput,
   type createMealNumericProposalService,
 } from "../services/meal-numeric-proposals.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
@@ -296,6 +297,12 @@ interface ProposeMealNumericCorrectionArgs {
   value?: number;
 }
 
+interface ProposeMealEstimateArgs {
+  meal_id: string;
+  fields: MealNumericField[];
+  estimated: Partial<Record<MealNumericField, number>>;
+}
+
 interface DeleteMealArgs {
   meal_id: string;
 }
@@ -572,6 +579,49 @@ const updateMealSchema = z.union([
 ]);
 
 const mealNumericFieldSchema = z.enum(MEAL_NUMERIC_FIELDS);
+const boundedEstimateSchema = z
+  .object({
+    calories: z.number().int().min(0).max(5000).optional(),
+    protein: z.number().min(0).max(400).optional(),
+    carbs: z.number().min(0).max(800).optional(),
+    fat: z.number().min(0).max(400).optional(),
+  })
+  .strict();
+const proposeMealEstimateSchema = z
+  .object({
+    meal_id: z.string().uuid("meal_id must be a uuid"),
+    fields: z.array(mealNumericFieldSchema).min(1, "fields must contain at least one field"),
+    estimated: boundedEstimateSchema,
+  })
+  .strict()
+  .superRefine((args, ctx) => {
+    const requestedFields = new Set(args.fields);
+    if (requestedFields.size !== args.fields.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "fields must be unique",
+        path: ["fields"],
+      });
+    }
+    for (const field of args.fields) {
+      if (args.estimated[field] === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: "estimated value is required for each requested field",
+          path: ["estimated", field],
+        });
+      }
+    }
+    for (const field of MEAL_NUMERIC_FIELDS) {
+      if (args.estimated[field] !== undefined && !requestedFields.has(field)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "estimated values must match requested fields",
+          path: ["estimated", field],
+        });
+      }
+    }
+  });
 const proposeMealNumericCorrectionSchema = z
   .object({
     meal_id: z.string().uuid("meal_id must be a uuid"),
@@ -1123,6 +1173,35 @@ function filterUnchangedMealNumericPatch(
   }
 
   return Object.keys(patch).length > 0 ? { patch } : undefined;
+}
+
+function buildBoundedEstimatePatch(
+  fields: readonly MealNumericField[],
+  estimated: Partial<Record<MealNumericField, number>>,
+): MealNumericUpdateInput {
+  const patch: MealNumericUpdateInput = {};
+  for (const field of fields) {
+    const value = estimated[field];
+    if (value !== undefined) {
+      patch[field] = value;
+    }
+  }
+  return patch;
+}
+
+function buildEstimateAffectedFields(
+  fields: readonly MealNumericField[],
+  updateInput: MealNumericUpdateInput,
+  currentTotals: Record<MealNumericField, number>,
+) {
+  return fields
+    .filter((field) => updateInput[field] !== undefined)
+    .filter((field) => roundComparableMealNumeric(currentTotals[field]) !== roundComparableMealNumeric(updateInput[field]!))
+    .map((field) => ({
+      field,
+      before: currentTotals[field],
+      after: updateInput[field]!,
+    }));
 }
 
 function makeMealNumericControlledResult(
@@ -1804,6 +1883,115 @@ const proposeMealNumericCorrectionContract: ToolContract<
   },
 };
 
+const proposeMealEstimateContract: ToolContract<
+  ProposeMealEstimateArgs,
+  ProposeMealNumericCorrectionResult
+> = {
+  name: "propose_meal_estimate",
+  policyClass: "confirm-first",
+  policyRules: [
+    {
+      id: "propose_meal_estimate_setup_only",
+      decision: "allowed",
+      description: "Writes bounded model-estimate proposal authority but does not mutate meals.",
+    },
+    {
+      id: "propose_meal_estimate_requires_resolved_target",
+      decision: "blocked",
+      description: "Estimate proposal setup requires a same-turn resolved target before writing pending helper state.",
+    },
+    {
+      id: "propose_meal_estimate_bounds_validation",
+      decision: "blocked",
+      description: "Model-estimated numeric values must pass strict field presence, uniqueness, and single-field bounds before persistence.",
+    },
+  ],
+  description:
+    "建立一組待確認的餐點估值修正提案，不會更新餐點。只在使用者明確要求協助估合理數值時使用；meal_id 必須已解析，估值只可放在 estimated 物件並通過後端單欄上下限驗證。",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      meal_id: { type: "string" },
+      fields: {
+        type: "array",
+        items: { type: "string", enum: [...MEAL_NUMERIC_FIELDS] },
+      },
+      estimated: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          calories: { type: "integer", minimum: 0, maximum: 5000 },
+          protein: { type: "number", minimum: 0, maximum: 400 },
+          carbs: { type: "number", minimum: 0, maximum: 800 },
+          fat: { type: "number", minimum: 0, maximum: 400 },
+        },
+      },
+    },
+    required: ["meal_id", "fields", "estimated"],
+  },
+  zodSchema: proposeMealEstimateSchema,
+  logSummary: (args) => ({
+    tool: "propose_meal_estimate",
+    fields: [...args.fields],
+  }),
+  execute: async (args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.mealCorrectionService || !deps.mealNumericProposalService || !deviceId) {
+      throw new Error("propose_meal_estimate contract missing mealCorrectionService/mealNumericProposalService/deviceId in context");
+    }
+
+    const resolvedTarget = findResolvedMealTarget(deps.toolSessionState, args.meal_id);
+    if (!resolvedTarget) {
+      throw new FatalToolError("meal target unresolved");
+    }
+
+    try {
+      const currentFacts = await deps.mealCorrectionService.loadCurrentMealFacts(
+        deviceId,
+        args.meal_id,
+        resolvedTarget.mealRevisionId,
+      );
+      const updateInput = buildBoundedEstimatePatch(args.fields, args.estimated);
+      const affectedFields = buildEstimateAffectedFields(args.fields, updateInput, currentFacts.totals);
+      const proposal = await deps.mealNumericProposalService.putLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: currentFacts.mealId,
+          expectedMealRevisionId: currentFacts.currentMealRevisionId,
+          updateInput,
+          affectedFields,
+          sourceOperator: "model_estimate",
+          provenance: "model_estimate",
+        },
+      });
+      const otherProposalKindActive = deps.goalProposalService
+        ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
+        : false;
+      const reply = renderMealNumericProposalCopy({
+        mealLabel: currentFacts.mealLabel,
+        affectedFields: proposal.affectedFields,
+        otherProposalKindActive,
+      });
+      return {
+        ok: true,
+        result: {
+          ...makeMealNumericControlledResult("meal_numeric_proposal", reply),
+          reason: "meal_numeric_proposal",
+        },
+        toolMessage: reply,
+      };
+    } catch (error) {
+      if (error instanceof MealRevisionPreconditionError) {
+        throw revisionPreconditionFatalError(error);
+      }
+      throw error;
+    }
+  },
+};
+
 const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult> = {
   name: "delete_meal",
   policyClass: "direct-execute",
@@ -2173,6 +2361,7 @@ export const KNOWN_TOOL_NAMES = [
   "find_meals",
   "propose_goals",
   "update_goals",
+  "propose_meal_estimate",
   "propose_meal_numeric_correction",
   "update_meal",
   "delete_meal",
@@ -2186,6 +2375,7 @@ export const KNOWN_TOOL_POLICY_CLASSES = {
   find_meals: "clarify-first",
   propose_goals: "confirm-first",
   update_goals: "direct-execute",
+  propose_meal_estimate: "confirm-first",
   propose_meal_numeric_correction: "confirm-first",
   update_meal: "direct-execute",
   delete_meal: "direct-execute",
@@ -2197,6 +2387,7 @@ export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [updateMealContract.name, updateMealContract as ToolContract<any, any>],
   [deleteMealContract.name, deleteMealContract as ToolContract<any, any>],
   [getDailySummaryContract.name, getDailySummaryContract as ToolContract<any, any>],
+  [proposeMealEstimateContract.name, proposeMealEstimateContract as ToolContract<any, any>],
   [proposeMealNumericCorrectionContract.name, proposeMealNumericCorrectionContract as ToolContract<any, any>],
   [proposeGoalsContract.name, proposeGoalsContract as ToolContract<any, any>],
   [updateGoalsContract.name, updateGoalsContract as ToolContract<any, any>],
@@ -2282,6 +2473,12 @@ export function redactToolArgsForHook(toolName: string, rawArgs: string): string
         : "";
       const operator = typeof summary.operator === "string" ? summary.operator : "unknown";
       return `fields: ${fields}; operator: ${operator}`;
+    }
+    if (toolName === "propose_meal_estimate") {
+      const fields = Array.isArray(summary.fields)
+        ? summary.fields.join(",")
+        : "";
+      return `fields: ${fields}`;
     }
     if (toolName === "delete_meal") {
       return "<delete_meal args>";
@@ -2531,7 +2728,40 @@ export async function executeTool(
       || toolCall.function.name === "update_goals"
       || toolCall.function.name === "update_meal"
       || toolCall.function.name === "delete_meal"
+      || toolCall.function.name === "propose_meal_estimate"
     ) {
+      if (
+        toolCall.function.name === "propose_meal_estimate"
+        && outcome.failureReason === "validation"
+      ) {
+        let failureKind = "schema_validation";
+        let failureFields: string[] | undefined;
+        try {
+          const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
+          if (typeof parsed.reason === "string") {
+            failureKind = parsed.reason;
+          }
+          if (
+            Array.isArray(parsed.fields)
+            && parsed.fields.every((field) => typeof field === "string")
+          ) {
+            failureFields = parsed.fields as string[];
+          }
+        } catch {
+          // Keep the stable schema_validation default below.
+        }
+        return attachPolicyFact({
+          result: outcome.result,
+          summary: `failureReason: ${outcome.failureReason}`,
+          success: false,
+          executed: false,
+          failureReason: outcome.failureReason,
+          validationDiagnostic: {
+            reason: failureKind,
+            ...(failureFields ? { fields: failureFields } : {}),
+          },
+        });
+      }
       const updatedFields =
         typeof outcome.logSummary === "object" &&
         outcome.logSummary !== null &&
@@ -2818,6 +3048,21 @@ export async function executeTool(
       success: isProposal,
       executed: isProposal,
       ...(isProposal ? {} : { failureReason: "guard" as const }),
+      controlledReply: {
+        source: "renderer",
+        reason: contractResult.reason,
+        text: contractResult.reply,
+      },
+    });
+  }
+
+  if (toolCall.function.name === "propose_meal_estimate") {
+    const contractResult = outcome.contractResult as ProposeMealNumericCorrectionResult;
+    return attachPolicyFact({
+      result: contractResult.reply,
+      summary: "status: proposal",
+      success: true,
+      executed: true,
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,
