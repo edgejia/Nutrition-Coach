@@ -340,6 +340,8 @@ describe("meal numeric proposal and rejection renderers", () => {
     assert.match(blocked, /^這次沒有更新/);
     assert.match(blocked, /蛋白質/);
     assert.match(blocked, /減半|少 20%/);
+    assert.match(blocked, /加 10g/);
+    assert.match(blocked, /少 10g/);
     assert.match(clarification, /^這次沒有更新/);
     assert.match(clarification, /卡路里/);
     assert.match(clarification, /偏高/);

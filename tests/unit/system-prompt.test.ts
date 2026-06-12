@@ -555,6 +555,8 @@ describe("buildSystemPrompt", () => {
     assert.match(section, /propose_meal_numeric_correction/);
     assert.match(section, /減半/);
     assert.match(section, /少 20%/);
+    assert.match(section, /加 10g/);
+    assert.match(section, /少 10g/);
     assert.match(section, /待確認提案/);
     assert.match(section, /工具路由指引/);
     assert.match(section, /後端工具驗證、目前提案狀態與使用者本輪文字決定/);

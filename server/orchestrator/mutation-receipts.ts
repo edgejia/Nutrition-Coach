@@ -266,8 +266,8 @@ export function renderMealNumericAuthorityFailureCopy(
   input: MealNumericFieldAwareCopyInput = {},
 ): string {
   const fieldText = input.field
-    ? `${mealNumericFieldLabel(input.field)}需要明確目標數字，或改用「減半」、「少 20%」這類可計算調整。`
-    : "請提供明確目標數字，或改用「減半」、「少 20%」這類可計算調整。";
+    ? `${mealNumericFieldLabel(input.field)}需要明確目標數字，或改用「減半」、「少 20%」、「加 10g」、「少 10g」這類可計算調整。`
+    : "請提供明確目標數字，或改用「減半」、「少 20%」、「加 10g」、「少 10g」這類可計算調整。";
   return `這次沒有更新餐點紀錄。${fieldText}`;
 }
 
