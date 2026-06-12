@@ -1,5 +1,28 @@
 # 更新日誌
 
+## v2.8 - 2026-06-12
+
+### 新增
+
+- Tool side-effect policy 現在由後端 tool contract 強制執行,不再依賴 LLM 自述信心;8 個目前註冊的 tool 都分類為 `direct-execute`、`execute-and-report`、`clarify-first` 或 `confirm-first`。
+- Confirm-first 提案改用 session-scoped pending state: `turn_states` 以 `(device_id, session_id, kind)` 作為身分邊界,跨 session 確認會 fail closed。
+- `log_food` 單品 compatibility shim 已移除; grouped `items[]` 交易成為唯一 canonical meal write path,legacy single-item shape 在 JSON/SSE 都不會建立餐點、收據或 summary 變動。
+- 新增 `policy-side-effect-gate` deterministic harness 與 NC-LLM-004 policy taxonomy ADR,per-tool policy table 由 live registry 產生並由 `yarn policy-taxonomy:check` 檢查 drift。
+- 320px onboarding 年齡 wheel 新增 tap fallback 並保留 drag;使用者更新年齡後會以新年齡重新產生 daily targets。
+
+### 變更
+
+- 既有 numeric evidence、failed-recognition、target resolution 與 revision precondition guard 改以 registry named rules 表達,行為維持 fail-closed 且 metadata-only。
+- Confirm-first commit 只接受後端保存的 proposal id / revision state,並以 atomic one-shot consume 防止重複確認造成二次 mutation。
+- Policy gate trace 只保存 tool、policy class、decision、rule/proposal metadata 與 `turnId`,不保存 raw args、user prose、tool payload、provider body 或 session material。
+- v2.8 closeout 維持本機驗證範圍;沒有 push、merge、deploy、Railway smoke、staging promotion 或 main promotion。
+
+### 驗證
+
+- Phase 83-87 verification 全部通過,涵蓋 grouped-only `log_food`、session-scoped pending state、tool policy gate、policy harness/taxonomy doc 與 320px onboarding age wheel。
+- v2.8 milestone audit 通過 `14/14` scoped requirements、`5/5` phases 與 E2E flow checks;integration 有 1 個非阻塞 proof-quality debt,已由 integration tests 補強並記錄在 milestone audit。
+- Closeout 前本機 `yarn release:check` 通過:TypeScript、`1,472` node tests、frontend production build 全部 green。Phase 87 browser harness 重新通過 320x760 tap/drag evidence。
+
 ## v2.7 - 2026-06-09
 
 ### 新增
