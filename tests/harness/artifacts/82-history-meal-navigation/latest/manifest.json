@@ -15,7 +15,7 @@
         "height": 844
       },
       "screenshotPath": "tests/harness/artifacts/82-history-meal-navigation/latest/current-week-header-mobile-390x844.png",
-      "screenshotBytes": 56424,
+      "screenshotBytes": 56421,
       "browserName": "Microsoft Edge",
       "localMockCategories": [
         "device bootstrap",
@@ -47,7 +47,7 @@
         "height": 844
       },
       "screenshotPath": "tests/harness/artifacts/82-history-meal-navigation/latest/previous-week-header-mobile-390x844.png",
-      "screenshotBytes": 51384,
+      "screenshotBytes": 51422,
       "browserName": "Microsoft Edge",
       "localMockCategories": [
         "device bootstrap",
