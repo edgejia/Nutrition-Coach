@@ -246,7 +246,7 @@ describe("onboarding stepper UI", () => {
 
     assert.match(html, /身體資料/);
     assert.match(html, /第 03 步 \/ 共 06 步/);
-    assert.match(html, /aria-valuenow="9"/);
+    assert.match(html, /aria-valuenow="10"/);
     assert.match(html, />10</);
     assert.match(html, />165</);
     assert.match(html, />58</);
@@ -281,6 +281,7 @@ describe("onboarding stepper UI", () => {
 
   it("keeps shared wheel source contracts for tap, compact/minimal variants, and TDEE steps", () => {
     assert.match(onboardingStepperSource, /function buildVisibleWheelValues/);
+    assert.match(onboardingStepperSource, /function clampNumericValue/);
     assert.match(onboardingStepperSource, /function WheelValueItem/);
     assert.match(onboardingStepperSource, /ONBOARDING_NUMERIC_BOUNDS/);
     assert.match(onboardingStepperSource, /age: \{ min: 10, max: 120 \}/);
@@ -290,7 +291,12 @@ describe("onboarding stepper UI", () => {
     assert.match(onboardingStepperSource, /tdee: \{ min: 500, max: 8000, step: 50 \}/);
     assert.match(onboardingStepperSource, /type="button"/);
     assert.match(onboardingStepperSource, /aria-current=\{active \? "true" : undefined\}/);
-    assert.match(onboardingStepperSource, /if \(item\.value === activeValue\) return;/);
+    assert.match(onboardingStepperSource, /currentValue=\{current\}/);
+    assert.match(onboardingStepperSource, /aria-valuenow=\{activeValue\}/);
+    assert.match(onboardingStepperSource, /if \(item\.value === currentValue\) return;/);
+    assert.match(onboardingStepperSource, /age: clampNumericValue\(bodyData\.age, ONBOARDING_NUMERIC_BOUNDS\.age\.min, ONBOARDING_NUMERIC_BOUNDS\.age\.max, 28\)/);
+    assert.match(onboardingStepperSource, /heightCm: clampNumericValue\(\s*bodyData\.heightCm,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.max,\s*175,\s*\)/);
+    assert.match(onboardingStepperSource, /weightKg: clampNumericValue\(\s*bodyData\.weightKg,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.max,\s*70,\s*\)/);
     assert.doesNotMatch(onboardingStepperSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
     assert.match(onboardingStepperSource, /visibleCount = minimal \? 3 : 5/);
     assert.match(onboardingStepperSource, /label="體脂率"[\s\S]*compact=\{true\}/);

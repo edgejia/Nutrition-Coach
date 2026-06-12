@@ -89,9 +89,15 @@ type WheelValueItemData = {
   className: string;
 };
 
+function clampNumericValue(value: string | number | undefined, min: number, max: number, fallback = min) {
+  const numeric = Number(value ?? fallback);
+  const finiteValue = Number.isFinite(numeric) ? numeric : fallback;
+  return Math.min(max, Math.max(min, finiteValue));
+}
+
 function buildVisibleWheelValues(current: number, min: number, max: number, step: number, visibleCount: number): WheelValueItemData[] {
   const safeStep = Number.isFinite(step) && step > 0 ? step : 1;
-  const boundedCurrent = Math.min(max, Math.max(min, Number.isFinite(current) ? current : min));
+  const boundedCurrent = clampNumericValue(current, min, max);
   const values: number[] = [];
 
   for (let value = min; value <= max; value += safeStep) {
@@ -122,10 +128,12 @@ function buildVisibleWheelValues(current: number, min: number, max: number, step
 
 function WheelValueItem({
   item,
+  currentValue,
   activeValue,
   onChange,
 }: {
   item: WheelValueItemData;
+  currentValue: number;
   activeValue: number;
   onChange?: (value: string) => void;
 }) {
@@ -137,7 +145,7 @@ function WheelValueItem({
       aria-current={active ? "true" : undefined}
       onClick={(event) => {
         event.stopPropagation();
-        if (item.value === activeValue) return;
+        if (item.value === currentValue) return;
         onChange?.(String(item.value));
       }}
     >
@@ -170,11 +178,11 @@ function SpNumberWheel({
   onChange?: (value: string) => void;
 }) {
   const current = Number(value || 0);
-  const activeValue = Math.min(max, Math.max(min, Number.isFinite(current) ? current : min));
-  const clamp = (n: number) => String(Math.min(max, Math.max(min, n)));
+  const activeValue = clampNumericValue(current, min, max);
+  const clamp = (n: number) => String(clampNumericValue(n, min, max));
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const startX = event.clientX;
-    const startValue = current;
+    const startValue = activeValue;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const move = (moveEvent: PointerEvent) => {
       const DIRECTION = -1;
@@ -200,9 +208,9 @@ function SpNumberWheel({
         </div>
       )}
       <div className={`${compact ? "sp-num-wheel compact" : "sp-num-wheel"}${minimal ? " minimal" : ""}`}>
-        <div className="sp-num-wheel-track" onPointerDown={startDrag} role="slider" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={current}>
+        <div className="sp-num-wheel-track" onPointerDown={startDrag} role="slider" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={activeValue}>
           {items.map((item) => (
-            <WheelValueItem key={`${label}-${item.value}`} item={item} activeValue={activeValue} onChange={onChange} />
+            <WheelValueItem key={`${label}-${item.value}`} item={item} currentValue={current} activeValue={activeValue} onChange={onChange} />
           ))}
         </div>
       </div>
@@ -1086,9 +1094,19 @@ export function OnboardingStepperPresentation({
       }}
       onNext={() => onBodyDataNext({
         sex: bodyData.sex,
-        age: Number(bodyData.age),
-        heightCm: Number(bodyData.heightCm),
-        weightKg: Number(bodyData.weightKg),
+        age: clampNumericValue(bodyData.age, ONBOARDING_NUMERIC_BOUNDS.age.min, ONBOARDING_NUMERIC_BOUNDS.age.max, 28),
+        heightCm: clampNumericValue(
+          bodyData.heightCm,
+          ONBOARDING_NUMERIC_BOUNDS.heightCm.min,
+          ONBOARDING_NUMERIC_BOUNDS.heightCm.max,
+          175,
+        ),
+        weightKg: clampNumericValue(
+          bodyData.weightKg,
+          ONBOARDING_NUMERIC_BOUNDS.weightKg.min,
+          ONBOARDING_NUMERIC_BOUNDS.weightKg.max,
+          70,
+        ),
       })}
       onBack={() => onBack(2)}
     />
