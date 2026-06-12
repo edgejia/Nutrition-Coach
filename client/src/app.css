@@ -700,6 +700,14 @@ textarea {
   animation: pulse 1.7s ease-in-out infinite;
 }
 
+.sp-coach-cta-loading-copy {
+  margin: 0 0 12px;
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .sp-coach-cta-skeleton {
   border-radius: var(--sp-r-pill);
   background: rgba(255, 255, 255, 0.1);
@@ -2338,6 +2346,17 @@ textarea {
 .assistant-markdown ol,
 .assistant-markdown ul {
   padding-left: 20px;
+}
+
+.assistant-markdown ol {
+  list-style-position: outside;
+  list-style-type: decimal;
+  padding-left: 28px;
+}
+
+.assistant-markdown ol > li::marker {
+  color: var(--sp-lime);
+  font-weight: 800;
 }
 
 .assistant-markdown li + li {
