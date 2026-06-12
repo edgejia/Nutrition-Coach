@@ -49,6 +49,13 @@ const SCENARIO_NAME = "estimate-confirm-first";
 const STEP_NAMES = [
   "estimate_proposal_created_without_mutation",
   "estimate_confirmation_commits_once",
+  "estimate_decline_clears_without_mutation",
+  "estimate_ignore_preserves_without_mutation",
+  "estimate_supersede_replaces_old_proposal",
+  "estimate_expiry_rejects_without_mutation",
+  "estimate_stale_revision_rejects_without_mutation",
+  "estimate_duplicate_confirmation_noops",
+  "direct_estimated_update_blocked_without_mutation",
 ] as const;
 
 function pass(name: string, actual?: unknown): ScenarioStepResult {
@@ -437,6 +444,8 @@ const scenario: VerificationScenario = {
         proposal: confirmProposalSummary,
         visibleOutcome: confirmVisibleOutcome,
       }));
+
+      throw new Error("RED: estimate negative controls are not implemented yet");
 
       assertPolicyEvidenceHasNoForbiddenFields(artifacts);
 
