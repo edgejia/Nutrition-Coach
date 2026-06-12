@@ -165,6 +165,13 @@ export function CoachAdviceCard({
   if (presentation.state === "loading") {
     return (
       <div className="sp-coach-cta sp-coach-cta-loading" aria-busy="true">
+        <div className="sp-coach-cta-label">
+          <SportBoltIcon size={14} stroke={2} />
+          <span>教練建議 · 載入中</span>
+        </div>
+        <p className="sp-coach-cta-loading-copy">
+          正在整理今天的營養進度，稍後會顯示即時建議。
+        </p>
         <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-label" />
         <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-headline" />
         <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-body" />

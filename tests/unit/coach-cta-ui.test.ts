@@ -181,6 +181,22 @@ describe("CoachCTAControls", () => {
     assert.doesNotMatch(html, /推薦三個便利商店高蛋白選擇/);
   });
 
+  it("renders visible loading copy while waiting for daily summary", () => {
+    storage.clear();
+    useStore.setState({
+      dailySummary: null,
+      dailyTargets: { calories: 1800, protein: 140, carbs: 180, fat: 60 },
+      sending: false,
+    });
+
+    const html = renderToStaticMarkup(createElement(CoachAdviceCard, { advice: null, cta: COACH_CTA_INTENTS }));
+
+    assert.match(html, /aria-busy="true"/);
+    assert.match(html, /教練建議 · 載入中/);
+    assert.match(html, /正在整理今天的營養進度/);
+    assert.match(html, /sp-coach-cta-loading-copy/);
+  });
+
   it("does not render fake-dialogue copy", () => {
     const html = renderToStaticMarkup(
       createElement(CoachCTAControls, {
