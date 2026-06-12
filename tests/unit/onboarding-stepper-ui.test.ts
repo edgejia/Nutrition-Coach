@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { IntakeData } from "../../client/src/types.js";
 
 const storage = new Map<string, string>();
 globalThis.localStorage = {
@@ -69,7 +70,7 @@ function renderStepSix(props: {
   }));
 }
 
-function renderStepThree(data: PartialIntake) {
+function renderStepThree(data: Partial<IntakeData>) {
   return renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
     step: 3,
     data: {
@@ -285,7 +286,7 @@ describe("onboarding stepper UI", () => {
     assert.match(onboardingStepperSource, /aria-current=\{active \? "true" : undefined\}/);
     assert.match(onboardingStepperSource, /if \(item\.value === activeValue\) return;/);
     assert.match(onboardingStepperSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
-    assert.match(onboardingStepperSource, /visibleCount=\{minimal \? 3 : 5\}/);
+    assert.match(onboardingStepperSource, /visibleCount = minimal \? 3 : 5/);
     assert.match(onboardingStepperSource, /label="體脂率"[\s\S]*compact=\{true\}/);
     assert.match(onboardingStepperSource, /label="每日消耗"[\s\S]*step=\{50\}[\s\S]*compact=\{true\}[\s\S]*minimal=\{true\}/);
     assert.doesNotMatch(onboardingStepperSource, /label\s*===\s*["']年齡["']/);

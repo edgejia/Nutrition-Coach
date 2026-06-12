@@ -273,12 +273,26 @@ textarea {
 .sp-num-wheel-item {
   position: relative;
   z-index: 1;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  font: inherit;
   font-family: var(--sp-font-display);
   line-height: .9;
   color: var(--sp-ink);
+  text-align: center;
   transform: translateY(1px);
   font-size: 28px;
   opacity: .24;
+  cursor: pointer;
+}
+.sp-num-wheel-item:focus-visible {
+  outline: 2px solid var(--sp-lime);
+  outline-offset: 2px;
 }
 .sp-num-wheel-item.near {
   opacity: .5;

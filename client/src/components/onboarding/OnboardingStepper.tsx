@@ -76,6 +76,69 @@ function SpObActions({ onBack, onNext, nextLabel = "繼續 →" }: { onBack?: ()
   );
 }
 
+type WheelValueItemData = {
+  value: number;
+  className: string;
+};
+
+function buildVisibleWheelValues(current: number, min: number, max: number, step: number, visibleCount: number): WheelValueItemData[] {
+  const safeStep = Number.isFinite(step) && step > 0 ? step : 1;
+  const boundedCurrent = Math.min(max, Math.max(min, Number.isFinite(current) ? current : min));
+  const values: number[] = [];
+
+  for (let value = min; value <= max; value += safeStep) {
+    values.push(value);
+  }
+  if (!values.includes(boundedCurrent)) {
+    values.push(boundedCurrent);
+    values.sort((a, b) => a - b);
+  }
+
+  const activeIndex = Math.max(0, values.indexOf(boundedCurrent));
+  const targetCount = Math.max(1, Math.min(visibleCount, values.length));
+  const centeredStart = activeIndex - Math.floor(targetCount / 2);
+  const maxStart = Math.max(0, values.length - targetCount);
+  const start = Math.min(Math.max(0, centeredStart), maxStart);
+
+  return values.slice(start, start + targetCount).map((value) => {
+    const steppedDistance = Math.abs((value - boundedCurrent) / safeStep);
+    const className = value === boundedCurrent
+      ? "sp-num-wheel-item active"
+      : steppedDistance <= 1
+        ? "sp-num-wheel-item near"
+        : "sp-num-wheel-item";
+
+    return { value, className };
+  });
+}
+
+function WheelValueItem({
+  item,
+  activeValue,
+  onChange,
+}: {
+  item: WheelValueItemData;
+  activeValue: number;
+  onChange?: (value: string) => void;
+}) {
+  const active = item.value === activeValue;
+  return (
+    <button
+      type="button"
+      className={item.className}
+      aria-current={active ? "true" : undefined}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (item.value === activeValue) return;
+        onChange?.(String(item.value));
+      }}
+    >
+      {item.value}
+    </button>
+  );
+}
+
 function SpNumberWheel({
   label,
   value,
@@ -100,6 +163,7 @@ function SpNumberWheel({
   onChange?: (value: string) => void;
 }) {
   const current = Number(value || 0);
+  const activeValue = Math.min(max, Math.max(min, Number.isFinite(current) ? current : min));
   const clamp = (n: number) => String(Math.min(max, Math.max(min, n)));
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const startX = event.clientX;
@@ -118,13 +182,8 @@ function SpNumberWheel({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
   };
-  const offsets = minimal ? [-1, 0, 1] : [-2, -1, 0, 1, 2];
-  const items = offsets.map((offset) => {
-    const next = Math.min(max, Math.max(min, current + offset * step));
-    const key = `${label}-${offset}-${next}`;
-    const className = offset === 0 ? "sp-num-wheel-item active" : Math.abs(offset) === 1 ? "sp-num-wheel-item near" : "sp-num-wheel-item";
-    return <span key={key} className={className}>{next}</span>;
-  });
+  const visibleCount = minimal ? 3 : 5;
+  const items = buildVisibleWheelValues(current, min, max, step, visibleCount);
   return (
     <div>
       {hideHeader ? null : (
@@ -135,7 +194,9 @@ function SpNumberWheel({
       )}
       <div className={`${compact ? "sp-num-wheel compact" : "sp-num-wheel"}${minimal ? " minimal" : ""}`}>
         <div className="sp-num-wheel-track" onPointerDown={startDrag} role="slider" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={current}>
-          {items}
+          {items.map((item) => (
+            <WheelValueItem key={`${label}-${item.value}`} item={item} activeValue={activeValue} onChange={onChange} />
+          ))}
         </div>
       </div>
     </div>
