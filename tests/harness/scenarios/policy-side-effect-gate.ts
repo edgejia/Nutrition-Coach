@@ -7,6 +7,7 @@
 
 import assert from "node:assert/strict";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
+import { DEFAULT_SESSION_ID } from "../../../server/services/turn-state.js";
 import {
   assertPolicyDbInvariant,
   assertPolicyEvidenceHasNoForbiddenFields,
@@ -53,6 +54,11 @@ const STEP_NAMES = [
   "direct-execute_get_daily_summary_policy_fact",
   "execute-and-report_log_food_policy_fact",
   "clarify-first_find_meals_no_domain_mutation",
+  "confirm-first_propose_approve_meal_numeric",
+  "confirm-first_propose_cancel_goal",
+  "confirm-first_cross_session_reject",
+  "confirm-first_stale_revision_reject",
+  "confirm-first_double_confirmation_reject",
 ] as const;
 
 function pass(name: string, actual?: unknown): ScenarioStepResult {
@@ -153,6 +159,16 @@ async function readTargets(address: string, cookieHeader: string): Promise<Devic
   assert.equal(res.status, 200);
   const body = await res.json() as DeviceSessionBody;
   return body.dailyTargets;
+}
+
+function sameTargets(
+  left: DeviceSessionBody["dailyTargets"],
+  right: DeviceSessionBody["dailyTargets"],
+): boolean {
+  return left.calories === right.calories
+    && left.protein === right.protein
+    && left.carbs === right.carbs
+    && left.fat === right.fat;
 }
 
 const scenario: VerificationScenario = {
@@ -397,6 +413,347 @@ const scenario: VerificationScenario = {
         visibleOutcome: clarifyVisibleOutcome,
       });
       steps.push(pass(clarifyStep, { policyFact: clarifyPolicyFact, dbInvariant: clarifyDbInvariant, visibleOutcome: clarifyVisibleOutcome }));
+
+      const approveStep = STEP_NAMES[3];
+      provider.reset();
+      resetPublishCounts();
+      const approvalMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+        loggedAt: new Date().toISOString(),
+        items: [{ foodName: "鮭魚飯", calories: 700, protein: 36, carbs: 82, fat: 24 }],
+      });
+      const approvalProposal = await fixture.services.mealNumericProposalService.putLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: approvalMeal.id,
+          expectedMealRevisionId: approvalMeal.mealRevisionId,
+          updateInput: { protein: 18 },
+          affectedFields: [{ field: "protein", before: 36, after: 18 }],
+          sourceOperator: "half",
+        },
+      });
+      const approvalMealsBefore = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
+      const approved = await postChat(fixture.address, fixture.cookieHeader, "套用餐點修改");
+      const approvalTrace = traceRecorders.at(-1)?.build({ scenario: approveStep, status: "pass" });
+      assert.ok(approvalTrace);
+      const approvalPolicyFact = findPolicyFact(approvalTrace, "propose_meal_numeric_correction");
+      const approvalMealsAfter = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
+      const approvedMeal = approvalMealsAfter.find((meal) => meal.id === approvalMeal.id);
+      const approvalDbInvariant = summarizePolicyDbInvariant({
+        mealCountBefore: approvalMealsBefore.length,
+        mealCountAfter: approvalMealsAfter.length,
+        pendingConsumed: await fixture.services.mealNumericProposalService.getLatest({
+          deviceId: fixture.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+        }) === undefined,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const approvalVisibleOutcome = summarizeVisibleOutcome({
+        keyLabels: {
+          updatedProteinLabel: /蛋白質 18 g/.test(approved.body.reply ?? ""),
+        },
+        meaning: {
+          returnedHttpSuccess: approved.status === 200,
+          didMutateMeal: approved.body.didMutateMeal === true,
+          returnedSummary: Boolean(approved.body.dailySummary),
+        },
+      });
+      assert.equal(approvedMeal?.protein, 18);
+      assertPolicyFact(approvalPolicyFact, {
+        tool: "propose_meal_numeric_correction",
+        policyClass: "confirm-first",
+        decision: "allowed",
+        ruleId: "meal_numeric_proposal_approval_consume",
+        proposalId: approvalProposal.proposalId,
+      });
+      assertPolicyDbInvariant(approvalDbInvariant, {
+        mealCountBefore: approvalMealsBefore.length,
+        mealCountAfter: approvalMealsBefore.length,
+        pendingConsumed: true,
+        dailySummaryPublishCount: 1,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(approvalVisibleOutcome, {
+        keyLabels: {
+          updatedProteinLabel: true,
+        },
+        meaning: {
+          returnedHttpSuccess: true,
+          didMutateMeal: true,
+          returnedSummary: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: approveStep,
+        policyFact: approvalPolicyFact,
+        dbInvariant: approvalDbInvariant,
+        visibleOutcome: approvalVisibleOutcome,
+      });
+      steps.push(pass(approveStep, { policyFact: approvalPolicyFact, dbInvariant: approvalDbInvariant, visibleOutcome: approvalVisibleOutcome }));
+
+      const cancelStep = STEP_NAMES[4];
+      provider.reset();
+      resetPublishCounts();
+      const targetsBeforeCancel = await readTargets(fixture.address, fixture.cookieHeader);
+      await fixture.services.goalProposalService.putLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        targets: {
+          calories: targetsBeforeCancel.calories - 100,
+          protein: targetsBeforeCancel.protein,
+          carbs: targetsBeforeCancel.carbs,
+          fat: targetsBeforeCancel.fat,
+        },
+      });
+      const cancelled = await postChat(fixture.address, fixture.cookieHeader, "先不用");
+      const targetsAfterCancel = await readTargets(fixture.address, fixture.cookieHeader);
+      const cancelDbInvariant = summarizePolicyDbInvariant({
+        targetsChanged: !sameTargets(targetsBeforeCancel, targetsAfterCancel),
+        pendingConsumed: await fixture.services.goalProposalService.getLatest({
+          deviceId: fixture.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+        }) === undefined,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const cancelVisibleOutcome = summarizeVisibleOutcome({
+        keyLabels: {
+          cancelledLabel: /取消|不用/.test(cancelled.body.reply ?? ""),
+        },
+        meaning: {
+          returnedHttpSuccess: cancelled.status === 200,
+          didNotMutateMeal: cancelled.body.didMutateMeal === false,
+          targetsUnchanged: sameTargets(targetsBeforeCancel, targetsAfterCancel),
+        },
+      });
+      assertPolicyDbInvariant(cancelDbInvariant, {
+        targetsChanged: false,
+        pendingConsumed: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(cancelVisibleOutcome, {
+        keyLabels: {
+          cancelledLabel: true,
+        },
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMeal: true,
+          targetsUnchanged: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: cancelStep,
+        dbInvariant: cancelDbInvariant,
+        visibleOutcome: cancelVisibleOutcome,
+      });
+      steps.push(pass(cancelStep, { dbInvariant: cancelDbInvariant, visibleOutcome: cancelVisibleOutcome }));
+
+      const crossStep = STEP_NAMES[5];
+      resetPublishCounts();
+      const crossMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+        loggedAt: new Date().toISOString(),
+        items: [{ foodName: "牛肉飯", calories: 680, protein: 32, carbs: 84, fat: 22 }],
+      });
+      const crossMealsBefore = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
+      const crossProposal = await fixture.services.mealNumericProposalService.putLatest({
+        deviceId: fixture.deviceId,
+        sessionId: "phase86-session-a",
+        input: {
+          mealId: crossMeal.id,
+          expectedMealRevisionId: crossMeal.mealRevisionId,
+          updateInput: { protein: 16 },
+          affectedFields: [{ field: "protein", before: 32, after: 16 }],
+          sourceOperator: "half",
+        },
+      });
+      const crossConsumed = await fixture.services.mealNumericProposalService.consumeLatest({
+        deviceId: fixture.deviceId,
+        sessionId: "phase86-session-b",
+        proposalId: crossProposal.proposalId,
+        expectedMealRevisionId: crossMeal.mealRevisionId,
+      });
+      const crossStillPending = await fixture.services.mealNumericProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: "phase86-session-a",
+      });
+      const crossMealsAfter = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
+      const crossDbInvariant = summarizePolicyDbInvariant({
+        mealCountBefore: crossMealsBefore.length,
+        mealCountAfter: crossMealsAfter.length,
+        pendingPreserved: crossStillPending?.proposalId === crossProposal.proposalId,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const crossVisibleOutcome = summarizeVisibleOutcome({
+        meaning: {
+          rejectedWrongOwner: crossConsumed === undefined,
+          didNotMutateMeal: crossMealsAfter.find((meal) => meal.id === crossMeal.id)?.protein === 32,
+        },
+      });
+      assertPolicyDbInvariant(crossDbInvariant, {
+        mealCountBefore: crossMealsBefore.length,
+        mealCountAfter: crossMealsBefore.length,
+        pendingPreserved: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(crossVisibleOutcome, {
+        meaning: {
+          rejectedWrongOwner: true,
+          didNotMutateMeal: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: crossStep,
+        dbInvariant: crossDbInvariant,
+        visibleOutcome: crossVisibleOutcome,
+      });
+      steps.push(pass(crossStep, { dbInvariant: crossDbInvariant, visibleOutcome: crossVisibleOutcome }));
+
+      const staleStep = STEP_NAMES[6];
+      provider.reset();
+      resetPublishCounts();
+      const staleMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+        loggedAt: new Date().toISOString(),
+        items: [{ foodName: "豆腐飯", calories: 560, protein: 26, carbs: 78, fat: 16 }],
+      });
+      const staleProposal = await fixture.services.mealNumericProposalService.putLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: staleMeal.id,
+          expectedMealRevisionId: staleMeal.mealRevisionId,
+          updateInput: { protein: 13 },
+          affectedFields: [{ field: "protein", before: 26, after: 13 }],
+          sourceOperator: "half",
+        },
+      });
+      const staleExternalUpdate = await fixture.services.foodLoggingService.updateMeal(fixture.deviceId, staleMeal.id, {
+        expectedMealRevisionId: staleMeal.mealRevisionId,
+        items: [{ foodName: "新版豆腐飯", calories: 560, protein: 27, carbs: 78, fat: 16 }],
+      });
+      const staleMealsBefore = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
+      const stale = await postChat(fixture.address, fixture.cookieHeader, "套用餐點修改");
+      const staleTrace = traceRecorders.at(-1)?.build({ scenario: staleStep, status: "pass" });
+      assert.ok(staleTrace);
+      const stalePolicyFact = findPolicyFact(staleTrace, "propose_meal_numeric_correction");
+      const staleMealsAfter = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
+      const staleCurrent = staleMealsAfter.find((meal) => meal.id === staleMeal.id);
+      const staleDbInvariant = summarizePolicyDbInvariant({
+        mealCountBefore: staleMealsBefore.length,
+        mealCountAfter: staleMealsAfter.length,
+        pendingConsumed: await fixture.services.mealNumericProposalService.getLatest({
+          deviceId: fixture.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+        }) === undefined,
+        targetsChanged: false,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const staleVisibleOutcome = summarizeVisibleOutcome({
+        meaning: {
+          returnedHttpSuccess: stale.status === 200,
+          didNotMutateMeal: stale.body.didMutateMeal === false,
+          staleRevisionRejected: staleCurrent?.mealRevisionId === staleExternalUpdate.mealRevisionId,
+        },
+      });
+      assert.equal(staleCurrent?.protein, 27);
+      assertPolicyFact(stalePolicyFact, {
+        tool: "propose_meal_numeric_correction",
+        policyClass: "confirm-first",
+        decision: "allowed",
+        ruleId: "meal_numeric_proposal_approval_consume",
+        proposalId: staleProposal.proposalId,
+      });
+      assertPolicyDbInvariant(staleDbInvariant, {
+        mealCountBefore: staleMealsBefore.length,
+        mealCountAfter: staleMealsBefore.length,
+        pendingConsumed: true,
+        targetsChanged: false,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(staleVisibleOutcome, {
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMeal: true,
+          staleRevisionRejected: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: staleStep,
+        policyFact: stalePolicyFact,
+        dbInvariant: staleDbInvariant,
+        visibleOutcome: staleVisibleOutcome,
+      });
+      steps.push(pass(staleStep, { policyFact: stalePolicyFact, dbInvariant: staleDbInvariant, visibleOutcome: staleVisibleOutcome }));
+
+      const doubleStep = STEP_NAMES[7];
+      provider.reset();
+      resetPublishCounts();
+      const doubleMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+        loggedAt: new Date().toISOString(),
+        items: [{ foodName: "雞胸飯", calories: 610, protein: 40, carbs: 76, fat: 14 }],
+      });
+      const doubleProposal = await fixture.services.mealNumericProposalService.putLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: doubleMeal.id,
+          expectedMealRevisionId: doubleMeal.mealRevisionId,
+          updateInput: { protein: 20 },
+          affectedFields: [{ field: "protein", before: 40, after: 20 }],
+          sourceOperator: "half",
+        },
+      });
+      const firstDouble = await postChat(fixture.address, fixture.cookieHeader, "套用餐點修改");
+      assert.equal(firstDouble.body.didMutateMeal, true);
+      resetPublishCounts();
+      provider.reset();
+      provider.queueRoundResponse({ content: "目前沒有待套用的餐點修改。" });
+      const doubleMealsBefore = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
+      const secondDouble = await postChat(fixture.address, fixture.cookieHeader, "套用餐點修改");
+      const doubleMealsAfter = await fixture.services.foodLoggingService.getMealsByDate(fixture.deviceId, new Date());
+      const doubleCurrent = doubleMealsAfter.find((meal) => meal.id === doubleMeal.id);
+      const doubleDbInvariant = summarizePolicyDbInvariant({
+        mealCountBefore: doubleMealsBefore.length,
+        mealCountAfter: doubleMealsAfter.length,
+        pendingConsumed: await fixture.services.mealNumericProposalService.getLatest({
+          deviceId: fixture.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+        }) === undefined,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const doubleVisibleOutcome = summarizeVisibleOutcome({
+        meaning: {
+          returnedHttpSuccess: secondDouble.status === 200,
+          didNotMutateMealAgain: secondDouble.body.didMutateMeal !== true && doubleCurrent?.protein === 20,
+          oneShotProposalConsumed: doubleProposal.proposalId.length > 0,
+        },
+      });
+      assertPolicyDbInvariant(doubleDbInvariant, {
+        mealCountBefore: doubleMealsBefore.length,
+        mealCountAfter: doubleMealsBefore.length,
+        pendingConsumed: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(doubleVisibleOutcome, {
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMealAgain: true,
+          oneShotProposalConsumed: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: doubleStep,
+        dbInvariant: doubleDbInvariant,
+        visibleOutcome: doubleVisibleOutcome,
+      });
+      steps.push(pass(doubleStep, { dbInvariant: doubleDbInvariant, visibleOutcome: doubleVisibleOutcome }));
 
       assertPolicyEvidenceHasNoForbiddenFields(artifacts);
 
