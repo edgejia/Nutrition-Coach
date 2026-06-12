@@ -256,6 +256,7 @@ describe("chat meal correction integration", () => {
     assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
     assert.deepEqual(publishDailySummaryCalls, []);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
 
     const meals = await getMeals();
     const current = meals.find((meal) => meal.id === original.id);
@@ -323,6 +324,188 @@ describe("chat meal correction integration", () => {
     const current = meals.find((meal) => meal.id === original.id);
     assert.equal(current?.mealRevisionId, original.mealRevisionId);
     assert.equal(current?.protein, 30);
+  });
+
+  it("creates a model-estimate proposal, confirms it once, and leaves duplicate confirmation inert", async () => {
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_estimate_numeric_meal",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "雞腿飯幫我估合理一點然後更新",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "propose_estimate_numeric_meal",
+        type: "function",
+        function: {
+          name: "propose_meal_estimate",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            fields: ["calories", "protein", "carbs", "fat"],
+            estimated: {
+              calories: 560,
+              protein: 28,
+              carbs: 70,
+              fat: 16,
+            },
+          }),
+        },
+      }],
+    });
+
+    const proposed = await postChat("雞腿飯幫我估合理一點然後更新");
+
+    assert.equal(proposed.status, 200);
+    assert.equal(proposed.body.didLogMeal, false);
+    assert.equal(proposed.body.didMutateMeal, false);
+    assert.equal(proposed.body.reply, renderMealNumericProposalCopy({
+      mealLabel: "雞腿飯",
+      affectedFields: [
+        { field: "calories", before: 650, after: 560 },
+        { field: "protein", before: 30, after: 28 },
+        { field: "carbs", before: 80, after: 70 },
+        { field: "fat", before: 20, after: 16 },
+      ],
+      sourceOperator: "model_estimate",
+    }));
+    assert.equal(Object.prototype.hasOwnProperty.call(proposed.body, "summaryOutcome"), false);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const proposal = await services.mealNumericProposalService.getLatest(defaultSessionKey());
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, original.id);
+    assert.equal(proposal.expectedMealRevisionId, original.mealRevisionId);
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.deepEqual(proposal.updateInput, {
+      calories: 560,
+      protein: 28,
+      carbs: 70,
+      fat: 16,
+    });
+    assert.deepEqual(proposal.affectedFields, [
+      { field: "calories", before: 650, after: 560 },
+      { field: "protein", before: 30, after: 28 },
+      { field: "carbs", before: 80, after: 70 },
+      { field: "fat", before: 20, after: 16 },
+    ]);
+
+    const beforeApprovalMeals = await getMeals();
+    const beforeApproval = beforeApprovalMeals.find((meal) => meal.id === original.id);
+    assert.equal(beforeApproval?.mealRevisionId, original.mealRevisionId);
+    assert.equal(beforeApproval?.calories, 650);
+    assert.equal(beforeApproval?.protein, 30);
+
+    const approved = await postChat("好");
+
+    assert.equal(approved.status, 200);
+    assert.equal(approved.body.didLogMeal, false);
+    assert.equal(approved.body.didMutateMeal, true);
+    assert.match(approved.body.reply, /已更新.*雞腿飯.*560 kcal.*蛋白質 28 g/);
+    assert.equal(approved.body.dailySummary?.totalCalories, 560);
+    assert.equal(publishDailySummaryCalls.length, 1);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+
+    const afterApprovalMeals = await getMeals();
+    const afterApproval = afterApprovalMeals.find((meal) => meal.id === original.id);
+    assert.ok(afterApproval);
+    assert.notEqual(afterApproval.mealRevisionId, original.mealRevisionId);
+    assert.equal(afterApproval.calories, 560);
+    assert.equal(afterApproval.protein, 28);
+    assert.equal(afterApproval.carbs, 70);
+    assert.equal(afterApproval.fat, 16);
+    const approvedRevisionId = afterApproval.mealRevisionId;
+
+    mockLLM.queueChatResponse({ content: "目前沒有可套用的餐點修正。" });
+
+    const duplicateApproval = await postChat("好");
+
+    assert.equal(duplicateApproval.status, 200);
+    assert.equal(duplicateApproval.body.didLogMeal, false);
+    assert.equal(duplicateApproval.body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(duplicateApproval.body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(duplicateApproval.body, "dailySummary"), false);
+    assert.equal(publishDailySummaryCalls.length, 1);
+
+    const afterDuplicateMeals = await getMeals();
+    const afterDuplicate = afterDuplicateMeals.find((meal) => meal.id === original.id);
+    assert.equal(afterDuplicate?.mealRevisionId, approvedRevisionId);
+    assert.equal(afterDuplicate?.protein, 28);
+  });
+
+  it("rejects stale model-estimate approval without revision or daily_summary publish", async () => {
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const proposal = await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: original.id,
+        expectedMealRevisionId: original.mealRevisionId,
+        updateInput: { calories: 560, protein: 28 },
+        affectedFields: [
+          { field: "calories", before: 650, after: 560 },
+          { field: "protein", before: 30, after: 28 },
+        ],
+        sourceOperator: "model_estimate",
+        provenance: "model_estimate",
+      },
+    });
+    const externalUpdate = await services.foodLoggingService.updateMeal(deviceId, original.id, {
+      expectedMealRevisionId: original.mealRevisionId,
+      items: [{
+        foodName: "新版雞腿飯",
+        calories: 640,
+        protein: 31,
+        carbs: 78,
+        fat: 19,
+      }],
+    });
+
+    const { status, body } = await postChat("套用餐點修改");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
+    assert.equal(current?.protein, 31);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+
+    const trace = traceRecorders.at(-1)?.build({ scenario: "meal-estimate-stale-policy", status: "pass" });
+    assert.ok(trace);
+    const toolResult = trace.timeline.find((event) => event.type === "tool_result");
+    assert.ok(toolResult);
+    assert.equal(toolResult.tool, "propose_meal_numeric_correction");
+    assert.equal(toolResult.success, true);
+    assert.equal(toolResult.executed, false);
+    assert.equal(toolResult.policyClass, "confirm-first");
+    assert.equal(toolResult.decision, "allowed");
+    assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
+    assert.equal(toolResult.proposalId, proposal.proposalId);
   });
 
   it("rejects stale meal proposal approval without revision or daily_summary publish", async () => {
@@ -437,6 +620,170 @@ describe("chat meal correction integration", () => {
     assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
     assert.equal(toolResult.proposalId, proposal.proposalId);
     assert.equal(typeof toolResult.turnId, "string");
+  });
+
+  it("supersedes a model-estimate proposal with an explicit numeric proposal instead of mutating immediately", async () => {
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_estimate_before_explicit_follow_up",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "雞腿飯幫我估合理一點",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "propose_estimate_before_explicit_follow_up",
+        type: "function",
+        function: {
+          name: "propose_meal_estimate",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            fields: ["calories", "protein", "carbs", "fat"],
+            estimated: {
+              calories: 560,
+              protein: 28,
+              carbs: 70,
+              fat: 16,
+            },
+          }),
+        },
+      }],
+    });
+
+    const estimated = await postChat("雞腿飯幫我估合理一點");
+    assert.equal(estimated.status, 200);
+    assert.equal(estimated.body.didMutateMeal, false);
+    const estimateProposal = await services.mealNumericProposalService.getLatest(defaultSessionKey());
+    assert.ok(estimateProposal);
+    assert.equal(estimateProposal.sourceOperator, "model_estimate");
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_explicit_follow_up_for_estimate",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "雞腿飯蛋白質改 30 就好",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "propose_explicit_follow_up_for_estimate",
+        type: "function",
+        function: {
+          name: "propose_meal_numeric_correction",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            fields: ["protein"],
+            operator: "set",
+            value: 30,
+          }),
+        },
+      }],
+    });
+
+    const explicit = await postChat("蛋白質改 30 就好");
+
+    assert.equal(explicit.status, 200);
+    assert.equal(explicit.body.didLogMeal, false);
+    assert.equal(explicit.body.didMutateMeal, false);
+    assert.equal(explicit.body.reply, renderMealNumericProposalCopy({
+      mealLabel: "雞腿飯",
+      affectedFields: [{ field: "protein", before: 30, after: 30 }],
+      sourceOperator: "set",
+    }));
+    assert.equal(Object.prototype.hasOwnProperty.call(explicit.body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(explicit.body, "dailySummary"), false);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const supersedingProposal = await services.mealNumericProposalService.getLatest(defaultSessionKey());
+    assert.ok(supersedingProposal);
+    assert.notEqual(supersedingProposal.proposalId, estimateProposal.proposalId);
+    assert.equal(supersedingProposal.sourceOperator, "set");
+    assert.equal(supersedingProposal.provenance, undefined);
+    assert.deepEqual(supersedingProposal.updateInput, { protein: 30 });
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, original.mealRevisionId);
+    assert.equal(current?.protein, 30);
+  });
+
+  it("fails closed after repeated invalid model-estimate proposals without persisting a proposal", async () => {
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+
+    const invalidEstimateToolCall = (id: string) => ({
+      id,
+      type: "function" as const,
+      function: {
+        name: "propose_meal_estimate",
+        arguments: JSON.stringify({
+          meal_id: original.id,
+          fields: ["calories", "protein"],
+          estimated: {
+            calories: 560,
+          },
+        }),
+      },
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [
+        {
+          id: "find_invalid_estimate_target",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({
+              action: "update",
+              query: "雞腿飯幫我估熱量跟蛋白質",
+            }),
+          },
+        },
+        invalidEstimateToolCall("invalid_estimate_missing_protein_1"),
+      ],
+    });
+    mockLLM.queueChatResponse({ toolCalls: [invalidEstimateToolCall("invalid_estimate_missing_protein_2")] });
+    mockLLM.queueChatResponse({ toolCalls: [invalidEstimateToolCall("invalid_estimate_missing_protein_3")] });
+
+    const { status, body } = await postChat("雞腿飯幫我估熱量跟蛋白質");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderMealNumericAuthorityFailureCopy());
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.deepEqual(publishDailySummaryCalls, []);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, original.mealRevisionId);
+    assert.equal(current?.protein, 30);
+    assert.equal(current?.calories, 650);
   });
 
   it("clears stale resolved meal selection after stored proposal approval", async () => {
