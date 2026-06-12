@@ -4,7 +4,7 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { createDb } from "./db/client.js";
+import { createDb, type AppDatabase } from "./db/client.js";
 import { createDeviceService } from "./services/device.js";
 import { createFoodLoggingService } from "./services/food-logging.js";
 import { createSummaryService } from "./services/summary.js";
@@ -53,6 +53,7 @@ export function getCorsRegistrationPolicy(input: {
 export interface AppServices {
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
+  db: AppDatabase;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   goalProposalService: ReturnType<typeof createGoalProposalService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
@@ -143,6 +144,7 @@ export async function buildApp(opts: AppOptions) {
   opts.onServicesReady?.({
     assetService,
     chatService,
+    db,
     foodLoggingService,
     goalProposalService,
     guestSessionService,
