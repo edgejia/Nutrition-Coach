@@ -13,6 +13,10 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderMealDeleteAuthorityFailureCopy,
+  renderMealDeleteCancelCopy,
+  renderMealDeleteProposalCopy,
+  renderMealDeleteStaleCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericCancelCopy,
   renderMealNumericClarificationCopy,
@@ -86,6 +90,21 @@ const MEAL_NUMERIC_INTERNAL_TERMS = [
   "payload",
 ] as const;
 
+const MEAL_DELETE_INTERNAL_TERMS = [
+  "proposalId",
+  "mealId",
+  "expectedMealRevisionId",
+  "turn_states",
+  "delete_meal",
+  "revision",
+  "payload",
+  "summaryOutcome",
+  "dailySummary",
+  "API",
+  "tool",
+  "DELETE",
+] as const;
+
 const CORRECTION_TARGET_INTERNAL_TERMS = [
   "find_meals",
   "update_meal",
@@ -140,6 +159,12 @@ function assertNoGoalInternalTerms(text: string) {
 
 function assertNoMealNumericInternalTerms(text: string) {
   const leaked = MEAL_NUMERIC_INTERNAL_TERMS.filter((term) => text.includes(term));
+  assert.deepEqual(leaked, []);
+  assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+}
+
+function assertNoMealDeleteInternalTerms(text: string) {
+  const leaked = MEAL_DELETE_INTERNAL_TERMS.filter((term) => text.includes(term));
   assert.deepEqual(leaked, []);
   assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
 }
@@ -388,6 +413,67 @@ describe("meal numeric proposal and rejection renderers", () => {
     assert.doesNotMatch(ambiguity, /已更新餐點|已更新每日目標/);
     assertNoMealNumericInternalTerms(cancel);
     assertNoMealNumericInternalTerms(ambiguity);
+  });
+});
+
+describe("meal delete proposal and rejection renderers", () => {
+  const snapshot = {
+    mealId: "meal-internal",
+    expectedMealRevisionId: "revision-internal",
+    mealLabel: "牛肉麵、滷蛋",
+    calories: 600,
+    protein: 31,
+    carbs: 69,
+    fat: 21,
+    dateKey: "2026-03-25",
+    loggedAt: "2026-03-25T10:30:00.000Z",
+    mealPeriod: "dinner" as const,
+    items: [
+      { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      { foodName: "滷蛋", calories: 80, protein: 7, carbs: 1, fat: 5 },
+    ],
+  };
+
+  it("renders proposal copy with persisted user-visible meal facts only", () => {
+    const text = renderMealDeleteProposalCopy({ snapshot });
+
+    assert.match(text, /即將刪除：牛肉麵、滷蛋/);
+    assert.match(text, /日期：2026-03-25 晚餐/);
+    assert.match(text, /營養：600 kcal，P31g \/ C69g \/ F21g/);
+    assert.match(text, /牛肉麵 520 kcal/);
+    assert.match(text, /滷蛋 80 kcal/);
+    assert.match(text, /確認.*刪除/);
+    assert.match(text, /取消.*不會變更/);
+    assert.doesNotMatch(text, /照片|圖片|image/);
+    assertNoMealDeleteInternalTerms(text);
+  });
+
+  it("adds the explicit delete confirmation hint only when another proposal kind is active", () => {
+    const withoutOtherProposal = renderMealDeleteProposalCopy({ snapshot });
+    const withOtherProposal = renderMealDeleteProposalCopy({
+      snapshot,
+      otherProposalKindActive: true,
+    });
+
+    assert.doesNotMatch(withoutOtherProposal, /明確回覆「刪除這筆餐點」/);
+    assert.match(withOtherProposal, /明確回覆「刪除這筆餐點」/);
+    assertNoMealDeleteInternalTerms(withoutOtherProposal);
+    assertNoMealDeleteInternalTerms(withOtherProposal);
+  });
+
+  it("renders no-delete cancel, authority failure, and stale copy", () => {
+    const cancel = renderMealDeleteCancelCopy();
+    const authorityFailure = renderMealDeleteAuthorityFailureCopy();
+    const stale = renderMealDeleteStaleCopy();
+
+    assert.equal(cancel, "已取消刪除這筆餐點，餐點紀錄沒有變更。");
+    assert.match(authorityFailure, /^這次沒有刪除餐點紀錄。/);
+    assert.match(stale, /^這次沒有刪除餐點紀錄。/);
+    assert.match(stale, /餐點內容已經變更/);
+    for (const text of [cancel, authorityFailure, stale]) {
+      assert.doesNotMatch(text, /已刪除|成功刪除/);
+      assertNoMealDeleteInternalTerms(text);
+    }
   });
 });
 

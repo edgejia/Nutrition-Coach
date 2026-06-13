@@ -6,6 +6,7 @@ import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createGoalProposalService } from "../../server/services/goal-proposals.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+import { createMealDeleteProposalService } from "../../server/services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
@@ -29,6 +30,9 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderMealDeleteAuthorityFailureCopy,
+  renderMealDeleteCancelCopy,
+  renderMealDeleteStaleCopy,
   renderMealNumericCancelCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
@@ -574,7 +578,9 @@ describe("Orchestrator - didLogMeal", () => {
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   let goalProposalService: ReturnType<typeof createGoalProposalService>;
+  let mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   let mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  let summaryService: ReturnType<typeof createSummaryService>;
   let chatService: ReturnType<typeof createChatService>;
   let shouldFailSummary = false;
 
@@ -584,8 +590,9 @@ describe("Orchestrator - didLogMeal", () => {
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
     goalProposalService = createGoalProposalService(db);
+    mealDeleteProposalService = createMealDeleteProposalService(db);
     mealNumericProposalService = createMealNumericProposalService(db);
-    const summaryService = createSummaryService(db);
+    summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
     shouldFailSummary = false;
@@ -606,6 +613,7 @@ describe("Orchestrator - didLogMeal", () => {
       mealCorrectionService,
       deviceService,
       goalProposalService,
+      mealDeleteProposalService,
       mealNumericProposalService,
       publisher: {
         publishGoalsUpdate() {
@@ -2833,5 +2841,226 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
     assert.equal(meals.find((current) => current.id === meal.id)?.protein, 15);
+  });
+
+  it("confirms the active delete proposal by consuming before deleting exactly that meal", async () => {
+    const firstMeal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const secondMeal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T10:00:00.000Z",
+      items: [
+        { foodName: "鮭魚飯", calories: 520, protein: 32, carbs: 58, fat: 14 },
+      ],
+    });
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: firstMeal.id,
+        expectedMealRevisionId: firstMeal.mealRevisionId,
+        snapshot: {
+          mealId: firstMeal.id,
+          expectedMealRevisionId: firstMeal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: firstMeal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    const deleteCalls: Array<{ mealId: string; expectedMealRevisionId?: string | null }> = [];
+    let clearPendingSelectionCalls = 0;
+    const approvalOrchestrator = createOrchestrator({
+      llmProvider: mockLLM,
+      chatService,
+      summaryService,
+      foodLoggingService,
+      mealCorrectionService: {
+        ...mealCorrectionService,
+        async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+          deleteCalls.push({ mealId: args[1], expectedMealRevisionId: args[2] });
+          return mealCorrectionService.deleteMeal(...args);
+        },
+        async clearPendingSelection(...args: Parameters<typeof mealCorrectionService.clearPendingSelection>) {
+          clearPendingSelectionCalls += 1;
+          return mealCorrectionService.clearPendingSelection(...args);
+        },
+      },
+      deviceService,
+      goalProposalService,
+      mealDeleteProposalService,
+      mealNumericProposalService,
+    });
+
+    const result = await approvalOrchestrator.handleMessage(deviceId, "確認");
+
+    assert.ok("reply" in result);
+    assert.match(result.reply, /已刪除雞腿飯，已從當日紀錄移除。/);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.deletedMealId, firstMeal.id);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.deepEqual(deleteCalls, [{ mealId: firstMeal.id, expectedMealRevisionId: firstMeal.mealRevisionId }]);
+    assert.equal(clearPendingSelectionCalls, 1);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((meal) => meal.id === firstMeal.id), false);
+    assert.equal(meals.some((meal) => meal.id === secondMeal.id), true);
+  });
+
+  it("clears an active delete proposal on cancel without deleting or calling the model", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "取消");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderMealDeleteCancelCopy());
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((current) => current.id === meal.id), true);
+  });
+
+  it("fails closed when delete proposal consume returns no payload", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const proposal = await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    let deleteCalls = 0;
+    const authorityFailureOrchestrator = createOrchestrator({
+      llmProvider: mockLLM,
+      chatService,
+      summaryService,
+      foodLoggingService,
+      mealCorrectionService: {
+        ...mealCorrectionService,
+        async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+          deleteCalls += 1;
+          return mealCorrectionService.deleteMeal(...args);
+        },
+      },
+      deviceService,
+      goalProposalService,
+      mealDeleteProposalService: {
+        ...mealDeleteProposalService,
+        async getLatest() {
+          return proposal;
+        },
+        async consumeLatest() {
+          return undefined;
+        },
+      },
+      mealNumericProposalService,
+    });
+
+    const result = await authorityFailureOrchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderMealDeleteAuthorityFailureCopy());
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(deleteCalls, 0);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((current) => current.id === meal.id), true);
+  });
+
+  it("returns stale delete copy when the previewed meal revision changed before confirmation", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    await mealCorrectionService.updateMeal(
+      deviceId,
+      meal.id,
+      { patch: { foodName: "新版雞腿飯", calories: 700, protein: 35, carbs: 82, fat: 22 } },
+      meal.mealRevisionId,
+    );
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderMealDeleteStaleCopy());
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((current) => current.id === meal.id), true);
   });
 });
