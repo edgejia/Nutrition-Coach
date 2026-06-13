@@ -1766,28 +1766,37 @@ describe("chat meal correction integration", () => {
       toolCalls: [{
         id: "delete_selected_meal",
         type: "function",
-            function: {
-              name: "delete_meal",
-              arguments: JSON.stringify({
-                meal_id: first.id,
-              }),
-            },
-          }],
-    });
-    mockLLM.queueChatResponse({
-      content: "已幫你刪除第二筆雞腿飯。",
+        function: {
+          name: "delete_meal",
+          arguments: JSON.stringify({
+            meal_id: first.id,
+          }),
+        },
+      }],
     });
 
-    const { status, body } = await postChat("第二個");
+    const selected = await postChat("第二個");
 
-    assert.equal(status, 200);
-    assert.equal(body.didLogMeal, false);
-    assert.equal(body.didMutateMeal, true);
-    assert.match(body.reply, /已刪除雞腿飯，已從當日紀錄移除。/);
-    assert.equal(body.dailySummary?.mealCount, 1);
-    assert.equal(body.dailySummary?.totalCalories, 620);
+    assert.equal(selected.status, 200);
+    assert.equal(selected.body.didLogMeal, false);
+    assert.equal(selected.body.didMutateMeal, false);
+    assert.match(selected.body.reply, /即將刪除：雞腿飯/);
+    assert.doesNotMatch(selected.body.reply, /已刪除/);
+    let meals = await getMeals();
+    assert.equal(meals.length, 2);
+    assert.equal(meals.some((meal) => meal.id === first.id), true);
+    assert.equal(meals.some((meal) => meal.id === second.id), true);
 
-    const meals = await getMeals();
+    const confirmed = await postChat("好");
+
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.didLogMeal, false);
+    assert.equal(confirmed.body.didMutateMeal, true);
+    assert.match(confirmed.body.reply, /已刪除雞腿飯，已從當日紀錄移除。/);
+    assert.equal(confirmed.body.dailySummary?.mealCount, 1);
+    assert.equal(confirmed.body.dailySummary?.totalCalories, 620);
+
+    meals = await getMeals();
     assert.equal(meals.length, 1);
     assert.equal(meals[0]!.id, second.id);
     assert.notEqual(meals[0]!.id, first.id);
@@ -1826,20 +1835,27 @@ describe("chat meal correction integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({
-      content: "已幫你刪除 3/25 那筆牛肉麵。",
-    });
 
-    const { status, body } = await postChat("把 3/25 的牛肉麵刪掉");
+    const setup = await postChat("把 3/25 的牛肉麵刪掉");
 
-    assert.equal(status, 200);
-    assert.equal(body.didLogMeal, false);
-    assert.equal(body.didMutateMeal, true);
-    assert.equal(body.affectedDate, "2026-03-25");
-    assert.equal(body.dailySummary?.date, "2026-03-25");
-    assert.match(body.reply, /3\/25/);
+    assert.equal(setup.status, 200);
+    assert.equal(setup.body.didLogMeal, false);
+    assert.equal(setup.body.didMutateMeal, false);
+    assert.match(setup.body.reply, /即將刪除：牛肉麵/);
+    assert.match(setup.body.reply, /2026-03-25/);
+    assert.doesNotMatch(setup.body.reply, /已刪除/);
+    let meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    assert.equal(meals.length, 1);
 
-    const meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    const confirmed = await postChat("好");
+
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.didLogMeal, false);
+    assert.equal(confirmed.body.didMutateMeal, true);
+    assert.equal(confirmed.body.affectedDate, "2026-03-25");
+    assert.equal(confirmed.body.dailySummary?.date, "2026-03-25");
+
+    meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
     assert.equal(meals.length, 0);
   });
 

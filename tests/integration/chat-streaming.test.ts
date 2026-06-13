@@ -2419,6 +2419,36 @@ describe("chat-streaming", () => {
     const mealId = mealsJson.meals[0]?.id;
     assert.ok(mealId);
 
+    mockLLM.queueRoundResponse({
+      toolCalls: [
+        createFindMealsToolCall("delete", "雞腿便當"),
+        createDeleteMealToolCall(mealId),
+      ],
+    });
+
+    const form = new FormData();
+    form.append("message", "刪除雞腿便當");
+
+    const setupRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(setupRes.body);
+    const setupText = await readStreamUntil(setupRes.body.getReader(), "event: done");
+    const setupPayload = JSON.parse(parseSSEEvents(setupText).find((event) => event.event === "done")!.data) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      deletedMealId?: string;
+      summaryOutcome?: SummaryOutcome;
+    };
+    assert.equal(setupPayload.didLogMeal, false);
+    assert.equal(setupPayload.didMutateMeal, false);
+    assert.equal(setupPayload.deletedMealId, undefined);
+    assert.equal(setupPayload.summaryOutcome, undefined);
+    assert.match(setupText, /即將刪除：雞腿便當/);
+
     assert.ok(services, "expected app services");
     services.summaryService.getDailySummary = async () => {
       throw new Error("summary recomputation failed after stream delete");
@@ -2426,25 +2456,16 @@ describe("chat-streaming", () => {
     services.foodLoggingService.getMealsByDate = async () => {
       throw new Error("summary recovery failed after stream delete");
     };
-    mockLLM.queueRoundResponse({
-      toolCalls: [
-        createFindMealsToolCall("delete", "雞腿便當"),
-        createDeleteMealToolCall(mealId),
-      ],
-    });
-    mockLLM.queueChatStream(["已刪除雞腿便當。"]);
-
-    const form = new FormData();
-    form.append("message", "刪除雞腿便當");
-
-    const res = await fetch(`${address}/api/chat`, {
+    const confirmForm = new FormData();
+    confirmForm.append("message", "好");
+    const confirmRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
-      body: form,
+      body: confirmForm,
     });
 
-    assert.ok(res.body);
-    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    assert.ok(confirmRes.body);
+    const text = await readStreamUntil(confirmRes.body.getReader(), "event: done");
     const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
       didLogMeal: boolean;
       didMutateMeal?: boolean;
@@ -2554,14 +2575,42 @@ describe("chat-streaming", () => {
     const form = new FormData();
     form.append("message", "刪除雞腿便當");
 
-    const res = await fetch(`${address}/api/chat`, {
+    const setupRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
       body: form,
     });
 
-    assert.ok(res.body);
-    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    assert.ok(setupRes.body);
+    const setupText = await readStreamUntil(setupRes.body.getReader(), "event: done");
+    assert.match(setupText, /即將刪除：雞腿便當/);
+    assert.doesNotMatch(setupText, /已刪除雞腿便當/);
+    const setupDoneDataMatch = setupText.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(setupDoneDataMatch);
+    const setupDonePayload = JSON.parse(setupDoneDataMatch[1]) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      deletedMealId?: string;
+    };
+    assert.equal(setupDonePayload.didLogMeal, false);
+    assert.equal(setupDonePayload.didMutateMeal, false);
+    assert.equal(setupDonePayload.deletedMealId, undefined);
+    const mealsAfterSetupRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsAfterSetupJson = await mealsAfterSetupRes.json() as { meals: Array<{ id: string }> };
+    assert.equal(mealsAfterSetupJson.meals.some((meal) => meal.id === mealId), true);
+
+    const confirmForm = new FormData();
+    confirmForm.append("message", "好");
+    const confirmRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: confirmForm,
+    });
+
+    assert.ok(confirmRes.body);
+    const text = await readStreamUntil(confirmRes.body.getReader(), "event: done");
     assert.match(text, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(text, /無法辨識這次的請求/);
     const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
@@ -2675,14 +2724,42 @@ describe("chat-streaming", () => {
     const form = new FormData();
     form.append("message", "刪除雞腿便當");
 
-    const res = await fetch(`${address}/api/chat`, {
+    const setupRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
-    assert.equal(res.status, 200);
-    const body = await res.json() as {
+    assert.equal(setupRes.status, 200);
+    const setupBody = await setupRes.json() as {
+      reply: string;
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      deletedMealId?: string;
+      loggedMeal?: unknown;
+    };
+    assert.equal(setupBody.didLogMeal, false);
+    assert.equal(setupBody.didMutateMeal, false);
+    assert.equal(setupBody.deletedMealId, undefined);
+    assert.equal(setupBody.loggedMeal, undefined);
+    assert.match(setupBody.reply, /即將刪除：雞腿便當/);
+    assert.doesNotMatch(setupBody.reply, /已刪除|方式1|方式2|無法辨識/);
+    const mealsAfterSetupRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsAfterSetupJson = await mealsAfterSetupRes.json() as { meals: Array<{ id: string }> };
+    assert.equal(mealsAfterSetupJson.meals.some((meal) => meal.id === mealId), true);
+
+    const confirmForm = new FormData();
+    confirmForm.append("message", "好");
+    const confirmRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: confirmForm,
+    });
+
+    assert.equal(confirmRes.status, 200);
+    const body = await confirmRes.json() as {
       reply: string;
       didLogMeal: boolean;
       didMutateMeal?: boolean;
@@ -2743,14 +2820,42 @@ describe("chat-streaming", () => {
     const form = new FormData();
     form.append("message", "刪除雞腿便當");
 
-    const res = await fetch(`${address}/api/chat`, {
+    const setupRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
       body: form,
     });
 
-    assert.ok(res.body);
-    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    assert.ok(setupRes.body);
+    const setupText = await readStreamUntil(setupRes.body.getReader(), "event: done");
+    assert.match(setupText, /即將刪除：雞腿便當/);
+    assert.doesNotMatch(setupText, /已刪除|方式1|方式2|無法辨識|回覆生成失敗/);
+    const setupDoneDataMatch = setupText.match(/event: done\s+data: (.+)\s*/);
+    assert.ok(setupDoneDataMatch);
+    const setupDonePayload = JSON.parse(setupDoneDataMatch[1]) as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+    };
+    assert.equal(setupDonePayload.didLogMeal, false);
+    assert.equal(setupDonePayload.didMutateMeal, false);
+    assert.equal(setupDonePayload.loggedMeal, undefined);
+    const mealsAfterSetupRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsAfterSetupJson = await mealsAfterSetupRes.json() as { meals: Array<{ id: string }> };
+    assert.equal(mealsAfterSetupJson.meals.some((meal) => meal.id === mealId), true);
+
+    const confirmForm = new FormData();
+    confirmForm.append("message", "好");
+    const confirmRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: confirmForm,
+    });
+
+    assert.ok(confirmRes.body);
+    const text = await readStreamUntil(confirmRes.body.getReader(), "event: done");
     assert.match(text, /已刪除雞腿便當，已從當日紀錄移除。/);
     assert.doesNotMatch(text, /方式1|方式2|無法辨識|回覆生成失敗/);
     const doneDataMatch = text.match(/event: done\s+data: (.+)\s*/);
@@ -2803,14 +2908,40 @@ describe("chat-streaming", () => {
     const form = new FormData();
     form.append("message", "刪除雞腿便當");
 
-    const res = await fetch(`${address}/api/chat`, {
+    const setupRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
       body: form,
     });
 
-    assert.equal(res.status, 200);
-    const body = await res.json() as {
+    assert.equal(setupRes.status, 200);
+    const setupBody = await setupRes.json() as {
+      reply: string;
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+    };
+    assert.equal(setupBody.didLogMeal, false);
+    assert.equal(setupBody.didMutateMeal, false);
+    assert.equal(setupBody.loggedMeal, undefined);
+    assert.match(setupBody.reply, /即將刪除：雞腿便當/);
+    assert.doesNotMatch(setupBody.reply, /方式1|方式2|無法辨識|回覆生成失敗|已刪除/);
+    const mealsAfterSetupRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsAfterSetupJson = await mealsAfterSetupRes.json() as { meals: Array<{ id: string }> };
+    assert.equal(mealsAfterSetupJson.meals.some((meal) => meal.id === mealId), true);
+
+    const confirmForm = new FormData();
+    confirmForm.append("message", "好");
+    const confirmRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: confirmForm,
+    });
+
+    assert.equal(confirmRes.status, 200);
+    const body = await confirmRes.json() as {
       reply: string;
       didLogMeal: boolean;
       didMutateMeal?: boolean;
