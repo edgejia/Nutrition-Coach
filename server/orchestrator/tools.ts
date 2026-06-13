@@ -1906,6 +1906,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
         sourceOperator: preview.sourceOperator,
         },
       });
+      await deps.mealDeleteProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
       const otherProposalKindActive = deps.goalProposalService
         ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
         : false;
@@ -2016,6 +2017,7 @@ const proposeMealEstimateContract: ToolContract<
           provenance: "model_estimate",
         },
       });
+      await deps.mealDeleteProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
       const otherProposalKindActive = deps.goalProposalService
         ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
         : false;
@@ -2133,6 +2135,7 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
           snapshot,
         },
       });
+      await deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
       const otherProposalKindActive = deps.goalProposalService
         ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
         : false;

@@ -64,7 +64,7 @@ Named rules preserve important behavior without splitting model-facing tool name
 
 ### Session-Expiry Semantics
 
-Pending goal and meal numeric proposals are scoped by device, session, kind, proposal id, and, for meal numeric approvals, expected meal revision. Pending approval expires or fails closed like existing pending-state TTL behavior; expired or missing pending state is treated as no pending proposal and users must restate or repropose.
+Pending goal, meal numeric, and meal delete proposals are scoped by device, session, kind, proposal id, and, for meal mutation approvals, expected meal revision. Pending approval expires or fails closed like existing pending-state TTL behavior; expired or missing pending state is treated as no pending proposal and users must restate or repropose.
 
 Wrong session, wrong proposal id, expired state, wrong expected revision, stale one-shot state, or duplicate confirmation cannot return proposal payload authority.
 

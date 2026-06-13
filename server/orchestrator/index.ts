@@ -735,6 +735,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       const activeMealDeleteProposal = deps.mealDeleteProposalService
         ? await deps.mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID })
         : undefined;
+      const activeMealMutationProposal = activeMealProposal || activeMealDeleteProposal;
 
       if (activeMealDeleteProposal && isMealDeleteProposalCancel(userMessage)) {
         await deps.mealDeleteProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
@@ -895,9 +896,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       if (
         activeGoalProposal
-        && activeMealProposal
+        && activeMealMutationProposal
         && isGoalProposalConsent(userMessage)
         && !isMealProposalApproval(userMessage)
+        && !isMealDeleteProposalApproval(userMessage)
         && !isGoalKindApproval(userMessage)
       ) {
         const reply = renderProposalKindAmbiguityCopy();
