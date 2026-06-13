@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 import type { ToolPolicyDecisionFact } from "../../../server/orchestrator/tool-contract.js";
+import { MEAL_DELETE_PROPOSAL_KIND } from "../../../server/services/meal-delete-proposals.js";
 import { DEFAULT_SESSION_ID } from "../../../server/services/turn-state.js";
 import {
   assertPolicyDbInvariant,
@@ -87,8 +88,6 @@ function summarizePolicyFact(fact: Record<string, unknown>): PolicyEvidence {
     policyClass: fact.policyClass as PolicyEvidence["policyClass"],
     decision: fact.decision as PolicyEvidence["decision"],
     ruleId: String(fact.ruleId),
-    ...(typeof fact.proposalId === "string" ? { proposalId: fact.proposalId } : {}),
-    ...(typeof fact.turnId === "string" ? { turnId: fact.turnId } : {}),
   };
 }
 
@@ -148,6 +147,9 @@ function summarizeVisibleOutcome(input: {
 function summarizeProposal(input: {
   persisted: boolean;
   consumed?: boolean;
+  replacedPrevious?: boolean;
+  oldProposalRejected?: boolean;
+  numericProposalCleared?: boolean;
   expectedRevisionMatched?: boolean;
   snapshotHasDescription?: boolean;
   snapshotHasCalories?: boolean;
@@ -213,6 +215,55 @@ const scenario: VerificationScenario = {
       fixture.deviceId,
       new Date(),
     );
+    const createDeleteProposalViaChat = async (label: string, items?: Array<{
+      foodName: string;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>) => {
+      provider.reset();
+      resetPublishCounts();
+      const meal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+        loggedAt: new Date().toISOString(),
+        items: items ?? [{ foodName: label, calories: 650, protein: 30, carbs: 80, fat: 20 }],
+      });
+      provider.queueRoundResponse({
+        toolCalls: [{
+          id: `${label}_find`,
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({
+              action: "delete",
+              query: label,
+            }),
+          },
+        }],
+      });
+      provider.queueRoundResponse({
+        toolCalls: [{
+          id: `${label}_delete`,
+          type: "function",
+          function: {
+            name: "delete_meal",
+            arguments: JSON.stringify({
+              meal_id: meal.id,
+            }),
+          },
+        }],
+      });
+      const chat = await postChat(fixture.address, fixture.cookieHeader, `刪除${label}`);
+      assert.equal(chat.status, 200);
+      assert.equal(chat.body.didMutateMeal, false);
+      const proposal = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      assert.ok(proposal);
+      assert.equal(proposal.mealId, meal.id);
+      return { meal, proposal, chat };
+    };
 
     try {
       const proposalStep = STEP_NAMES[0];
@@ -327,12 +378,14 @@ const scenario: VerificationScenario = {
         policyClass: "clarify-first",
         decision: "allowed",
         ruleId: "base_policy_allowed",
+        requireTurnId: false,
       });
       assertPolicyFact(deleteSetupPolicyFact, {
         tool: "delete_meal",
         policyClass: "confirm-first",
         decision: "allowed",
         ruleId: "delete_meal_setup_only",
+        requireTurnId: false,
       });
       assertPolicyDbInvariant(proposalDbInvariant, {
         mealCountBefore: mealsBeforeProposal.length,
@@ -430,7 +483,7 @@ const scenario: VerificationScenario = {
         policyClass: "confirm-first",
         decision: "allowed",
         ruleId: "delete_meal_approval_consume",
-        proposalId: proposal.proposalId,
+        requireTurnId: false,
       });
       assertPolicyDbInvariant(confirmDbInvariant, {
         mealCountBefore: mealsBeforeConfirm.length,
@@ -465,6 +518,599 @@ const scenario: VerificationScenario = {
         proposal: confirmProposalSummary,
         mealState: confirmMealState,
         visibleOutcome: confirmVisibleOutcome,
+      }));
+
+      const cancelStep = STEP_NAMES[2];
+      const cancelSetup = await createDeleteProposalViaChat("刪除取消雞腿飯");
+      resetPublishCounts();
+      const cancelMealsBefore = await readMeals();
+      const cancelled = await postChat(fixture.address, fixture.cookieHeader, "先不要");
+      const cancelMealsAfter = await readMeals();
+      const cancelPending = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const cancelMeal = cancelMealsAfter.find((meal) => meal.id === cancelSetup.meal.id);
+      const cancelDbInvariant = summarizeDbInvariant({
+        mealCountBefore: cancelMealsBefore.length,
+        mealCountAfter: cancelMealsAfter.length,
+        pendingConsumed: cancelPending === undefined,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const cancelVisibleOutcome = summarizeVisibleOutcome({
+        keyLabels: { cancelledLabel: /已取消刪除/.test(cancelled.body.reply ?? "") },
+        meaning: {
+          returnedHttpSuccess: cancelled.status === 200,
+          didNotMutateMeal: cancelled.body.didMutateMeal === false,
+          clearedProposal: cancelPending === undefined,
+        },
+      });
+      assert.equal(cancelMeal?.mealRevisionId, cancelSetup.meal.mealRevisionId);
+      assertPolicyDbInvariant(cancelDbInvariant, {
+        mealCountBefore: cancelMealsBefore.length,
+        mealCountAfter: cancelMealsBefore.length,
+        pendingConsumed: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(cancelVisibleOutcome, {
+        keyLabels: { cancelledLabel: true },
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMeal: true,
+          clearedProposal: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: cancelStep,
+        dbInvariant: cancelDbInvariant,
+        proposal: summarizeProposal({ persisted: true, consumed: true }),
+        mealState: summarizeMealState({ previewedMealPresent: cancelMeal !== undefined }),
+        visibleOutcome: cancelVisibleOutcome,
+      });
+      steps.push(pass(cancelStep, {
+        dbInvariant: cancelDbInvariant,
+        visibleOutcome: cancelVisibleOutcome,
+      }));
+
+      const ignoreStep = STEP_NAMES[3];
+      const ignoreSetup = await createDeleteProposalViaChat("刪除忽略雞腿飯");
+      provider.reset();
+      provider.queueRoundResponse({ content: "先保留目前的刪除提案。" });
+      resetPublishCounts();
+      const ignoreMealsBefore = await readMeals();
+      const ignored = await postChat(fixture.address, fixture.cookieHeader, "今天水喝夠嗎");
+      const ignoreMealsAfter = await readMeals();
+      const ignorePending = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const ignoreMeal = ignoreMealsAfter.find((meal) => meal.id === ignoreSetup.meal.id);
+      const ignoreDbInvariant = summarizeDbInvariant({
+        mealCountBefore: ignoreMealsBefore.length,
+        mealCountAfter: ignoreMealsAfter.length,
+        pendingPreserved: ignorePending?.proposalId === ignoreSetup.proposal.proposalId,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const ignoreVisibleOutcome = summarizeVisibleOutcome({
+        meaning: {
+          returnedHttpSuccess: ignored.status === 200,
+          didNotMutateMeal: ignored.body.didMutateMeal === false,
+          preservedProposal: ignorePending?.proposalId === ignoreSetup.proposal.proposalId,
+        },
+      });
+      assert.equal(ignoreMeal?.mealRevisionId, ignoreSetup.meal.mealRevisionId);
+      assertPolicyDbInvariant(ignoreDbInvariant, {
+        mealCountBefore: ignoreMealsBefore.length,
+        mealCountAfter: ignoreMealsBefore.length,
+        pendingPreserved: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(ignoreVisibleOutcome, {
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMeal: true,
+          preservedProposal: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: ignoreStep,
+        dbInvariant: ignoreDbInvariant,
+        proposal: summarizeProposal({ persisted: true, consumed: false }),
+        mealState: summarizeMealState({ previewedMealPresent: ignoreMeal !== undefined }),
+        visibleOutcome: ignoreVisibleOutcome,
+      });
+      steps.push(pass(ignoreStep, {
+        dbInvariant: ignoreDbInvariant,
+        visibleOutcome: ignoreVisibleOutcome,
+      }));
+      await fixture.services.mealDeleteProposalService.clear({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+
+      const supersedeStep = STEP_NAMES[4];
+      const supersedeOld = await createDeleteProposalViaChat("刪除被取代雞腿飯");
+      const supersedeNewMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+        loggedAt: new Date().toISOString(),
+        items: [{ foodName: "刪除替代鮭魚飯", calories: 520, protein: 32, carbs: 58, fat: 14 }],
+      });
+      const supersedeNewProposal = await fixture.services.mealDeleteProposalService.putLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: supersedeNewMeal.id,
+          expectedMealRevisionId: supersedeNewMeal.mealRevisionId,
+          snapshot: {
+            mealId: supersedeNewMeal.id,
+            expectedMealRevisionId: supersedeNewMeal.mealRevisionId,
+            mealLabel: "刪除替代鮭魚飯",
+            calories: 520,
+            protein: 32,
+            carbs: 58,
+            fat: 14,
+            dateKey: new Date().toISOString().slice(0, 10),
+            loggedAt: supersedeNewMeal.loggedAt,
+            mealPeriod: "lunch",
+          },
+        },
+      });
+      resetPublishCounts();
+      const supersedeMealsBefore = await readMeals();
+      const oldDeleteConsume = await fixture.services.mealDeleteProposalService.consumeLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: supersedeOld.proposal.proposalId,
+        expectedMealRevisionId: supersedeOld.meal.mealRevisionId,
+      });
+      const activeReplacement = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const supersedeMealsAfter = await readMeals();
+      const supersedeOldMeal = supersedeMealsAfter.find((meal) => meal.id === supersedeOld.meal.id);
+      const supersedeReplacementMeal = supersedeMealsAfter.find((meal) => meal.id === supersedeNewMeal.id);
+      const supersedeDbInvariant = summarizeDbInvariant({
+        mealCountBefore: supersedeMealsBefore.length,
+        mealCountAfter: supersedeMealsAfter.length,
+        pendingPreserved: activeReplacement?.proposalId === supersedeNewProposal.proposalId,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const supersedeVisibleOutcome = summarizeVisibleOutcome({
+        meaning: {
+          oldProposalRejected: oldDeleteConsume === undefined,
+          replacementProposalActive: activeReplacement?.proposalId === supersedeNewProposal.proposalId,
+          didNotMutateMeal: supersedeOldMeal !== undefined && supersedeReplacementMeal !== undefined,
+        },
+      });
+      assert.equal(oldDeleteConsume, undefined);
+      assert.equal(supersedeOldMeal?.mealRevisionId, supersedeOld.meal.mealRevisionId);
+      assert.equal(supersedeReplacementMeal?.mealRevisionId, supersedeNewMeal.mealRevisionId);
+      assertPolicyDbInvariant(supersedeDbInvariant, {
+        mealCountBefore: supersedeMealsBefore.length,
+        mealCountAfter: supersedeMealsBefore.length,
+        pendingPreserved: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(supersedeVisibleOutcome, {
+        meaning: {
+          oldProposalRejected: true,
+          replacementProposalActive: true,
+          didNotMutateMeal: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: supersedeStep,
+        dbInvariant: supersedeDbInvariant,
+        proposal: summarizeProposal({
+          persisted: true,
+          replacedPrevious: true,
+          oldProposalRejected: true,
+        }),
+        mealState: summarizeMealState({
+          previewedMealPresent: supersedeReplacementMeal !== undefined,
+          otherMealPresent: supersedeOldMeal !== undefined,
+        }),
+        visibleOutcome: supersedeVisibleOutcome,
+      });
+      steps.push(pass(supersedeStep, {
+        dbInvariant: supersedeDbInvariant,
+        visibleOutcome: supersedeVisibleOutcome,
+      }));
+      await fixture.services.mealDeleteProposalService.clear({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+
+      const expiryStep = STEP_NAMES[5];
+      const expirySetup = await createDeleteProposalViaChat("刪除過期雞腿飯");
+      fixture.services.db.$client
+        .prepare(
+          "UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND session_id = ? AND kind = ?",
+        )
+        .run(
+          "2026-05-16T00:00:00.000Z",
+          fixture.deviceId,
+          DEFAULT_SESSION_ID,
+          MEAL_DELETE_PROPOSAL_KIND,
+        );
+      provider.reset();
+      provider.queueRoundResponse({ content: "目前沒有待確認的刪除提案。" });
+      resetPublishCounts();
+      const expiryMealsBefore = await readMeals();
+      const expired = await postChat(fixture.address, fixture.cookieHeader, "好");
+      const expiryMealsAfter = await readMeals();
+      const expiryMeal = expiryMealsAfter.find((meal) => meal.id === expirySetup.meal.id);
+      const expiryPending = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const expiryDbInvariant = summarizeDbInvariant({
+        mealCountBefore: expiryMealsBefore.length,
+        mealCountAfter: expiryMealsAfter.length,
+        pendingConsumed: expiryPending === undefined,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const expiryVisibleOutcome = summarizeVisibleOutcome({
+        meaning: {
+          returnedHttpSuccess: expired.status === 200,
+          didNotMutateMeal: expired.body.didMutateMeal === false,
+          expiredProposalRejected: expiryPending === undefined,
+        },
+      });
+      assert.equal(expiryMeal?.mealRevisionId, expirySetup.meal.mealRevisionId);
+      assertPolicyDbInvariant(expiryDbInvariant, {
+        mealCountBefore: expiryMealsBefore.length,
+        mealCountAfter: expiryMealsBefore.length,
+        pendingConsumed: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(expiryVisibleOutcome, {
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMeal: true,
+          expiredProposalRejected: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: expiryStep,
+        dbInvariant: expiryDbInvariant,
+        proposal: summarizeProposal({ persisted: true, consumed: true }),
+        mealState: summarizeMealState({ previewedMealPresent: expiryMeal !== undefined }),
+        visibleOutcome: expiryVisibleOutcome,
+      });
+      steps.push(pass(expiryStep, {
+        dbInvariant: expiryDbInvariant,
+        visibleOutcome: expiryVisibleOutcome,
+      }));
+
+      const staleStep = STEP_NAMES[6];
+      const staleSetup = await createDeleteProposalViaChat("刪除過時雞腿飯");
+      const externalUpdate = await fixture.services.foodLoggingService.updateMeal(
+        fixture.deviceId,
+        staleSetup.meal.id,
+        {
+          expectedMealRevisionId: staleSetup.meal.mealRevisionId,
+          items: [{ foodName: "新版刪除過時雞腿飯", calories: 651, protein: 31, carbs: 80, fat: 20 }],
+        },
+      );
+      resetPublishCounts();
+      const staleMealsBefore = await readMeals();
+      const stale = await postChat(fixture.address, fixture.cookieHeader, "好");
+      const staleTrace = traceRecorders.at(-1)?.build({ scenario: staleStep, status: "pass" });
+      assert.ok(staleTrace);
+      const stalePolicyFact = findPolicyFact(staleTrace, "delete_meal");
+      const staleMealsAfter = await readMeals();
+      const staleMeal = staleMealsAfter.find((meal) => meal.id === staleSetup.meal.id);
+      const stalePending = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const staleDbInvariant = summarizeDbInvariant({
+        mealCountBefore: staleMealsBefore.length,
+        mealCountAfter: staleMealsAfter.length,
+        pendingConsumed: stalePending === undefined,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const staleVisibleOutcome = summarizeVisibleOutcome({
+        keyLabels: { staleCopy: /餐點內容已經變更/.test(stale.body.reply ?? "") },
+        meaning: {
+          returnedHttpSuccess: stale.status === 200,
+          didNotMutateMeal: stale.body.didMutateMeal === false,
+          staleRevisionRejected: staleMeal?.mealRevisionId === externalUpdate.mealRevisionId,
+        },
+      });
+      assert.equal(staleMeal?.mealRevisionId, externalUpdate.mealRevisionId);
+      assertPolicyFact(stalePolicyFact, {
+        tool: "delete_meal",
+        policyClass: "confirm-first",
+        decision: "allowed",
+        ruleId: "delete_meal_approval_consume",
+        requireTurnId: false,
+      });
+      assertPolicyDbInvariant(staleDbInvariant, {
+        mealCountBefore: staleMealsBefore.length,
+        mealCountAfter: staleMealsBefore.length,
+        pendingConsumed: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(staleVisibleOutcome, {
+        keyLabels: { staleCopy: true },
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMeal: true,
+          staleRevisionRejected: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: staleStep,
+        policyFact: stalePolicyFact,
+        dbInvariant: staleDbInvariant,
+        proposal: summarizeProposal({ persisted: true, consumed: true }),
+        mealState: summarizeMealState({ previewedMealPresent: staleMeal !== undefined }),
+        visibleOutcome: staleVisibleOutcome,
+      });
+      steps.push(pass(staleStep, {
+        policyFact: stalePolicyFact,
+        dbInvariant: staleDbInvariant,
+        visibleOutcome: staleVisibleOutcome,
+      }));
+
+      const crossSessionStep = STEP_NAMES[7];
+      const crossSetup = await createDeleteProposalViaChat("刪除跨工作階段雞腿飯");
+      const otherDeviceRes = await fixture.app.inject({
+        method: "POST",
+        url: "/api/device",
+        payload: { goal: "fat_loss" },
+      });
+      assert.ok(otherDeviceRes.statusCode === 200 || otherDeviceRes.statusCode === 201);
+      const otherCookieHeader = [otherDeviceRes.headers["set-cookie"]]
+        .flat()
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.split(";", 1)[0])
+        .join("; ");
+      provider.reset();
+      provider.queueRoundResponse({ content: "目前沒有待確認的刪除提案。" });
+      resetPublishCounts();
+      const crossMealsBefore = await readMeals();
+      const cross = await postChat(fixture.address, otherCookieHeader, "好");
+      const crossMealsAfter = await readMeals();
+      const crossMeal = crossMealsAfter.find((meal) => meal.id === crossSetup.meal.id);
+      const crossPending = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const crossDbInvariant = summarizeDbInvariant({
+        mealCountBefore: crossMealsBefore.length,
+        mealCountAfter: crossMealsAfter.length,
+        pendingPreserved: crossPending?.proposalId === crossSetup.proposal.proposalId,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const crossVisibleOutcome = summarizeVisibleOutcome({
+        meaning: {
+          returnedHttpSuccess: cross.status === 200,
+          didNotMutateMeal: cross.body.didMutateMeal === false,
+          originalProposalStillPending: crossPending?.proposalId === crossSetup.proposal.proposalId,
+        },
+      });
+      assert.equal(crossMeal?.mealRevisionId, crossSetup.meal.mealRevisionId);
+      assertPolicyDbInvariant(crossDbInvariant, {
+        mealCountBefore: crossMealsBefore.length,
+        mealCountAfter: crossMealsBefore.length,
+        pendingPreserved: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(crossVisibleOutcome, {
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMeal: true,
+          originalProposalStillPending: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: crossSessionStep,
+        dbInvariant: crossDbInvariant,
+        proposal: summarizeProposal({ persisted: true, consumed: false }),
+        mealState: summarizeMealState({ previewedMealPresent: crossMeal !== undefined }),
+        visibleOutcome: crossVisibleOutcome,
+      });
+      steps.push(pass(crossSessionStep, {
+        dbInvariant: crossDbInvariant,
+        visibleOutcome: crossVisibleOutcome,
+      }));
+      await fixture.services.mealDeleteProposalService.clear({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+
+      const duplicateStep = STEP_NAMES[8];
+      const duplicateSetup = await createDeleteProposalViaChat("刪除重複確認雞腿飯");
+      const firstDuplicate = await postChat(fixture.address, fixture.cookieHeader, "好");
+      assert.equal(firstDuplicate.body.didMutateMeal, true);
+      resetPublishCounts();
+      provider.reset();
+      provider.queueRoundResponse({ content: "目前沒有待確認的刪除提案。" });
+      const duplicateMealsBefore = await readMeals();
+      const duplicate = await postChat(fixture.address, fixture.cookieHeader, "好");
+      const duplicateMealsAfter = await readMeals();
+      const duplicatePending = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const duplicateDbInvariant = summarizeDbInvariant({
+        mealCountBefore: duplicateMealsBefore.length,
+        mealCountAfter: duplicateMealsAfter.length,
+        pendingConsumed: duplicatePending === undefined,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const duplicateVisibleOutcome = summarizeVisibleOutcome({
+        meaning: {
+          returnedHttpSuccess: duplicate.status === 200,
+          didNotMutateMealAgain: duplicate.body.didMutateMeal !== true,
+          deletedMealStillAbsent: !duplicateMealsAfter.some((meal) => meal.id === duplicateSetup.meal.id),
+        },
+      });
+      assertPolicyDbInvariant(duplicateDbInvariant, {
+        mealCountBefore: duplicateMealsBefore.length,
+        mealCountAfter: duplicateMealsBefore.length,
+        pendingConsumed: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(duplicateVisibleOutcome, {
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMealAgain: true,
+          deletedMealStillAbsent: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: duplicateStep,
+        dbInvariant: duplicateDbInvariant,
+        proposal: summarizeProposal({ persisted: true, consumed: true }),
+        mealState: summarizeMealState({ previewedMealDeleted: true }),
+        visibleOutcome: duplicateVisibleOutcome,
+      });
+      steps.push(pass(duplicateStep, {
+        dbInvariant: duplicateDbInvariant,
+        visibleOutcome: duplicateVisibleOutcome,
+      }));
+
+      const directStep = STEP_NAMES[9];
+      provider.reset();
+      resetPublishCounts();
+      const directMealForSetup = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+        loggedAt: new Date().toISOString(),
+        items: [{ foodName: "刪除直接工具雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 }],
+      });
+      await fixture.services.mealNumericProposalService.putLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: directMealForSetup.id,
+          expectedMealRevisionId: directMealForSetup.mealRevisionId,
+          updateInput: { protein: 14 },
+          affectedFields: [{ field: "protein", before: 30, after: 14 }],
+          sourceOperator: "half",
+        },
+      });
+      provider.queueRoundResponse({
+        toolCalls: [{
+          id: "direct_delete_find",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({
+              action: "delete",
+              query: "刪除直接工具雞腿飯",
+            }),
+          },
+        }],
+      });
+      provider.queueRoundResponse({
+        toolCalls: [{
+          id: "direct_delete_setup",
+          type: "function",
+          function: {
+            name: "delete_meal",
+            arguments: JSON.stringify({
+              meal_id: directMealForSetup.id,
+            }),
+          },
+        }],
+      });
+      const directSetup = await postChat(
+        fixture.address,
+        fixture.cookieHeader,
+        "刪除直接工具雞腿飯",
+      );
+      const directTrace = traceRecorders.at(-1)?.build({ scenario: directStep, status: "pass" });
+      assert.ok(directTrace);
+      const directDeletePolicyFact = findPolicyFact(directTrace, "delete_meal");
+      const directMealsAfter = await readMeals();
+      const directPending = await fixture.services.mealDeleteProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const directNumericPending = await fixture.services.mealNumericProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      const directMeal = directMealsAfter.find((meal) => meal.id === directMealForSetup.id);
+      const directDbInvariant = summarizeDbInvariant({
+        mealCountBefore: directMealsAfter.length,
+        mealCountAfter: directMealsAfter.length,
+        pendingPreserved: directPending?.mealId === directMealForSetup.id,
+        dailySummaryPublishCount: publishCounts.dailySummary,
+        goalsPublishCount: publishCounts.goals,
+      });
+      const directVisibleOutcome = summarizeVisibleOutcome({
+        keyLabels: {
+          hasPreviewOnlyCopy: /即將刪除/.test(directSetup.body.reply ?? "")
+            && /如果確認要刪除/.test(directSetup.body.reply ?? ""),
+          hasNoDeletedReceipt: !/已刪除/.test(directSetup.body.reply ?? ""),
+        },
+        meaning: {
+          returnedHttpSuccess: directSetup.status === 200,
+          didNotMutateMeal: directSetup.body.didMutateMeal === false,
+          proposalStillPending: directPending?.mealId === directMealForSetup.id,
+          numericProposalCleared: directNumericPending === undefined,
+        },
+      });
+      assert.equal(directSetup.status, 200);
+      assert.equal(directSetup.body.didMutateMeal, false);
+      assert.equal(directMeal?.mealRevisionId, directMealForSetup.mealRevisionId);
+      assert.equal(directNumericPending, undefined);
+      assertPolicyFact(directDeletePolicyFact, {
+        tool: "delete_meal",
+        policyClass: "confirm-first",
+        decision: "allowed",
+        ruleId: "delete_meal_setup_only",
+        requireTurnId: false,
+      });
+      assertPolicyDbInvariant(directDbInvariant, {
+        mealCountBefore: directMealsAfter.length,
+        mealCountAfter: directMealsAfter.length,
+        pendingPreserved: true,
+        dailySummaryPublishCount: 0,
+        goalsPublishCount: 0,
+      });
+      assertVisibleOutcomeSummary(directVisibleOutcome, {
+        keyLabels: {
+          hasPreviewOnlyCopy: true,
+          hasNoDeletedReceipt: true,
+        },
+        meaning: {
+          returnedHttpSuccess: true,
+          didNotMutateMeal: true,
+          proposalStillPending: true,
+          numericProposalCleared: true,
+        },
+      });
+      addEvidence(artifacts, {
+        step: directStep,
+        policyFact: directDeletePolicyFact,
+        dbInvariant: directDbInvariant,
+        proposal: summarizeProposal({ persisted: true, consumed: false, numericProposalCleared: true }),
+        mealState: summarizeMealState({ previewedMealPresent: directMeal !== undefined }),
+        visibleOutcome: directVisibleOutcome,
+      });
+      steps.push(pass(directStep, {
+        policyFact: directDeletePolicyFact,
+        dbInvariant: directDbInvariant,
+        visibleOutcome: directVisibleOutcome,
       }));
 
       assert.equal(steps.length, STEP_NAMES.length, "negative delete controls not implemented");
