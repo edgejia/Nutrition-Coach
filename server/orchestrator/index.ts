@@ -354,6 +354,16 @@ function isMealDeleteKindText(message: string): boolean {
   return /(刪除|删除|移除|delete).*(餐點|餐|meal)|(?:餐點|餐|meal).*(刪除|删除|移除|delete)/i.test(normalized);
 }
 
+function hasMealDeleteVerb(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /(刪除|删除|移除|delete)/i.test(normalized);
+}
+
+function isBareProposalConfirmation(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /^(確認|確定)$/.test(normalized);
+}
+
 function isMealProposalCancel(message: string): boolean {
   const normalized = normalizeProposalDecisionText(message);
   return /(取消|不要|不用|不套用|先不用|先不要|no)/i.test(normalized)
@@ -362,8 +372,8 @@ function isMealProposalCancel(message: string): boolean {
 
 function isMealDeleteProposalCancel(message: string): boolean {
   const normalized = normalizeProposalDecisionText(message);
-  return /(取消|不要|不用|不刪|不删|不移除|先不用|先不要|no)/i.test(normalized)
-    && isMealDeleteKindText(message);
+  return /(取消|不要|不用|不刪|不删|不移除|別刪|别删|先別刪|先别删|不想刪|不想删|先不用|先不要|no|not)/i.test(normalized)
+    && (isMealDeleteKindText(message) || hasMealDeleteVerb(message));
 }
 
 function isGoalKindCancel(message: string): boolean {
@@ -379,13 +389,20 @@ function isMealProposalApproval(message: string): boolean {
   return isMealProposalKindText(message) && isGoalProposalConsent(message);
 }
 
-function isMealDeleteProposalApproval(message: string): boolean {
+function isMealDeleteProposalApproval(
+  message: string,
+  options: { requireExplicitDelete?: boolean } = {},
+): boolean {
   const normalized = normalizeProposalDecisionText(message);
-  if (isGoalProposalCancel(message)) return false;
-  if (/^(確認|確定)$/.test(normalized)) return true;
-  if (/(確認|確定)?(刪除|删除|移除)(這筆|該筆)?(餐點|餐|meal)?|delete(?:this)?meal/i.test(normalized)) {
+  if (isGoalProposalCancel(message) || isMealDeleteProposalCancel(message)) return false;
+  const explicitDelete = /(確認|確定)?(刪除|删除|移除)(這筆|該筆)?(餐點|餐|meal)?|delete(?:this)?meal/i.test(normalized);
+  if (explicitDelete) {
     return true;
   }
+  if (options.requireExplicitDelete) {
+    return false;
+  }
+  if (isBareProposalConfirmation(message)) return true;
   return isMealDeleteKindText(message) && isGoalProposalConsent(message);
 }
 
@@ -803,7 +820,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         activeMealDeleteProposal
         && deps.mealCorrectionService
         && deps.mealDeleteProposalService
-        && (isMealDeleteProposalApproval(userMessage) || (!activeGoalProposal && isGoalProposalConsent(userMessage)))
+        && (
+          isMealDeleteProposalApproval(userMessage, { requireExplicitDelete: Boolean(activeGoalProposal) })
+          || (!activeGoalProposal && isGoalProposalConsent(userMessage))
+        )
       ) {
         const consumedDeleteProposal = await deps.mealDeleteProposalService.consumeLatest({
           deviceId,
@@ -834,20 +854,6 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             finalReplyShape: classifyPlainReplyShape(reply),
           };
         }
-        opts?.hooks?.onToolResult?.({
-          tool: "delete_meal",
-          success: true,
-          executed: false,
-          summary: "policyDecision: allowed",
-          ...policyFactPayload({
-            tool: "delete_meal",
-            policyClass: "confirm-first",
-            decision: "allowed",
-            ruleId: "delete_meal_approval_consume",
-            proposalId: consumedDeleteProposal.proposalId,
-          }, opts?.turnId),
-        });
-
         try {
           const deleted = await deps.mealCorrectionService.deleteMeal(
             deviceId,
@@ -867,6 +873,19 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           };
           const reply = renderCheckedMutationReceipt(mutationEffects);
           const mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
+          opts?.hooks?.onToolResult?.({
+            tool: "delete_meal",
+            success: true,
+            executed: true,
+            summary: "policyDecision: allowed",
+            ...policyFactPayload({
+              tool: "delete_meal",
+              policyClass: "confirm-first",
+              decision: "allowed",
+              ruleId: "delete_meal_approval_consume",
+              proposalId: consumedDeleteProposal.proposalId,
+            }, opts?.turnId),
+          });
           return {
             reply,
             didLogMeal: false,
@@ -881,6 +900,19 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           };
         } catch (error) {
           if (error instanceof MealRevisionPreconditionError) {
+            opts?.hooks?.onToolResult?.({
+              tool: "delete_meal",
+              success: false,
+              executed: false,
+              summary: "policyDecision: blocked",
+              ...policyFactPayload({
+                tool: "delete_meal",
+                policyClass: "confirm-first",
+                decision: "blocked",
+                ruleId: "delete_meal_approval_stale",
+                proposalId: consumedDeleteProposal.proposalId,
+              }, opts?.turnId),
+            });
             const reply = renderMealDeleteStaleCopy();
             return {
               reply,
@@ -897,9 +929,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       if (
         activeGoalProposal
         && activeMealMutationProposal
-        && isGoalProposalConsent(userMessage)
+        && (isGoalProposalConsent(userMessage) || isBareProposalConfirmation(userMessage))
         && !isMealProposalApproval(userMessage)
-        && !isMealDeleteProposalApproval(userMessage)
+        && !isMealDeleteProposalApproval(userMessage, { requireExplicitDelete: true })
         && !isGoalKindApproval(userMessage)
       ) {
         const reply = renderProposalKindAmbiguityCopy();
@@ -1276,7 +1308,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               } else if (toolCall.function.name === "update_meal") {
                 opts?.onStatus?.("調整餐點中...");
               } else if (toolCall.function.name === "delete_meal") {
-                opts?.onStatus?.("刪除餐點中...");
+                opts?.onStatus?.("準備刪除確認...");
               }
               const argsRedacted = redactToolArgsForHook(toolCall.function.name, toolCall.function.arguments);
               if (safeToolNames.has(toolCall.function.name)) {
@@ -1290,6 +1322,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 summaryOutcome: toolSummaryOutcome,
                 loggedMeal: toolLoggedMeal,
                 success,
+                executed,
                 failureReason,
                 updatedFields,
                 publishedEvents,
@@ -1320,7 +1353,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 opts?.hooks?.onToolResult?.({
                   tool: toolCall.function.name,
                   success: success !== false,
-                  executed: success !== false,
+                  executed: executed ?? success !== false,
                   failureReason,
                   summary,
                   updatedFields,

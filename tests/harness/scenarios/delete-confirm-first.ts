@@ -43,6 +43,8 @@ interface ChatBody {
 
 type LlmTraceArtifact = ReturnType<ReturnType<typeof createLlmTraceRecorder>["build"]>;
 type PolicyEvidence = ToolPolicyDecisionFact & {
+  success: boolean;
+  executed: boolean;
   turnId?: string;
 };
 
@@ -85,6 +87,8 @@ function failResult(
 function summarizePolicyFact(fact: Record<string, unknown>): PolicyEvidence {
   return {
     tool: String(fact.tool),
+    success: fact.success === true,
+    executed: fact.executed === true,
     policyClass: fact.policyClass as PolicyEvidence["policyClass"],
     decision: fact.decision as PolicyEvidence["decision"],
     ruleId: String(fact.ruleId),
@@ -387,6 +391,8 @@ const scenario: VerificationScenario = {
         ruleId: "delete_meal_setup_only",
         requireTurnId: false,
       });
+      assert.equal(deleteSetupPolicyFact.success, true);
+      assert.equal(deleteSetupPolicyFact.executed, false);
       assertPolicyDbInvariant(proposalDbInvariant, {
         mealCountBefore: mealsBeforeProposal.length,
         mealCountAfter: mealsBeforeProposal.length,
@@ -485,6 +491,8 @@ const scenario: VerificationScenario = {
         ruleId: "delete_meal_approval_consume",
         requireTurnId: false,
       });
+      assert.equal(approvalPolicyFact.success, true);
+      assert.equal(approvalPolicyFact.executed, true);
       assertPolicyDbInvariant(confirmDbInvariant, {
         mealCountBefore: mealsBeforeConfirm.length,
         mealCountAfter: mealsBeforeConfirm.length - 1,
@@ -832,10 +840,12 @@ const scenario: VerificationScenario = {
       assertPolicyFact(stalePolicyFact, {
         tool: "delete_meal",
         policyClass: "confirm-first",
-        decision: "allowed",
-        ruleId: "delete_meal_approval_consume",
+        decision: "blocked",
+        ruleId: "delete_meal_approval_stale",
         requireTurnId: false,
       });
+      assert.equal(stalePolicyFact.success, false);
+      assert.equal(stalePolicyFact.executed, false);
       assertPolicyDbInvariant(staleDbInvariant, {
         mealCountBefore: staleMealsBefore.length,
         mealCountAfter: staleMealsBefore.length,
@@ -1080,6 +1090,8 @@ const scenario: VerificationScenario = {
         ruleId: "delete_meal_setup_only",
         requireTurnId: false,
       });
+      assert.equal(directDeletePolicyFact.success, true);
+      assert.equal(directDeletePolicyFact.executed, false);
       assertPolicyDbInvariant(directDbInvariant, {
         mealCountBefore: directMealsAfter.length,
         mealCountAfter: directMealsAfter.length,

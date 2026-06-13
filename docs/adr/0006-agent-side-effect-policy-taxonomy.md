@@ -49,7 +49,7 @@ The app treats backend-validated facts as authoritative and treats assistant pro
 - `update_goals` is `direct-execute`: current-turn numeric values execute directly when source authority passes. `latest_proposal` escalates through the named confirm-first rule and consumes backend proposal state before mutation.
 - `propose_meal_numeric_correction` is `confirm-first`: it writes pending meal numeric proposal authority and reverses the commit into a later confirmation step.
 - `update_meal` is `direct-execute`: it requires a resolved target, numeric authority for changed numeric fields, and a current revision precondition before commit.
-- `delete_meal` is `direct-execute`: current behavior requires a resolved target and revision precondition before delete; no delete confirmation proposal exists in this milestone.
+- `delete_meal` is `confirm-first`: setup requires a resolved target and current revision, writes a pending delete proposal, and only a later explicit confirmation consumes that proposal before deleting.
 
 ### Classification Rationale
 
@@ -93,7 +93,7 @@ Generated from server/orchestrator/tools.ts.
 - Documentation drift in the per-tool table fails `yarn policy-taxonomy:check`.
 - Future registry changes must update source metadata first, then regenerate the ADR table.
 - Base class and named rule escalation remain visually separate, reducing the risk of reclassifying tools by accident.
-- The ADR documents implemented behavior only; it does not add delete confirmation previews, chat-session UI, new policy classes, new trace payload fields, or runtime policy changes.
+- The ADR documents implemented behavior only; it does not add chat-session UI, new policy classes, new trace payload fields, or runtime policy changes beyond the recorded tool-policy behavior.
 
 ## Verification
 
