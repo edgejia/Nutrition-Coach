@@ -13,6 +13,7 @@ import type {
   FindMealsResult,
   MealCorrectionCandidate,
 } from "../services/meal-correction.js";
+import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import {
   MEAL_NUMERIC_FIELDS,
   type MealNumericField,
@@ -89,6 +90,7 @@ export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
+  mealDeleteProposalService?: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
   deviceService?: ReturnType<typeof createDeviceService>;
   goalProposalService?: ReturnType<typeof createGoalProposalService>;
@@ -128,6 +130,7 @@ export interface ToolExecutionResult {
       | "meal_numeric_authority_failure"
       | "meal_numeric_clarification"
       | "meal_numeric_proposal"
+      | "meal_delete_proposal"
       | "failed_recognition_no_save";
     text: string;
   };
@@ -389,7 +392,33 @@ interface DeleteMealResult {
   deletedMeal: DeletedMealSnapshot;
 }
 
-type DeleteMealContractResult = DeleteMealResult | MealTargetControlledResult;
+interface MealDeleteProposalResult {
+  status: "meal_delete_proposal";
+  reason: "meal_delete_proposal";
+  proposalId: string;
+  reply: string;
+  snapshot: {
+    mealId: string;
+    expectedMealRevisionId: string;
+    mealLabel: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    dateKey: string;
+    loggedAt: string;
+    mealPeriod: MealPeriod;
+    items?: Array<{
+      foodName: string;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
+  };
+}
+
+type DeleteMealContractResult = DeleteMealResult | MealTargetControlledResult | MealDeleteProposalResult;
 
 interface GetDailySummaryArgs {
   date_text?: string;
@@ -1216,6 +1245,65 @@ function makeMealNumericControlledResult(
   };
 }
 
+function mealPeriodLabel(period: MealPeriod): string {
+  switch (period) {
+    case "breakfast":
+      return "早餐";
+    case "lunch":
+      return "午餐";
+    case "dinner":
+      return "晚餐";
+    case "late_night":
+      return "宵夜";
+    default:
+      return "餐點";
+  }
+}
+
+function renderMealDeleteProposalSetupCopy(input: {
+  mealLabel: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  dateKey: string;
+  mealPeriod: MealPeriod;
+  items?: Array<{
+    foodName: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  }>;
+  otherProposalKindActive?: boolean;
+}): string {
+  const itemLines = input.items && input.items.length > 1
+    ? [
+        "項目：",
+        ...input.items.map((item) => `- ${item.foodName} ${item.calories} kcal`),
+      ]
+    : [];
+  const otherProposalLine = input.otherProposalKindActive
+    ? "你也有另一組目標提案；若要刪除這筆餐點，請明確回覆「刪除這筆餐點」。"
+    : undefined;
+  return [
+    `即將刪除：${input.mealLabel}`,
+    `日期：${input.dateKey} ${mealPeriodLabel(input.mealPeriod)}`,
+    `營養：${input.calories} kcal，P${input.protein}g / C${input.carbs}g / F${input.fat}g`,
+    ...itemLines,
+    "如果確認要刪除，請回覆「好」或「確認」。",
+    ...(otherProposalLine ? [otherProposalLine] : []),
+  ].join("\n");
+}
+
+function makeMealDeleteProposalResult(input: Omit<MealDeleteProposalResult, "status" | "reason">): MealDeleteProposalResult {
+  return {
+    status: "meal_delete_proposal",
+    reason: "meal_delete_proposal",
+    ...input,
+  };
+}
+
 function makeMealTargetControlledResult(reply: string): MealTargetControlledResult {
   return {
     status: "controlled_reply",
@@ -2005,20 +2093,34 @@ const proposeMealEstimateContract: ToolContract<
 
 const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult> = {
   name: "delete_meal",
-  policyClass: "direct-execute",
+  policyClass: "confirm-first",
   policyRules: [
+    {
+      id: "delete_meal_setup_only",
+      decision: "allowed",
+      description: "Writes pending delete proposal authority but does not mutate meals.",
+    },
     {
       id: "delete_meal_requires_resolved_target",
       decision: "blocked",
-      description: "Direct delete requires a same-turn resolved target; no delete proposal path exists in Phase 85.",
+      description: "Delete proposal setup requires a same-turn resolved target before writing pending helper state.",
     },
     {
       id: "delete_meal_revision_precondition_guard",
       decision: "blocked",
-      description: "Direct delete requires the resolved target revision to remain current.",
+      description: "Delete proposal setup requires the resolved target revision to remain current.",
     },
   ],
-  description: "刪除已解析出的歷史餐點。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
+  policyGate: () => ({
+    allowed: true,
+    fact: {
+      tool: "delete_meal",
+      policyClass: "confirm-first",
+      decision: "allowed",
+      ruleId: "delete_meal_setup_only",
+    },
+  }),
+  description: "建立一組待確認的歷史餐點刪除提案，不會刪除餐點。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -2034,8 +2136,8 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
   execute: async (args, context) => {
     const deps = context.deps?.toolDeps as ToolDeps | undefined;
     const deviceId = context.deps?.deviceId as string | undefined;
-    if (!deps?.mealCorrectionService || !deviceId) {
-      throw new Error("delete_meal contract missing mealCorrectionService/deviceId in context");
+    if (!deps?.mealCorrectionService || !deps.mealDeleteProposalService || !deviceId) {
+      throw new Error("delete_meal contract missing mealCorrectionService/mealDeleteProposalService/deviceId in context");
     }
 
     const resolvedTarget = findResolvedMealTarget(deps.toolSessionState, args.meal_id);
@@ -2043,9 +2145,67 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
       throw new FatalToolError("meal target unresolved");
     }
 
-    let deleted: DeleteMealResult;
     try {
-      deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id, resolvedTarget.mealRevisionId);
+      const currentFacts = await deps.mealCorrectionService.loadCurrentMealFacts(
+        deviceId,
+        args.meal_id,
+        resolvedTarget.mealRevisionId,
+      );
+      const snapshot = {
+        mealId: currentFacts.mealId,
+        expectedMealRevisionId: currentFacts.currentMealRevisionId,
+        mealLabel: currentFacts.mealLabel,
+        calories: currentFacts.totals.calories,
+        protein: currentFacts.totals.protein,
+        carbs: currentFacts.totals.carbs,
+        fat: currentFacts.totals.fat,
+        dateKey: currentFacts.dateKey,
+        loggedAt: currentFacts.loggedAt,
+        mealPeriod: currentFacts.mealPeriod,
+        ...(currentFacts.items.length > 1
+          ? {
+              items: currentFacts.items.map((item) => ({
+                foodName: item.foodName,
+                calories: item.calories,
+                protein: item.protein,
+                carbs: item.carbs,
+                fat: item.fat,
+              })),
+            }
+          : {}),
+      };
+      const proposal = await deps.mealDeleteProposalService.putLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: currentFacts.mealId,
+          expectedMealRevisionId: currentFacts.currentMealRevisionId,
+          snapshot,
+        },
+      });
+      const otherProposalKindActive = deps.goalProposalService
+        ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
+        : false;
+      const reply = renderMealDeleteProposalSetupCopy({
+        mealLabel: proposal.snapshot.mealLabel,
+        calories: proposal.snapshot.calories,
+        protein: proposal.snapshot.protein,
+        carbs: proposal.snapshot.carbs,
+        fat: proposal.snapshot.fat,
+        dateKey: proposal.snapshot.dateKey,
+        mealPeriod: proposal.snapshot.mealPeriod,
+        items: proposal.snapshot.items,
+        otherProposalKindActive,
+      });
+      return {
+        ok: true,
+        result: makeMealDeleteProposalResult({
+          proposalId: proposal.proposalId,
+          reply,
+          snapshot: proposal.snapshot,
+        }),
+        toolMessage: reply,
+      };
     } catch (error) {
       if (error instanceof MealRevisionPreconditionError) {
         const recovery = await deps.mealCorrectionService.recoverStalePendingSelection?.({
@@ -2065,20 +2225,6 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
       }
       throw error;
     }
-
-    await deps.mealCorrectionService.clearPendingSelection({
-      deviceId,
-      sessionId: DEFAULT_SESSION_ID,
-    });
-    if (deps.toolSessionState) {
-      deps.toolSessionState.resolvedMealTargets = [];
-    }
-
-    return {
-      ok: true,
-      result: deleted,
-      toolMessage: "已刪除餐點",
-    };
   },
 };
 
@@ -2389,7 +2535,7 @@ export const KNOWN_TOOL_POLICY_CLASSES = {
   propose_meal_estimate: "confirm-first",
   propose_meal_numeric_correction: "confirm-first",
   update_meal: "direct-execute",
-  delete_meal: "direct-execute",
+  delete_meal: "confirm-first",
 } satisfies Record<KnownToolName, SideEffectPolicyClass>;
 
 export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
@@ -2960,6 +3106,19 @@ export async function executeTool(
 
   if (toolCall.function.name === "delete_meal") {
     const contractResult = outcome.contractResult as DeleteMealContractResult;
+    if ("status" in contractResult && contractResult.status === "meal_delete_proposal") {
+      return attachPolicyFact({
+        result: contractResult.reply,
+        summary: "status: proposal",
+        success: true,
+        executed: false,
+        controlledReply: {
+          source: "renderer",
+          reason: contractResult.reason,
+          text: contractResult.reply,
+        },
+      });
+    }
     if (isMealControlledResult(contractResult)) {
       return attachPolicyFact({
         result: contractResult.reply,

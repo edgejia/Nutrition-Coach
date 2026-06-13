@@ -13,6 +13,7 @@ import { createHistoryQueryService } from "./services/history-query.js";
 import { createChatService } from "./services/chat.js";
 import { createAssetService } from "./services/assets.js";
 import { createMealCorrectionService } from "./services/meal-correction.js";
+import { createMealDeleteProposalService } from "./services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "./services/meal-numeric-proposals.js";
 import { createGoalProposalService } from "./services/goal-proposals.js";
 import { createGuestSessionService } from "./services/guest-session.js";
@@ -59,6 +60,7 @@ export interface AppServices {
   guestSessionService: ReturnType<typeof createGuestSessionService>;
   historyQueryService: ReturnType<typeof createHistoryQueryService>;
   mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
   orchestrator: ReturnType<typeof createOrchestrator>;
   publisher: RealtimePublisher;
@@ -126,6 +128,7 @@ export async function buildApp(opts: AppOptions) {
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
   const mealCorrectionService = createMealCorrectionService(db, { summaryService, foodLoggingService });
   const goalProposalService = createGoalProposalService(db);
+  const mealDeleteProposalService = createMealDeleteProposalService(db);
   const mealNumericProposalService = createMealNumericProposalService(db);
   const publisher = new RealtimePublisher();
 
@@ -135,6 +138,7 @@ export async function buildApp(opts: AppOptions) {
     summaryService,
     foodLoggingService,
     mealCorrectionService,
+    mealDeleteProposalService,
     mealNumericProposalService,
     deviceService,
     goalProposalService,
@@ -150,6 +154,7 @@ export async function buildApp(opts: AppOptions) {
     guestSessionService,
     historyQueryService,
     mealCorrectionService,
+    mealDeleteProposalService,
     mealNumericProposalService,
     orchestrator,
     publisher,

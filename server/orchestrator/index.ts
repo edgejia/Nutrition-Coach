@@ -8,6 +8,7 @@ import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
 import type { createMealCorrectionService } from "../services/meal-correction.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
+import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import type {
   createMealNumericProposalService,
   MealNumericProposalPayload,
@@ -60,6 +61,7 @@ interface OrchestratorDeps {
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
   deviceService: ReturnType<typeof createDeviceService>;
   goalProposalService?: ReturnType<typeof createGoalProposalService>;
+  mealDeleteProposalService?: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
@@ -1162,6 +1164,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 mealCorrectionService: deps.mealCorrectionService,
                 deviceService: deps.deviceService,
                 goalProposalService: deps.goalProposalService,
+                mealDeleteProposalService: deps.mealDeleteProposalService,
                 mealNumericProposalService: deps.mealNumericProposalService,
                 publisher: deps.publisher,
                 imagePath,

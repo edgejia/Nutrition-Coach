@@ -1762,6 +1762,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
 
     const call: ToolCall = {
       id: "call_delete_id_only_state",
@@ -1778,6 +1779,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       foodLoggingService,
       summaryService,
       mealCorrectionService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealIds: [created.id],
       },
@@ -1812,6 +1814,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
     const updated = await foodLoggingService.updateMeal(deviceId, updateTarget.id, {
       expectedMealRevisionId: updateTarget.mealRevisionId,
       items: [{
@@ -1847,6 +1850,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       foodLoggingService,
       summaryService,
       mealCorrectionService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealTargets: [{
           mealId: updateTarget.id,
@@ -1867,6 +1871,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       foodLoggingService,
       summaryService,
       mealCorrectionService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealTargets: [{
           mealId: deleteTarget.id,

@@ -50,6 +50,7 @@ export interface ScenarioAppServices {
   foodLoggingService: AppServices["foodLoggingService"];
   goalProposalService: AppServices["goalProposalService"];
   mealCorrectionService: AppServices["mealCorrectionService"];
+  mealDeleteProposalService: AppServices["mealDeleteProposalService"];
   mealNumericProposalService: AppServices["mealNumericProposalService"];
   publisher: AppServices["publisher"];
   summaryService: AppServices["summaryService"];
@@ -92,6 +93,7 @@ export async function createScenarioApp(
         foodLoggingService: readyServices.foodLoggingService,
         goalProposalService: readyServices.goalProposalService,
         mealCorrectionService: readyServices.mealCorrectionService,
+        mealDeleteProposalService: readyServices.mealDeleteProposalService,
         mealNumericProposalService: readyServices.mealNumericProposalService,
         publisher: readyServices.publisher,
         summaryService: readyServices.summaryService,

@@ -160,6 +160,9 @@ export interface CurrentMealFacts {
   mealId: string;
   currentMealRevisionId: string;
   mealLabel: string;
+  loggedAt: string;
+  dateKey: string;
+  mealPeriod: MealPeriod;
   items: MealTransactionItemInput[];
   totals: Record<NumericItemField, number>;
 }
@@ -1057,6 +1060,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       const header = await db
         .select({
           id: mealTransactions.id,
+          loggedAt: mealTransactions.loggedAt,
+          mealPeriod: mealTransactions.mealPeriod,
           currentRevisionId: mealTransactions.currentRevisionId,
         })
         .from(mealTransactions)
@@ -1072,6 +1077,9 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         mealId: current.id,
         currentMealRevisionId: current.currentRevisionId,
         mealLabel: display.foodName,
+        loggedAt: current.loggedAt,
+        dateKey: formatLocalDate(new Date(current.loggedAt)),
+        mealPeriod: normalizeMealPeriod(current.mealPeriod) ?? inferMealPeriod(current.loggedAt),
         items,
         totals: {
           calories: items.reduce((sum, item) => sum + item.calories, 0),
