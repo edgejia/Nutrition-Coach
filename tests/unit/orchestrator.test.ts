@@ -2745,6 +2745,60 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(meals.find((current) => current.id === meal.id)?.protein, 30);
   });
 
+  it("fails closed on bare consent when goal and delete proposals are both active", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: {
+        calories: 1750,
+        protein: 125,
+        carbs: 180,
+        fat: 55,
+      },
+    });
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該被呼叫" });
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderProposalKindAmbiguityCopy());
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.ok(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
+    assert.ok(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.find((current) => current.id === meal.id)?.calories, 650);
+  });
+
   it("clears goal and meal proposals on broad cancel before any model call", async () => {
     const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",

@@ -88,6 +88,7 @@ describe("Phase 86-03: policy taxonomy ADR", () => {
       "yarn verify:harness -- policy-side-effect-gate",
       "tests/harness/artifacts/policy-side-effect-gate/latest/",
       "yarn policy-taxonomy:check",
+      "Pending goal, meal numeric, and meal delete proposals are scoped by device, session, kind, proposal id",
       "expired or missing pending state is treated as no pending proposal and users must restate or repropose",
     ]);
 

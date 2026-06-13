@@ -120,6 +120,21 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /沒有可信蛋白來源/);
   });
 
+  it("routes delete_meal as confirm-first preview setup after find_meals", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = mealCorrectionSection(prompt);
+
+    assert.match(section, /find_meals[\s\S]*唯一目標[\s\S]*delete_meal[\s\S]*確認預覽/);
+    assert.match(section, /delete_meal[\s\S]*不代表已刪除/);
+    assert.match(section, /刪除成功[\s\S]*確認/);
+    assert.doesNotMatch(section, /只有當 find_meals 已解析出唯一目標時，才可以呼叫 update_meal 或 delete_meal；/);
+  });
+
   it("renders the no-intake legacy fat_loss prompt byte-for-byte", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1500,

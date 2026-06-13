@@ -2123,7 +2123,20 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const mealDeleteProposalService = createMealDeleteProposalService(db);
+    const mealNumericProposalService = createMealNumericProposalService(db);
     let deleteCalls = 0;
+
+    await mealNumericProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: created.id,
+        expectedMealRevisionId: created.mealRevisionId,
+        updateInput: { calories: 300 },
+        affectedFields: [{ field: "calories", before: 600, after: 300 }],
+        sourceOperator: "half",
+      },
+    });
 
     const call: ToolCall = {
       id: "call_delete",
@@ -2147,6 +2160,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
         },
       },
       mealDeleteProposalService,
+      mealNumericProposalService,
       toolSessionState: {
         resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
@@ -2201,6 +2215,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       text: result.result,
     });
     assert.equal(deleteCalls, 0);
+    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
     assert.equal(transaction?.deletedAt, null);
     assert.equal(transaction?.currentRevisionId, created.mealRevisionId);
     assert.equal(revisions.length, 1);
@@ -2841,6 +2856,27 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const mealNumericProposalService = createMealNumericProposalService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: created.id,
+        expectedMealRevisionId: created.mealRevisionId,
+        snapshot: {
+          mealId: created.id,
+          expectedMealRevisionId: created.mealRevisionId,
+          mealLabel: "雞腿、白飯",
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          dateKey: "2026-03-25",
+          loggedAt: created.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
     const contract = toolRegistry.get("propose_meal_numeric_correction");
     assert.ok(contract, "propose_meal_numeric_correction contract must be registered");
     assert.equal(contract.zodSchema.safeParse({
@@ -2876,6 +2912,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       summaryService,
       mealCorrectionService,
       mealNumericProposalService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
@@ -2904,6 +2941,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(revisions.length, 1);
     assert.equal(result.mealMutationKind, undefined);
     assert.equal(result.summaryOutcome, undefined);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
   });
 
   it("registers propose_meal_estimate with strict bounded confirm-first schema", async () => {
@@ -2957,7 +2995,28 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const mealNumericProposalService = createMealNumericProposalService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
     let updateCalls = 0;
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: created.id,
+        expectedMealRevisionId: created.mealRevisionId,
+        snapshot: {
+          mealId: created.id,
+          expectedMealRevisionId: created.mealRevisionId,
+          mealLabel: "雞腿、白飯",
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          dateKey: "2026-03-25",
+          loggedAt: created.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
 
     const result = await executeTool({
       id: "call_propose_meal_estimate",
@@ -2981,6 +3040,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
         },
       },
       mealNumericProposalService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
@@ -3014,6 +3074,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(revisions.length, 1);
     assert.equal(result.mealMutationKind, undefined);
     assert.equal(result.summaryOutcome, undefined);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
   });
 
   it("returns sanitized retryable validation diagnostics for invalid estimate proposals", async () => {
