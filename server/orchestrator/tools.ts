@@ -66,6 +66,7 @@ import {
   renderHistoricalLogFoodClarificationCopy,
   renderHistoricalSummaryClarificationCopy,
   renderHistoricalSummaryMultipleTargetsCopy,
+  renderMealDeleteProposalCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericClarificationCopy,
   renderMealNumericProposalCopy,
@@ -1245,57 +1246,6 @@ function makeMealNumericControlledResult(
   };
 }
 
-function mealPeriodLabel(period: MealPeriod): string {
-  switch (period) {
-    case "breakfast":
-      return "早餐";
-    case "lunch":
-      return "午餐";
-    case "dinner":
-      return "晚餐";
-    case "late_night":
-      return "宵夜";
-    default:
-      return "餐點";
-  }
-}
-
-function renderMealDeleteProposalSetupCopy(input: {
-  mealLabel: string;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  dateKey: string;
-  mealPeriod: MealPeriod;
-  items?: Array<{
-    foodName: string;
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-  }>;
-  otherProposalKindActive?: boolean;
-}): string {
-  const itemLines = input.items && input.items.length > 1
-    ? [
-        "項目：",
-        ...input.items.map((item) => `- ${item.foodName} ${item.calories} kcal`),
-      ]
-    : [];
-  const otherProposalLine = input.otherProposalKindActive
-    ? "你也有另一組目標提案；若要刪除這筆餐點，請明確回覆「刪除這筆餐點」。"
-    : undefined;
-  return [
-    `即將刪除：${input.mealLabel}`,
-    `日期：${input.dateKey} ${mealPeriodLabel(input.mealPeriod)}`,
-    `營養：${input.calories} kcal，P${input.protein}g / C${input.carbs}g / F${input.fat}g`,
-    ...itemLines,
-    "如果確認要刪除，請回覆「好」或「確認」。",
-    ...(otherProposalLine ? [otherProposalLine] : []),
-  ].join("\n");
-}
-
 function makeMealDeleteProposalResult(input: Omit<MealDeleteProposalResult, "status" | "reason">): MealDeleteProposalResult {
   return {
     status: "meal_delete_proposal",
@@ -2186,15 +2136,8 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
       const otherProposalKindActive = deps.goalProposalService
         ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
         : false;
-      const reply = renderMealDeleteProposalSetupCopy({
-        mealLabel: proposal.snapshot.mealLabel,
-        calories: proposal.snapshot.calories,
-        protein: proposal.snapshot.protein,
-        carbs: proposal.snapshot.carbs,
-        fat: proposal.snapshot.fat,
-        dateKey: proposal.snapshot.dateKey,
-        mealPeriod: proposal.snapshot.mealPeriod,
-        items: proposal.snapshot.items,
+      const reply = renderMealDeleteProposalCopy({
+        snapshot: proposal.snapshot,
         otherProposalKindActive,
       });
       return {

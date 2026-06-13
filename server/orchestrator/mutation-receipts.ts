@@ -3,6 +3,7 @@ import type {
   MealNumericAffectedField,
   MealNumericField,
 } from "../services/meal-numeric-proposals.js";
+import type { MealDeleteProposalSnapshot } from "../services/meal-delete-proposals.js";
 import type { MealCorrectionCandidate } from "../services/meal-correction.js";
 import type { DailyTargets } from "../services/device.js";
 import type { MutationEffects } from "./mutation-effects.js";
@@ -118,6 +119,11 @@ export interface MealNumericProposalCopyInput {
 
 export interface MealNumericFieldAwareCopyInput {
   field?: MealNumericField;
+}
+
+export interface MealDeleteProposalCopyInput {
+  snapshot: MealDeleteProposalSnapshot;
+  otherProposalKindActive?: boolean;
 }
 
 function formatMealNumericValue(field: MealNumericField, value: number): string {
@@ -283,6 +289,55 @@ export function renderMealNumericClarificationCopy(
 
 export function renderMealNumericCancelCopy(): string {
   return "已取消這組餐點修正提案，沒有更新任何餐點紀錄。";
+}
+
+function mealPeriodLabel(period: MealDeleteProposalSnapshot["mealPeriod"]): string {
+  switch (period) {
+    case "breakfast":
+      return "早餐";
+    case "lunch":
+      return "午餐";
+    case "dinner":
+      return "晚餐";
+    case "late_night":
+      return "宵夜";
+    default:
+      return "餐點";
+  }
+}
+
+export function renderMealDeleteProposalCopy(input: MealDeleteProposalCopyInput): string {
+  const { snapshot } = input;
+  const itemLines = snapshot.items && snapshot.items.length > 1
+    ? [
+        "項目：",
+        ...snapshot.items.map((item) => `- ${item.foodName} ${formatNumber(item.calories)} kcal`),
+      ]
+    : [];
+  const otherProposalLine = input.otherProposalKindActive
+    ? "你也有另一組目標提案；若要刪除這筆餐點，請明確回覆「刪除這筆餐點」。"
+    : undefined;
+
+  return [
+    `即將刪除：${snapshot.mealLabel}`,
+    `日期：${snapshot.dateKey} ${mealPeriodLabel(snapshot.mealPeriod)}`,
+    `營養：${formatNumber(snapshot.calories)} kcal，P${formatNumber(snapshot.protein)}g / C${formatNumber(snapshot.carbs)}g / F${formatNumber(snapshot.fat)}g`,
+    ...itemLines,
+    "如果確認要刪除，請回覆「好」或「確認」；如果取消，餐點紀錄不會變更。",
+    ...(otherProposalLine ? [otherProposalLine] : []),
+  ].join("\n");
+}
+
+export function renderMealDeleteCancelCopy(): string {
+  return "已取消刪除這筆餐點，餐點紀錄沒有變更。";
+}
+
+export function renderMealDeleteAuthorityFailureCopy(): string {
+  return "這次沒有刪除餐點紀錄。刪除確認已失效，請重新選擇要刪除的餐點。";
+}
+
+export function renderMealDeleteStaleCopy(): string {
+  return "這次沒有刪除餐點紀錄。餐點內容已經變更，請重新選擇要刪除的餐點。";
 }
 
 export function renderProposalKindAmbiguityCopy(): string {

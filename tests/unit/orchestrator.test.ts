@@ -1283,7 +1283,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.doesNotMatch(result.reply, /summaryOutcome|recompute_failed|dailySummary|publish_failed/);
   });
 
-  it("returns the delete receipt when a later tool in the same batch fails fatally", async () => {
+  it("previews delete setup before confirmation commits the delete receipt", async () => {
     const seeded = await foodLoggingService.logGroupedMeal(deviceId, {
       items: [
         { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
@@ -1315,7 +1315,18 @@ describe("Orchestrator - didLogMeal", () => {
       ],
     });
 
-    const result = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+    const setupResult = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in setupResult);
+    assert.match(setupResult.reply, /即將刪除：雞腿便當/);
+    assert.equal(setupResult.didLogMeal, false);
+    assert.equal(setupResult.didMutateMeal, false);
+    assert.equal(setupResult.finalReplySource, "renderer");
+    assert.equal(setupResult.finalReplyShape, "plain_text");
+    assert.equal(setupResult.deletedMealId, undefined);
+    assert.equal(setupResult.dailySummary, undefined);
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
 
     assert.ok("reply" in result);
     assert.equal(result.reply, "已刪除雞腿便當，已從當日紀錄移除。");
@@ -1333,6 +1344,7 @@ describe("Orchestrator - didLogMeal", () => {
     const localDeviceService = createDeviceService(db);
     const localFoodLoggingService = createFoodLoggingService(db);
     const localChatService = createChatService(db);
+    const localMealDeleteProposalService = createMealDeleteProposalService(db);
     const localLLM = new MockLLMProvider();
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
     const seeded = await localFoodLoggingService.logGroupedMeal(localDeviceId, {
@@ -1368,6 +1380,7 @@ describe("Orchestrator - didLogMeal", () => {
         },
       }),
       deviceService: localDeviceService,
+      mealDeleteProposalService: localMealDeleteProposalService,
     });
 
     localLLM.queueChatResponse({
@@ -1391,7 +1404,15 @@ describe("Orchestrator - didLogMeal", () => {
       ],
     });
 
-    const result = await orchestrator.handleMessage(localDeviceId, "刪掉雞腿便當");
+    const setupResult = await orchestrator.handleMessage(localDeviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in setupResult);
+    assert.match(setupResult.reply, /即將刪除：雞腿便當/);
+    assert.equal(setupResult.didMutateMeal, false);
+    assert.equal(setupResult.summaryOutcome, undefined);
+    assert.equal(setupResult.dailySummary, undefined);
+
+    const result = await orchestrator.handleMessage(localDeviceId, "好");
 
     assert.ok("reply" in result);
     assert.equal(result.reply, "已刪除雞腿便當，已從當日紀錄移除。");
@@ -1532,7 +1553,14 @@ describe("Orchestrator - didLogMeal", () => {
       ],
     });
 
-    const result = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+    const setupResult = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in setupResult);
+    assert.match(setupResult.reply, /即將刪除：雞腿便當/);
+    assert.equal(setupResult.didMutateMeal, false);
+    assert.equal(getMutationOutcomeFact(setupResult), undefined);
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
 
     assert.ok("reply" in result);
     assertMutationOutcomeFact(result, {
@@ -2903,7 +2931,7 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await approvalOrchestrator.handleMessage(deviceId, "確認");
 
     assert.ok("reply" in result);
-    assert.match(result.reply, /已刪除雞腿飯，已從當日紀錄移除。/);
+    assert.match(result.reply, /已刪除4\/19 雞腿飯，已從當日紀錄移除。/);
     assert.equal(result.didMutateMeal, true);
     assert.equal(result.deletedMealId, firstMeal.id);
     assert.equal(mockLLM.chatCalls.length, 0);
