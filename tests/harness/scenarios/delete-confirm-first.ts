@@ -49,6 +49,14 @@ const SCENARIO_NAME = "delete-confirm-first";
 const STEP_NAMES = [
   "delete_proposal_created_without_mutation",
   "delete_confirmation_deletes_previewed_meal_once",
+  "delete_cancel_clears_without_mutation",
+  "delete_ignore_preserves_without_mutation",
+  "delete_supersede_replaces_old_proposal",
+  "delete_expiry_rejects_without_mutation",
+  "delete_stale_revision_rejects_without_mutation",
+  "delete_cross_session_rejects_without_mutation",
+  "delete_duplicate_confirmation_noops",
+  "direct_delete_without_confirm_blocked_without_mutation",
 ] as const;
 
 function pass(name: string, actual?: unknown): ScenarioStepResult {
@@ -459,6 +467,7 @@ const scenario: VerificationScenario = {
         visibleOutcome: confirmVisibleOutcome,
       }));
 
+      assert.equal(steps.length, STEP_NAMES.length, "negative delete controls not implemented");
       assertPolicyEvidenceHasNoForbiddenFields(artifacts);
 
       return {
