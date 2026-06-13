@@ -1,9 +1,12 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { buildApp } from "../../server/app.js";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createSummaryService } from "../../server/services/summary.js";
+import { MockLLMProvider } from "../../server/llm/mock.js";
+import { createScenarioApp } from "../harness/app-fixture.js";
 import {
   assertRegistryPolicies,
   executeTool,
@@ -93,7 +96,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         update_goals: "direct-execute",
         propose_meal_numeric_correction: "confirm-first",
         update_meal: "direct-execute",
-        delete_meal: "direct-execute",
+        delete_meal: "confirm-first",
       });
 
       assert.doesNotThrow(() => assertRegistryPolicies(toolRegistry, KNOWN_TOOL_POLICY_CLASSES));
@@ -157,6 +160,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         "update_meal_revision_precondition_guard",
       ]);
       assertRules("delete_meal", [
+        "delete_meal_setup_only",
         "delete_meal_requires_resolved_target",
         "delete_meal_revision_precondition_guard",
       ]);
@@ -176,7 +180,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         "update_goals_latest_proposal_cancel",
       ]);
 
-      assert.equal(toolRegistry.get("delete_meal")?.policyClass, "direct-execute");
+      assert.equal(toolRegistry.get("delete_meal")?.policyClass, "confirm-first");
       assert.equal(getToolDefinitions().filter((definition) => definition.function.name === "find_meals").length, 1);
       assert.equal(getToolDefinitions().filter((definition) => definition.function.name === "delete_meal").length, 1);
     });
@@ -186,11 +190,39 @@ describe("Phase 10-02: orchestrator tool registry", () => {
       assertRuleOnlyOn("get_daily_summary_historical_date_clarification", "get_daily_summary");
       assertRuleOnlyOn("find_meals_target_clarification", "find_meals");
       assertRuleOnlyOn("update_meal_revision_precondition_guard", "update_meal");
+      assertRuleOnlyOn("delete_meal_setup_only", "delete_meal");
       assertRuleOnlyOn("delete_meal_revision_precondition_guard", "delete_meal");
       assertRuleOnlyOn("update_goals_latest_proposal_confirm_first", "update_goals");
       assertRuleOnlyOn("propose_meal_estimate_setup_only", "propose_meal_estimate");
       assertRuleOnlyOn("propose_meal_estimate_requires_resolved_target", "propose_meal_estimate");
       assertRuleOnlyOn("propose_meal_estimate_bounds_validation", "propose_meal_estimate");
+    });
+
+    it("Test 2g: app and harness composition expose mealDeleteProposalService", async () => {
+      let appServices: Parameters<NonNullable<Parameters<typeof buildApp>[0]["onServicesReady"]>>[0] | undefined;
+      const app = await buildApp({
+        dbPath: ":memory:",
+        llmProvider: new MockLLMProvider(),
+        onServicesReady: (services) => {
+          appServices = services;
+        },
+      });
+      try {
+        assert.ok(appServices?.mealDeleteProposalService, "AppServices must expose mealDeleteProposalService");
+        assert.ok(appServices.orchestrator, "createOrchestrator must be constructed with app services");
+      } finally {
+        await app.close();
+      }
+
+      const scenario = await createScenarioApp({ llmProvider: new MockLLMProvider() });
+      try {
+        assert.ok(
+          scenario.services.mealDeleteProposalService,
+          "ScenarioAppServices must expose mealDeleteProposalService",
+        );
+      } finally {
+        await scenario.close();
+      }
     });
   });
 
