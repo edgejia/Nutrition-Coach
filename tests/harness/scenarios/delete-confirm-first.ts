@@ -85,10 +85,14 @@ function failResult(
 }
 
 function summarizePolicyFact(fact: Record<string, unknown>): PolicyEvidence {
+  assert.equal(typeof fact.success, "boolean", "policy fact success must be explicit");
+  assert.equal(typeof fact.executed, "boolean", "policy fact executed must be explicit");
+  const success = fact.success as boolean;
+  const executed = fact.executed as boolean;
   return {
     tool: String(fact.tool),
-    success: fact.success === true,
-    executed: fact.executed === true,
+    success,
+    executed,
     policyClass: fact.policyClass as PolicyEvidence["policyClass"],
     decision: fact.decision as PolicyEvidence["decision"],
     ruleId: String(fact.ruleId),

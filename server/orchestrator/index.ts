@@ -979,20 +979,6 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             finalReplyShape: classifyPlainReplyShape(reply),
           };
         }
-        opts?.hooks?.onToolResult?.({
-          tool: "propose_meal_numeric_correction",
-          success: true,
-          executed: false,
-          summary: "policyDecision: allowed",
-          ...policyFactPayload({
-            tool: "propose_meal_numeric_correction",
-            policyClass: "confirm-first",
-            decision: "allowed",
-            ruleId: "meal_numeric_proposal_approval_consume",
-            proposalId: consumedMealProposal.proposalId,
-          }, opts?.turnId),
-        });
-
         try {
           const updated = await deps.mealCorrectionService.updateMeal(
             deviceId,
@@ -1014,6 +1000,19 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           };
           const reply = renderCheckedMutationReceipt(mutationEffects);
           const mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
+          opts?.hooks?.onToolResult?.({
+            tool: "propose_meal_numeric_correction",
+            success: true,
+            executed: true,
+            summary: "policyDecision: allowed",
+            ...policyFactPayload({
+              tool: "propose_meal_numeric_correction",
+              policyClass: "confirm-first",
+              decision: "allowed",
+              ruleId: "meal_numeric_proposal_approval_consume",
+              proposalId: consumedMealProposal.proposalId,
+            }, opts?.turnId),
+          });
           return {
             reply,
             didLogMeal: false,
@@ -1028,6 +1027,19 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           };
         } catch (error) {
           if (error instanceof MealRevisionPreconditionError) {
+            opts?.hooks?.onToolResult?.({
+              tool: "propose_meal_numeric_correction",
+              success: false,
+              executed: false,
+              summary: "policyDecision: blocked",
+              ...policyFactPayload({
+                tool: "propose_meal_numeric_correction",
+                policyClass: "confirm-first",
+                decision: "blocked",
+                ruleId: "meal_numeric_proposal_approval_consume",
+                proposalId: consumedMealProposal.proposalId,
+              }, opts?.turnId),
+            });
             const reply = renderMealProposalStaleCopy();
             return {
               reply,

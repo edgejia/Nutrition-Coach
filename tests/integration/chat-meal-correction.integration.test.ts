@@ -500,10 +500,10 @@ describe("chat meal correction integration", () => {
     const toolResult = trace.timeline.find((event) => event.type === "tool_result");
     assert.ok(toolResult);
     assert.equal(toolResult.tool, "propose_meal_numeric_correction");
-    assert.equal(toolResult.success, true);
+    assert.equal(toolResult.success, false);
     assert.equal(toolResult.executed, false);
     assert.equal(toolResult.policyClass, "confirm-first");
-    assert.equal(toolResult.decision, "allowed");
+    assert.equal(toolResult.decision, "blocked");
     assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
     assert.equal(toolResult.proposalId, proposal.proposalId);
   });
@@ -557,10 +557,10 @@ describe("chat meal correction integration", () => {
     const toolResult = trace.timeline.find((event) => event.type === "tool_result");
     assert.ok(toolResult);
     assert.equal(toolResult.tool, "propose_meal_numeric_correction");
-    assert.equal(toolResult.success, true);
+    assert.equal(toolResult.success, false);
     assert.equal(toolResult.executed, false);
     assert.equal(toolResult.policyClass, "confirm-first");
-    assert.equal(toolResult.decision, "allowed");
+    assert.equal(toolResult.decision, "blocked");
     assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
     assert.equal(toolResult.proposalId, proposal.proposalId);
     assert.equal(typeof toolResult.turnId, "string");
