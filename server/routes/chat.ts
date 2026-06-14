@@ -3,7 +3,7 @@ import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
-import type { createOrchestrator } from "../orchestrator/index.js";
+import type { createOrchestrator, ProposalEditContext } from "../orchestrator/index.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -42,6 +42,7 @@ import type { ProviderErrorMetadata } from "../llm/types.js";
 import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
 import {
   projectProposalCardForClient,
+  PROPOSAL_KINDS,
   type PendingProposalCardInput,
   type ProposalActionEventClientMetadata,
   type ProposalCardClientMetadata,
@@ -510,6 +511,53 @@ function createNoMutationLoggingClaimStreamGuard() {
   };
 }
 
+function parseProposalContext(rawValue: unknown):
+  | { proposalContext: ProposalEditContext }
+  | { error: string } {
+  if (typeof rawValue !== "string") {
+    return { error: "Invalid proposalContext" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch {
+    return { error: "Invalid proposalContext JSON" };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { error: "Invalid proposalContext shape" };
+  }
+
+  const keys = Object.keys(parsed);
+  if (
+    keys.length !== 3
+    || !keys.includes("proposalId")
+    || !keys.includes("kind")
+    || !keys.includes("action")
+  ) {
+    return { error: "Invalid proposalContext keys" };
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+  if (typeof candidate.proposalId !== "string" || candidate.proposalId.trim().length === 0) {
+    return { error: "Invalid proposalContext proposalId" };
+  }
+  if (typeof candidate.kind !== "string" || !(PROPOSAL_KINDS as readonly string[]).includes(candidate.kind)) {
+    return { error: "Invalid proposalContext kind" };
+  }
+  if (candidate.action !== "edit") {
+    return { error: "Invalid proposalContext action" };
+  }
+
+  return {
+    proposalContext: {
+      proposalId: candidate.proposalId,
+      kind: candidate.kind as ProposalKind,
+      action: "edit",
+    },
+  };
+}
+
 async function parseMultipartRequest(
   request: FastifyRequest,
   uploadsDir: string,
@@ -517,6 +565,7 @@ async function parseMultipartRequest(
   | {
       message: string;
       image?: { dataUri: string; path: string; mimeType: string; originalFilename?: string };
+      proposalContext?: ProposalEditContext;
     }
   | { error: string; code: number }
 > {
@@ -524,6 +573,8 @@ async function parseMultipartRequest(
   let image:
     | { dataUri: string; path: string; mimeType: string; originalFilename?: string }
     | undefined;
+  let proposalContext: ProposalEditContext | undefined;
+  let proposalContextSeen = false;
   const savedImagePaths: string[] = [];
 
   async function reject(error: string, code: number) {
@@ -540,6 +591,16 @@ async function parseMultipartRequest(
   for await (const part of parts) {
     if (part.type === "field" && part.fieldname === "message") {
       message = part.value as string;
+    } else if (part.type === "field" && part.fieldname === "proposalContext") {
+      if (proposalContextSeen) {
+        return reject("Only one proposalContext field is allowed", 400);
+      }
+      proposalContextSeen = true;
+      const parsedContext = parseProposalContext(part.value);
+      if ("error" in parsedContext) {
+        return reject(parsedContext.error, 400);
+      }
+      proposalContext = parsedContext.proposalContext;
     } else if (part.type === "file" && part.fieldname === "image") {
       if (!ALLOWED_TYPES.includes(part.mimetype)) {
         return reject("Invalid image type. Allowed: jpeg, png, webp", 400);
@@ -568,6 +629,10 @@ async function parseMultipartRequest(
     }
   }
 
+  if (proposalContext && image) {
+    return reject("proposalContext is text-only and cannot be combined with image upload", 400);
+  }
+
   if (!message && image) {
     message = "(圖片)";
   }
@@ -576,7 +641,11 @@ async function parseMultipartRequest(
     return { error: "Message or image required", code: 400 };
   }
 
-  return { message, image };
+  return {
+    message,
+    image,
+    ...(proposalContext ? { proposalContext } : {}),
+  };
 }
 
 function publishSummarySafe(
@@ -1041,6 +1110,7 @@ async function handleOrchestratorSSE(
   deviceId: string,
   message: string,
   image: { dataUri: string; path: string; mimeType: string; originalFilename?: string } | undefined,
+  proposalContext: ProposalEditContext | undefined,
   startedAt: number,
   hooks?: OrchestratorHooks,
   recorder?: LlmTraceRecorder,
@@ -1168,6 +1238,7 @@ async function handleOrchestratorSSE(
         hooks,
         signal: stopControl?.signal,
         turnId: stopControl.turnId,
+        proposalContext,
       }
     );
 
@@ -1525,7 +1596,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       return reply.code(parseResult.code).send({ error: parseResult.error });
     }
 
-    const { message, image } = parseResult;
+    const { message, image, proposalContext } = parseResult;
     const chatTurnStartedAt = Date.now();
     const hadImage = Boolean(image);
     const { turnId, turnLog, orchLog } = createChatTurnContext(request);
@@ -1642,6 +1713,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             },
             hooks,
             turnId,
+            proposalContext,
           },
         );
         jsonDidLogMeal = result.didLogMeal;
@@ -1926,6 +1998,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         deviceId,
         message,
         image,
+        proposalContext,
         chatTurnStartedAt,
         hooks,
         traceRecorder,

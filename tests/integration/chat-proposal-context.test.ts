@@ -204,7 +204,6 @@ describe("inline edit proposal context through /api/chat", () => {
         editLabel: "調整目標",
         rejectLabel: "取消提案",
       },
-      expiresAt: proposal.expiresAt,
     });
     return proposal;
   }
@@ -470,7 +469,7 @@ describe("inline edit proposal context through /api/chat", () => {
     assert.equal(mismatch.didLogMeal, false);
     assert.equal(mismatch.didMutateMeal, false);
     assert.equal(mismatch.proposalActionEvent, undefined);
-    assert.equal(mismatch.proposalCard?.status, "stale");
+    assert.equal(mismatch.proposalCard, undefined);
     assert.ok(await services.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
     assert.equal(
       (await services.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.proposalId,

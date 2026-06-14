@@ -721,6 +721,13 @@ export interface HandleMessageOpts {
   onUserMessageSaved?: () => void;
   signal?: AbortSignal;
   turnId?: string;
+  proposalContext?: ProposalEditContext;
+}
+
+export interface ProposalEditContext {
+  proposalId: string;
+  kind: ProposalKind;
+  action: "edit";
 }
 
 interface TypedProposalDecision {
@@ -731,6 +738,51 @@ interface TypedProposalDecision {
 
 function mealProposalKind(proposal: MealNumericProposalPayload): Extract<ProposalKind, "meal_numeric" | "meal_estimate"> {
   return proposal.provenance === "model_estimate" ? "meal_estimate" : "meal_numeric";
+}
+
+function isSelectedProposalGenericReject(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /^(取消(?:這個|此)?提案|不要(?:這個|此)?提案|不套用|先不用|先不要)$/i.test(normalized);
+}
+
+function selectedProposalReject(message: string, kind: ProposalKind): boolean {
+  if (isSelectedProposalGenericReject(message)) {
+    return true;
+  }
+  if (kind === "goal") {
+    return isGoalProposalCancel(message) || isGoalKindCancel(message);
+  }
+  if (kind === "meal_delete") {
+    return isGoalProposalCancel(message) || isMealDeleteProposalCancel(message);
+  }
+  return isGoalProposalCancel(message) || isMealProposalCancel(message);
+}
+
+function selectedProposalApprove(message: string, kind: ProposalKind): boolean {
+  if (kind === "goal") {
+    return isGoalProposalConsent(message) || isGoalKindApproval(message);
+  }
+  if (kind === "meal_delete") {
+    return isMealDeleteProposalApproval(message, { requireExplicitDelete: true });
+  }
+  return isGoalProposalConsent(message) || isMealProposalApproval(message);
+}
+
+function selectedProposalToolName(kind: ProposalKind): string {
+  if (kind === "goal") return "update_goals";
+  if (kind === "meal_delete") return "delete_meal";
+  return "propose_meal_numeric_correction";
+}
+
+function selectedProposalFallbackReply(kind: ProposalKind, action: ProposalActionRequestAction): string {
+  if (action === "approve") {
+    if (kind === "goal") return renderGoalAuthorityFailureCopy();
+    if (kind === "meal_delete") return renderMealDeleteAuthorityFailureCopy();
+    return renderMealNumericAuthorityFailureCopy();
+  }
+  if (kind === "goal") return renderGoalCancelCopy();
+  if (kind === "meal_delete") return renderMealDeleteCancelCopy();
+  return renderMealNumericCancelCopy();
 }
 
 function buildTypedActionResult(input: {
@@ -840,6 +892,37 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         });
         return buildTypedActionResult({ actionResult, fallbackReply });
       };
+
+      if (opts?.proposalContext) {
+        const validation = await deps.proposalActionService?.validateEditContext({
+          deviceId,
+          proposalId: opts.proposalContext.proposalId,
+          kind: opts.proposalContext.kind,
+        });
+        if (validation && !validation.ok) {
+          return buildTypedActionResult({
+            actionResult: validation,
+            fallbackReply: validation.proposalCard?.lapseCopy ?? renderProposalKindAmbiguityCopy(),
+          });
+        }
+        const selectedAction = selectedProposalReject(userMessage, opts.proposalContext.kind)
+          ? "reject"
+          : selectedProposalApprove(userMessage, opts.proposalContext.kind)
+            ? "approve"
+            : undefined;
+        if (selectedAction) {
+          const typedResult = await runTypedProposalDecision(
+            {
+              proposalId: opts.proposalContext.proposalId,
+              kind: opts.proposalContext.kind,
+              action: selectedAction,
+            },
+            selectedProposalFallbackReply(opts.proposalContext.kind, selectedAction),
+            selectedProposalToolName(opts.proposalContext.kind),
+          );
+          if (typedResult) return typedResult;
+        }
+      }
 
       if (activeMealDeleteProposal && isMealDeleteProposalCancel(userMessage)) {
         const typedResult = await runTypedProposalDecision(

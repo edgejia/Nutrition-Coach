@@ -42,6 +42,12 @@ export interface ProposalActionServiceInput {
   actionMessageId?: string;
 }
 
+export interface ProposalEditContextValidationInput {
+  deviceId: string;
+  proposalId: string;
+  kind: ProposalActionRequestKind;
+}
+
 export interface ProposalActionTestHooks {
   afterDomainMutation?: (input: {
     deviceId: string;
@@ -274,7 +280,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     };
   }
 
-  async function ensureActiveCard(input: ProposalActionServiceInput): Promise<ProposalCardMetadata | undefined> {
+  async function ensureActiveCard(input: ProposalEditContextValidationInput): Promise<ProposalCardMetadata | undefined> {
     const card = await loadCard(input);
     if (!card || card.status !== "active" || card.proposalKind !== input.kind || card.proposalLane !== proposalKindToLane(input.kind)) {
       return undefined;
@@ -282,7 +288,45 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     return card;
   }
 
+  async function activeProposalMatchesContext(input: ProposalEditContextValidationInput): Promise<boolean> {
+    if (input.kind === "goal") {
+      const proposal = await deps.goalProposalService.getLatest({
+        deviceId: input.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      return activeProposalIdMatches(proposal, input.proposalId)
+        && activeKindMatches({ kind: input.kind, proposal });
+    }
+    if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
+      const proposal = await deps.mealNumericProposalService.getLatest({
+        deviceId: input.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      return activeProposalIdMatches(proposal, input.proposalId)
+        && activeKindMatches({ kind: input.kind, proposal });
+    }
+    const proposal = await deps.mealDeleteProposalService.getLatest({
+      deviceId: input.deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    });
+    return activeProposalIdMatches(proposal, input.proposalId)
+      && activeKindMatches({ kind: input.kind, proposal });
+  }
+
   return {
+    async validateEditContext(
+      input: ProposalEditContextValidationInput,
+    ): Promise<{ ok: true } | Extract<ProposalActionServiceResult, { ok: false }>> {
+      const card = await ensureActiveCard(input);
+      if (!card) {
+        return markStale(input);
+      }
+      if (!await activeProposalMatchesContext(input)) {
+        return markStale({ ...input, card });
+      }
+      return { ok: true };
+    },
+
     async handleAction(input: ProposalActionServiceInput): Promise<ProposalActionServiceResult> {
       const card = await ensureActiveCard(input);
       if (!card) {
