@@ -1904,6 +1904,200 @@ textarea {
   white-space: nowrap;
 }
 
+.sp-proposal-card {
+  width: min(92%, 320px);
+  max-width: 92%;
+  overflow: hidden;
+  border: 1px solid var(--sp-line);
+  border-radius: var(--sp-r-lg);
+  background: var(--sp-surface);
+  color: var(--sp-ink);
+  font-family: var(--sp-font-zh);
+}
+
+.sp-proposal-card-active {
+  border-color: var(--sp-lime-line);
+}
+
+.sp-proposal-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border-bottom: 1px solid var(--sp-line);
+  padding: 12px 14px;
+}
+
+.sp-proposal-head h3 {
+  margin: 3px 0 0;
+  color: var(--sp-ink);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+
+.sp-proposal-eyebrow,
+.sp-proposal-status,
+.sp-proposal-row span:first-child,
+.sp-proposal-action-event-label {
+  color: var(--sp-ink-2);
+  font-family: var(--sp-font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.sp-proposal-status {
+  border: 1px solid var(--sp-lime-line);
+  border-radius: var(--sp-r-pill);
+  color: var(--sp-lime);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.sp-proposal-rows {
+  display: grid;
+}
+
+.sp-proposal-row {
+  display: grid;
+  grid-template-columns: minmax(0, 88px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+.sp-proposal-row + .sp-proposal-row {
+  border-top: 1px solid var(--sp-line);
+}
+
+.sp-proposal-row span:last-child {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--sp-ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.sp-proposal-row i {
+  color: var(--sp-ink-2);
+  font-style: normal;
+}
+
+.sp-proposal-row b {
+  color: var(--sp-ink-3);
+  font-weight: 400;
+}
+
+.sp-proposal-row strong {
+  color: var(--sp-lime);
+  font-weight: 700;
+}
+
+.sp-proposal-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--sp-line);
+}
+
+.sp-proposal-action {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--sp-line-strong);
+  border-radius: var(--sp-r-pill);
+  background: var(--sp-surface-2);
+  color: var(--sp-ink);
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.25;
+  padding: 10px 12px;
+}
+
+.sp-proposal-action:focus-visible {
+  outline: 2px solid var(--sp-lime);
+  outline-offset: 2px;
+}
+
+.sp-proposal-approve {
+  border-color: var(--sp-lime);
+  background: var(--sp-lime);
+  color: var(--sp-bg);
+}
+
+.sp-proposal-edit {
+  color: var(--sp-ink);
+}
+
+.sp-proposal-reject {
+  color: var(--sp-ink-2);
+}
+
+.sp-proposal-danger {
+  border-color: var(--sp-red);
+  background: rgba(255, 77, 77, 0.14);
+  color: #ffb3b3;
+}
+
+.sp-proposal-inactive {
+  border-color: var(--sp-line);
+  color: var(--sp-ink-2);
+}
+
+.sp-proposal-inactive .sp-proposal-status {
+  border-color: var(--sp-line);
+  color: var(--sp-ink-2);
+}
+
+.sp-proposal-inactive .sp-proposal-head h3,
+.sp-proposal-inactive .sp-proposal-row span,
+.sp-proposal-inactive .sp-proposal-row strong {
+  color: var(--sp-ink-2);
+}
+
+.sp-proposal-lapse {
+  border-top: 1px solid var(--sp-line);
+  margin: 0;
+  padding: 12px 14px 14px;
+  color: var(--sp-ink-2);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+.sp-proposal-action-event {
+  display: grid;
+  max-width: 82%;
+  min-width: 0;
+  gap: 4px;
+  border: 1px solid var(--sp-lime-line);
+  border-radius: 18px 18px 4px 18px;
+  background: var(--sp-surface-2);
+  color: var(--sp-ink);
+  font-family: var(--sp-font-zh);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  padding: 8px 16px;
+}
+
 .sp-receipt-deleted .sp-receipt-title,
 .sp-receipt-deleted .sp-receipt-kcal,
 .sp-receipt-deleted .sp-receipt-macros {
