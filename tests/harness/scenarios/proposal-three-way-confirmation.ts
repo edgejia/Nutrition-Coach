@@ -607,6 +607,12 @@ const scenario: VerificationScenario = {
       assert.equal(rejectedDelete.body.proposalActionEvent?.transcriptCopy, "已取消刪除提案");
       assert.equal(toMealCount(mealsAfterReject), toMealCount(mealsBeforeReject));
       assert.equal(rejectedMealAfter?.mealRevisionId, deleteRejectSetup.meal.mealRevisionId);
+      assert.equal(publish.counts.dailySummary, 0);
+      assert.equal(publish.counts.goals, 0);
+      const rejectPublishCounts = {
+        dailySummary: publish.counts.dailySummary,
+        goals: publish.counts.goals,
+      };
       const deleteApproveSetup = await createDeleteProposalViaChat("三方刪除確認飯");
       const mealsBeforeApprove = await readMeals();
       publish.reset();
@@ -634,8 +640,8 @@ const scenario: VerificationScenario = {
           counts: summarizeCounts({
             mealCountBefore: toMealCount(mealsBeforeReject),
             mealCountAfter: toMealCount(mealsAfterReject),
-            dailySummaryPublishes: publish.counts.dailySummary,
-            goalsPublishes: publish.counts.goals,
+            dailySummaryPublishes: rejectPublishCounts.dailySummary,
+            goalsPublishes: rejectPublishCounts.goals,
           }),
           mealRevisionUnchanged: rejectedMealAfter?.mealRevisionId === deleteRejectSetup.meal.mealRevisionId,
         },
