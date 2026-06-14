@@ -221,6 +221,7 @@ export interface ProposalCardMetadata {
   title: string;
   details: ProposalCardDetails;
   actions: ProposalCardActions;
+  inputHint?: string;
   expiresAt: string | null;
   lapseCopy: string | null;
   supersededByKind: ProposalKind | null;

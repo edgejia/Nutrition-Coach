@@ -13,6 +13,12 @@ type ProvisionalBubbleProps = {
   isStatusLabel: boolean;
 };
 
+type ActiveProposalEdit = {
+  messageId: string;
+  proposalId: string;
+  value: string;
+};
+
 const STOPPED_EMPTY_COPY = "已停止生成。";
 const STOPPED_STATUS_LABEL = "已停止";
 const RAW_STOPPED_PLACEHOLDER = "（已停止）";
@@ -233,8 +239,12 @@ export function MessageBubble(props: {
   onImageSettle?: () => void;
   onOpenMealEdit?: (payload: MealEditPayload) => void;
   onProposalApprove?: (request: ProposalActionRequest) => void;
-  onProposalEdit?: (proposalCard: ProposalCardMetadata) => void;
+  onProposalEdit?: (input: { messageId: string; proposalCard: ProposalCardMetadata }) => void;
   onProposalReject?: (request: ProposalActionRequest) => void;
+  activeEdit?: ActiveProposalEdit | null;
+  onInlineEditChange?: (value: string) => void;
+  onInlineEditSubmit?: () => void;
+  onCancelProposalEdit?: () => void;
 } & Partial<ProvisionalBubbleProps>) {
   const {
     message,
@@ -243,6 +253,10 @@ export function MessageBubble(props: {
     onProposalApprove,
     onProposalEdit,
     onProposalReject,
+    activeEdit,
+    onInlineEditChange,
+    onInlineEditSubmit,
+    onCancelProposalEdit,
     isProvisional,
     isStatusLabel,
   } = props;
@@ -295,8 +309,17 @@ export function MessageBubble(props: {
           <ProposalCard
             proposalCard={message.proposalCard}
             onApprove={onProposalApprove}
-            onEdit={onProposalEdit}
+            onEdit={(proposalCard) => onProposalEdit?.({ messageId: message.id, proposalCard })}
             onReject={onProposalReject}
+            activeEdit={
+              activeEdit?.messageId === message.id &&
+              activeEdit.proposalId === message.proposalCard.proposalId
+                ? activeEdit
+                : undefined
+            }
+            onInlineEditChange={onInlineEditChange}
+            onInlineEditSubmit={onInlineEditSubmit}
+            onCancelEdit={onCancelProposalEdit}
           />
         ) : null}
         {shouldRenderReceipt ? (

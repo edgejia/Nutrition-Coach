@@ -22,7 +22,7 @@ function renderMessageBubble(message: Message, options?: { isProvisional?: boole
   return renderToStaticMarkup(createElement(MessageBubble, { message, ...options }));
 }
 
-function renderProposalCard(props: Record<string, unknown>) {
+function renderProposalCard(props: Parameters<typeof ProposalCard>[0]) {
   return renderToStaticMarkup(createElement(ProposalCard, props));
 }
 
@@ -529,7 +529,7 @@ describe("chat bubble source contract", () => {
     assert.match(html, /輸入你想怎麼調整，例如：熱量再低一點/);
     assert.match(html, /關閉編輯/);
     assert.match(html, /送出/);
-    assert.doesNotMatch(html, /取消提案[^]*sp-proposal-inline-edit/);
+    assert.doesNotMatch(html, /sp-proposal-inline-cancel[^>]*>取消提案/);
   });
 
   it("wires ChatPanel inline edit through one active state, composer lock, and proposal context send", async () => {

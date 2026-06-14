@@ -4,6 +4,12 @@ import type {
   ProposalCardMetadata,
 } from "../types.js";
 
+type ActiveProposalEdit = {
+  messageId: string;
+  proposalId: string;
+  value: string;
+};
+
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
@@ -25,6 +31,19 @@ function getStatusCopy(status: ProposalCardMetadata["status"]) {
   }
 }
 
+function getDefaultInputHint(proposalKind: ProposalCardMetadata["proposalKind"]) {
+  switch (proposalKind) {
+    case "goal":
+      return "輸入新的每日目標，例如：蛋白質改 120g";
+    case "meal_numeric":
+      return "輸入你想改成的數字，例如：蛋白質改 30g";
+    case "meal_estimate":
+      return "輸入你想怎麼調整，例如：熱量再低一點";
+    case "meal_delete":
+      return "輸入新的需求；這不會直接刪除餐點";
+  }
+}
+
 export function ProposalActionEvent({ event }: { event: ProposalActionEventMetadata }) {
   return (
     <div className="sp-message-row sp-message-row-user">
@@ -41,14 +60,24 @@ export function ProposalCard({
   onApprove,
   onEdit,
   onReject,
+  activeEdit,
+  onInlineEditChange,
+  onInlineEditSubmit,
+  onCancelEdit,
 }: {
   proposalCard: ProposalCardMetadata;
   onApprove?: (request: ProposalActionRequest) => void;
   onEdit?: (proposalCard: ProposalCardMetadata) => void;
   onReject?: (request: ProposalActionRequest) => void;
+  activeEdit?: ActiveProposalEdit;
+  onInlineEditChange?: (value: string) => void;
+  onInlineEditSubmit?: () => void;
+  onCancelEdit?: () => void;
 }) {
   const isActive = proposalCard.status === "active" && proposalCard.isActionable;
   const isDelete = proposalCard.proposalKind === "meal_delete";
+  const isEditing = activeEdit?.proposalId === proposalCard.proposalId;
+  const inputHint = proposalCard.inputHint ?? getDefaultInputHint(proposalCard.proposalKind);
 
   return (
     <div className="sp-message-row sp-message-row-assistant">
@@ -88,37 +117,70 @@ export function ProposalCard({
         </div>
 
         {isActive ? (
-          <div className="sp-proposal-actions">
-            <button
-              className={cx("sp-proposal-action", "sp-proposal-approve", isDelete && "sp-proposal-danger")}
-              type="button"
-              onClick={() => onApprove?.({
-                proposalId: proposalCard.proposalId,
-                kind: proposalCard.proposalKind,
-                action: "approve",
-              })}
-            >
-              {proposalCard.actions.approveLabel}
-            </button>
-            <button
-              className="sp-proposal-action sp-proposal-edit"
-              type="button"
-              onClick={() => onEdit?.(proposalCard)}
-            >
-              {proposalCard.actions.editLabel}
-            </button>
-            <button
-              className="sp-proposal-action sp-proposal-reject"
-              type="button"
-              onClick={() => onReject?.({
-                proposalId: proposalCard.proposalId,
-                kind: proposalCard.proposalKind,
-                action: "reject",
-              })}
-            >
-              {proposalCard.actions.rejectLabel}
-            </button>
-          </div>
+          <>
+            <div className="sp-proposal-actions">
+              <button
+                className={cx("sp-proposal-action", "sp-proposal-approve", isDelete && "sp-proposal-danger")}
+                type="button"
+                onClick={() => onApprove?.({
+                  proposalId: proposalCard.proposalId,
+                  kind: proposalCard.proposalKind,
+                  action: "approve",
+                })}
+              >
+                {proposalCard.actions.approveLabel}
+              </button>
+              <button
+                className="sp-proposal-action sp-proposal-edit"
+                type="button"
+                onClick={() => onEdit?.(proposalCard)}
+              >
+                {proposalCard.actions.editLabel}
+              </button>
+              <button
+                className="sp-proposal-action sp-proposal-reject"
+                type="button"
+                onClick={() => onReject?.({
+                  proposalId: proposalCard.proposalId,
+                  kind: proposalCard.proposalKind,
+                  action: "reject",
+                })}
+              >
+                {proposalCard.actions.rejectLabel}
+              </button>
+            </div>
+            {isEditing ? (
+              <form
+                className="sp-proposal-inline-edit"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  onInlineEditSubmit?.();
+                }}
+              >
+                <textarea
+                  aria-label={inputHint}
+                  autoFocus
+                  className="sp-proposal-inline-input"
+                  onChange={(event) => onInlineEditChange?.(event.currentTarget.value)}
+                  placeholder={inputHint}
+                  rows={2}
+                  value={activeEdit.value}
+                />
+                <div className="sp-proposal-inline-actions">
+                  <button className="sp-proposal-action sp-proposal-inline-send" type="submit">
+                    送出
+                  </button>
+                  <button
+                    className="sp-proposal-action sp-proposal-inline-cancel"
+                    type="button"
+                    onClick={() => onCancelEdit?.()}
+                  >
+                    關閉編輯
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </>
         ) : (
           <p className="sp-proposal-lapse">
             {proposalCard.lapseCopy ?? "這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。"}

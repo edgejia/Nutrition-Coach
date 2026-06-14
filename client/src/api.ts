@@ -263,6 +263,7 @@ function isProposalCardMetadata(value: unknown): value is ProposalCardMetadata {
     value.title.trim().length > 0 &&
     isProposalCardDetails(value.details) &&
     isProposalCardActions(value.actions) &&
+    (value.inputHint === undefined || typeof value.inputHint === "string") &&
     isStringOrNull(value.expiresAt) &&
     isStringOrNull(value.lapseCopy) &&
     (value.supersededByKind === null || isOneOf(value.supersededByKind, PROPOSAL_KINDS))

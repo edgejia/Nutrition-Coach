@@ -2,7 +2,11 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { IntakeData } from "../../client/src/types.js";
+import type {
+  IntakeData,
+  ProposalActionEventMetadata,
+  ProposalCardMetadata,
+} from "../../client/src/types.js";
 
 // Minimal localStorage shim
 const storage = new Map<string, string>();
@@ -109,7 +113,7 @@ const validProposalCard = {
   expiresAt: "2026-04-29T08:00:00.000Z",
   lapseCopy: null,
   supersededByKind: null,
-};
+} satisfies ProposalCardMetadata;
 
 const validProposalActionEvent = {
   proposalId: "proposal-1",
@@ -118,7 +122,7 @@ const validProposalActionEvent = {
   action: "approve",
   transcriptCopy: "已選擇套用餐點修改",
   createdAt: "2026-04-29T07:35:00.000Z",
-};
+} satisfies ProposalActionEventMetadata;
 
 const api = await import("../../client/src/api.js");
 const store = await import("../../client/src/store.js");
@@ -559,6 +563,7 @@ describe("API Client", () => {
       kind: "meal_estimate",
       action: "approve",
     });
+    assert.equal(result.ok, true);
     assert.equal(result.proposalCard.status, "approved");
     for (const forbidden of ["targets", "nutrition", "updateInput", "expectedMealRevisionId", "deleteMealId"]) {
       assert.equal(String(fetchCalls[0].init.body).includes(forbidden), false);
