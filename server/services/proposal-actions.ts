@@ -1,10 +1,22 @@
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import type { AppDatabase } from "../db/client.js";
 import {
+  mutationOutcomeFactFromEffects,
+  type CommittedMealFacts,
+  type DeletedMealSnapshot,
+  type MutationEffects,
+} from "../orchestrator/mutation-effects.js";
+import {
+  renderGoalCancelCopy,
+  renderMealDeleteCancelCopy,
+  renderMealNumericCancelCopy,
   renderProposalActionEventCopy,
   renderProposalInactiveCopy,
+  renderMutationReceipt,
 } from "../orchestrator/mutation-receipts.js";
+import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { MealRevisionPreconditionError } from "./meal-transactions.js";
+import type { ChatMutationOutcomeFact } from "./chat-mutation-outcomes.js";
 import type { createChatService } from "./chat.js";
 import type { createDeviceService, DailyTargets } from "./device.js";
 import type { createGoalProposalService, GoalProposalPayload } from "./goal-proposals.js";
@@ -64,6 +76,8 @@ export type ProposalActionServiceResult =
       proposalCard: ProposalCardClientMetadata;
       proposalActionEvent: ProposalActionEventClientMetadata;
       didMutateMeal: boolean;
+      reply?: string;
+      mutationOutcomeFact?: ChatMutationOutcomeFact;
       dailyTargets?: DailyTargets;
       updatedMeal?: unknown;
       deletedMealId?: string;
@@ -164,6 +178,29 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     });
   }
 
+  async function getCommittedTargets(deviceId: string): Promise<DailyTargets> {
+    const device = await deps.deviceService.getDevice(deviceId);
+    if (!device) {
+      throw new Error("proposal action completed without device targets");
+    }
+    return {
+      calories: device.dailyCalories,
+      protein: device.dailyProtein,
+      carbs: device.dailyCarbs,
+      fat: device.dailyFat,
+    };
+  }
+
+  function cancelReply(kind: ProposalActionRequestKind): string {
+    if (kind === "goal") {
+      return renderGoalCancelCopy();
+    }
+    if (kind === "meal_delete") {
+      return renderMealDeleteCancelCopy();
+    }
+    return renderMealNumericCancelCopy();
+  }
+
   async function loadCard(input: {
     deviceId: string;
     proposalId: string;
@@ -178,6 +215,9 @@ export function createProposalActionService(deps: ProposalActionDeps) {
   }): Promise<ProposalActionServiceResult> {
     const card = await loadCard(input);
     if (!card) {
+      if (await activeProposalMatchesContext(input)) {
+        await clearActiveProposal(input);
+      }
       return { ok: false, status: "stale", didMutateMeal: false };
     }
     if (
@@ -192,6 +232,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
         proposalCard: projectProposalCardForClient(card),
       };
     }
+    await clearActiveProposal(input);
     await deps.proposalCardService.markProposalStatus({
       deviceId: input.deviceId,
       proposalId: input.proposalId,
@@ -205,6 +246,21 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       didMutateMeal: false,
       ...(updated ? { proposalCard: projectProposalCardForClient(updated) } : {}),
     };
+  }
+
+  async function clearActiveProposal(input: {
+    deviceId: string;
+    kind: ProposalActionRequestKind;
+  }): Promise<void> {
+    if (input.kind === "goal") {
+      await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+      return;
+    }
+    if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
+      await deps.mealNumericProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+      return;
+    }
+    await deps.mealDeleteProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
   }
 
   async function saveActionEvent(input: {
@@ -242,6 +298,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     actionMessageId?: string;
     mutation?: {
       didMutateMeal: boolean;
+      effects?: MutationEffects;
       dailyTargets?: DailyTargets;
       updatedMeal?: unknown;
       deletedMealId?: string;
@@ -274,6 +331,12 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       proposalCard: projectProposalCardForClient(card),
       proposalActionEvent: event,
       didMutateMeal: input.mutation?.didMutateMeal ?? false,
+      reply: input.mutation?.effects
+        ? renderMutationReceipt(input.mutation.effects)
+        : input.action === "reject"
+          ? cancelReply(input.kind)
+          : undefined,
+      ...(input.mutation?.effects ? { mutationOutcomeFact: mutationOutcomeFactFromEffects(input.mutation.effects) } : {}),
       ...(input.mutation?.dailyTargets ? { dailyTargets: input.mutation.dailyTargets } : {}),
       ...(input.mutation?.updatedMeal ? { updatedMeal: input.mutation.updatedMeal } : {}),
       ...(input.mutation?.deletedMealId ? { deletedMealId: input.mutation.deletedMealId } : {}),
@@ -358,12 +421,19 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             return { result: await markStale(input) };
           }
           const dailyTargets = await deps.deviceService.updateGoals(input.deviceId, consumed.targets);
+          const effects: MutationEffects = {
+            kind: "goals",
+            affectedDate: formatLocalDate(currentAppDate()),
+            committedTargets: dailyTargets,
+            targets: dailyTargets,
+            updatedFields: ["calories", "protein", "carbs", "fat"],
+          };
           deps.testHooks?.afterDomainMutation?.(input);
           return {
             result: await completeActiveAction({
               ...input,
               card,
-              mutation: { didMutateMeal: false, dailyTargets },
+              mutation: { didMutateMeal: false, effects, dailyTargets },
             }),
             publish: { type: "goals_update", targets: dailyTargets },
           };
@@ -403,12 +473,31 @@ export function createProposalActionService(deps: ProposalActionDeps) {
               deviceId: input.deviceId,
               sessionId: DEFAULT_SESSION_ID,
             });
+            const effects: MutationEffects = {
+              kind: "update",
+              affectedDate: updated.affectedDate,
+              summaryOutcome: updated.summaryOutcome,
+              committedTargets: await getCommittedTargets(input.deviceId),
+              meal: {
+                mealId: updated.updatedMeal.id,
+                mealRevisionId: updated.updatedMeal.mealRevisionId,
+                dateKey: formatLocalDate(new Date(updated.updatedMeal.loggedAt)),
+                loggedAt: updated.updatedMeal.loggedAt,
+                foodName: updated.updatedMeal.foodName,
+                calories: updated.updatedMeal.calories,
+                protein: updated.updatedMeal.protein,
+                carbs: updated.updatedMeal.carbs,
+                fat: updated.updatedMeal.fat,
+                itemCount: updated.updatedMeal.itemCount,
+              } satisfies CommittedMealFacts,
+            };
             return {
               result: await completeActiveAction({
                 ...input,
                 card,
                 mutation: {
                   didMutateMeal: true,
+                  effects,
                   updatedMeal: updated.updatedMeal,
                   affectedDate: updated.affectedDate,
                   summaryOutcome: updated.summaryOutcome,
@@ -465,12 +554,20 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             deviceId: input.deviceId,
             sessionId: DEFAULT_SESSION_ID,
           });
+          const effects: MutationEffects = {
+            kind: "delete",
+            affectedDate: deleted.affectedDate,
+            summaryOutcome: deleted.summaryOutcome,
+            committedTargets: await getCommittedTargets(input.deviceId),
+            deletedMeal: deleted.deletedMeal as DeletedMealSnapshot,
+          };
           return {
             result: await completeActiveAction({
               ...input,
               card,
               mutation: {
                 didMutateMeal: true,
+                effects,
                 deletedMealId: deleted.deletedMealId,
                 affectedDate: deleted.affectedDate,
                 summaryOutcome: deleted.summaryOutcome,

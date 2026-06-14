@@ -8,10 +8,13 @@ import { createGoalProposalService } from "../../server/services/goal-proposals.
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
 import { createMealDeleteProposalService } from "../../server/services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
+import { createProposalActionService } from "../../server/services/proposal-actions.js";
+import { createProposalCardService } from "../../server/services/proposal-cards.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import type {
   ChatMessage,
   GenerateObjectRequest,
@@ -30,10 +33,9 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
-  renderMealDeleteAuthorityFailureCopy,
   renderMealDeleteCancelCopy,
-  renderMealDeleteStaleCopy,
   renderMealNumericCancelCopy,
+  renderProposalInactiveCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
@@ -571,6 +573,7 @@ describe("orchestrator shared patterns", () => {
 });
 
 describe("Orchestrator - didLogMeal", () => {
+  let db: ReturnType<typeof createDb>;
   let orchestrator: ReturnType<typeof createOrchestrator>;
   let mockLLM: MockLLMProvider;
   let deviceId: string;
@@ -580,20 +583,121 @@ describe("Orchestrator - didLogMeal", () => {
   let goalProposalService: ReturnType<typeof createGoalProposalService>;
   let mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   let mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  let proposalCardService: ReturnType<typeof createProposalCardService>;
+  let proposalActionService: ReturnType<typeof createProposalActionService>;
+  let publisher: RealtimePublisher;
   let summaryService: ReturnType<typeof createSummaryService>;
   let chatService: ReturnType<typeof createChatService>;
   let shouldFailSummary = false;
 
   beforeEach(async () => {
-    const db = createDb(":memory:");
+    db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
-    goalProposalService = createGoalProposalService(db);
-    mealDeleteProposalService = createMealDeleteProposalService(db);
-    mealNumericProposalService = createMealNumericProposalService(db);
     summaryService = createSummaryService(db);
     chatService = createChatService(db);
+    proposalCardService = createProposalCardService(db);
+    const baseGoalProposalService = createGoalProposalService(db);
+    const baseMealDeleteProposalService = createMealDeleteProposalService(db);
+    const baseMealNumericProposalService = createMealNumericProposalService(db);
+    goalProposalService = {
+      ...baseGoalProposalService,
+      async putLatest(input) {
+        const proposal = await baseGoalProposalService.putLatest(input);
+        const assistant = await chatService.saveMessage(input.deviceId, "assistant", "請確認這組每日目標提案。");
+        await proposalCardService.saveAssistantProposalCard({
+          deviceId: input.deviceId,
+          assistantMessageId: assistant.id,
+          proposalId: proposal.proposalId,
+          proposalKind: "goal",
+          proposalLane: "goal",
+          title: "請確認這組每日目標提案。",
+          details: {
+            rows: [
+              { label: "卡路里", after: `${input.targets.calories} kcal` },
+              { label: "蛋白質", after: `${input.targets.protein} g` },
+            ],
+          },
+          actions: {
+            approveLabel: "套用目標",
+            editLabel: "調整目標",
+            rejectLabel: "取消提案",
+          },
+        });
+        return proposal;
+      },
+    };
+    mealDeleteProposalService = {
+      ...baseMealDeleteProposalService,
+      async putLatest(input) {
+        const proposal = await baseMealDeleteProposalService.putLatest(input);
+        const assistant = await chatService.saveMessage(input.deviceId, "assistant", "請確認是否刪除這筆餐點。");
+        await proposalCardService.saveAssistantProposalCard({
+          deviceId: input.deviceId,
+          assistantMessageId: assistant.id,
+          proposalId: proposal.proposalId,
+          proposalKind: "meal_delete",
+          proposalLane: "meal_mutation",
+          title: "請確認是否刪除這筆餐點。",
+          details: {
+            rows: [
+              { label: "餐點", value: input.input.snapshot.mealLabel },
+              { label: "熱量", value: `${input.input.snapshot.calories} kcal` },
+            ],
+          },
+          actions: {
+            approveLabel: "確認刪除",
+            editLabel: "改用文字調整",
+            rejectLabel: "取消提案",
+          },
+          expiresAt: proposal.expiresAt,
+        });
+        return proposal;
+      },
+    };
+    mealNumericProposalService = {
+      ...baseMealNumericProposalService,
+      async putLatest(input) {
+        const proposal = await baseMealNumericProposalService.putLatest(input);
+        const proposalKind = input.input.provenance === "model_estimate" ? "meal_estimate" : "meal_numeric";
+        const assistant = await chatService.saveMessage(input.deviceId, "assistant", "請確認這組餐點修正提案。");
+        await proposalCardService.saveAssistantProposalCard({
+          deviceId: input.deviceId,
+          assistantMessageId: assistant.id,
+          proposalId: proposal.proposalId,
+          proposalKind,
+          proposalLane: "meal_mutation",
+          title: "請確認這組餐點修正提案。",
+          details: {
+            rows: input.input.affectedFields.map((field) => ({
+              label: field.field,
+              before: String(field.before),
+              after: String(field.after),
+            })),
+          },
+          actions: {
+            approveLabel: "套用修改",
+            editLabel: "改用文字調整",
+            rejectLabel: "取消提案",
+          },
+          expiresAt: proposal.expiresAt,
+        });
+        return proposal;
+      },
+    };
+    publisher = new RealtimePublisher();
+    proposalActionService = createProposalActionService({
+      db,
+      chatService,
+      proposalCardService,
+      goalProposalService,
+      mealDeleteProposalService,
+      mealNumericProposalService,
+      mealCorrectionService,
+      deviceService,
+      publisher,
+    });
     mockLLM = new MockLLMProvider();
     shouldFailSummary = false;
 
@@ -615,6 +719,7 @@ describe("Orchestrator - didLogMeal", () => {
       goalProposalService,
       mealDeleteProposalService,
       mealNumericProposalService,
+      proposalActionService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -1344,6 +1449,9 @@ describe("Orchestrator - didLogMeal", () => {
     const localDeviceService = createDeviceService(db);
     const localFoodLoggingService = createFoodLoggingService(db);
     const localChatService = createChatService(db);
+    const localProposalCardService = createProposalCardService(db);
+    const localGoalProposalService = createGoalProposalService(db);
+    const localMealNumericProposalService = createMealNumericProposalService(db);
     const localMealDeleteProposalService = createMealDeleteProposalService(db);
     const localLLM = new MockLLMProvider();
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
@@ -1351,6 +1459,29 @@ describe("Orchestrator - didLogMeal", () => {
       items: [
         { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
       ],
+    });
+    const localMealCorrectionService = createMealCorrectionService(db, {
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary recomputation failed");
+        },
+      },
+      foodLoggingService: {
+        async getMealsByDate() {
+          throw new Error("persisted meal recovery failed");
+        },
+      },
+    });
+    const localProposalActionService = createProposalActionService({
+      db,
+      chatService: localChatService,
+      proposalCardService: localProposalCardService,
+      goalProposalService: localGoalProposalService,
+      mealDeleteProposalService: localMealDeleteProposalService,
+      mealNumericProposalService: localMealNumericProposalService,
+      mealCorrectionService: localMealCorrectionService,
+      deviceService: localDeviceService,
+      publisher: new RealtimePublisher(),
     });
 
     orchestrator = createOrchestrator({
@@ -1367,20 +1498,12 @@ describe("Orchestrator - didLogMeal", () => {
           throw new Error("persisted meal recovery failed");
         },
       },
-      mealCorrectionService: createMealCorrectionService(db, {
-        summaryService: {
-          async getDailySummary() {
-            throw new Error("summary recomputation failed");
-          },
-        },
-        foodLoggingService: {
-          async getMealsByDate() {
-            throw new Error("persisted meal recovery failed");
-          },
-        },
-      }),
+      mealCorrectionService: localMealCorrectionService,
       deviceService: localDeviceService,
+      goalProposalService: localGoalProposalService,
       mealDeleteProposalService: localMealDeleteProposalService,
+      mealNumericProposalService: localMealNumericProposalService,
+      proposalActionService: localProposalActionService,
     });
 
     localLLM.queueChatResponse({
@@ -1411,6 +1534,15 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(setupResult.didMutateMeal, false);
     assert.equal(setupResult.summaryOutcome, undefined);
     assert.equal(setupResult.dailySummary, undefined);
+    if (!setupResult.proposalCard) {
+      throw new Error("expected pending delete proposal card");
+    }
+    const setupAssistant = await localChatService.saveMessage(localDeviceId, "assistant", setupResult.reply);
+    await localProposalCardService.saveAssistantProposalCard({
+      ...setupResult.proposalCard,
+      deviceId: localDeviceId,
+      assistantMessageId: setupAssistant.id,
+    });
 
     const result = await orchestrator.handleMessage(localDeviceId, "好");
 
@@ -2879,14 +3011,14 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(deviceId, "不要");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, renderMealNumericCancelCopy());
+    assert.equal(result.reply, renderProposalKindAmbiguityCopy());
     assert.equal(result.didLogMeal, false);
     assert.equal(result.didMutateMeal, false);
     assert.equal(result.finalReplySource, "renderer");
     assert.equal(result.finalReplyShape, "plain_text");
     assert.equal(mockLLM.chatCalls.length, 0);
-    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
-    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    assert.ok(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
+    assert.ok(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
   });
 
   it("clears only the meal proposal on kind-specific meal cancel", async () => {
@@ -3007,26 +3139,39 @@ describe("Orchestrator - didLogMeal", () => {
     });
     const deleteCalls: Array<{ mealId: string; expectedMealRevisionId?: string | null }> = [];
     let clearPendingSelectionCalls = 0;
+    const trackedMealCorrectionService = {
+      ...mealCorrectionService,
+      async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+        deleteCalls.push({ mealId: args[1], expectedMealRevisionId: args[2] });
+        return mealCorrectionService.deleteMeal(...args);
+      },
+      async clearPendingSelection(...args: Parameters<typeof mealCorrectionService.clearPendingSelection>) {
+        clearPendingSelectionCalls += 1;
+        return mealCorrectionService.clearPendingSelection(...args);
+      },
+    };
+    const trackedProposalActionService = createProposalActionService({
+      db,
+      chatService,
+      proposalCardService,
+      goalProposalService,
+      mealDeleteProposalService,
+      mealNumericProposalService,
+      mealCorrectionService: trackedMealCorrectionService,
+      deviceService,
+      publisher,
+    });
     const approvalOrchestrator = createOrchestrator({
       llmProvider: mockLLM,
       chatService,
       summaryService,
       foodLoggingService,
-      mealCorrectionService: {
-        ...mealCorrectionService,
-        async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
-          deleteCalls.push({ mealId: args[1], expectedMealRevisionId: args[2] });
-          return mealCorrectionService.deleteMeal(...args);
-        },
-        async clearPendingSelection(...args: Parameters<typeof mealCorrectionService.clearPendingSelection>) {
-          clearPendingSelectionCalls += 1;
-          return mealCorrectionService.clearPendingSelection(...args);
-        },
-      },
+      mealCorrectionService: trackedMealCorrectionService,
       deviceService,
       goalProposalService,
       mealDeleteProposalService,
       mealNumericProposalService,
+      proposalActionService: trackedProposalActionService,
     });
 
     const result = await approvalOrchestrator.handleMessage(deviceId, "確認");
@@ -3111,36 +3256,50 @@ describe("Orchestrator - didLogMeal", () => {
       },
     });
     let deleteCalls = 0;
+    const authorityFailureMealCorrectionService = {
+      ...mealCorrectionService,
+      async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+        deleteCalls += 1;
+        return mealCorrectionService.deleteMeal(...args);
+      },
+    };
+    const authorityFailureMealDeleteProposalService = {
+      ...mealDeleteProposalService,
+      async getLatest() {
+        return proposal;
+      },
+      async consumeLatest() {
+        return undefined;
+      },
+    };
+    const authorityFailureProposalActionService = createProposalActionService({
+      db,
+      chatService,
+      proposalCardService,
+      goalProposalService,
+      mealDeleteProposalService: authorityFailureMealDeleteProposalService,
+      mealNumericProposalService,
+      mealCorrectionService: authorityFailureMealCorrectionService,
+      deviceService,
+      publisher,
+    });
     const authorityFailureOrchestrator = createOrchestrator({
       llmProvider: mockLLM,
       chatService,
       summaryService,
       foodLoggingService,
-      mealCorrectionService: {
-        ...mealCorrectionService,
-        async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
-          deleteCalls += 1;
-          return mealCorrectionService.deleteMeal(...args);
-        },
-      },
+      mealCorrectionService: authorityFailureMealCorrectionService,
       deviceService,
       goalProposalService,
-      mealDeleteProposalService: {
-        ...mealDeleteProposalService,
-        async getLatest() {
-          return proposal;
-        },
-        async consumeLatest() {
-          return undefined;
-        },
-      },
+      mealDeleteProposalService: authorityFailureMealDeleteProposalService,
       mealNumericProposalService,
+      proposalActionService: authorityFailureProposalActionService,
     });
 
     const result = await authorityFailureOrchestrator.handleMessage(deviceId, "好");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, renderMealDeleteAuthorityFailureCopy());
+    assert.equal(result.reply, renderProposalInactiveCopy({ proposalKind: "meal_delete", status: "stale" }));
     assert.equal(result.didMutateMeal, false);
     assert.equal(deleteCalls, 0);
     assert.equal(mockLLM.chatCalls.length, 0);
@@ -3185,7 +3344,7 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(deviceId, "好");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, renderMealDeleteStaleCopy());
+    assert.equal(result.reply, renderProposalInactiveCopy({ proposalKind: "meal_delete", status: "stale" }));
     assert.equal(result.didMutateMeal, false);
     assert.equal(mockLLM.chatCalls.length, 0);
     assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);

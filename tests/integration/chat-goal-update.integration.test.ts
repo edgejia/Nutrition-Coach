@@ -359,7 +359,7 @@ describe("chat goal update integration", () => {
     const confirmed = await postChat("好");
 
     assert.equal(confirmed.status, 200);
-    assert.equal(confirmed.body.reply, "已選擇套用目標");
+    assert.equal(confirmed.body.reply, PROPOSAL_SUCCESS_RECEIPT);
     assert.deepEqual(confirmed.body.dailyTargets, PROPOSAL_TARGETS);
     assert.equal(confirmed.body.proposalCard?.status, "approved");
     assert.equal(confirmed.body.proposalActionEvent?.proposalId, activeProposal.proposalId);
@@ -505,7 +505,7 @@ describe("chat goal update integration", () => {
     const cancelled = await postChat("先不用");
 
     assert.equal(cancelled.status, 200);
-    assert.equal(cancelled.body.reply, "已取消目標提案");
+    assert.equal(cancelled.body.reply, renderGoalCancelCopy());
     assert.equal(cancelled.body.didLogMeal, false);
     assert.equal(cancelled.body.didMutateMeal, false);
     assert.equal(cancelled.body.dailyTargets, undefined);
@@ -534,7 +534,7 @@ describe("chat goal update integration", () => {
       const cancelled = await postChat(term);
 
       assert.equal(cancelled.status, 200);
-      assert.equal(cancelled.body.reply, "已取消目標提案");
+      assert.equal(cancelled.body.reply, renderGoalCancelCopy());
       assert.equal(cancelled.body.didLogMeal, false);
       assert.equal(cancelled.body.didMutateMeal, false);
       assert.equal(cancelled.body.dailyTargets, undefined);
@@ -639,7 +639,7 @@ describe("chat goal update integration", () => {
     const { status, body } = await postChat("套用餐點修改");
 
     assert.equal(status, 200);
-    assert.equal(body.reply, "已選擇套用餐點修改");
+    assert.match(body.reply, /已更新4\/19 雞腿飯，650 kcal，蛋白質 15 g。/);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
     assert.equal(body.dailyTargets, undefined);
@@ -735,7 +735,7 @@ describe("chat goal update integration", () => {
     const current = meals.find((candidate) => candidate.id === meal.id);
     assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
     assert.equal(current?.protein, 31);
-    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 

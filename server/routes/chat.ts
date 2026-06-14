@@ -1440,7 +1440,9 @@ async function handleOrchestratorSSE(
       } else {
         recordSseCompletion({ didLogMeal, didMutateMeal: streamDidMutateMeal });
       }
-      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, affectedDate, deps.log);
+      if (!streamProposalActionEvent) {
+        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, affectedDate, deps.log);
+      }
     }
   } catch (error) {
     const fallback = streamDidLogMeal
@@ -1857,7 +1859,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         });
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, affectedDate, turnLog);
+        if (!jsonProposalActionEvent) {
+          publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, affectedDate, turnLog);
+        }
         if (result.fallbackOutcomeContext) {
           const providerMetadata = result.providerFallbackContext?.reason === "llm_error"
             && result.fallbackOutcomeContext.reason === "llm_error"

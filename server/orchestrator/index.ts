@@ -790,7 +790,7 @@ function buildTypedActionResult(input: {
   fallbackReply: string;
 }): OrchestratorResult {
   const reply = input.actionResult.ok
-    ? input.actionResult.proposalActionEvent.transcriptCopy
+    ? input.actionResult.reply ?? input.actionResult.proposalActionEvent.transcriptCopy
     : input.actionResult.proposalCard?.lapseCopy ?? input.fallbackReply;
 
   return {
@@ -802,6 +802,7 @@ function buildTypedActionResult(input: {
     ...(input.actionResult.ok && input.actionResult.affectedDate ? { affectedDate: input.actionResult.affectedDate } : {}),
     ...(input.actionResult.ok && input.actionResult.summaryOutcome ? { summaryOutcome: input.actionResult.summaryOutcome } : {}),
     ...(input.actionResult.ok && input.actionResult.dailySummary ? { dailySummary: input.actionResult.dailySummary } : {}),
+    ...(input.actionResult.ok && input.actionResult.mutationOutcomeFact ? { mutationOutcomeFact: input.actionResult.mutationOutcomeFact } : {}),
     ...(input.actionResult.proposalCard ? { proposalCard: input.actionResult.proposalCard } : {}),
     ...(input.actionResult.ok ? { proposalActionEvent: input.actionResult.proposalActionEvent } : {}),
     finalReplySource: "renderer",

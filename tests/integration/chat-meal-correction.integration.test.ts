@@ -8,7 +8,6 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import {
   renderMealNumericAuthorityFailureCopy,
-  renderMealNumericCancelCopy,
   renderMealNumericProposalCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
@@ -504,7 +503,7 @@ describe("chat meal correction integration", () => {
     assert.equal(toolResult.executed, false);
     assert.equal(toolResult.policyClass, "confirm-first");
     assert.equal(toolResult.decision, "blocked");
-    assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
+    assert.equal(toolResult.ruleId, "typed_meal_estimate_approve");
     assert.equal(toolResult.proposalId, proposal.proposalId);
   });
 
@@ -561,7 +560,7 @@ describe("chat meal correction integration", () => {
     assert.equal(toolResult.executed, false);
     assert.equal(toolResult.policyClass, "confirm-first");
     assert.equal(toolResult.decision, "blocked");
-    assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
+    assert.equal(toolResult.ruleId, "typed_meal_numeric_approve");
     assert.equal(toolResult.proposalId, proposal.proposalId);
     assert.equal(typeof toolResult.turnId, "string");
   });
@@ -617,7 +616,7 @@ describe("chat meal correction integration", () => {
     assert.equal(toolResult.executed, false);
     assert.equal(toolResult.policyClass, "confirm-first");
     assert.equal(toolResult.decision, "blocked");
-    assert.equal(toolResult.ruleId, "meal_numeric_proposal_approval_consume");
+    assert.equal(toolResult.ruleId, "typed_meal_numeric_approve");
     assert.equal(toolResult.proposalId, proposal.proposalId);
     assert.equal(typeof toolResult.turnId, "string");
   });
@@ -872,7 +871,7 @@ describe("chat meal correction integration", () => {
     assert.equal(current.protein, 22);
   });
 
-  it("fails closed for cross-kind bare approval and broad cancel clears active proposals", async () => {
+  it("fails closed for cross-kind bare approval and broad cancel when active proposal kinds coexist", async () => {
     const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
       items: [
@@ -915,12 +914,12 @@ describe("chat meal correction integration", () => {
     const cancelled = await postChat("取消");
 
     assert.equal(cancelled.status, 200);
-    assert.equal(cancelled.body.reply, renderMealNumericCancelCopy());
+    assert.equal(cancelled.body.reply, renderProposalKindAmbiguityCopy());
     assert.equal(cancelled.body.didLogMeal, false);
     assert.equal(cancelled.body.didMutateMeal, false);
     assert.doesNotMatch(cancelled.body.reply, SUCCESS_STYLE_COPY);
-    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
-    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.ok(await services.goalProposalService.getLatest(defaultSessionKey()));
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
     assert.deepEqual(publishDailySummaryCalls, []);
     assert.equal(mockLLM.chatCalls.length, 0);
 
