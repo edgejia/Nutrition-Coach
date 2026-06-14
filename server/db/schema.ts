@@ -181,6 +181,103 @@ export const chatMutationOutcomes = sqliteTable(
   ],
 );
 
+export const chatProposalCards = sqliteTable(
+  "chat_proposal_cards",
+  {
+    id: text("id").primaryKey(),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    assistantMessageId: text("assistant_message_id")
+      .notNull()
+      .references(() => chatMessages.id),
+    proposalId: text("proposal_id").notNull(),
+    proposalKind: text("proposal_kind").notNull(),
+    proposalLane: text("proposal_lane").notNull(),
+    status: text("status").notNull(),
+    title: text("title").notNull(),
+    detailsJson: text("details_json").notNull(),
+    actionsJson: text("actions_json").notNull(),
+    expiresAt: text("expires_at"),
+    lapseCopy: text("lapse_copy"),
+    supersededByKind: text("superseded_by_kind"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    check(
+      "chat_proposal_cards_kind_check",
+      sql`${table.proposalKind} in ('goal','meal_numeric','meal_estimate','meal_delete')`,
+    ),
+    check(
+      "chat_proposal_cards_lane_check",
+      sql`${table.proposalLane} in ('goal','meal_mutation')`,
+    ),
+    check(
+      "chat_proposal_cards_status_check",
+      sql`${table.status} in ('active','approved','rejected','expired','superseded','stale')`,
+    ),
+    check(
+      "chat_proposal_cards_superseded_kind_check",
+      sql`${table.supersededByKind} is null or ${table.supersededByKind} in ('goal','meal_numeric','meal_estimate','meal_delete')`,
+    ),
+    uniqueIndex("chat_proposal_cards_assistant_message_uq").on(table.assistantMessageId),
+    index("chat_proposal_cards_device_assistant_idx").on(table.deviceId, table.assistantMessageId),
+    index("chat_proposal_cards_device_proposal_idx").on(table.deviceId, table.proposalId),
+    index("chat_proposal_cards_device_lane_status_idx").on(
+      table.deviceId,
+      table.proposalLane,
+      table.status,
+    ),
+  ],
+);
+
+export const chatProposalActionEvents = sqliteTable(
+  "chat_proposal_action_events",
+  {
+    id: text("id").primaryKey(),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    actionMessageId: text("action_message_id")
+      .notNull()
+      .references(() => chatMessages.id),
+    assistantMessageId: text("assistant_message_id")
+      .notNull()
+      .references(() => chatMessages.id),
+    proposalId: text("proposal_id").notNull(),
+    proposalKind: text("proposal_kind").notNull(),
+    proposalLane: text("proposal_lane").notNull(),
+    action: text("action").notNull(),
+    transcriptCopy: text("transcript_copy").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    check(
+      "chat_proposal_action_events_kind_check",
+      sql`${table.proposalKind} in ('goal','meal_numeric','meal_estimate','meal_delete')`,
+    ),
+    check(
+      "chat_proposal_action_events_lane_check",
+      sql`${table.proposalLane} in ('goal','meal_mutation')`,
+    ),
+    check(
+      "chat_proposal_action_events_action_check",
+      sql`${table.action} in ('approve','edit','reject')`,
+    ),
+    uniqueIndex("chat_proposal_action_events_action_message_uq").on(table.actionMessageId),
+    index("chat_proposal_action_events_device_action_message_idx").on(
+      table.deviceId,
+      table.actionMessageId,
+    ),
+    index("chat_proposal_action_events_device_assistant_idx").on(
+      table.deviceId,
+      table.assistantMessageId,
+    ),
+    index("chat_proposal_action_events_device_proposal_idx").on(table.deviceId, table.proposalId),
+  ],
+);
+
 export const mealRevisionItems = sqliteTable(
   "meal_revision_items",
   {
