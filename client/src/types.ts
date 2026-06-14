@@ -189,6 +189,85 @@ export interface HistoryDaySnapshot {
   meals: MealEntry[];
 }
 
+export type ProposalKind = "goal" | "meal_numeric" | "meal_estimate" | "meal_delete";
+export type ProposalLane = "goal" | "meal_mutation";
+export type ProposalStatus = "active" | "approved" | "rejected" | "expired" | "superseded" | "stale";
+export type ProposalAction = "approve" | "edit" | "reject";
+
+export interface ProposalCardDetailRow {
+  label: string;
+  before?: string;
+  after?: string;
+  value?: string;
+}
+
+export interface ProposalCardDetails {
+  rows: ProposalCardDetailRow[];
+  [key: string]: unknown;
+}
+
+export interface ProposalCardActions {
+  approveLabel: string;
+  editLabel: string;
+  rejectLabel: string;
+}
+
+export interface ProposalCardMetadata {
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  status: ProposalStatus;
+  isActionable: boolean;
+  title: string;
+  details: ProposalCardDetails;
+  actions: ProposalCardActions;
+  expiresAt: string | null;
+  lapseCopy: string | null;
+  supersededByKind: ProposalKind | null;
+}
+
+export interface ProposalActionEventMetadata {
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  action: ProposalAction;
+  transcriptCopy: string;
+  createdAt: string;
+}
+
+export interface ProposalActionRequest {
+  proposalId: string;
+  kind: ProposalKind;
+  action: Extract<ProposalAction, "approve" | "reject">;
+}
+
+export type ProposalActionReply =
+  | {
+      ok: true;
+      status: "approved" | "rejected";
+      proposalCard: ProposalCardMetadata;
+      proposalActionEvent: ProposalActionEventMetadata;
+      didMutateMeal: boolean;
+      dailyTargets?: DailyTargets;
+      updatedMeal?: unknown;
+      deletedMealId?: string;
+      affectedDate?: string;
+      summaryOutcome?: SummaryOutcome;
+      dailySummary?: DailySummary;
+    }
+  | {
+      ok: false;
+      status: "stale";
+      proposalCard?: ProposalCardMetadata;
+      didMutateMeal: false;
+    };
+
+export interface ProposalEditContext {
+  proposalId: string;
+  kind: ProposalKind;
+  action: "edit";
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -202,6 +281,8 @@ export interface Message {
   status?: "complete" | "stopped" | "error";
   didLogMeal?: boolean;
   loggedMeal?: LoggedMealReceipt;
+  proposalCard?: ProposalCardMetadata;
+  proposalActionEvent?: ProposalActionEventMetadata;
 }
 
 export interface PendingHomeChatDraft {
@@ -223,6 +304,8 @@ export interface ChatReply {
   dailyTargets?: DailyTargets;
   affectedDate?: string;
   deletedMealId?: string;
+  proposalCard?: ProposalCardMetadata;
+  proposalActionEvent?: ProposalActionEventMetadata;
 }
 
 export type CoachCTAIntentId = "protein" | "next_meal" | "calorie_control" | "food_logging";

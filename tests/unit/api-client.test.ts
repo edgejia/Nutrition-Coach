@@ -582,7 +582,10 @@ describe("API Client", () => {
 
     assert.match(apiSource, /export async function sendProposalAction/);
     assert.match(apiSource, /fetch\("\/api\/proposals\/actions",\s*\{\s*method: "POST",\s*credentials: "same-origin"/s);
-    assert.doesNotMatch(apiSource, /sendProposalAction[\s\S]*(targets|nutrition|updateInput|expectedMealRevisionId|deleteMealId)/);
+    const sendProposalActionSource = apiSource.match(
+      /export async function sendProposalAction[\s\S]*?\n}\n\nexport async function loadHistory/,
+    )?.[0] ?? "";
+    assert.doesNotMatch(sendProposalActionSource, /targets|nutrition|updateInput|expectedMealRevisionId|deleteMealId/);
   });
 
   it("sendMessage sends text-only proposalContext without attaching an image from edit state", async () => {

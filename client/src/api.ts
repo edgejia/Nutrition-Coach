@@ -17,6 +17,14 @@ import type {
   CoachCTAOptionId,
   DeleteMealOptions,
   DeleteMealResponse,
+  ProposalActionEventMetadata,
+  ProposalActionReply,
+  ProposalActionRequest,
+  ProposalCardMetadata,
+  ProposalEditContext,
+  ProposalKind,
+  ProposalLane,
+  ProposalStatus,
   SummaryOutcome,
   UpdateMealInput,
   UpdateMealResponse,
@@ -191,6 +199,89 @@ export function isSummaryOutcome(value: unknown): value is SummaryOutcome {
 
 function isDailyTargets(value: unknown): value is DailyTargets {
   return isDailyTargetsDto(value);
+}
+
+const PROPOSAL_KINDS: readonly ProposalKind[] = ["goal", "meal_numeric", "meal_estimate", "meal_delete"];
+const PROPOSAL_LANES: readonly ProposalLane[] = ["goal", "meal_mutation"];
+const PROPOSAL_STATUSES: readonly ProposalStatus[] = [
+  "active",
+  "approved",
+  "rejected",
+  "expired",
+  "superseded",
+  "stale",
+];
+const PROPOSAL_ACTIONS: readonly ProposalActionEventMetadata["action"][] = ["approve", "edit", "reject"];
+
+function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
+  return typeof value === "string" && allowed.includes(value as T);
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isProposalCardDetails(value: unknown): value is ProposalCardMetadata["details"] {
+  if (!isRecord(value) || !Array.isArray(value.rows)) {
+    return false;
+  }
+
+  return value.rows.every((row) => {
+    if (!isRecord(row) || typeof row.label !== "string" || !row.label.trim()) {
+      return false;
+    }
+    return (
+      (row.before === undefined || typeof row.before === "string") &&
+      (row.after === undefined || typeof row.after === "string") &&
+      (row.value === undefined || typeof row.value === "string")
+    );
+  });
+}
+
+function isProposalCardActions(value: unknown): value is ProposalCardMetadata["actions"] {
+  return (
+    isRecord(value) &&
+    typeof value.approveLabel === "string" &&
+    value.approveLabel.trim().length > 0 &&
+    typeof value.editLabel === "string" &&
+    value.editLabel.trim().length > 0 &&
+    typeof value.rejectLabel === "string" &&
+    value.rejectLabel.trim().length > 0
+  );
+}
+
+function isProposalCardMetadata(value: unknown): value is ProposalCardMetadata {
+  return (
+    isRecord(value) &&
+    typeof value.proposalId === "string" &&
+    value.proposalId.trim().length > 0 &&
+    isOneOf(value.proposalKind, PROPOSAL_KINDS) &&
+    isOneOf(value.proposalLane, PROPOSAL_LANES) &&
+    isOneOf(value.status, PROPOSAL_STATUSES) &&
+    typeof value.isActionable === "boolean" &&
+    typeof value.title === "string" &&
+    value.title.trim().length > 0 &&
+    isProposalCardDetails(value.details) &&
+    isProposalCardActions(value.actions) &&
+    isStringOrNull(value.expiresAt) &&
+    isStringOrNull(value.lapseCopy) &&
+    (value.supersededByKind === null || isOneOf(value.supersededByKind, PROPOSAL_KINDS))
+  );
+}
+
+function isProposalActionEventMetadata(value: unknown): value is ProposalActionEventMetadata {
+  return (
+    isRecord(value) &&
+    typeof value.proposalId === "string" &&
+    value.proposalId.trim().length > 0 &&
+    isOneOf(value.proposalKind, PROPOSAL_KINDS) &&
+    isOneOf(value.proposalLane, PROPOSAL_LANES) &&
+    isOneOf(value.action, PROPOSAL_ACTIONS) &&
+    typeof value.transcriptCopy === "string" &&
+    value.transcriptCopy.trim().length > 0 &&
+    typeof value.createdAt === "string" &&
+    value.createdAt.trim().length > 0
+  );
 }
 
 async function readJsonSafe(res: Response): Promise<unknown> {
@@ -452,15 +543,44 @@ function normalizeChatReply<T extends {
   dailySummary?: unknown;
   summaryOutcome?: unknown;
   deletedMealId?: unknown;
+  proposalCard?: unknown;
+  proposalActionEvent?: unknown;
 }>(
   reply: T,
 ): T {
-  const { loggedMeal, deletedMealId, ...rest } = reply;
+  const { loggedMeal, deletedMealId, proposalCard, proposalActionEvent, ...rest } = reply;
   return {
     ...normalizeSummaryOutcomeFields(rest),
     ...(loggedMeal ? { loggedMeal: normalizeLoggedMealReceipt(loggedMeal) } : {}),
     ...(typeof deletedMealId === "string" ? { deletedMealId } : {}),
+    ...(isProposalCardMetadata(proposalCard) ? { proposalCard } : {}),
+    ...(isProposalActionEventMetadata(proposalActionEvent) ? { proposalActionEvent } : {}),
   } as T;
+}
+
+function normalizeMessage(message: Message): Message {
+  const { proposalCard, proposalActionEvent, ...rest } = message as Message & {
+    proposalCard?: unknown;
+    proposalActionEvent?: unknown;
+  };
+  return {
+    ...rest,
+    imageUrl: withAuthorizedAssetUrl(message.imageUrl),
+    loggedMeal: message.loggedMeal
+      ? normalizeLoggedMealReceipt(message.loggedMeal)
+      : message.loggedMeal,
+    ...(isProposalCardMetadata(proposalCard) ? { proposalCard } : {}),
+    ...(isProposalActionEventMetadata(proposalActionEvent) ? { proposalActionEvent } : {}),
+  };
+}
+
+function normalizeProposalTerminalPayload(parsed: Record<string, unknown>) {
+  return {
+    ...(isProposalCardMetadata(parsed.proposalCard) ? { proposalCard: parsed.proposalCard } : {}),
+    ...(isProposalActionEventMetadata(parsed.proposalActionEvent)
+      ? { proposalActionEvent: parsed.proposalActionEvent }
+      : {}),
+  };
 }
 
 function isOptionalNullableString(value: unknown): value is string | null | undefined {
@@ -651,9 +771,16 @@ export async function updateGoals(goals: Partial<DailyTargets>): Promise<{ daily
   return body;
 }
 
-export async function sendMessage(message: string, image?: File): Promise<ChatReply> {
+export interface SendMessageOptions {
+  proposalContext?: ProposalEditContext;
+}
+
+export async function sendMessage(message: string, image?: File, options?: SendMessageOptions): Promise<ChatReply> {
   const form = new FormData();
   form.append("message", message);
+  if (options?.proposalContext) {
+    form.append("proposalContext", JSON.stringify(options.proposalContext));
+  }
   if (image) {
     form.append("image", await prepareImageForUpload(image));
   }
@@ -671,19 +798,29 @@ export async function sendMessage(message: string, image?: File): Promise<ChatRe
   return normalizeChatReply(body);
 }
 
+export async function sendProposalAction(request: ProposalActionRequest): Promise<ProposalActionReply> {
+  const res = await fetch("/api/proposals/actions", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) {
+    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    throw new Error(errorMessage ?? "Failed to send proposal action");
+  }
+  const body = await res.json() as ProposalActionReply;
+  return normalizeChatReply(body);
+}
+
 export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> {
   const res = await fetch(`/api/chat/history?limit=${limit}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history");
   const body = await res.json() as { messages: Message[] };
   return {
-    messages: body.messages.map((message) => ({
-      ...message,
-      imageUrl: withAuthorizedAssetUrl(message.imageUrl),
-      loggedMeal: message.loggedMeal
-        ? normalizeLoggedMealReceipt(message.loggedMeal)
-        : message.loggedMeal,
-    })),
+    messages: body.messages.map(normalizeMessage),
   };
 }
 
@@ -700,6 +837,8 @@ export interface StreamCallbacks {
     dailyTargets?: DailyTargets;
     affectedDate?: string;
     deletedMealId?: string;
+    proposalCard?: ProposalCardMetadata;
+    proposalActionEvent?: ProposalActionEventMetadata;
     turnId?: string;
   }) => void;
   onStopped?: (data: {
@@ -714,6 +853,8 @@ export interface StreamCallbacks {
     dailyTargets?: DailyTargets;
     affectedDate?: string;
     deletedMealId?: string;
+    proposalCard?: ProposalCardMetadata;
+    proposalActionEvent?: ProposalActionEventMetadata;
   }) => void;
   onError: (message: string) => void;
 }
@@ -721,6 +862,7 @@ export interface StreamCallbacks {
 export interface SendMessageStreamOptions {
   signal?: AbortSignal;
   turnId?: string;
+  proposalContext?: ProposalEditContext;
 }
 
 export async function sendMessageStream(
@@ -733,6 +875,9 @@ export async function sendMessageStream(
   form.append("message", message);
   if (options?.turnId) {
     form.append("turnId", options.turnId);
+  }
+  if (options?.proposalContext) {
+    form.append("proposalContext", JSON.stringify(options.proposalContext));
   }
   if (image) {
     form.append("image", await prepareImageForUpload(image));
@@ -834,6 +979,7 @@ export async function sendMessageStream(
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
             ...(typeof parsed.deletedMealId === "string" ? { deletedMealId: parsed.deletedMealId } : {}),
+            ...normalizeProposalTerminalPayload(parsed),
             ...(getValidTurnId(parsed.turnId) ? { turnId: getValidTurnId(parsed.turnId) } : {}),
           });
         } else if (eventType === "stopped") {
@@ -855,6 +1001,7 @@ export async function sendMessageStream(
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
             ...(typeof parsed.deletedMealId === "string" ? { deletedMealId: parsed.deletedMealId } : {}),
+            ...normalizeProposalTerminalPayload(parsed),
           });
         } else if (eventType === "error") {
           sawTerminalEvent = true;
