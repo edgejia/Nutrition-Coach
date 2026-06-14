@@ -402,4 +402,49 @@ describe("proposal action API", () => {
     const historyBody = history.json() as { messages: Array<{ proposalActionEvent?: unknown }> };
     assert.equal(historyBody.messages.some((message) => message.proposalActionEvent), false);
   });
+
+  it("fails closed for mismatched action kind without deactivating the active card", async () => {
+    const defaults = await readTargets();
+    const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
+    const { proposalId } = await createGoalCard(targets);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "meal_delete", action: "approve" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      proposalCard?: {
+        status: string;
+        isActionable: boolean;
+        proposalKind: string;
+        proposalId: string;
+      };
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.status, "stale");
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.proposalCard?.proposalId, proposalId);
+    assert.equal(body.proposalCard?.proposalKind, "goal");
+    assert.equal(body.proposalCard?.status, "active");
+    assert.equal(body.proposalCard?.isActionable, true);
+    assert.deepEqual(await readTargets(), defaults);
+    assert.equal(await historyHasActionEvent(proposalId), false);
+
+    const storedCard = await services.proposalCardService.getLatestCardForProposal({
+      deviceId,
+      proposalId,
+    });
+    assert.equal(storedCard?.status, "active");
+    assert.equal((await services.goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    }))?.proposalId, proposalId);
+  });
 });

@@ -175,13 +175,16 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     deviceId: string;
     proposalId: string;
     kind: ProposalActionRequestKind;
-    card?: ProposalCardMetadata;
   }): Promise<ProposalActionServiceResult> {
-    const card = input.card ?? await loadCard(input);
+    const card = await loadCard(input);
     if (!card) {
       return { ok: false, status: "stale", didMutateMeal: false };
     }
-    if (card.status !== "active") {
+    if (
+      card.status !== "active"
+      || card.proposalKind !== input.kind
+      || card.proposalLane !== proposalKindToLane(input.kind)
+    ) {
       return {
         ok: false,
         status: "stale",
@@ -322,7 +325,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
         return markStale(input);
       }
       if (!await activeProposalMatchesContext(input)) {
-        return markStale({ ...input, card });
+        return markStale(input);
       }
       return { ok: true };
     },
@@ -340,7 +343,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             sessionId: DEFAULT_SESSION_ID,
           });
           if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
-            return { result: await markStale({ ...input, card }) };
+            return { result: await markStale(input) };
           }
           if (input.action === "reject") {
             await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
@@ -352,7 +355,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             proposalId: input.proposalId,
           });
           if (!consumed) {
-            return { result: await markStale({ ...input, card }) };
+            return { result: await markStale(input) };
           }
           const dailyTargets = await deps.deviceService.updateGoals(input.deviceId, consumed.targets);
           deps.testHooks?.afterDomainMutation?.(input);
@@ -372,7 +375,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             sessionId: DEFAULT_SESSION_ID,
           });
           if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
-            return { result: await markStale({ ...input, card }) };
+            return { result: await markStale(input) };
           }
           if (input.action === "reject") {
             await deps.mealNumericProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
@@ -386,7 +389,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             expectedMealRevisionId: activeProposal.expectedMealRevisionId,
           });
           if (!consumed) {
-            return { result: await markStale({ ...input, card }) };
+            return { result: await markStale(input) };
           }
           try {
             const updated = await deps.mealCorrectionService.updateMeal(
@@ -424,7 +427,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             };
           } catch (error) {
             if (error instanceof MealRevisionPreconditionError) {
-              return { result: await markStale({ ...input, card }) };
+              return { result: await markStale(input) };
             }
             throw error;
           }
@@ -435,7 +438,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           sessionId: DEFAULT_SESSION_ID,
         });
         if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
-          return { result: await markStale({ ...input, card }) };
+          return { result: await markStale(input) };
         }
         if (input.action === "reject") {
           await deps.mealDeleteProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
@@ -449,7 +452,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           expectedMealRevisionId: activeProposal.expectedMealRevisionId,
         });
         if (!consumed) {
-          return { result: await markStale({ ...input, card }) };
+          return { result: await markStale(input) };
         }
         try {
           const deleted = await deps.mealCorrectionService.deleteMeal(
@@ -486,7 +489,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           };
         } catch (error) {
           if (error instanceof MealRevisionPreconditionError) {
-            return { result: await markStale({ ...input, card }) };
+            return { result: await markStale(input) };
           }
           throw error;
         }
