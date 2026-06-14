@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageBubble } from "../../client/src/components/MessageBubble.js";
+import { ProposalCard } from "../../client/src/components/ProposalCard.js";
 import type { Message } from "../../client/src/types.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -19,6 +20,10 @@ function escapeRegExp(value: string) {
 
 function renderMessageBubble(message: Message, options?: { isProvisional?: boolean; isStatusLabel?: boolean }) {
   return renderToStaticMarkup(createElement(MessageBubble, { message, ...options }));
+}
+
+function renderProposalCard(props: Record<string, unknown>) {
+  return renderToStaticMarkup(createElement(ProposalCard, props));
 }
 
 const activeMealEstimateProposal = {
@@ -501,6 +506,57 @@ describe("chat bubble source contract", () => {
     assert.match(css, /var\(--sp-red\)/);
     assert.match(css, /var\(--sp-font-zh\)/);
     assert.match(css, /var\(--sp-font-mono\)/);
+  });
+
+  it("renders an empty focused inline edit input with backend hint and distinct close control", () => {
+    const html = renderProposalCard({
+      proposalCard: {
+        ...activeMealEstimateProposal,
+        inputHint: "輸入你想怎麼調整，例如：熱量再低一點",
+      },
+      activeEdit: {
+        messageId: "proposal-message-1",
+        proposalId: activeMealEstimateProposal.proposalId,
+        value: "",
+      },
+      onInlineEditChange: () => {},
+      onInlineEditSubmit: () => {},
+      onCancelEdit: () => {},
+    });
+
+    assert.match(html, /sp-proposal-inline-edit/);
+    assert.match(html, /autoFocus|autofocus/);
+    assert.match(html, /輸入你想怎麼調整，例如：熱量再低一點/);
+    assert.match(html, /關閉編輯/);
+    assert.match(html, /送出/);
+    assert.doesNotMatch(html, /取消提案[^]*sp-proposal-inline-edit/);
+  });
+
+  it("wires ChatPanel inline edit through one active state, composer lock, and proposal context send", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const proposalCard = await readSource("client/src/components/ProposalCard.tsx");
+
+    assert.match(chatPanel, /activeProposalEdit/);
+    assert.match(chatPanel, /setActiveProposalEdit/);
+    assert.match(chatPanel, /messageId/);
+    assert.match(chatPanel, /proposalId/);
+    assert.match(chatPanel, /setActiveProposalEdit\(null\)/);
+    assert.match(chatPanel, /sendProposalAction\(\{/);
+    assert.match(chatPanel, /action: "approve"/);
+    assert.match(chatPanel, /action: "reject"/);
+    assert.match(chatPanel, /proposalContext:\s*\{/);
+    assert.match(chatPanel, /action: "edit"/);
+    assert.match(chatPanel, /handleSend\([^,\n]+,\s*undefined,/);
+    assert.match(chatPanel, /activeProposalEdit\s*\?\s*true\s*:\s*isChatLocked/);
+    assert.match(chatPanel, /onProposalApprove=/);
+    assert.match(chatPanel, /onProposalEdit=/);
+    assert.match(chatPanel, /onProposalReject=/);
+    assert.match(chatPanel, /activeEdit=/);
+    assert.doesNotMatch(chatPanel, /關閉編輯[\s\S]{0,240}sendProposalAction/);
+
+    assert.match(proposalCard, /autoFocus/);
+    assert.match(proposalCard, /sp-proposal-inline-edit/);
+    assert.match(proposalCard, /關閉編輯/);
   });
 
   it("delete mutation confirmations stay assistant text only without receipt affordances", async () => {
