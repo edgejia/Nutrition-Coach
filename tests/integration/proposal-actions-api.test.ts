@@ -403,6 +403,45 @@ describe("proposal action API", () => {
     assert.equal(historyBody.messages.some((message) => message.proposalActionEvent), false);
   });
 
+  it("marks an older same-kind card stale without clearing the newer backend proposal", async () => {
+    const defaults = await readTargets();
+    const olderTargets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
+    const newerTargets = { calories: 1600, protein: 135, carbs: 150, fat: 55 };
+    const { proposalId: olderProposalId } = await createGoalCard(olderTargets);
+    const newerProposal = await services.goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: newerTargets,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId: olderProposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      proposalCard?: { proposalId: string; status: string; isActionable: boolean };
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.status, "stale");
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.proposalCard?.proposalId, olderProposalId);
+    assert.equal(body.proposalCard?.status, "stale");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.deepEqual(await readTargets(), defaults);
+    assert.equal((await services.goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    }))?.proposalId, newerProposal.proposalId);
+    assert.equal(await historyHasActionEvent(olderProposalId), false);
+  });
+
   it("fails closed for mismatched action kind without deactivating the active card", async () => {
     const defaults = await readTargets();
     const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
@@ -446,5 +485,82 @@ describe("proposal action API", () => {
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
     }))?.proposalId, proposalId);
+  });
+
+  it("returns committed goal action metadata when goals_update publish fails after commit", async () => {
+    const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
+    const { proposalId } = await createGoalCard(targets);
+    services.publisher.publishGoalsUpdate = () => {
+      throw new Error("goals_update publish failed after commit");
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      dailyTargets?: DailyTargets;
+      proposalCard?: { proposalId: string; status: string; isActionable: boolean };
+      proposalActionEvent?: { proposalId: string; action: string; transcriptCopy: string };
+    };
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "approved");
+    assert.equal(body.didMutateMeal, false);
+    assert.deepEqual(body.dailyTargets, targets);
+    assert.deepEqual(await readTargets(), targets);
+    assert.equal(body.proposalCard?.proposalId, proposalId);
+    assert.equal(body.proposalCard?.status, "approved");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.equal(body.proposalActionEvent?.proposalId, proposalId);
+    assert.equal(body.proposalActionEvent?.action, "approve");
+    assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
+    assert.equal(await historyHasActionEvent(proposalId), true);
+  });
+
+  it("returns committed delete action metadata when daily_summary publish fails after commit", async () => {
+    const { meal, proposalId } = await createDeleteCard();
+    services.publisher.publishDailySummary = () => {
+      throw new Error("daily_summary publish failed after commit");
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "meal_delete", action: "approve" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      deletedMealId?: string;
+      affectedDate?: string;
+      dailySummary?: unknown;
+      proposalCard?: { proposalId: string; status: string; isActionable: boolean };
+      proposalActionEvent?: { proposalId: string; action: string; transcriptCopy: string };
+    };
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "approved");
+    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.deletedMealId, meal.id);
+    assert.equal(body.affectedDate, "2026-03-25");
+    assert.ok(body.dailySummary);
+    assert.equal(body.proposalCard?.proposalId, proposalId);
+    assert.equal(body.proposalCard?.status, "approved");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.equal(body.proposalActionEvent?.proposalId, proposalId);
+    assert.equal(body.proposalActionEvent?.action, "approve");
+    assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇確認刪除");
+    assert.equal((await readMealsFor(meal)).some((row) => row.id === meal.id), false);
+    assert.equal(await historyHasActionEvent(proposalId), true);
   });
 });

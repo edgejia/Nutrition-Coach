@@ -232,7 +232,9 @@ export function createProposalActionService(deps: ProposalActionDeps) {
         proposalCard: projectProposalCardForClient(card),
       };
     }
-    await clearActiveProposal(input);
+    if (await activeProposalMatchesContext(input)) {
+      await clearActiveProposal(input);
+    }
     await deps.proposalCardService.markProposalStatus({
       deviceId: input.deviceId,
       proposalId: input.proposalId,
@@ -591,7 +593,11 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           throw error;
         }
       });
-      publishAfterCommit(decision.publish, input.deviceId);
+      try {
+        publishAfterCommit(decision.publish, input.deviceId);
+      } catch {
+        // Publish fan-out is best-effort after the durable action decision commits.
+      }
       return decision.result;
     },
   };
