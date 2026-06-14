@@ -147,7 +147,7 @@
         "counts": {
           "mealCountBefore": 2,
           "mealCountAfter": 2,
-          "dailySummaryPublishes": 1,
+          "dailySummaryPublishes": 0,
           "goalsPublishes": 0
         },
         "mealRevisionUnchanged": true

@@ -149,7 +149,7 @@
           "counts": {
             "mealCountBefore": 2,
             "mealCountAfter": 2,
-            "dailySummaryPublishes": 1,
+            "dailySummaryPublishes": 0,
             "goalsPublishes": 0
           },
           "mealRevisionUnchanged": true
@@ -548,7 +548,7 @@
           "counts": {
             "mealCountBefore": 2,
             "mealCountAfter": 2,
-            "dailySummaryPublishes": 1,
+            "dailySummaryPublishes": 0,
             "goalsPublishes": 0
           },
           "mealRevisionUnchanged": true
@@ -778,7 +778,374 @@
         "storesNoImageBytes": true,
         "storesNoFullDbSnapshots": true
       }
-    ]
+    ],
+    "goal_card_approve_action": {
+      "step": "goal_card_approve_action",
+      "before": {
+        "kind": "goal",
+        "lane": "goal",
+        "status": "active",
+        "actionable": true,
+        "rowCount": 4,
+        "actionLabels": {
+          "approve": "套用目標",
+          "edit": "調整目標",
+          "reject": "取消提案"
+        },
+        "hasExpiry": true,
+        "hasLapseCopy": true,
+        "supersededByKind": "none"
+      },
+      "action": {
+        "status": "approved",
+        "didMutateMeal": false,
+        "card": {
+          "kind": "goal",
+          "lane": "goal",
+          "status": "approved",
+          "actionable": false,
+          "rowCount": 4,
+          "actionLabels": {
+            "approve": "套用目標",
+            "edit": "調整目標",
+            "reject": "取消提案"
+          },
+          "hasExpiry": true,
+          "hasLapseCopy": true,
+          "supersededByKind": "none"
+        },
+        "event": {
+          "kind": "goal",
+          "lane": "goal",
+          "action": "approve",
+          "copy": "已選擇套用目標",
+          "hasCreatedAt": true
+        },
+        "targetChanged": true
+      },
+      "publishCounts": {
+        "dailySummaryPublishes": 0,
+        "goalsPublishes": 1
+      },
+      "history": {
+        "actionEventVisible": true,
+        "actionTransportUsesStructuredPayload": true
+      }
+    },
+    "meal_estimate_card_edit_context": {
+      "step": "meal_estimate_card_edit_context",
+      "initialCard": {
+        "kind": "meal_estimate",
+        "lane": "meal_mutation",
+        "status": "active",
+        "actionable": true,
+        "rowCount": 4,
+        "actionLabels": {
+          "approve": "套用修改",
+          "edit": "改成其他數字",
+          "reject": "取消提案"
+        },
+        "hasExpiry": true,
+        "hasLapseCopy": true,
+        "supersededByKind": "none"
+      },
+      "editContext": {
+        "submittedAsTextOnlyChat": true,
+        "createdReplacementProposal": true,
+        "oldProposalWasNotTransportAuthority": true
+      },
+      "action": {
+        "status": "approved",
+        "didMutateMeal": true,
+        "card": {
+          "kind": "meal_estimate",
+          "lane": "meal_mutation",
+          "status": "approved",
+          "actionable": false,
+          "rowCount": 4,
+          "actionLabels": {
+            "approve": "套用修改",
+            "edit": "改成其他數字",
+            "reject": "取消提案"
+          },
+          "hasExpiry": true,
+          "hasLapseCopy": true,
+          "supersededByKind": "none"
+        },
+        "event": {
+          "kind": "meal_estimate",
+          "lane": "meal_mutation",
+          "action": "approve",
+          "copy": "已選擇套用餐點修改",
+          "hasCreatedAt": true
+        }
+      },
+      "mealMutation": {
+        "changedAfterBackendApproval": true
+      },
+      "publishCounts": {
+        "dailySummaryPublishes": 1,
+        "goalsPublishes": 0
+      }
+    },
+    "delete_card_reject_and_approve": {
+      "step": "delete_card_reject_and_approve",
+      "rejectPath": {
+        "card": {
+          "kind": "meal_delete",
+          "lane": "meal_mutation",
+          "status": "rejected",
+          "actionable": false,
+          "rowCount": 5,
+          "actionLabels": {
+            "approve": "確認刪除",
+            "edit": "先不要刪，改問別的",
+            "reject": "取消刪除"
+          },
+          "hasExpiry": true,
+          "hasLapseCopy": true,
+          "supersededByKind": "none"
+        },
+        "event": {
+          "kind": "meal_delete",
+          "lane": "meal_mutation",
+          "action": "reject",
+          "copy": "已取消刪除提案",
+          "hasCreatedAt": true
+        },
+        "counts": {
+          "mealCountBefore": 2,
+          "mealCountAfter": 2,
+          "dailySummaryPublishes": 0,
+          "goalsPublishes": 0
+        },
+        "mealRevisionUnchanged": true
+      },
+      "approvePath": {
+        "initialPreview": {
+          "hasDeleteLabel": true,
+          "rowCount": 5
+        },
+        "card": {
+          "kind": "meal_delete",
+          "lane": "meal_mutation",
+          "status": "approved",
+          "actionable": false,
+          "rowCount": 5,
+          "actionLabels": {
+            "approve": "確認刪除",
+            "edit": "先不要刪，改問別的",
+            "reject": "取消刪除"
+          },
+          "hasExpiry": true,
+          "hasLapseCopy": true,
+          "supersededByKind": "none"
+        },
+        "event": {
+          "kind": "meal_delete",
+          "lane": "meal_mutation",
+          "action": "approve",
+          "copy": "已選擇確認刪除",
+          "hasCreatedAt": true
+        },
+        "counts": {
+          "mealCountBefore": 3,
+          "mealCountAfter": 2,
+          "dailySummaryPublishes": 1,
+          "goalsPublishes": 0
+        },
+        "deletedExactlyPreviewedMeal": true
+      }
+    },
+    "history_reload_recovers_actionability": {
+      "step": "history_reload_recovers_actionability",
+      "card": {
+        "kind": "meal_estimate",
+        "lane": "meal_mutation",
+        "status": "active",
+        "actionable": true,
+        "rowCount": 4,
+        "actionLabels": {
+          "approve": "套用修改",
+          "edit": "改成其他數字",
+          "reject": "取消提案"
+        },
+        "hasExpiry": true,
+        "hasLapseCopy": true,
+        "supersededByKind": "none"
+      },
+      "latestActiveRecoveredFromBackend": true,
+      "notInferredFromVisualRecency": true
+    },
+    "meal_lane_supersede_lapse_copy": {
+      "step": "meal_lane_supersede_lapse_copy",
+      "oldCard": {
+        "kind": "meal_estimate",
+        "lane": "meal_mutation",
+        "status": "superseded",
+        "actionable": false,
+        "rowCount": 4,
+        "actionLabels": {
+          "approve": "套用修改",
+          "edit": "改成其他數字",
+          "reject": "取消提案"
+        },
+        "hasExpiry": true,
+        "hasLapseCopy": true,
+        "supersededByKind": "meal_delete"
+      },
+      "replacementCard": {
+        "kind": "meal_delete",
+        "lane": "meal_mutation",
+        "status": "active",
+        "actionable": true,
+        "rowCount": 5,
+        "actionLabels": {
+          "approve": "確認刪除",
+          "edit": "先不要刪，改問別的",
+          "reject": "取消刪除"
+        },
+        "hasExpiry": true,
+        "hasLapseCopy": true,
+        "supersededByKind": "none"
+      },
+      "copyPresence": {
+        "namesReplacementKind": true,
+        "inactiveCardRemainsVisible": true
+      }
+    },
+    "expiry_lapse_on_refresh": {
+      "step": "expiry_lapse_on_refresh",
+      "card": {
+        "kind": "meal_estimate",
+        "lane": "meal_mutation",
+        "status": "expired",
+        "actionable": false,
+        "rowCount": 4,
+        "actionLabels": {
+          "approve": "套用修改",
+          "edit": "改成其他數字",
+          "reject": "取消提案"
+        },
+        "hasExpiry": true,
+        "hasLapseCopy": true,
+        "supersededByKind": "none"
+      },
+      "copyPresence": {
+        "hasKindSpecificTraditionalChineseCopy": true,
+        "visibleOnHistoryRefresh": true
+      },
+      "noMutation": {
+        "mealStillPresent": true
+      }
+    },
+    "stale_action_misses_without_mutation": {
+      "step": "stale_action_misses_without_mutation",
+      "action": {
+        "ok": false,
+        "status": "stale",
+        "card": {
+          "kind": "meal_estimate",
+          "lane": "meal_mutation",
+          "status": "stale",
+          "actionable": false,
+          "rowCount": 4,
+          "actionLabels": {
+            "approve": "套用修改",
+            "edit": "改成其他數字",
+            "reject": "取消提案"
+          },
+          "hasExpiry": true,
+          "hasLapseCopy": true,
+          "supersededByKind": "none"
+        },
+        "hasNoActionEvent": true
+      },
+      "copyPresence": {
+        "staleCopyVisible": true
+      },
+      "counts": {
+        "mealCountBefore": 7,
+        "mealCountAfter": 7,
+        "dailySummaryPublishes": 0,
+        "goalsPublishes": 0
+      }
+    },
+    "cross_session_action_rejected": {
+      "step": "cross_session_action_rejected",
+      "action": {
+        "ok": false,
+        "status": "stale",
+        "noForeignCardLeak": true
+      },
+      "originalProposal": {
+        "remainsPending": true
+      },
+      "counts": {
+        "mealCountBefore": 8,
+        "mealCountAfter": 8,
+        "dailySummaryPublishes": 0,
+        "goalsPublishes": 0
+      }
+    },
+    "duplicate_action_noops": {
+      "step": "duplicate_action_noops",
+      "firstAction": {
+        "status": "approved",
+        "didMutateMeal": true,
+        "card": {
+          "kind": "meal_delete",
+          "lane": "meal_mutation",
+          "status": "approved",
+          "actionable": false,
+          "rowCount": 5,
+          "actionLabels": {
+            "approve": "確認刪除",
+            "edit": "先不要刪，改問別的",
+            "reject": "取消刪除"
+          },
+          "hasExpiry": true,
+          "hasLapseCopy": true,
+          "supersededByKind": "none"
+        }
+      },
+      "duplicateAction": {
+        "ok": false,
+        "status": "stale",
+        "card": {
+          "kind": "meal_delete",
+          "lane": "meal_mutation",
+          "status": "approved",
+          "actionable": false,
+          "rowCount": 5,
+          "actionLabels": {
+            "approve": "確認刪除",
+            "edit": "先不要刪，改問別的",
+            "reject": "取消刪除"
+          },
+          "hasExpiry": true,
+          "hasLapseCopy": true,
+          "supersededByKind": "none"
+        },
+        "hasNoActionEvent": true
+      },
+      "counts": {
+        "mealCountBefore": 8,
+        "mealCountAfter": 8,
+        "dailySummaryPublishes": 0,
+        "goalsPublishes": 0
+      }
+    },
+    "metadata_only_artifact_guard": {
+      "step": "metadata_only_artifact_guard",
+      "checkedEntries": 9,
+      "metadataOnly": true,
+      "storesNoRawCookies": true,
+      "storesNoProviderBodies": true,
+      "storesNoFullTranscripts": true,
+      "storesNoImageBytes": true,
+      "storesNoFullDbSnapshots": true
+    }
   },
   "consoleSummary": "PASS proposal-three-way-confirmation 10/10"
 }

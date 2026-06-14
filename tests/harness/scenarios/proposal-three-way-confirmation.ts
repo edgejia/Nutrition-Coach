@@ -181,6 +181,10 @@ function addEvidence(
   assertPolicyEvidenceHasNoForbiddenFields(entry);
   assertMetadataOnly(entry);
   artifacts.evidence.push(entry);
+  const stepName = entry.step;
+  if (typeof stepName === "string") {
+    (artifacts as Record<string, unknown>)[stepName] = entry;
+  }
 }
 
 function summarizeCard(card: ProposalCardBody | undefined) {
