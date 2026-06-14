@@ -29,6 +29,17 @@ interface ChatBody {
   didLogMeal: boolean;
   didMutateMeal?: boolean;
   dailyTargets?: DailyTargets;
+  proposalCard?: {
+    proposalId: string;
+    proposalKind: string;
+    proposalLane: string;
+    status: string;
+    isActionable: boolean;
+    title: string;
+    details: { rows: Array<Record<string, unknown>> };
+    actions: Record<string, string>;
+    expiresAt: string | null;
+  };
 }
 
 type AppServicesWithMealProposal = AppServices & {
@@ -263,8 +274,27 @@ describe("chat goal update integration", () => {
     assert.equal(body.didMutateMeal, false);
     assert.equal(body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS));
     assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard?.proposalKind, "goal");
+    assert.equal(body.proposalCard?.proposalLane, "goal");
+    assert.equal(body.proposalCard?.status, "active");
+    assert.equal(body.proposalCard?.isActionable, true);
+    assert.deepEqual(body.proposalCard?.details.rows.map((row) => row.after), [
+      "1400 kcal",
+      "125 g",
+      "130 g",
+      "45 g",
+    ]);
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
     assert.deepEqual(publishCalls, []);
+
+    const historyRes = await fetch(`${address}/api/chat/history`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(historyRes.status, 200);
+    const history = await historyRes.json() as { messages: Array<{ proposalCard?: ChatBody["proposalCard"] }> };
+    const assistantProposal = history.messages.find((message) => message.proposalCard);
+    assert.equal(assistantProposal?.proposalCard?.proposalId, body.proposalCard?.proposalId);
+    assert.equal(assistantProposal?.proposalCard?.isActionable, true);
   });
 
   it("applies an active proposal once, then replayed consent fails closed without mutation", async () => {

@@ -1,0 +1,374 @@
+import type { RealtimePublisher } from "../realtime/publisher.js";
+import {
+  renderProposalActionEventCopy,
+  renderProposalInactiveCopy,
+} from "../orchestrator/mutation-receipts.js";
+import { MealRevisionPreconditionError } from "./meal-transactions.js";
+import type { createChatService } from "./chat.js";
+import type { createDeviceService, DailyTargets } from "./device.js";
+import type { createGoalProposalService, GoalProposalPayload } from "./goal-proposals.js";
+import type { createMealCorrectionService } from "./meal-correction.js";
+import type {
+  createMealNumericProposalService,
+  MealNumericProposalPayload,
+} from "./meal-numeric-proposals.js";
+import type {
+  createMealDeleteProposalService,
+  MealDeleteProposalPayload,
+} from "./meal-delete-proposals.js";
+import {
+  projectProposalActionEventForClient,
+  projectProposalCardForClient,
+  proposalKindToLane,
+  type ProposalActionEventClientMetadata,
+  type ProposalCardClientMetadata,
+  type ProposalCardMetadata,
+  type ProposalKind,
+} from "./proposal-cards.js";
+import type { createProposalCardService } from "./proposal-cards.js";
+import type { DailySummary } from "./summary.js";
+import type { SummaryOutcome } from "./summary-outcome.js";
+import { DEFAULT_SESSION_ID } from "./turn-state.js";
+
+export type ProposalActionRequestKind = ProposalKind;
+export type ProposalActionRequestAction = "approve" | "reject";
+
+export interface ProposalActionServiceInput {
+  deviceId: string;
+  proposalId: string;
+  kind: ProposalActionRequestKind;
+  action: ProposalActionRequestAction;
+}
+
+export type ProposalActionServiceResult =
+  | {
+      ok: true;
+      status: "approved" | "rejected";
+      proposalCard: ProposalCardClientMetadata;
+      proposalActionEvent: ProposalActionEventClientMetadata;
+      didMutateMeal: boolean;
+      dailyTargets?: DailyTargets;
+      updatedMeal?: unknown;
+      deletedMealId?: string;
+      affectedDate?: string;
+      summaryOutcome?: SummaryOutcome;
+      dailySummary?: DailySummary;
+    }
+  | {
+      ok: false;
+      status: "stale";
+      proposalCard?: ProposalCardClientMetadata;
+      didMutateMeal: false;
+    };
+
+interface ProposalActionDeps {
+  chatService: ReturnType<typeof createChatService>;
+  proposalCardService: ReturnType<typeof createProposalCardService>;
+  goalProposalService: ReturnType<typeof createGoalProposalService>;
+  mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
+  mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
+  deviceService: ReturnType<typeof createDeviceService>;
+  publisher: RealtimePublisher;
+}
+
+function activeKindMatches(input: {
+  kind: ProposalActionRequestKind;
+  proposal?: GoalProposalPayload | MealNumericProposalPayload | MealDeleteProposalPayload;
+}): boolean {
+  if (!input.proposal) {
+    return false;
+  }
+  if (input.kind === "meal_estimate") {
+    return "provenance" in input.proposal && input.proposal.provenance === "model_estimate";
+  }
+  if (input.kind === "meal_numeric") {
+    return "affectedFields" in input.proposal && input.proposal.provenance !== "model_estimate";
+  }
+  if (input.kind === "meal_delete") {
+    return "snapshot" in input.proposal;
+  }
+  return "targets" in input.proposal;
+}
+
+function activeProposalIdMatches(
+  proposal: GoalProposalPayload | MealNumericProposalPayload | MealDeleteProposalPayload | undefined,
+  proposalId: string,
+): boolean {
+  return proposal?.proposalId === proposalId;
+}
+
+export function createProposalActionService(deps: ProposalActionDeps) {
+  async function loadCard(input: {
+    deviceId: string;
+    proposalId: string;
+  }): Promise<ProposalCardMetadata | undefined> {
+    return deps.proposalCardService.getLatestCardForProposal(input);
+  }
+
+  async function markStale(input: {
+    deviceId: string;
+    proposalId: string;
+    kind: ProposalActionRequestKind;
+    card?: ProposalCardMetadata;
+  }): Promise<ProposalActionServiceResult> {
+    const card = input.card ?? await loadCard(input);
+    if (!card) {
+      return { ok: false, status: "stale", didMutateMeal: false };
+    }
+    if (card.status !== "active") {
+      return {
+        ok: false,
+        status: "stale",
+        didMutateMeal: false,
+        proposalCard: projectProposalCardForClient(card),
+      };
+    }
+    await deps.proposalCardService.markProposalStatus({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      status: "stale",
+      lapseCopy: renderProposalInactiveCopy({ proposalKind: input.kind, status: "stale" }),
+    });
+    const updated = await loadCard(input);
+    return {
+      ok: false,
+      status: "stale",
+      didMutateMeal: false,
+      ...(updated ? { proposalCard: projectProposalCardForClient(updated) } : {}),
+    };
+  }
+
+  async function saveActionEvent(input: {
+    deviceId: string;
+    kind: ProposalActionRequestKind;
+    action: ProposalActionRequestAction;
+    card: ProposalCardMetadata;
+  }): Promise<ProposalActionEventClientMetadata> {
+    const transcriptCopy = renderProposalActionEventCopy({
+      proposalKind: input.kind,
+      action: input.action,
+    });
+    const userMessage = await deps.chatService.saveMessage(input.deviceId, "user", transcriptCopy);
+    const event = await deps.proposalCardService.saveProposalActionEvent({
+      deviceId: input.deviceId,
+      actionMessageId: userMessage.id,
+      assistantMessageId: input.card.assistantMessageId,
+      proposalId: input.card.proposalId,
+      proposalKind: input.card.proposalKind,
+      proposalLane: input.card.proposalLane,
+      action: input.action,
+      transcriptCopy,
+    });
+    return projectProposalActionEventForClient(event);
+  }
+
+  async function completeActiveAction(input: {
+    deviceId: string;
+    proposalId: string;
+    kind: ProposalActionRequestKind;
+    action: ProposalActionRequestAction;
+    card: ProposalCardMetadata;
+    mutation?: {
+      didMutateMeal: boolean;
+      dailyTargets?: DailyTargets;
+      updatedMeal?: unknown;
+      deletedMealId?: string;
+      affectedDate?: string;
+      summaryOutcome?: SummaryOutcome;
+      dailySummary?: DailySummary;
+    };
+  }): Promise<Extract<ProposalActionServiceResult, { ok: true }>> {
+    await deps.proposalCardService.markProposalStatus({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      status: input.action === "approve" ? "approved" : "rejected",
+    });
+    const [card, event] = await Promise.all([
+      loadCard(input),
+      saveActionEvent({
+        deviceId: input.deviceId,
+        kind: input.kind,
+        action: input.action,
+        card: input.card,
+      }),
+    ]);
+    if (!card) {
+      throw new Error("proposal action completed without persisted proposal card");
+    }
+    return {
+      ok: true,
+      status: input.action === "approve" ? "approved" : "rejected",
+      proposalCard: projectProposalCardForClient(card),
+      proposalActionEvent: event,
+      didMutateMeal: input.mutation?.didMutateMeal ?? false,
+      ...(input.mutation?.dailyTargets ? { dailyTargets: input.mutation.dailyTargets } : {}),
+      ...(input.mutation?.updatedMeal ? { updatedMeal: input.mutation.updatedMeal } : {}),
+      ...(input.mutation?.deletedMealId ? { deletedMealId: input.mutation.deletedMealId } : {}),
+      ...(input.mutation?.affectedDate ? { affectedDate: input.mutation.affectedDate } : {}),
+      ...(input.mutation?.summaryOutcome ? { summaryOutcome: input.mutation.summaryOutcome } : {}),
+      ...(input.mutation?.dailySummary ? { dailySummary: input.mutation.dailySummary } : {}),
+    };
+  }
+
+  async function ensureActiveCard(input: ProposalActionServiceInput): Promise<ProposalCardMetadata | undefined> {
+    const card = await loadCard(input);
+    if (!card || card.status !== "active" || card.proposalKind !== input.kind || card.proposalLane !== proposalKindToLane(input.kind)) {
+      return undefined;
+    }
+    return card;
+  }
+
+  return {
+    async handleAction(input: ProposalActionServiceInput): Promise<ProposalActionServiceResult> {
+      const card = await ensureActiveCard(input);
+      if (!card) {
+        return markStale(input);
+      }
+
+      if (input.kind === "goal") {
+        const proposal = await deps.goalProposalService.getLatest({
+          deviceId: input.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+        });
+        if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+          return markStale({ ...input, card });
+        }
+        if (input.action === "reject") {
+          await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+          return completeActiveAction({ ...input, card });
+        }
+        const consumed = await deps.goalProposalService.consumeLatest({
+          deviceId: input.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+          proposalId: input.proposalId,
+        });
+        if (!consumed) {
+          return markStale({ ...input, card });
+        }
+        const dailyTargets = await deps.deviceService.updateGoals(input.deviceId, consumed.targets);
+        deps.publisher.publishGoalsUpdate(input.deviceId, dailyTargets);
+        return completeActiveAction({
+          ...input,
+          card,
+          mutation: { didMutateMeal: false, dailyTargets },
+        });
+      }
+
+      if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
+        const proposal = await deps.mealNumericProposalService.getLatest({
+          deviceId: input.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+        });
+        if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+          return markStale({ ...input, card });
+        }
+        if (input.action === "reject") {
+          await deps.mealNumericProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+          return completeActiveAction({ ...input, card });
+        }
+        const activeProposal = proposal as MealNumericProposalPayload;
+        const consumed = await deps.mealNumericProposalService.consumeLatest({
+          deviceId: input.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+          proposalId: input.proposalId,
+          expectedMealRevisionId: activeProposal.expectedMealRevisionId,
+        });
+        if (!consumed) {
+          return markStale({ ...input, card });
+        }
+        try {
+          const updated = await deps.mealCorrectionService.updateMeal(
+            input.deviceId,
+            consumed.mealId,
+            consumed.items ? { items: consumed.items } : { patch: consumed.updateInput ?? {} },
+            consumed.expectedMealRevisionId,
+          );
+          if (updated.dailySummary) {
+            deps.publisher.publishDailySummary(input.deviceId, {
+              summary: updated.dailySummary,
+              affectedDate: updated.affectedDate,
+              source: "meal_mutation",
+            });
+          }
+          await deps.mealCorrectionService.clearPendingSelection({
+            deviceId: input.deviceId,
+            sessionId: DEFAULT_SESSION_ID,
+          });
+          return completeActiveAction({
+            ...input,
+            card,
+            mutation: {
+              didMutateMeal: true,
+              updatedMeal: updated.updatedMeal,
+              affectedDate: updated.affectedDate,
+              summaryOutcome: updated.summaryOutcome,
+              ...(updated.dailySummary ? { dailySummary: updated.dailySummary } : {}),
+            },
+          });
+        } catch (error) {
+          if (error instanceof MealRevisionPreconditionError) {
+            return markStale({ ...input, card });
+          }
+          throw error;
+        }
+      }
+
+      const proposal = await deps.mealDeleteProposalService.getLatest({
+        deviceId: input.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+        return markStale({ ...input, card });
+      }
+      if (input.action === "reject") {
+        await deps.mealDeleteProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+        return completeActiveAction({ ...input, card });
+      }
+      const activeProposal = proposal as MealDeleteProposalPayload;
+      const consumed = await deps.mealDeleteProposalService.consumeLatest({
+        deviceId: input.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: input.proposalId,
+        expectedMealRevisionId: activeProposal.expectedMealRevisionId,
+      });
+      if (!consumed) {
+        return markStale({ ...input, card });
+      }
+      try {
+        const deleted = await deps.mealCorrectionService.deleteMeal(
+          input.deviceId,
+          consumed.mealId,
+          consumed.expectedMealRevisionId,
+        );
+        if (deleted.dailySummary) {
+          deps.publisher.publishDailySummary(input.deviceId, {
+            summary: deleted.dailySummary,
+            affectedDate: deleted.affectedDate,
+            source: "meal_mutation",
+          });
+        }
+        await deps.mealCorrectionService.clearPendingSelection({
+          deviceId: input.deviceId,
+          sessionId: DEFAULT_SESSION_ID,
+        });
+        return completeActiveAction({
+          ...input,
+          card,
+          mutation: {
+            didMutateMeal: true,
+            deletedMealId: deleted.deletedMealId,
+            affectedDate: deleted.affectedDate,
+            summaryOutcome: deleted.summaryOutcome,
+            ...(deleted.dailySummary ? { dailySummary: deleted.dailySummary } : {}),
+          },
+        });
+      } catch (error) {
+        if (error instanceof MealRevisionPreconditionError) {
+          return markStale({ ...input, card });
+        }
+        throw error;
+      }
+    },
+  };
+}

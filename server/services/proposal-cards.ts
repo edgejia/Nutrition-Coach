@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   chatProposalActionEvents,
@@ -58,11 +58,34 @@ export interface ProposalCardMetadata {
   updatedAt: string;
 }
 
+export interface ProposalCardClientMetadata {
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  status: ProposalStatus;
+  isActionable: boolean;
+  title: string;
+  details: ProposalCardDetails;
+  actions: ProposalCardActions;
+  expiresAt: string | null;
+  lapseCopy: string | null;
+  supersededByKind: ProposalKind | null;
+}
+
 export interface ProposalActionEventMetadata {
   id: string;
   deviceId: string;
   actionMessageId: string;
   assistantMessageId: string;
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  action: ProposalAction;
+  transcriptCopy: string;
+  createdAt: string;
+}
+
+export interface ProposalActionEventClientMetadata {
   proposalId: string;
   proposalKind: ProposalKind;
   proposalLane: ProposalLane;
@@ -95,6 +118,8 @@ export interface SaveProposalCardInput {
   lapseCopy?: string | null;
   supersededByKind?: ProposalKind | null;
 }
+
+export type PendingProposalCardInput = Omit<SaveProposalCardInput, "deviceId" | "assistantMessageId">;
 
 export interface SaveProposalActionEventInput {
   deviceId: string;
@@ -234,6 +259,42 @@ function activeProposalMatches(
     active.proposalLane === card.proposalLane;
 }
 
+export function proposalKindToLane(proposalKind: ProposalKind): ProposalLane {
+  return proposalKind === "goal" ? "goal" : "meal_mutation";
+}
+
+export function projectProposalCardForClient(
+  card: ProposalCardMetadata,
+  projection?: ProposalStatusProjection,
+): ProposalCardClientMetadata {
+  return {
+    proposalId: card.proposalId,
+    proposalKind: card.proposalKind,
+    proposalLane: card.proposalLane,
+    status: projection?.status ?? card.status,
+    isActionable: projection?.isActionable ?? card.status === "active",
+    title: card.title,
+    details: card.details,
+    actions: card.actions,
+    expiresAt: projection?.expiresAt ?? card.expiresAt,
+    lapseCopy: projection?.lapseCopy ?? card.lapseCopy,
+    supersededByKind: card.supersededByKind,
+  };
+}
+
+export function projectProposalActionEventForClient(
+  event: ProposalActionEventMetadata,
+): ProposalActionEventClientMetadata {
+  return {
+    proposalId: event.proposalId,
+    proposalKind: event.proposalKind,
+    proposalLane: event.proposalLane,
+    action: event.action,
+    transcriptCopy: event.transcriptCopy,
+    createdAt: event.createdAt,
+  };
+}
+
 export function createProposalCardService(db: AppDatabase) {
   return {
     async saveAssistantProposalCard(
@@ -317,6 +378,27 @@ export function createProposalCardService(db: AppDatabase) {
           ),
         );
       return new Map(rows.map((row) => [row.assistantMessageId, cardRowToMetadata(row)]));
+    },
+
+    async getLatestCardForProposal({
+      deviceId,
+      proposalId,
+    }: {
+      deviceId: string;
+      proposalId: string;
+    }): Promise<ProposalCardMetadata | undefined> {
+      const rows = await db
+        .select()
+        .from(chatProposalCards)
+        .where(
+          and(
+            eq(chatProposalCards.deviceId, deviceId),
+            eq(chatProposalCards.proposalId, proposalId),
+          ),
+        )
+        .orderBy(desc(chatProposalCards.createdAt))
+        .limit(1);
+      return rows[0] ? cardRowToMetadata(rows[0]) : undefined;
     },
 
     async getActionEventsForMessages({

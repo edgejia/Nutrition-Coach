@@ -40,13 +40,32 @@ import {
 } from "../observability/events.js";
 import type { ProviderErrorMetadata } from "../llm/types.js";
 import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
+import {
+  projectProposalCardForClient,
+  type PendingProposalCardInput,
+  type ProposalCardClientMetadata,
+  type ProposalKind,
+  type ProposalLane,
+  type createProposalCardService,
+} from "../services/proposal-cards.js";
+import {
+  renderProposalSupersededCopy,
+} from "../orchestrator/mutation-receipts.js";
+import type { createGoalProposalService } from "../services/goal-proposals.js";
+import type { createMealNumericProposalService } from "../services/meal-numeric-proposals.js";
+import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
+import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
+  proposalCardService: ReturnType<typeof createProposalCardService>;
   deviceService: ReturnType<typeof createDeviceService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
+  goalProposalService: ReturnType<typeof createGoalProposalService>;
+  mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   publisher: RealtimePublisher;
   /**
    * Override the upload storage directory. When undefined the route falls back
@@ -123,6 +142,90 @@ interface StreamingReplyResult {
   finalReplySource: LlmTraceFinalReplySource;
   finalReplyShape: LlmTraceFinalReplyShape;
   receiptPersistence: ReceiptPersistence;
+}
+
+async function loadActiveProposalSnapshots(deps: {
+  goalProposalService: ReturnType<typeof createGoalProposalService>;
+  mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
+}, deviceId: string): Promise<Array<{
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  expiresAt?: string | null;
+}>> {
+  const [goal, mealNumeric, mealDelete] = await Promise.all([
+    deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+    deps.mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+    deps.mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+  ]);
+  return [
+    ...(goal ? [{
+      proposalId: goal.proposalId,
+      proposalKind: "goal" as const,
+      proposalLane: "goal" as const,
+    }] : []),
+    ...(mealNumeric ? [{
+      proposalId: mealNumeric.proposalId,
+      proposalKind: mealNumeric.provenance === "model_estimate" ? "meal_estimate" as const : "meal_numeric" as const,
+      proposalLane: "meal_mutation" as const,
+      expiresAt: mealNumeric.expiresAt,
+    }] : []),
+    ...(mealDelete ? [{
+      proposalId: mealDelete.proposalId,
+      proposalKind: "meal_delete" as const,
+      proposalLane: "meal_mutation" as const,
+      expiresAt: mealDelete.expiresAt,
+    }] : []),
+  ];
+}
+
+async function persistProposalCardForAssistant(input: {
+  proposalCardService: ReturnType<typeof createProposalCardService>;
+  deviceId: string;
+  assistantMessageId: string;
+  proposalCard?: PendingProposalCardInput;
+}): Promise<ProposalCardClientMetadata | undefined> {
+  if (!input.proposalCard) {
+    return undefined;
+  }
+  if (input.proposalCard.proposalLane === "meal_mutation") {
+    await input.proposalCardService.markSupersededInLane({
+      deviceId: input.deviceId,
+      proposalLane: input.proposalCard.proposalLane,
+      replacementProposalId: input.proposalCard.proposalId,
+      supersededByKind: input.proposalCard.proposalKind,
+      lapseCopy: renderProposalSupersededCopy({
+        proposalKind: input.proposalCard.proposalKind,
+        supersededByKind: input.proposalCard.proposalKind,
+      }),
+    });
+  } else {
+    await input.proposalCardService.markSupersededInLane({
+      deviceId: input.deviceId,
+      proposalLane: "goal",
+      replacementProposalId: input.proposalCard.proposalId,
+      supersededByKind: "goal",
+      lapseCopy: renderProposalSupersededCopy({
+        proposalKind: "goal",
+        supersededByKind: "goal",
+      }),
+    });
+  }
+  const saved = await input.proposalCardService.saveAssistantProposalCard({
+    ...input.proposalCard,
+    deviceId: input.deviceId,
+    assistantMessageId: input.assistantMessageId,
+  });
+  return projectProposalCardForClient(saved, {
+    proposalId: saved.proposalId,
+    proposalKind: saved.proposalKind,
+    proposalLane: saved.proposalLane,
+    status: saved.status,
+    isActionable: saved.status === "active",
+    expiresAt: saved.expiresAt,
+    lapseCopy: saved.lapseCopy,
+  });
 }
 
 const activeChatTurns = new Map<string, ActiveChatTurn>();
@@ -921,6 +1024,7 @@ async function handleOrchestratorSSE(
     assetService: ReturnType<typeof createAssetService>;
     orchestrator: ReturnType<typeof createOrchestrator>;
     chatService: ReturnType<typeof createChatService>;
+    proposalCardService: ReturnType<typeof createProposalCardService>;
     publisher: RealtimePublisher;
     log: FastifyBaseLogger;
   },
@@ -946,6 +1050,7 @@ async function handleOrchestratorSSE(
   let streamDailyTargets: unknown;
   let streamAffectedDate: string | undefined;
   let streamDeletedMealId: string | undefined;
+  let streamProposalCard: ProposalCardClientMetadata | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
   let streamReceiptIdentity: ReceiptIdentity | undefined;
@@ -1065,6 +1170,7 @@ async function handleOrchestratorSSE(
         affectedDate,
         deletedMealId,
         loggedMeal,
+        proposalCard,
       } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
@@ -1166,6 +1272,7 @@ async function handleOrchestratorSSE(
         affectedDate,
         deletedMealId,
         loggedMeal,
+        proposalCard,
       } = result;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
@@ -1205,6 +1312,12 @@ async function handleOrchestratorSSE(
           transport: "sse",
         },
       );
+      streamProposalCard = await persistProposalCardForAssistant({
+        proposalCardService: deps.proposalCardService,
+        deviceId,
+        assistantMessageId: finalized.assistantMessageId,
+        proposalCard,
+      });
       const sanitizedFallback = finalized.sanitized;
       streamReceiptPersistence = finalized.receiptPersistence;
       const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
@@ -1219,6 +1332,7 @@ async function handleOrchestratorSSE(
         ...(dailyTargets ? { dailyTargets } : {}),
         ...(affectedDate ? { affectedDate } : {}),
         ...(deletedMealId ? { deletedMealId } : {}),
+        ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (result.fallbackOutcomeContext) {
@@ -1299,6 +1413,7 @@ async function handleOrchestratorSSE(
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
       ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
+      ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
     recordSseFallback({
@@ -1330,8 +1445,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     orchestrator,
     assetService,
     chatService,
+    proposalCardService,
     deviceService,
     guestSessionService,
+    goalProposalService,
+    mealNumericProposalService,
+    mealDeleteProposalService,
     publisher,
     uploadsDir: injectedUploadsDir,
     llmTraceRecorderFactory,
@@ -1409,6 +1528,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonDailyTargets: unknown;
       let jsonAffectedDate: string | undefined;
       let jsonDeletedMealId: string | undefined;
+      let jsonProposalCard: ProposalCardClientMetadata | undefined;
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
       let jsonReceiptIdentity: ReceiptIdentity | undefined;
@@ -1560,6 +1680,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const sanitized = finalized.sanitized;
           jsonReceiptPersistence = finalized.receiptPersistence;
           const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
+          jsonProposalCard = await persistProposalCardForAssistant({
+            proposalCardService,
+            deviceId,
+            assistantMessageId: finalized.assistantMessageId,
+            proposalCard: result.proposalCard,
+          });
           traceRecorder?.recordFinalReply({
             source: hallucinationDetected ? "fallback" : composedSummaryHistory ? "renderer" : "model",
             shape: sanitized.trim() ? (hallucinationDetected ? "fallback_text" : "streamed_text") : "empty_or_missing",
@@ -1595,6 +1721,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
             ...(affectedDate ? { affectedDate } : {}),
             ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+            ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
           };
         }
 
@@ -1625,6 +1752,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         const sanitizedJson = finalized.sanitized;
         jsonReceiptPersistence = finalized.receiptPersistence;
         const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
+        jsonProposalCard = await persistProposalCardForAssistant({
+          proposalCardService,
+          deviceId,
+          assistantMessageId: finalized.assistantMessageId,
+          proposalCard: result.proposalCard,
+        });
         traceRecorder?.recordFinalReply({
           source: result.finalReplySource ?? "model",
           shape: result.finalReplyShape ?? "empty_or_missing",
@@ -1660,6 +1793,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(dailyTargets ? { dailyTargets } : {}),
           ...(affectedDate ? { affectedDate } : {}),
           ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+          ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
         };
       } catch (error) {
         const fallback = jsonDidLogMeal
@@ -1716,6 +1850,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
           ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),
           ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+          ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
         };
       } finally {
         await cleanupDurableAssetSafe(
@@ -1764,7 +1899,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     setImmediate(() => {
       void handleOrchestratorSSE(
         stream,
-        { assetService, orchestrator, chatService, publisher, log: turnLog },
+        { assetService, orchestrator, chatService, proposalCardService, publisher, log: turnLog },
         deviceId,
         message,
         image,
@@ -1803,7 +1938,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
       return reply.code(400).send({ error: "Invalid limit. Must be an integer between 1 and 200." });
     }
-    const messages = await chatService.getHistory(deviceId, parsedLimit);
+    const activeProposals = await loadActiveProposalSnapshots(
+      { goalProposalService, mealNumericProposalService, mealDeleteProposalService },
+      deviceId,
+    );
+    const messages = await chatService.getHistory(deviceId, parsedLimit, { activeProposals });
     return {
       messages: messages.map((message) => {
         const { deviceId: _deviceId, ...publicMessage } = message;

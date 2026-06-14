@@ -16,6 +16,8 @@ import { createMealCorrectionService } from "./services/meal-correction.js";
 import { createMealDeleteProposalService } from "./services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "./services/meal-numeric-proposals.js";
 import { createGoalProposalService } from "./services/goal-proposals.js";
+import { createProposalActionService } from "./services/proposal-actions.js";
+import { createProposalCardService } from "./services/proposal-cards.js";
 import { createGuestSessionService } from "./services/guest-session.js";
 import { createOrchestrator } from "./orchestrator/index.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
@@ -28,6 +30,7 @@ import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
+import { registerProposalActionRoutes } from "./routes/proposal-actions.js";
 import type { LLMProvider } from "./llm/types.js";
 import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
 import { config, isDeployedLikeRuntime, validateGuestSessionSecretForRuntime } from "./config.js";
@@ -63,6 +66,8 @@ export interface AppServices {
   mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
   orchestrator: ReturnType<typeof createOrchestrator>;
+  proposalActionService: ReturnType<typeof createProposalActionService>;
+  proposalCardService: ReturnType<typeof createProposalCardService>;
   publisher: RealtimePublisher;
   summaryService: ReturnType<typeof createSummaryService>;
 }
@@ -130,6 +135,7 @@ export async function buildApp(opts: AppOptions) {
   const goalProposalService = createGoalProposalService(db);
   const mealDeleteProposalService = createMealDeleteProposalService(db);
   const mealNumericProposalService = createMealNumericProposalService(db);
+  const proposalCardService = createProposalCardService(db);
   const publisher = new RealtimePublisher();
 
   const orchestrator = createOrchestrator({
@@ -142,6 +148,16 @@ export async function buildApp(opts: AppOptions) {
     mealNumericProposalService,
     deviceService,
     goalProposalService,
+    publisher,
+  });
+  const proposalActionService = createProposalActionService({
+    chatService,
+    proposalCardService,
+    goalProposalService,
+    mealNumericProposalService,
+    mealDeleteProposalService,
+    mealCorrectionService,
+    deviceService,
     publisher,
   });
 
@@ -157,6 +173,8 @@ export async function buildApp(opts: AppOptions) {
     mealDeleteProposalService,
     mealNumericProposalService,
     orchestrator,
+    proposalActionService,
+    proposalCardService,
     publisher,
     summaryService,
   });
@@ -174,14 +192,19 @@ export async function buildApp(opts: AppOptions) {
   registerChatRoutes(app, {
     orchestrator,
     chatService,
+    proposalCardService,
     deviceService,
     guestSessionService,
+    goalProposalService,
+    mealNumericProposalService,
+    mealDeleteProposalService,
     assetService,
     publisher,
     uploadsDir: opts.uploadsDir,
     llmTraceRecorderFactory: opts.llmTraceRecorderFactory,
   });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, assetService, publisher });
+  registerProposalActionRoutes(app, { proposalActionService, deviceService, guestSessionService });
   registerDaySnapshotRoutes(app, { daySnapshotService, deviceService, guestSessionService });
   registerHistoryRoutes(app, { historyQueryService, deviceService, guestSessionService });
   registerAssetRoutes(app, { assetService, deviceService, guestSessionService });

@@ -13,6 +13,7 @@ import type {
   createMealNumericProposalService,
   MealNumericProposalPayload,
 } from "../services/meal-numeric-proposals.js";
+import type { PendingProposalCardInput } from "../services/proposal-cards.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
@@ -141,6 +142,7 @@ export type OrchestratorResult =
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
       mutationOutcomeFact?: ChatMutationOutcomeFact;
+      proposalCard?: PendingProposalCardInput;
     } & FinalReplyTraceMetadata)
   | ({
       streamGenerator: AsyncGenerator<string>;
@@ -155,6 +157,7 @@ export type OrchestratorResult =
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
       mutationOutcomeFact?: ChatMutationOutcomeFact;
+      proposalCard?: PendingProposalCardInput;
     } & FinalReplyTraceMetadata);
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
@@ -1344,6 +1347,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 deletedMeal,
                 summaryHistoryFacts: toolSummaryHistoryFacts,
                 controlledReply,
+                proposalCard,
                 validationDiagnostic,
                 policyFact,
               } = await executeTool(toolCall, deviceId, {
@@ -1377,6 +1381,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   reply: controlledReply.text,
                   didLogMeal: false,
                   didMutateMeal: false,
+                  ...(proposalCard ? { proposalCard } : {}),
                   finalReplySource: controlledReply.source,
                   finalReplyShape: classifyPlainReplyShape(controlledReply.text),
                 };

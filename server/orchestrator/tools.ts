@@ -21,7 +21,11 @@ import {
   type createMealNumericProposalService,
 } from "../services/meal-numeric-proposals.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
-import type { createGoalProposalService, GoalProposalPayload } from "../services/goal-proposals.js";
+import {
+  GOAL_PROPOSAL_TTL_MS,
+  type createGoalProposalService,
+  type GoalProposalPayload,
+} from "../services/goal-proposals.js";
 import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
@@ -60,6 +64,7 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  getProposalActionLabels,
   renderCorrectionTargetClarificationCopy,
   renderCorrectionTargetNoMealsForDateCopy,
   renderCorrectionTargetSameDateRecoveryCopy,
@@ -70,7 +75,10 @@ import {
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericClarificationCopy,
   renderMealNumericProposalCopy,
+  renderProposalCardIntro,
+  renderProposalExpiredCopy,
 } from "./mutation-receipts.js";
+import type { PendingProposalCardInput } from "../services/proposal-cards.js";
 import {
   classifyProteinSource,
   normalizeTrustedProteinEstimate,
@@ -135,6 +143,7 @@ export interface ToolExecutionResult {
       | "failed_recognition_no_save";
     text: string;
   };
+  proposalCard?: PendingProposalCardInput;
   updatedFields?: string[];
   publishedEvents?: string[];
   policyFact?: ToolPolicyDecisionFact;
@@ -398,6 +407,7 @@ interface MealDeleteProposalResult {
   reason: "meal_delete_proposal";
   proposalId: string;
   reply: string;
+  expiresAt: string;
   snapshot: {
     mealId: string;
     expectedMealRevisionId: string;
@@ -456,6 +466,7 @@ interface GoalControlledResult {
 
 type ProposeGoalsResult = GoalControlledResult & {
   reason: "goal_proposal";
+  proposalCard: PendingProposalCardInput;
 };
 
 interface MealNumericControlledResult {
@@ -474,6 +485,7 @@ type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult;
 type UpdateMealContractResult = UpdateMealResult | MealNumericControlledResult | MealTargetControlledResult;
 type ProposeMealNumericCorrectionResult = MealNumericControlledResult & {
   reason: "meal_numeric_proposal";
+  proposalCard?: PendingProposalCardInput;
 };
 
 type UpdateGoalsArgs =
@@ -698,6 +710,152 @@ function makeGoalControlledResult(
     status: "controlled_reply",
     reason,
     reply,
+  };
+}
+
+function formatGoalValue(field: keyof DailyTargets, value: number): string {
+  return field === "calories" ? `${value} kcal` : `${value} g`;
+}
+
+function goalFieldLabel(field: keyof DailyTargets): string {
+  switch (field) {
+    case "calories":
+      return "卡路里";
+    case "protein":
+      return "蛋白質";
+    case "carbs":
+      return "碳水";
+    case "fat":
+      return "脂肪";
+    default:
+      return field satisfies never;
+  }
+}
+
+function proposalMealNumericFieldLabel(field: MealNumericField): string {
+  switch (field) {
+    case "calories":
+      return "卡路里";
+    case "protein":
+      return "蛋白質";
+    case "carbs":
+      return "碳水";
+    case "fat":
+      return "脂肪";
+    default:
+      return field satisfies never;
+  }
+}
+
+function formatProposalMealNumericValue(field: MealNumericField, value: number): string {
+  const unit = field === "calories" ? "kcal" : "g";
+  const normalized = Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+  return `${normalized} ${unit}`;
+}
+
+function formatProposalNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+}
+
+function proposalMealPeriodLabel(period: MealPeriod): string {
+  switch (period) {
+    case "breakfast":
+      return "早餐";
+    case "lunch":
+      return "午餐";
+    case "dinner":
+      return "晚餐";
+    case "late_night":
+      return "宵夜";
+    default:
+      return period satisfies never;
+  }
+}
+
+function buildGoalProposalCard(proposal: GoalProposalPayload): PendingProposalCardInput {
+  const labels = getProposalActionLabels("goal");
+  return {
+    proposalId: proposal.proposalId,
+    proposalKind: "goal",
+    proposalLane: "goal",
+    title: renderProposalCardIntro("goal"),
+    details: {
+      rows: (["calories", "protein", "carbs", "fat"] as const).map((field) => ({
+        label: goalFieldLabel(field),
+        after: formatGoalValue(field, proposal.targets[field]),
+      })),
+    },
+    actions: {
+      approveLabel: labels.approveLabel,
+      editLabel: labels.editLabel,
+      rejectLabel: labels.rejectLabel,
+    },
+    expiresAt: new Date(new Date(proposal.createdAt).getTime() + GOAL_PROPOSAL_TTL_MS).toISOString(),
+    lapseCopy: renderProposalExpiredCopy("goal"),
+  };
+}
+
+function buildMealNumericProposalCard(input: {
+  proposalId: string;
+  proposalKind: "meal_numeric" | "meal_estimate";
+  affectedFields: Array<{ field: MealNumericField; before: number; after: number }>;
+  expiresAt: string;
+}): PendingProposalCardInput {
+  const labels = getProposalActionLabels(input.proposalKind);
+  return {
+    proposalId: input.proposalId,
+    proposalKind: input.proposalKind,
+    proposalLane: "meal_mutation",
+    title: renderProposalCardIntro(input.proposalKind),
+    details: {
+      rows: input.affectedFields.map((field) => ({
+        label: proposalMealNumericFieldLabel(field.field),
+        before: formatProposalMealNumericValue(field.field, field.before),
+        after: formatProposalMealNumericValue(field.field, field.after),
+      })),
+    },
+    actions: {
+      approveLabel: labels.approveLabel,
+      editLabel: labels.editLabel,
+      rejectLabel: labels.rejectLabel,
+    },
+    expiresAt: input.expiresAt,
+    lapseCopy: renderProposalExpiredCopy(input.proposalKind),
+  };
+}
+
+function buildMealDeleteProposalCard(input: {
+  proposalId: string;
+  expiresAt: string;
+  snapshot: MealDeleteProposalResult["snapshot"];
+}): PendingProposalCardInput {
+  const labels = getProposalActionLabels("meal_delete");
+  return {
+    proposalId: input.proposalId,
+    proposalKind: "meal_delete",
+    proposalLane: "meal_mutation",
+    title: renderProposalCardIntro("meal_delete"),
+    details: {
+      rows: [
+        { label: "餐點", value: input.snapshot.mealLabel },
+        { label: "日期", value: `${input.snapshot.dateKey} ${proposalMealPeriodLabel(input.snapshot.mealPeriod)}` },
+        {
+          label: "營養",
+          value: `${formatProposalNumber(input.snapshot.calories)} kcal，P${formatProposalNumber(input.snapshot.protein)}g / C${formatProposalNumber(input.snapshot.carbs)}g / F${formatProposalNumber(input.snapshot.fat)}g`,
+        },
+        ...(input.snapshot.items?.map((item) => ({
+          label: item.foodName,
+          value: `${formatProposalNumber(item.calories)} kcal`,
+        })) ?? []),
+      ],
+    },
+    actions: {
+      approveLabel: labels.approveLabel,
+      editLabel: labels.editLabel,
+      rejectLabel: labels.rejectLabel,
+    },
+    expiresAt: input.expiresAt,
+    lapseCopy: renderProposalExpiredCopy("meal_delete"),
   };
 }
 
@@ -1921,6 +2079,12 @@ const proposeMealNumericCorrectionContract: ToolContract<
         result: {
           ...makeMealNumericControlledResult("meal_numeric_proposal", reply),
           reason: "meal_numeric_proposal",
+          proposalCard: buildMealNumericProposalCard({
+            proposalId: proposal.proposalId,
+            proposalKind: "meal_numeric",
+            affectedFields: proposal.affectedFields,
+            expiresAt: proposal.expiresAt,
+          }),
         },
         toolMessage: reply,
       };
@@ -2031,6 +2195,12 @@ const proposeMealEstimateContract: ToolContract<
         result: {
           ...makeMealNumericControlledResult("meal_numeric_proposal", reply),
           reason: "meal_numeric_proposal",
+          proposalCard: buildMealNumericProposalCard({
+            proposalId: proposal.proposalId,
+            proposalKind: "meal_estimate",
+            affectedFields: proposal.affectedFields,
+            expiresAt: proposal.expiresAt,
+          }),
         },
         toolMessage: reply,
       };
@@ -2149,6 +2319,7 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
           proposalId: proposal.proposalId,
           reply,
           snapshot: proposal.snapshot,
+          expiresAt: proposal.expiresAt,
         }),
         toolMessage: reply,
       };
@@ -2204,7 +2375,7 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       throw new Error("propose_goals contract missing goalProposalService/deviceId in context");
     }
 
-    await deps.goalProposalService.putLatest({
+    const proposal = await deps.goalProposalService.putLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
       targets: args,
@@ -2216,6 +2387,7 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       result: {
         ...makeGoalControlledResult("goal_proposal", reply),
         reason: "goal_proposal",
+        proposalCard: buildGoalProposalCard(proposal),
       },
       toolMessage: reply,
     };
@@ -3058,6 +3230,11 @@ export async function executeTool(
         summary: "status: proposal",
         success: true,
         executed: false,
+        proposalCard: buildMealDeleteProposalCard({
+          proposalId: contractResult.proposalId,
+          expiresAt: contractResult.expiresAt,
+          snapshot: contractResult.snapshot,
+        }),
         controlledReply: {
           source: "renderer",
           reason: contractResult.reason,
@@ -3147,6 +3324,7 @@ export async function executeTool(
       summary: "status: proposal",
       success: true,
       executed: true,
+      proposalCard: contractResult.proposalCard,
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,
@@ -3164,6 +3342,7 @@ export async function executeTool(
       success: isProposal,
       executed: isProposal,
       ...(isProposal ? {} : { failureReason: "guard" as const }),
+      ...(contractResult.proposalCard ? { proposalCard: contractResult.proposalCard } : {}),
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,
@@ -3179,6 +3358,7 @@ export async function executeTool(
       summary: "status: proposal",
       success: true,
       executed: true,
+      ...(contractResult.proposalCard ? { proposalCard: contractResult.proposalCard } : {}),
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,
