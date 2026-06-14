@@ -15,6 +15,11 @@ interface DailyTargets {
   fat: number;
 }
 
+interface PublishRecord {
+  args: unknown[];
+  actionEventCount: number;
+}
+
 function toCookieHeader(rawHeader: string | string[] | undefined) {
   const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
   return values.map((value) => value.split(";", 1)[0]).join("; ");
@@ -26,8 +31,8 @@ describe("proposal action API", () => {
   let deviceId: string;
   let sessionCookieHeader: string;
   let proposalActionTestHooks: ProposalActionTestHooks;
-  let publishedGoalUpdates: unknown[];
-  let publishedDailySummaries: unknown[];
+  let publishedGoalUpdates: PublishRecord[];
+  let publishedDailySummaries: PublishRecord[];
 
   beforeEach(async () => {
     proposalActionTestHooks = {};
@@ -39,14 +44,20 @@ describe("proposal action API", () => {
       proposalActionTestHooks,
       onServicesReady: (ready) => {
         services = ready;
+        const countActionEvents = () => {
+          const row = ready.db.$client
+            .prepare("SELECT count(*) AS count FROM chat_proposal_action_events")
+            .get() as { count: number };
+          return row.count;
+        };
         const originalPublishGoalsUpdate = ready.publisher.publishGoalsUpdate.bind(ready.publisher);
         ready.publisher.publishGoalsUpdate = (...args) => {
-          publishedGoalUpdates.push(args);
+          publishedGoalUpdates.push({ args, actionEventCount: countActionEvents() });
           return originalPublishGoalsUpdate(...args);
         };
         const originalPublishDailySummary = ready.publisher.publishDailySummary.bind(ready.publisher);
         ready.publisher.publishDailySummary = (...args) => {
-          publishedDailySummaries.push(args);
+          publishedDailySummaries.push({ args, actionEventCount: countActionEvents() });
           return originalPublishDailySummary(...args);
         };
       },
@@ -92,12 +103,11 @@ describe("proposal action API", () => {
   }
 
   async function createDeleteCard() {
+    const item = { foodName: "豆腐雞肉飯", calories: 520, protein: 38, carbs: 54, fat: 16 };
     const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
       mealPeriod: "lunch",
-      items: [
-        { foodName: "豆腐雞肉飯", calories: 520, protein: 38, carbs: 54, fat: 16 },
-      ],
+      items: [item],
     });
     const proposal = await services.mealDeleteProposalService.putLatest({
       deviceId,
@@ -113,16 +123,10 @@ describe("proposal action API", () => {
           protein: meal.protein,
           carbs: meal.carbs,
           fat: meal.fat,
-          dateKey: meal.dateKey,
+          dateKey: "2026-03-25",
           loggedAt: meal.loggedAt,
           mealPeriod: meal.mealPeriod ?? "lunch",
-          items: meal.items?.map((item) => ({
-            foodName: item.name,
-            calories: item.calories,
-            protein: item.protein,
-            carbs: item.carbs,
-            fat: item.fat,
-          })),
+          items: [item],
         },
       },
     });
@@ -237,6 +241,8 @@ describe("proposal action API", () => {
     assert.equal(body.proposalActionEvent?.proposalKind, "goal");
     assert.equal(body.proposalActionEvent?.action, "approve");
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
+    assert.equal(publishedGoalUpdates.length, 1);
+    assert.equal(publishedGoalUpdates[0]?.actionEventCount, 1);
 
     const history = await app.inject({
       method: "GET",
@@ -290,7 +296,7 @@ describe("proposal action API", () => {
 
     assert.equal(failed.statusCode, 500);
     assert.deepEqual(await readTargets(), defaults);
-    assert.deepEqual(publishedGoalUpdates, []);
+    assert.equal(publishedGoalUpdates.length, 0);
     assert.equal(await historyHasActionEvent(proposalId), false);
     assert.equal((await services.goalProposalService.getLatest({
       deviceId,
@@ -313,6 +319,7 @@ describe("proposal action API", () => {
     assert.equal(recovered.json().ok, true);
     assert.deepEqual(await readTargets(), targets);
     assert.equal(publishedGoalUpdates.length, 1);
+    assert.equal(publishedGoalUpdates[0]?.actionEventCount, 1);
     assert.equal(await historyHasActionEvent(proposalId), true);
   });
 
@@ -331,7 +338,7 @@ describe("proposal action API", () => {
 
     assert.equal(failed.statusCode, 500);
     assert.ok((await readMealsFor(meal)).some((row) => row.id === meal.id));
-    assert.deepEqual(publishedDailySummaries, []);
+    assert.equal(publishedDailySummaries.length, 0);
     assert.equal(await historyHasActionEvent(proposalId), false);
     assert.equal((await services.mealDeleteProposalService.getLatest({
       deviceId,
@@ -354,6 +361,7 @@ describe("proposal action API", () => {
     assert.equal(recovered.json().ok, true);
     assert.equal((await readMealsFor(meal)).some((row) => row.id === meal.id), false);
     assert.equal(publishedDailySummaries.length, 1);
+    assert.equal(publishedDailySummaries[0]?.actionEventCount, 1);
     assert.equal(await historyHasActionEvent(proposalId), true);
   });
 

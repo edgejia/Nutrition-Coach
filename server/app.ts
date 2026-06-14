@@ -156,6 +156,7 @@ export async function buildApp(opts: AppOptions) {
     publisher,
   });
   const proposalActionService = createProposalActionService({
+    db,
     chatService,
     proposalCardService,
     goalProposalService,

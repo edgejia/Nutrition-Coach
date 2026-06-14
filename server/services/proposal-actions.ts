@@ -1,4 +1,5 @@
 import type { RealtimePublisher } from "../realtime/publisher.js";
+import type { AppDatabase } from "../db/client.js";
 import {
   renderProposalActionEventCopy,
   renderProposalInactiveCopy,
@@ -71,6 +72,7 @@ export type ProposalActionServiceResult =
     };
 
 interface ProposalActionDeps {
+  db: AppDatabase;
   chatService: ReturnType<typeof createChatService>;
   proposalCardService: ReturnType<typeof createProposalCardService>;
   goalProposalService: ReturnType<typeof createGoalProposalService>;
@@ -80,6 +82,19 @@ interface ProposalActionDeps {
   deviceService: ReturnType<typeof createDeviceService>;
   publisher: RealtimePublisher;
   testHooks?: ProposalActionTestHooks;
+}
+
+type PostCommitPublish =
+  | { type: "goals_update"; targets: DailyTargets }
+  | {
+      type: "daily_summary";
+      summary: DailySummary;
+      affectedDate: string;
+    };
+
+interface DurableDecision<T extends ProposalActionServiceResult = ProposalActionServiceResult> {
+  result: T;
+  publish?: PostCommitPublish;
 }
 
 function activeKindMatches(input: {
@@ -109,6 +124,39 @@ function activeProposalIdMatches(
 }
 
 export function createProposalActionService(deps: ProposalActionDeps) {
+  async function runDurableDecision<T extends ProposalActionServiceResult>(
+    fn: () => Promise<DurableDecision<T>>,
+  ): Promise<DurableDecision<T>> {
+    deps.db.$client.prepare("BEGIN IMMEDIATE").run();
+    let transactionOpen = true;
+    try {
+      const decision = await fn();
+      deps.db.$client.prepare("COMMIT").run();
+      transactionOpen = false;
+      return decision;
+    } catch (error) {
+      if (transactionOpen) {
+        deps.db.$client.prepare("ROLLBACK").run();
+      }
+      throw error;
+    }
+  }
+
+  function publishAfterCommit(publish: PostCommitPublish | undefined, deviceId: string): void {
+    if (!publish) {
+      return;
+    }
+    if (publish.type === "goals_update") {
+      deps.publisher.publishGoalsUpdate(deviceId, publish.targets);
+      return;
+    }
+    deps.publisher.publishDailySummary(deviceId, {
+      summary: publish.summary,
+      affectedDate: publish.affectedDate,
+      source: "meal_mutation",
+    });
+  }
+
   async function loadCard(input: {
     deviceId: string;
     proposalId: string;
@@ -236,152 +284,166 @@ export function createProposalActionService(deps: ProposalActionDeps) {
         return markStale(input);
       }
 
-      if (input.kind === "goal") {
-        const proposal = await deps.goalProposalService.getLatest({
-          deviceId: input.deviceId,
-          sessionId: DEFAULT_SESSION_ID,
-        });
-        if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
-          return markStale({ ...input, card });
+      const decision = await runDurableDecision(async () => {
+        if (input.kind === "goal") {
+          const proposal = await deps.goalProposalService.getLatest({
+            deviceId: input.deviceId,
+            sessionId: DEFAULT_SESSION_ID,
+          });
+          if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+            return { result: await markStale({ ...input, card }) };
+          }
+          if (input.action === "reject") {
+            await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+            return { result: await completeActiveAction({ ...input, card }) };
+          }
+          const consumed = await deps.goalProposalService.consumeLatest({
+            deviceId: input.deviceId,
+            sessionId: DEFAULT_SESSION_ID,
+            proposalId: input.proposalId,
+          });
+          if (!consumed) {
+            return { result: await markStale({ ...input, card }) };
+          }
+          const dailyTargets = await deps.deviceService.updateGoals(input.deviceId, consumed.targets);
+          deps.testHooks?.afterDomainMutation?.(input);
+          return {
+            result: await completeActiveAction({
+              ...input,
+              card,
+              mutation: { didMutateMeal: false, dailyTargets },
+            }),
+            publish: { type: "goals_update", targets: dailyTargets },
+          };
         }
-        if (input.action === "reject") {
-          await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-          return completeActiveAction({ ...input, card });
-        }
-        const consumed = await deps.goalProposalService.consumeLatest({
-          deviceId: input.deviceId,
-          sessionId: DEFAULT_SESSION_ID,
-          proposalId: input.proposalId,
-        });
-        if (!consumed) {
-          return markStale({ ...input, card });
-        }
-        const dailyTargets = await deps.deviceService.updateGoals(input.deviceId, consumed.targets);
-        deps.testHooks?.afterDomainMutation?.(input);
-        deps.publisher.publishGoalsUpdate(input.deviceId, dailyTargets);
-        return completeActiveAction({
-          ...input,
-          card,
-          mutation: { didMutateMeal: false, dailyTargets },
-        });
-      }
 
-      if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
-        const proposal = await deps.mealNumericProposalService.getLatest({
+        if (input.kind === "meal_numeric" || input.kind === "meal_estimate") {
+          const proposal = await deps.mealNumericProposalService.getLatest({
+            deviceId: input.deviceId,
+            sessionId: DEFAULT_SESSION_ID,
+          });
+          if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+            return { result: await markStale({ ...input, card }) };
+          }
+          if (input.action === "reject") {
+            await deps.mealNumericProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+            return { result: await completeActiveAction({ ...input, card }) };
+          }
+          const activeProposal = proposal as MealNumericProposalPayload;
+          const consumed = await deps.mealNumericProposalService.consumeLatest({
+            deviceId: input.deviceId,
+            sessionId: DEFAULT_SESSION_ID,
+            proposalId: input.proposalId,
+            expectedMealRevisionId: activeProposal.expectedMealRevisionId,
+          });
+          if (!consumed) {
+            return { result: await markStale({ ...input, card }) };
+          }
+          try {
+            const updated = await deps.mealCorrectionService.updateMeal(
+              input.deviceId,
+              consumed.mealId,
+              consumed.items ? { items: consumed.items } : { patch: consumed.updateInput ?? {} },
+              consumed.expectedMealRevisionId,
+            );
+            deps.testHooks?.afterDomainMutation?.(input);
+            await deps.mealCorrectionService.clearPendingSelection({
+              deviceId: input.deviceId,
+              sessionId: DEFAULT_SESSION_ID,
+            });
+            return {
+              result: await completeActiveAction({
+                ...input,
+                card,
+                mutation: {
+                  didMutateMeal: true,
+                  updatedMeal: updated.updatedMeal,
+                  affectedDate: updated.affectedDate,
+                  summaryOutcome: updated.summaryOutcome,
+                  ...(updated.dailySummary ? { dailySummary: updated.dailySummary } : {}),
+                },
+              }),
+              ...(updated.dailySummary
+                ? {
+                    publish: {
+                      type: "daily_summary" as const,
+                      summary: updated.dailySummary,
+                      affectedDate: updated.affectedDate,
+                    },
+                  }
+                : {}),
+            };
+          } catch (error) {
+            if (error instanceof MealRevisionPreconditionError) {
+              return { result: await markStale({ ...input, card }) };
+            }
+            throw error;
+          }
+        }
+
+        const proposal = await deps.mealDeleteProposalService.getLatest({
           deviceId: input.deviceId,
           sessionId: DEFAULT_SESSION_ID,
         });
         if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
-          return markStale({ ...input, card });
+          return { result: await markStale({ ...input, card }) };
         }
         if (input.action === "reject") {
-          await deps.mealNumericProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-          return completeActiveAction({ ...input, card });
+          await deps.mealDeleteProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+          return { result: await completeActiveAction({ ...input, card }) };
         }
-        const activeProposal = proposal as MealNumericProposalPayload;
-        const consumed = await deps.mealNumericProposalService.consumeLatest({
+        const activeProposal = proposal as MealDeleteProposalPayload;
+        const consumed = await deps.mealDeleteProposalService.consumeLatest({
           deviceId: input.deviceId,
           sessionId: DEFAULT_SESSION_ID,
           proposalId: input.proposalId,
           expectedMealRevisionId: activeProposal.expectedMealRevisionId,
         });
         if (!consumed) {
-          return markStale({ ...input, card });
+          return { result: await markStale({ ...input, card }) };
         }
         try {
-          const updated = await deps.mealCorrectionService.updateMeal(
+          const deleted = await deps.mealCorrectionService.deleteMeal(
             input.deviceId,
             consumed.mealId,
-            consumed.items ? { items: consumed.items } : { patch: consumed.updateInput ?? {} },
             consumed.expectedMealRevisionId,
           );
-          if (updated.dailySummary) {
-            deps.testHooks?.afterDomainMutation?.(input);
-            deps.publisher.publishDailySummary(input.deviceId, {
-              summary: updated.dailySummary,
-              affectedDate: updated.affectedDate,
-              source: "meal_mutation",
-            });
-          }
+          deps.testHooks?.afterDomainMutation?.(input);
           await deps.mealCorrectionService.clearPendingSelection({
             deviceId: input.deviceId,
             sessionId: DEFAULT_SESSION_ID,
           });
-          return completeActiveAction({
-            ...input,
-            card,
-            mutation: {
-              didMutateMeal: true,
-              updatedMeal: updated.updatedMeal,
-              affectedDate: updated.affectedDate,
-              summaryOutcome: updated.summaryOutcome,
-              ...(updated.dailySummary ? { dailySummary: updated.dailySummary } : {}),
-            },
-          });
+          return {
+            result: await completeActiveAction({
+              ...input,
+              card,
+              mutation: {
+                didMutateMeal: true,
+                deletedMealId: deleted.deletedMealId,
+                affectedDate: deleted.affectedDate,
+                summaryOutcome: deleted.summaryOutcome,
+                ...(deleted.dailySummary ? { dailySummary: deleted.dailySummary } : {}),
+              },
+            }),
+            ...(deleted.dailySummary
+              ? {
+                  publish: {
+                    type: "daily_summary" as const,
+                    summary: deleted.dailySummary,
+                    affectedDate: deleted.affectedDate,
+                  },
+                }
+              : {}),
+          };
         } catch (error) {
           if (error instanceof MealRevisionPreconditionError) {
-            return markStale({ ...input, card });
+            return { result: await markStale({ ...input, card }) };
           }
           throw error;
         }
-      }
-
-      const proposal = await deps.mealDeleteProposalService.getLatest({
-        deviceId: input.deviceId,
-        sessionId: DEFAULT_SESSION_ID,
       });
-      if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
-        return markStale({ ...input, card });
-      }
-      if (input.action === "reject") {
-        await deps.mealDeleteProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-        return completeActiveAction({ ...input, card });
-      }
-      const activeProposal = proposal as MealDeleteProposalPayload;
-      const consumed = await deps.mealDeleteProposalService.consumeLatest({
-        deviceId: input.deviceId,
-        sessionId: DEFAULT_SESSION_ID,
-        proposalId: input.proposalId,
-        expectedMealRevisionId: activeProposal.expectedMealRevisionId,
-      });
-      if (!consumed) {
-        return markStale({ ...input, card });
-      }
-      try {
-        const deleted = await deps.mealCorrectionService.deleteMeal(
-          input.deviceId,
-          consumed.mealId,
-          consumed.expectedMealRevisionId,
-        );
-        deps.testHooks?.afterDomainMutation?.(input);
-        if (deleted.dailySummary) {
-          deps.publisher.publishDailySummary(input.deviceId, {
-            summary: deleted.dailySummary,
-            affectedDate: deleted.affectedDate,
-            source: "meal_mutation",
-          });
-        }
-        await deps.mealCorrectionService.clearPendingSelection({
-          deviceId: input.deviceId,
-          sessionId: DEFAULT_SESSION_ID,
-        });
-        return completeActiveAction({
-          ...input,
-          card,
-          mutation: {
-            didMutateMeal: true,
-            deletedMealId: deleted.deletedMealId,
-            affectedDate: deleted.affectedDate,
-            summaryOutcome: deleted.summaryOutcome,
-            ...(deleted.dailySummary ? { dailySummary: deleted.dailySummary } : {}),
-          },
-        });
-      } catch (error) {
-        if (error instanceof MealRevisionPreconditionError) {
-          return markStale({ ...input, card });
-        }
-        throw error;
-      }
+      publishAfterCommit(decision.publish, input.deviceId);
+      return decision.result;
     },
   };
 }
