@@ -416,6 +416,7 @@ export function createProposalCardService(db: AppDatabase) {
     },
 
     projectStatusForCards({
+      deviceId,
       cards,
       activeProposals,
       now = new Date(),
@@ -425,7 +426,7 @@ export function createProposalCardService(db: AppDatabase) {
       activeProposals: ActiveProposalSnapshot[];
       now?: Date;
     }): ProposalStatusProjection[] {
-      return cards.map((card) => {
+      return cards.filter((card) => card.deviceId === deviceId).map((card) => {
         if (card.status !== "active") {
           return {
             proposalId: card.proposalId,
