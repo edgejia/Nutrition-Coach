@@ -43,6 +43,7 @@ import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes
 import {
   projectProposalCardForClient,
   type PendingProposalCardInput,
+  type ProposalActionEventClientMetadata,
   type ProposalCardClientMetadata,
   type ProposalKind,
   type ProposalLane,
@@ -144,6 +145,12 @@ interface StreamingReplyResult {
   receiptPersistence: ReceiptPersistence;
 }
 
+type RouteProposalCard = PendingProposalCardInput | ProposalCardClientMetadata;
+
+function isProjectedProposalCard(card: RouteProposalCard): card is ProposalCardClientMetadata {
+  return "status" in card && "isActionable" in card;
+}
+
 async function loadActiveProposalSnapshots(deps: {
   goalProposalService: ReturnType<typeof createGoalProposalService>;
   mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
@@ -184,10 +191,13 @@ async function persistProposalCardForAssistant(input: {
   proposalCardService: ReturnType<typeof createProposalCardService>;
   deviceId: string;
   assistantMessageId: string;
-  proposalCard?: PendingProposalCardInput;
+  proposalCard?: RouteProposalCard;
 }): Promise<ProposalCardClientMetadata | undefined> {
   if (!input.proposalCard) {
     return undefined;
+  }
+  if (isProjectedProposalCard(input.proposalCard)) {
+    return input.proposalCard;
   }
   if (input.proposalCard.proposalLane === "meal_mutation") {
     await input.proposalCardService.markSupersededInLane({
@@ -1051,6 +1061,7 @@ async function handleOrchestratorSSE(
   let streamAffectedDate: string | undefined;
   let streamDeletedMealId: string | undefined;
   let streamProposalCard: ProposalCardClientMetadata | undefined;
+  let streamProposalActionEvent: ProposalActionEventClientMetadata | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
   let streamReceiptIdentity: ReceiptIdentity | undefined;
@@ -1171,6 +1182,7 @@ async function handleOrchestratorSSE(
         deletedMealId,
         loggedMeal,
         proposalCard,
+        proposalActionEvent,
       } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
@@ -1183,6 +1195,7 @@ async function handleOrchestratorSSE(
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
       streamMutationOutcomeFact = result.mutationOutcomeFact;
+      streamProposalActionEvent = proposalActionEvent;
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -1245,6 +1258,7 @@ async function handleOrchestratorSSE(
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
         ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
+        ...(streamProposalActionEvent ? { proposalActionEvent: streamProposalActionEvent } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (streamResult.finalReplySource === "fallback") {
@@ -1273,6 +1287,7 @@ async function handleOrchestratorSSE(
         deletedMealId,
         loggedMeal,
         proposalCard,
+        proposalActionEvent,
       } = result;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
@@ -1289,6 +1304,7 @@ async function handleOrchestratorSSE(
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
       streamMutationOutcomeFact = result.mutationOutcomeFact;
+      streamProposalActionEvent = proposalActionEvent;
       const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
         && !result.fallbackOutcomeContext;
       const normalizedReply = normalizeRouteFinalReply(
@@ -1333,6 +1349,7 @@ async function handleOrchestratorSSE(
         ...(affectedDate ? { affectedDate } : {}),
         ...(deletedMealId ? { deletedMealId } : {}),
         ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
+        ...(streamProposalActionEvent ? { proposalActionEvent: streamProposalActionEvent } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (result.fallbackOutcomeContext) {
@@ -1529,6 +1546,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonAffectedDate: string | undefined;
       let jsonDeletedMealId: string | undefined;
       let jsonProposalCard: ProposalCardClientMetadata | undefined;
+      let jsonProposalActionEvent: ProposalActionEventClientMetadata | undefined;
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
       let jsonReceiptIdentity: ReceiptIdentity | undefined;
@@ -1639,6 +1657,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonLoggedMealReceipt = projectLoggedMealReceipt(result.loggedMeal);
         jsonReceiptIdentity = buildReceiptIdentity(result.loggedMeal, result.loggedMealToolMessageId);
         jsonMutationOutcomeFact = result.mutationOutcomeFact;
+        jsonProposalActionEvent = result.proposalActionEvent;
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
@@ -1722,10 +1741,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ...(affectedDate ? { affectedDate } : {}),
             ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
             ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+            ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
           };
         }
 
         const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
+        jsonProposalActionEvent = result.proposalActionEvent;
         const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
           && !result.fallbackOutcomeContext;
         const normalizedReply = normalizeRouteFinalReply(
@@ -1794,6 +1815,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(affectedDate ? { affectedDate } : {}),
           ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
           ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+          ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
         };
       } catch (error) {
         const fallback = jsonDidLogMeal
@@ -1851,6 +1873,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),
           ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
           ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+          ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
         };
       } finally {
         await cleanupDurableAssetSafe(

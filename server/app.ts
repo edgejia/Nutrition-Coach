@@ -143,18 +143,6 @@ export async function buildApp(opts: AppOptions) {
   const proposalCardService = createProposalCardService(db);
   const publisher = new RealtimePublisher();
 
-  const orchestrator = createOrchestrator({
-    llmProvider,
-    chatService,
-    summaryService,
-    foodLoggingService,
-    mealCorrectionService,
-    mealDeleteProposalService,
-    mealNumericProposalService,
-    deviceService,
-    goalProposalService,
-    publisher,
-  });
   const proposalActionService = createProposalActionService({
     db,
     chatService,
@@ -166,6 +154,19 @@ export async function buildApp(opts: AppOptions) {
     deviceService,
     publisher,
     testHooks: opts.proposalActionTestHooks,
+  });
+  const orchestrator = createOrchestrator({
+    llmProvider,
+    chatService,
+    summaryService,
+    foodLoggingService,
+    mealCorrectionService,
+    mealDeleteProposalService,
+    mealNumericProposalService,
+    deviceService,
+    goalProposalService,
+    proposalActionService,
+    publisher,
   });
 
   opts.onServicesReady?.({

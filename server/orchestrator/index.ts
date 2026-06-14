@@ -13,7 +13,16 @@ import type {
   createMealNumericProposalService,
   MealNumericProposalPayload,
 } from "../services/meal-numeric-proposals.js";
-import type { PendingProposalCardInput } from "../services/proposal-cards.js";
+import type {
+  createProposalActionService,
+  ProposalActionRequestAction,
+} from "../services/proposal-actions.js";
+import type {
+  PendingProposalCardInput,
+  ProposalActionEventClientMetadata,
+  ProposalCardClientMetadata,
+  ProposalKind,
+} from "../services/proposal-cards.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
@@ -41,6 +50,7 @@ import {
 } from "./mutation-effects.js";
 import {
   assertNoForbiddenReceiptTerms,
+  renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderMealDeleteAuthorityFailureCopy,
   renderMealDeleteCancelCopy,
@@ -67,6 +77,7 @@ interface OrchestratorDeps {
   goalProposalService?: ReturnType<typeof createGoalProposalService>;
   mealDeleteProposalService?: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
+  proposalActionService?: ReturnType<typeof createProposalActionService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
 
@@ -142,7 +153,8 @@ export type OrchestratorResult =
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
       mutationOutcomeFact?: ChatMutationOutcomeFact;
-      proposalCard?: PendingProposalCardInput;
+      proposalCard?: PendingProposalCardInput | ProposalCardClientMetadata;
+      proposalActionEvent?: ProposalActionEventClientMetadata;
     } & FinalReplyTraceMetadata)
   | ({
       streamGenerator: AsyncGenerator<string>;
@@ -157,7 +169,8 @@ export type OrchestratorResult =
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
       mutationOutcomeFact?: ChatMutationOutcomeFact;
-      proposalCard?: PendingProposalCardInput;
+      proposalCard?: PendingProposalCardInput | ProposalCardClientMetadata;
+      proposalActionEvent?: ProposalActionEventClientMetadata;
     } & FinalReplyTraceMetadata);
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
@@ -710,6 +723,40 @@ export interface HandleMessageOpts {
   turnId?: string;
 }
 
+interface TypedProposalDecision {
+  proposalId: string;
+  kind: ProposalKind;
+  action: ProposalActionRequestAction;
+}
+
+function mealProposalKind(proposal: MealNumericProposalPayload): Extract<ProposalKind, "meal_numeric" | "meal_estimate"> {
+  return proposal.provenance === "model_estimate" ? "meal_estimate" : "meal_numeric";
+}
+
+function buildTypedActionResult(input: {
+  actionResult: Awaited<ReturnType<ReturnType<typeof createProposalActionService>["handleAction"]>>;
+  fallbackReply: string;
+}): OrchestratorResult {
+  const reply = input.actionResult.ok
+    ? input.actionResult.proposalActionEvent.transcriptCopy
+    : input.actionResult.proposalCard?.lapseCopy ?? input.fallbackReply;
+
+  return {
+    reply,
+    didLogMeal: false,
+    didMutateMeal: input.actionResult.didMutateMeal,
+    ...(input.actionResult.ok && input.actionResult.dailyTargets ? { dailyTargets: input.actionResult.dailyTargets } : {}),
+    ...(input.actionResult.ok && input.actionResult.deletedMealId ? { deletedMealId: input.actionResult.deletedMealId } : {}),
+    ...(input.actionResult.ok && input.actionResult.affectedDate ? { affectedDate: input.actionResult.affectedDate } : {}),
+    ...(input.actionResult.ok && input.actionResult.summaryOutcome ? { summaryOutcome: input.actionResult.summaryOutcome } : {}),
+    ...(input.actionResult.ok && input.actionResult.dailySummary ? { dailySummary: input.actionResult.dailySummary } : {}),
+    ...(input.actionResult.proposalCard ? { proposalCard: input.actionResult.proposalCard } : {}),
+    ...(input.actionResult.ok ? { proposalActionEvent: input.actionResult.proposalActionEvent } : {}),
+    finalReplySource: "renderer",
+    finalReplyShape: classifyPlainReplyShape(reply),
+  };
+}
+
 export function createOrchestrator(deps: OrchestratorDeps) {
   return {
     async handleMessage(
@@ -734,7 +781,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         .find((message) => message.role === "assistant")?.content;
 
       // Save user message after loading history
-      await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
+      const savedUserMessage = await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
       opts?.onUserMessageSaved?.();
       if (hallucinatedChoiceRecovery) {
         opts?.hooks?.onFallback?.({ reason: "hallucination_detected" });
@@ -757,33 +804,72 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         : undefined;
       const activeMealMutationProposal = activeMealProposal || activeMealDeleteProposal;
 
+      const activeProposalCount = [
+        activeGoalProposal,
+        activeMealProposal,
+        activeMealDeleteProposal,
+      ].filter(Boolean).length;
+
+      const runTypedProposalDecision = async (
+        decision: TypedProposalDecision,
+        fallbackReply: string,
+        toolName: string,
+      ) => {
+        if (!deps.proposalActionService) {
+          return undefined;
+        }
+        const actionResult = await deps.proposalActionService.handleAction({
+          deviceId,
+          proposalId: decision.proposalId,
+          kind: decision.kind,
+          action: decision.action,
+          actionMessageId: savedUserMessage.id,
+        });
+        opts?.hooks?.onToolResult?.({
+          tool: toolName,
+          success: actionResult.ok,
+          executed: actionResult.ok && decision.action === "approve",
+          summary: `proposalAction: ${actionResult.status}`,
+          ...policyFactPayload({
+            tool: toolName,
+            policyClass: "confirm-first",
+            decision: actionResult.ok ? "allowed" : "blocked",
+            ruleId: `typed_${decision.kind}_${decision.action}`,
+            proposalId: decision.proposalId,
+          }, opts?.turnId),
+        });
+        return buildTypedActionResult({ actionResult, fallbackReply });
+      };
+
       if (activeMealDeleteProposal && isMealDeleteProposalCancel(userMessage)) {
-        await deps.mealDeleteProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
-        const reply = renderMealDeleteCancelCopy();
-        return {
-          reply,
-          didLogMeal: false,
-          didMutateMeal: false,
-          finalReplySource: "renderer",
-          finalReplyShape: classifyPlainReplyShape(reply),
-        };
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealDeleteProposal.proposalId, kind: "meal_delete", action: "reject" },
+          renderMealDeleteCancelCopy(),
+          "delete_meal",
+        );
+        if (typedResult) return typedResult;
       }
 
       if (activeMealProposal && isMealProposalCancel(userMessage)) {
-        await deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
-        const reply = renderMealNumericCancelCopy();
-        return {
-          reply,
-          didLogMeal: false,
-          didMutateMeal: false,
-          finalReplySource: "renderer",
-          finalReplyShape: classifyPlainReplyShape(reply),
-        };
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealProposal.proposalId, kind: mealProposalKind(activeMealProposal), action: "reject" },
+          renderMealNumericCancelCopy(),
+          "propose_meal_numeric_correction",
+        );
+        if (typedResult) return typedResult;
       }
 
       if (activeGoalProposal && isGoalKindCancel(userMessage)) {
-        await deps.goalProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
-        const reply = renderGoalCancelCopy();
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeGoalProposal.proposalId, kind: "goal", action: "reject" },
+          renderGoalCancelCopy(),
+          "update_goals",
+        );
+        if (typedResult) return typedResult;
+      }
+
+      if (isGoalProposalCancel(userMessage) && activeProposalCount > 1) {
+        const reply = renderProposalKindAmbiguityCopy();
         return {
           reply,
           didLogMeal: false,
@@ -793,140 +879,46 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         };
       }
 
-      if (isGoalProposalCancel(userMessage) && (activeGoalProposal || activeMealProposal || activeMealDeleteProposal)) {
-        await Promise.all([
-          activeGoalProposal
-            ? deps.goalProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID })
-            : undefined,
-          activeMealProposal
-            ? deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID })
-            : undefined,
-          activeMealDeleteProposal
-            ? deps.mealDeleteProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID })
-            : undefined,
-        ]);
-        const reply = activeMealDeleteProposal
-          ? renderMealDeleteCancelCopy()
-          : activeMealProposal
-            ? renderMealNumericCancelCopy()
-            : renderGoalCancelCopy();
-        return {
-          reply,
-          didLogMeal: false,
-          didMutateMeal: false,
-          finalReplySource: "renderer",
-          finalReplyShape: classifyPlainReplyShape(reply),
-        };
+      if (isGoalProposalCancel(userMessage) && activeGoalProposal) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeGoalProposal.proposalId, kind: "goal", action: "reject" },
+          renderGoalCancelCopy(),
+          "update_goals",
+        );
+        if (typedResult) return typedResult;
+      }
+
+      if (isGoalProposalCancel(userMessage) && activeMealProposal) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealProposal.proposalId, kind: mealProposalKind(activeMealProposal), action: "reject" },
+          renderMealNumericCancelCopy(),
+          "propose_meal_numeric_correction",
+        );
+        if (typedResult) return typedResult;
+      }
+
+      if (isGoalProposalCancel(userMessage) && activeMealDeleteProposal) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealDeleteProposal.proposalId, kind: "meal_delete", action: "reject" },
+          renderMealDeleteCancelCopy(),
+          "delete_meal",
+        );
+        if (typedResult) return typedResult;
       }
 
       if (
         activeMealDeleteProposal
-        && deps.mealCorrectionService
-        && deps.mealDeleteProposalService
         && (
           isMealDeleteProposalApproval(userMessage, { requireExplicitDelete: Boolean(activeGoalProposal) })
           || (!activeGoalProposal && isGoalProposalConsent(userMessage))
         )
       ) {
-        const consumedDeleteProposal = await deps.mealDeleteProposalService.consumeLatest({
-          deviceId,
-          sessionId: DEFAULT_SESSION_ID,
-          proposalId: activeMealDeleteProposal.proposalId,
-          expectedMealRevisionId: activeMealDeleteProposal.expectedMealRevisionId,
-        });
-        if (!consumedDeleteProposal) {
-          opts?.hooks?.onToolResult?.({
-            tool: "delete_meal",
-            success: false,
-            executed: false,
-            summary: "policyDecision: blocked",
-            ...policyFactPayload({
-              tool: "delete_meal",
-              policyClass: "confirm-first",
-              decision: "blocked",
-              ruleId: "delete_meal_approval_consume",
-              proposalId: activeMealDeleteProposal.proposalId,
-            }, opts?.turnId),
-          });
-          const reply = renderMealDeleteAuthorityFailureCopy();
-          return {
-            reply,
-            didLogMeal: false,
-            didMutateMeal: false,
-            finalReplySource: "renderer",
-            finalReplyShape: classifyPlainReplyShape(reply),
-          };
-        }
-        try {
-          const deleted = await deps.mealCorrectionService.deleteMeal(
-            deviceId,
-            consumedDeleteProposal.mealId,
-            consumedDeleteProposal.expectedMealRevisionId,
-          );
-          await deps.mealCorrectionService.clearPendingSelection({
-            deviceId,
-            sessionId: DEFAULT_SESSION_ID,
-          });
-          const mutationEffects: MutationEffects = {
-            kind: "delete",
-            affectedDate: deleted.affectedDate,
-            summaryOutcome: requireSummaryOutcomeForMealMutation(deleted.summaryOutcome),
-            committedTargets: getDeviceTargets(device),
-            deletedMeal: deleted.deletedMeal,
-          };
-          const reply = renderCheckedMutationReceipt(mutationEffects);
-          const mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
-          opts?.hooks?.onToolResult?.({
-            tool: "delete_meal",
-            success: true,
-            executed: true,
-            summary: "policyDecision: allowed",
-            ...policyFactPayload({
-              tool: "delete_meal",
-              policyClass: "confirm-first",
-              decision: "allowed",
-              ruleId: "delete_meal_approval_consume",
-              proposalId: consumedDeleteProposal.proposalId,
-            }, opts?.turnId),
-          });
-          return {
-            reply,
-            didLogMeal: false,
-            didMutateMeal: true,
-            dailySummary: deleted.dailySummary,
-            summaryOutcome: deleted.summaryOutcome,
-            affectedDate: deleted.affectedDate,
-            deletedMealId: deleted.deletedMeal.mealId,
-            mutationOutcomeFact,
-            finalReplySource: "renderer",
-            finalReplyShape: classifyPlainReplyShape(reply),
-          };
-        } catch (error) {
-          if (error instanceof MealRevisionPreconditionError) {
-            opts?.hooks?.onToolResult?.({
-              tool: "delete_meal",
-              success: false,
-              executed: false,
-              summary: "policyDecision: blocked",
-              ...policyFactPayload({
-                tool: "delete_meal",
-                policyClass: "confirm-first",
-                decision: "blocked",
-                ruleId: "delete_meal_approval_stale",
-                proposalId: consumedDeleteProposal.proposalId,
-              }, opts?.turnId),
-            });
-            const reply = renderMealDeleteStaleCopy();
-            return {
-              reply,
-              didLogMeal: false,
-              didMutateMeal: false,
-              finalReplySource: "renderer",
-              finalReplyShape: classifyPlainReplyShape(reply),
-            };
-          }
-          throw error;
-        }
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealDeleteProposal.proposalId, kind: "meal_delete", action: "approve" },
+          renderMealDeleteAuthorityFailureCopy(),
+          "delete_meal",
+        );
+        if (typedResult) return typedResult;
       }
 
       if (
@@ -949,111 +941,27 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       if (
         activeMealProposal
-        && deps.mealCorrectionService
-        && deps.mealNumericProposalService
         && (isMealProposalApproval(userMessage) || (!activeGoalProposal && isGoalProposalConsent(userMessage)))
       ) {
-        const consumedMealProposal = await deps.mealNumericProposalService.consumeLatest({
-          deviceId,
-          sessionId: DEFAULT_SESSION_ID,
-          proposalId: activeMealProposal.proposalId,
-          expectedMealRevisionId: activeMealProposal.expectedMealRevisionId,
-        });
-        if (!consumedMealProposal) {
-          opts?.hooks?.onToolResult?.({
-            tool: "propose_meal_numeric_correction",
-            success: false,
-            executed: false,
-            summary: "policyDecision: blocked",
-            ...policyFactPayload({
-              tool: "propose_meal_numeric_correction",
-              policyClass: "confirm-first",
-              decision: "blocked",
-              ruleId: "meal_numeric_proposal_approval_consume",
-              proposalId: activeMealProposal.proposalId,
-            }, opts?.turnId),
-          });
-          const reply = renderMealNumericAuthorityFailureCopy();
-          return {
-            reply,
-            didLogMeal: false,
-            didMutateMeal: false,
-            finalReplySource: "renderer",
-            finalReplyShape: classifyPlainReplyShape(reply),
-          };
-        }
-        try {
-          const updated = await deps.mealCorrectionService.updateMeal(
-            deviceId,
-            consumedMealProposal.mealId,
-            buildMealNumericProposalUpdateInput(consumedMealProposal),
-            consumedMealProposal.expectedMealRevisionId,
-          );
-          await deps.mealCorrectionService.clearPendingSelection({
-            deviceId,
-            sessionId: DEFAULT_SESSION_ID,
-          });
-          const loggedMeal = buildLoggedMealFromMealProposalUpdate(updated.updatedMeal);
-          const mutationEffects: MutationEffects = {
-            kind: "update",
-            affectedDate: updated.affectedDate,
-            summaryOutcome: requireSummaryOutcomeForMealMutation(updated.summaryOutcome),
-            committedTargets: getDeviceTargets(device),
-            meal: loggedMeal,
-          };
-          const reply = renderCheckedMutationReceipt(mutationEffects);
-          const mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
-          opts?.hooks?.onToolResult?.({
-            tool: "propose_meal_numeric_correction",
-            success: true,
-            executed: true,
-            summary: "policyDecision: allowed",
-            ...policyFactPayload({
-              tool: "propose_meal_numeric_correction",
-              policyClass: "confirm-first",
-              decision: "allowed",
-              ruleId: "meal_numeric_proposal_approval_consume",
-              proposalId: consumedMealProposal.proposalId,
-            }, opts?.turnId),
-          });
-          return {
-            reply,
-            didLogMeal: false,
-            didMutateMeal: true,
-            dailySummary: updated.dailySummary,
-            summaryOutcome: updated.summaryOutcome,
-            affectedDate: updated.affectedDate,
-            loggedMeal,
-            mutationOutcomeFact,
-            finalReplySource: "renderer",
-            finalReplyShape: classifyPlainReplyShape(reply),
-          };
-        } catch (error) {
-          if (error instanceof MealRevisionPreconditionError) {
-            opts?.hooks?.onToolResult?.({
-              tool: "propose_meal_numeric_correction",
-              success: false,
-              executed: false,
-              summary: "policyDecision: blocked",
-              ...policyFactPayload({
-                tool: "propose_meal_numeric_correction",
-                policyClass: "confirm-first",
-                decision: "blocked",
-                ruleId: "meal_numeric_proposal_approval_consume",
-                proposalId: consumedMealProposal.proposalId,
-              }, opts?.turnId),
-            });
-            const reply = renderMealProposalStaleCopy();
-            return {
-              reply,
-              didLogMeal: false,
-              didMutateMeal: false,
-              finalReplySource: "renderer",
-              finalReplyShape: classifyPlainReplyShape(reply),
-            };
-          }
-          throw error;
-        }
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealProposal.proposalId, kind: mealProposalKind(activeMealProposal), action: "approve" },
+          renderMealNumericAuthorityFailureCopy(),
+          "propose_meal_numeric_correction",
+        );
+        if (typedResult) return typedResult;
+      }
+
+      if (
+        activeGoalProposal
+        && !activeMealMutationProposal
+        && (isGoalProposalConsent(userMessage) || isGoalKindApproval(userMessage))
+      ) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeGoalProposal.proposalId, kind: "goal", action: "approve" },
+          renderGoalAuthorityFailureCopy(),
+          "update_goals",
+        );
+        if (typedResult) return typedResult;
       }
       const systemMsg: ChatMessage = {
         role: "system",

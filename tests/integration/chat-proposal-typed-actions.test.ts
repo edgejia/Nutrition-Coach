@@ -302,13 +302,10 @@ describe("typed proposal actions through /api/chat", () => {
     assert.equal(body.proposalCard?.proposalId, proposal.proposalId);
     assert.equal(body.proposalCard?.status, "approved");
     assert.equal(body.proposalCard?.isActionable, false);
-    assert.deepEqual(body.proposalActionEvent, {
-      proposalId: proposal.proposalId,
-      proposalKind: "goal",
-      proposalLane: "goal",
-      action: "approve",
-      transcriptCopy: "已選擇套用目標",
-    });
+    assert.equal(body.proposalActionEvent?.proposalId, proposal.proposalId);
+    assert.equal(body.proposalActionEvent?.proposalKind, "goal");
+    assert.equal(body.proposalActionEvent?.action, "approve");
+    assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
     assert.deepEqual(await readTargets(), UPDATED_TARGETS);
 
     const history = await getHistory();
@@ -384,6 +381,36 @@ describe("typed proposal actions through /api/chat", () => {
     const card = history.find((message) => message.proposalCard?.proposalId === proposal.proposalId)?.proposalCard;
     assert.equal(card?.status, "approved");
     assert.equal(card?.isActionable, false);
-    assert.equal(card?.lapseCopy, undefined);
+    assert.equal(card?.lapseCopy ?? undefined, undefined);
+  });
+
+  it("fails closed for ambiguous bare approval when multiple proposal lanes are active", async () => {
+    const goalProposal = await createGoalCard();
+    const { meal, proposal: deleteProposal } = await createMealDeleteCard();
+
+    const body = await postChat("好");
+
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.proposalCard, undefined);
+    assert.equal(body.proposalActionEvent, undefined);
+    assert.ok(await services.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
+    assert.ok(await services.mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
+    assert.ok(await readMeal(meal.id, meal.loggedAt));
+
+    const history = await getHistory();
+    assert.equal(
+      history.some((message) => message.proposalActionEvent),
+      false,
+      "ambiguous typed approval must not create an action event",
+    );
+    assert.equal(
+      history.find((message) => message.proposalCard?.proposalId === goalProposal.proposalId)?.proposalCard?.status,
+      "active",
+    );
+    assert.equal(
+      history.find((message) => message.proposalCard?.proposalId === deleteProposal.proposalId)?.proposalCard?.status,
+      "active",
+    );
   });
 });

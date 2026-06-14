@@ -39,6 +39,7 @@ export interface ProposalActionServiceInput {
   proposalId: string;
   kind: ProposalActionRequestKind;
   action: ProposalActionRequestAction;
+  actionMessageId?: string;
 }
 
 export interface ProposalActionTestHooks {
@@ -202,15 +203,17 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     kind: ProposalActionRequestKind;
     action: ProposalActionRequestAction;
     card: ProposalCardMetadata;
+    actionMessageId?: string;
   }): Promise<ProposalActionEventClientMetadata> {
     const transcriptCopy = renderProposalActionEventCopy({
       proposalKind: input.kind,
       action: input.action,
     });
-    const userMessage = await deps.chatService.saveMessage(input.deviceId, "user", transcriptCopy);
+    const actionMessageId = input.actionMessageId
+      ?? (await deps.chatService.saveMessage(input.deviceId, "user", transcriptCopy)).id;
     const event = await deps.proposalCardService.saveProposalActionEvent({
       deviceId: input.deviceId,
-      actionMessageId: userMessage.id,
+      actionMessageId,
       assistantMessageId: input.card.assistantMessageId,
       proposalId: input.card.proposalId,
       proposalKind: input.card.proposalKind,
@@ -227,6 +230,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     kind: ProposalActionRequestKind;
     action: ProposalActionRequestAction;
     card: ProposalCardMetadata;
+    actionMessageId?: string;
     mutation?: {
       didMutateMeal: boolean;
       dailyTargets?: DailyTargets;
@@ -249,6 +253,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
         kind: input.kind,
         action: input.action,
         card: input.card,
+        actionMessageId: input.actionMessageId,
       }),
     ]);
     if (!card) {

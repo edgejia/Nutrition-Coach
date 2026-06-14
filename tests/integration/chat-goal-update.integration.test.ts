@@ -10,7 +10,6 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
-  renderMealNumericCancelCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import type { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
@@ -39,6 +38,12 @@ interface ChatBody {
     details: { rows: Array<Record<string, unknown>> };
     actions: Record<string, string>;
     expiresAt: string | null;
+  };
+  proposalActionEvent?: {
+    proposalId: string;
+    proposalKind: string;
+    action: string;
+    transcriptCopy: string;
   };
 }
 
@@ -160,6 +165,32 @@ describe("chat goal update integration", () => {
     assert.equal(res.status, 200);
     const body = await res.json() as { dailyTargets: DailyTargets };
     return body.dailyTargets;
+  }
+
+  async function saveMealNumericProposalCard(input: {
+    proposalId: string;
+    expiresAt: string;
+  }) {
+    const assistant = await services.chatService.saveMessage(deviceId, "assistant", "請確認這組餐點修改提案。");
+    await services.proposalCardService.saveAssistantProposalCard({
+      deviceId,
+      assistantMessageId: assistant.id,
+      proposalId: input.proposalId,
+      proposalKind: "meal_numeric",
+      proposalLane: "meal_mutation",
+      title: "請確認這組餐點修改提案。",
+      details: {
+        rows: [
+          { label: "蛋白質", before: "30 g", after: "15 g" },
+        ],
+      },
+      actions: {
+        approveLabel: "套用修改",
+        editLabel: "改成其他數字",
+        rejectLabel: "取消提案",
+      },
+      expiresAt: input.expiresAt,
+    });
   }
 
   it("persists explicit current-turn targets, returns receipt, and publishes goals_update", async () => {
@@ -328,17 +359,22 @@ describe("chat goal update integration", () => {
     const confirmed = await postChat("好");
 
     assert.equal(confirmed.status, 200);
-    assert.equal(confirmed.body.reply, PROPOSAL_SUCCESS_RECEIPT);
+    assert.equal(confirmed.body.reply, "已選擇套用目標");
     assert.deepEqual(confirmed.body.dailyTargets, PROPOSAL_TARGETS);
+    assert.equal(confirmed.body.proposalCard?.status, "approved");
+    assert.equal(confirmed.body.proposalActionEvent?.proposalId, activeProposal.proposalId);
+    assert.equal(confirmed.body.proposalActionEvent?.proposalKind, "goal");
+    assert.equal(confirmed.body.proposalActionEvent?.action, "approve");
+    assert.equal(confirmed.body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
     assert.deepEqual(await readTargets(), PROPOSAL_TARGETS);
     assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
     const confirmedTrace = traceRecorders.at(-1)?.build({ scenario: "goal-confirm-policy", status: "pass" });
     assert.ok(confirmedTrace);
     const confirmedToolResult = confirmedTrace.timeline.find((event) => event.type === "tool_result");
     assert.ok(confirmedToolResult);
-    assert.equal(confirmedToolResult.policyClass, "direct-execute");
+    assert.equal(confirmedToolResult.policyClass, "confirm-first");
     assert.equal(confirmedToolResult.decision, "allowed");
-    assert.equal(confirmedToolResult.ruleId, "update_goals_latest_proposal_confirm_first");
+    assert.equal(confirmedToolResult.ruleId, "typed_goal_approve");
     assert.equal(confirmedToolResult.proposalId, activeProposal.proposalId);
     assert.equal(typeof confirmedToolResult.turnId, "string");
 
@@ -469,7 +505,7 @@ describe("chat goal update integration", () => {
     const cancelled = await postChat("先不用");
 
     assert.equal(cancelled.status, 200);
-    assert.equal(cancelled.body.reply, renderGoalCancelCopy());
+    assert.equal(cancelled.body.reply, "已取消目標提案");
     assert.equal(cancelled.body.didLogMeal, false);
     assert.equal(cancelled.body.didMutateMeal, false);
     assert.equal(cancelled.body.dailyTargets, undefined);
@@ -498,7 +534,7 @@ describe("chat goal update integration", () => {
       const cancelled = await postChat(term);
 
       assert.equal(cancelled.status, 200);
-      assert.equal(cancelled.body.reply, renderGoalCancelCopy());
+      assert.equal(cancelled.body.reply, "已取消目標提案");
       assert.equal(cancelled.body.didLogMeal, false);
       assert.equal(cancelled.body.didMutateMeal, false);
       assert.equal(cancelled.body.dailyTargets, undefined);
@@ -566,14 +602,14 @@ describe("chat goal update integration", () => {
     const { status, body } = await postChat("取消");
 
     assert.equal(status, 200);
-    assert.equal(body.reply, renderMealNumericCancelCopy());
+    assert.equal(body.reply, renderProposalKindAmbiguityCopy());
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, false);
     assert.equal(body.dailyTargets, undefined);
     assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
-    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
-    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.ok(await services.goalProposalService.getLatest(defaultSessionKey()));
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
@@ -585,7 +621,7 @@ describe("chat goal update integration", () => {
       ],
     });
     await services.goalProposalService.putLatest({ ...defaultSessionKey(), targets: PROPOSAL_TARGETS });
-    await services.mealNumericProposalService.putLatest({
+    const mealProposal = await services.mealNumericProposalService.putLatest({
       ...defaultSessionKey(),
       input: {
         mealId: meal.id,
@@ -595,14 +631,22 @@ describe("chat goal update integration", () => {
         sourceOperator: "half",
       },
     });
+    await saveMealNumericProposalCard({
+      proposalId: mealProposal.proposalId,
+      expiresAt: mealProposal.expiresAt,
+    });
 
     const { status, body } = await postChat("套用餐點修改");
 
     assert.equal(status, 200);
-    assert.match(body.reply, /已更新.*雞腿飯.*蛋白質 15 g/);
+    assert.equal(body.reply, "已選擇套用餐點修改");
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
     assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard?.status, "approved");
+    assert.equal(body.proposalActionEvent?.proposalId, mealProposal.proposalId);
+    assert.equal(body.proposalActionEvent?.proposalKind, "meal_numeric");
+    assert.equal(body.proposalActionEvent?.action, "approve");
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
     assert.ok(await services.goalProposalService.getLatest(defaultSessionKey()));
     assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
@@ -617,7 +661,7 @@ describe("chat goal update integration", () => {
       ],
     });
     await services.goalProposalService.putLatest({ ...defaultSessionKey(), targets: PROPOSAL_TARGETS });
-    await services.mealNumericProposalService.putLatest({
+    const staleProposal = await services.mealNumericProposalService.putLatest({
       ...defaultSessionKey(),
       input: {
         mealId: meal.id,
@@ -626,6 +670,10 @@ describe("chat goal update integration", () => {
         affectedFields: [{ field: "protein", before: 30, after: 15 }],
         sourceOperator: "half",
       },
+    });
+    await saveMealNumericProposalCard({
+      proposalId: staleProposal.proposalId,
+      expiresAt: staleProposal.expiresAt,
     });
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -687,7 +735,7 @@ describe("chat goal update integration", () => {
     const current = meals.find((candidate) => candidate.id === meal.id);
     assert.equal(current?.mealRevisionId, externalUpdate.mealRevisionId);
     assert.equal(current?.protein, 31);
-    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.ok(await services.mealNumericProposalService.getLatest(defaultSessionKey()));
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
