@@ -40,6 +40,15 @@ export interface ProposalActionServiceInput {
   action: ProposalActionRequestAction;
 }
 
+export interface ProposalActionTestHooks {
+  afterDomainMutation?: (input: {
+    deviceId: string;
+    proposalId: string;
+    kind: ProposalActionRequestKind;
+    action: ProposalActionRequestAction;
+  }) => void;
+}
+
 export type ProposalActionServiceResult =
   | {
       ok: true;
@@ -70,6 +79,7 @@ interface ProposalActionDeps {
   mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   deviceService: ReturnType<typeof createDeviceService>;
   publisher: RealtimePublisher;
+  testHooks?: ProposalActionTestHooks;
 }
 
 function activeKindMatches(input: {
@@ -247,6 +257,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           return markStale({ ...input, card });
         }
         const dailyTargets = await deps.deviceService.updateGoals(input.deviceId, consumed.targets);
+        deps.testHooks?.afterDomainMutation?.(input);
         deps.publisher.publishGoalsUpdate(input.deviceId, dailyTargets);
         return completeActiveAction({
           ...input,
@@ -285,6 +296,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             consumed.expectedMealRevisionId,
           );
           if (updated.dailySummary) {
+            deps.testHooks?.afterDomainMutation?.(input);
             deps.publisher.publishDailySummary(input.deviceId, {
               summary: updated.dailySummary,
               affectedDate: updated.affectedDate,
@@ -341,6 +353,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           consumed.mealId,
           consumed.expectedMealRevisionId,
         );
+        deps.testHooks?.afterDomainMutation?.(input);
         if (deleted.dailySummary) {
           deps.publisher.publishDailySummary(input.deviceId, {
             summary: deleted.dailySummary,

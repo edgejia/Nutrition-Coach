@@ -16,7 +16,10 @@ import { createMealCorrectionService } from "./services/meal-correction.js";
 import { createMealDeleteProposalService } from "./services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "./services/meal-numeric-proposals.js";
 import { createGoalProposalService } from "./services/goal-proposals.js";
-import { createProposalActionService } from "./services/proposal-actions.js";
+import {
+  createProposalActionService,
+  type ProposalActionTestHooks,
+} from "./services/proposal-actions.js";
 import { createProposalCardService } from "./services/proposal-cards.js";
 import { createGuestSessionService } from "./services/guest-session.js";
 import { createOrchestrator } from "./orchestrator/index.js";
@@ -97,6 +100,8 @@ export interface AppOptions {
   llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
   /** Test harness observer for in-process service access. Does not expose an HTTP surface. */
   onServicesReady?: (services: AppServices) => void;
+  /** Test-only proposal action failure hooks. Not exposed through HTTP. */
+  proposalActionTestHooks?: ProposalActionTestHooks;
 }
 
 export async function buildApp(opts: AppOptions) {
@@ -159,6 +164,7 @@ export async function buildApp(opts: AppOptions) {
     mealCorrectionService,
     deviceService,
     publisher,
+    testHooks: opts.proposalActionTestHooks,
   });
 
   opts.onServicesReady?.({

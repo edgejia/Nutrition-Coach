@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import type { ProposalActionTestHooks } from "../../server/services/proposal-actions.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 
 interface DailyTargets {
@@ -24,13 +25,30 @@ describe("proposal action API", () => {
   let services: AppServices;
   let deviceId: string;
   let sessionCookieHeader: string;
+  let proposalActionTestHooks: ProposalActionTestHooks;
+  let publishedGoalUpdates: unknown[];
+  let publishedDailySummaries: unknown[];
 
   beforeEach(async () => {
+    proposalActionTestHooks = {};
+    publishedGoalUpdates = [];
+    publishedDailySummaries = [];
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: new MockLLMProvider(),
+      proposalActionTestHooks,
       onServicesReady: (ready) => {
         services = ready;
+        const originalPublishGoalsUpdate = ready.publisher.publishGoalsUpdate.bind(ready.publisher);
+        ready.publisher.publishGoalsUpdate = (...args) => {
+          publishedGoalUpdates.push(args);
+          return originalPublishGoalsUpdate(...args);
+        };
+        const originalPublishDailySummary = ready.publisher.publishDailySummary.bind(ready.publisher);
+        ready.publisher.publishDailySummary = (...args) => {
+          publishedDailySummaries.push(args);
+          return originalPublishDailySummary(...args);
+        };
       },
     });
     const res = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
@@ -73,6 +91,66 @@ describe("proposal action API", () => {
     return { proposalId: proposalId ?? proposal!.proposalId, assistantMessageId: assistant.id };
   }
 
+  async function createDeleteCard() {
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      mealPeriod: "lunch",
+      items: [
+        { foodName: "豆腐雞肉飯", calories: 520, protein: 38, carbs: 54, fat: 16 },
+      ],
+    });
+    const proposal = await services.mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: meal.foodName,
+          calories: meal.calories,
+          protein: meal.protein,
+          carbs: meal.carbs,
+          fat: meal.fat,
+          dateKey: meal.dateKey,
+          loggedAt: meal.loggedAt,
+          mealPeriod: meal.mealPeriod ?? "lunch",
+          items: meal.items?.map((item) => ({
+            foodName: item.name,
+            calories: item.calories,
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+          })),
+        },
+      },
+    });
+    const assistant = await services.chatService.saveMessage(deviceId, "assistant", "請確認是否刪除這筆餐點。");
+    await services.proposalCardService.saveAssistantProposalCard({
+      deviceId,
+      assistantMessageId: assistant.id,
+      proposalId: proposal.proposalId,
+      proposalKind: "meal_delete",
+      proposalLane: "meal_mutation",
+      title: "請確認是否刪除這筆餐點。",
+      details: {
+        rows: [
+          { label: "餐點", value: meal.foodName },
+          { label: "熱量", value: `${meal.calories} kcal` },
+        ],
+      },
+      actions: {
+        approveLabel: "確認刪除",
+        editLabel: "改用文字調整",
+        rejectLabel: "取消提案",
+      },
+      expiresAt: proposal.expiresAt,
+    });
+
+    return { meal, proposalId: proposal.proposalId };
+  }
+
   async function readTargets(): Promise<DailyTargets> {
     const response = await app.inject({
       method: "POST",
@@ -81,6 +159,22 @@ describe("proposal action API", () => {
     });
     assert.equal(response.statusCode, 200);
     return response.json().dailyTargets as DailyTargets;
+  }
+
+  async function readMealsFor(meal: { loggedAt: string }) {
+    return services.foodLoggingService.getMealsByDate(deviceId, new Date(meal.loggedAt));
+  }
+
+  async function historyHasActionEvent(proposalId: string) {
+    const history = await app.inject({
+      method: "GET",
+      url: "/api/chat/history",
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyBody = history.json() as {
+      messages: Array<{ proposalActionEvent?: { proposalId: string } }>;
+    };
+    return historyBody.messages.some((message) => message.proposalActionEvent?.proposalId === proposalId);
   }
 
   it("requires cookie-backed ownership and rejects client-supplied ownership fields", async () => {
@@ -177,6 +271,90 @@ describe("proposal action API", () => {
     assert.equal(replayBody.proposalCard?.status, "approved");
     assert.equal(replayBody.proposalCard?.isActionable, false);
     assert.deepEqual(await readTargets(), targets);
+  });
+
+  it("rolls back goal approval when the decision boundary fails before action metadata is durable", async () => {
+    const defaults = await readTargets();
+    const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
+    const { proposalId } = await createGoalCard(targets);
+    proposalActionTestHooks.afterDomainMutation = () => {
+      throw new Error("injected proposal action failure");
+    };
+
+    const failed = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(failed.statusCode, 500);
+    assert.deepEqual(await readTargets(), defaults);
+    assert.deepEqual(publishedGoalUpdates, []);
+    assert.equal(await historyHasActionEvent(proposalId), false);
+    assert.equal((await services.goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    }))?.proposalId, proposalId);
+    assert.equal((await services.proposalCardService.getLatestCardForProposal({
+      deviceId,
+      proposalId,
+    }))?.status, "active");
+
+    proposalActionTestHooks.afterDomainMutation = undefined;
+    const recovered = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(recovered.statusCode, 200);
+    assert.equal(recovered.json().ok, true);
+    assert.deepEqual(await readTargets(), targets);
+    assert.equal(publishedGoalUpdates.length, 1);
+    assert.equal(await historyHasActionEvent(proposalId), true);
+  });
+
+  it("rolls back meal delete approval when the decision boundary fails before action metadata is durable", async () => {
+    const { meal, proposalId } = await createDeleteCard();
+    proposalActionTestHooks.afterDomainMutation = () => {
+      throw new Error("injected proposal action failure");
+    };
+
+    const failed = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "meal_delete", action: "approve" },
+    });
+
+    assert.equal(failed.statusCode, 500);
+    assert.ok((await readMealsFor(meal)).some((row) => row.id === meal.id));
+    assert.deepEqual(publishedDailySummaries, []);
+    assert.equal(await historyHasActionEvent(proposalId), false);
+    assert.equal((await services.mealDeleteProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    }))?.proposalId, proposalId);
+    assert.equal((await services.proposalCardService.getLatestCardForProposal({
+      deviceId,
+      proposalId,
+    }))?.status, "active");
+
+    proposalActionTestHooks.afterDomainMutation = undefined;
+    const recovered = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "meal_delete", action: "approve" },
+    });
+
+    assert.equal(recovered.statusCode, 200);
+    assert.equal(recovered.json().ok, true);
+    assert.equal((await readMealsFor(meal)).some((row) => row.id === meal.id), false);
+    assert.equal(publishedDailySummaries.length, 1);
+    assert.equal(await historyHasActionEvent(proposalId), true);
   });
 
   it("fails closed for stale proposal actions without mutating targets or creating action events", async () => {
