@@ -21,6 +21,40 @@ function renderMessageBubble(message: Message, options?: { isProvisional?: boole
   return renderToStaticMarkup(createElement(MessageBubble, { message, ...options }));
 }
 
+const activeMealEstimateProposal = {
+  proposalId: "proposal-meal-estimate-1",
+  proposalKind: "meal_estimate" as const,
+  proposalLane: "meal_mutation" as const,
+  status: "active" as const,
+  isActionable: true,
+  title: "確認這個估值修改",
+  details: {
+    rows: [
+      { label: "熱量", before: "520 kcal", after: "460 kcal" },
+      { label: "蛋白質", value: "32 g" },
+    ],
+  },
+  actions: {
+    approveLabel: "套用修改",
+    editLabel: "改成其他數字",
+    rejectLabel: "取消提案",
+  },
+  expiresAt: "2026-04-29T08:00:00.000Z",
+  lapseCopy: null,
+  supersededByKind: null,
+};
+
+function proposalMessage(message: Partial<Message> = {}): Message {
+  return {
+    id: "proposal-message-1",
+    role: "assistant",
+    content: "我先把這次修改整理成提案。",
+    createdAt: "2026-04-29T07:30:00.000Z",
+    proposalCard: activeMealEstimateProposal,
+    ...message,
+  };
+}
+
 describe("chat bubble source contract", () => {
   it("uses the sport composer controls while preserving upload and send behavior", async () => {
     const chatInput = await readSource("client/src/components/ChatInput.tsx");
@@ -321,6 +355,152 @@ describe("chat bubble source contract", () => {
     assert.match(css, /height:\s*56px/);
     assert.match(css, /\.sp-receipt-thumbnail/);
     assert.match(css, /\.sp-receipt-thumbnail-fallback/);
+  });
+
+  it("renders active proposal cards before assistant intro text with approve, edit, and reject controls", () => {
+    const html = renderMessageBubble(proposalMessage());
+    const cardIndex = html.indexOf("sp-proposal-card");
+    const textIndex = html.indexOf("我先把這次修改整理成提案");
+
+    assert.ok(cardIndex >= 0, "proposal card should render");
+    assert.ok(textIndex > cardIndex, "assistant intro text should render after proposal card");
+    assert.match(html, /確認這個估值修改/);
+    assert.match(html, /熱量/);
+    assert.match(html, /520 kcal/);
+    assert.match(html, /460 kcal/);
+    assert.match(html, /蛋白質/);
+    assert.match(html, /32 g/);
+    assert.match(html, /套用修改/);
+    assert.match(html, /改成其他數字/);
+    assert.match(html, /取消提案/);
+    assert.match(html, /button/);
+  });
+
+  it("renders each proposal kind from backend labels and inactive lapse copy without parsing assistant text", () => {
+    const cases = [
+      {
+        kind: "goal" as const,
+        title: "確認每日目標",
+        approveLabel: "套用目標",
+        lapseCopy: "這個目標提案已超過 30 分鐘，請重新提出目標調整。",
+      },
+      {
+        kind: "meal_numeric" as const,
+        title: "確認餐點修改",
+        approveLabel: "套用修改",
+        lapseCopy: "這個餐點修改提案已超過 30 分鐘，請重新提出修改。",
+      },
+      {
+        kind: "meal_estimate" as const,
+        title: "確認估值修改",
+        approveLabel: "套用修改",
+        lapseCopy: "這個估值修改提案已超過 30 分鐘，請重新提出修改。",
+      },
+      {
+        kind: "meal_delete" as const,
+        title: "確認刪除餐點",
+        approveLabel: "確認刪除",
+        lapseCopy: "這個刪除確認已超過 30 分鐘，請重新選擇要刪除的餐點。",
+      },
+    ];
+
+    for (const item of cases) {
+      const html = renderMessageBubble(
+        proposalMessage({
+          content: "這段文字不含任何可解析的提案種類",
+          proposalCard: {
+            ...activeMealEstimateProposal,
+            proposalId: `proposal-${item.kind}`,
+            proposalKind: item.kind,
+            proposalLane: item.kind === "goal" ? "goal" : "meal_mutation",
+            status: "expired",
+            isActionable: false,
+            title: item.title,
+            actions: {
+              ...activeMealEstimateProposal.actions,
+              approveLabel: item.approveLabel,
+            },
+            lapseCopy: item.lapseCopy,
+          },
+        }),
+      );
+
+      assert.match(html, new RegExp(escapeRegExp(item.title)));
+      assert.match(html, new RegExp(escapeRegExp(item.lapseCopy)));
+      assert.doesNotMatch(html, /<button/);
+    }
+  });
+
+  it("renders structured proposal action events as user-side events distinct from typed bubbles", () => {
+    const message: Message = {
+      id: "proposal-action-event-1",
+      role: "user",
+      content: "這段文字不應該成為普通使用者泡泡",
+      createdAt: "2026-04-29T07:35:00.000Z",
+      proposalActionEvent: {
+        proposalId: "proposal-meal-estimate-1",
+        proposalKind: "meal_estimate",
+        proposalLane: "meal_mutation",
+        action: "approve",
+        transcriptCopy: "已選擇套用餐點修改",
+        createdAt: "2026-04-29T07:35:00.000Z",
+      },
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, /sp-proposal-action-event/);
+    assert.match(html, /已選擇套用餐點修改/);
+    assert.doesNotMatch(html, /sp-bubble-user/);
+    assert.doesNotMatch(html, /這段文字不應該成為普通使用者泡泡/);
+  });
+
+  it("renders delete proposal approval as destructive confirmation while reject stays non-destructive", () => {
+    const html = renderMessageBubble(
+      proposalMessage({
+        proposalCard: {
+          ...activeMealEstimateProposal,
+          proposalId: "proposal-delete-1",
+          proposalKind: "meal_delete",
+          title: "確認刪除這筆餐點",
+          actions: {
+            approveLabel: "確認刪除",
+            editLabel: "先不要刪，改問別的",
+            rejectLabel: "取消刪除",
+          },
+        },
+      }),
+    );
+
+    assert.match(html, /確認刪除/);
+    assert.match(html, /sp-proposal-danger/);
+    assert.match(html, /取消刪除/);
+    assert.doesNotMatch(html, /sp-proposal-reject[^"]*sp-proposal-danger/);
+  });
+
+  it("keeps proposal rendering sourced from metadata and styled with Sport-safe card controls", async () => {
+    const card = await readSource("client/src/components/ProposalCard.tsx");
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const css = await readSource("client/src/app.css");
+
+    assert.match(card, /proposalCard/);
+    assert.match(card, /details\.rows/);
+    assert.doesNotMatch(card, /message\.content/);
+    assert.doesNotMatch(card, /includes\(/);
+    assert.doesNotMatch(card, /確認刪除[\s\S]*proposalKind/);
+
+    assert.match(bubble, /message\.proposalCard/);
+    assert.match(bubble, /message\.proposalActionEvent/);
+    assert.match(bubble, /ReceiptCard/);
+
+    assert.match(css, /\.sp-proposal-card/);
+    assert.match(css, /width:\s*min\(92%, 320px\)/);
+    assert.match(css, /max-width:\s*92%/);
+    assert.match(css, /min-height:\s*44px/);
+    assert.match(css, /var\(--sp-lime\)/);
+    assert.match(css, /var\(--sp-red\)/);
+    assert.match(css, /var\(--sp-font-zh\)/);
+    assert.match(css, /var\(--sp-font-mono\)/);
   });
 
   it("delete mutation confirmations stay assistant text only without receipt affordances", async () => {
