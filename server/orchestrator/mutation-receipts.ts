@@ -6,6 +6,11 @@ import type {
 import type { MealDeleteProposalSnapshot } from "../services/meal-delete-proposals.js";
 import type { MealCorrectionCandidate } from "../services/meal-correction.js";
 import type { DailyTargets } from "../services/device.js";
+import type {
+  ProposalAction,
+  ProposalKind,
+  ProposalStatus,
+} from "../services/proposal-cards.js";
 import type { MutationEffects } from "./mutation-effects.js";
 
 export const FORBIDDEN_RECEIPT_TERMS = [
@@ -83,6 +88,7 @@ const MEAL_NUMERIC_OPERATOR_COPY: Record<string, string> = {
 };
 
 type CorrectionTargetAction = "update" | "delete";
+type ProposalActionEventAction = Extract<ProposalAction, "approve" | "reject">;
 
 export interface CorrectionTargetClarificationCopyInput {
   action: CorrectionTargetAction;
@@ -124,6 +130,159 @@ export interface MealNumericFieldAwareCopyInput {
 export interface MealDeleteProposalCopyInput {
   snapshot: MealDeleteProposalSnapshot;
   otherProposalKindActive?: boolean;
+}
+
+export interface ProposalActionLabelSet {
+  approveLabel: string;
+  editLabel: string;
+  rejectLabel: string;
+  closeEditLabel: string;
+  destructiveConfirmationLabel?: string;
+}
+
+export interface ProposalActionEventCopyInput {
+  proposalKind: ProposalKind;
+  action: ProposalActionEventAction;
+}
+
+export interface ProposalSupersededCopyInput {
+  proposalKind: ProposalKind;
+  supersededByKind?: ProposalKind | null;
+}
+
+export interface ProposalInactiveCopyInput {
+  proposalKind: ProposalKind;
+  status: Exclude<ProposalStatus, "active" | "approved" | "rejected">;
+  supersededByKind?: ProposalKind | null;
+}
+
+const PROPOSAL_ACTION_LABELS: Record<ProposalKind, ProposalActionLabelSet> = {
+  goal: {
+    approveLabel: "套用目標",
+    editLabel: "調整目標",
+    rejectLabel: "取消提案",
+    closeEditLabel: "關閉編輯",
+  },
+  meal_numeric: {
+    approveLabel: "套用修改",
+    editLabel: "改成其他數字",
+    rejectLabel: "取消提案",
+    closeEditLabel: "關閉編輯",
+  },
+  meal_estimate: {
+    approveLabel: "套用修改",
+    editLabel: "改成其他數字",
+    rejectLabel: "取消提案",
+    closeEditLabel: "關閉編輯",
+  },
+  meal_delete: {
+    approveLabel: "確認刪除",
+    editLabel: "先不要刪，改問別的",
+    rejectLabel: "取消刪除",
+    closeEditLabel: "關閉編輯",
+    destructiveConfirmationLabel: "確認刪除這筆餐點",
+  },
+};
+
+const PROPOSAL_INLINE_EDIT_HINTS: Record<ProposalKind, string> = {
+  goal: "輸入新的每日目標，例如：蛋白質改 120g",
+  meal_numeric: "輸入你想改成的數字，例如：蛋白質改 30g",
+  meal_estimate: "輸入你想怎麼調整，例如：熱量再低一點",
+  meal_delete: "輸入新的需求；這不會直接刪除餐點",
+};
+
+const PROPOSAL_CARD_INTROS: Record<ProposalKind, string> = {
+  goal: "請確認這組每日目標提案。",
+  meal_numeric: "請確認這組餐點修改提案。",
+  meal_estimate: "請確認這組估值修改提案。",
+  meal_delete: "請確認是否刪除這筆餐點。",
+};
+
+const PROPOSAL_EXPIRED_COPY: Record<ProposalKind, string> = {
+  goal: "這個目標提案已超過 30 分鐘，請重新提出目標調整。",
+  meal_numeric: "這個餐點修改提案已超過 30 分鐘，請重新提出修改。",
+  meal_estimate: "這個估值修改提案已超過 30 分鐘，請重新提出修改。",
+  meal_delete: "這個刪除確認已超過 30 分鐘，請重新選擇要刪除的餐點。",
+};
+
+const PROPOSAL_STALE_COPY = "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。";
+
+export function getProposalActionLabels(proposalKind: ProposalKind): ProposalActionLabelSet {
+  return { ...PROPOSAL_ACTION_LABELS[proposalKind] };
+}
+
+export function getProposalInlineEditHint(proposalKind: ProposalKind): string {
+  return PROPOSAL_INLINE_EDIT_HINTS[proposalKind];
+}
+
+export function renderProposalCardIntro(proposalKind: ProposalKind): string {
+  return PROPOSAL_CARD_INTROS[proposalKind];
+}
+
+export function renderProposalActionEventCopy(input: ProposalActionEventCopyInput): string {
+  if (input.action === "approve") {
+    switch (input.proposalKind) {
+      case "goal":
+        return "已選擇套用目標";
+      case "meal_numeric":
+      case "meal_estimate":
+        return "已選擇套用餐點修改";
+      case "meal_delete":
+        return "已選擇確認刪除";
+      default:
+        return input.proposalKind satisfies never;
+    }
+  }
+
+  switch (input.proposalKind) {
+    case "goal":
+      return "已取消目標提案";
+    case "meal_numeric":
+    case "meal_estimate":
+      return "已取消餐點修改提案";
+    case "meal_delete":
+      return "已取消刪除提案";
+    default:
+      return input.proposalKind satisfies never;
+  }
+}
+
+export function renderProposalExpiredCopy(proposalKind: ProposalKind): string {
+  return PROPOSAL_EXPIRED_COPY[proposalKind];
+}
+
+export function renderProposalSupersededCopy(input: ProposalSupersededCopyInput): string {
+  if (input.proposalKind === "goal") {
+    return "這個目標提案已被新的目標提案取代。";
+  }
+
+  switch (input.supersededByKind) {
+    case "meal_estimate":
+      return "這個提案已被新的估值修改取代。";
+    case "meal_delete":
+      return "這個提案已被新的刪除確認取代。";
+    case "meal_numeric":
+    case undefined:
+    case null:
+      return "這個提案已被新的餐點修改取代。";
+    case "goal":
+      return "這個提案已被新的餐點修改取代。";
+    default:
+      return input.supersededByKind satisfies never;
+  }
+}
+
+export function renderProposalInactiveCopy(input: ProposalInactiveCopyInput): string {
+  switch (input.status) {
+    case "expired":
+      return renderProposalExpiredCopy(input.proposalKind);
+    case "superseded":
+      return renderProposalSupersededCopy(input);
+    case "stale":
+      return PROPOSAL_STALE_COPY;
+    default:
+      return input.status satisfies never;
+  }
 }
 
 function formatMealNumericValue(field: MealNumericField, value: number): string {

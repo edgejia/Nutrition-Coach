@@ -509,6 +509,7 @@ describe("proposal card labels, action events, and inactive copy", () => {
       editLabel: "先不要刪，改問別的",
       rejectLabel: "取消刪除",
       closeEditLabel: "關閉編輯",
+      destructiveConfirmationLabel: "確認刪除這筆餐點",
     });
   });
 
