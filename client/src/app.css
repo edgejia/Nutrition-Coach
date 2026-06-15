@@ -1919,6 +1919,10 @@ textarea {
   border-color: var(--sp-lime-line);
 }
 
+.sp-proposal-card-error {
+  border-color: rgba(255, 77, 77, 0.38);
+}
+
 .sp-proposal-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2033,6 +2037,14 @@ textarea {
   outline-offset: 2px;
 }
 
+.sp-proposal-action:disabled {
+  cursor: not-allowed;
+  border-color: var(--sp-line);
+  background: var(--sp-surface-2);
+  color: var(--sp-ink-3);
+  opacity: 0.72;
+}
+
 .sp-proposal-approve {
   border-color: var(--sp-lime);
   background: var(--sp-lime);
@@ -2078,6 +2090,25 @@ textarea {
   font-weight: 400;
   letter-spacing: 0;
   line-height: 1.5;
+}
+
+.sp-proposal-pending,
+.sp-proposal-error {
+  border-top: 1px solid var(--sp-line);
+  margin: 0;
+  padding: 12px 14px 14px;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+.sp-proposal-pending {
+  color: var(--sp-ink-2);
+}
+
+.sp-proposal-error {
+  color: #ffb3b3;
 }
 
 .sp-proposal-inline-edit {

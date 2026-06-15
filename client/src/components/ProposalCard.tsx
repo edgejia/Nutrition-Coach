@@ -61,6 +61,9 @@ export function ProposalCard({
   onEdit,
   onReject,
   activeEdit,
+  pendingAction,
+  isActionPending,
+  actionError,
   onInlineEditChange,
   onInlineEditSubmit,
   onCancelEdit,
@@ -70,6 +73,9 @@ export function ProposalCard({
   onEdit?: (proposalCard: ProposalCardMetadata) => void;
   onReject?: (request: ProposalActionRequest) => void;
   activeEdit?: ActiveProposalEdit;
+  pendingAction?: ProposalActionRequest["action"] | null;
+  isActionPending?: boolean;
+  actionError?: string | null;
   onInlineEditChange?: (value: string) => void;
   onInlineEditSubmit?: () => void;
   onCancelEdit?: () => void;
@@ -78,6 +84,8 @@ export function ProposalCard({
   const isDelete = proposalCard.proposalKind === "meal_delete";
   const isEditing = activeEdit?.proposalId === proposalCard.proposalId;
   const inputHint = proposalCard.inputHint ?? getDefaultInputHint(proposalCard.proposalKind);
+  const isPending = Boolean(isActionPending || pendingAction);
+  const isInlineSubmitDisabled = activeEdit ? activeEdit.value.trim().length === 0 || isPending : false;
 
   return (
     <div className="sp-message-row sp-message-row-assistant">
@@ -85,9 +93,11 @@ export function ProposalCard({
         className={cx(
           "sp-proposal-card",
           isActive && "sp-proposal-card-active",
+          actionError && "sp-proposal-card-error",
           !isActive && "sp-proposal-inactive",
         )}
         aria-label={proposalCard.title}
+        aria-busy={isPending}
       >
         <div className="sp-proposal-head">
           <div>
@@ -122,6 +132,7 @@ export function ProposalCard({
               <button
                 className={cx("sp-proposal-action", "sp-proposal-approve", isDelete && "sp-proposal-danger")}
                 type="button"
+                disabled={isPending}
                 onClick={() => onApprove?.({
                   proposalId: proposalCard.proposalId,
                   kind: proposalCard.proposalKind,
@@ -133,6 +144,7 @@ export function ProposalCard({
               <button
                 className="sp-proposal-action sp-proposal-edit"
                 type="button"
+                disabled={isPending}
                 onClick={() => onEdit?.(proposalCard)}
               >
                 {proposalCard.actions.editLabel}
@@ -140,6 +152,7 @@ export function ProposalCard({
               <button
                 className="sp-proposal-action sp-proposal-reject"
                 type="button"
+                disabled={isPending}
                 onClick={() => onReject?.({
                   proposalId: proposalCard.proposalId,
                   kind: proposalCard.proposalKind,
@@ -154,6 +167,9 @@ export function ProposalCard({
                 className="sp-proposal-inline-edit"
                 onSubmit={(event) => {
                   event.preventDefault();
+                  if (isInlineSubmitDisabled) {
+                    return;
+                  }
                   onInlineEditSubmit?.();
                 }}
               >
@@ -167,18 +183,33 @@ export function ProposalCard({
                   value={activeEdit.value}
                 />
                 <div className="sp-proposal-inline-actions">
-                  <button className="sp-proposal-action sp-proposal-inline-send" type="submit">
+                  <button
+                    className="sp-proposal-action sp-proposal-inline-send"
+                    type="submit"
+                    disabled={isInlineSubmitDisabled}
+                  >
                     送出
                   </button>
                   <button
                     className="sp-proposal-action sp-proposal-inline-cancel"
                     type="button"
+                    disabled={isPending}
                     onClick={() => onCancelEdit?.()}
                   >
                     關閉編輯
                   </button>
                 </div>
               </form>
+            ) : null}
+            {isPending ? (
+              <p className="sp-proposal-pending" role="status">
+                處理中...
+              </p>
+            ) : null}
+            {actionError ? (
+              <p className="sp-proposal-error" role="alert">
+                {actionError}
+              </p>
             ) : null}
           </>
         ) : (

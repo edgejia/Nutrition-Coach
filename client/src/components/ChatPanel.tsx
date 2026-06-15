@@ -32,6 +32,7 @@ const UPLOAD_SETTLE_WINDOW_MS = 320;
 const STOP_FALLBACK_TIMEOUT_MS = 1000;
 const PHASE40_INCOMPLETE_RECEIPT_FLAG = "phase40IncompleteReceipt";
 const PHASE40_INCOMPLETE_RECEIPT_ID = "phase40-incomplete-receipt-mock";
+const PROPOSAL_ACTION_ERROR_COPY = "這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。";
 const CHAT_EMPTY_STARTER_PROMPTS = [
   "我想記錄今天吃的東西",
   "示範怎麼描述一餐",
@@ -155,11 +156,16 @@ export function ChatPanel() {
   const activeTurnIdRef = useRef<string | null>(null);
   const stopFallbackTimeoutRef = useRef<number | null>(null);
   const stoppingRef = useRef(false);
+  const pendingProposalActionRef = useRef<Set<string>>(new Set());
   const [followMode, setFollowMode] = useState<FollowMode>("attached");
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [activeProposalEdit, setActiveProposalEdit] = useState<ActiveProposalEdit | null>(null);
+  const [pendingProposalActionById, setPendingProposalActionById] = useState<
+    Record<string, ProposalActionRequest["action"]>
+  >({});
+  const [proposalActionErrorById, setProposalActionErrorById] = useState<Record<string, string>>({});
 
   const isChatLocked = sending;
   const isComposerLocked = activeProposalEdit ? true : isChatLocked;
@@ -720,7 +726,18 @@ export function ChatPanel() {
 
   async function handleProposalAction(request: ProposalActionRequest) {
     if (useStore.getState().sending) return;
+    if (pendingProposalActionRef.current.has(request.proposalId)) return;
 
+    pendingProposalActionRef.current.add(request.proposalId);
+    setPendingProposalActionById((current) => ({ ...current, [request.proposalId]: request.action }));
+    setProposalActionErrorById((current) => {
+      if (!current[request.proposalId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[request.proposalId];
+      return next;
+    });
     try {
       const result = await sendProposalAction({
         proposalId: request.proposalId,
@@ -745,7 +762,22 @@ export function ChatPanel() {
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         void recoverGuestSession();
+        return;
       }
+      setProposalActionErrorById((current) => ({
+        ...current,
+        [request.proposalId]: PROPOSAL_ACTION_ERROR_COPY,
+      }));
+    } finally {
+      pendingProposalActionRef.current.delete(request.proposalId);
+      setPendingProposalActionById((current) => {
+        if (!current[request.proposalId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[request.proposalId];
+        return next;
+      });
     }
   }
 
@@ -1089,6 +1121,8 @@ export function ChatPanel() {
                 onProposalEdit={handleProposalEdit}
                 onProposalReject={handleProposalReject}
                 activeEdit={activeProposalEdit}
+                pendingAction={m.proposalCard ? pendingProposalActionById[m.proposalCard.proposalId] : null}
+                actionError={m.proposalCard ? proposalActionErrorById[m.proposalCard.proposalId] : null}
                 onInlineEditChange={(value) => {
                   setActiveProposalEdit((current) => current ? { ...current, value } : current);
                 }}

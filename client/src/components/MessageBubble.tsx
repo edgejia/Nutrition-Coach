@@ -242,6 +242,8 @@ export function MessageBubble(props: {
   onProposalEdit?: (input: { messageId: string; proposalCard: ProposalCardMetadata }) => void;
   onProposalReject?: (request: ProposalActionRequest) => void;
   activeEdit?: ActiveProposalEdit | null;
+  pendingAction?: ProposalActionRequest["action"] | null;
+  actionError?: string | null;
   onInlineEditChange?: (value: string) => void;
   onInlineEditSubmit?: () => void;
   onCancelProposalEdit?: () => void;
@@ -254,6 +256,8 @@ export function MessageBubble(props: {
     onProposalEdit,
     onProposalReject,
     activeEdit,
+    pendingAction,
+    actionError,
     onInlineEditChange,
     onInlineEditSubmit,
     onCancelProposalEdit,
@@ -317,6 +321,8 @@ export function MessageBubble(props: {
                 ? activeEdit
                 : undefined
             }
+            pendingAction={pendingAction}
+            actionError={actionError}
             onInlineEditChange={onInlineEditChange}
             onInlineEditSubmit={onInlineEditSubmit}
             onCancelEdit={onCancelProposalEdit}

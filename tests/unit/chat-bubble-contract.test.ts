@@ -543,9 +543,9 @@ describe("chat bubble source contract", () => {
 
     assert.match(html, /aria-busy="true"/);
     assert.match(html, /處理中\.\.\./);
-    assert.match(html, /套用修改[\s\S]*disabled=""/);
-    assert.match(html, /改成其他數字[\s\S]*disabled=""/);
-    assert.match(html, /取消提案[\s\S]*disabled=""/);
+    assert.match(html, /disabled="">套用修改/);
+    assert.match(html, /disabled="">改成其他數字/);
+    assert.match(html, /disabled="">取消提案/);
   });
 
   it("renders deterministic proposal action error copy without retiring the active card", () => {
