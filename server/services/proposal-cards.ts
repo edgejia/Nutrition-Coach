@@ -497,6 +497,36 @@ export function createProposalCardService(db: AppDatabase) {
       return result.changes;
     },
 
+    async markActiveLaneStale({
+      deviceId,
+      proposalLane,
+      lapseCopy,
+    }: {
+      deviceId: string;
+      proposalLane: ProposalLane;
+      lapseCopy: string;
+    }): Promise<number> {
+      assertOneOf(proposalLane, PROPOSAL_LANES, "lane");
+      assertNonEmptyString(lapseCopy, "lapse copy");
+
+      const result = await db
+        .update(chatProposalCards)
+        .set({
+          status: "stale",
+          lapseCopy,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(
+          and(
+            eq(chatProposalCards.deviceId, deviceId),
+            eq(chatProposalCards.proposalLane, proposalLane),
+            eq(chatProposalCards.status, "active"),
+          ),
+        );
+
+      return result.changes;
+    },
+
     projectStatusForCards({
       deviceId,
       cards,

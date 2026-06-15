@@ -23,6 +23,7 @@ import {
 import { createProposalCardService } from "./services/proposal-cards.js";
 import { createGuestSessionService } from "./services/guest-session.js";
 import { createOrchestrator } from "./orchestrator/index.js";
+import { renderProposalInactiveCopy } from "./orchestrator/mutation-receipts.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
 import { RealtimePublisher } from "./realtime/publisher.js";
 import { registerDeviceRoutes } from "./routes/device.js";
@@ -136,11 +137,24 @@ export async function buildApp(opts: AppOptions) {
   const daySnapshotService = createDaySnapshotService({ summaryService, foodLoggingService });
   const chatService = createChatService(db);
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
-  const mealCorrectionService = createMealCorrectionService(db, { summaryService, foodLoggingService });
+  const proposalCardService = createProposalCardService(db);
+  const mealCorrectionService = createMealCorrectionService(db, {
+    summaryService,
+    foodLoggingService,
+    async markActiveMealProposalCardsStale({ deviceId }) {
+      await proposalCardService.markActiveLaneStale({
+        deviceId,
+        proposalLane: "meal_mutation",
+        lapseCopy: renderProposalInactiveCopy({
+          proposalKind: "meal_numeric",
+          status: "stale",
+        }),
+      });
+    },
+  });
   const goalProposalService = createGoalProposalService(db);
   const mealDeleteProposalService = createMealDeleteProposalService(db);
   const mealNumericProposalService = createMealNumericProposalService(db);
-  const proposalCardService = createProposalCardService(db);
   const publisher = new RealtimePublisher();
 
   const proposalActionService = createProposalActionService({
