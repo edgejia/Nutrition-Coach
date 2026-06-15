@@ -27,6 +27,7 @@ const {
 } = await import(
   "../../client/src/components/HomeScreen.js"
 );
+const { getCoachAdvice } = await import("../../client/src/coach-advice.js");
 const { recordHomeCtaIntentSelected, recordHomeCtaOptionSent } = await import("../../client/src/api.js");
 
 function installFetchStub(handler: typeof fetch) {
@@ -53,6 +54,25 @@ describe("Home screen helpers", () => {
     );
 
     assert.equal(advice, "蛋白質還差 100g，晚餐建議高蛋白食物");
+  });
+
+  it("forwards goal when deriving fresh coach advice", () => {
+    const summary = {
+      date: "2026-04-01",
+      totalCalories: 900,
+      totalProtein: 40,
+      totalCarbs: 80,
+      totalFat: 20,
+      mealCount: 2,
+    };
+    const targets = { calories: 1800, protein: 140, carbs: 180, fat: 60 };
+    const maintainAdvice = getCoachAdvice(summary, targets, "maintain");
+    const muscleGainAdvice = getDisplayedCoachAdvice(null, summary, targets, "muscle_gain");
+
+    assert.equal(muscleGainAdvice, getCoachAdvice(summary, targets, "muscle_gain"));
+    assert.notEqual(muscleGainAdvice, maintainAdvice);
+    assert.equal(getDisplayedCoachAdvice(null, summary, targets, null), maintainAdvice);
+    assert.equal(getDisplayedCoachAdvice(null, summary, targets, "garbage"), maintainAdvice);
   });
 
   it("formats HomeHeader date keys with the existing zh-TW month/day/weekday style", () => {
