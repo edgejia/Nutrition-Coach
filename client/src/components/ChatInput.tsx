@@ -4,6 +4,10 @@ import { SportCameraIcon, SportCloseIcon, SportSendIcon, SportStopIcon } from ".
 
 const UPLOAD_ERROR_COPY = "目前只支援 JPG、PNG、WebP 照片。iPhone HEIC 請先轉成 JPG 後再上傳。";
 
+function shouldUseMobileNewlineBehavior() {
+  return window.matchMedia("(pointer: coarse), (hover: none)").matches;
+}
+
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
   onBeforeSend?: (payload: { hasImage: boolean; hasText: boolean }) => void;
@@ -90,6 +94,7 @@ export function ChatInput({
     if (isComposingRef.current) return;
     if (e.key !== "Enter") return;
     if (e.shiftKey) return;
+    if (!e.metaKey && !e.ctrlKey && shouldUseMobileNewlineBehavior()) return;
 
     if (!e.metaKey && !e.ctrlKey) {
       e.preventDefault();
@@ -155,6 +160,7 @@ export function ChatInput({
             isComposingRef.current = false;
           }}
           placeholder="描述你吃了什麼…"
+          enterKeyHint="enter"
           rows={1}
           className="sp-chat-textarea"
         />
