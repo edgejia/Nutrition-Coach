@@ -237,7 +237,7 @@ textarea {
   background: var(--sp-surface);
   border: 1px solid var(--sp-line);
   border-radius: var(--sp-r-md);
-  padding: 12px 14px;
+  padding: 12px 16px;
 }
 .sp-num-wheel-track {
   position: relative;
@@ -969,7 +969,7 @@ textarea {
   border-radius: var(--sp-r-md);
   background: var(--sp-surface);
   color: var(--sp-ink);
-  padding: 12px 14px;
+  padding: 12px 16px;
 }
 
 .home-sport-meal-row[type="button"] {
@@ -1929,7 +1929,7 @@ textarea {
   gap: 12px;
   align-items: start;
   border-bottom: 1px solid var(--sp-line);
-  padding: 12px 14px;
+  padding: 12px 16px;
 }
 
 .sp-proposal-head h3 {
@@ -1970,7 +1970,7 @@ textarea {
   grid-template-columns: minmax(0, 88px) minmax(0, 1fr);
   gap: 12px;
   align-items: center;
-  padding: 12px 14px;
+  padding: 12px 16px;
   font-size: 14px;
   font-weight: 400;
   letter-spacing: 0;
@@ -2003,7 +2003,7 @@ textarea {
 }
 
 .sp-proposal-row strong {
-  color: var(--sp-lime);
+  color: var(--sp-ink);
   font-weight: 700;
 }
 
@@ -2011,7 +2011,7 @@ textarea {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
-  padding: 12px 14px 14px;
+  padding: 12px 16px 16px;
   border-top: 1px solid var(--sp-line);
 }
 
@@ -2029,7 +2029,7 @@ textarea {
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1.25;
-  padding: 10px 12px;
+  padding: 12px 16px;
 }
 
 .sp-proposal-action:focus-visible {
@@ -2084,7 +2084,7 @@ textarea {
 .sp-proposal-lapse {
   border-top: 1px solid var(--sp-line);
   margin: 0;
-  padding: 12px 14px 14px;
+  padding: 12px 16px 16px;
   color: var(--sp-ink-2);
   font-size: 14px;
   font-weight: 400;
@@ -2096,7 +2096,7 @@ textarea {
 .sp-proposal-error {
   border-top: 1px solid var(--sp-line);
   margin: 0;
-  padding: 12px 14px 14px;
+  padding: 12px 16px 16px;
   font-size: 14px;
   font-weight: 400;
   letter-spacing: 0;
@@ -2116,7 +2116,7 @@ textarea {
   gap: 8px;
   border-top: 1px solid var(--sp-line);
   background: var(--sp-surface-2);
-  padding: 12px 14px 14px;
+  padding: 12px 16px 16px;
 }
 
 .sp-proposal-inline-input {
@@ -2133,7 +2133,7 @@ textarea {
   letter-spacing: 0;
   line-height: 1.5;
   outline: none;
-  padding: 10px 12px;
+  padding: 12px 16px;
 }
 
 .sp-proposal-inline-input::placeholder {

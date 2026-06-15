@@ -19,8 +19,9 @@ function escapeRegExp(value: string) {
 }
 
 function getCssRule(css: string, selector: string) {
-  const selectorIndex = css.indexOf(selector);
-  assert.notEqual(selectorIndex, -1, `Missing CSS selector: ${selector}`);
+  const selectorMatch = new RegExp(`(^|\\n)${escapeRegExp(selector)}(?:,|\\s*\\{)`).exec(css);
+  assert.ok(selectorMatch?.index !== undefined, `Missing CSS selector: ${selector}`);
+  const selectorIndex = selectorMatch.index + selectorMatch[1].length;
   const openIndex = css.indexOf("{", selectorIndex);
   const closeIndex = css.indexOf("}", openIndex);
   assert.ok(openIndex > selectorIndex && closeIndex > openIndex, `Malformed CSS selector: ${selector}`);
