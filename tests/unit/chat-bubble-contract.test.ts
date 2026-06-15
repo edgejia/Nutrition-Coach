@@ -532,6 +532,69 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(html, /sp-proposal-inline-cancel[^>]*>取消提案/);
   });
 
+  it("disables active proposal actions and exposes pending copy for the matching request", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      isActionPending: true,
+      onApprove: () => {},
+      onEdit: () => {},
+      onReject: () => {},
+    } as Parameters<typeof ProposalCard>[0] & { isActionPending: boolean });
+
+    assert.match(html, /aria-busy="true"/);
+    assert.match(html, /處理中\.\.\./);
+    assert.match(html, /套用修改[\s\S]*disabled=""/);
+    assert.match(html, /改成其他數字[\s\S]*disabled=""/);
+    assert.match(html, /取消提案[\s\S]*disabled=""/);
+  });
+
+  it("renders deterministic proposal action error copy without retiring the active card", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      actionError: "這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。",
+      onApprove: () => {},
+      onEdit: () => {},
+      onReject: () => {},
+    } as Parameters<typeof ProposalCard>[0] & { actionError: string });
+
+    assert.match(html, /這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。/);
+    assert.match(html, /套用修改/);
+    assert.match(html, /改成其他數字/);
+    assert.match(html, /取消提案/);
+  });
+
+  it("disables inline edit submit while the trimmed edit value is empty", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      activeEdit: {
+        messageId: "proposal-message-1",
+        proposalId: activeMealEstimateProposal.proposalId,
+        value: "   ",
+      },
+      onInlineEditChange: () => {},
+      onInlineEditSubmit: () => {},
+      onCancelEdit: () => {},
+    });
+
+    assert.match(html, /class="sp-proposal-action sp-proposal-inline-send" type="submit" disabled="">送出/);
+  });
+
+  it("enables inline edit submit when the edit value contains text", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      activeEdit: {
+        messageId: "proposal-message-1",
+        proposalId: activeMealEstimateProposal.proposalId,
+        value: "熱量改 480 kcal",
+      },
+      onInlineEditChange: () => {},
+      onInlineEditSubmit: () => {},
+      onCancelEdit: () => {},
+    });
+
+    assert.doesNotMatch(html, /sp-proposal-inline-send" type="submit" disabled/);
+  });
+
   it("wires ChatPanel inline edit through one active state, composer lock, and proposal context send", async () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
     const proposalCard = await readSource("client/src/components/ProposalCard.tsx");
