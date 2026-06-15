@@ -174,33 +174,76 @@ export const COACH_CTA_INTENTS = [
 
 const HOME_CTA_INTENT_LIMIT = 3;
 
-function orderIntents(leadId: CoachCTAIntentId): CoachCTA {
-  const lead = COACH_CTA_INTENTS.find((intent) => intent.id === leadId);
-  const rest = COACH_CTA_INTENTS.filter((intent) => intent.id !== leadId);
-  const ordered = lead ? [lead, ...rest] : COACH_CTA_INTENTS;
+function orderIntentsByPriority(leadIds: readonly CoachCTAIntentId[]): CoachCTA {
+  const intents: readonly CoachCTAIntent[] = COACH_CTA_INTENTS;
+  const leads: CoachCTAIntent[] = [];
+  for (const leadId of leadIds) {
+    const intent = intents.find((candidate) => candidate.id === leadId);
+    if (intent) {
+      leads.push(intent);
+    }
+  }
+  const leadIdSet = new Set(leads.map((intent) => intent.id));
+  const rest = intents.filter((intent) => !leadIdSet.has(intent.id));
+  const ordered = [...leads, ...rest];
   return ordered.slice(0, HOME_CTA_INTENT_LIMIT);
+}
+
+function orderIntents(leadId: CoachCTAIntentId): CoachCTA {
+  return orderIntentsByPriority([leadId]);
+}
+
+function defaultLeadForGoal(goal: CoachGoal): CoachCTAIntentId {
+  if (goal === "muscle_gain") {
+    return "protein";
+  }
+  if (goal === "fat_loss") {
+    return "calorie_control";
+  }
+  return "next_meal";
 }
 
 export function getCoachCTA(
   summary: DailySummary | null,
   targets: DailyTargets | null,
   _hour: number = new Date().getHours(),
+  goal: string | null = "maintain",
 ): CoachCTA {
   if (!summary || !targets) {
     return orderIntents("next_meal");
   }
 
+  const g = narrowGoal(goal);
   if (summary.mealCount === 0) {
+    if (g === "muscle_gain") {
+      return orderIntentsByPriority(["food_logging", "protein", "calorie_control"]);
+    }
+    if (g === "fat_loss") {
+      return orderIntentsByPriority(["food_logging", "calorie_control", "protein"]);
+    }
     return orderIntents("food_logging");
   }
 
-  if (targets.protein - summary.totalProtein > 30) {
+  const proteinGap = targets.protein - summary.totalProtein;
+  const caloriesRemaining = targets.calories - summary.totalCalories;
+
+  if (g === "fat_loss") {
+    if (caloriesRemaining <= 200) {
+      return orderIntents("calorie_control");
+    }
+    if (proteinGap > 30) {
+      return orderIntents("protein");
+    }
+    return orderIntents(defaultLeadForGoal(g));
+  }
+
+  if (proteinGap > 30) {
     return orderIntents("protein");
   }
 
-  if (targets.calories - summary.totalCalories <= 200) {
+  if (caloriesRemaining <= 200) {
     return orderIntents("calorie_control");
   }
 
-  return orderIntents("next_meal");
+  return orderIntents(defaultLeadForGoal(g));
 }
