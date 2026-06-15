@@ -597,10 +597,15 @@ describe("chat bubble source contract", () => {
 
   it("wires ChatPanel inline edit through one active state, composer lock, and proposal context send", async () => {
     const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
     const proposalCard = await readSource("client/src/components/ProposalCard.tsx");
 
     assert.match(chatPanel, /activeProposalEdit/);
     assert.match(chatPanel, /setActiveProposalEdit/);
+    assert.match(chatPanel, /pendingProposalActionById/);
+    assert.match(chatPanel, /setPendingProposalActionById/);
+    assert.match(chatPanel, /proposalActionErrorById/);
+    assert.match(chatPanel, /setProposalActionErrorById/);
     assert.match(chatPanel, /messageId/);
     assert.match(chatPanel, /proposalId/);
     assert.match(chatPanel, /setActiveProposalEdit\(null\)/);
@@ -615,8 +620,14 @@ describe("chat bubble source contract", () => {
     assert.match(chatPanel, /onProposalEdit=/);
     assert.match(chatPanel, /onProposalReject=/);
     assert.match(chatPanel, /activeEdit=/);
+    assert.match(chatPanel, /pendingAction=/);
+    assert.match(chatPanel, /actionError=/);
+    assert.match(chatPanel, /finally/);
+    assert.match(chatPanel, /這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。/);
     assert.doesNotMatch(chatPanel, /關閉編輯[\s\S]{0,240}sendProposalAction/);
 
+    assert.match(bubble, /pendingAction/);
+    assert.match(bubble, /actionError/);
     assert.match(proposalCard, /autoFocus/);
     assert.match(proposalCard, /sp-proposal-inline-edit/);
     assert.match(proposalCard, /關閉編輯/);
