@@ -18,6 +18,15 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function getCssRule(css: string, selector: string) {
+  const selectorIndex = css.indexOf(selector);
+  assert.notEqual(selectorIndex, -1, `Missing CSS selector: ${selector}`);
+  const openIndex = css.indexOf("{", selectorIndex);
+  const closeIndex = css.indexOf("}", openIndex);
+  assert.ok(openIndex > selectorIndex && closeIndex > openIndex, `Malformed CSS selector: ${selector}`);
+  return css.slice(openIndex + 1, closeIndex);
+}
+
 function renderMessageBubble(message: Message, options?: { isProvisional?: boolean; isStatusLabel?: boolean }) {
   return renderToStaticMarkup(createElement(MessageBubble, { message, ...options }));
 }
@@ -506,6 +515,29 @@ describe("chat bubble source contract", () => {
     assert.match(css, /var\(--sp-red\)/);
     assert.match(css, /var\(--sp-font-zh\)/);
     assert.match(css, /var\(--sp-font-mono\)/);
+  });
+
+  it("keeps proposal CSS on the Phase 90 spacing scale and reserves lime for controls", async () => {
+    const css = await readSource("client/src/app.css");
+    const proposalSelectors = [
+      ".sp-proposal-head",
+      ".sp-proposal-row",
+      ".sp-proposal-actions",
+      ".sp-proposal-action",
+      ".sp-proposal-lapse",
+      ".sp-proposal-inline-edit",
+      ".sp-proposal-inline-input",
+    ];
+
+    for (const selector of proposalSelectors) {
+      const rule = getCssRule(css, selector);
+      assert.doesNotMatch(rule, /padding:\s*12px 14px(?: 14px)?/);
+      assert.doesNotMatch(rule, /padding:\s*10px 12px/);
+    }
+
+    assert.doesNotMatch(getCssRule(css, ".sp-proposal-row strong"), /var\(--sp-lime\)/);
+    assert.match(getCssRule(css, ".sp-proposal-action"), /min-height:\s*44px/);
+    assert.match(getCssRule(css, ".sp-proposal-inactive .sp-proposal-head h3"), /var\(--sp-ink-2\)/);
   });
 
   it("renders an empty focused inline edit input with backend hint and distinct close control", () => {
