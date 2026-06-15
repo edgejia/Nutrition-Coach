@@ -446,6 +446,10 @@ export function renderMealNumericClarificationCopy(
   return `這次沒有更新餐點紀錄。${fieldText}請給明確目標數字，或說「減半」、「少 20%」、「偏高」這類方向讓我再確認；也可以請我幫你估合理值。`;
 }
 
+export function renderMealNumericNoChangeCopy(): string {
+  return "這次沒有更新餐點紀錄。這筆餐點目前的數值已經和提案一致，不需要套用修改。";
+}
+
 export function renderMealNumericCancelCopy(): string {
   return "已取消這組餐點修正提案，沒有更新任何餐點紀錄。";
 }

@@ -189,12 +189,21 @@ function addEvidence(
 
 function summarizeCard(card: ProposalCardBody | undefined) {
   assert.ok(card, "expected proposal card metadata");
+  const changedRowCount = card.details.rows.filter((row) => (
+    row.before !== undefined
+    && row.after !== undefined
+    && row.before !== row.after
+  )).length;
+  if (card.isActionable && (card.proposalKind === "meal_numeric" || card.proposalKind === "meal_estimate")) {
+    assert.ok(changedRowCount > 0, "actionable meal proposal cards must show at least one changed row");
+  }
   return {
     kind: card.proposalKind,
     lane: card.proposalLane,
     status: card.status,
     actionable: card.isActionable,
     rowCount: card.details.rows.length,
+    changedRowCount,
     actionLabels: {
       approve: card.actions.approveLabel,
       edit: card.actions.editLabel,
@@ -567,6 +576,55 @@ const scenario: VerificationScenario = {
       assert.equal(estimateApproved.body.didMutateMeal, true);
       assert.equal(estimateApproved.body.proposalActionEvent?.transcriptCopy, "已選擇套用餐點修改");
       assert.equal(estimateMealAfterApprove?.calories, 580);
+      const estimateApprovePublishCounts = summarizeCounts({
+        dailySummaryPublishes: publish.counts.dailySummary,
+        goalsPublishes: publish.counts.goals,
+      });
+      provider.reset();
+      publish.reset();
+      const noOpMeal = await fixture.services.foodLoggingService.logGroupedMeal(fixture.deviceId, {
+        loggedAt: new Date().toISOString(),
+        items: [{ foodName: "三方無變更飯", calories: 650, protein: 30, carbs: 80, fat: 20 }],
+      });
+      provider.queueRoundResponse({
+        toolCalls: [{
+          id: "noop_estimate_find",
+          type: "function",
+          function: {
+            name: "find_meals",
+            arguments: JSON.stringify({
+              action: "update",
+              query: "三方無變更飯 幫我估合理一點",
+            }),
+          },
+        }],
+      });
+      provider.queueRoundResponse({
+        toolCalls: [{
+          id: "noop_estimate_apply",
+          type: "function",
+          function: {
+            name: "propose_meal_estimate",
+            arguments: JSON.stringify({
+              meal_id: noOpMeal.id,
+              fields: ["calories", "protein", "carbs", "fat"],
+              estimated: { calories: 650, protein: 30, carbs: 80, fat: 20 },
+            }),
+          },
+        }],
+      });
+      const noOpEstimate = await postChat(fixture.address, fixture.cookieHeader, "幫我估合理一點");
+      const noOpMealAfter = (await readMeals()).find((meal) => meal.id === noOpMeal.id);
+      const noOpProposal = await fixture.services.mealNumericProposalService.getLatest({
+        deviceId: fixture.deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      assert.equal(noOpEstimate.status, 200);
+      assert.equal(noOpEstimate.body.didMutateMeal, false);
+      assert.equal(noOpEstimate.body.proposalCard, undefined);
+      assert.equal(noOpProposal, undefined);
+      assert.equal(noOpMealAfter?.mealRevisionId, noOpMeal.mealRevisionId);
+      assert.equal(publish.counts.dailySummary, 0);
       const estimateEvidence = {
         step: estimateStep,
         initialCard: summarizeCard(estimateCard),
@@ -584,10 +642,13 @@ const scenario: VerificationScenario = {
         mealMutation: {
           changedAfterBackendApproval: estimateMealAfterApprove?.calories === 580,
         },
-        publishCounts: summarizeCounts({
+        noOpBoundary: {
+          proposalCardCreated: noOpEstimate.body.proposalCard !== undefined,
+          proposalStateCreated: noOpProposal !== undefined,
+          mealRevisionUnchanged: noOpMealAfter?.mealRevisionId === noOpMeal.mealRevisionId,
           dailySummaryPublishes: publish.counts.dailySummary,
-          goalsPublishes: publish.counts.goals,
-        }),
+        },
+        publishCounts: estimateApprovePublishCounts,
       };
       addEvidence(artifacts, estimateEvidence);
       steps.push(pass(estimateStep, estimateEvidence));
@@ -694,17 +755,17 @@ const scenario: VerificationScenario = {
       const replacementCard = supersedeHistory.messages
         .map((message) => message.proposalCard)
         .find((card) => card?.proposalId === supersedingDelete.chat.body.proposalCard?.proposalId);
-      assert.equal(oldCard?.status, "superseded");
+      assert.equal(oldCard?.status, "stale");
       assert.equal(oldCard?.isActionable, false);
-      assert.equal(oldCard?.lapseCopy, "這個提案已被新的刪除確認取代。");
-      assert.equal(oldCard?.supersededByKind, "meal_delete");
+      assert.equal(oldCard?.lapseCopy, "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。");
+      assert.equal(oldCard?.supersededByKind, null);
       assert.equal(replacementCard?.status, "active");
       const supersedeEvidence = {
         step: supersedeStep,
         oldCard: summarizeCard(oldCard),
         replacementCard: summarizeCard(replacementCard),
         copyPresence: summarizeCopy({
-          namesReplacementKind: oldCard?.lapseCopy === "這個提案已被新的刪除確認取代。",
+          staleNoUpdateCopyVisible: oldCard?.lapseCopy === "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。",
           inactiveCardRemainsVisible: Boolean(oldCard),
         }),
       };

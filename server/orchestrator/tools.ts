@@ -74,6 +74,7 @@ import {
   renderMealDeleteProposalCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericClarificationCopy,
+  renderMealNumericNoChangeCopy,
   renderMealNumericProposalCopy,
   renderProposalCardIntro,
   renderProposalExpiredCopy,
@@ -1393,6 +1394,16 @@ function buildEstimateAffectedFields(
     }));
 }
 
+function buildUpdateInputFromAffectedFields(
+  affectedFields: Array<{ field: MealNumericField; after: number }>,
+): MealNumericUpdateInput {
+  const input: MealNumericUpdateInput = {};
+  for (const affected of affectedFields) {
+    input[affected.field] = affected.after;
+  }
+  return input;
+}
+
 function makeMealNumericControlledResult(
   reason: MealNumericControlledResult["reason"],
   reply: string,
@@ -2053,6 +2064,14 @@ const proposeMealNumericCorrectionContract: ToolContract<
         currentFacts,
         toMealNumericOperatorIntent(args),
       );
+      if (preview.affectedFields.length === 0) {
+        const reply = renderMealNumericNoChangeCopy();
+        return {
+          ok: true,
+          result: makeMealNumericControlledResult("meal_numeric_clarification", reply) as ProposeMealNumericCorrectionResult,
+          toolMessage: reply,
+        };
+      }
       const proposal = await deps.mealNumericProposalService.putLatest({
         deviceId,
         sessionId: DEFAULT_SESSION_ID,
@@ -2169,13 +2188,21 @@ const proposeMealEstimateContract: ToolContract<
       );
       const updateInput = buildBoundedEstimatePatch(args.fields, args.estimated);
       const affectedFields = buildEstimateAffectedFields(args.fields, updateInput, currentFacts.totals);
+      if (affectedFields.length === 0) {
+        const reply = renderMealNumericNoChangeCopy();
+        return {
+          ok: true,
+          result: makeMealNumericControlledResult("meal_numeric_clarification", reply) as ProposeMealNumericCorrectionResult,
+          toolMessage: reply,
+        };
+      }
       const proposal = await deps.mealNumericProposalService.putLatest({
         deviceId,
         sessionId: DEFAULT_SESSION_ID,
         input: {
           mealId: currentFacts.mealId,
           expectedMealRevisionId: currentFacts.currentMealRevisionId,
-          updateInput,
+          updateInput: buildUpdateInputFromAffectedFields(affectedFields),
           affectedFields,
           sourceOperator: "model_estimate",
           provenance: "model_estimate",
@@ -3353,11 +3380,13 @@ export async function executeTool(
 
   if (toolCall.function.name === "propose_meal_estimate") {
     const contractResult = outcome.contractResult as ProposeMealNumericCorrectionResult;
+    const isProposal = contractResult.reason === "meal_numeric_proposal";
     return attachPolicyFact({
       result: contractResult.reply,
-      summary: "status: proposal",
-      success: true,
-      executed: true,
+      summary: isProposal ? "status: proposal" : "failureReason: guard",
+      success: isProposal,
+      executed: isProposal,
+      ...(isProposal ? {} : { failureReason: "guard" as const }),
       ...(contractResult.proposalCard ? { proposalCard: contractResult.proposalCard } : {}),
       controlledReply: {
         source: "renderer",

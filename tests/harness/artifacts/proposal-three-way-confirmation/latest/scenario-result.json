@@ -12,6 +12,7 @@
           "status": "active",
           "actionable": true,
           "rowCount": 4,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "套用目標",
             "edit": "調整目標",
@@ -30,6 +31,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 4,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "套用目標",
               "edit": "調整目標",
@@ -69,6 +71,7 @@
           "status": "active",
           "actionable": true,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -92,6 +95,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 4,
+            "changedRowCount": 4,
             "actionLabels": {
               "approve": "套用修改",
               "edit": "改成其他數字",
@@ -112,6 +116,12 @@
         "mealMutation": {
           "changedAfterBackendApproval": true
         },
+        "noOpBoundary": {
+          "proposalCardCreated": false,
+          "proposalStateCreated": false,
+          "mealRevisionUnchanged": true,
+          "dailySummaryPublishes": 0
+        },
         "publishCounts": {
           "dailySummaryPublishes": 1,
           "goalsPublishes": 0
@@ -130,6 +140,7 @@
             "status": "rejected",
             "actionable": false,
             "rowCount": 5,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "確認刪除",
               "edit": "先不要刪，改問別的",
@@ -147,8 +158,8 @@
             "hasCreatedAt": true
           },
           "counts": {
-            "mealCountBefore": 2,
-            "mealCountAfter": 2,
+            "mealCountBefore": 3,
+            "mealCountAfter": 3,
             "dailySummaryPublishes": 0,
             "goalsPublishes": 0
           },
@@ -165,6 +176,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 5,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "確認刪除",
               "edit": "先不要刪，改問別的",
@@ -182,8 +194,8 @@
             "hasCreatedAt": true
           },
           "counts": {
-            "mealCountBefore": 3,
-            "mealCountAfter": 2,
+            "mealCountBefore": 4,
+            "mealCountAfter": 3,
             "dailySummaryPublishes": 1,
             "goalsPublishes": 0
           },
@@ -202,6 +214,7 @@
           "status": "active",
           "actionable": true,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -223,9 +236,10 @@
         "oldCard": {
           "kind": "meal_estimate",
           "lane": "meal_mutation",
-          "status": "superseded",
+          "status": "stale",
           "actionable": false,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -233,7 +247,7 @@
           },
           "hasExpiry": true,
           "hasLapseCopy": true,
-          "supersededByKind": "meal_delete"
+          "supersededByKind": "none"
         },
         "replacementCard": {
           "kind": "meal_delete",
@@ -241,6 +255,7 @@
           "status": "active",
           "actionable": true,
           "rowCount": 5,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "確認刪除",
             "edit": "先不要刪，改問別的",
@@ -251,7 +266,7 @@
           "supersededByKind": "none"
         },
         "copyPresence": {
-          "namesReplacementKind": true,
+          "staleNoUpdateCopyVisible": true,
           "inactiveCardRemainsVisible": true
         }
       }
@@ -267,6 +282,7 @@
           "status": "expired",
           "actionable": false,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -299,6 +315,7 @@
             "status": "stale",
             "actionable": false,
             "rowCount": 4,
+            "changedRowCount": 4,
             "actionLabels": {
               "approve": "套用修改",
               "edit": "改成其他數字",
@@ -314,8 +331,8 @@
           "staleCopyVisible": true
         },
         "counts": {
-          "mealCountBefore": 7,
-          "mealCountAfter": 7,
+          "mealCountBefore": 8,
+          "mealCountAfter": 8,
           "dailySummaryPublishes": 0,
           "goalsPublishes": 0
         }
@@ -335,8 +352,8 @@
           "remainsPending": true
         },
         "counts": {
-          "mealCountBefore": 8,
-          "mealCountAfter": 8,
+          "mealCountBefore": 9,
+          "mealCountAfter": 9,
           "dailySummaryPublishes": 0,
           "goalsPublishes": 0
         }
@@ -356,6 +373,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 5,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "確認刪除",
               "edit": "先不要刪，改問別的",
@@ -375,6 +393,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 5,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "確認刪除",
               "edit": "先不要刪，改問別的",
@@ -387,8 +406,8 @@
           "hasNoActionEvent": true
         },
         "counts": {
-          "mealCountBefore": 8,
-          "mealCountAfter": 8,
+          "mealCountBefore": 9,
+          "mealCountAfter": 9,
           "dailySummaryPublishes": 0,
           "goalsPublishes": 0
         }
@@ -419,6 +438,7 @@
           "status": "active",
           "actionable": true,
           "rowCount": 4,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "套用目標",
             "edit": "調整目標",
@@ -437,6 +457,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 4,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "套用目標",
               "edit": "調整目標",
@@ -472,6 +493,7 @@
           "status": "active",
           "actionable": true,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -495,6 +517,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 4,
+            "changedRowCount": 4,
             "actionLabels": {
               "approve": "套用修改",
               "edit": "改成其他數字",
@@ -515,6 +538,12 @@
         "mealMutation": {
           "changedAfterBackendApproval": true
         },
+        "noOpBoundary": {
+          "proposalCardCreated": false,
+          "proposalStateCreated": false,
+          "mealRevisionUnchanged": true,
+          "dailySummaryPublishes": 0
+        },
         "publishCounts": {
           "dailySummaryPublishes": 1,
           "goalsPublishes": 0
@@ -529,6 +558,7 @@
             "status": "rejected",
             "actionable": false,
             "rowCount": 5,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "確認刪除",
               "edit": "先不要刪，改問別的",
@@ -546,8 +576,8 @@
             "hasCreatedAt": true
           },
           "counts": {
-            "mealCountBefore": 2,
-            "mealCountAfter": 2,
+            "mealCountBefore": 3,
+            "mealCountAfter": 3,
             "dailySummaryPublishes": 0,
             "goalsPublishes": 0
           },
@@ -564,6 +594,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 5,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "確認刪除",
               "edit": "先不要刪，改問別的",
@@ -581,8 +612,8 @@
             "hasCreatedAt": true
           },
           "counts": {
-            "mealCountBefore": 3,
-            "mealCountAfter": 2,
+            "mealCountBefore": 4,
+            "mealCountAfter": 3,
             "dailySummaryPublishes": 1,
             "goalsPublishes": 0
           },
@@ -597,6 +628,7 @@
           "status": "active",
           "actionable": true,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -614,9 +646,10 @@
         "oldCard": {
           "kind": "meal_estimate",
           "lane": "meal_mutation",
-          "status": "superseded",
+          "status": "stale",
           "actionable": false,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -624,7 +657,7 @@
           },
           "hasExpiry": true,
           "hasLapseCopy": true,
-          "supersededByKind": "meal_delete"
+          "supersededByKind": "none"
         },
         "replacementCard": {
           "kind": "meal_delete",
@@ -632,6 +665,7 @@
           "status": "active",
           "actionable": true,
           "rowCount": 5,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "確認刪除",
             "edit": "先不要刪，改問別的",
@@ -642,7 +676,7 @@
           "supersededByKind": "none"
         },
         "copyPresence": {
-          "namesReplacementKind": true,
+          "staleNoUpdateCopyVisible": true,
           "inactiveCardRemainsVisible": true
         }
       },
@@ -654,6 +688,7 @@
           "status": "expired",
           "actionable": false,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -682,6 +717,7 @@
             "status": "stale",
             "actionable": false,
             "rowCount": 4,
+            "changedRowCount": 4,
             "actionLabels": {
               "approve": "套用修改",
               "edit": "改成其他數字",
@@ -697,8 +733,8 @@
           "staleCopyVisible": true
         },
         "counts": {
-          "mealCountBefore": 7,
-          "mealCountAfter": 7,
+          "mealCountBefore": 8,
+          "mealCountAfter": 8,
           "dailySummaryPublishes": 0,
           "goalsPublishes": 0
         }
@@ -714,8 +750,8 @@
           "remainsPending": true
         },
         "counts": {
-          "mealCountBefore": 8,
-          "mealCountAfter": 8,
+          "mealCountBefore": 9,
+          "mealCountAfter": 9,
           "dailySummaryPublishes": 0,
           "goalsPublishes": 0
         }
@@ -731,6 +767,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 5,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "確認刪除",
               "edit": "先不要刪，改問別的",
@@ -750,6 +787,7 @@
             "status": "approved",
             "actionable": false,
             "rowCount": 5,
+            "changedRowCount": 0,
             "actionLabels": {
               "approve": "確認刪除",
               "edit": "先不要刪，改問別的",
@@ -762,8 +800,8 @@
           "hasNoActionEvent": true
         },
         "counts": {
-          "mealCountBefore": 8,
-          "mealCountAfter": 8,
+          "mealCountBefore": 9,
+          "mealCountAfter": 9,
           "dailySummaryPublishes": 0,
           "goalsPublishes": 0
         }
@@ -787,6 +825,7 @@
         "status": "active",
         "actionable": true,
         "rowCount": 4,
+        "changedRowCount": 0,
         "actionLabels": {
           "approve": "套用目標",
           "edit": "調整目標",
@@ -805,6 +844,7 @@
           "status": "approved",
           "actionable": false,
           "rowCount": 4,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "套用目標",
             "edit": "調整目標",
@@ -840,6 +880,7 @@
         "status": "active",
         "actionable": true,
         "rowCount": 4,
+        "changedRowCount": 4,
         "actionLabels": {
           "approve": "套用修改",
           "edit": "改成其他數字",
@@ -863,6 +904,7 @@
           "status": "approved",
           "actionable": false,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -883,6 +925,12 @@
       "mealMutation": {
         "changedAfterBackendApproval": true
       },
+      "noOpBoundary": {
+        "proposalCardCreated": false,
+        "proposalStateCreated": false,
+        "mealRevisionUnchanged": true,
+        "dailySummaryPublishes": 0
+      },
       "publishCounts": {
         "dailySummaryPublishes": 1,
         "goalsPublishes": 0
@@ -897,6 +945,7 @@
           "status": "rejected",
           "actionable": false,
           "rowCount": 5,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "確認刪除",
             "edit": "先不要刪，改問別的",
@@ -914,8 +963,8 @@
           "hasCreatedAt": true
         },
         "counts": {
-          "mealCountBefore": 2,
-          "mealCountAfter": 2,
+          "mealCountBefore": 3,
+          "mealCountAfter": 3,
           "dailySummaryPublishes": 0,
           "goalsPublishes": 0
         },
@@ -932,6 +981,7 @@
           "status": "approved",
           "actionable": false,
           "rowCount": 5,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "確認刪除",
             "edit": "先不要刪，改問別的",
@@ -949,8 +999,8 @@
           "hasCreatedAt": true
         },
         "counts": {
-          "mealCountBefore": 3,
-          "mealCountAfter": 2,
+          "mealCountBefore": 4,
+          "mealCountAfter": 3,
           "dailySummaryPublishes": 1,
           "goalsPublishes": 0
         },
@@ -965,6 +1015,7 @@
         "status": "active",
         "actionable": true,
         "rowCount": 4,
+        "changedRowCount": 4,
         "actionLabels": {
           "approve": "套用修改",
           "edit": "改成其他數字",
@@ -982,9 +1033,10 @@
       "oldCard": {
         "kind": "meal_estimate",
         "lane": "meal_mutation",
-        "status": "superseded",
+        "status": "stale",
         "actionable": false,
         "rowCount": 4,
+        "changedRowCount": 4,
         "actionLabels": {
           "approve": "套用修改",
           "edit": "改成其他數字",
@@ -992,7 +1044,7 @@
         },
         "hasExpiry": true,
         "hasLapseCopy": true,
-        "supersededByKind": "meal_delete"
+        "supersededByKind": "none"
       },
       "replacementCard": {
         "kind": "meal_delete",
@@ -1000,6 +1052,7 @@
         "status": "active",
         "actionable": true,
         "rowCount": 5,
+        "changedRowCount": 0,
         "actionLabels": {
           "approve": "確認刪除",
           "edit": "先不要刪，改問別的",
@@ -1010,7 +1063,7 @@
         "supersededByKind": "none"
       },
       "copyPresence": {
-        "namesReplacementKind": true,
+        "staleNoUpdateCopyVisible": true,
         "inactiveCardRemainsVisible": true
       }
     },
@@ -1022,6 +1075,7 @@
         "status": "expired",
         "actionable": false,
         "rowCount": 4,
+        "changedRowCount": 4,
         "actionLabels": {
           "approve": "套用修改",
           "edit": "改成其他數字",
@@ -1050,6 +1104,7 @@
           "status": "stale",
           "actionable": false,
           "rowCount": 4,
+          "changedRowCount": 4,
           "actionLabels": {
             "approve": "套用修改",
             "edit": "改成其他數字",
@@ -1065,8 +1120,8 @@
         "staleCopyVisible": true
       },
       "counts": {
-        "mealCountBefore": 7,
-        "mealCountAfter": 7,
+        "mealCountBefore": 8,
+        "mealCountAfter": 8,
         "dailySummaryPublishes": 0,
         "goalsPublishes": 0
       }
@@ -1082,8 +1137,8 @@
         "remainsPending": true
       },
       "counts": {
-        "mealCountBefore": 8,
-        "mealCountAfter": 8,
+        "mealCountBefore": 9,
+        "mealCountAfter": 9,
         "dailySummaryPublishes": 0,
         "goalsPublishes": 0
       }
@@ -1099,6 +1154,7 @@
           "status": "approved",
           "actionable": false,
           "rowCount": 5,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "確認刪除",
             "edit": "先不要刪，改問別的",
@@ -1118,6 +1174,7 @@
           "status": "approved",
           "actionable": false,
           "rowCount": 5,
+          "changedRowCount": 0,
           "actionLabels": {
             "approve": "確認刪除",
             "edit": "先不要刪，改問別的",
@@ -1130,8 +1187,8 @@
         "hasNoActionEvent": true
       },
       "counts": {
-        "mealCountBefore": 8,
-        "mealCountAfter": 8,
+        "mealCountBefore": 9,
+        "mealCountAfter": 9,
         "dailySummaryPublishes": 0,
         "goalsPublishes": 0
       }

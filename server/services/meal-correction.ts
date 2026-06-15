@@ -945,6 +945,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     for (const field of operatorIntent.fields) {
       const before = currentFacts.totals[field];
       const after = previewFieldValue(before, operatorIntent);
+      if (roundNonNegativePatchValue(before) === after) continue;
       updateInput[field] = after;
       affectedFields.push({ field, before, after });
     }
