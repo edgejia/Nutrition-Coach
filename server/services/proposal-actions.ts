@@ -327,17 +327,21 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     if (!card) {
       throw new Error("proposal action completed without persisted proposal card");
     }
+    const reply = input.mutation?.effects
+      ? renderMutationReceipt(input.mutation.effects)
+      : input.action === "reject"
+        ? cancelReply(input.kind)
+        : undefined;
+    if (reply?.trim()) {
+      await deps.chatService.saveMessage(input.deviceId, "assistant", reply);
+    }
     return {
       ok: true,
       status: input.action === "approve" ? "approved" : "rejected",
       proposalCard: projectProposalCardForClient(card),
       proposalActionEvent: event,
       didMutateMeal: input.mutation?.didMutateMeal ?? false,
-      reply: input.mutation?.effects
-        ? renderMutationReceipt(input.mutation.effects)
-        : input.action === "reject"
-          ? cancelReply(input.kind)
-          : undefined,
+      reply,
       ...(input.mutation?.effects ? { mutationOutcomeFact: mutationOutcomeFactFromEffects(input.mutation.effects) } : {}),
       ...(input.mutation?.dailyTargets ? { dailyTargets: input.mutation.dailyTargets } : {}),
       ...(input.mutation?.updatedMeal ? { updatedMeal: input.mutation.updatedMeal } : {}),
