@@ -546,6 +546,7 @@ describe("API Client", () => {
       proposalCard: { ...validProposalCard, status: "approved", isActionable: false },
       proposalActionEvent: validProposalActionEvent,
       didMutateMeal: true,
+      reply: "已完成這次餐點修改。",
     });
 
     const result = await api.sendProposalAction({
@@ -565,6 +566,7 @@ describe("API Client", () => {
     });
     assert.equal(result.ok, true);
     assert.equal(result.proposalCard.status, "approved");
+    assert.equal(result.reply, "已完成這次餐點修改。");
     for (const forbidden of ["targets", "nutrition", "updateInput", "expectedMealRevisionId", "deleteMealId"]) {
       assert.equal(String(fetchCalls[0].init.body).includes(forbidden), false);
     }
@@ -586,6 +588,7 @@ describe("API Client", () => {
     }
 
     assert.match(apiSource, /export async function sendProposalAction/);
+    assert.match(typesSource, /type ProposalActionReply[\s\S]*?ok: true;[\s\S]*?reply\?: string;/);
     assert.match(apiSource, /fetch\("\/api\/proposals\/actions",\s*\{\s*method: "POST",\s*credentials: "same-origin"/s);
     const sendProposalActionSource = apiSource.match(
       /export async function sendProposalAction[\s\S]*?\n}\n\nexport async function loadHistory/,

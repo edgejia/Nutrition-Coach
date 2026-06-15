@@ -225,6 +225,7 @@ describe("proposal action API", () => {
       ok: boolean;
       status: string;
       didMutateMeal: boolean;
+      reply?: string;
       dailyTargets?: DailyTargets;
       proposalCard?: { status: string; isActionable: boolean; proposalId: string };
       proposalActionEvent?: { proposalId: string; proposalKind: string; action: string; transcriptCopy: string };
@@ -232,6 +233,10 @@ describe("proposal action API", () => {
     assert.equal(body.ok, true);
     assert.equal(body.status, "approved");
     assert.equal(body.didMutateMeal, false);
+    assert.equal(
+      body.reply,
+      "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g",
+    );
     assert.deepEqual(body.dailyTargets, targets);
     assert.deepEqual(await readTargets(), targets);
     assert.equal(body.proposalCard?.proposalId, proposalId);
@@ -277,6 +282,43 @@ describe("proposal action API", () => {
     assert.equal(replayBody.proposalCard?.status, "approved");
     assert.equal(replayBody.proposalCard?.isActionable, false);
     assert.deepEqual(await readTargets(), targets);
+  });
+
+  it("rejects an active goal proposal with deterministic assistant reply copy", async () => {
+    const defaults = await readTargets();
+    const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
+    const { proposalId } = await createGoalCard(targets);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "goal", action: "reject" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      reply?: string;
+      proposalCard?: { proposalId: string; status: string; isActionable: boolean };
+      proposalActionEvent?: { proposalId: string; proposalKind: string; action: string; transcriptCopy: string };
+    };
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "rejected");
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, "已取消這組目標提案，沒有套用任何更新。之後可以直接提供新的目標數字，或再請我產生一組建議。");
+    assert.deepEqual(await readTargets(), defaults);
+    assert.equal(body.proposalCard?.proposalId, proposalId);
+    assert.equal(body.proposalCard?.status, "rejected");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.equal(body.proposalActionEvent?.proposalId, proposalId);
+    assert.equal(body.proposalActionEvent?.proposalKind, "goal");
+    assert.equal(body.proposalActionEvent?.action, "reject");
+    assert.equal(body.proposalActionEvent?.transcriptCopy, "已取消目標提案");
+    assert.equal(publishedGoalUpdates.length, 0);
+    assert.equal(await historyHasActionEvent(proposalId), true);
   });
 
   it("rolls back goal approval when the decision boundary fails before action metadata is durable", async () => {
