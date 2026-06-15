@@ -181,6 +181,20 @@ describe("proposal action API", () => {
     return historyBody.messages.some((message) => message.proposalActionEvent?.proposalId === proposalId);
   }
 
+  async function historyHasAssistantReply(reply: string) {
+    const history = await app.inject({
+      method: "GET",
+      url: "/api/chat/history",
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyBody = history.json() as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    return historyBody.messages.some((message) =>
+      message.role === "assistant" && message.content === reply
+    );
+  }
+
   async function assertHistoryActionReply(input: {
     proposalId: string;
     action: string;
@@ -372,6 +386,8 @@ describe("proposal action API", () => {
     assert.deepEqual(await readTargets(), defaults);
     assert.equal(publishedGoalUpdates.length, 0);
     assert.equal(await historyHasActionEvent(proposalId), false);
+    const goalReply = "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g";
+    assert.equal(await historyHasAssistantReply(goalReply), false);
     assert.equal((await services.goalProposalService.getLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
@@ -390,11 +406,21 @@ describe("proposal action API", () => {
     });
 
     assert.equal(recovered.statusCode, 200);
-    assert.equal(recovered.json().ok, true);
+    const recoveredBody = recovered.json() as {
+      ok: boolean;
+      reply: string;
+    };
+    assert.equal(recoveredBody.ok, true);
+    assert.equal(recoveredBody.reply, goalReply);
     assert.deepEqual(await readTargets(), targets);
     assert.equal(publishedGoalUpdates.length, 1);
     assert.equal(publishedGoalUpdates[0]?.actionEventCount, 1);
-    assert.equal(await historyHasActionEvent(proposalId), true);
+    await assertHistoryActionReply({
+      proposalId,
+      action: "approve",
+      transcriptCopy: "已選擇套用目標",
+      reply: recoveredBody.reply,
+    });
   });
 
   it("rolls back meal delete approval when the decision boundary fails before action metadata is durable", async () => {
@@ -414,6 +440,8 @@ describe("proposal action API", () => {
     assert.ok((await readMealsFor(meal)).some((row) => row.id === meal.id));
     assert.equal(publishedDailySummaries.length, 0);
     assert.equal(await historyHasActionEvent(proposalId), false);
+    const deleteReply = "已刪除3/25 豆腐雞肉飯，已從當日紀錄移除。";
+    assert.equal(await historyHasAssistantReply(deleteReply), false);
     assert.equal((await services.mealDeleteProposalService.getLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
@@ -432,11 +460,21 @@ describe("proposal action API", () => {
     });
 
     assert.equal(recovered.statusCode, 200);
-    assert.equal(recovered.json().ok, true);
+    const recoveredBody = recovered.json() as {
+      ok: boolean;
+      reply: string;
+    };
+    assert.equal(recoveredBody.ok, true);
+    assert.equal(recoveredBody.reply, deleteReply);
     assert.equal((await readMealsFor(meal)).some((row) => row.id === meal.id), false);
     assert.equal(publishedDailySummaries.length, 1);
     assert.equal(publishedDailySummaries[0]?.actionEventCount, 1);
-    assert.equal(await historyHasActionEvent(proposalId), true);
+    await assertHistoryActionReply({
+      proposalId,
+      action: "approve",
+      transcriptCopy: "已選擇確認刪除",
+      reply: recoveredBody.reply,
+    });
   });
 
   it("fails closed for stale proposal actions without mutating targets or creating action events", async () => {
@@ -580,6 +618,7 @@ describe("proposal action API", () => {
       ok: boolean;
       status: string;
       didMutateMeal: boolean;
+      reply?: string;
       dailyTargets?: DailyTargets;
       proposalCard?: { proposalId: string; status: string; isActionable: boolean };
       proposalActionEvent?: { proposalId: string; action: string; transcriptCopy: string };
@@ -595,7 +634,16 @@ describe("proposal action API", () => {
     assert.equal(body.proposalActionEvent?.proposalId, proposalId);
     assert.equal(body.proposalActionEvent?.action, "approve");
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
-    assert.equal(await historyHasActionEvent(proposalId), true);
+    assert.equal(
+      body.reply,
+      "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g",
+    );
+    await assertHistoryActionReply({
+      proposalId,
+      action: "approve",
+      transcriptCopy: "已選擇套用目標",
+      reply: body.reply,
+    });
   });
 
   it("returns committed delete action metadata when daily_summary publish fails after commit", async () => {
@@ -616,6 +664,7 @@ describe("proposal action API", () => {
       ok: boolean;
       status: string;
       didMutateMeal: boolean;
+      reply?: string;
       deletedMealId?: string;
       affectedDate?: string;
       dailySummary?: unknown;
@@ -635,6 +684,12 @@ describe("proposal action API", () => {
     assert.equal(body.proposalActionEvent?.action, "approve");
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇確認刪除");
     assert.equal((await readMealsFor(meal)).some((row) => row.id === meal.id), false);
-    assert.equal(await historyHasActionEvent(proposalId), true);
+    assert.equal(body.reply, "已刪除3/25 豆腐雞肉飯，已從當日紀錄移除。");
+    await assertHistoryActionReply({
+      proposalId,
+      action: "approve",
+      transcriptCopy: "已選擇確認刪除",
+      reply: body.reply,
+    });
   });
 });
