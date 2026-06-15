@@ -2288,7 +2288,7 @@ textarea {
 .sp-chat-input-well {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px;
-  align-items: center;
+  align-items: end;
   gap: 8px;
   min-height: 44px;
   min-width: 0;
@@ -2364,8 +2364,10 @@ textarea {
 }
 
 .sp-chat-textarea {
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  height: 28px;
   min-height: 28px;
   max-height: 96px;
   resize: none;
@@ -2377,7 +2379,7 @@ textarea {
   font-size: 16px;
   line-height: 1.5;
   outline: 0;
-  overflow-y: auto;
+  overflow-y: hidden;
 }
 
 .sp-chat-textarea::placeholder {
