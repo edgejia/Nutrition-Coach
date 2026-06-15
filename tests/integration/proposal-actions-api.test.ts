@@ -181,6 +181,40 @@ describe("proposal action API", () => {
     return historyBody.messages.some((message) => message.proposalActionEvent?.proposalId === proposalId);
   }
 
+  async function assertHistoryActionReply(input: {
+    proposalId: string;
+    action: string;
+    transcriptCopy: string;
+    reply: string;
+  }) {
+    const history = await app.inject({
+      method: "GET",
+      url: "/api/chat/history",
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyBody = history.json() as {
+      messages: Array<{
+        role: string;
+        content: string;
+        proposalActionEvent?: { proposalId: string; action: string; transcriptCopy: string };
+        proposalCard?: unknown;
+      }>;
+    };
+    const actionIndex = historyBody.messages.findIndex((message) =>
+      message.role === "user"
+        && message.content === input.transcriptCopy
+        && message.proposalActionEvent?.proposalId === input.proposalId
+        && message.proposalActionEvent.action === input.action
+        && message.proposalActionEvent.transcriptCopy === input.transcriptCopy
+    );
+    assert.ok(actionIndex >= 0, "expected persisted proposal action event in chat history");
+    const replyMessage = historyBody.messages[actionIndex + 1];
+    assert.equal(replyMessage?.role, "assistant");
+    assert.equal(replyMessage.content, input.reply);
+    assert.equal(replyMessage.proposalActionEvent, undefined);
+    assert.equal(replyMessage.proposalCard, undefined);
+  }
+
   it("requires cookie-backed ownership and rejects client-supplied ownership fields", async () => {
     const missingSession = await app.inject({
       method: "POST",
@@ -249,19 +283,12 @@ describe("proposal action API", () => {
     assert.equal(publishedGoalUpdates.length, 1);
     assert.equal(publishedGoalUpdates[0]?.actionEventCount, 1);
 
-    const history = await app.inject({
-      method: "GET",
-      url: "/api/chat/history",
-      headers: { cookie: sessionCookieHeader },
+    await assertHistoryActionReply({
+      proposalId,
+      action: "approve",
+      transcriptCopy: "已選擇套用目標",
+      reply: body.reply,
     });
-    const historyBody = history.json() as {
-      messages: Array<{ role: string; proposalActionEvent?: { proposalId: string; action: string } }>;
-    };
-    assert.ok(historyBody.messages.some((message) =>
-      message.role === "user"
-        && message.proposalActionEvent?.proposalId === proposalId
-        && message.proposalActionEvent.action === "approve",
-    ));
 
     const replay = await app.inject({
       method: "POST",
@@ -318,7 +345,12 @@ describe("proposal action API", () => {
     assert.equal(body.proposalActionEvent?.action, "reject");
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已取消目標提案");
     assert.equal(publishedGoalUpdates.length, 0);
-    assert.equal(await historyHasActionEvent(proposalId), true);
+    await assertHistoryActionReply({
+      proposalId,
+      action: "reject",
+      transcriptCopy: "已取消目標提案",
+      reply: body.reply,
+    });
   });
 
   it("rolls back goal approval when the decision boundary fails before action metadata is durable", async () => {
