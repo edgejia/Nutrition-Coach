@@ -9,6 +9,7 @@ import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import {
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericProposalCopy,
+  renderProposalInactiveCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
@@ -16,6 +17,29 @@ import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 const REAL_DATE = Date;
 const FIXED_NOW = new REAL_DATE("2026-04-19T12:00:00+08:00");
 const SUCCESS_STYLE_COPY = /已更新|更新好了|已經幫你更新|已套用/;
+
+interface HistoryProposalCard {
+  proposalId: string;
+  proposalKind: string;
+  proposalLane: string;
+  status: string;
+  isActionable: boolean;
+  lapseCopy?: string | null;
+}
+
+interface HistoryProposalActionEvent {
+  proposalId: string;
+  proposalKind: string;
+  action: string;
+  transcriptCopy: string;
+}
+
+interface HistoryMessage {
+  role: string;
+  content: string;
+  proposalCard?: HistoryProposalCard;
+  proposalActionEvent?: HistoryProposalActionEvent;
+}
 
 class FixedDate extends REAL_DATE {
   constructor(...args: any[]) {
@@ -156,6 +180,14 @@ describe("chat meal correction integration", () => {
       carbs: number;
       fat: number;
     }> }).meals;
+  }
+
+  async function getHistory() {
+    const res = await fetch(`${address}/api/chat/history?limit=50`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(res.status, 200);
+    return (await res.json() as { messages: HistoryMessage[] }).messages;
   }
 
   it("updates a resolved meal only when the current turn supplies the explicit numeric target", async () => {
@@ -1485,6 +1517,136 @@ describe("chat meal correction integration", () => {
     assert.notEqual(updatedFirst?.mealRevisionId, first.mealRevisionId);
     assert.equal(untouchedSecond?.protein, 28);
     assert.equal(untouchedSecond?.mealRevisionId, second.mealRevisionId);
+  });
+
+  it("clears active meal proposal state and card when target selection starts before a numbered follow-up", async () => {
+    const older = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const newer = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 620, protein: 28, carbs: 76, fat: 18 },
+      ],
+    });
+    const staleProposal = await services.mealNumericProposalService.putLatest({
+      ...defaultSessionKey(),
+      input: {
+        mealId: older.id,
+        expectedMealRevisionId: older.mealRevisionId,
+        updateInput: { protein: 15 },
+        affectedFields: [{ field: "protein", before: 30, after: 15 }],
+        sourceOperator: "half",
+      },
+    });
+    const assistant = await services.chatService.saveMessage(
+      deviceId,
+      "assistant",
+      "請確認這組餐點修改提案。",
+    );
+    await services.proposalCardService.saveAssistantProposalCard({
+      deviceId,
+      assistantMessageId: assistant.id,
+      proposalId: staleProposal.proposalId,
+      proposalKind: "meal_numeric",
+      proposalLane: "meal_mutation",
+      title: "請確認這組餐點修改提案。",
+      details: {
+        rows: [{ label: "蛋白質", before: "30 g", after: "15 g" }],
+      },
+      actions: {
+        approveLabel: "套用修改",
+        editLabel: "改成其他數字",
+        rejectLabel: "取消提案",
+      },
+      expiresAt: staleProposal.expiresAt,
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_selection_after_stale_proposal",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "把今天午餐的雞腿飯蛋白質改掉",
+          }),
+        },
+      }],
+    });
+
+    const selectionPrompt = await postChat("把今天午餐的雞腿飯蛋白質改掉");
+
+    assert.equal(selectionPrompt.status, 200);
+    assert.equal(selectionPrompt.body.didLogMeal, false);
+    assert.equal(selectionPrompt.body.didMutateMeal, false);
+    assert.match(selectionPrompt.body.reply, /請直接回覆編號/);
+    assert.equal(await services.mealNumericProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.equal(await services.mealDeleteProposalService.getLatest(defaultSessionKey()), undefined);
+
+    const historyAfterSelection = await getHistory();
+    const staleCard = historyAfterSelection
+      .find((message) => message.proposalCard?.proposalId === staleProposal.proposalId)
+      ?.proposalCard;
+    assert.equal(staleCard?.status, "stale");
+    assert.equal(staleCard?.isActionable, false);
+    assert.equal(staleCard?.lapseCopy, renderProposalInactiveCopy({
+      proposalKind: "meal_numeric",
+      status: "stale",
+    }));
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_numbered_selection_after_stale_proposal",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "1，蛋白質改 8g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "apply_numbered_selection_after_stale_proposal",
+        type: "function",
+        function: {
+          name: "update_meal",
+          arguments: JSON.stringify({
+            meal_id: newer.id,
+            protein: 8,
+          }),
+        },
+      }],
+    });
+
+    const selected = await postChat("1，蛋白質改 8g");
+
+    assert.equal(selected.status, 200);
+    assert.equal(selected.body.didLogMeal, false);
+    assert.equal(selected.body.didMutateMeal, true);
+    assert.match(selected.body.reply, /已更新.*雞腿飯.*蛋白質 8 g/);
+
+    const historyAfterFollowUp = await getHistory();
+    assert.equal(
+      historyAfterFollowUp.some((message) => message.proposalActionEvent?.proposalId === staleProposal.proposalId),
+      false,
+      "numbered target-selection follow-up must not create an action event for the stale proposal",
+    );
+
+    const meals = await getMeals();
+    const untouchedOlder = meals.find((meal) => meal.id === older.id);
+    const updatedNewer = meals.find((meal) => meal.id === newer.id);
+    assert.equal(untouchedOlder?.mealRevisionId, older.mealRevisionId);
+    assert.equal(untouchedOlder?.protein, 30);
+    assert.notEqual(updatedNewer?.mealRevisionId, newer.mealRevisionId);
+    assert.equal(updatedNewer?.protein, 8);
   });
 
   it("Phase 67 D-43 resolves a mixed numbered vague follow-up without direct mutation or daily_summary publish", async () => {
