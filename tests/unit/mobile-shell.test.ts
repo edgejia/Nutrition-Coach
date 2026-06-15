@@ -306,6 +306,41 @@ describe("mobile shell source contract", () => {
     assert.match(textareaBlock, /resize:\s*none/);
   });
 
+  it("keeps proposal rows and action labels mobile wrapping safe", () => {
+    const rowBlock = cssBlock(".sp-proposal-row");
+    const rowValueBlock = cssBlock(".sp-proposal-row span:last-child");
+    const actionBlock = cssBlock(".sp-proposal-action");
+
+    assert.match(rowBlock, /grid-template-columns:\s*minmax\(0,\s*88px\) minmax\(0,\s*1fr\)/);
+    assert.match(rowBlock, /min-width:\s*0/);
+    assert.match(rowBlock, /overflow-wrap:\s*anywhere/);
+    assert.match(rowBlock, /word-break:\s*break-word/);
+
+    assert.match(sources.appCss, /\.sp-proposal-row span:first-child\s*\{[^}]*min-width:\s*0/s);
+    assert.match(sources.appCss, /\.sp-proposal-row span:first-child\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+    assert.match(sources.appCss, /\.sp-proposal-row span:first-child\s*\{[^}]*word-break:\s*break-word/s);
+
+    assert.match(rowValueBlock, /min-width:\s*0/);
+    assert.match(rowValueBlock, /flex-wrap:\s*wrap/);
+    assert.match(rowValueBlock, /overflow-wrap:\s*anywhere/);
+    assert.match(rowValueBlock, /word-break:\s*break-word/);
+    assert.match(sources.appCss, /\.sp-proposal-row i,\s*\.sp-proposal-row b,\s*\.sp-proposal-row strong\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+
+    assert.match(actionBlock, /min-height:\s*44px/);
+    assert.match(actionBlock, /min-width:\s*0/);
+    assert.match(actionBlock, /white-space:\s*normal/);
+    assert.match(actionBlock, /overflow-wrap:\s*anywhere/);
+
+    assert.match(
+      sources.appCss,
+      /@media \(max-width:\s*360px\)\s*\{[\s\S]*?\.sp-proposal-row\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    );
+    assert.match(
+      sources.appCss,
+      /@media \(max-width:\s*360px\)\s*\{[\s\S]*?\.sp-proposal-row span:last-child\s*\{[\s\S]*?justify-content:\s*flex-start/,
+    );
+  });
+
   it("keeps Chat composer and Meal Edit controls reserved above bottom occlusion without moving the bottom bar twice", () => {
     assert.match(cssBlock(".sp-chat-scroll"), /var\(--app-bottom-occlusion,\s*0px\)/);
     assert.doesNotMatch(cssBlock(".screen-bottom-bar"), /var\(--app-bottom-occlusion,\s*0px\)/);
