@@ -1968,6 +1968,7 @@ textarea {
 .sp-proposal-row {
   display: grid;
   grid-template-columns: minmax(0, 88px) minmax(0, 1fr);
+  min-width: 0;
   gap: 12px;
   align-items: center;
   padding: 12px 16px;
@@ -1975,6 +1976,8 @@ textarea {
   font-weight: 400;
   letter-spacing: 0;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sp-proposal-row + .sp-proposal-row {
@@ -1990,6 +1993,13 @@ textarea {
   color: var(--sp-ink);
   text-align: right;
   overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.sp-proposal-row span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sp-proposal-row i {
@@ -2007,6 +2017,14 @@ textarea {
   font-weight: 700;
 }
 
+.sp-proposal-row i,
+.sp-proposal-row b,
+.sp-proposal-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .sp-proposal-actions {
   display: grid;
   grid-template-columns: 1fr;
@@ -2018,6 +2036,7 @@ textarea {
 .sp-proposal-action {
   display: inline-flex;
   min-height: 44px;
+  min-width: 0;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--sp-line-strong);
@@ -2029,7 +2048,9 @@ textarea {
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1.25;
+  overflow-wrap: anywhere;
   padding: 12px 16px;
+  white-space: normal;
 }
 
 .sp-proposal-action:focus-visible {
@@ -2327,6 +2348,19 @@ textarea {
   font-size: 12px;
   line-height: 1.25;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 360px) {
+  .sp-proposal-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    align-items: start;
+  }
+
+  .sp-proposal-row span:last-child {
+    justify-content: flex-start;
+    text-align: left;
+  }
 }
 
 .sp-chat-textarea {
