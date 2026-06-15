@@ -3,7 +3,6 @@ import { getSupportedImageMimeType } from "../api.js";
 import { SportCameraIcon, SportCloseIcon, SportSendIcon, SportStopIcon } from "./SportIcons.js";
 
 const UPLOAD_ERROR_COPY = "目前只支援 JPG、PNG、WebP 照片。iPhone HEIC 請先轉成 JPG 後再上傳。";
-const CHAT_TEXTAREA_MAX_HEIGHT_FALLBACK_PX = 144;
 
 function shouldUseMobileNewlineBehavior() {
   return window.matchMedia("(pointer: coarse), (hover: none)").matches;
@@ -35,19 +34,18 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isComposingRef = useRef(false);
   const canSend = Boolean(text.trim() || image);
+  const composerExpanded = text.includes("\n");
 
   function resizeTextarea() {
     const textarea = textareaRef.current;
     if (!textarea) return;
 
     textarea.style.height = "auto";
+    textarea.style.overflowY = "hidden";
+    textarea.style.height = `${textarea.scrollHeight}px`;
 
-    const computedMaxHeight = Number.parseFloat(window.getComputedStyle(textarea).maxHeight);
-    const maxHeight = Number.isFinite(computedMaxHeight) ? computedMaxHeight : CHAT_TEXTAREA_MAX_HEIGHT_FALLBACK_PX;
-    const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
-
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+    const isOverflowing = textarea.scrollHeight > textarea.clientHeight + 1;
+    textarea.style.overflowY = isOverflowing ? "auto" : "hidden";
   }
 
   useLayoutEffect(() => {
@@ -127,7 +125,7 @@ export function ChatInput({
       >
         <SportCameraIcon size={20} stroke={1.8} />
       </button>
-      <div className="sp-chat-input-well">
+      <div className="sp-chat-input-well" data-expanded={composerExpanded}>
         {image && (
           <span className="sp-chat-image-chip">
             <span>{image.name}</span>

@@ -2294,9 +2294,22 @@ textarea {
   min-width: 0;
   flex: 1 1 auto;
   border: 1px solid var(--sp-line);
-  border-radius: var(--sp-r-pill);
+  border-radius: 28px;
   background: var(--sp-surface-2);
   padding: 5px 6px 5px 14px;
+}
+
+.sp-chat-input-well[data-expanded="true"] {
+  padding-top: 12px;
+}
+
+.sp-chat-input-well[data-expanded="true"] .sp-chat-textarea {
+  grid-column: 1 / -1;
+}
+
+.sp-chat-input-well[data-expanded="true"] .sp-chat-send {
+  grid-column: 2;
+  justify-self: end;
 }
 
 .sp-chat-image-chip {
@@ -2369,7 +2382,7 @@ textarea {
   min-width: 0;
   height: 28px;
   min-height: 28px;
-  max-height: 144px;
+  max-height: min(42dvh, 360px);
   resize: none;
   border: 0;
   background: transparent;
