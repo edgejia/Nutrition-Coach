@@ -2350,7 +2350,7 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 360px) {
+@media (max-width: 430px) {
   .sp-proposal-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 6px;
