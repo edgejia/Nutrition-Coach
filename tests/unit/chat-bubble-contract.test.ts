@@ -557,12 +557,9 @@ describe("chat bubble source contract", () => {
     assert.match(getCssRule(css, ".sp-proposal-inactive .sp-proposal-head h3"), /var\(--sp-ink-2\)/);
   });
 
-  it("renders an empty focused inline edit input with backend hint and distinct close control", () => {
+  it("renders an empty focused inline edit input with backend numeric hint and distinct close control", () => {
     const html = renderProposalCard({
-      proposalCard: {
-        ...activeMealEstimateProposal,
-        inputHint: "輸入你想怎麼調整，例如：熱量再低一點",
-      },
+      proposalCard: activeMealEstimateProposal,
       activeEdit: {
         messageId: "proposal-message-1",
         proposalId: activeMealEstimateProposal.proposalId,
@@ -575,7 +572,8 @@ describe("chat bubble source contract", () => {
 
     assert.match(html, /sp-proposal-inline-edit/);
     assert.match(html, /autoFocus|autofocus/);
-    assert.match(html, /輸入你想怎麼調整，例如：熱量再低一點/);
+    assert.match(html, /輸入明確數字，例如：熱量改 460 kcal 或蛋白質改 30g/);
+    assert.doesNotMatch(html, /熱量再低一點/);
     assert.match(html, /關閉編輯/);
     assert.match(html, /送出/);
     assert.doesNotMatch(html, /sp-proposal-inline-cancel[^>]*>取消提案/);
@@ -625,7 +623,8 @@ describe("chat bubble source contract", () => {
       onCancelEdit: () => {},
     });
 
-    assert.match(html, /class="sp-proposal-action sp-proposal-inline-send" type="submit" disabled="">送出/);
+    assert.match(html, /class="sp-proposal-action sp-proposal-inline-send" type="submit" disabled=""[^>]*>送出/);
+    assert.match(html, /aria-disabled="true"/);
   });
 
   it("enables inline edit submit when the edit value contains text", () => {
@@ -680,6 +679,23 @@ describe("chat bubble source contract", () => {
     assert.match(proposalCard, /autoFocus/);
     assert.match(proposalCard, /sp-proposal-inline-edit/);
     assert.match(proposalCard, /關閉編輯/);
+  });
+
+  it("keeps inline proposal edit keyboard handling IME-safe and submit guarded", async () => {
+    const proposalCard = await readSource("client/src/components/ProposalCard.tsx");
+    const chatInput = await readSource("client/src/components/ChatInput.tsx");
+
+    assert.match(chatInput, /e\.nativeEvent\.isComposing/);
+    assert.match(proposalCard, /isComposingRef/);
+    assert.match(proposalCard, /event\.nativeEvent\.isComposing/);
+    assert.match(proposalCard, /onCompositionStart=\{\(\) => \{/);
+    assert.match(proposalCard, /onCompositionEnd=\{\(\) => \{/);
+    assert.match(proposalCard, /if \(event\.key !== "Enter"\) return;/);
+    assert.match(proposalCard, /if \(event\.shiftKey\) return;/);
+    assert.match(proposalCard, /event\.preventDefault\(\);/);
+    assert.match(proposalCard, /canSubmitInlineEdit/);
+    assert.match(proposalCard, /if \(!canSubmitInlineEdit\) \{/);
+    assert.match(proposalCard, /onInlineEditSubmit\?\.\(\)/);
   });
 
   it("appends proposal action replies as assistant messages after the user action event", async () => {
