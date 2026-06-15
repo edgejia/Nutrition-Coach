@@ -155,6 +155,7 @@ export type OrchestratorResult =
       mutationOutcomeFact?: ChatMutationOutcomeFact;
       proposalCard?: PendingProposalCardInput | ProposalCardClientMetadata;
       proposalActionEvent?: ProposalActionEventClientMetadata;
+      assistantReplyPersistence?: "already_persisted";
     } & FinalReplyTraceMetadata)
   | ({
       streamGenerator: AsyncGenerator<string>;
@@ -171,6 +172,7 @@ export type OrchestratorResult =
       mutationOutcomeFact?: ChatMutationOutcomeFact;
       proposalCard?: PendingProposalCardInput | ProposalCardClientMetadata;
       proposalActionEvent?: ProposalActionEventClientMetadata;
+      assistantReplyPersistence?: "already_persisted";
     } & FinalReplyTraceMetadata);
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
@@ -805,6 +807,7 @@ function buildTypedActionResult(input: {
     ...(input.actionResult.ok && input.actionResult.mutationOutcomeFact ? { mutationOutcomeFact: input.actionResult.mutationOutcomeFact } : {}),
     ...(input.actionResult.proposalCard ? { proposalCard: input.actionResult.proposalCard } : {}),
     ...(input.actionResult.ok ? { proposalActionEvent: input.actionResult.proposalActionEvent } : {}),
+    ...(input.actionResult.ok && input.actionResult.reply ? { assistantReplyPersistence: "already_persisted" as const } : {}),
     finalReplySource: "renderer",
     finalReplyShape: classifyPlainReplyShape(reply),
   };

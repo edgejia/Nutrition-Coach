@@ -1388,25 +1388,33 @@ async function handleOrchestratorSSE(
           rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
         },
       ).reply;
-      const finalized = await finalizeAssistantReply(
-        deps.chatService,
-        deviceId,
-        normalizedReply,
-        streamReceiptIdentity,
-        {
-          mutationOutcomeFact: streamMutationOutcomeFact,
-          log: deps.log,
-          transport: "sse",
-        },
-      );
-      streamProposalCard = await persistProposalCardForAssistant({
-        proposalCardService: deps.proposalCardService,
-        deviceId,
-        assistantMessageId: finalized.assistantMessageId,
-        proposalCard,
-      });
-      const sanitizedFallback = finalized.sanitized;
-      streamReceiptPersistence = finalized.receiptPersistence;
+      const alreadyPersistedAssistantReply = result.assistantReplyPersistence === "already_persisted";
+      let sanitizedFallback = sanitizeReply(normalizedReply);
+      if (alreadyPersistedAssistantReply) {
+        streamProposalCard = proposalCard && isProjectedProposalCard(proposalCard)
+          ? proposalCard
+          : undefined;
+      } else {
+        const finalized = await finalizeAssistantReply(
+          deps.chatService,
+          deviceId,
+          normalizedReply,
+          streamReceiptIdentity,
+          {
+            mutationOutcomeFact: streamMutationOutcomeFact,
+            log: deps.log,
+            transport: "sse",
+          },
+        );
+        streamProposalCard = await persistProposalCardForAssistant({
+          proposalCardService: deps.proposalCardService,
+          deviceId,
+          assistantMessageId: finalized.assistantMessageId,
+          proposalCard,
+        });
+        sanitizedFallback = finalized.sanitized;
+        streamReceiptPersistence = finalized.receiptPersistence;
+      }
       const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
@@ -1833,26 +1841,34 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
           },
         ).reply;
-        const finalized = await finalizeAssistantReply(
-          chatService,
-          deviceId,
-          normalizedReply,
-          jsonReceiptIdentity,
-          {
-            mutationOutcomeFact: jsonMutationOutcomeFact,
-            log: turnLog,
-            transport: "json",
-          },
-        );
-        const sanitizedJson = finalized.sanitized;
-        jsonReceiptPersistence = finalized.receiptPersistence;
+        const alreadyPersistedAssistantReply = result.assistantReplyPersistence === "already_persisted";
+        let sanitizedJson = sanitizeReply(normalizedReply);
+        if (alreadyPersistedAssistantReply) {
+          jsonProposalCard = result.proposalCard && isProjectedProposalCard(result.proposalCard)
+            ? result.proposalCard
+            : undefined;
+        } else {
+          const finalized = await finalizeAssistantReply(
+            chatService,
+            deviceId,
+            normalizedReply,
+            jsonReceiptIdentity,
+            {
+              mutationOutcomeFact: jsonMutationOutcomeFact,
+              log: turnLog,
+              transport: "json",
+            },
+          );
+          sanitizedJson = finalized.sanitized;
+          jsonReceiptPersistence = finalized.receiptPersistence;
+          jsonProposalCard = await persistProposalCardForAssistant({
+            proposalCardService,
+            deviceId,
+            assistantMessageId: finalized.assistantMessageId,
+            proposalCard: result.proposalCard,
+          });
+        }
         const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
-        jsonProposalCard = await persistProposalCardForAssistant({
-          proposalCardService,
-          deviceId,
-          assistantMessageId: finalized.assistantMessageId,
-          proposalCard: result.proposalCard,
-        });
         traceRecorder?.recordFinalReply({
           source: result.finalReplySource ?? "model",
           shape: result.finalReplyShape ?? "empty_or_missing",
