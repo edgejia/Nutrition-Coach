@@ -1,12 +1,71 @@
 import type { CoachCTA, CoachCTAIntent, CoachCTAIntentId, DailyTargets, DailySummary } from "./types.js";
 
-export function getCoachAdvice(summary: DailySummary | null, targets: DailyTargets | null): string | null {
+export type CoachGoal = "fat_loss" | "muscle_gain" | "maintain";
+
+export function narrowGoal(goal: string | null | undefined): CoachGoal {
+  return goal === "fat_loss" || goal === "muscle_gain" || goal === "maintain" ? goal : "maintain";
+}
+
+export function getEmptyStateCopy(goal: string | null, targets: DailyTargets | null): string {
+  if (!targets) {
+    return "還沒記錄任何餐點，開始記錄你的第一餐吧";
+  }
+
+  const g = narrowGoal(goal);
+  if (g === "muscle_gain") {
+    return `今天蛋白質目標 ${Math.round(targets.protein)}g，先記錄第一餐幫增肌打底`;
+  }
+  if (g === "fat_loss") {
+    return `今天熱量額度 ${Math.round(targets.calories)} kcal，先記錄第一餐掌握減脂節奏`;
+  }
+  return "還沒記錄任何餐點，開始記錄你的第一餐吧";
+}
+
+export function getCoachAdvice(
+  summary: DailySummary | null,
+  targets: DailyTargets | null,
+  goal: string | null = "maintain",
+): string | null {
   if (!summary || !targets) {
     return null;
   }
 
   if (summary.mealCount === 0) {
-    return "還沒記錄任何餐點，開始記錄你的第一餐吧";
+    return getEmptyStateCopy(goal, targets);
+  }
+
+  const g = narrowGoal(goal);
+  if (g === "muscle_gain") {
+    const proteinRemaining = Math.max(targets.protein - summary.totalProtein, 0);
+    const caloriesRemaining = Math.max(targets.calories - summary.totalCalories, 0);
+    if (proteinRemaining > 30) {
+      return `蛋白質還差 ${Math.round(proteinRemaining)}g，記得再補一餐`;
+    }
+    if (caloriesRemaining > 200) {
+      return `今天還有 ${Math.round(caloriesRemaining)} kcal 空間，記得再補一餐`;
+    }
+    if (summary.totalFat > targets.fat) {
+      return "脂肪已超標，接下來選低油高蛋白食物";
+    }
+    return "今天增肌節奏穩定，繼續把蛋白質補齊";
+  }
+
+  if (g === "fat_loss") {
+    const caloriesRemaining = targets.calories - summary.totalCalories;
+    if (caloriesRemaining < 200) {
+      return "熱量快到上限了，晚餐吃清淡一點";
+    }
+
+    if (summary.totalFat > targets.fat) {
+      return "脂肪已超標，接下來避免油炸食物";
+    }
+
+    const proteinRemaining = Math.max(targets.protein - summary.totalProtein, 0);
+    if (proteinRemaining > 30) {
+      return `蛋白質還差 ${Math.round(proteinRemaining)}g，下一餐選低脂高蛋白`;
+    }
+
+    return "今天減脂節奏穩定，繼續掌握份量";
   }
 
   const proteinRemaining = Math.max(targets.protein - summary.totalProtein, 0);
