@@ -470,6 +470,22 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(html, /這段文字不應該成為普通使用者泡泡/);
   });
 
+  it("renders proposal action completion replies through the normal assistant bubble path", () => {
+    const message: Message = {
+      id: "proposal-action-reply-1",
+      role: "assistant",
+      content: "已完成這次餐點修改。",
+      createdAt: "2026-04-29T07:35:01.000Z",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, /sp-bubble-asst/);
+    assert.match(html, /已完成這次餐點修改。/);
+    assert.doesNotMatch(html, /sp-proposal-action-event/);
+    assert.doesNotMatch(html, /提案動作/);
+  });
+
   it("renders delete proposal approval as destructive confirmation while reject stays non-destructive", () => {
     const html = renderMessageBubble(
       proposalMessage({
@@ -664,6 +680,21 @@ describe("chat bubble source contract", () => {
     assert.match(proposalCard, /autoFocus/);
     assert.match(proposalCard, /sp-proposal-inline-edit/);
     assert.match(proposalCard, /關閉編輯/);
+  });
+
+  it("appends proposal action replies as assistant messages after the user action event", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+
+    assert.match(chatPanel, /function appendProposalActionReply\(reply: string\)/);
+    assert.match(chatPanel, /createClientId\("ast-action"\)/);
+    assert.match(chatPanel, /role: "assistant"/);
+    assert.match(chatPanel, /content: trimmedReply/);
+    assert.match(chatPanel, /result\.reply/);
+
+    const actionEventIndex = chatPanel.indexOf("appendProposalActionEvent(result.proposalActionEvent)");
+    const replyIndex = chatPanel.indexOf("appendProposalActionReply(result.reply)");
+    assert.ok(actionEventIndex >= 0, "ChatPanel should append the structured proposal action event");
+    assert.ok(replyIndex > actionEventIndex, "assistant completion reply should be appended after the action event");
   });
 
   it("delete mutation confirmations stay assistant text only without receipt affordances", async () => {
