@@ -296,13 +296,13 @@ describe("mobile shell source contract", () => {
     assert.match(submitMessage, /onSend\(trimmedText, image \?\? undefined\)/);
   });
 
-  it("keeps Chat textarea at mobile-safe font size and four-line growth cap", () => {
+  it("keeps Chat textarea at mobile-safe font size with viewport-relative growth cap", () => {
     const textareaBlock = cssBlock(".sp-chat-textarea");
 
     assert.match(textareaBlock, /font-size:\s*16px/);
     assert.match(textareaBlock, /line-height:\s*1\.5/);
-    assert.match(textareaBlock, /max-height:\s*96px/);
-    assert.match(textareaBlock, /overflow-y:\s*auto/);
+    assert.match(textareaBlock, /max-height:\s*min\(42dvh,\s*360px\)/);
+    assert.match(textareaBlock, /overflow-y:\s*hidden/);
     assert.match(textareaBlock, /resize:\s*none/);
   });
 
