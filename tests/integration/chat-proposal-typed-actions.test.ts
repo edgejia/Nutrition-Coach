@@ -291,6 +291,31 @@ describe("typed proposal actions through /api/chat", () => {
     );
   }
 
+  function assertHistoryActionThenSingleAssistantReply(input: {
+    history: HistoryMessage[];
+    proposalId: string;
+    reply: string;
+  }) {
+    const actionIndex = input.history.findIndex((message) =>
+      message.role === "user" && message.proposalActionEvent?.proposalId === input.proposalId
+    );
+    assert.ok(actionIndex >= 0, "expected persisted typed proposal action event");
+
+    const assistantReplies = input.history
+      .map((message, index) => ({ message, index }))
+      .filter(({ message }) => message.role === "assistant" && message.content === input.reply);
+    assert.equal(
+      assistantReplies.length,
+      1,
+      "typed proposal action must persist exactly one assistant completion reply",
+    );
+    assert.ok(
+      assistantReplies[0]!.index > actionIndex,
+      "assistant completion reply should reload after the structured action event",
+    );
+    assert.equal(assistantReplies[0]!.message.proposalActionEvent, undefined);
+  }
+
   it("approves a goal proposal from typed chat text and reloads as a structured action event", async () => {
     const proposal = await createGoalCard();
 
@@ -306,6 +331,10 @@ describe("typed proposal actions through /api/chat", () => {
     assert.equal(body.proposalActionEvent?.proposalKind, "goal");
     assert.equal(body.proposalActionEvent?.action, "approve");
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
+    assert.equal(
+      body.reply,
+      "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g",
+    );
     assert.deepEqual(await readTargets(), UPDATED_TARGETS);
 
     const history = await getHistory();
@@ -316,6 +345,11 @@ describe("typed proposal actions through /api/chat", () => {
       action: "approve",
       transcriptCopy: "已選擇套用目標",
       typedText: "好",
+    });
+    assertHistoryActionThenSingleAssistantReply({
+      history,
+      proposalId: proposal.proposalId,
+      reply: body.reply,
     });
     const card = history.find((message) => message.proposalCard?.proposalId === proposal.proposalId)?.proposalCard;
     assert.equal(card?.status, "approved");
