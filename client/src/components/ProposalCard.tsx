@@ -3,6 +3,7 @@ import type {
   ProposalActionRequest,
   ProposalCardMetadata,
 } from "../types.js";
+import { useRef, type KeyboardEvent } from "react";
 
 type ActiveProposalEdit = {
   messageId: string;
@@ -38,7 +39,7 @@ function getDefaultInputHint(proposalKind: ProposalCardMetadata["proposalKind"])
     case "meal_numeric":
       return "輸入你想改成的數字，例如：蛋白質改 30g";
     case "meal_estimate":
-      return "輸入你想怎麼調整，例如：熱量再低一點";
+      return "輸入明確數字，例如：熱量改 460 kcal 或蛋白質改 30g";
     case "meal_delete":
       return "輸入新的需求；這不會直接刪除餐點";
   }
@@ -85,7 +86,29 @@ export function ProposalCard({
   const isEditing = activeEdit?.proposalId === proposalCard.proposalId;
   const inputHint = proposalCard.inputHint ?? getDefaultInputHint(proposalCard.proposalKind);
   const isPending = Boolean(isActionPending || pendingAction);
-  const isInlineSubmitDisabled = activeEdit ? activeEdit.value.trim().length === 0 || isPending : false;
+  const isComposingRef = useRef(false);
+  const canSubmitInlineEdit = Boolean(activeEdit?.value.trim());
+  const isInlineSubmitDisabled = activeEdit ? !canSubmitInlineEdit || isPending : false;
+
+  function submitInlineEdit() {
+    if (!canSubmitInlineEdit) {
+      return;
+    }
+    if (isPending) {
+      return;
+    }
+    onInlineEditSubmit?.();
+  }
+
+  function handleInlineEditKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing) return;
+    if (isComposingRef.current) return;
+    if (event.key !== "Enter") return;
+    if (event.shiftKey) return;
+
+    event.preventDefault();
+    submitInlineEdit();
+  }
 
   return (
     <div className="sp-message-row sp-message-row-assistant">
@@ -167,10 +190,7 @@ export function ProposalCard({
                 className="sp-proposal-inline-edit"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (isInlineSubmitDisabled) {
-                    return;
-                  }
-                  onInlineEditSubmit?.();
+                  submitInlineEdit();
                 }}
               >
                 <textarea
@@ -178,6 +198,13 @@ export function ProposalCard({
                   autoFocus
                   className="sp-proposal-inline-input"
                   onChange={(event) => onInlineEditChange?.(event.currentTarget.value)}
+                  onCompositionStart={() => {
+                    isComposingRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    isComposingRef.current = false;
+                  }}
+                  onKeyDown={handleInlineEditKeyDown}
                   placeholder={inputHint}
                   rows={2}
                   value={activeEdit.value}
@@ -187,6 +214,7 @@ export function ProposalCard({
                     className="sp-proposal-action sp-proposal-inline-send"
                     type="submit"
                     disabled={isInlineSubmitDisabled}
+                    aria-disabled={isInlineSubmitDisabled}
                   >
                     送出
                   </button>

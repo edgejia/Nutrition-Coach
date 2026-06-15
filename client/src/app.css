@@ -2158,6 +2158,12 @@ textarea {
   color: var(--sp-bg);
 }
 
+.sp-proposal-inline-send:disabled {
+  border-color: var(--sp-line);
+  background: var(--sp-surface-2);
+  color: var(--sp-ink-3);
+}
+
 .sp-proposal-inline-cancel {
   color: var(--sp-ink-2);
 }
