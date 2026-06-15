@@ -2299,19 +2299,6 @@ textarea {
   padding: 5px 6px 5px 14px;
 }
 
-.sp-chat-input-well[data-expanded="true"] {
-  padding-top: 12px;
-}
-
-.sp-chat-input-well[data-expanded="true"] .sp-chat-textarea {
-  grid-column: 1 / -1;
-}
-
-.sp-chat-input-well[data-expanded="true"] .sp-chat-send {
-  grid-column: 2;
-  justify-self: end;
-}
-
 .sp-chat-image-chip {
   grid-column: 1 / -1;
   display: inline-flex;

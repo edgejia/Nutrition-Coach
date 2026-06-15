@@ -34,7 +34,6 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isComposingRef = useRef(false);
   const canSend = Boolean(text.trim() || image);
-  const composerExpanded = text.includes("\n");
 
   function resizeTextarea() {
     const textarea = textareaRef.current;
@@ -125,7 +124,7 @@ export function ChatInput({
       >
         <SportCameraIcon size={20} stroke={1.8} />
       </button>
-      <div className="sp-chat-input-well" data-expanded={composerExpanded}>
+      <div className="sp-chat-input-well">
         {image && (
           <span className="sp-chat-image-chip">
             <span>{image.name}</span>
