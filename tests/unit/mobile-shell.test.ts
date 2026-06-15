@@ -333,11 +333,15 @@ describe("mobile shell source contract", () => {
 
     assert.match(
       sources.appCss,
-      /@media \(max-width:\s*360px\)\s*\{[\s\S]*?\.sp-proposal-row\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+      /@media \(max-width:\s*430px\)\s*\{[\s\S]*?\.sp-proposal-row\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/,
     );
     assert.match(
       sources.appCss,
-      /@media \(max-width:\s*360px\)\s*\{[\s\S]*?\.sp-proposal-row span:last-child\s*\{[\s\S]*?justify-content:\s*flex-start/,
+      /@media \(max-width:\s*430px\)\s*\{[\s\S]*?\.sp-proposal-row span:last-child\s*\{[\s\S]*?justify-content:\s*flex-start/,
+    );
+    assert.match(
+      sources.appCss,
+      /@media \(max-width:\s*430px\)\s*\{[\s\S]*?\.sp-proposal-row span:last-child\s*\{[\s\S]*?text-align:\s*left/,
     );
   });
 

@@ -28,6 +28,25 @@ function getCssRule(css: string, selector: string) {
   return css.slice(openIndex + 1, closeIndex);
 }
 
+function getCssAtRuleBlock(css: string, atRule: string) {
+  const startIndex = css.indexOf(atRule);
+  assert.notEqual(startIndex, -1, `Missing CSS at-rule: ${atRule}`);
+  const openIndex = css.indexOf("{", startIndex);
+  assert.ok(openIndex > startIndex, `Malformed CSS at-rule: ${atRule}`);
+
+  let depth = 0;
+  for (let index = openIndex; index < css.length; index += 1) {
+    const char = css[index];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      return css.slice(openIndex + 1, index);
+    }
+  }
+
+  assert.fail(`CSS at-rule should be closed: ${atRule}`);
+}
+
 function renderMessageBubble(message: Message, options?: { isProvisional?: boolean; isStatusLabel?: boolean }) {
   return renderToStaticMarkup(createElement(MessageBubble, { message, ...options }));
 }
@@ -555,6 +574,17 @@ describe("chat bubble source contract", () => {
     assert.doesNotMatch(getCssRule(css, ".sp-proposal-row strong"), /var\(--sp-lime\)/);
     assert.match(getCssRule(css, ".sp-proposal-action"), /min-height:\s*44px/);
     assert.match(getCssRule(css, ".sp-proposal-inactive .sp-proposal-head h3"), /var\(--sp-ink-2\)/);
+  });
+
+  it("keeps browser-preview proposal row stacking scoped to proposal selectors", async () => {
+    const css = await readSource("client/src/app.css");
+    const previewBlock = getCssAtRuleBlock(css, "@media (max-width: 430px)");
+
+    assert.match(previewBlock, /\.sp-proposal-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+    assert.match(previewBlock, /\.sp-proposal-row\s*\{[^}]*align-items:\s*start/s);
+    assert.match(previewBlock, /\.sp-proposal-row span:last-child\s*\{[^}]*justify-content:\s*flex-start/s);
+    assert.match(previewBlock, /\.sp-proposal-row span:last-child\s*\{[^}]*text-align:\s*left/s);
+    assert.doesNotMatch(previewBlock, /\.sp-chat-textarea|\.sp-chat-input|\.screen-scroll|\.sp-receipt-row/);
   });
 
   it("renders an empty focused inline edit input with backend numeric hint and distinct close control", () => {
