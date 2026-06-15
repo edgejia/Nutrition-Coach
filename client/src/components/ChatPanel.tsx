@@ -724,6 +724,19 @@ export function ChatPanel() {
     });
   }
 
+  function appendProposalActionReply(reply: string) {
+    const trimmedReply = reply.trim();
+    if (trimmedReply.length === 0) {
+      return;
+    }
+    addMessage({
+      id: createClientId("ast-action"),
+      role: "assistant",
+      content: trimmedReply,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
   async function handleProposalAction(request: ProposalActionRequest) {
     if (useStore.getState().sending) return;
     if (pendingProposalActionRef.current.has(request.proposalId)) return;
@@ -749,6 +762,9 @@ export function ChatPanel() {
       }
       if (result.ok) {
         appendProposalActionEvent(result.proposalActionEvent);
+        if (result.reply) {
+          appendProposalActionReply(result.reply);
+        }
         if (result.dailyTargets) {
           setDailyTargets(result.dailyTargets);
         }
