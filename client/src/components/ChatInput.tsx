@@ -3,6 +3,7 @@ import { getSupportedImageMimeType } from "../api.js";
 import { SportCameraIcon, SportCloseIcon, SportSendIcon, SportStopIcon } from "./SportIcons.js";
 
 const UPLOAD_ERROR_COPY = "目前只支援 JPG、PNG、WebP 照片。iPhone HEIC 請先轉成 JPG 後再上傳。";
+const CHAT_TEXTAREA_MAX_HEIGHT_FALLBACK_PX = 144;
 
 function shouldUseMobileNewlineBehavior() {
   return window.matchMedia("(pointer: coarse), (hover: none)").matches;
@@ -42,7 +43,7 @@ export function ChatInput({
     textarea.style.height = "auto";
 
     const computedMaxHeight = Number.parseFloat(window.getComputedStyle(textarea).maxHeight);
-    const maxHeight = Number.isFinite(computedMaxHeight) ? computedMaxHeight : 96;
+    const maxHeight = Number.isFinite(computedMaxHeight) ? computedMaxHeight : CHAT_TEXTAREA_MAX_HEIGHT_FALLBACK_PX;
     const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
 
     textarea.style.height = `${nextHeight}px`;
