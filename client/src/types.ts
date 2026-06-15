@@ -249,6 +249,7 @@ export type ProposalActionReply =
       proposalCard: ProposalCardMetadata;
       proposalActionEvent: ProposalActionEventMetadata;
       didMutateMeal: boolean;
+      reply?: string;
       dailyTargets?: DailyTargets;
       updatedMeal?: unknown;
       deletedMealId?: string;
