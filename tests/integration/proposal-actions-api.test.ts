@@ -325,19 +325,6 @@ describe("proposal action API", () => {
     assert.deepEqual(await readTargets(), targets);
     assert.deepEqual(await readTargets(foreignCookieHeader), originalForeignTargets);
 
-    const extraField = await app.inject({
-      method: "POST",
-      url: "/api/proposals/actions",
-      headers: { cookie: sessionCookieHeader },
-      payload: {
-        proposalId: "proposal-1",
-        kind: "goal",
-        action: "approve",
-        deviceId,
-      },
-    });
-    assert.equal(extraField.statusCode, 400);
-
     const events = observabilityEvents(logCapture.logLines, "ownership_bypass_blocked");
     assert.equal(events.length, 1);
     assert.equal(typeof events[0]!.requestId, "string");
@@ -366,14 +353,34 @@ describe("proposal action API", () => {
         "guest_session",
         "cookie",
         JSON.stringify({ proposalId, kind: "goal", action: "approve" }),
-        JSON.stringify({
-          proposalId: "proposal-1",
-          kind: "goal",
-          action: "approve",
-          deviceId,
-        }),
       ],
     );
+
+    const extraField = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: {
+        proposalId: "proposal-1",
+        kind: "goal",
+        action: "approve",
+        deviceId,
+      },
+    });
+    assert.equal(extraField.statusCode, 400);
+    const allEvents = observabilityEvents(logCapture.logLines, "ownership_bypass_blocked");
+    assertLogEventsExclude([allEvents.at(-1)!], [
+      deviceId,
+      "deviceId",
+      "guest_session",
+      "cookie",
+      JSON.stringify({
+        proposalId: "proposal-1",
+        kind: "goal",
+        action: "approve",
+        deviceId,
+      }),
+    ]);
   });
 
   it("approves an active goal proposal, updates targets, and records a transcript action event", async () => {

@@ -1,5 +1,6 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import { logOwnershipBypassBlocked } from "../observability/events.js";
 import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import {
@@ -24,6 +25,14 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function isOneOf<T extends readonly string[]>(value: unknown, values: T): value is T[number] {
   return typeof value === "string" && values.includes(value);
+}
+
+function hasRawDeviceIdSelector(request: FastifyRequest) {
+  return (
+    request.headers["x-device-id"] !== undefined
+    || (isPlainRecord(request.query) && "deviceId" in request.query)
+    || (isPlainRecord(request.body) && "deviceId" in request.body)
+  );
 }
 
 function parseProposalActionBody(
@@ -67,6 +76,15 @@ export function registerProposalActionRoutes(app: FastifyInstance, deps: Deps) {
     }
     if (session.setCookies) {
       reply.header("set-cookie", session.setCookies);
+    }
+
+    if (hasRawDeviceIdSelector(request)) {
+      logOwnershipBypassBlocked(request.log, {
+        reason: "raw_device_id_param",
+        route: "api_proposals_actions",
+        operation: "proposal_action",
+        requestId: request.id,
+      });
     }
 
     const parsed = parseProposalActionBody(request.body);
