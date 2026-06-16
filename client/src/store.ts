@@ -291,7 +291,8 @@ export const useStore = create<AppState>((set, get) => ({
       }));
       return true;
     } catch {
-      set({ guestSessionStatus: "recovery_required" });
+      localStorage.removeItem("deviceId");
+      set({ deviceId: null, guestSessionStatus: "recovery_required" });
       return false;
     }
   },
