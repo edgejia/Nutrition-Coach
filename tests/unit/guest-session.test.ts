@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createGuestSessionService } from "../../server/services/guest-session.js";
 import { buildApp } from "../../server/app.js";
+import { DEFAULT_GUEST_SESSION_SECRET } from "../../server/config.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 
 describe("GuestSessionService", () => {
@@ -36,6 +38,45 @@ describe("GuestSessionService", () => {
 
     const tamperedSignature = `${encodedClaims}.${signature.slice(0, -1)}${signature.endsWith("a") ? "b" : "a"}`;
     assert.deepEqual(service.verifyActiveSession(tamperedSignature), { ok: false, reason: "invalid" });
+  });
+
+  it("rejects active tokens forged with the development default secret", () => {
+    const now = () => new Date("2026-04-21T00:00:00.000Z");
+    const runtimeService = createGuestSessionService({
+      secret: "runtime-secret-value-at-least-32-chars",
+      activeCookieName: "guest_session",
+      resumeCookieName: "guest_session_resume",
+      activeTtlSeconds: 3600,
+      resumeTtlSeconds: 7200,
+      secure: true,
+      now,
+    });
+    const defaultSecretService = createGuestSessionService({
+      secret: DEFAULT_GUEST_SESSION_SECRET,
+      activeCookieName: "guest_session",
+      resumeCookieName: "guest_session_resume",
+      activeTtlSeconds: 3600,
+      resumeTtlSeconds: 7200,
+      secure: true,
+      now,
+    });
+
+    const forged = defaultSecretService.issue("device-1");
+
+    assert.deepEqual(runtimeService.verifyActiveSession(forged.activeToken), { ok: false, reason: "invalid" });
+  });
+
+  it("checks signature length before timingSafeEqual in the token verifier", () => {
+    const source = readFileSync("server/services/guest-session.ts", "utf8");
+    const lengthPrecheckIndex = source.indexOf("expectedSignature.length !== signature.length");
+    const timingSafeEqualIndex = source.indexOf("timingSafeEqual(");
+
+    assert.notEqual(lengthPrecheckIndex, -1);
+    assert.notEqual(timingSafeEqualIndex, -1);
+    assert.ok(
+      lengthPrecheckIndex < timingSafeEqualIndex,
+      "expected signature-length precheck to appear before timingSafeEqual",
+    );
   });
 
   it("reissues a fresh active session from a still-valid resume token", () => {
