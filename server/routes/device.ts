@@ -10,6 +10,7 @@ import {
   logOnboardingSubmitStarted,
   logOnboardingSubmitSucceeded,
   logOnboardingValidationFailed,
+  logOwnershipBypassBlocked,
 } from "../observability/events.js";
 
 interface Deps {
@@ -448,6 +449,12 @@ export function registerDeviceRoutes(
     }
 
     if (isDeployedLikeRuntime({ nodeEnv: config.nodeEnv, guestSessionCookieSecure: config.guestSessionCookieSecure })) {
+      logOwnershipBypassBlocked(request.log, {
+        reason: "legacy_device_id_rejected",
+        route: "api_device_session",
+        operation: "legacy_session_bootstrap",
+        requestId: request.id,
+      });
       return reply.code(401).send({ error: "No guest session available" });
     }
 

@@ -112,7 +112,7 @@ function assertGoalsResponseDto(value: unknown) {
 }
 
 function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
-  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg"]);
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
   const allowed = new Set(allowedKeys);
   for (const key of Object.keys(event)) {
     assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
