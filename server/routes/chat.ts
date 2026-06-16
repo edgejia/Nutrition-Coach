@@ -33,6 +33,7 @@ import type { SummaryOutcome } from "../services/summary-outcome.js";
 import {
   logChatRouteFallback,
   logChatTurnCompleted,
+  logOwnershipBypassBlocked,
   sanitizeRouteCatchError,
   type RouteCatchSite,
   type RouteFallbackReason,
@@ -96,6 +97,18 @@ const SENSITIVE_IDENTIFIERS = [
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasRawDeviceIdSelector(request: FastifyRequest) {
+  return (
+    request.headers["x-device-id"] !== undefined
+    || (isPlainRecord(request.query) && "deviceId" in request.query)
+    || (isPlainRecord(request.body) && "deviceId" in request.body)
+  );
+}
 
 async function validateImageBytes(buffer: Buffer, claimedMimeType: string): Promise<boolean> {
   const expectedFormat = IMAGE_FORMAT_BY_MIME_TYPE.get(claimedMimeType);
@@ -1571,8 +1584,19 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     if (typeof turnId !== "string" || !turnId.trim()) {
       return reply.code(400).send({ error: "turnId is required" });
     }
+    const trimmedTurnId = turnId.trim();
 
-    const activeTurn = activeChatTurns.get(activeChatTurnKey(session.deviceId, turnId));
+    if (hasRawDeviceIdSelector(request)) {
+      logOwnershipBypassBlocked(request.log, {
+        reason: "raw_device_id_param",
+        route: "api_chat_stop",
+        operation: "chat_stop",
+        requestId: request.id,
+        turnId: trimmedTurnId,
+      });
+    }
+
+    const activeTurn = activeChatTurns.get(activeChatTurnKey(session.deviceId, trimmedTurnId));
     if (!activeTurn) {
       return reply.code(404).send({ error: "Active turn not found" });
     }
@@ -1582,7 +1606,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       activeTurn.controller.abort();
     }
 
-    return { stopped: true, turnId };
+    return { stopped: true, turnId: trimmedTurnId };
   });
 
   app.post("/api/chat", async (request, reply) => {
@@ -1610,6 +1634,16 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const chatTurnStartedAt = Date.now();
     const hadImage = Boolean(image);
     const { turnId, turnLog, orchLog } = createChatTurnContext(request);
+
+    if (hasRawDeviceIdSelector(request)) {
+      logOwnershipBypassBlocked(request.log, {
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+        requestId: request.id,
+        turnId,
+      });
+    }
 
     // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
     const acceptHeader = request.headers["accept"] ?? "";
