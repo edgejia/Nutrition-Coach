@@ -155,6 +155,28 @@
     }
   },
   {
+    "name": "raw_selector_fail_closed",
+    "ok": true,
+    "actual": {
+      "validCookieForeignSelectors": {
+        "historyStatus": 200,
+        "ownerHistoryVisible": true,
+        "foreignHistoryVisible": false,
+        "ownerAssetStatus": 200,
+        "foreignAssetStatus": 404
+      },
+      "missingCookieRawSelectors": {
+        "historyStatus": 401,
+        "assetStatus": 401,
+        "sseStatus": 401
+      },
+      "stepResult": {
+        "cookieOwnerAuthoritative": true,
+        "rawSelectorsAuthorizeMissingCookie": false
+      }
+    }
+  },
+  {
     "name": "blocking_rebuild_flow",
     "ok": true,
     "actual": {

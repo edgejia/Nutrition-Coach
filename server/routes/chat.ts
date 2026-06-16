@@ -1592,7 +1592,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         route: "api_chat_stop",
         operation: "chat_stop",
         requestId: request.id,
-        turnId: trimmedTurnId,
       });
     }
 

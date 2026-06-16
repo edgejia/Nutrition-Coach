@@ -81,6 +81,7 @@ const STEP_NAMES = [
   "deployed_like_legacy_rejected",
   "same_browser_resume",
   "tampered_access_fail_closed",
+  "raw_selector_fail_closed",
   "blocking_rebuild_flow",
 ] as const;
 
@@ -691,6 +692,118 @@ const scenario: VerificationScenario = {
         const message = error instanceof Error ? error.message : String(error);
         steps.push(fail("tampered_access_fail_closed", message, artifacts.tampered_access_fail_closed));
         return failResult("guest-session-hardening", steps, "tampered_access_fail_closed", artifacts);
+      }
+
+      try {
+        const foreignDeviceRes = await fixture.app.inject({
+          method: "POST",
+          url: "/api/device",
+          payload: { goal: "muscle_gain" },
+        });
+        if (foreignDeviceRes.statusCode !== 200 && foreignDeviceRes.statusCode !== 201) {
+          throw new Error(`Expected foreign device seed status 200/201, got ${foreignDeviceRes.statusCode}`);
+        }
+        const foreignDeviceId = (foreignDeviceRes.json() as { deviceId: string }).deviceId;
+        const ownerMessage = await fixture.services.chatService.saveMessage(fixture.deviceId, "assistant", "owner selector baseline");
+        const foreignMessage = await fixture.services.chatService.saveMessage(foreignDeviceId, "assistant", "foreign selector baseline");
+
+        const ownerAssetPath = path.join(tempRoot, "raw-selector-owner.png");
+        const foreignAssetPath = path.join(tempRoot, "raw-selector-foreign.png");
+        await writeFile(ownerAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01]));
+        await writeFile(foreignAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x02]));
+        const ownerAsset = await fixture.services.assetService.createAsset(fixture.deviceId, {
+          stagedPath: ownerAssetPath,
+          mimeType: "image/png",
+          originalFilename: "raw-selector-owner.png",
+        });
+        const foreignAsset = await fixture.services.assetService.createAsset(foreignDeviceId, {
+          stagedPath: foreignAssetPath,
+          mimeType: "image/png",
+          originalFilename: "raw-selector-foreign.png",
+        });
+
+        const validSelectorHeaders = {
+          cookie: migratedCookieHeader,
+          "x-device-id": foreignDeviceId,
+        };
+        const invalidSelectorHeaders = {
+          "x-device-id": fixture.deviceId,
+        };
+
+        const validHistoryRes = await fetch(
+          `${fixture.address}/api/chat/history?limit=10&deviceId=${encodeURIComponent(foreignDeviceId)}`,
+          { headers: validSelectorHeaders },
+        );
+        const validHistoryBody = await validHistoryRes.json() as { messages: Array<{ id: string }> };
+        const ownerAssetWithForeignSelectorRes = await fetch(
+          `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(foreignDeviceId)}`,
+          { headers: validSelectorHeaders },
+        );
+        const foreignAssetWithOwnerCookieRes = await fetch(
+          `${fixture.address}/api/assets/${foreignAsset.id}?deviceId=${encodeURIComponent(foreignDeviceId)}`,
+          { headers: validSelectorHeaders },
+        );
+        const missingCookieHistoryRes = await fetch(
+          `${fixture.address}/api/chat/history?limit=5&deviceId=${encodeURIComponent(fixture.deviceId)}`,
+          { headers: invalidSelectorHeaders },
+        );
+        const missingCookieAssetRes = await fetch(
+          `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+          { headers: invalidSelectorHeaders },
+        );
+        const missingCookieSseRes = await fetch(
+          `${fixture.address}/api/sse?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+          { headers: invalidSelectorHeaders },
+        );
+
+        if (validHistoryRes.status !== 200) {
+          throw new Error(`Expected valid cookie history with raw selectors to return 200, got ${validHistoryRes.status}`);
+        }
+        if (!validHistoryBody.messages.some((message) => message.id === ownerMessage.id)) {
+          throw new Error("Expected cookie-owner history to remain visible with foreign raw selectors");
+        }
+        if (validHistoryBody.messages.some((message) => message.id === foreignMessage.id)) {
+          throw new Error("Foreign history became visible through raw selectors");
+        }
+        if (ownerAssetWithForeignSelectorRes.status !== 200) {
+          throw new Error(`Expected cookie-owner asset with foreign raw selectors to return 200, got ${ownerAssetWithForeignSelectorRes.status}`);
+        }
+        if (foreignAssetWithOwnerCookieRes.status !== 404) {
+          throw new Error(`Expected foreign asset with cookie owner plus raw selectors to return 404, got ${foreignAssetWithOwnerCookieRes.status}`);
+        }
+        if (missingCookieHistoryRes.status !== 401) {
+          throw new Error(`Expected missing-cookie history with raw selectors to return 401, got ${missingCookieHistoryRes.status}`);
+        }
+        if (missingCookieAssetRes.status !== 401) {
+          throw new Error(`Expected missing-cookie asset with raw selectors to return 401, got ${missingCookieAssetRes.status}`);
+        }
+        if (missingCookieSseRes.status !== 401) {
+          throw new Error(`Expected missing-cookie SSE with raw selectors to return 401, got ${missingCookieSseRes.status}`);
+        }
+
+        artifacts.raw_selector_fail_closed = {
+          validCookieForeignSelectors: {
+            historyStatus: validHistoryRes.status,
+            ownerHistoryVisible: validHistoryBody.messages.some((message) => message.id === ownerMessage.id),
+            foreignHistoryVisible: validHistoryBody.messages.some((message) => message.id === foreignMessage.id),
+            ownerAssetStatus: ownerAssetWithForeignSelectorRes.status,
+            foreignAssetStatus: foreignAssetWithOwnerCookieRes.status,
+          },
+          missingCookieRawSelectors: {
+            historyStatus: missingCookieHistoryRes.status,
+            assetStatus: missingCookieAssetRes.status,
+            sseStatus: missingCookieSseRes.status,
+          },
+          stepResult: {
+            cookieOwnerAuthoritative: true,
+            rawSelectorsAuthorizeMissingCookie: false,
+          },
+        };
+        steps.push(pass("raw_selector_fail_closed", artifacts.raw_selector_fail_closed));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        steps.push(fail("raw_selector_fail_closed", message, artifacts.raw_selector_fail_closed));
+        return failResult("guest-session-hardening", steps, "raw_selector_fail_closed", artifacts);
       }
 
       try {

@@ -157,6 +157,28 @@
       }
     },
     {
+      "name": "raw_selector_fail_closed",
+      "ok": true,
+      "actual": {
+        "validCookieForeignSelectors": {
+          "historyStatus": 200,
+          "ownerHistoryVisible": true,
+          "foreignHistoryVisible": false,
+          "ownerAssetStatus": 200,
+          "foreignAssetStatus": 404
+        },
+        "missingCookieRawSelectors": {
+          "historyStatus": 401,
+          "assetStatus": 401,
+          "sseStatus": 401
+        },
+        "stepResult": {
+          "cookieOwnerAuthoritative": true,
+          "rawSelectorsAuthorizeMissingCookie": false
+        }
+      }
+    },
+    {
       "name": "blocking_rebuild_flow",
       "ok": true,
       "actual": {
@@ -349,6 +371,24 @@
         "error": "[REDACTED]"
       }
     },
+    "raw_selector_fail_closed": {
+      "validCookieForeignSelectors": {
+        "historyStatus": 200,
+        "ownerHistoryVisible": true,
+        "foreignHistoryVisible": false,
+        "ownerAssetStatus": 200,
+        "foreignAssetStatus": 404
+      },
+      "missingCookieRawSelectors": {
+        "historyStatus": 401,
+        "assetStatus": 401,
+        "sseStatus": 401
+      },
+      "stepResult": {
+        "cookieOwnerAuthoritative": true,
+        "rawSelectorsAuthorizeMissingCookie": false
+      }
+    },
     "blocking_rebuild_flow": {
       "firstRecover": false,
       "secondRecover": false,
@@ -398,5 +438,5 @@
       "browserCookieCount": 0
     }
   },
-  "consoleSummary": "PASS guest-session-hardening 5/5"
+  "consoleSummary": "PASS guest-session-hardening 6/6"
 }

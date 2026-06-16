@@ -1423,6 +1423,18 @@ describe("chat-streaming", () => {
         ?.turnId;
       assert.match(foreignTurnId ?? "", UUID_PATTERN);
 
+      const forgedStopRes = await fetch(`${address}/api/chat/stop?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
+        method: "POST",
+        headers: {
+          cookie: sessionCookieHeader,
+          "content-type": "application/json",
+          "x-device-id": foreignDeviceId,
+        },
+        body: JSON.stringify({ turnId: foreignDeviceId }),
+      });
+      assert.equal(forgedStopRes.status, 404);
+      assert.deepEqual(await forgedStopRes.json(), { error: "Active turn not found" });
+
       const stopRes = await fetch(`${address}/api/chat/stop?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
         method: "POST",
         headers: {
@@ -1442,29 +1454,32 @@ describe("chat-streaming", () => {
       assert.equal(events.filter((event) => event.event === "done").length, 1);
 
       const ownershipEvents = observabilityEvents(logLines, "ownership_bypass_blocked");
-      assert.equal(ownershipEvents.length, 1);
-      assert.equal(typeof ownershipEvents[0]!.requestId, "string");
-      assert.equal(ownershipEvents[0]!.turnId, foreignTurnId);
-      assert.deepEqual(
-        {
-          event: ownershipEvents[0]!.event,
-          reason: ownershipEvents[0]!.reason,
-          route: ownershipEvents[0]!.route,
-          operation: ownershipEvents[0]!.operation,
-        },
-        {
-          event: "ownership_bypass_blocked",
-          reason: "raw_device_id_param",
-          route: "api_chat_stop",
-          operation: "chat_stop",
-        },
-      );
-      assertLogEventApplicationKeys(ownershipEvents[0]!, ["event", "reason", "route", "operation", "requestId", "turnId"]);
+      assert.equal(ownershipEvents.length, 2);
+      for (const event of ownershipEvents) {
+        assert.equal(typeof event.requestId, "string");
+        assert.equal("turnId" in event, false);
+        assert.deepEqual(
+          {
+            event: event.event,
+            reason: event.reason,
+            route: event.route,
+            operation: event.operation,
+          },
+          {
+            event: "ownership_bypass_blocked",
+            reason: "raw_device_id_param",
+            route: "api_chat_stop",
+            operation: "chat_stop",
+          },
+        );
+        assertLogEventApplicationKeys(event, ["event", "reason", "route", "operation", "requestId"]);
+      }
       assertLogEventsExclude(
-        [ownershipEvents[0]!],
+        ownershipEvents,
         [
           deviceId,
           foreignDeviceId,
+          foreignTurnId ?? "",
           "x-device-id",
           "deviceId",
           "guest_session",
