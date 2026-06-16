@@ -77,6 +77,7 @@ function failResult(
 
 const STEP_NAMES = [
   "legacy_migration",
+  "deployed_like_legacy_rejected",
   "same_browser_resume",
   "tampered_access_fail_closed",
   "blocking_rebuild_flow",
@@ -633,6 +634,16 @@ const scenario: VerificationScenario = {
         const message = error instanceof Error ? error.message : String(error);
         steps.push(fail("blocking_rebuild_flow", message, artifacts.blocking_rebuild_flow));
         return failResult("guest-session-hardening", steps, "blocking_rebuild_flow", artifacts);
+      }
+
+      const missingStepNames = STEP_NAMES.filter((stepName) => !steps.some((step) => step.name === stepName));
+      if (missingStepNames.length > 0) {
+        artifacts.artifact_contract = {
+          stepNames: [...STEP_NAMES],
+          missingStepNames,
+        };
+        steps.push(fail(missingStepNames[0], `Missing step names: ${missingStepNames.join(", ")}`, artifacts.artifact_contract));
+        return failResult("guest-session-hardening", steps, missingStepNames[0], artifacts);
       }
 
       return {
