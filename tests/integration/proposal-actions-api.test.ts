@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
@@ -25,6 +26,47 @@ function toCookieHeader(rawHeader: string | string[] | undefined) {
   return values.map((value) => value.split(";", 1)[0]).join("; ");
 }
 
+function createLogCapture() {
+  const logLines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _, cb) {
+      chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+      cb();
+    },
+  });
+
+  return { logLines, stream };
+}
+
+function parseJsonLogLines(logLines: string[]) {
+  return logLines.flatMap((line) => {
+    try {
+      return [JSON.parse(line) as Record<string, unknown>];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function observabilityEvents(logLines: string[], eventName: string) {
+  return parseJsonLogLines(logLines).filter((record) => record.event === eventName);
+}
+
+function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(event)) {
+    assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+  }
+}
+
+function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  for (const value of forbiddenValues) {
+    assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+  }
+}
+
 describe("proposal action API", () => {
   let app: FastifyInstance;
   let services: AppServices;
@@ -33,14 +75,17 @@ describe("proposal action API", () => {
   let proposalActionTestHooks: ProposalActionTestHooks;
   let publishedGoalUpdates: PublishRecord[];
   let publishedDailySummaries: PublishRecord[];
+  let logCapture: ReturnType<typeof createLogCapture>;
 
   beforeEach(async () => {
     proposalActionTestHooks = {};
     publishedGoalUpdates = [];
     publishedDailySummaries = [];
+    logCapture = createLogCapture();
     app = await buildApp({
       dbPath: ":memory:",
       llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logCapture.stream },
       proposalActionTestHooks,
       onServicesReady: (ready) => {
         services = ready;
@@ -155,11 +200,11 @@ describe("proposal action API", () => {
     return { meal, proposalId: proposal.proposalId };
   }
 
-  async function readTargets(): Promise<DailyTargets> {
+  async function readTargets(cookieHeader = sessionCookieHeader): Promise<DailyTargets> {
     const response = await app.inject({
       method: "POST",
       url: "/api/device/session",
-      headers: { cookie: sessionCookieHeader },
+      headers: { cookie: cookieHeader },
     });
     assert.equal(response.statusCode, 200);
     return response.json().dailyTargets as DailyTargets;
@@ -255,6 +300,80 @@ describe("proposal action API", () => {
       },
     });
     assert.equal(extraField.statusCode, 400);
+  });
+
+  it("approves using cookie ownership when foreign raw selectors are supplied and logs metadata only", async () => {
+    const foreignDevice = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "muscle_gain" },
+    });
+    const foreignDeviceId = foreignDevice.json().deviceId as string;
+    const foreignCookieHeader = toCookieHeader(foreignDevice.headers["set-cookie"]);
+    const originalForeignTargets = await readTargets(foreignCookieHeader);
+    const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
+    const { proposalId } = await createGoalCard(targets);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/proposals/actions?deviceId=${encodeURIComponent(foreignDeviceId)}`,
+      headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+      payload: { proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(await readTargets(), targets);
+    assert.deepEqual(await readTargets(foreignCookieHeader), originalForeignTargets);
+
+    const extraField = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: {
+        proposalId: "proposal-1",
+        kind: "goal",
+        action: "approve",
+        deviceId,
+      },
+    });
+    assert.equal(extraField.statusCode, 400);
+
+    const events = observabilityEvents(logCapture.logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.equal(typeof events[0]!.requestId, "string");
+    assert.deepEqual(
+      {
+        event: events[0]!.event,
+        reason: events[0]!.reason,
+        route: events[0]!.route,
+        operation: events[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_proposals_actions",
+        operation: "proposal_action",
+      },
+    );
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude(
+      [events[0]!],
+      [
+        deviceId,
+        foreignDeviceId,
+        "x-device-id",
+        "deviceId",
+        "guest_session",
+        "cookie",
+        JSON.stringify({ proposalId, kind: "goal", action: "approve" }),
+        JSON.stringify({
+          proposalId: "proposal-1",
+          kind: "goal",
+          action: "approve",
+          deviceId,
+        }),
+      ],
+    );
   });
 
   it("approves an active goal proposal, updates targets, and records a transcript action event", async () => {
