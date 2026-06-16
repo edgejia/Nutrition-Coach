@@ -10,6 +10,7 @@ import {
   buildOnboardingSubmitStartedEvent,
   buildOnboardingSubmitSucceededEvent,
   buildOnboardingValidationFailedEvent,
+  buildOwnershipBypassBlockedEvent,
   buildSseConnectionStateEvent,
   parseHomeCtaClientEvent,
   sanitizeRouteCatchError,
@@ -25,6 +26,7 @@ const LOCKED_EVENT_NAMES: RedactedObservabilityEventName[] = [
   "home_cta_option_sent",
   "chat_turn_completed",
   "chat_route_fallback",
+  "ownership_bypass_blocked",
   "device_goals_validation_failed",
   "device_goals_updated_rest",
   "sse_connection_state",
@@ -51,6 +53,9 @@ const ALLOWED_METADATA_KEYS = new Set([
   "errorMessage",
   "round",
   "lastTool",
+  "route",
+  "operation",
+  "requestId",
   "updatedFields",
   "state",
 ]);
@@ -79,6 +84,13 @@ const FORBIDDEN_STRINGS = [
   '"method":"POST"',
   '"body"',
   '"value"',
+  "legacy-device-id-123",
+  "legacyDeviceId",
+  "guest_session",
+  "cookie",
+  "x-device-id",
+  "192.168.0.42",
+  "forged_signature",
 ];
 
 function assertLockedPayload(payload: { event: RedactedObservabilityEventName } & object) {
@@ -125,6 +137,12 @@ describe("redacted observability event builders", () => {
         latencyMs: 7,
         reason: "llm_error",
       }),
+      buildOwnershipBypassBlockedEvent({
+        reason: "legacy_device_id_rejected",
+        route: "api_device_session",
+        operation: "legacy_session_bootstrap",
+        requestId: "req-ownership-1",
+      }),
       buildDeviceGoalsValidationFailedEvent({ fields: ["protein"], codes: ["invalid_field_value"] }),
       buildDeviceGoalsUpdatedRestEvent({ updatedFields: ["protein", "calories"] }),
       buildSseConnectionStateEvent({ state: "opened" }),
@@ -157,11 +175,79 @@ describe("redacted observability event builders", () => {
         codes: ["invalid_body", "invalid_field_value", "empty_valid_fields", "raw body text"],
       }),
       buildDeviceGoalsUpdatedRestEvent({ updatedFields: ["calories", "protein"] }),
+      buildOwnershipBypassBlockedEvent({
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+        requestId: "req-ownership-2",
+        turnId: "turn-ownership-2",
+      }),
     ];
 
     for (const payload of payloads) {
       assertLockedPayload(payload);
     }
+  });
+
+  it("builds ownership bypass blocked events with metadata-only fields", () => {
+    const withoutTurnId = buildOwnershipBypassBlockedEvent({
+      reason: "legacy_device_id_rejected",
+      route: "api_device_session",
+      operation: "legacy_session_bootstrap",
+      requestId: "req-legacy-rejected",
+    });
+    assert.deepEqual(withoutTurnId, {
+      event: "ownership_bypass_blocked",
+      reason: "legacy_device_id_rejected",
+      route: "api_device_session",
+      operation: "legacy_session_bootstrap",
+      requestId: "req-legacy-rejected",
+    });
+    assert.deepEqual(Object.keys(withoutTurnId), ["event", "reason", "route", "operation", "requestId"]);
+    assertLockedPayload(withoutTurnId);
+
+    const withTurnId = buildOwnershipBypassBlockedEvent({
+      reason: "raw_device_id_param",
+      route: "api_chat_stop",
+      operation: "chat_stop",
+      requestId: "req-raw-param",
+      turnId: "turn-raw-param",
+    });
+    assert.deepEqual(withTurnId, {
+      event: "ownership_bypass_blocked",
+      reason: "raw_device_id_param",
+      route: "api_chat_stop",
+      operation: "chat_stop",
+      requestId: "req-raw-param",
+      turnId: "turn-raw-param",
+    });
+    assert.deepEqual(Object.keys(withTurnId), ["event", "reason", "route", "operation", "requestId", "turnId"]);
+    assertLockedPayload(withTurnId);
+  });
+
+  it("sanitizes ownership bypass blocked dimensions and excludes forbidden telemetry", () => {
+    const payload = buildOwnershipBypassBlockedEvent({
+      reason: "forged_signature",
+      route: "api/device/session?legacyDeviceId=legacy-device-id-123",
+      operation: "legacyDeviceId",
+      requestId: "guest_session=signed-cookie",
+      turnId: "192.168.0.42",
+      legacyDeviceId: "legacy-device-id-123",
+      cookie: "guest_session=signed-cookie",
+      headers: { "x-device-id": "legacy-device-id-123" },
+      body: "raw body text legacyDeviceId=legacy-device-id-123",
+      error: new Error("forged_signature"),
+    } as never);
+
+    assert.deepEqual(payload, {
+      event: "ownership_bypass_blocked",
+      reason: "raw_device_id_param",
+      route: "api_device_session",
+      operation: "legacy_session_bootstrap",
+      requestId: "redacted",
+      turnId: "redacted",
+    });
+    assertLockedPayload(payload);
   });
 
   it("builds device goals validation failures with locked fields and codes only", () => {
