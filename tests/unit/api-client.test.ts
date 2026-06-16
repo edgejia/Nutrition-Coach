@@ -2,7 +2,11 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { IntakeData } from "../../client/src/types.js";
+import type {
+  IntakeData,
+  ProposalActionEventMetadata,
+  ProposalCardMetadata,
+} from "../../client/src/types.js";
 
 // Minimal localStorage shim
 const storage = new Map<string, string>();
@@ -88,8 +92,42 @@ const validHistoryMeal = {
   itemCount: 1,
 };
 
+const validProposalCard = {
+  proposalId: "proposal-1",
+  proposalKind: "meal_estimate",
+  proposalLane: "meal_mutation",
+  status: "active",
+  isActionable: true,
+  title: "確認這個估值修改",
+  details: {
+    rows: [
+      { label: "熱量", before: "520 kcal", after: "460 kcal" },
+      { label: "蛋白質", value: "32 g" },
+    ],
+  },
+  actions: {
+    approveLabel: "套用修改",
+    editLabel: "改成其他數字",
+    rejectLabel: "取消提案",
+  },
+  expiresAt: "2026-04-29T08:00:00.000Z",
+  lapseCopy: null,
+  supersededByKind: null,
+} satisfies ProposalCardMetadata;
+
+const validProposalActionEvent = {
+  proposalId: "proposal-1",
+  proposalKind: "meal_estimate",
+  proposalLane: "meal_mutation",
+  action: "approve",
+  transcriptCopy: "已選擇套用餐點修改",
+  createdAt: "2026-04-29T07:35:00.000Z",
+} satisfies ProposalActionEventMetadata;
+
 const api = await import("../../client/src/api.js");
+const store = await import("../../client/src/store.js");
 const typesSource = await readSource("../../client/src/types.ts");
+const apiSource = await readSource("../../client/src/api.ts");
 
 describe("API Client", () => {
   beforeEach(() => {
@@ -385,6 +423,245 @@ describe("API Client", () => {
     const invalidResult = await api.sendMessage("午餐我吃了飯糰");
 
     assert.equal(invalidResult.loggedMeal?.mealPeriod, undefined);
+  });
+
+  it("normalizes valid proposal metadata from JSON replies and omits malformed proposal metadata", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      turnId: "turn-proposal",
+      reply: "我先幫你整理成提案。",
+      proposalCard: validProposalCard,
+      proposalActionEvent: validProposalActionEvent,
+    });
+
+    const validResult = await api.sendMessage("幫我估合理一點");
+
+    assert.deepEqual(validResult.proposalCard, validProposalCard);
+    assert.deepEqual(validResult.proposalActionEvent, validProposalActionEvent);
+
+    mockFetch(200, {
+      turnId: "turn-malformed",
+      reply: "這是一段普通回覆。",
+      proposalCard: {
+        ...validProposalCard,
+        proposalKind: "localized-copy-only",
+      },
+      proposalActionEvent: {
+        ...validProposalActionEvent,
+        action: "套用修改",
+      },
+    });
+
+    const malformedResult = await api.sendMessage("普通訊息");
+
+    assert.equal(malformedResult.proposalCard, undefined);
+    assert.equal(malformedResult.proposalActionEvent, undefined);
+  });
+
+  it("normalizes proposal metadata consistently from SSE done, stopped payloads, JSON chat, and history", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      turnId: "turn-json",
+      reply: "JSON",
+      proposalCard: validProposalCard,
+      proposalActionEvent: validProposalActionEvent,
+    });
+    const jsonReply = await api.sendMessage("json");
+
+    mockFetch(200, {
+      messages: [
+        {
+          id: "msg-card",
+          role: "assistant",
+          content: "history card",
+          createdAt: "2026-04-29T07:30:00.000Z",
+          proposalCard: validProposalCard,
+        },
+        {
+          id: "msg-action",
+          role: "user",
+          content: validProposalActionEvent.transcriptCopy,
+          createdAt: "2026-04-29T07:35:00.000Z",
+          proposalActionEvent: validProposalActionEvent,
+        },
+      ],
+    });
+    const history = await api.loadHistory();
+
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: false,
+        proposalCard: validProposalCard,
+        proposalActionEvent: validProposalActionEvent,
+      })}\n\n`,
+    ]);
+    let doneCard: unknown;
+    let doneEvent: unknown;
+    await api.sendMessageStream("done", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        doneCard = payload.proposalCard;
+        doneEvent = payload.proposalActionEvent;
+      },
+      onError: () => {},
+    });
+
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 2,
+        proposalCard: validProposalCard,
+        proposalActionEvent: validProposalActionEvent,
+      })}\n\n`,
+    ]);
+    let stoppedCard: unknown;
+    let stoppedEvent: unknown;
+    await api.sendMessageStream("stopped", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedCard = payload.proposalCard;
+        stoppedEvent = payload.proposalActionEvent;
+      },
+      onError: () => {},
+    });
+
+    assert.deepEqual(jsonReply.proposalCard, validProposalCard);
+    assert.deepEqual(jsonReply.proposalActionEvent, validProposalActionEvent);
+    assert.deepEqual(history.messages[0]?.proposalCard, validProposalCard);
+    assert.deepEqual(history.messages[1]?.proposalActionEvent, validProposalActionEvent);
+    assert.deepEqual(doneCard, validProposalCard);
+    assert.deepEqual(doneEvent, validProposalActionEvent);
+    assert.deepEqual(stoppedCard, validProposalCard);
+    assert.deepEqual(stoppedEvent, validProposalActionEvent);
+  });
+
+  it("sendProposalAction posts only proposal id, kind, and action with same-origin credentials", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      ok: true,
+      status: "approved",
+      proposalCard: { ...validProposalCard, status: "approved", isActionable: false },
+      proposalActionEvent: validProposalActionEvent,
+      didMutateMeal: true,
+      reply: "已完成這次餐點修改。",
+    });
+
+    const result = await api.sendProposalAction({
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+
+    assert.equal(fetchCalls[0].url, "/api/proposals/actions");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(fetchCalls[0].init.headers, { "Content-Type": "application/json" });
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), {
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.proposalCard.status, "approved");
+    assert.equal(result.reply, "已完成這次餐點修改。");
+    for (const forbidden of ["targets", "nutrition", "updateInput", "expectedMealRevisionId", "deleteMealId"]) {
+      assert.equal(String(fetchCalls[0].init.body).includes(forbidden), false);
+    }
+  });
+
+  it("declares proposal DTO types and strict client action transport in source", () => {
+    for (const exportedType of [
+      "ProposalKind",
+      "ProposalLane",
+      "ProposalStatus",
+      "ProposalAction",
+      "ProposalCardMetadata",
+      "ProposalActionEventMetadata",
+      "ProposalActionRequest",
+      "ProposalActionReply",
+      "ProposalEditContext",
+    ]) {
+      assert.match(typesSource, new RegExp(`export (type|interface) ${exportedType}\\b`));
+    }
+
+    assert.match(apiSource, /export async function sendProposalAction/);
+    assert.match(typesSource, /type ProposalActionReply[\s\S]*?ok: true;[\s\S]*?reply\?: string;/);
+    assert.match(apiSource, /fetch\("\/api\/proposals\/actions",\s*\{\s*method: "POST",\s*credentials: "same-origin"/s);
+    const sendProposalActionSource = apiSource.match(
+      /export async function sendProposalAction[\s\S]*?\n}\n\nexport async function loadHistory/,
+    )?.[0] ?? "";
+    assert.doesNotMatch(sendProposalActionSource, /targets|nutrition|updateInput|expectedMealRevisionId|deleteMealId/);
+  });
+
+  it("sendMessage sends text-only proposalContext without attaching an image from edit state", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, { turnId: "turn-edit", reply: "收到修改說明" });
+
+    await api.sendMessage("蛋白質改 30g", undefined, {
+      proposalContext: {
+        proposalId: "proposal-1",
+        kind: "meal_numeric",
+        action: "edit",
+      },
+    });
+
+    const body = fetchCalls[0].init.body;
+    assert.ok(body instanceof FormData);
+    assert.equal(body.get("message"), "蛋白質改 30g");
+    assert.equal(body.has("image"), false);
+    assert.deepEqual(JSON.parse(String(body.get("proposalContext"))), {
+      proposalId: "proposal-1",
+      kind: "meal_numeric",
+      action: "edit",
+    });
+  });
+
+  it("store provisional commits can attach proposal card and action event metadata", () => {
+    const { useStore } = store;
+    useStore.setState({
+      messages: [],
+      provisionalBubble: {
+        id: "assistant-proposal",
+        statusLabel: "",
+        content: "我先整理成提案。",
+        isStreaming: true,
+      },
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      proposalCard: validProposalCard,
+      proposalActionEvent: validProposalActionEvent,
+    });
+
+    const committed = useStore.getState().messages.at(-1);
+    assert.equal(committed?.id, "assistant-proposal");
+    assert.deepEqual(committed?.proposalCard, validProposalCard);
+    assert.deepEqual(committed?.proposalActionEvent, validProposalActionEvent);
+
+    useStore.setState({
+      messages: [],
+      provisionalBubble: {
+        id: "assistant-stopped-proposal",
+        statusLabel: "",
+        content: "",
+        isStreaming: true,
+      },
+    });
+
+    useStore.getState().commitStoppedProvisionalBubble({
+      didLogMeal: false,
+      proposalCard: validProposalCard,
+      proposalActionEvent: validProposalActionEvent,
+    });
+
+    const stopped = useStore.getState().messages.at(-1);
+    assert.equal(stopped?.status, "stopped");
+    assert.deepEqual(stopped?.proposalCard, validProposalCard);
+    assert.deepEqual(stopped?.proposalActionEvent, validProposalActionEvent);
   });
 
   it("sendMessage throws UNAUTHORIZED on 401", async () => {

@@ -3181,13 +3181,6 @@ describe("Chat API", () => {
     const mealId = mealsBeforeJson.meals[0]?.id;
     assert.ok(mealId);
 
-    assert.ok(services, "expected app services");
-    services.summaryService.getDailySummary = async () => {
-      throw new Error("summary recomputation failed after delete");
-    };
-    services.foodLoggingService.getMealsByDate = async () => {
-      throw new Error("summary recovery failed after delete");
-    };
     mockLLM.queueChatResponse({
       toolCalls: [
         {
@@ -3208,20 +3201,54 @@ describe("Chat API", () => {
         },
       ],
     });
-    mockLLM.queueChatResponse({ content: "已刪除雞腿便當。" });
 
     const deleteForm = new FormData();
     deleteForm.append("message", "刪除雞腿便當");
-    const deleteRes = await fetch(`${address}/api/chat`, {
+    const setupRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
       body: deleteForm,
     });
 
-    assert.equal(deleteRes.status, 200);
-    const body = await deleteRes.json() as {
+    assert.equal(setupRes.status, 200);
+    const setupBody = await setupRes.json() as {
+      reply: string;
       didLogMeal: boolean;
       didMutateMeal?: boolean;
+      deletedMealId?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+    assert.equal(setupBody.didLogMeal, false);
+    assert.equal(setupBody.didMutateMeal, false);
+    assert.equal(setupBody.deletedMealId, undefined);
+    assert.equal(setupBody.summaryOutcome, undefined);
+    assert.match(setupBody.reply, /即將刪除：雞腿便當/);
+    const mealsAfterSetupRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsAfterSetupJson = await mealsAfterSetupRes.json() as { meals: Array<{ id: string }> };
+    assert.equal(mealsAfterSetupJson.meals.some((meal) => meal.id === mealId), true);
+
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after delete");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("summary recovery failed after delete");
+    };
+    const confirmForm = new FormData();
+    confirmForm.append("message", "好");
+    const confirmRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: confirmForm,
+    });
+
+    assert.equal(confirmRes.status, 200);
+    const body = await confirmRes.json() as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      deletedMealId?: string;
       affectedDate?: string;
       loggedMeal?: unknown;
       dailySummary?: unknown;
@@ -3229,6 +3256,7 @@ describe("Chat API", () => {
     };
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
+    assert.equal(body.deletedMealId, mealId);
     assert.match(body.affectedDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(body.loggedMeal, undefined);
     assertUnavailableSummaryOutcome(body.summaryOutcome);

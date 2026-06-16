@@ -24,8 +24,9 @@ export function getDisplayedCoachAdvice(
   storedAdvice: string | null,
   dailySummary: ReturnType<typeof useStore.getState>["dailySummary"],
   dailyTargets: ReturnType<typeof useStore.getState>["dailyTargets"],
+  goal: string | null = null,
 ) {
-  return getCoachAdvice(dailySummary, dailyTargets) ?? storedAdvice;
+  return getCoachAdvice(dailySummary, dailyTargets, goal) ?? storedAdvice;
 }
 
 export function formatHomeHeaderDate(dateKey: string): string {
@@ -476,6 +477,7 @@ function MealRows({
 export function HomeScreen() {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
+  const goal = useStore((s) => s.goal);
   const storedCoachAdvice = useStore((s) => s.coachAdvice);
   const setCoachAdvice = useStore((s) => s.setCoachAdvice);
   const sending = useStore((s) => s.sending);
@@ -483,8 +485,8 @@ export function HomeScreen() {
   const openMealEdit = useStore((s) => s.openMealEdit);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
-  const coachAdvice = getDisplayedCoachAdvice(storedCoachAdvice, dailySummary, dailyTargets);
-  const cta = getCoachCTA(dailySummary, dailyTargets);
+  const coachAdvice = getDisplayedCoachAdvice(storedCoachAdvice, dailySummary, dailyTargets, goal);
+  const cta = getCoachCTA(dailySummary, dailyTargets, undefined, goal);
   const emptyCopy = getHomeEmptyCoachCopy();
   const todayDateKey = dailySummary?.date ?? formatLocalDate(new Date());
 

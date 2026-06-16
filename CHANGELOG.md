@@ -1,5 +1,28 @@
 # 更新日誌
 
+## v2.9 - 2026-06-15
+
+### 新增
+
+- 使用者要求「幫我估合理一點」時,meal numeric correction 會建立後端保存的 confirm-first estimate proposal,顯示 before -> after values,並只在使用者明確確認後提交。
+- `delete_meal` 改為 confirm-first preview:先顯示後端渲染的餐點描述、日期/餐別、calories 與 macros,確認後才透過 revision-safe delete path 刪除。
+- Pending goal、meal numeric、estimate、delete proposals 現在都有結構化 approve / edit-via-new-message / reject affordance,button action 只傳 proposal intent,commit authority 仍在後端。
+- Pending proposal 過期、stale 或被 supersede 時會保留 deterministic Traditional Chinese lapse copy,不再靜默消失。
+- Home coach advice 與 CTA 現在會依使用者 goal、今日紀錄與剩餘 targets 選擇 copy / next action；missing 或 unknown goal 會安全 fallback 到 maintain。
+
+### 變更
+
+- Confirm-first action reply persistence 改為 single-source backend path,避免 button/typed confirmation 造成重複 assistant reply 或 action event。
+- Proposal action mutation、terminal card status、chat action event 與 realtime publish now commit in durable order:domain mutation 和 metadata commit 後才 publish `goals_update` 或 `daily_summary`。
+- 模糊餐點數字修正仍 fail closed；只有明確使用者數字、backend-computable relative operator,或後端保存 estimate proposal confirmation 能提交。
+- v2.9 closeout 維持本機驗證範圍;沒有 push、merge、deploy、Railway smoke、staging promotion 或 main promotion。
+
+### 驗證
+
+- Phase 88-91 verification 全部通過,涵蓋 estimate confirm-first、delete preview confirmation、structured proposal card/action/lapse behavior,以及 goal-aware coach advice / CTAs。
+- Deterministic harness evidence 通過: `estimate-confirm-first` 9/9、`delete-confirm-first` 10/10、`proposal-three-way-confirmation` 10/10；artifact policy remains metadata-only。
+- Closeout 前本機 `yarn release:check` 通過:TypeScript、`1,574` node tests、frontend production build 全部 green。Generated proof remains metadata-only.
+
 ## v2.8 - 2026-06-12
 
 ### 新增

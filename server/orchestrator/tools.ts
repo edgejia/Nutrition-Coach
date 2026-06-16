@@ -13,13 +13,19 @@ import type {
   FindMealsResult,
   MealCorrectionCandidate,
 } from "../services/meal-correction.js";
+import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import {
   MEAL_NUMERIC_FIELDS,
   type MealNumericField,
+  type MealNumericUpdateInput,
   type createMealNumericProposalService,
 } from "../services/meal-numeric-proposals.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
-import type { createGoalProposalService, GoalProposalPayload } from "../services/goal-proposals.js";
+import {
+  GOAL_PROPOSAL_TTL_MS,
+  type createGoalProposalService,
+  type GoalProposalPayload,
+} from "../services/goal-proposals.js";
 import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
@@ -49,6 +55,7 @@ import {
 import {
   authorizeMealNumericUpdate,
   classifyMealNumericAdjustment,
+  extractMealNumericEvidence,
   type MealNumericAdjustmentClassification,
   type MealNumericUpdate,
 } from "./meal-numeric-authority.js";
@@ -57,16 +64,22 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  getProposalActionLabels,
   renderCorrectionTargetClarificationCopy,
   renderCorrectionTargetNoMealsForDateCopy,
   renderCorrectionTargetSameDateRecoveryCopy,
   renderHistoricalLogFoodClarificationCopy,
   renderHistoricalSummaryClarificationCopy,
   renderHistoricalSummaryMultipleTargetsCopy,
+  renderMealDeleteProposalCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericClarificationCopy,
+  renderMealNumericNoChangeCopy,
   renderMealNumericProposalCopy,
+  renderProposalCardIntro,
+  renderProposalExpiredCopy,
 } from "./mutation-receipts.js";
+import type { PendingProposalCardInput } from "../services/proposal-cards.js";
 import {
   classifyProteinSource,
   normalizeTrustedProteinEstimate,
@@ -87,6 +100,7 @@ export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   summaryService: ReturnType<typeof createSummaryService>;
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
+  mealDeleteProposalService?: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
   deviceService?: ReturnType<typeof createDeviceService>;
   goalProposalService?: ReturnType<typeof createGoalProposalService>;
@@ -126,9 +140,11 @@ export interface ToolExecutionResult {
       | "meal_numeric_authority_failure"
       | "meal_numeric_clarification"
       | "meal_numeric_proposal"
+      | "meal_delete_proposal"
       | "failed_recognition_no_save";
     text: string;
   };
+  proposalCard?: PendingProposalCardInput;
   updatedFields?: string[];
   publishedEvents?: string[];
   policyFact?: ToolPolicyDecisionFact;
@@ -292,8 +308,14 @@ type UpdateMealArgs = UpdateMealPatchArgs | { meal_id: string; items: LogFoodIte
 interface ProposeMealNumericCorrectionArgs {
   meal_id: string;
   fields: MealNumericField[];
-  operator: "half" | "subtract_percent" | "add_amount" | "subtract_amount";
+  operator: "half" | "set" | "subtract_percent" | "add_amount" | "subtract_amount";
   value?: number;
+}
+
+interface ProposeMealEstimateArgs {
+  meal_id: string;
+  fields: MealNumericField[];
+  estimated: Partial<Record<MealNumericField, number>>;
 }
 
 interface DeleteMealArgs {
@@ -381,7 +403,34 @@ interface DeleteMealResult {
   deletedMeal: DeletedMealSnapshot;
 }
 
-type DeleteMealContractResult = DeleteMealResult | MealTargetControlledResult;
+interface MealDeleteProposalResult {
+  status: "meal_delete_proposal";
+  reason: "meal_delete_proposal";
+  proposalId: string;
+  reply: string;
+  expiresAt: string;
+  snapshot: {
+    mealId: string;
+    expectedMealRevisionId: string;
+    mealLabel: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    dateKey: string;
+    loggedAt: string;
+    mealPeriod: MealPeriod;
+    items?: Array<{
+      foodName: string;
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    }>;
+  };
+}
+
+type DeleteMealContractResult = DeleteMealResult | MealTargetControlledResult | MealDeleteProposalResult;
 
 interface GetDailySummaryArgs {
   date_text?: string;
@@ -418,6 +467,7 @@ interface GoalControlledResult {
 
 type ProposeGoalsResult = GoalControlledResult & {
   reason: "goal_proposal";
+  proposalCard: PendingProposalCardInput;
 };
 
 interface MealNumericControlledResult {
@@ -436,6 +486,7 @@ type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult;
 type UpdateMealContractResult = UpdateMealResult | MealNumericControlledResult | MealTargetControlledResult;
 type ProposeMealNumericCorrectionResult = MealNumericControlledResult & {
   reason: "meal_numeric_proposal";
+  proposalCard?: PendingProposalCardInput;
 };
 
 type UpdateGoalsArgs =
@@ -572,11 +623,54 @@ const updateMealSchema = z.union([
 ]);
 
 const mealNumericFieldSchema = z.enum(MEAL_NUMERIC_FIELDS);
+const boundedEstimateSchema = z
+  .object({
+    calories: z.number().int().min(0).max(5000).optional(),
+    protein: z.number().min(0).max(400).optional(),
+    carbs: z.number().min(0).max(800).optional(),
+    fat: z.number().min(0).max(400).optional(),
+  })
+  .strict();
+const proposeMealEstimateSchema = z
+  .object({
+    meal_id: z.string().uuid("meal_id must be a uuid"),
+    fields: z.array(mealNumericFieldSchema).min(1, "fields must contain at least one field"),
+    estimated: boundedEstimateSchema,
+  })
+  .strict()
+  .superRefine((args, ctx) => {
+    const requestedFields = new Set(args.fields);
+    if (requestedFields.size !== args.fields.length) {
+      ctx.addIssue({
+        code: "custom",
+        message: "fields must be unique",
+        path: ["fields"],
+      });
+    }
+    for (const field of args.fields) {
+      if (args.estimated[field] === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: "estimated value is required for each requested field",
+          path: ["estimated", field],
+        });
+      }
+    }
+    for (const field of MEAL_NUMERIC_FIELDS) {
+      if (args.estimated[field] !== undefined && !requestedFields.has(field)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "estimated values must match requested fields",
+          path: ["estimated", field],
+        });
+      }
+    }
+  });
 const proposeMealNumericCorrectionSchema = z
   .object({
     meal_id: z.string().uuid("meal_id must be a uuid"),
     fields: z.array(mealNumericFieldSchema).min(1, "fields must contain at least one field"),
-    operator: z.enum(["half", "subtract_percent", "add_amount", "subtract_amount"]),
+    operator: z.enum(["half", "set", "subtract_percent", "add_amount", "subtract_amount"]),
     value: finiteNumber.optional(),
   })
   .strict()
@@ -617,6 +711,152 @@ function makeGoalControlledResult(
     status: "controlled_reply",
     reason,
     reply,
+  };
+}
+
+function formatGoalValue(field: keyof DailyTargets, value: number): string {
+  return field === "calories" ? `${value} kcal` : `${value} g`;
+}
+
+function goalFieldLabel(field: keyof DailyTargets): string {
+  switch (field) {
+    case "calories":
+      return "卡路里";
+    case "protein":
+      return "蛋白質";
+    case "carbs":
+      return "碳水";
+    case "fat":
+      return "脂肪";
+    default:
+      return field satisfies never;
+  }
+}
+
+function proposalMealNumericFieldLabel(field: MealNumericField): string {
+  switch (field) {
+    case "calories":
+      return "卡路里";
+    case "protein":
+      return "蛋白質";
+    case "carbs":
+      return "碳水";
+    case "fat":
+      return "脂肪";
+    default:
+      return field satisfies never;
+  }
+}
+
+function formatProposalMealNumericValue(field: MealNumericField, value: number): string {
+  const unit = field === "calories" ? "kcal" : "g";
+  const normalized = Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+  return `${normalized} ${unit}`;
+}
+
+function formatProposalNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+}
+
+function proposalMealPeriodLabel(period: MealPeriod): string {
+  switch (period) {
+    case "breakfast":
+      return "早餐";
+    case "lunch":
+      return "午餐";
+    case "dinner":
+      return "晚餐";
+    case "late_night":
+      return "宵夜";
+    default:
+      return period satisfies never;
+  }
+}
+
+function buildGoalProposalCard(proposal: GoalProposalPayload): PendingProposalCardInput {
+  const labels = getProposalActionLabels("goal");
+  return {
+    proposalId: proposal.proposalId,
+    proposalKind: "goal",
+    proposalLane: "goal",
+    title: renderProposalCardIntro("goal"),
+    details: {
+      rows: (["calories", "protein", "carbs", "fat"] as const).map((field) => ({
+        label: goalFieldLabel(field),
+        after: formatGoalValue(field, proposal.targets[field]),
+      })),
+    },
+    actions: {
+      approveLabel: labels.approveLabel,
+      editLabel: labels.editLabel,
+      rejectLabel: labels.rejectLabel,
+    },
+    expiresAt: new Date(new Date(proposal.createdAt).getTime() + GOAL_PROPOSAL_TTL_MS).toISOString(),
+    lapseCopy: renderProposalExpiredCopy("goal"),
+  };
+}
+
+function buildMealNumericProposalCard(input: {
+  proposalId: string;
+  proposalKind: "meal_numeric" | "meal_estimate";
+  affectedFields: Array<{ field: MealNumericField; before: number; after: number }>;
+  expiresAt: string;
+}): PendingProposalCardInput {
+  const labels = getProposalActionLabels(input.proposalKind);
+  return {
+    proposalId: input.proposalId,
+    proposalKind: input.proposalKind,
+    proposalLane: "meal_mutation",
+    title: renderProposalCardIntro(input.proposalKind),
+    details: {
+      rows: input.affectedFields.map((field) => ({
+        label: proposalMealNumericFieldLabel(field.field),
+        before: formatProposalMealNumericValue(field.field, field.before),
+        after: formatProposalMealNumericValue(field.field, field.after),
+      })),
+    },
+    actions: {
+      approveLabel: labels.approveLabel,
+      editLabel: labels.editLabel,
+      rejectLabel: labels.rejectLabel,
+    },
+    expiresAt: input.expiresAt,
+    lapseCopy: renderProposalExpiredCopy(input.proposalKind),
+  };
+}
+
+function buildMealDeleteProposalCard(input: {
+  proposalId: string;
+  expiresAt: string;
+  snapshot: MealDeleteProposalResult["snapshot"];
+}): PendingProposalCardInput {
+  const labels = getProposalActionLabels("meal_delete");
+  return {
+    proposalId: input.proposalId,
+    proposalKind: "meal_delete",
+    proposalLane: "meal_mutation",
+    title: renderProposalCardIntro("meal_delete"),
+    details: {
+      rows: [
+        { label: "餐點", value: input.snapshot.mealLabel },
+        { label: "日期", value: `${input.snapshot.dateKey} ${proposalMealPeriodLabel(input.snapshot.mealPeriod)}` },
+        {
+          label: "營養",
+          value: `${formatProposalNumber(input.snapshot.calories)} kcal，P${formatProposalNumber(input.snapshot.protein)}g / C${formatProposalNumber(input.snapshot.carbs)}g / F${formatProposalNumber(input.snapshot.fat)}g`,
+        },
+        ...(input.snapshot.items?.map((item) => ({
+          label: item.foodName,
+          value: `${formatProposalNumber(item.calories)} kcal`,
+        })) ?? []),
+      ],
+    },
+    actions: {
+      approveLabel: labels.approveLabel,
+      editLabel: labels.editLabel,
+      rejectLabel: labels.rejectLabel,
+    },
+    expiresAt: input.expiresAt,
+    lapseCopy: renderProposalExpiredCopy("meal_delete"),
   };
 }
 
@@ -1125,6 +1365,45 @@ function filterUnchangedMealNumericPatch(
   return Object.keys(patch).length > 0 ? { patch } : undefined;
 }
 
+function buildBoundedEstimatePatch(
+  fields: readonly MealNumericField[],
+  estimated: Partial<Record<MealNumericField, number>>,
+): MealNumericUpdateInput {
+  const patch: MealNumericUpdateInput = {};
+  for (const field of fields) {
+    const value = estimated[field];
+    if (value !== undefined) {
+      patch[field] = value;
+    }
+  }
+  return patch;
+}
+
+function buildEstimateAffectedFields(
+  fields: readonly MealNumericField[],
+  updateInput: MealNumericUpdateInput,
+  currentTotals: Record<MealNumericField, number>,
+) {
+  return fields
+    .filter((field) => updateInput[field] !== undefined)
+    .filter((field) => roundComparableMealNumeric(currentTotals[field]) !== roundComparableMealNumeric(updateInput[field]!))
+    .map((field) => ({
+      field,
+      before: currentTotals[field],
+      after: updateInput[field]!,
+    }));
+}
+
+function buildUpdateInputFromAffectedFields(
+  affectedFields: Array<{ field: MealNumericField; after: number }>,
+): MealNumericUpdateInput {
+  const input: MealNumericUpdateInput = {};
+  for (const affected of affectedFields) {
+    input[affected.field] = affected.after;
+  }
+  return input;
+}
+
 function makeMealNumericControlledResult(
   reason: MealNumericControlledResult["reason"],
   reply: string,
@@ -1133,6 +1412,14 @@ function makeMealNumericControlledResult(
     status: "controlled_reply",
     reason,
     reply,
+  };
+}
+
+function makeMealDeleteProposalResult(input: Omit<MealDeleteProposalResult, "status" | "reason">): MealDeleteProposalResult {
+  return {
+    status: "meal_delete_proposal",
+    reason: "meal_delete_proposal",
+    ...input,
   };
 }
 
@@ -1147,7 +1434,16 @@ function makeMealTargetControlledResult(reply: string): MealTargetControlledResu
 function classificationMatchesOperator(
   classification: MealNumericAdjustmentClassification,
   args: ProposeMealNumericCorrectionArgs,
+  currentUserMessage: string,
 ): boolean {
+  if (args.operator === "set") {
+    if (classification.kind !== "explicit_final_value" || args.value === undefined) {
+      return false;
+    }
+    const evidence = extractMealNumericEvidence(currentUserMessage);
+    return args.fields.every((field) => evidence[field].includes(args.value!));
+  }
+
   if (classification.kind !== "proposal_candidate" || classification.operator !== args.operator) {
     return false;
   }
@@ -1161,6 +1457,7 @@ function toMealNumericOperatorIntent(args: ProposeMealNumericCorrectionArgs) {
   switch (args.operator) {
     case "half":
       return { fields: args.fields, operator: args.operator } as const;
+    case "set":
     case "subtract_percent":
     case "add_amount":
     case "subtract_amount":
@@ -1710,7 +2007,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
     },
   ],
   description:
-    "建立一組待確認的餐點數字修正提案，不會更新餐點。只接受已解析 meal_id、受影響欄位和可計算操作；具體 before/after 由後端從目前餐點資料計算。",
+    "建立一組待確認的餐點數字修正提案，不會更新餐點。只接受已解析 meal_id、受影響欄位和本輪文字支持的操作；具體 before/after 由後端從目前餐點資料計算。",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -1722,7 +2019,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
       },
       operator: {
         type: "string",
-        enum: ["half", "subtract_percent", "add_amount", "subtract_amount"],
+        enum: ["half", "set", "subtract_percent", "add_amount", "subtract_amount"],
       },
       value: { type: "number" },
     },
@@ -1748,7 +2045,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
     }
 
     const classification = classifyMealNumericAdjustment(context.currentUserMessage);
-    if (!classificationMatchesOperator(classification, args)) {
+    if (!classificationMatchesOperator(classification, args, context.currentUserMessage)) {
       const reply = renderMealNumericClarificationCopy({ field: args.fields[0] });
       return {
         ok: true,
@@ -1767,6 +2064,14 @@ const proposeMealNumericCorrectionContract: ToolContract<
         currentFacts,
         toMealNumericOperatorIntent(args),
       );
+      if (preview.affectedFields.length === 0) {
+        const reply = renderMealNumericNoChangeCopy();
+        return {
+          ok: true,
+          result: makeMealNumericControlledResult("meal_numeric_clarification", reply) as ProposeMealNumericCorrectionResult,
+          toolMessage: reply,
+        };
+      }
       const proposal = await deps.mealNumericProposalService.putLatest({
         deviceId,
         sessionId: DEFAULT_SESSION_ID,
@@ -1778,6 +2083,7 @@ const proposeMealNumericCorrectionContract: ToolContract<
         sourceOperator: preview.sourceOperator,
         },
       });
+      await deps.mealDeleteProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
       const otherProposalKindActive = deps.goalProposalService
         ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
         : false;
@@ -1792,6 +2098,136 @@ const proposeMealNumericCorrectionContract: ToolContract<
         result: {
           ...makeMealNumericControlledResult("meal_numeric_proposal", reply),
           reason: "meal_numeric_proposal",
+          proposalCard: buildMealNumericProposalCard({
+            proposalId: proposal.proposalId,
+            proposalKind: "meal_numeric",
+            affectedFields: proposal.affectedFields,
+            expiresAt: proposal.expiresAt,
+          }),
+        },
+        toolMessage: reply,
+      };
+    } catch (error) {
+      if (error instanceof MealRevisionPreconditionError) {
+        throw revisionPreconditionFatalError(error);
+      }
+      throw error;
+    }
+  },
+};
+
+const proposeMealEstimateContract: ToolContract<
+  ProposeMealEstimateArgs,
+  ProposeMealNumericCorrectionResult
+> = {
+  name: "propose_meal_estimate",
+  policyClass: "confirm-first",
+  policyRules: [
+    {
+      id: "propose_meal_estimate_setup_only",
+      decision: "allowed",
+      description: "Writes bounded model-estimate proposal authority but does not mutate meals.",
+    },
+    {
+      id: "propose_meal_estimate_requires_resolved_target",
+      decision: "blocked",
+      description: "Estimate proposal setup requires a same-turn resolved target before writing pending helper state.",
+    },
+    {
+      id: "propose_meal_estimate_bounds_validation",
+      decision: "blocked",
+      description: "Model-estimated numeric values must pass strict field presence, uniqueness, and single-field bounds before persistence.",
+    },
+  ],
+  description:
+    "建立一組待確認的餐點估值修正提案，不會更新餐點。只在使用者明確要求協助估合理數值時使用；meal_id 必須已解析，估值只可放在 estimated 物件並通過後端單欄上下限驗證。",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      meal_id: { type: "string" },
+      fields: {
+        type: "array",
+        items: { type: "string", enum: [...MEAL_NUMERIC_FIELDS] },
+      },
+      estimated: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          calories: { type: "integer", minimum: 0, maximum: 5000 },
+          protein: { type: "number", minimum: 0, maximum: 400 },
+          carbs: { type: "number", minimum: 0, maximum: 800 },
+          fat: { type: "number", minimum: 0, maximum: 400 },
+        },
+      },
+    },
+    required: ["meal_id", "fields", "estimated"],
+  },
+  zodSchema: proposeMealEstimateSchema,
+  logSummary: (args) => ({
+    tool: "propose_meal_estimate",
+    fields: [...args.fields],
+  }),
+  execute: async (args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.mealCorrectionService || !deps.mealNumericProposalService || !deviceId) {
+      throw new Error("propose_meal_estimate contract missing mealCorrectionService/mealNumericProposalService/deviceId in context");
+    }
+
+    const resolvedTarget = findResolvedMealTarget(deps.toolSessionState, args.meal_id);
+    if (!resolvedTarget) {
+      throw new FatalToolError("meal target unresolved");
+    }
+
+    try {
+      const currentFacts = await deps.mealCorrectionService.loadCurrentMealFacts(
+        deviceId,
+        args.meal_id,
+        resolvedTarget.mealRevisionId,
+      );
+      const updateInput = buildBoundedEstimatePatch(args.fields, args.estimated);
+      const affectedFields = buildEstimateAffectedFields(args.fields, updateInput, currentFacts.totals);
+      if (affectedFields.length === 0) {
+        const reply = renderMealNumericNoChangeCopy();
+        return {
+          ok: true,
+          result: makeMealNumericControlledResult("meal_numeric_clarification", reply) as ProposeMealNumericCorrectionResult,
+          toolMessage: reply,
+        };
+      }
+      const proposal = await deps.mealNumericProposalService.putLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: currentFacts.mealId,
+          expectedMealRevisionId: currentFacts.currentMealRevisionId,
+          updateInput: buildUpdateInputFromAffectedFields(affectedFields),
+          affectedFields,
+          sourceOperator: "model_estimate",
+          provenance: "model_estimate",
+        },
+      });
+      await deps.mealDeleteProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
+      const otherProposalKindActive = deps.goalProposalService
+        ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
+        : false;
+      const reply = renderMealNumericProposalCopy({
+        mealLabel: currentFacts.mealLabel,
+        affectedFields: proposal.affectedFields,
+        otherProposalKindActive,
+      });
+      return {
+        ok: true,
+        result: {
+          ...makeMealNumericControlledResult("meal_numeric_proposal", reply),
+          reason: "meal_numeric_proposal",
+          proposalCard: buildMealNumericProposalCard({
+            proposalId: proposal.proposalId,
+            proposalKind: "meal_estimate",
+            affectedFields: proposal.affectedFields,
+            expiresAt: proposal.expiresAt,
+          }),
         },
         toolMessage: reply,
       };
@@ -1806,20 +2242,34 @@ const proposeMealNumericCorrectionContract: ToolContract<
 
 const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult> = {
   name: "delete_meal",
-  policyClass: "direct-execute",
+  policyClass: "confirm-first",
   policyRules: [
+    {
+      id: "delete_meal_setup_only",
+      decision: "allowed",
+      description: "Writes pending delete proposal authority but does not mutate meals.",
+    },
     {
       id: "delete_meal_requires_resolved_target",
       decision: "blocked",
-      description: "Direct delete requires a same-turn resolved target; no delete proposal path exists in Phase 85.",
+      description: "Delete proposal setup requires a same-turn resolved target before writing pending helper state.",
     },
     {
       id: "delete_meal_revision_precondition_guard",
       decision: "blocked",
-      description: "Direct delete requires the resolved target revision to remain current.",
+      description: "Delete proposal setup requires the resolved target revision to remain current.",
     },
   ],
-  description: "刪除已解析出的歷史餐點。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
+  policyGate: () => ({
+    allowed: true,
+    fact: {
+      tool: "delete_meal",
+      policyClass: "confirm-first",
+      decision: "allowed",
+      ruleId: "delete_meal_setup_only",
+    },
+  }),
+  description: "建立一組待確認的歷史餐點刪除提案，不會刪除餐點。只有在本輪已先透過 find_meals 解析出唯一目標後才可呼叫。",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -1835,8 +2285,8 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
   execute: async (args, context) => {
     const deps = context.deps?.toolDeps as ToolDeps | undefined;
     const deviceId = context.deps?.deviceId as string | undefined;
-    if (!deps?.mealCorrectionService || !deviceId) {
-      throw new Error("delete_meal contract missing mealCorrectionService/deviceId in context");
+    if (!deps?.mealCorrectionService || !deps.mealDeleteProposalService || !deviceId) {
+      throw new Error("delete_meal contract missing mealCorrectionService/mealDeleteProposalService/deviceId in context");
     }
 
     const resolvedTarget = findResolvedMealTarget(deps.toolSessionState, args.meal_id);
@@ -1844,9 +2294,62 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
       throw new FatalToolError("meal target unresolved");
     }
 
-    let deleted: DeleteMealResult;
     try {
-      deleted = await deps.mealCorrectionService.deleteMeal(deviceId, args.meal_id, resolvedTarget.mealRevisionId);
+      const currentFacts = await deps.mealCorrectionService.loadCurrentMealFacts(
+        deviceId,
+        args.meal_id,
+        resolvedTarget.mealRevisionId,
+      );
+      const snapshot = {
+        mealId: currentFacts.mealId,
+        expectedMealRevisionId: currentFacts.currentMealRevisionId,
+        mealLabel: currentFacts.mealLabel,
+        calories: currentFacts.totals.calories,
+        protein: currentFacts.totals.protein,
+        carbs: currentFacts.totals.carbs,
+        fat: currentFacts.totals.fat,
+        dateKey: currentFacts.dateKey,
+        loggedAt: currentFacts.loggedAt,
+        mealPeriod: currentFacts.mealPeriod,
+        ...(currentFacts.items.length > 1
+          ? {
+              items: currentFacts.items.map((item) => ({
+                foodName: item.foodName,
+                calories: item.calories,
+                protein: item.protein,
+                carbs: item.carbs,
+                fat: item.fat,
+              })),
+            }
+          : {}),
+      };
+      const proposal = await deps.mealDeleteProposalService.putLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: currentFacts.mealId,
+          expectedMealRevisionId: currentFacts.currentMealRevisionId,
+          snapshot,
+        },
+      });
+      await deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
+      const otherProposalKindActive = deps.goalProposalService
+        ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
+        : false;
+      const reply = renderMealDeleteProposalCopy({
+        snapshot: proposal.snapshot,
+        otherProposalKindActive,
+      });
+      return {
+        ok: true,
+        result: makeMealDeleteProposalResult({
+          proposalId: proposal.proposalId,
+          reply,
+          snapshot: proposal.snapshot,
+          expiresAt: proposal.expiresAt,
+        }),
+        toolMessage: reply,
+      };
     } catch (error) {
       if (error instanceof MealRevisionPreconditionError) {
         const recovery = await deps.mealCorrectionService.recoverStalePendingSelection?.({
@@ -1866,20 +2369,6 @@ const deleteMealContract: ToolContract<DeleteMealArgs, DeleteMealContractResult>
       }
       throw error;
     }
-
-    await deps.mealCorrectionService.clearPendingSelection({
-      deviceId,
-      sessionId: DEFAULT_SESSION_ID,
-    });
-    if (deps.toolSessionState) {
-      deps.toolSessionState.resolvedMealTargets = [];
-    }
-
-    return {
-      ok: true,
-      result: deleted,
-      toolMessage: "已刪除餐點",
-    };
   },
 };
 
@@ -1913,7 +2402,7 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       throw new Error("propose_goals contract missing goalProposalService/deviceId in context");
     }
 
-    await deps.goalProposalService.putLatest({
+    const proposal = await deps.goalProposalService.putLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
       targets: args,
@@ -1925,6 +2414,7 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       result: {
         ...makeGoalControlledResult("goal_proposal", reply),
         reason: "goal_proposal",
+        proposalCard: buildGoalProposalCard(proposal),
       },
       toolMessage: reply,
     };
@@ -2173,6 +2663,7 @@ export const KNOWN_TOOL_NAMES = [
   "find_meals",
   "propose_goals",
   "update_goals",
+  "propose_meal_estimate",
   "propose_meal_numeric_correction",
   "update_meal",
   "delete_meal",
@@ -2186,9 +2677,10 @@ export const KNOWN_TOOL_POLICY_CLASSES = {
   find_meals: "clarify-first",
   propose_goals: "confirm-first",
   update_goals: "direct-execute",
+  propose_meal_estimate: "confirm-first",
   propose_meal_numeric_correction: "confirm-first",
   update_meal: "direct-execute",
-  delete_meal: "direct-execute",
+  delete_meal: "confirm-first",
 } satisfies Record<KnownToolName, SideEffectPolicyClass>;
 
 export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
@@ -2197,6 +2689,7 @@ export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [updateMealContract.name, updateMealContract as ToolContract<any, any>],
   [deleteMealContract.name, deleteMealContract as ToolContract<any, any>],
   [getDailySummaryContract.name, getDailySummaryContract as ToolContract<any, any>],
+  [proposeMealEstimateContract.name, proposeMealEstimateContract as ToolContract<any, any>],
   [proposeMealNumericCorrectionContract.name, proposeMealNumericCorrectionContract as ToolContract<any, any>],
   [proposeGoalsContract.name, proposeGoalsContract as ToolContract<any, any>],
   [updateGoalsContract.name, updateGoalsContract as ToolContract<any, any>],
@@ -2282,6 +2775,12 @@ export function redactToolArgsForHook(toolName: string, rawArgs: string): string
         : "";
       const operator = typeof summary.operator === "string" ? summary.operator : "unknown";
       return `fields: ${fields}; operator: ${operator}`;
+    }
+    if (toolName === "propose_meal_estimate") {
+      const fields = Array.isArray(summary.fields)
+        ? summary.fields.join(",")
+        : "";
+      return `fields: ${fields}`;
     }
     if (toolName === "delete_meal") {
       return "<delete_meal args>";
@@ -2531,7 +3030,40 @@ export async function executeTool(
       || toolCall.function.name === "update_goals"
       || toolCall.function.name === "update_meal"
       || toolCall.function.name === "delete_meal"
+      || toolCall.function.name === "propose_meal_estimate"
     ) {
+      if (
+        toolCall.function.name === "propose_meal_estimate"
+        && outcome.failureReason === "validation"
+      ) {
+        let failureKind = "schema_validation";
+        let failureFields: string[] | undefined;
+        try {
+          const parsed = JSON.parse(outcome.result) as Record<string, unknown>;
+          if (typeof parsed.reason === "string") {
+            failureKind = parsed.reason;
+          }
+          if (
+            Array.isArray(parsed.fields)
+            && parsed.fields.every((field) => typeof field === "string")
+          ) {
+            failureFields = parsed.fields as string[];
+          }
+        } catch {
+          // Keep the stable schema_validation default below.
+        }
+        return attachPolicyFact({
+          result: outcome.result,
+          summary: `failureReason: ${outcome.failureReason}`,
+          success: false,
+          executed: false,
+          failureReason: outcome.failureReason,
+          validationDiagnostic: {
+            reason: failureKind,
+            ...(failureFields ? { fields: failureFields } : {}),
+          },
+        });
+      }
       const updatedFields =
         typeof outcome.logSummary === "object" &&
         outcome.logSummary !== null &&
@@ -2719,6 +3251,24 @@ export async function executeTool(
 
   if (toolCall.function.name === "delete_meal") {
     const contractResult = outcome.contractResult as DeleteMealContractResult;
+    if ("status" in contractResult && contractResult.status === "meal_delete_proposal") {
+      return attachPolicyFact({
+        result: contractResult.reply,
+        summary: "status: proposal",
+        success: true,
+        executed: false,
+        proposalCard: buildMealDeleteProposalCard({
+          proposalId: contractResult.proposalId,
+          expiresAt: contractResult.expiresAt,
+          snapshot: contractResult.snapshot,
+        }),
+        controlledReply: {
+          source: "renderer",
+          reason: contractResult.reason,
+          text: contractResult.reply,
+        },
+      });
+    }
     if (isMealControlledResult(contractResult)) {
       return attachPolicyFact({
         result: contractResult.reply,
@@ -2801,6 +3351,7 @@ export async function executeTool(
       summary: "status: proposal",
       success: true,
       executed: true,
+      proposalCard: contractResult.proposalCard,
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,
@@ -2818,6 +3369,25 @@ export async function executeTool(
       success: isProposal,
       executed: isProposal,
       ...(isProposal ? {} : { failureReason: "guard" as const }),
+      ...(contractResult.proposalCard ? { proposalCard: contractResult.proposalCard } : {}),
+      controlledReply: {
+        source: "renderer",
+        reason: contractResult.reason,
+        text: contractResult.reply,
+      },
+    });
+  }
+
+  if (toolCall.function.name === "propose_meal_estimate") {
+    const contractResult = outcome.contractResult as ProposeMealNumericCorrectionResult;
+    const isProposal = contractResult.reason === "meal_numeric_proposal";
+    return attachPolicyFact({
+      result: contractResult.reply,
+      summary: isProposal ? "status: proposal" : "failureReason: guard",
+      success: isProposal,
+      executed: isProposal,
+      ...(isProposal ? {} : { failureReason: "guard" as const }),
+      ...(contractResult.proposalCard ? { proposalCard: contractResult.proposalCard } : {}),
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,

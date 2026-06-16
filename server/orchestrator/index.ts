@@ -8,10 +8,21 @@ import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
 import type { createMealCorrectionService } from "../services/meal-correction.js";
 import type { createGoalProposalService } from "../services/goal-proposals.js";
+import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import type {
   createMealNumericProposalService,
   MealNumericProposalPayload,
 } from "../services/meal-numeric-proposals.js";
+import type {
+  createProposalActionService,
+  ProposalActionRequestAction,
+} from "../services/proposal-actions.js";
+import type {
+  PendingProposalCardInput,
+  ProposalActionEventClientMetadata,
+  ProposalCardClientMetadata,
+  ProposalKind,
+} from "../services/proposal-cards.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
@@ -39,7 +50,11 @@ import {
 } from "./mutation-effects.js";
 import {
   assertNoForbiddenReceiptTerms,
+  renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
+  renderMealDeleteAuthorityFailureCopy,
+  renderMealDeleteCancelCopy,
+  renderMealDeleteStaleCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericCancelCopy,
   renderMutationReceipt,
@@ -60,7 +75,9 @@ interface OrchestratorDeps {
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
   deviceService: ReturnType<typeof createDeviceService>;
   goalProposalService?: ReturnType<typeof createGoalProposalService>;
+  mealDeleteProposalService?: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
+  proposalActionService?: ReturnType<typeof createProposalActionService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
 
@@ -136,6 +153,9 @@ export type OrchestratorResult =
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
       mutationOutcomeFact?: ChatMutationOutcomeFact;
+      proposalCard?: PendingProposalCardInput | ProposalCardClientMetadata;
+      proposalActionEvent?: ProposalActionEventClientMetadata;
+      assistantReplyPersistence?: "already_persisted";
     } & FinalReplyTraceMetadata)
   | ({
       streamGenerator: AsyncGenerator<string>;
@@ -150,6 +170,9 @@ export type OrchestratorResult =
       loggedMeal?: LoggedMealReceipt;
       loggedMealToolMessageId?: string;
       mutationOutcomeFact?: ChatMutationOutcomeFact;
+      proposalCard?: PendingProposalCardInput | ProposalCardClientMetadata;
+      proposalActionEvent?: ProposalActionEventClientMetadata;
+      assistantReplyPersistence?: "already_persisted";
     } & FinalReplyTraceMetadata);
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
@@ -344,10 +367,31 @@ function isGoalProposalKindText(message: string): boolean {
   return /(每日)?目標|goal/i.test(normalized);
 }
 
+function isMealDeleteKindText(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /(刪除|删除|移除|delete).*(餐點|餐|meal)|(?:餐點|餐|meal).*(刪除|删除|移除|delete)/i.test(normalized);
+}
+
+function hasMealDeleteVerb(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /(刪除|删除|移除|delete)/i.test(normalized);
+}
+
+function isBareProposalConfirmation(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /^(確認|確定)$/.test(normalized);
+}
+
 function isMealProposalCancel(message: string): boolean {
   const normalized = normalizeProposalDecisionText(message);
   return /(取消|不要|不用|不套用|先不用|先不要|no)/i.test(normalized)
     && isMealProposalKindText(message);
+}
+
+function isMealDeleteProposalCancel(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /(取消|不要|不用|不刪|不删|不移除|別刪|别删|先別刪|先别删|不想刪|不想删|先不用|先不要|no|not)/i.test(normalized)
+    && (isMealDeleteKindText(message) || hasMealDeleteVerb(message));
 }
 
 function isGoalKindCancel(message: string): boolean {
@@ -361,6 +405,23 @@ function isMealProposalApproval(message: string): boolean {
   if (isGoalProposalCancel(message)) return false;
   if (/套用(?:這組)?(?:餐點)?(?:修正|修改)|套用餐點|applymeal/i.test(normalized)) return true;
   return isMealProposalKindText(message) && isGoalProposalConsent(message);
+}
+
+function isMealDeleteProposalApproval(
+  message: string,
+  options: { requireExplicitDelete?: boolean } = {},
+): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  if (isGoalProposalCancel(message) || isMealDeleteProposalCancel(message)) return false;
+  const explicitDelete = /(確認|確定)?(刪除|删除|移除)(這筆|該筆)?(餐點|餐|meal)?|delete(?:this)?meal/i.test(normalized);
+  if (explicitDelete) {
+    return true;
+  }
+  if (options.requireExplicitDelete) {
+    return false;
+  }
+  if (isBareProposalConfirmation(message)) return true;
+  return isMealDeleteKindText(message) && isGoalProposalConsent(message);
 }
 
 function isGoalKindApproval(message: string): boolean {
@@ -662,6 +723,94 @@ export interface HandleMessageOpts {
   onUserMessageSaved?: () => void;
   signal?: AbortSignal;
   turnId?: string;
+  proposalContext?: ProposalEditContext;
+}
+
+export interface ProposalEditContext {
+  proposalId: string;
+  kind: ProposalKind;
+  action: "edit";
+}
+
+interface TypedProposalDecision {
+  proposalId: string;
+  kind: ProposalKind;
+  action: ProposalActionRequestAction;
+}
+
+function mealProposalKind(proposal: MealNumericProposalPayload): Extract<ProposalKind, "meal_numeric" | "meal_estimate"> {
+  return proposal.provenance === "model_estimate" ? "meal_estimate" : "meal_numeric";
+}
+
+function isSelectedProposalGenericReject(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  return /^(取消(?:這個|此)?提案|不要(?:這個|此)?提案|不套用|先不用|先不要)$/i.test(normalized);
+}
+
+function selectedProposalReject(message: string, kind: ProposalKind): boolean {
+  if (isSelectedProposalGenericReject(message)) {
+    return true;
+  }
+  if (kind === "goal") {
+    return isGoalProposalCancel(message) || isGoalKindCancel(message);
+  }
+  if (kind === "meal_delete") {
+    return isGoalProposalCancel(message) || isMealDeleteProposalCancel(message);
+  }
+  return isGoalProposalCancel(message) || isMealProposalCancel(message);
+}
+
+function selectedProposalApprove(message: string, kind: ProposalKind): boolean {
+  if (kind === "goal") {
+    return isGoalProposalConsent(message) || isGoalKindApproval(message);
+  }
+  if (kind === "meal_delete") {
+    return isMealDeleteProposalApproval(message, { requireExplicitDelete: true });
+  }
+  return isGoalProposalConsent(message) || isMealProposalApproval(message);
+}
+
+function selectedProposalToolName(kind: ProposalKind): string {
+  if (kind === "goal") return "update_goals";
+  if (kind === "meal_delete") return "delete_meal";
+  return "propose_meal_numeric_correction";
+}
+
+function selectedProposalFallbackReply(kind: ProposalKind, action: ProposalActionRequestAction): string {
+  if (action === "approve") {
+    if (kind === "goal") return renderGoalAuthorityFailureCopy();
+    if (kind === "meal_delete") return renderMealDeleteAuthorityFailureCopy();
+    return renderMealNumericAuthorityFailureCopy();
+  }
+  if (kind === "goal") return renderGoalCancelCopy();
+  if (kind === "meal_delete") return renderMealDeleteCancelCopy();
+  return renderMealNumericCancelCopy();
+}
+
+function buildTypedActionResult(input: {
+  actionResult: Awaited<ReturnType<ReturnType<typeof createProposalActionService>["handleAction"]>>;
+  fallbackReply: string;
+}): OrchestratorResult {
+  const reply = input.actionResult.ok
+    ? input.actionResult.reply ?? input.actionResult.proposalActionEvent.transcriptCopy
+    : input.actionResult.proposalCard?.lapseCopy ?? input.fallbackReply;
+
+  return {
+    reply,
+    didLogMeal: false,
+    didMutateMeal: input.actionResult.didMutateMeal,
+    ...(input.actionResult.ok && input.actionResult.dailyTargets ? { dailyTargets: input.actionResult.dailyTargets } : {}),
+    ...(input.actionResult.ok && input.actionResult.deletedMealId ? { deletedMealId: input.actionResult.deletedMealId } : {}),
+    ...(input.actionResult.ok && input.actionResult.affectedDate ? { affectedDate: input.actionResult.affectedDate } : {}),
+    ...(input.actionResult.ok && input.actionResult.summaryOutcome ? { summaryOutcome: input.actionResult.summaryOutcome } : {}),
+    ...(input.actionResult.ok && input.actionResult.dailySummary ? { dailySummary: input.actionResult.dailySummary } : {}),
+    ...(input.actionResult.ok && input.actionResult.mutationOutcomeFact ? { mutationOutcomeFact: input.actionResult.mutationOutcomeFact } : {}),
+    ...(input.actionResult.proposalCard ? { proposalCard: input.actionResult.proposalCard } : {}),
+    ...(input.actionResult.ok ? { proposalActionEvent: input.actionResult.proposalActionEvent } : {}),
+    ...(input.actionResult.ok && input.actionResult.reply ? { assistantReplyPersistence: "already_persisted" as const } : {}),
+    finalReplySource: "renderer",
+    finalReplyShape: classifyPlainReplyShape(reply),
+  };
 }
 
 export function createOrchestrator(deps: OrchestratorDeps) {
@@ -688,7 +837,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         .find((message) => message.role === "assistant")?.content;
 
       // Save user message after loading history
-      await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
+      const savedUserMessage = await chatService.saveMessage(deviceId, "user", userMessage, { imagePath });
       opts?.onUserMessageSaved?.();
       if (hallucinatedChoiceRecovery) {
         opts?.hooks?.onFallback?.({ reason: "hallucination_detected" });
@@ -706,22 +855,108 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       const activeMealProposal = deps.mealNumericProposalService
         ? await deps.mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID })
         : undefined;
+      const activeMealDeleteProposal = deps.mealDeleteProposalService
+        ? await deps.mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID })
+        : undefined;
+      const activeMealMutationProposal = activeMealProposal || activeMealDeleteProposal;
+
+      const activeProposalCount = [
+        activeGoalProposal,
+        activeMealProposal,
+        activeMealDeleteProposal,
+      ].filter(Boolean).length;
+
+      const runTypedProposalDecision = async (
+        decision: TypedProposalDecision,
+        fallbackReply: string,
+        toolName: string,
+      ) => {
+        if (!deps.proposalActionService) {
+          return undefined;
+        }
+        const actionResult = await deps.proposalActionService.handleAction({
+          deviceId,
+          proposalId: decision.proposalId,
+          kind: decision.kind,
+          action: decision.action,
+          actionMessageId: savedUserMessage.id,
+        });
+        opts?.hooks?.onToolResult?.({
+          tool: toolName,
+          success: actionResult.ok,
+          executed: actionResult.ok && decision.action === "approve",
+          summary: `proposalAction: ${actionResult.status}`,
+          ...policyFactPayload({
+            tool: toolName,
+            policyClass: "confirm-first",
+            decision: actionResult.ok ? "allowed" : "blocked",
+            ruleId: `typed_${decision.kind}_${decision.action}`,
+            proposalId: decision.proposalId,
+          }, opts?.turnId),
+        });
+        return buildTypedActionResult({ actionResult, fallbackReply });
+      };
+
+      if (opts?.proposalContext) {
+        const validation = await deps.proposalActionService?.validateEditContext({
+          deviceId,
+          proposalId: opts.proposalContext.proposalId,
+          kind: opts.proposalContext.kind,
+        });
+        if (validation && !validation.ok) {
+          return buildTypedActionResult({
+            actionResult: validation,
+            fallbackReply: validation.proposalCard?.lapseCopy ?? renderProposalKindAmbiguityCopy(),
+          });
+        }
+        const selectedAction = selectedProposalReject(userMessage, opts.proposalContext.kind)
+          ? "reject"
+          : selectedProposalApprove(userMessage, opts.proposalContext.kind)
+            ? "approve"
+            : undefined;
+        if (selectedAction) {
+          const typedResult = await runTypedProposalDecision(
+            {
+              proposalId: opts.proposalContext.proposalId,
+              kind: opts.proposalContext.kind,
+              action: selectedAction,
+            },
+            selectedProposalFallbackReply(opts.proposalContext.kind, selectedAction),
+            selectedProposalToolName(opts.proposalContext.kind),
+          );
+          if (typedResult) return typedResult;
+        }
+      }
+
+      if (activeMealDeleteProposal && isMealDeleteProposalCancel(userMessage)) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealDeleteProposal.proposalId, kind: "meal_delete", action: "reject" },
+          renderMealDeleteCancelCopy(),
+          "delete_meal",
+        );
+        if (typedResult) return typedResult;
+      }
 
       if (activeMealProposal && isMealProposalCancel(userMessage)) {
-        await deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
-        const reply = renderMealNumericCancelCopy();
-        return {
-          reply,
-          didLogMeal: false,
-          didMutateMeal: false,
-          finalReplySource: "renderer",
-          finalReplyShape: classifyPlainReplyShape(reply),
-        };
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealProposal.proposalId, kind: mealProposalKind(activeMealProposal), action: "reject" },
+          renderMealNumericCancelCopy(),
+          "propose_meal_numeric_correction",
+        );
+        if (typedResult) return typedResult;
       }
 
       if (activeGoalProposal && isGoalKindCancel(userMessage)) {
-        await deps.goalProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
-        const reply = renderGoalCancelCopy();
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeGoalProposal.proposalId, kind: "goal", action: "reject" },
+          renderGoalCancelCopy(),
+          "update_goals",
+        );
+        if (typedResult) return typedResult;
+      }
+
+      if (isGoalProposalCancel(userMessage) && activeProposalCount > 1) {
+        const reply = renderProposalKindAmbiguityCopy();
         return {
           reply,
           didLogMeal: false,
@@ -731,30 +966,54 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         };
       }
 
-      if (isGoalProposalCancel(userMessage) && (activeGoalProposal || activeMealProposal)) {
-        await Promise.all([
-          activeGoalProposal
-            ? deps.goalProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID })
-            : undefined,
-          activeMealProposal
-            ? deps.mealNumericProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID })
-            : undefined,
-        ]);
-        const reply = activeMealProposal ? renderMealNumericCancelCopy() : renderGoalCancelCopy();
-        return {
-          reply,
-          didLogMeal: false,
-          didMutateMeal: false,
-          finalReplySource: "renderer",
-          finalReplyShape: classifyPlainReplyShape(reply),
-        };
+      if (isGoalProposalCancel(userMessage) && activeGoalProposal) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeGoalProposal.proposalId, kind: "goal", action: "reject" },
+          renderGoalCancelCopy(),
+          "update_goals",
+        );
+        if (typedResult) return typedResult;
+      }
+
+      if (isGoalProposalCancel(userMessage) && activeMealProposal) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealProposal.proposalId, kind: mealProposalKind(activeMealProposal), action: "reject" },
+          renderMealNumericCancelCopy(),
+          "propose_meal_numeric_correction",
+        );
+        if (typedResult) return typedResult;
+      }
+
+      if (isGoalProposalCancel(userMessage) && activeMealDeleteProposal) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealDeleteProposal.proposalId, kind: "meal_delete", action: "reject" },
+          renderMealDeleteCancelCopy(),
+          "delete_meal",
+        );
+        if (typedResult) return typedResult;
+      }
+
+      if (
+        activeMealDeleteProposal
+        && (
+          isMealDeleteProposalApproval(userMessage, { requireExplicitDelete: Boolean(activeGoalProposal) })
+          || (!activeGoalProposal && isGoalProposalConsent(userMessage))
+        )
+      ) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealDeleteProposal.proposalId, kind: "meal_delete", action: "approve" },
+          renderMealDeleteAuthorityFailureCopy(),
+          "delete_meal",
+        );
+        if (typedResult) return typedResult;
       }
 
       if (
         activeGoalProposal
-        && activeMealProposal
-        && isGoalProposalConsent(userMessage)
+        && activeMealMutationProposal
+        && (isGoalProposalConsent(userMessage) || isBareProposalConfirmation(userMessage))
         && !isMealProposalApproval(userMessage)
+        && !isMealDeleteProposalApproval(userMessage, { requireExplicitDelete: true })
         && !isGoalKindApproval(userMessage)
       ) {
         const reply = renderProposalKindAmbiguityCopy();
@@ -769,99 +1028,27 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
       if (
         activeMealProposal
-        && deps.mealCorrectionService
-        && deps.mealNumericProposalService
         && (isMealProposalApproval(userMessage) || (!activeGoalProposal && isGoalProposalConsent(userMessage)))
       ) {
-        const consumedMealProposal = await deps.mealNumericProposalService.consumeLatest({
-          deviceId,
-          sessionId: DEFAULT_SESSION_ID,
-          proposalId: activeMealProposal.proposalId,
-          expectedMealRevisionId: activeMealProposal.expectedMealRevisionId,
-        });
-        if (!consumedMealProposal) {
-          opts?.hooks?.onToolResult?.({
-            tool: "propose_meal_numeric_correction",
-            success: false,
-            executed: false,
-            summary: "policyDecision: blocked",
-            ...policyFactPayload({
-              tool: "propose_meal_numeric_correction",
-              policyClass: "confirm-first",
-              decision: "blocked",
-              ruleId: "meal_numeric_proposal_approval_consume",
-              proposalId: activeMealProposal.proposalId,
-            }, opts?.turnId),
-          });
-          const reply = renderMealNumericAuthorityFailureCopy();
-          return {
-            reply,
-            didLogMeal: false,
-            didMutateMeal: false,
-            finalReplySource: "renderer",
-            finalReplyShape: classifyPlainReplyShape(reply),
-          };
-        }
-        opts?.hooks?.onToolResult?.({
-          tool: "propose_meal_numeric_correction",
-          success: true,
-          executed: false,
-          summary: "policyDecision: allowed",
-          ...policyFactPayload({
-            tool: "propose_meal_numeric_correction",
-            policyClass: "confirm-first",
-            decision: "allowed",
-            ruleId: "meal_numeric_proposal_approval_consume",
-            proposalId: consumedMealProposal.proposalId,
-          }, opts?.turnId),
-        });
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeMealProposal.proposalId, kind: mealProposalKind(activeMealProposal), action: "approve" },
+          renderMealNumericAuthorityFailureCopy(),
+          "propose_meal_numeric_correction",
+        );
+        if (typedResult) return typedResult;
+      }
 
-        try {
-          const updated = await deps.mealCorrectionService.updateMeal(
-            deviceId,
-            consumedMealProposal.mealId,
-            buildMealNumericProposalUpdateInput(consumedMealProposal),
-            consumedMealProposal.expectedMealRevisionId,
-          );
-          await deps.mealCorrectionService.clearPendingSelection({
-            deviceId,
-            sessionId: DEFAULT_SESSION_ID,
-          });
-          const loggedMeal = buildLoggedMealFromMealProposalUpdate(updated.updatedMeal);
-          const mutationEffects: MutationEffects = {
-            kind: "update",
-            affectedDate: updated.affectedDate,
-            summaryOutcome: requireSummaryOutcomeForMealMutation(updated.summaryOutcome),
-            committedTargets: getDeviceTargets(device),
-            meal: loggedMeal,
-          };
-          const reply = renderCheckedMutationReceipt(mutationEffects);
-          const mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
-          return {
-            reply,
-            didLogMeal: false,
-            didMutateMeal: true,
-            dailySummary: updated.dailySummary,
-            summaryOutcome: updated.summaryOutcome,
-            affectedDate: updated.affectedDate,
-            loggedMeal,
-            mutationOutcomeFact,
-            finalReplySource: "renderer",
-            finalReplyShape: classifyPlainReplyShape(reply),
-          };
-        } catch (error) {
-          if (error instanceof MealRevisionPreconditionError) {
-            const reply = renderMealProposalStaleCopy();
-            return {
-              reply,
-              didLogMeal: false,
-              didMutateMeal: false,
-              finalReplySource: "renderer",
-              finalReplyShape: classifyPlainReplyShape(reply),
-            };
-          }
-          throw error;
-        }
+      if (
+        activeGoalProposal
+        && !activeMealMutationProposal
+        && (isGoalProposalConsent(userMessage) || isGoalKindApproval(userMessage))
+      ) {
+        const typedResult = await runTypedProposalDecision(
+          { proposalId: activeGoalProposal.proposalId, kind: "goal", action: "approve" },
+          renderGoalAuthorityFailureCopy(),
+          "update_goals",
+        );
+        if (typedResult) return typedResult;
       }
       const systemMsg: ChatMessage = {
         role: "system",
@@ -923,6 +1110,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         | undefined;
       let loggedMealToolMessageId: string | undefined;
       let lastTool: string | undefined;
+      let lastValidationFailureTool: string | undefined;
 
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
@@ -1130,7 +1318,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               } else if (toolCall.function.name === "update_meal") {
                 opts?.onStatus?.("調整餐點中...");
               } else if (toolCall.function.name === "delete_meal") {
-                opts?.onStatus?.("刪除餐點中...");
+                opts?.onStatus?.("準備刪除確認...");
               }
               const argsRedacted = redactToolArgsForHook(toolCall.function.name, toolCall.function.arguments);
               if (safeToolNames.has(toolCall.function.name)) {
@@ -1144,6 +1332,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 summaryOutcome: toolSummaryOutcome,
                 loggedMeal: toolLoggedMeal,
                 success,
+                executed,
                 failureReason,
                 updatedFields,
                 publishedEvents,
@@ -1153,6 +1342,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 deletedMeal,
                 summaryHistoryFacts: toolSummaryHistoryFacts,
                 controlledReply,
+                proposalCard,
                 validationDiagnostic,
                 policyFact,
               } = await executeTool(toolCall, deviceId, {
@@ -1161,6 +1351,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 mealCorrectionService: deps.mealCorrectionService,
                 deviceService: deps.deviceService,
                 goalProposalService: deps.goalProposalService,
+                mealDeleteProposalService: deps.mealDeleteProposalService,
                 mealNumericProposalService: deps.mealNumericProposalService,
                 publisher: deps.publisher,
                 imagePath,
@@ -1173,7 +1364,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 opts?.hooks?.onToolResult?.({
                   tool: toolCall.function.name,
                   success: success !== false,
-                  executed: success !== false,
+                  executed: executed ?? success !== false,
                   failureReason,
                   summary,
                   updatedFields,
@@ -1185,11 +1376,13 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   reply: controlledReply.text,
                   didLogMeal: false,
                   didMutateMeal: false,
+                  ...(proposalCard ? { proposalCard } : {}),
                   finalReplySource: controlledReply.source,
                   finalReplyShape: classifyPlainReplyShape(controlledReply.text),
                 };
               }
               if (success === false) {
+                lastValidationFailureTool = validationDiagnostic ? toolCall.function.name : undefined;
                 // Phase 83 (D-02): log_food schema_validation failures now reach
                 // this controlled feedback path instead of the FatalToolError
                 // catch below. executeTool supplies typed, redacted diagnostics
@@ -1211,6 +1404,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 toolResults.push({ toolCall, result });
                 continue;
               }
+              lastValidationFailureTool = undefined;
               if (affectedDate) {
                 resolvedAffectedDate = affectedDate;
               }
@@ -1472,6 +1666,24 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 ...deletedMealIdFields(deletedMealId),
           finalReplySource: "renderer",
           finalReplyShape: classifyPlainReplyShape(mutationReceiptText),
+          fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
+        };
+      }
+      if (lastValidationFailureTool === "propose_meal_estimate") {
+        const reply = renderMealNumericAuthorityFailureCopy();
+        return {
+          reply,
+          didLogMeal,
+          didMutateMeal,
+          dailySummary: logMealSummary,
+          summaryOutcome: mealSummaryOutcome,
+          affectedDate: resolvedAffectedDate,
+          loggedMeal,
+          loggedMealToolMessageId,
+          ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(reply),
           fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
         };
       }

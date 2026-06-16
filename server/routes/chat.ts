@@ -3,7 +3,7 @@ import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
-import type { createOrchestrator } from "../orchestrator/index.js";
+import type { createOrchestrator, ProposalEditContext } from "../orchestrator/index.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -40,13 +40,34 @@ import {
 } from "../observability/events.js";
 import type { ProviderErrorMetadata } from "../llm/types.js";
 import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
+import {
+  projectProposalCardForClient,
+  PROPOSAL_KINDS,
+  type PendingProposalCardInput,
+  type ProposalActionEventClientMetadata,
+  type ProposalCardClientMetadata,
+  type ProposalKind,
+  type ProposalLane,
+  type createProposalCardService,
+} from "../services/proposal-cards.js";
+import {
+  renderProposalSupersededCopy,
+} from "../orchestrator/mutation-receipts.js";
+import type { createGoalProposalService } from "../services/goal-proposals.js";
+import type { createMealNumericProposalService } from "../services/meal-numeric-proposals.js";
+import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
+import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
+  proposalCardService: ReturnType<typeof createProposalCardService>;
   deviceService: ReturnType<typeof createDeviceService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
+  goalProposalService: ReturnType<typeof createGoalProposalService>;
+  mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   publisher: RealtimePublisher;
   /**
    * Override the upload storage directory. When undefined the route falls back
@@ -123,6 +144,99 @@ interface StreamingReplyResult {
   finalReplySource: LlmTraceFinalReplySource;
   finalReplyShape: LlmTraceFinalReplyShape;
   receiptPersistence: ReceiptPersistence;
+}
+
+type RouteProposalCard = PendingProposalCardInput | ProposalCardClientMetadata;
+
+function isProjectedProposalCard(card: RouteProposalCard): card is ProposalCardClientMetadata {
+  return "status" in card && "isActionable" in card;
+}
+
+async function loadActiveProposalSnapshots(deps: {
+  goalProposalService: ReturnType<typeof createGoalProposalService>;
+  mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
+}, deviceId: string): Promise<Array<{
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  expiresAt?: string | null;
+}>> {
+  const [goal, mealNumeric, mealDelete] = await Promise.all([
+    deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+    deps.mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+    deps.mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+  ]);
+  return [
+    ...(goal ? [{
+      proposalId: goal.proposalId,
+      proposalKind: "goal" as const,
+      proposalLane: "goal" as const,
+    }] : []),
+    ...(mealNumeric ? [{
+      proposalId: mealNumeric.proposalId,
+      proposalKind: mealNumeric.provenance === "model_estimate" ? "meal_estimate" as const : "meal_numeric" as const,
+      proposalLane: "meal_mutation" as const,
+      expiresAt: mealNumeric.expiresAt,
+    }] : []),
+    ...(mealDelete ? [{
+      proposalId: mealDelete.proposalId,
+      proposalKind: "meal_delete" as const,
+      proposalLane: "meal_mutation" as const,
+      expiresAt: mealDelete.expiresAt,
+    }] : []),
+  ];
+}
+
+async function persistProposalCardForAssistant(input: {
+  proposalCardService: ReturnType<typeof createProposalCardService>;
+  deviceId: string;
+  assistantMessageId: string;
+  proposalCard?: RouteProposalCard;
+}): Promise<ProposalCardClientMetadata | undefined> {
+  if (!input.proposalCard) {
+    return undefined;
+  }
+  if (isProjectedProposalCard(input.proposalCard)) {
+    return input.proposalCard;
+  }
+  if (input.proposalCard.proposalLane === "meal_mutation") {
+    await input.proposalCardService.markSupersededInLane({
+      deviceId: input.deviceId,
+      proposalLane: input.proposalCard.proposalLane,
+      replacementProposalId: input.proposalCard.proposalId,
+      supersededByKind: input.proposalCard.proposalKind,
+      lapseCopy: renderProposalSupersededCopy({
+        proposalKind: input.proposalCard.proposalKind,
+        supersededByKind: input.proposalCard.proposalKind,
+      }),
+    });
+  } else {
+    await input.proposalCardService.markSupersededInLane({
+      deviceId: input.deviceId,
+      proposalLane: "goal",
+      replacementProposalId: input.proposalCard.proposalId,
+      supersededByKind: "goal",
+      lapseCopy: renderProposalSupersededCopy({
+        proposalKind: "goal",
+        supersededByKind: "goal",
+      }),
+    });
+  }
+  const saved = await input.proposalCardService.saveAssistantProposalCard({
+    ...input.proposalCard,
+    deviceId: input.deviceId,
+    assistantMessageId: input.assistantMessageId,
+  });
+  return projectProposalCardForClient(saved, {
+    proposalId: saved.proposalId,
+    proposalKind: saved.proposalKind,
+    proposalLane: saved.proposalLane,
+    status: saved.status,
+    isActionable: saved.status === "active",
+    expiresAt: saved.expiresAt,
+    lapseCopy: saved.lapseCopy,
+  });
 }
 
 const activeChatTurns = new Map<string, ActiveChatTurn>();
@@ -397,6 +511,53 @@ function createNoMutationLoggingClaimStreamGuard() {
   };
 }
 
+function parseProposalContext(rawValue: unknown):
+  | { proposalContext: ProposalEditContext }
+  | { error: string } {
+  if (typeof rawValue !== "string") {
+    return { error: "Invalid proposalContext" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch {
+    return { error: "Invalid proposalContext JSON" };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { error: "Invalid proposalContext shape" };
+  }
+
+  const keys = Object.keys(parsed);
+  if (
+    keys.length !== 3
+    || !keys.includes("proposalId")
+    || !keys.includes("kind")
+    || !keys.includes("action")
+  ) {
+    return { error: "Invalid proposalContext keys" };
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+  if (typeof candidate.proposalId !== "string" || candidate.proposalId.trim().length === 0) {
+    return { error: "Invalid proposalContext proposalId" };
+  }
+  if (typeof candidate.kind !== "string" || !(PROPOSAL_KINDS as readonly string[]).includes(candidate.kind)) {
+    return { error: "Invalid proposalContext kind" };
+  }
+  if (candidate.action !== "edit") {
+    return { error: "Invalid proposalContext action" };
+  }
+
+  return {
+    proposalContext: {
+      proposalId: candidate.proposalId,
+      kind: candidate.kind as ProposalKind,
+      action: "edit",
+    },
+  };
+}
+
 async function parseMultipartRequest(
   request: FastifyRequest,
   uploadsDir: string,
@@ -404,6 +565,7 @@ async function parseMultipartRequest(
   | {
       message: string;
       image?: { dataUri: string; path: string; mimeType: string; originalFilename?: string };
+      proposalContext?: ProposalEditContext;
     }
   | { error: string; code: number }
 > {
@@ -411,6 +573,8 @@ async function parseMultipartRequest(
   let image:
     | { dataUri: string; path: string; mimeType: string; originalFilename?: string }
     | undefined;
+  let proposalContext: ProposalEditContext | undefined;
+  let proposalContextSeen = false;
   const savedImagePaths: string[] = [];
 
   async function reject(error: string, code: number) {
@@ -427,6 +591,16 @@ async function parseMultipartRequest(
   for await (const part of parts) {
     if (part.type === "field" && part.fieldname === "message") {
       message = part.value as string;
+    } else if (part.type === "field" && part.fieldname === "proposalContext") {
+      if (proposalContextSeen) {
+        return reject("Only one proposalContext field is allowed", 400);
+      }
+      proposalContextSeen = true;
+      const parsedContext = parseProposalContext(part.value);
+      if ("error" in parsedContext) {
+        return reject(parsedContext.error, 400);
+      }
+      proposalContext = parsedContext.proposalContext;
     } else if (part.type === "file" && part.fieldname === "image") {
       if (!ALLOWED_TYPES.includes(part.mimetype)) {
         return reject("Invalid image type. Allowed: jpeg, png, webp", 400);
@@ -455,6 +629,10 @@ async function parseMultipartRequest(
     }
   }
 
+  if (proposalContext && image) {
+    return reject("proposalContext is text-only and cannot be combined with image upload", 400);
+  }
+
   if (!message && image) {
     message = "(圖片)";
   }
@@ -463,7 +641,11 @@ async function parseMultipartRequest(
     return { error: "Message or image required", code: 400 };
   }
 
-  return { message, image };
+  return {
+    message,
+    image,
+    ...(proposalContext ? { proposalContext } : {}),
+  };
 }
 
 function publishSummarySafe(
@@ -921,12 +1103,14 @@ async function handleOrchestratorSSE(
     assetService: ReturnType<typeof createAssetService>;
     orchestrator: ReturnType<typeof createOrchestrator>;
     chatService: ReturnType<typeof createChatService>;
+    proposalCardService: ReturnType<typeof createProposalCardService>;
     publisher: RealtimePublisher;
     log: FastifyBaseLogger;
   },
   deviceId: string,
   message: string,
   image: { dataUri: string; path: string; mimeType: string; originalFilename?: string } | undefined,
+  proposalContext: ProposalEditContext | undefined,
   startedAt: number,
   hooks?: OrchestratorHooks,
   recorder?: LlmTraceRecorder,
@@ -946,6 +1130,8 @@ async function handleOrchestratorSSE(
   let streamDailyTargets: unknown;
   let streamAffectedDate: string | undefined;
   let streamDeletedMealId: string | undefined;
+  let streamProposalCard: ProposalCardClientMetadata | undefined;
+  let streamProposalActionEvent: ProposalActionEventClientMetadata | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
   let streamReceiptIdentity: ReceiptIdentity | undefined;
@@ -1052,6 +1238,7 @@ async function handleOrchestratorSSE(
         hooks,
         signal: stopControl?.signal,
         turnId: stopControl.turnId,
+        proposalContext,
       }
     );
 
@@ -1065,6 +1252,8 @@ async function handleOrchestratorSSE(
         affectedDate,
         deletedMealId,
         loggedMeal,
+        proposalCard,
+        proposalActionEvent,
       } = result;
       streamDidLogMeal = didLogMeal;
       streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
@@ -1077,6 +1266,7 @@ async function handleOrchestratorSSE(
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
       streamMutationOutcomeFact = result.mutationOutcomeFact;
+      streamProposalActionEvent = proposalActionEvent;
 
       const streamResult = await handleStreamingReply(
         stream,
@@ -1139,6 +1329,7 @@ async function handleOrchestratorSSE(
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
         ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
+        ...(streamProposalActionEvent ? { proposalActionEvent: streamProposalActionEvent } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (streamResult.finalReplySource === "fallback") {
@@ -1166,6 +1357,8 @@ async function handleOrchestratorSSE(
         affectedDate,
         deletedMealId,
         loggedMeal,
+        proposalCard,
+        proposalActionEvent,
       } = result;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
@@ -1182,6 +1375,7 @@ async function handleOrchestratorSSE(
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
       streamMutationOutcomeFact = result.mutationOutcomeFact;
+      streamProposalActionEvent = proposalActionEvent;
       const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
         && !result.fallbackOutcomeContext;
       const normalizedReply = normalizeRouteFinalReply(
@@ -1194,19 +1388,33 @@ async function handleOrchestratorSSE(
           rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
         },
       ).reply;
-      const finalized = await finalizeAssistantReply(
-        deps.chatService,
-        deviceId,
-        normalizedReply,
-        streamReceiptIdentity,
-        {
-          mutationOutcomeFact: streamMutationOutcomeFact,
-          log: deps.log,
-          transport: "sse",
-        },
-      );
-      const sanitizedFallback = finalized.sanitized;
-      streamReceiptPersistence = finalized.receiptPersistence;
+      const alreadyPersistedAssistantReply = result.assistantReplyPersistence === "already_persisted";
+      let sanitizedFallback = sanitizeReply(normalizedReply);
+      if (alreadyPersistedAssistantReply) {
+        streamProposalCard = proposalCard && isProjectedProposalCard(proposalCard)
+          ? proposalCard
+          : undefined;
+      } else {
+        const finalized = await finalizeAssistantReply(
+          deps.chatService,
+          deviceId,
+          normalizedReply,
+          streamReceiptIdentity,
+          {
+            mutationOutcomeFact: streamMutationOutcomeFact,
+            log: deps.log,
+            transport: "sse",
+          },
+        );
+        streamProposalCard = await persistProposalCardForAssistant({
+          proposalCardService: deps.proposalCardService,
+          deviceId,
+          assistantMessageId: finalized.assistantMessageId,
+          proposalCard,
+        });
+        sanitizedFallback = finalized.sanitized;
+        streamReceiptPersistence = finalized.receiptPersistence;
+      }
       const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
@@ -1219,6 +1427,8 @@ async function handleOrchestratorSSE(
         ...(dailyTargets ? { dailyTargets } : {}),
         ...(affectedDate ? { affectedDate } : {}),
         ...(deletedMealId ? { deletedMealId } : {}),
+        ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
+        ...(streamProposalActionEvent ? { proposalActionEvent: streamProposalActionEvent } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (result.fallbackOutcomeContext) {
@@ -1238,7 +1448,9 @@ async function handleOrchestratorSSE(
       } else {
         recordSseCompletion({ didLogMeal, didMutateMeal: streamDidMutateMeal });
       }
-      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, affectedDate, deps.log);
+      if (!streamProposalActionEvent) {
+        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, affectedDate, deps.log);
+      }
     }
   } catch (error) {
     const fallback = streamDidLogMeal
@@ -1299,6 +1511,7 @@ async function handleOrchestratorSSE(
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
       ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
+      ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
     recordSseFallback({
@@ -1330,8 +1543,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     orchestrator,
     assetService,
     chatService,
+    proposalCardService,
     deviceService,
     guestSessionService,
+    goalProposalService,
+    mealNumericProposalService,
+    mealDeleteProposalService,
     publisher,
     uploadsDir: injectedUploadsDir,
     llmTraceRecorderFactory,
@@ -1389,7 +1606,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       return reply.code(parseResult.code).send({ error: parseResult.error });
     }
 
-    const { message, image } = parseResult;
+    const { message, image, proposalContext } = parseResult;
     const chatTurnStartedAt = Date.now();
     const hadImage = Boolean(image);
     const { turnId, turnLog, orchLog } = createChatTurnContext(request);
@@ -1409,6 +1626,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let jsonDailyTargets: unknown;
       let jsonAffectedDate: string | undefined;
       let jsonDeletedMealId: string | undefined;
+      let jsonProposalCard: ProposalCardClientMetadata | undefined;
+      let jsonProposalActionEvent: ProposalActionEventClientMetadata | undefined;
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
       let jsonReceiptIdentity: ReceiptIdentity | undefined;
@@ -1504,6 +1723,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             },
             hooks,
             turnId,
+            proposalContext,
           },
         );
         jsonDidLogMeal = result.didLogMeal;
@@ -1519,6 +1739,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonLoggedMealReceipt = projectLoggedMealReceipt(result.loggedMeal);
         jsonReceiptIdentity = buildReceiptIdentity(result.loggedMeal, result.loggedMealToolMessageId);
         jsonMutationOutcomeFact = result.mutationOutcomeFact;
+        jsonProposalActionEvent = result.proposalActionEvent;
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
@@ -1560,6 +1781,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const sanitized = finalized.sanitized;
           jsonReceiptPersistence = finalized.receiptPersistence;
           const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
+          jsonProposalCard = await persistProposalCardForAssistant({
+            proposalCardService,
+            deviceId,
+            assistantMessageId: finalized.assistantMessageId,
+            proposalCard: result.proposalCard,
+          });
           traceRecorder?.recordFinalReply({
             source: hallucinationDetected ? "fallback" : composedSummaryHistory ? "renderer" : "model",
             shape: sanitized.trim() ? (hallucinationDetected ? "fallback_text" : "streamed_text") : "empty_or_missing",
@@ -1595,10 +1822,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
             ...(affectedDate ? { affectedDate } : {}),
             ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+            ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+            ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
           };
         }
 
         const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
+        jsonProposalActionEvent = result.proposalActionEvent;
         const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
           && !result.fallbackOutcomeContext;
         const normalizedReply = normalizeRouteFinalReply(
@@ -1611,19 +1841,33 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
           },
         ).reply;
-        const finalized = await finalizeAssistantReply(
-          chatService,
-          deviceId,
-          normalizedReply,
-          jsonReceiptIdentity,
-          {
-            mutationOutcomeFact: jsonMutationOutcomeFact,
-            log: turnLog,
-            transport: "json",
-          },
-        );
-        const sanitizedJson = finalized.sanitized;
-        jsonReceiptPersistence = finalized.receiptPersistence;
+        const alreadyPersistedAssistantReply = result.assistantReplyPersistence === "already_persisted";
+        let sanitizedJson = sanitizeReply(normalizedReply);
+        if (alreadyPersistedAssistantReply) {
+          jsonProposalCard = result.proposalCard && isProjectedProposalCard(result.proposalCard)
+            ? result.proposalCard
+            : undefined;
+        } else {
+          const finalized = await finalizeAssistantReply(
+            chatService,
+            deviceId,
+            normalizedReply,
+            jsonReceiptIdentity,
+            {
+              mutationOutcomeFact: jsonMutationOutcomeFact,
+              log: turnLog,
+              transport: "json",
+            },
+          );
+          sanitizedJson = finalized.sanitized;
+          jsonReceiptPersistence = finalized.receiptPersistence;
+          jsonProposalCard = await persistProposalCardForAssistant({
+            proposalCardService,
+            deviceId,
+            assistantMessageId: finalized.assistantMessageId,
+            proposalCard: result.proposalCard,
+          });
+        }
         const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
         traceRecorder?.recordFinalReply({
           source: result.finalReplySource ?? "model",
@@ -1631,7 +1875,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         });
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, affectedDate, turnLog);
+        if (!jsonProposalActionEvent) {
+          publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, affectedDate, turnLog);
+        }
         if (result.fallbackOutcomeContext) {
           const providerMetadata = result.providerFallbackContext?.reason === "llm_error"
             && result.fallbackOutcomeContext.reason === "llm_error"
@@ -1660,6 +1906,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(dailyTargets ? { dailyTargets } : {}),
           ...(affectedDate ? { affectedDate } : {}),
           ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+          ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+          ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
         };
       } catch (error) {
         const fallback = jsonDidLogMeal
@@ -1716,6 +1964,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
           ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),
           ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+          ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+          ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
         };
       } finally {
         await cleanupDurableAssetSafe(
@@ -1764,10 +2014,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     setImmediate(() => {
       void handleOrchestratorSSE(
         stream,
-        { assetService, orchestrator, chatService, publisher, log: turnLog },
+        { assetService, orchestrator, chatService, proposalCardService, publisher, log: turnLog },
         deviceId,
         message,
         image,
+        proposalContext,
         chatTurnStartedAt,
         hooks,
         traceRecorder,
@@ -1803,7 +2054,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
       return reply.code(400).send({ error: "Invalid limit. Must be an integer between 1 and 200." });
     }
-    const messages = await chatService.getHistory(deviceId, parsedLimit);
+    const activeProposals = await loadActiveProposalSnapshots(
+      { goalProposalService, mealNumericProposalService, mealDeleteProposalService },
+      deviceId,
+    );
+    const messages = await chatService.getHistory(deviceId, parsedLimit, { activeProposals });
     return {
       messages: messages.map((message) => {
         const { deviceId: _deviceId, ...publicMessage } = message;

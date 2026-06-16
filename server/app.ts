@@ -4,7 +4,7 @@ import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { createDb } from "./db/client.js";
+import { createDb, type AppDatabase } from "./db/client.js";
 import { createDeviceService } from "./services/device.js";
 import { createFoodLoggingService } from "./services/food-logging.js";
 import { createSummaryService } from "./services/summary.js";
@@ -13,10 +13,17 @@ import { createHistoryQueryService } from "./services/history-query.js";
 import { createChatService } from "./services/chat.js";
 import { createAssetService } from "./services/assets.js";
 import { createMealCorrectionService } from "./services/meal-correction.js";
+import { createMealDeleteProposalService } from "./services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "./services/meal-numeric-proposals.js";
 import { createGoalProposalService } from "./services/goal-proposals.js";
+import {
+  createProposalActionService,
+  type ProposalActionTestHooks,
+} from "./services/proposal-actions.js";
+import { createProposalCardService } from "./services/proposal-cards.js";
 import { createGuestSessionService } from "./services/guest-session.js";
 import { createOrchestrator } from "./orchestrator/index.js";
+import { renderProposalInactiveCopy } from "./orchestrator/mutation-receipts.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
 import { RealtimePublisher } from "./realtime/publisher.js";
 import { registerDeviceRoutes } from "./routes/device.js";
@@ -27,6 +34,7 @@ import { registerHistoryRoutes } from "./routes/history.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
+import { registerProposalActionRoutes } from "./routes/proposal-actions.js";
 import type { LLMProvider } from "./llm/types.js";
 import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
 import { config, isDeployedLikeRuntime, validateGuestSessionSecretForRuntime } from "./config.js";
@@ -53,13 +61,17 @@ export function getCorsRegistrationPolicy(input: {
 export interface AppServices {
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
+  db: AppDatabase;
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   goalProposalService: ReturnType<typeof createGoalProposalService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
   historyQueryService: ReturnType<typeof createHistoryQueryService>;
   mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
   orchestrator: ReturnType<typeof createOrchestrator>;
+  proposalActionService: ReturnType<typeof createProposalActionService>;
+  proposalCardService: ReturnType<typeof createProposalCardService>;
   publisher: RealtimePublisher;
   summaryService: ReturnType<typeof createSummaryService>;
 }
@@ -89,6 +101,8 @@ export interface AppOptions {
   llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
   /** Test harness observer for in-process service access. Does not expose an HTTP surface. */
   onServicesReady?: (services: AppServices) => void;
+  /** Test-only proposal action failure hooks. Not exposed through HTTP. */
+  proposalActionTestHooks?: ProposalActionTestHooks;
 }
 
 export async function buildApp(opts: AppOptions) {
@@ -123,33 +137,66 @@ export async function buildApp(opts: AppOptions) {
   const daySnapshotService = createDaySnapshotService({ summaryService, foodLoggingService });
   const chatService = createChatService(db);
   const assetService = createAssetService(db, { assetsDir: opts.assetsDir ?? config.assetsDir });
-  const mealCorrectionService = createMealCorrectionService(db, { summaryService, foodLoggingService });
+  const proposalCardService = createProposalCardService(db);
+  const mealCorrectionService = createMealCorrectionService(db, {
+    summaryService,
+    foodLoggingService,
+    async markActiveMealProposalCardsStale({ deviceId }) {
+      await proposalCardService.markActiveLaneStale({
+        deviceId,
+        proposalLane: "meal_mutation",
+        lapseCopy: renderProposalInactiveCopy({
+          proposalKind: "meal_numeric",
+          status: "stale",
+        }),
+      });
+    },
+  });
   const goalProposalService = createGoalProposalService(db);
+  const mealDeleteProposalService = createMealDeleteProposalService(db);
   const mealNumericProposalService = createMealNumericProposalService(db);
   const publisher = new RealtimePublisher();
 
+  const proposalActionService = createProposalActionService({
+    db,
+    chatService,
+    proposalCardService,
+    goalProposalService,
+    mealNumericProposalService,
+    mealDeleteProposalService,
+    mealCorrectionService,
+    deviceService,
+    publisher,
+    testHooks: opts.proposalActionTestHooks,
+  });
   const orchestrator = createOrchestrator({
     llmProvider,
     chatService,
     summaryService,
     foodLoggingService,
     mealCorrectionService,
+    mealDeleteProposalService,
     mealNumericProposalService,
     deviceService,
     goalProposalService,
+    proposalActionService,
     publisher,
   });
 
   opts.onServicesReady?.({
     assetService,
     chatService,
+    db,
     foodLoggingService,
     goalProposalService,
     guestSessionService,
     historyQueryService,
     mealCorrectionService,
+    mealDeleteProposalService,
     mealNumericProposalService,
     orchestrator,
+    proposalActionService,
+    proposalCardService,
     publisher,
     summaryService,
   });
@@ -167,14 +214,19 @@ export async function buildApp(opts: AppOptions) {
   registerChatRoutes(app, {
     orchestrator,
     chatService,
+    proposalCardService,
     deviceService,
     guestSessionService,
+    goalProposalService,
+    mealNumericProposalService,
+    mealDeleteProposalService,
     assetService,
     publisher,
     uploadsDir: opts.uploadsDir,
     llmTraceRecorderFactory: opts.llmTraceRecorderFactory,
   });
   registerMealRoutes(app, { foodLoggingService, summaryService, deviceService, guestSessionService, assetService, publisher });
+  registerProposalActionRoutes(app, { proposalActionService, deviceService, guestSessionService });
   registerDaySnapshotRoutes(app, { daySnapshotService, deviceService, guestSessionService });
   registerHistoryRoutes(app, { historyQueryService, deviceService, guestSessionService });
   registerAssetRoutes(app, { assetService, deviceService, guestSessionService });

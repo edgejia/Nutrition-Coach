@@ -1,12 +1,71 @@
 import type { CoachCTA, CoachCTAIntent, CoachCTAIntentId, DailyTargets, DailySummary } from "./types.js";
 
-export function getCoachAdvice(summary: DailySummary | null, targets: DailyTargets | null): string | null {
+export type CoachGoal = "fat_loss" | "muscle_gain" | "maintain";
+
+export function narrowGoal(goal: string | null | undefined): CoachGoal {
+  return goal === "fat_loss" || goal === "muscle_gain" || goal === "maintain" ? goal : "maintain";
+}
+
+export function getEmptyStateCopy(goal: string | null, targets: DailyTargets | null): string {
+  if (!targets) {
+    return "還沒記錄任何餐點，開始記錄你的第一餐吧";
+  }
+
+  const g = narrowGoal(goal);
+  if (g === "muscle_gain") {
+    return `今天蛋白質目標 ${Math.round(targets.protein)}g，先記錄第一餐幫增肌打底`;
+  }
+  if (g === "fat_loss") {
+    return `今天熱量額度 ${Math.round(targets.calories)} kcal，先記錄第一餐掌握減脂節奏`;
+  }
+  return "還沒記錄任何餐點，開始記錄你的第一餐吧";
+}
+
+export function getCoachAdvice(
+  summary: DailySummary | null,
+  targets: DailyTargets | null,
+  goal: string | null = "maintain",
+): string | null {
   if (!summary || !targets) {
     return null;
   }
 
   if (summary.mealCount === 0) {
-    return "還沒記錄任何餐點，開始記錄你的第一餐吧";
+    return getEmptyStateCopy(goal, targets);
+  }
+
+  const g = narrowGoal(goal);
+  if (g === "muscle_gain") {
+    const proteinRemaining = Math.max(targets.protein - summary.totalProtein, 0);
+    const caloriesRemaining = Math.max(targets.calories - summary.totalCalories, 0);
+    if (proteinRemaining > 30) {
+      return `蛋白質還差 ${Math.round(proteinRemaining)}g，記得再補一餐`;
+    }
+    if (caloriesRemaining > 200) {
+      return `今天還有 ${Math.round(caloriesRemaining)} kcal 空間，記得再補一餐`;
+    }
+    if (summary.totalFat > targets.fat) {
+      return "脂肪已超標，接下來選低油高蛋白食物";
+    }
+    return "今天增肌節奏穩定，繼續把蛋白質補齊";
+  }
+
+  if (g === "fat_loss") {
+    const caloriesRemaining = targets.calories - summary.totalCalories;
+    if (caloriesRemaining < 200) {
+      return "熱量快到上限了，晚餐吃清淡一點";
+    }
+
+    if (summary.totalFat > targets.fat) {
+      return "脂肪已超標，接下來避免油炸食物";
+    }
+
+    const proteinRemaining = Math.max(targets.protein - summary.totalProtein, 0);
+    if (proteinRemaining > 30) {
+      return `蛋白質還差 ${Math.round(proteinRemaining)}g，下一餐選低脂高蛋白`;
+    }
+
+    return "今天減脂節奏穩定，繼續掌握份量";
   }
 
   const proteinRemaining = Math.max(targets.protein - summary.totalProtein, 0);
@@ -115,33 +174,76 @@ export const COACH_CTA_INTENTS = [
 
 const HOME_CTA_INTENT_LIMIT = 3;
 
-function orderIntents(leadId: CoachCTAIntentId): CoachCTA {
-  const lead = COACH_CTA_INTENTS.find((intent) => intent.id === leadId);
-  const rest = COACH_CTA_INTENTS.filter((intent) => intent.id !== leadId);
-  const ordered = lead ? [lead, ...rest] : COACH_CTA_INTENTS;
+function orderIntentsByPriority(leadIds: readonly CoachCTAIntentId[]): CoachCTA {
+  const intents: readonly CoachCTAIntent[] = COACH_CTA_INTENTS;
+  const leads: CoachCTAIntent[] = [];
+  for (const leadId of leadIds) {
+    const intent = intents.find((candidate) => candidate.id === leadId);
+    if (intent) {
+      leads.push(intent);
+    }
+  }
+  const leadIdSet = new Set(leads.map((intent) => intent.id));
+  const rest = intents.filter((intent) => !leadIdSet.has(intent.id));
+  const ordered = [...leads, ...rest];
   return ordered.slice(0, HOME_CTA_INTENT_LIMIT);
+}
+
+function orderIntents(leadId: CoachCTAIntentId): CoachCTA {
+  return orderIntentsByPriority([leadId]);
+}
+
+function defaultLeadForGoal(goal: CoachGoal): CoachCTAIntentId {
+  if (goal === "muscle_gain") {
+    return "protein";
+  }
+  if (goal === "fat_loss") {
+    return "calorie_control";
+  }
+  return "next_meal";
 }
 
 export function getCoachCTA(
   summary: DailySummary | null,
   targets: DailyTargets | null,
   _hour: number = new Date().getHours(),
+  goal: string | null = "maintain",
 ): CoachCTA {
   if (!summary || !targets) {
     return orderIntents("next_meal");
   }
 
+  const g = narrowGoal(goal);
   if (summary.mealCount === 0) {
+    if (g === "muscle_gain") {
+      return orderIntentsByPriority(["food_logging", "protein", "calorie_control"]);
+    }
+    if (g === "fat_loss") {
+      return orderIntentsByPriority(["food_logging", "calorie_control", "protein"]);
+    }
     return orderIntents("food_logging");
   }
 
-  if (targets.protein - summary.totalProtein > 30) {
+  const proteinGap = targets.protein - summary.totalProtein;
+  const caloriesRemaining = targets.calories - summary.totalCalories;
+
+  if (g === "fat_loss") {
+    if (caloriesRemaining <= 200) {
+      return orderIntents("calorie_control");
+    }
+    if (proteinGap > 30) {
+      return orderIntents("protein");
+    }
+    return orderIntents(defaultLeadForGoal(g));
+  }
+
+  if (proteinGap > 30) {
     return orderIntents("protein");
   }
 
-  if (targets.calories - summary.totalCalories <= 200) {
+  if (caloriesRemaining <= 200) {
     return orderIntents("calorie_control");
   }
 
-  return orderIntents("next_meal");
+  return orderIntents(defaultLeadForGoal(g));
 }

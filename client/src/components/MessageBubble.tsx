@@ -1,15 +1,22 @@
-import type { MealEditPayload, Message } from "../types.js";
+import type { MealEditPayload, Message, ProposalActionRequest, ProposalCardMetadata } from "../types.js";
 import type { KeyboardEvent } from "react";
 import { formatTurnReference } from "../api.js";
 import { buildReceiptMealEditPayload } from "../meal-edit-payload.js";
 import { AssistantMarkdown } from "./AssistantMarkdown.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
+import { ProposalActionEvent, ProposalCard } from "./ProposalCard.js";
 import { SportBoltIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportReceipt } from "./SportPrimitives.js";
 
 type ProvisionalBubbleProps = {
   isProvisional: boolean;
   isStatusLabel: boolean;
+};
+
+type ActiveProposalEdit = {
+  messageId: string;
+  proposalId: string;
+  value: string;
 };
 
 const STOPPED_EMPTY_COPY = "已停止生成。";
@@ -231,11 +238,39 @@ export function MessageBubble(props: {
   message: Message;
   onImageSettle?: () => void;
   onOpenMealEdit?: (payload: MealEditPayload) => void;
+  onProposalApprove?: (request: ProposalActionRequest) => void;
+  onProposalEdit?: (input: { messageId: string; proposalCard: ProposalCardMetadata }) => void;
+  onProposalReject?: (request: ProposalActionRequest) => void;
+  activeEdit?: ActiveProposalEdit | null;
+  pendingAction?: ProposalActionRequest["action"] | null;
+  actionError?: string | null;
+  onInlineEditChange?: (value: string) => void;
+  onInlineEditSubmit?: () => void;
+  onCancelProposalEdit?: () => void;
 } & Partial<ProvisionalBubbleProps>) {
-  const { message, onImageSettle, onOpenMealEdit, isProvisional, isStatusLabel } = props;
+  const {
+    message,
+    onImageSettle,
+    onOpenMealEdit,
+    onProposalApprove,
+    onProposalEdit,
+    onProposalReject,
+    activeEdit,
+    pendingAction,
+    actionError,
+    onInlineEditChange,
+    onInlineEditSubmit,
+    onCancelProposalEdit,
+    isProvisional,
+    isStatusLabel,
+  } = props;
   const isUser = message.role === "user";
 
   if (isUser) {
+    if (message.proposalActionEvent) {
+      return <ProposalActionEvent event={message.proposalActionEvent} />;
+    }
+
     const { imageSrc, text, hasImage, hasText, isImageOnly } = getUserMessagePresentation(message);
 
     return (
@@ -268,16 +303,38 @@ export function MessageBubble(props: {
 
   const editPayload = getCompleteReceiptEditPayload(message);
   const shouldRenderReceipt = Boolean(message.loggedMeal);
+  const shouldRenderProposal = Boolean(message.proposalCard);
   const shouldRenderText = getStoppedPresentation(message).content.trim().length > 0;
 
-  if (shouldRenderReceipt) {
+  if (shouldRenderProposal || shouldRenderReceipt) {
     return (
       <>
-        <ReceiptCard
-          message={message}
-          editPayload={isCompleteLoggedMealReceipt(message) ? editPayload : null}
-          onOpenMealEdit={onOpenMealEdit}
-        />
+        {message.proposalCard ? (
+          <ProposalCard
+            proposalCard={message.proposalCard}
+            onApprove={onProposalApprove}
+            onEdit={(proposalCard) => onProposalEdit?.({ messageId: message.id, proposalCard })}
+            onReject={onProposalReject}
+            activeEdit={
+              activeEdit?.messageId === message.id &&
+              activeEdit.proposalId === message.proposalCard.proposalId
+                ? activeEdit
+                : undefined
+            }
+            pendingAction={pendingAction}
+            actionError={actionError}
+            onInlineEditChange={onInlineEditChange}
+            onInlineEditSubmit={onInlineEditSubmit}
+            onCancelEdit={onCancelProposalEdit}
+          />
+        ) : null}
+        {shouldRenderReceipt ? (
+          <ReceiptCard
+            message={message}
+            editPayload={isCompleteLoggedMealReceipt(message) ? editPayload : null}
+            onOpenMealEdit={onOpenMealEdit}
+          />
+        ) : null}
         {shouldRenderText ? (
           <AssistantTextBubble
             message={message}

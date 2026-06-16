@@ -16,6 +16,8 @@ import type {
   MealNumericField,
   MealNumericUpdateInput,
 } from "./meal-numeric-proposals.js";
+import { MEAL_NUMERIC_PROPOSAL_KIND as MEAL_NUMERIC_PROPOSAL_STATE_KIND } from "./meal-numeric-proposals.js";
+import { MEAL_DELETE_PROPOSAL_KIND } from "./meal-delete-proposals.js";
 import { createTurnStateService } from "./turn-state.js";
 import { createSummaryService, type DailySummary } from "./summary.js";
 import { createFoodLoggingService } from "./food-logging.js";
@@ -154,18 +156,23 @@ type NumericItemField = (typeof NUMERIC_ITEM_FIELDS)[number];
 interface MealCorrectionServiceDeps {
   summaryService?: Pick<ReturnType<typeof createSummaryService>, "getDailySummary">;
   foodLoggingService?: Pick<ReturnType<typeof createFoodLoggingService>, "getMealsByDate">;
+  markActiveMealProposalCardsStale?: (input: { deviceId: string }) => Promise<void>;
 }
 
 export interface CurrentMealFacts {
   mealId: string;
   currentMealRevisionId: string;
   mealLabel: string;
+  loggedAt: string;
+  dateKey: string;
+  mealPeriod: MealPeriod;
   items: MealTransactionItemInput[];
   totals: Record<NumericItemField, number>;
 }
 
 export type MealNumericOperatorIntent =
   | { fields: MealNumericField[]; operator: "half" }
+  | { fields: MealNumericField[]; operator: "set"; value: number }
   | { fields: MealNumericField[]; operator: "subtract_percent"; value: number }
   | { fields: MealNumericField[]; operator: "add_amount"; value: number }
   | { fields: MealNumericField[]; operator: "subtract_amount"; value: number };
@@ -592,6 +599,39 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
   const summaryService = deps.summaryService ?? createSummaryService(db);
   const foodLoggingService = deps.foodLoggingService ?? createFoodLoggingService(db);
 
+  async function clearMealMutationProposalLane({ deviceId, sessionId }: MealCorrectionSessionKey): Promise<void> {
+    await Promise.all([
+      turnStateService.clearState({
+        deviceId,
+        sessionId,
+        kind: MEAL_NUMERIC_PROPOSAL_STATE_KIND,
+      }),
+      turnStateService.clearState({
+        deviceId,
+        sessionId,
+        kind: MEAL_DELETE_PROPOSAL_KIND,
+      }),
+    ]);
+    await deps.markActiveMealProposalCardsStale?.({ deviceId });
+  }
+
+  async function putPendingSelectionState({
+    deviceId,
+    sessionId,
+    payload,
+  }: MealCorrectionSessionKey & {
+    payload: PendingMealSelectionState;
+  }): Promise<void> {
+    await clearMealMutationProposalLane({ deviceId, sessionId });
+    await turnStateService.putState({
+      deviceId,
+      sessionId,
+      kind: PENDING_SELECTION_KIND,
+      payload,
+      ttlMs: PENDING_SELECTION_TTL_MS,
+    });
+  }
+
   async function loadActiveCandidates(
     deviceId: string,
     options: { limit?: number; targetDateKey?: string } = {},
@@ -662,16 +702,14 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     action: "update" | "delete",
     candidate: MealCorrectionCandidate,
   ): Promise<void> {
-    await turnStateService.putState({
+    await putPendingSelectionState({
       deviceId,
       sessionId,
-      kind: PENDING_SELECTION_KIND,
       payload: {
         action,
         renderedOptions: createRenderedOptions([candidate]),
         scope: { evidenceTier: "resolved" },
       } satisfies PendingMealSelectionState,
-      ttlMs: PENDING_SELECTION_TTL_MS,
     });
   }
 
@@ -741,16 +779,14 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     }
 
     const renderedOptions = createRenderedOptions(scopedCandidates);
-    await turnStateService.putState({
+    await putPendingSelectionState({
       deviceId,
       sessionId,
-      kind: PENDING_SELECTION_KIND,
       payload: {
         action: pending.action,
         renderedOptions,
         scope: pending.scope,
       } satisfies PendingMealSelectionState,
-      ttlMs: PENDING_SELECTION_TTL_MS,
     });
 
     return {
@@ -883,6 +919,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     switch (intent.operator) {
       case "half":
         return roundNonNegativePatchValue(before / 2);
+      case "set":
+        return roundNonNegativePatchValue(intent.value);
       case "subtract_percent":
         return roundNonNegativePatchValue(before * (1 - intent.value / 100));
       case "add_amount":
@@ -907,6 +945,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
     for (const field of operatorIntent.fields) {
       const before = currentFacts.totals[field];
       const after = previewFieldValue(before, operatorIntent);
+      if (roundNonNegativePatchValue(before) === after) continue;
       updateInput[field] = after;
       affectedFields.push({ field, before, after });
     }
@@ -985,10 +1024,9 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       const renderedOptions = createRenderedOptions(narrowed);
       if (narrowed.length > 0) {
         const targetMealPeriod = extractMealPeriod(query);
-        await turnStateService.putState({
+        await putPendingSelectionState({
           deviceId,
           sessionId,
-          kind: PENDING_SELECTION_KIND,
           payload: {
             action,
             renderedOptions,
@@ -1004,7 +1042,6 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
               ...(targetMealPeriod ? { targetMealPeriod } : {}),
             },
           } satisfies PendingMealSelectionState,
-          ttlMs: PENDING_SELECTION_TTL_MS,
         });
       }
 
@@ -1054,6 +1091,8 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
       const header = await db
         .select({
           id: mealTransactions.id,
+          loggedAt: mealTransactions.loggedAt,
+          mealPeriod: mealTransactions.mealPeriod,
           currentRevisionId: mealTransactions.currentRevisionId,
         })
         .from(mealTransactions)
@@ -1069,6 +1108,9 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
         mealId: current.id,
         currentMealRevisionId: current.currentRevisionId,
         mealLabel: display.foodName,
+        loggedAt: current.loggedAt,
+        dateKey: formatLocalDate(new Date(current.loggedAt)),
+        mealPeriod: normalizeMealPeriod(current.mealPeriod) ?? inferMealPeriod(current.loggedAt),
         items,
         totals: {
           calories: items.reduce((sum, item) => sum + item.calories, 0),
