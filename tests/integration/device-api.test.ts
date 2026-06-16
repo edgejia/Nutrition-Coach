@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -143,6 +144,63 @@ function createMigratedDeviceTestDb(dbPath: string) {
   } finally {
     sqlite.close();
   }
+}
+
+const deployedLikeLegacySessionProbeScript = `
+const { buildApp } = await import("./server/app.ts");
+const { MockLLMProvider } = await import("./server/llm/mock.ts");
+
+const app = await buildApp({ dbPath: ":memory:", llmProvider: new MockLLMProvider() });
+try {
+  const create = await app.inject({
+    method: "POST",
+    url: "/api/device",
+    payload: { goal: "fat_loss" },
+  });
+  const deviceId = create.json().deviceId;
+  const session = await app.inject({
+    method: "POST",
+    url: "/api/device/session",
+    payload: { legacyDeviceId: deviceId },
+  });
+  const rawSetCookie = session.headers["set-cookie"];
+  const setCookieHeaders = Array.isArray(rawSetCookie)
+    ? rawSetCookie
+    : typeof rawSetCookie === "string"
+      ? [rawSetCookie]
+      : [];
+  console.log(JSON.stringify({
+    statusCode: session.statusCode,
+    setCookieHeaders,
+    body: session.json(),
+  }));
+} finally {
+  await app.close();
+}
+`;
+
+function runDeployedLikeLegacySessionProbe() {
+  const result = spawnSync(process.execPath, ["--import", "tsx", "--eval", deployedLikeLegacySessionProbeScript], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      TZ: "Asia/Taipei",
+      GUEST_SESSION_COOKIE_SECURE: "true",
+      GUEST_SESSION_SECRET: "test-guest-session-secret-strong-value",
+    },
+    encoding: "utf8",
+  });
+
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(result.status, 0, output);
+  const probeLine = result.stdout.trim().split("\n").at(-1);
+  assert.ok(probeLine, output);
+  return JSON.parse(probeLine) as {
+    statusCode: number;
+    setCookieHeaders: string[];
+    body: unknown;
+  };
 }
 
 describe("Device API", () => {
@@ -466,6 +524,13 @@ describe("Device API", () => {
     assert.equal(setCookieHeaders.length, 2);
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session_resume=")));
+  });
+
+  it("POST /api/device/session rejects raw legacy device ids in deployed-like runtime without cookies", () => {
+    const result = runDeployedLikeLegacySessionProbe();
+
+    assert.equal(result.statusCode, 401);
+    assert.deepEqual(result.setCookieHeaders, []);
   });
 
   it("POST /api/device/session preserves maintain goal for active and legacy sessions", async () => {
