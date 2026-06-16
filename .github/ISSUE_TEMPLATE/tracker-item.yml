@@ -1,0 +1,71 @@
+name: Tracker Item
+description: Track actionable Nutrition Coach work that should resolve through code, tests, or release verification.
+title: "[Tracker]: "
+labels: ["tracker", "needs-verification"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is broken, risky, or missing?
+      placeholder: Describe the user-facing behavior, code risk, or release blocker.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: What must be true before this item can close?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: input
+    id: priority
+    attributes:
+      label: Priority
+      placeholder: P1 / P2 / P3
+    validations:
+      required: true
+
+  - type: input
+    id: area
+    attributes:
+      label: Area
+      placeholder: security / mutation-truthfulness / device / orchestrator / realtime / ui
+    validations:
+      required: true
+
+  - type: textarea
+    id: related-files
+    attributes:
+      label: Related Files
+      description: List likely files or directories, one per line.
+      placeholder: |
+        server/routes/device.ts
+        server/orchestrator/index.ts
+    validations:
+      required: false
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Commands, smoke checks, harness scenarios, or manual checks expected before close.
+      placeholder: |
+        - [ ] yarn test:unit
+        - [ ] yarn test:integration
+        - [ ] yarn release:check
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / Notes
+      description: Links to prior Notion rows, handoff docs, PRs, findings, or audit evidence.
+    validations:
+      required: false
