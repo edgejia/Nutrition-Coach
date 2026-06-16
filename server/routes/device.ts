@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { createDeviceService, Goal, IntakeFields } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
+import { config, isDeployedLikeRuntime } from "../config.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import {
   logDeviceGoalsValidationFailed,
@@ -443,6 +444,10 @@ export function registerDeviceRoutes(
 
     const legacyDeviceId = typeof body.legacyDeviceId === "string" ? body.legacyDeviceId.trim() : "";
     if (!legacyDeviceId) {
+      return reply.code(401).send({ error: "No guest session available" });
+    }
+
+    if (isDeployedLikeRuntime({ nodeEnv: config.nodeEnv, guestSessionCookieSecure: config.guestSessionCookieSecure })) {
       return reply.code(401).send({ error: "No guest session available" });
     }
 
