@@ -78,12 +78,37 @@ describe("server config guest-session policy", () => {
     );
   });
 
+  it("rejects the development default when secure guest cookies make test runtime deployed-like", () => {
+    assert.throws(
+      () =>
+        validateGuestSessionSecretForRuntime({
+          guestSessionSecret: DEFAULT_GUEST_SESSION_SECRET,
+          guestSessionCookieSecure: true,
+          nodeEnv: "test",
+        }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /GUEST_SESSION_SECRET/);
+        assert.match(error.message, /GUEST_SESSION_COOKIE_SECURE=true/);
+        assert.doesNotMatch(error.message, new RegExp(DEFAULT_GUEST_SESSION_SECRET));
+        return true;
+      },
+    );
+  });
+
   it("accepts any trimmed non-default secret at least 32 characters without format restrictions", () => {
     assert.doesNotThrow(() => {
       validateGuestSessionSecretForRuntime({
         guestSessionSecret: "  not-hex!!!not-base64url???value-ok  ",
         guestSessionCookieSecure: false,
         nodeEnv: "production",
+      });
+    });
+    assert.doesNotThrow(() => {
+      validateGuestSessionSecretForRuntime({
+        guestSessionSecret: "secure-cookie-runtime-secret-value!!!",
+        guestSessionCookieSecure: true,
+        nodeEnv: "test",
       });
     });
   });
