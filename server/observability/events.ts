@@ -20,6 +20,7 @@ export type RedactedObservabilityEventName =
   | "home_cta_option_sent"
   | "chat_turn_completed"
   | "chat_route_fallback"
+  | "ownership_bypass_blocked"
   | "device_goals_validation_failed"
   | "device_goals_updated_rest"
   | "sse_connection_state";
@@ -61,12 +62,28 @@ const INTAKE_FIELDS = [
 ] as const;
 const GOAL_UPDATE_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
 const GOAL_VALIDATION_CODES = ["invalid_body", "invalid_field_value", "empty_valid_fields"] as const;
+const OWNERSHIP_BYPASS_BLOCKED_REASONS = ["legacy_device_id_rejected", "raw_device_id_param"] as const;
+const OWNERSHIP_BYPASS_BLOCKED_ROUTES = [
+  "api_device_session",
+  "api_proposals_actions",
+  "api_chat_stop",
+  "api_chat",
+] as const;
+const OWNERSHIP_BYPASS_BLOCKED_OPERATIONS = [
+  "legacy_session_bootstrap",
+  "proposal_action",
+  "chat_stop",
+  "chat_message",
+] as const;
 const TARGET_GENERATION_FIELDS = ["calories", "protein", "carbs", "fat", "coachExplanation", "root"] as const;
 const TARGET_GENERATION_NO_CONTENT_SUBTYPES = ["no_choices", "missing_content", "empty_content"] as const;
 
 const INTAKE_FIELD_SET = new Set<string>(INTAKE_FIELDS);
 const GOAL_UPDATE_FIELD_SET = new Set<string>(GOAL_UPDATE_FIELDS);
 const GOAL_VALIDATION_CODE_SET = new Set<string>(GOAL_VALIDATION_CODES);
+const OWNERSHIP_BYPASS_BLOCKED_REASON_SET = new Set<string>(OWNERSHIP_BYPASS_BLOCKED_REASONS);
+const OWNERSHIP_BYPASS_BLOCKED_ROUTE_SET = new Set<string>(OWNERSHIP_BYPASS_BLOCKED_ROUTES);
+const OWNERSHIP_BYPASS_BLOCKED_OPERATION_SET = new Set<string>(OWNERSHIP_BYPASS_BLOCKED_OPERATIONS);
 const TARGET_GENERATION_FIELD_SET = new Set<string>(TARGET_GENERATION_FIELDS);
 const TARGET_GENERATION_NO_CONTENT_SUBTYPE_SET = new Set<string>(TARGET_GENERATION_NO_CONTENT_SUBTYPES);
 const VALID_IDENTIFIER = /^[a-z0-9_-]{1,64}$/;
@@ -93,6 +110,9 @@ const UNSAFE_PROVIDER_METADATA_LABEL_FRAGMENTS = [
 ] as const;
 export type IntakeObservabilityField = (typeof INTAKE_FIELDS)[number];
 export type GoalUpdateField = (typeof GOAL_UPDATE_FIELDS)[number];
+export type OwnershipBypassBlockedReason = (typeof OWNERSHIP_BYPASS_BLOCKED_REASONS)[number];
+export type OwnershipBypassBlockedRoute = (typeof OWNERSHIP_BYPASS_BLOCKED_ROUTES)[number];
+export type OwnershipBypassBlockedOperation = (typeof OWNERSHIP_BYPASS_BLOCKED_OPERATIONS)[number];
 
 export interface OnboardingSubmitStartedEvent {
   event: "onboarding_submit_started";
@@ -188,6 +208,15 @@ export interface DeviceGoalsValidationFailedEvent {
   codes: string[];
 }
 
+export interface OwnershipBypassBlockedEvent {
+  event: "ownership_bypass_blocked";
+  reason: OwnershipBypassBlockedReason;
+  route: OwnershipBypassBlockedRoute;
+  operation: OwnershipBypassBlockedOperation;
+  requestId: string;
+  turnId?: string;
+}
+
 export interface SseConnectionStateEvent {
   event: "sse_connection_state";
   state: SseConnectionState;
@@ -203,6 +232,7 @@ export type RedactedObservabilityEvent =
   | HomeCtaOptionSentEvent
   | ChatTurnCompletedEvent
   | ChatRouteFallbackEvent
+  | OwnershipBypassBlockedEvent
   | DeviceGoalsValidationFailedEvent
   | DeviceGoalsUpdatedRestEvent
   | SseConnectionStateEvent;
@@ -255,6 +285,28 @@ function sanitizeNoContentSubtype(value: unknown): StructuredOutputNoContentSubt
   return typeof value === "string" && TARGET_GENERATION_NO_CONTENT_SUBTYPE_SET.has(value)
     ? value as StructuredOutputNoContentSubtype
     : undefined;
+}
+
+function sanitizeOwnershipBypassBlockedReason(value: unknown): OwnershipBypassBlockedReason {
+  return typeof value === "string" && OWNERSHIP_BYPASS_BLOCKED_REASON_SET.has(value)
+    ? value as OwnershipBypassBlockedReason
+    : "raw_device_id_param";
+}
+
+function sanitizeOwnershipBypassBlockedRoute(value: unknown): OwnershipBypassBlockedRoute {
+  return typeof value === "string" && OWNERSHIP_BYPASS_BLOCKED_ROUTE_SET.has(value)
+    ? value as OwnershipBypassBlockedRoute
+    : "api_device_session";
+}
+
+function sanitizeOwnershipBypassBlockedOperation(value: unknown): OwnershipBypassBlockedOperation {
+  return typeof value === "string" && OWNERSHIP_BYPASS_BLOCKED_OPERATION_SET.has(value)
+    ? value as OwnershipBypassBlockedOperation
+    : "legacy_session_bootstrap";
+}
+
+function sanitizeCorrelationIdentifier(value: unknown): string {
+  return isIdentifier(value) ? value : "redacted";
 }
 
 function sanitizeIssueCount(issueCount: number | undefined): number | undefined {
@@ -547,6 +599,30 @@ export function logChatRouteFallback(
   params: Parameters<typeof buildChatRouteFallbackEvent>[0],
 ) {
   logRedactedEvent(log, buildChatRouteFallbackEvent(params), "Chat route fallback");
+}
+
+export function buildOwnershipBypassBlockedEvent(params: {
+  reason: OwnershipBypassBlockedReason;
+  route: OwnershipBypassBlockedRoute;
+  operation: OwnershipBypassBlockedOperation;
+  requestId: string;
+  turnId?: string;
+}): OwnershipBypassBlockedEvent {
+  return {
+    event: "ownership_bypass_blocked",
+    reason: sanitizeOwnershipBypassBlockedReason(params.reason),
+    route: sanitizeOwnershipBypassBlockedRoute(params.route),
+    operation: sanitizeOwnershipBypassBlockedOperation(params.operation),
+    requestId: sanitizeCorrelationIdentifier(params.requestId),
+    ...(params.turnId !== undefined ? { turnId: sanitizeCorrelationIdentifier(params.turnId) } : {}),
+  };
+}
+
+export function logOwnershipBypassBlocked(
+  log: FastifyBaseLogger,
+  params: Parameters<typeof buildOwnershipBypassBlockedEvent>[0],
+) {
+  logRedactedEvent(log, buildOwnershipBypassBlockedEvent(params), "Ownership bypass blocked");
 }
 
 export function sanitizeRouteCatchError(
