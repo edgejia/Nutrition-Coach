@@ -147,10 +147,23 @@ function createMigratedDeviceTestDb(dbPath: string) {
 }
 
 const deployedLikeLegacySessionProbeScript = `
+const { Writable } = await import("node:stream");
 const { buildApp } = await import("./server/app.ts");
 const { MockLLMProvider } = await import("./server/llm/mock.ts");
 
-const app = await buildApp({ dbPath: ":memory:", llmProvider: new MockLLMProvider() });
+const logLines = [];
+const logStream = new Writable({
+  write(chunk, _, cb) {
+    chunk.toString().split("\\n").filter(Boolean).forEach((line) => logLines.push(line));
+    cb();
+  },
+});
+
+const app = await buildApp({
+  dbPath: ":memory:",
+  llmProvider: new MockLLMProvider(),
+  logger: { level: "info", stream: logStream },
+});
 try {
   const create = await app.inject({
     method: "POST",
@@ -158,10 +171,11 @@ try {
     payload: { goal: "fat_loss" },
   });
   const deviceId = create.json().deviceId;
+  const requestPayload = { legacyDeviceId: deviceId };
   const session = await app.inject({
     method: "POST",
     url: "/api/device/session",
-    payload: { legacyDeviceId: deviceId },
+    payload: requestPayload,
   });
   const rawSetCookie = session.headers["set-cookie"];
   const setCookieHeaders = Array.isArray(rawSetCookie)
@@ -170,9 +184,12 @@ try {
       ? [rawSetCookie]
       : [];
   console.log(JSON.stringify({
+    deviceId,
+    requestBodyJson: JSON.stringify(requestPayload),
     statusCode: session.statusCode,
     setCookieHeaders,
     body: session.json(),
+    logLines,
   }));
 } finally {
   await app.close();
@@ -197,9 +214,12 @@ function runDeployedLikeLegacySessionProbe() {
   const probeLine = result.stdout.trim().split("\n").at(-1);
   assert.ok(probeLine, output);
   return JSON.parse(probeLine) as {
+    deviceId: string;
+    requestBodyJson: string;
     statusCode: number;
     setCookieHeaders: string[];
     body: unknown;
+    logLines: string[];
   };
 }
 
@@ -531,6 +551,30 @@ describe("Device API", () => {
 
     assert.equal(result.statusCode, 401);
     assert.deepEqual(result.setCookieHeaders, []);
+
+    const events = findLogEvents(result.logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.deepEqual(pickEventMetadata(events[0]!, ["event", "reason", "route", "operation"]), {
+      event: "ownership_bypass_blocked",
+      reason: "legacy_device_id_rejected",
+      route: "api_device_session",
+      operation: "legacy_session_bootstrap",
+    });
+    assert.equal(typeof events[0]!.requestId, "string");
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude(
+      [events[0]!],
+      [
+        result.deviceId,
+        "legacyDeviceId",
+        "guest_session",
+        "guest_session_resume",
+        "cookie",
+        "x-device-id",
+        result.requestBodyJson,
+        "forged_signature",
+      ],
+    );
   });
 
   it("POST /api/device/session preserves maintain goal for active and legacy sessions", async () => {
