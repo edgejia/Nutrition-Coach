@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { config } from "../../../server/config.js";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
@@ -198,6 +199,75 @@ function snapshotStoreState(state: {
   };
 }
 
+function sanitizeStoreSnapshot(snapshot: AppStateSnapshot) {
+  return {
+    localIdentity: snapshot.deviceId === null ? null : "present",
+    goal: snapshot.goal,
+    activeScreen: snapshot.activeScreen,
+    guestSessionStatus: snapshot.guestSessionStatus,
+    guestSessionRecoveryAttempted: snapshot.guestSessionRecoveryAttempted,
+    dailyTargets: snapshot.dailyTargets,
+  };
+}
+
+function parseStoredTargets(value: string | undefined) {
+  if (value === undefined) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as DailyTargets;
+  } catch {
+    return "unparseable";
+  }
+}
+
+function sanitizeStorageValues(storage: Record<string, string>) {
+  return {
+    localIdentity: Object.prototype.hasOwnProperty.call(storage, "deviceId") ? "present" : null,
+    goal: storage.goal ?? null,
+    dailyTargets: parseStoredTargets(storage.dailyTargets),
+  };
+}
+
+function summarizeSessionCall(call: BrowserSessionCall | undefined) {
+  if (!call) {
+    return null;
+  }
+
+  let establishedBy: string | undefined;
+  try {
+    const parsed = JSON.parse(call.responseBody) as { establishedBy?: unknown };
+    if (typeof parsed.establishedBy === "string") {
+      establishedBy = parsed.establishedBy;
+    }
+  } catch {
+    // Non-JSON or error responses still provide useful status/cookie-count evidence.
+  }
+
+  return {
+    method: call.method,
+    url: call.url,
+    status: call.status,
+    issuedCookieCount: call.setCookieHeaders.length,
+    ...(establishedBy ? { establishedBy } : {}),
+  };
+}
+
+function cookieCount(cookieHeader: string) {
+  return parseCookieHeader(cookieHeader).size;
+}
+
+async function withSimulatedDeployedLikeRuntime<T>(fn: () => Promise<T>): Promise<T> {
+  const mutableConfig = config as { guestSessionCookieSecure: boolean };
+  const originalSecure = mutableConfig.guestSessionCookieSecure;
+  mutableConfig.guestSessionCookieSecure = true;
+  try {
+    return await fn();
+  } finally {
+    mutableConfig.guestSessionCookieSecure = originalSecure;
+  }
+}
+
 function responseHeadersFromInject(
   headers: InjectHeaders,
 ) {
@@ -377,16 +447,82 @@ const scenario: VerificationScenario = {
         }
         resumeOnlyCookieHeader = `${resumeCookieName}=${migratedJar.get(resumeCookieName)}`;
         artifacts.legacy_migration = {
-          migrationCall,
-          snapshot: migrationEvidence.snapshot,
-          storage: migrationEvidence.storage,
-          cookieHeader: migratedCookieHeader,
+          request: summarizeSessionCall(migrationCall),
+          snapshot: sanitizeStoreSnapshot(migrationEvidence.snapshot),
+          storage: sanitizeStorageValues(migrationEvidence.storage),
+          browserCookieCount: cookieCount(migratedCookieHeader),
+          stepResult: {
+            bootstrapReturned: migrationEvidence.ok,
+            establishedBy: migrationBody.establishedBy,
+          },
         };
         steps.push(pass("legacy_migration", artifacts.legacy_migration));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         steps.push(fail("legacy_migration", message, artifacts.legacy_migration));
         return failResult("guest-session-hardening", steps, "legacy_migration", artifacts);
+      }
+
+      try {
+        const rejectionEvidence = await withSimulatedDeployedLikeRuntime(async () => runStoreFlow({
+          app: fixture.app,
+          storageSeed: {
+            deviceId: fixture.deviceId,
+            goal: "fat_loss",
+            dailyTargets: JSON.stringify({ calories: 1500, protein: 120, carbs: 150, fat: 50 }),
+          },
+          tag: `guest-session-hardening-deployed-like-reject-${Date.now()}`,
+          run: async (store, session, storage) => {
+            const ok = await store.getState().bootstrapGuestSession();
+            return {
+              ok,
+              snapshot: snapshotStoreState(store.getState()),
+              storage: Object.fromEntries(storage.entries()),
+              calls: session.calls,
+              cookieHeader: cookieHeaderFromJar(session.jar),
+            } satisfies StoreHarnessResult & { ok: boolean };
+          },
+        })) as StoreHarnessResult & { ok: boolean };
+
+        const rejectionCall = rejectionEvidence.calls[0];
+        if (rejectionEvidence.ok !== false) {
+          throw new Error("Expected bootstrapGuestSession to return false for deployed-like legacy rejection");
+        }
+        if (!rejectionCall) {
+          throw new Error("bootstrapGuestSession did not make a deployed-like rejection request");
+        }
+        if (rejectionCall.status !== 401) {
+          throw new Error(`Expected deployed-like legacy rejection status 401, got ${rejectionCall.status}`);
+        }
+        if (rejectionCall.setCookieHeaders.length !== 0) {
+          throw new Error(`Expected no cookies issued on deployed-like rejection, got ${rejectionCall.setCookieHeaders.length}`);
+        }
+        if (Object.prototype.hasOwnProperty.call(rejectionEvidence.storage, "deviceId")) {
+          throw new Error("Expected stale local device identity to be removed after deployed-like rejection");
+        }
+        if (rejectionEvidence.snapshot.deviceId !== null) {
+          throw new Error("Expected store deviceId to be null after deployed-like rejection");
+        }
+        if (rejectionEvidence.snapshot.guestSessionStatus !== "recovery_required") {
+          throw new Error(`Expected recovery_required, got ${rejectionEvidence.snapshot.guestSessionStatus}`);
+        }
+
+        artifacts.deployed_like_legacy_rejected = {
+          simulatedDeployedLikeRuntime: { guestSessionCookieSecure: true },
+          request: summarizeSessionCall(rejectionCall),
+          snapshot: sanitizeStoreSnapshot(rejectionEvidence.snapshot),
+          storageAfterCleanup: sanitizeStorageValues(rejectionEvidence.storage),
+          stepResult: {
+            bootstrapReturned: rejectionEvidence.ok,
+            staleLocalIdentityCleared: true,
+            recoveryStatus: rejectionEvidence.snapshot.guestSessionStatus,
+          },
+        };
+        steps.push(pass("deployed_like_legacy_rejected", artifacts.deployed_like_legacy_rejected));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        steps.push(fail("deployed_like_legacy_rejected", message, artifacts.deployed_like_legacy_rejected));
+        return failResult("guest-session-hardening", steps, "deployed_like_legacy_rejected", artifacts);
       }
 
       try {
@@ -430,10 +566,14 @@ const scenario: VerificationScenario = {
 
         migratedCookieHeader = resumeEvidence.cookieHeader;
         artifacts.same_browser_resume = {
-          resumeCall,
-          snapshot: resumeEvidence.snapshot,
-          storage: resumeEvidence.storage,
-          cookieHeader: migratedCookieHeader,
+          request: summarizeSessionCall(resumeCall),
+          snapshot: sanitizeStoreSnapshot(resumeEvidence.snapshot),
+          storage: sanitizeStorageValues(resumeEvidence.storage),
+          browserCookieCount: cookieCount(migratedCookieHeader),
+          stepResult: {
+            recoveryReturned: resumeEvidence.ok,
+            establishedBy: resumeBody.establishedBy,
+          },
         };
         steps.push(pass("same_browser_resume", artifacts.same_browser_resume));
       } catch (error) {
@@ -517,12 +657,11 @@ const scenario: VerificationScenario = {
           }
 
           artifacts.tampered_access_fail_closed = {
-            historyMessageId: historyMessage.id,
-            assetId: asset.id,
-            validSseEvents,
+            validSseEventTypes: validSseEvents.map((event) => event.event),
             validHistory: {
               status: validHistoryRes.status,
-              messages: validHistoryBody.messages,
+              messageCount: validHistoryBody.messages.length,
+              seededMessageVisible: validHistoryBody.messages.some((message) => message.id === historyMessage.id),
             },
             validAsset: {
               status: validAssetRes.status,
@@ -530,15 +669,15 @@ const scenario: VerificationScenario = {
             },
             invalidHistory: {
               status: invalidHistoryRes.status,
-              body: invalidHistoryBody,
+              error: invalidHistoryBody.error,
             },
             invalidAsset: {
               status: invalidAssetRes.status,
-              body: invalidAssetBody,
+              error: invalidAssetBody.error,
             },
             invalidSse: {
               status: invalidSseRes.status,
-              body: invalidSseBody,
+              error: invalidSseBody.error,
             },
           };
         } finally {
@@ -628,7 +767,16 @@ const scenario: VerificationScenario = {
           throw new Error("Rebuild should clear persisted deviceId");
         }
 
-        artifacts.blocking_rebuild_flow = rebuildEvidence;
+        artifacts.blocking_rebuild_flow = {
+          firstRecover: rebuildEvidence.firstRecover,
+          secondRecover: rebuildEvidence.secondRecover,
+          afterFirstRecover: sanitizeStoreSnapshot(rebuildEvidence.afterFirstRecover),
+          afterSecondRecover: sanitizeStoreSnapshot(rebuildEvidence.afterSecondRecover),
+          afterRebuild: sanitizeStoreSnapshot(rebuildEvidence.afterRebuild),
+          storageAfterRebuild: sanitizeStorageValues(rebuildEvidence.storage),
+          requests: rebuildEvidence.calls.map(summarizeSessionCall),
+          browserCookieCount: cookieCount(rebuildEvidence.cookieHeader),
+        };
         steps.push(pass("blocking_rebuild_flow", artifacts.blocking_rebuild_flow));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

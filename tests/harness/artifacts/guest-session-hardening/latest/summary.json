@@ -1,0 +1,15 @@
+{
+  "scenarioName": "guest-session-hardening",
+  "ok": true,
+  "consoleSummary": "PASS guest-session-hardening 5/5",
+  "totalSteps": 5,
+  "passedSteps": 5,
+  "stepNames": [
+    "legacy_migration",
+    "deployed_like_legacy_rejected",
+    "same_browser_resume",
+    "tampered_access_fail_closed",
+    "blocking_rebuild_flow"
+  ],
+  "writtenAt": "2026-06-16T20:25:14.742Z"
+}
