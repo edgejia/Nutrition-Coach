@@ -75,6 +75,21 @@ function observabilityEvents(logLines: string[], eventName: string) {
   return parseLogLines(logLines).filter((record) => record.event === eventName);
 }
 
+function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(event)) {
+    assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+  }
+}
+
+function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  for (const value of forbiddenValues) {
+    assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+  }
+}
+
 function assertNoSuccessfulLogInternalCopy(text: string) {
   assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
 }
@@ -339,6 +354,7 @@ describe("Chat API", () => {
   let assetsDir: string;
   let dbPath: string;
   let services: AppServices | undefined;
+  let logLines: string[];
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -354,11 +370,14 @@ describe("Chat API", () => {
     const sqlite = new Database(dbPath);
     applyMigrations(sqlite);
     sqlite.close();
+    const logCapture = createLogCapture();
+    logLines = logCapture.logLines;
     app = await buildApp({
       dbPath,
       llmProvider: mockLLM,
       uploadsDir,
       assetsDir,
+      logger: { level: "info", stream: logCapture.stream },
       onServicesReady: (readyServices) => {
         services = readyServices;
       },
@@ -1541,6 +1560,98 @@ describe("Chat API", () => {
       body: form,
     });
     assert.equal(res.status, 401);
+  });
+
+  it("POST /api/chat uses cookie ownership when foreign raw selectors are supplied and logs metadata only", async () => {
+    assert.ok(services, "expected app services");
+    const foreignDeviceRes = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "muscle_gain" },
+    });
+    const foreignDeviceId = foreignDeviceRes.json().deviceId as string;
+    const foreignCookieHeader = toCookieHeader(foreignDeviceRes.headers["set-cookie"]);
+    const userMessage = "ownership selector lunch sentinel";
+    const loggedFoodName = "Cookie Owned Apple";
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_ownership_selector",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [{ food_name: loggedFoodName, calories: 95, protein: 0.5, carbs: 25, fat: 0.3 }],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果。" });
+
+    const form = new FormData();
+    form.append("message", userMessage);
+    const res = await fetch(`${address}/api/chat?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { didLogMeal?: boolean; didMutateMeal?: boolean; turnId?: string };
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.turnId ?? "", UUID_PATTERN);
+
+    const ownerHistory = await services.chatService.getHistory(deviceId, 10);
+    const foreignHistory = await services.chatService.getHistory(foreignDeviceId, 10);
+    assert.ok(ownerHistory.some((message) => message.role === "user" && message.content === userMessage));
+    assert.equal(foreignHistory.some((message) => message.content === userMessage), false);
+
+    const ownerMeals = await services.foodLoggingService.getMealsByDate(deviceId, new Date());
+    const foreignMeals = await services.foodLoggingService.getMealsByDate(foreignDeviceId, new Date());
+    assert.ok(ownerMeals.some((meal) => meal.foodName === loggedFoodName));
+    assert.equal(foreignMeals.some((meal) => meal.foodName === loggedFoodName), false);
+
+    const foreignSession = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: foreignCookieHeader },
+    });
+    assert.equal(foreignSession.statusCode, 200);
+
+    const events = observabilityEvents(logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.equal(typeof events[0]!.requestId, "string");
+    assert.equal(events[0]!.turnId, body.turnId);
+    assert.deepEqual(
+      {
+        event: events[0]!.event,
+        reason: events[0]!.reason,
+        route: events[0]!.route,
+        operation: events[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+      },
+    );
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId", "turnId"]);
+    assertLogEventsExclude(
+      [events[0]!],
+      [
+        deviceId,
+        foreignDeviceId,
+        "x-device-id",
+        "deviceId",
+        "guest_session",
+        "cookie",
+        userMessage,
+        loggedFoodName,
+        "image",
+        "snippet",
+      ],
+    );
   });
 
   it("GET /api/chat/history returns messages", async () => {

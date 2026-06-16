@@ -413,6 +413,21 @@ function observabilityEvents(logLines: string[], eventName: string) {
   return parseLogLines(logLines).filter((record) => record.event === eventName);
 }
 
+function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(event)) {
+    assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+  }
+}
+
+function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  for (const value of forbiddenValues) {
+    assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+  }
+}
+
 function assertNoSuccessfulLogInternalCopy(text: string) {
   assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
 }
@@ -1366,6 +1381,100 @@ describe("chat-streaming", () => {
         }],
       );
       assert.equal(trace.timeline.some((event) => event.type === "route_fallback"), false);
+    } finally {
+      clearTimeout(timeout);
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+    }
+  });
+
+  it("POST /api/chat/stop cannot stop a foreign active turn through raw selectors and logs metadata only", async () => {
+    const foreignDeviceRes = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "muscle_gain" },
+    });
+    const foreignDeviceId = foreignDeviceRes.json().deviceId as string;
+    const foreignCookieHeader = toCookieHeader(foreignDeviceRes.headers["set-cookie"]);
+    mockLLM.queueAbortableChatStream(["foreign stream keeps running", " and completes"]);
+
+    const form = new FormData();
+    form.append("message", "foreign active turn");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const foreignStream = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: foreignCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+      assert.equal(foreignStream.status, 200);
+      assert.ok(foreignStream.body);
+      reader = foreignStream.body.getReader();
+      const firstText = await readStreamUntil(reader, "event: chunk");
+      const foreignTurnId = parseSSEEvents(firstText)
+        .filter((event) => event.event === "start")
+        .map((event) => JSON.parse(event.data) as { turnId?: string })
+        .find((payload) => typeof payload.turnId === "string")
+        ?.turnId;
+      assert.match(foreignTurnId ?? "", UUID_PATTERN);
+
+      const stopRes = await fetch(`${address}/api/chat/stop?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
+        method: "POST",
+        headers: {
+          cookie: sessionCookieHeader,
+          "content-type": "application/json",
+          "x-device-id": foreignDeviceId,
+        },
+        body: JSON.stringify({ turnId: foreignTurnId }),
+      });
+      assert.equal(stopRes.status, 404);
+      assert.deepEqual(await stopRes.json(), { error: "Active turn not found" });
+      assert.equal(mockLLM.lastSignal?.aborted, false);
+
+      const completedText = firstText + await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(completedText);
+      assert.equal(events.filter((event) => event.event === "stopped").length, 0);
+      assert.equal(events.filter((event) => event.event === "done").length, 1);
+
+      const ownershipEvents = observabilityEvents(logLines, "ownership_bypass_blocked");
+      assert.equal(ownershipEvents.length, 1);
+      assert.equal(typeof ownershipEvents[0]!.requestId, "string");
+      assert.equal(ownershipEvents[0]!.turnId, foreignTurnId);
+      assert.deepEqual(
+        {
+          event: ownershipEvents[0]!.event,
+          reason: ownershipEvents[0]!.reason,
+          route: ownershipEvents[0]!.route,
+          operation: ownershipEvents[0]!.operation,
+        },
+        {
+          event: "ownership_bypass_blocked",
+          reason: "raw_device_id_param",
+          route: "api_chat_stop",
+          operation: "chat_stop",
+        },
+      );
+      assertLogEventApplicationKeys(ownershipEvents[0]!, ["event", "reason", "route", "operation", "requestId", "turnId"]);
+      assertLogEventsExclude(
+        [ownershipEvents[0]!],
+        [
+          deviceId,
+          foreignDeviceId,
+          "x-device-id",
+          "deviceId",
+          "guest_session",
+          "cookie",
+          "foreign active turn",
+          "foreign stream keeps running",
+          "image",
+          "snippet",
+        ],
+      );
     } finally {
       clearTimeout(timeout);
       await reader?.cancel().catch(() => {});
