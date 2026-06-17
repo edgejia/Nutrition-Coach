@@ -97,7 +97,7 @@ describe("chat goal update integration", () => {
   let deviceId: string;
   let sessionCookieHeader: string;
   let services: AppServicesWithMealProposal;
-  let publishCalls: Array<{ event: "goals_update" }>;
+  let publishCalls: Array<{ event: "goals_update" | "daily_summary" }>;
   let traceRecorders: Array<ReturnType<typeof createLlmTraceRecorder>>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
@@ -127,6 +127,11 @@ describe("chat goal update integration", () => {
         readyServices.publisher.publishGoalsUpdate = (deviceId, targets) => {
           publishCalls.push({ event: "goals_update" });
           return originalPublishGoalsUpdate(deviceId, targets);
+        };
+        const originalPublishDailySummary = readyServices.publisher.publishDailySummary.bind(readyServices.publisher);
+        readyServices.publisher.publishDailySummary = (...args) => {
+          publishCalls.push({ event: "daily_summary" });
+          return originalPublishDailySummary(...args);
         };
         services = readyServices;
       },
@@ -214,7 +219,7 @@ describe("chat goal update integration", () => {
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
-    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.didMutateMeal, false);
     assert.equal(body.reply, SUCCESS_RECEIPT);
     assert.deepEqual(body.dailyTargets, SUCCESS_TARGETS);
     assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
@@ -245,7 +250,7 @@ describe("chat goal update integration", () => {
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
-    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.didMutateMeal, false);
     assert.equal(body.reply, SUCCESS_RECEIPT);
     assert.deepEqual(body.dailyTargets, SUCCESS_TARGETS);
     assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
@@ -277,7 +282,7 @@ describe("chat goal update integration", () => {
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
-    assert.equal(body.didMutateMeal, true);
+    assert.equal(body.didMutateMeal, false);
     assert.equal(body.reply, SUCCESS_RECEIPT);
     assert.deepEqual(body.dailyTargets, SUCCESS_TARGETS);
     assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
@@ -359,6 +364,8 @@ describe("chat goal update integration", () => {
     const confirmed = await postChat("好");
 
     assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.didLogMeal, false);
+    assert.equal(confirmed.body.didMutateMeal, false);
     assert.equal(confirmed.body.reply, PROPOSAL_SUCCESS_RECEIPT);
     assert.deepEqual(confirmed.body.dailyTargets, PROPOSAL_TARGETS);
     assert.equal(confirmed.body.proposalCard?.status, "approved");
