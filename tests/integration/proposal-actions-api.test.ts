@@ -22,6 +22,8 @@ interface PublishRecord {
   actionEventCount: number;
 }
 
+const RECOVERABLE_PROPOSAL_ACTION_COPY = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
+
 function toCookieHeader(rawHeader: string | string[] | undefined) {
   const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
   return values.map((value) => value.split(";", 1)[0]).join("; ");
@@ -562,7 +564,7 @@ describe("proposal action API", () => {
     });
   });
 
-  it("rolls back meal delete approval when the decision boundary fails before action metadata is durable", async () => {
+  it("keeps meal delete approval retryable when the decision boundary fails before action metadata is durable", async () => {
     const { meal, proposalId } = await createDeleteCard();
     proposalActionTestHooks.afterDomainMutation = () => {
       throw new Error("injected proposal action failure");
@@ -575,7 +577,21 @@ describe("proposal action API", () => {
       payload: { proposalId, kind: "meal_delete", action: "approve" },
     });
 
-    assert.equal(failed.statusCode, 500);
+    assert.equal(failed.statusCode, 200);
+    const failedBody = failed.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      reply: string;
+      proposalCard?: { proposalId: string; status: string; isActionable: boolean };
+    };
+    assert.equal(failedBody.ok, false);
+    assert.equal(failedBody.status, "retryable");
+    assert.equal(failedBody.didMutateMeal, false);
+    assert.equal(failedBody.reply, RECOVERABLE_PROPOSAL_ACTION_COPY);
+    assert.equal(failedBody.proposalCard?.proposalId, proposalId);
+    assert.equal(failedBody.proposalCard?.status, "active");
+    assert.equal(failedBody.proposalCard?.isActionable, true);
     assert.ok((await readMealsFor(meal)).some((row) => row.id === meal.id));
     assert.equal(publishedDailySummaries.length, 0);
     assert.equal(await historyHasActionEvent(proposalId), false);
@@ -629,7 +645,21 @@ describe("proposal action API", () => {
       payload: { proposalId, kind: "meal_delete", action: "approve" },
     });
 
-    assert.equal(failed.statusCode, 500);
+    assert.equal(failed.statusCode, 200);
+    const failedBody = failed.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      reply: string;
+      proposalCard?: { proposalId: string; status: string; isActionable: boolean };
+    };
+    assert.equal(failedBody.ok, false);
+    assert.equal(failedBody.status, "retryable");
+    assert.equal(failedBody.didMutateMeal, false);
+    assert.equal(failedBody.reply, RECOVERABLE_PROPOSAL_ACTION_COPY);
+    assert.equal(failedBody.proposalCard?.proposalId, proposalId);
+    assert.equal(failedBody.proposalCard?.status, "active");
+    assert.equal(failedBody.proposalCard?.isActionable, true);
     assert.doesNotMatch(failed.body, /已刪除/);
     assert.equal(await historyHasAssistantReply("已刪除3/25 豆腐雞肉飯，已從當日紀錄移除。"), false);
     assert.equal((await readMealsFor(meal)).some((row) => row.id === meal.id), true);
