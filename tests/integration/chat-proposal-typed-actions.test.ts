@@ -31,6 +31,7 @@ interface ProposalCardBody {
 
 interface ChatActionBody {
   reply: string;
+  status?: string;
   didLogMeal: boolean;
   didMutateMeal?: boolean;
   dailyTargets?: DailyTargets;
@@ -52,6 +53,9 @@ const UPDATED_TARGETS: DailyTargets = {
   carbs: 130,
   fat: 45,
 };
+const RECOVERABLE_COPY = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
+const IDEMPOTENT_COPY = "這個提案已經處理過，不需要再確認一次。";
+const STALE_LAPSE_COPY = "這個估值修改提案已超過 30 分鐘，請重新提出修改。";
 
 function toCookieHeader(rawHeader: string | string[] | undefined) {
   const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -253,6 +257,20 @@ describe("typed proposal actions through /api/chat", () => {
     return { meal, proposal };
   }
 
+  async function postChatWithForcedProposalActionResult(
+    message: string,
+    result: unknown,
+  ): Promise<ChatActionBody> {
+    const originalHandleAction = services.proposalActionService.handleAction;
+    services.proposalActionService.handleAction = async () =>
+      result as Awaited<ReturnType<typeof originalHandleAction>>;
+    try {
+      return await postChat(message);
+    } finally {
+      services.proposalActionService.handleAction = originalHandleAction;
+    }
+  }
+
   async function readTargets(): Promise<DailyTargets> {
     const response = await app.inject({
       method: "POST",
@@ -416,6 +434,82 @@ describe("typed proposal actions through /api/chat", () => {
     assert.equal(card?.status, "approved");
     assert.equal(card?.isActionable, false);
     assert.equal(card?.lapseCopy ?? undefined, undefined);
+  });
+
+  it("preserves retryable non-ok actionResult.reply through typed meal confirmation", async () => {
+    const { proposal } = await createMealEstimateCard();
+
+    const body = await postChatWithForcedProposalActionResult("套用餐點修改", {
+      ok: false,
+      status: "retryable",
+      didMutateMeal: false,
+      reply: RECOVERABLE_COPY,
+      proposalCard: {
+        proposalId: proposal.proposalId,
+        proposalKind: "meal_estimate",
+        proposalLane: "meal_mutation",
+        status: "active",
+        isActionable: true,
+        title: "請確認這組估值修改提案。",
+        details: { rows: [{ label: "卡路里", before: "680 kcal", after: "610 kcal" }] },
+        actions: {
+          approveLabel: "套用修改",
+          editLabel: "改成其他數字",
+          rejectLabel: "取消提案",
+        },
+        expiresAt: proposal.expiresAt,
+        lapseCopy: STALE_LAPSE_COPY,
+        supersededByKind: null,
+      },
+    });
+
+    assert.equal(body.reply, RECOVERABLE_COPY);
+    assert.notEqual(body.reply, STALE_LAPSE_COPY);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.proposalCard?.proposalId, proposal.proposalId);
+    assert.equal(body.proposalCard?.status, "active");
+    assert.equal(body.proposalCard?.isActionable, true);
+    assert.equal(body.proposalActionEvent, undefined);
+    assert.equal(body.dailyTargets, undefined);
+  });
+
+  it("preserves idempotent non-ok actionResult.reply through typed meal confirmation", async () => {
+    const { proposal } = await createMealEstimateCard();
+
+    const body = await postChatWithForcedProposalActionResult("套用餐點修改", {
+      ok: false,
+      status: "idempotent",
+      didMutateMeal: false,
+      reply: IDEMPOTENT_COPY,
+      proposalCard: {
+        proposalId: proposal.proposalId,
+        proposalKind: "meal_estimate",
+        proposalLane: "meal_mutation",
+        status: "approved",
+        isActionable: false,
+        title: "請確認這組估值修改提案。",
+        details: { rows: [{ label: "卡路里", before: "680 kcal", after: "610 kcal" }] },
+        actions: {
+          approveLabel: "套用修改",
+          editLabel: "改成其他數字",
+          rejectLabel: "取消提案",
+        },
+        expiresAt: proposal.expiresAt,
+        lapseCopy: STALE_LAPSE_COPY,
+        supersededByKind: null,
+      },
+    });
+
+    assert.equal(body.reply, IDEMPOTENT_COPY);
+    assert.notEqual(body.reply, STALE_LAPSE_COPY);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.proposalCard?.proposalId, proposal.proposalId);
+    assert.equal(body.proposalCard?.status, "approved");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.equal(body.proposalActionEvent, undefined);
+    assert.equal(body.dailyTargets, undefined);
   });
 
   it("fails closed for ambiguous bare approval when multiple proposal lanes are active", async () => {

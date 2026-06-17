@@ -737,10 +737,33 @@ describe("chat bubble source contract", () => {
     assert.match(chatPanel, /content: trimmedReply/);
     assert.match(chatPanel, /result\.reply/);
 
-    const actionEventIndex = chatPanel.indexOf("appendProposalActionEvent(result.proposalActionEvent)");
-    const replyIndex = chatPanel.indexOf("appendProposalActionReply(result.reply)");
+    const okBranch = chatPanel.match(/if \(result\.ok\) \{[\s\S]*?\n\s*\}/)?.[0] ?? "";
+    const actionEventIndex = okBranch.indexOf("appendProposalActionEvent(result.proposalActionEvent)");
+    const replyIndex = okBranch.indexOf("appendProposalActionReply(result.reply)");
     assert.ok(actionEventIndex >= 0, "ChatPanel should append the structured proposal action event");
     assert.ok(replyIndex > actionEventIndex, "assistant completion reply should be appended after the action event");
+  });
+
+  it("appends retryable and idempotent non-ok proposal replies without success events", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const nonOkBranch = chatPanel.match(/if \(!result\.ok\) \{[\s\S]*?return;\s*\n\s*\}/)?.[0] ?? "";
+
+    assert.match(
+      nonOkBranch,
+      /result\.status === "retryable" \|\| result\.status === "idempotent"/,
+      "source-only proof: residual risk is runtime wiring, covered by transport and typed /api/chat tests",
+    );
+    assert.match(nonOkBranch, /appendProposalActionReply\(result\.reply\)/);
+    assert.doesNotMatch(nonOkBranch, /appendProposalActionEvent/);
+    assert.doesNotMatch(nonOkBranch, /proposalActionEvent/);
+    assert.doesNotMatch(nonOkBranch, /setDailyTargets/);
+    assert.doesNotMatch(nonOkBranch, /setDailySummary/);
+    assert.doesNotMatch(nonOkBranch, /refreshTodayMeals/);
+
+    const nonOkIndex = chatPanel.indexOf("if (!result.ok)");
+    const okIndex = chatPanel.indexOf("if (result.ok)");
+    assert.ok(nonOkIndex >= 0, "ChatPanel should contain a distinct non-ok branch");
+    assert.ok(okIndex > nonOkIndex, "success side effects should remain in the later ok branch");
   });
 
   it("delete mutation confirmations stay assistant text only without receipt affordances", async () => {

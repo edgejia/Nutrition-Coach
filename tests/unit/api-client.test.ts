@@ -572,6 +572,72 @@ describe("API Client", () => {
     }
   });
 
+  it("sendProposalAction preserves retryable non-ok reply copy and proposal card", async () => {
+    const retryableReply = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
+    const retryableCard = { ...validProposalCard, status: "active", isActionable: true };
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      ok: false,
+      status: "retryable",
+      didMutateMeal: false,
+      reply: retryableReply,
+      proposalCard: retryableCard,
+    });
+
+    const result = await api.sendProposalAction({
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+
+    assert.equal(fetchCalls[0].url, "/api/proposals/actions");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), {
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "retryable");
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.reply, retryableReply);
+    assert.deepEqual(result.proposalCard, retryableCard);
+  });
+
+  it("sendProposalAction preserves idempotent non-ok reply copy and proposal card", async () => {
+    const idempotentReply = "這個提案已經處理過，不需要再確認一次。";
+    const idempotentCard = { ...validProposalCard, status: "approved", isActionable: false };
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      ok: false,
+      status: "idempotent",
+      didMutateMeal: false,
+      reply: idempotentReply,
+      proposalCard: idempotentCard,
+    });
+
+    const result = await api.sendProposalAction({
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+
+    assert.equal(fetchCalls[0].url, "/api/proposals/actions");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), {
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "idempotent");
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.reply, idempotentReply);
+    assert.deepEqual(result.proposalCard, idempotentCard);
+  });
+
   it("declares proposal DTO types and strict client action transport in source", () => {
     for (const exportedType of [
       "ProposalKind",
@@ -589,6 +655,9 @@ describe("API Client", () => {
 
     assert.match(apiSource, /export async function sendProposalAction/);
     assert.match(typesSource, /type ProposalActionReply[\s\S]*?ok: true;[\s\S]*?reply\?: string;/);
+    assert.match(typesSource, /status: "stale";[\s\S]*?didMutateMeal: false;/);
+    assert.match(typesSource, /status: "retryable";[\s\S]*?didMutateMeal: false;[\s\S]*?reply: string;/);
+    assert.match(typesSource, /status: "idempotent";[\s\S]*?didMutateMeal: false;[\s\S]*?reply: string;/);
     assert.match(apiSource, /fetch\("\/api\/proposals\/actions",\s*\{\s*method: "POST",\s*credentials: "same-origin"/s);
     const sendProposalActionSource = apiSource.match(
       /export async function sendProposalAction[\s\S]*?\n}\n\nexport async function loadHistory/,
