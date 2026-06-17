@@ -94,12 +94,12 @@ const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完
 const COMMITTED_MEAL_MUTATION_HISTORY_PATTERN =
   /\[系統已(?:完成餐點(?:記錄|修改|刪除)|(?:記錄|更新|刪除)餐點[：:])/;
 const MUTATION_SUCCESS_CLAIM_PATTERNS = {
-  goals: /已\s*(?:經\s*)?更新\s*每日目標|已\s*(?:經\s*)?(?:套用|更新)[^。！？\n]{0,12}目標|目標[^。！？\n]{0,12}(?:已\s*)?(?:更新|套用)/,
+  goals: /已\s*(?:經\s*)?更新\s*每日目標|已\s*(?:經\s*)?(?:套用|更新)[^。！？\n]{0,12}目標|(?:每日)?目標[^。！？\n]{0,8}已\s*(?:經\s*)?(?:更新|套用)/,
   log: /已\s*(?:經\s*)?記錄|完成\s*記錄/,
   update: /已\s*(?:經\s*)?更新(?!\s*每日目標)|完成\s*更新/,
   delete: /已\s*(?:經\s*)?刪除|完成\s*刪除/,
 } as const;
-const NO_MUTATION_SUCCESS_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
+const NO_MUTATION_MEAL_SUCCESS_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
 // Summary replies often use approximate wording after totals are rounded by the model.
 const SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL = 10;
 
@@ -559,7 +559,7 @@ export function guardNoMutationSuccessClaim(
   ) {
     return reply;
   }
-  return NO_MUTATION_SUCCESS_FALLBACK;
+  return noMutationSuccessFallback(claimedKinds);
 }
 
 function detectMutationSuccessClaimKinds(reply: string): Array<NonNullable<CommittedMutationProjection["mutationKind"]>> {
@@ -571,6 +571,24 @@ function detectMutationSuccessClaimKinds(reply: string): Array<NonNullable<Commi
     }
   }
   return kinds;
+}
+
+function noMutationSuccessFallback(
+  claimedKinds: Array<NonNullable<CommittedMutationProjection["mutationKind"]>>,
+): string {
+  const uniqueKinds = new Set(claimedKinds);
+  if (uniqueKinds.size === 1) {
+    if (uniqueKinds.has("goals")) {
+      return renderGoalAuthorityFailureCopy();
+    }
+    if (uniqueKinds.has("delete")) {
+      return renderMealDeleteAuthorityFailureCopy();
+    }
+    if (uniqueKinds.has("update")) {
+      return renderMealNumericAuthorityFailureCopy();
+    }
+  }
+  return NO_MUTATION_MEAL_SUCCESS_FALLBACK;
 }
 
 function isFactGroundedSummaryHistoryReply(reply: string, facts: SummaryHistoryFacts | undefined): boolean {

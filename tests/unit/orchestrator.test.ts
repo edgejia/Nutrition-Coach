@@ -349,6 +349,17 @@ describe("no-mutation success-claim guard", () => {
     }
   });
 
+  it("preserves renderer-owned no-mutation goal and proposal failure copy", () => {
+    for (const reply of [
+      renderGoalAuthorityFailureCopy(),
+      renderGoalValidationFailureCopy(["calories"]),
+      renderGoalCancelCopy(),
+      renderProposalKindAmbiguityCopy(),
+    ]) {
+      assert.equal(guardWithState(reply), reply);
+    }
+  });
+
   it("blocks cross-verb success claims when the committed kind does not match the copy", () => {
     assert.notEqual(guardWithState("已刪除雞腿便當，已從當日紀錄移除。", stateFor(logEffects)), "已刪除雞腿便當，已從當日紀錄移除。");
     assert.notEqual(guardWithState("已更新雞腿便當，620 kcal，蛋白質 24 g。", stateFor(deleteEffects)), "已更新雞腿便當，620 kcal，蛋白質 24 g。");
