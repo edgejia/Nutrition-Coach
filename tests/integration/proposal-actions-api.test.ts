@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
@@ -273,6 +274,18 @@ describe("proposal action API", () => {
     assert.equal(replyMessage.proposalActionEvent, undefined);
     assert.equal(replyMessage.proposalCard, undefined);
   }
+
+  it("routes proposal action mutation replies through the guarded receipt wrapper", () => {
+    const source = readFileSync("server/services/proposal-actions.ts", "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("//"))
+      .join("\n");
+
+    assert.match(source, /renderGuardedMutationReceipt/);
+    assert.doesNotMatch(source, /renderMutationReceipt/);
+    assert.match(source, /input\.mutation\?\.effects[\s\S]*renderGuardedMutationReceipt/);
+  });
 
   it("requires cookie-backed ownership and rejects client-supplied ownership fields", async () => {
     const missingSession = await app.inject({

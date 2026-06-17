@@ -7,6 +7,7 @@ import {
   buildDeviceGoalsUpdatedRestEvent,
   buildHomeCtaIntentSelectedEvent,
   buildHomeCtaOptionSentEvent,
+  buildMutationReceiptGuardTrippedEvent,
   buildOnboardingSubmitStartedEvent,
   buildOnboardingSubmitSucceededEvent,
   buildOnboardingValidationFailedEvent,
@@ -55,6 +56,7 @@ const ALLOWED_METADATA_KEYS = new Set([
   "lastTool",
   "route",
   "operation",
+  "verb",
   "requestId",
   "updatedFields",
   "state",
@@ -91,6 +93,13 @@ const FORBIDDEN_STRINGS = [
   "x-device-id",
   "192.168.0.42",
   "forged_signature",
+  "log_food",
+  "update_meal",
+  "delete_meal",
+  "update_goals",
+  "body armor",
+  "field roast",
+  "已完成 log_food",
 ];
 
 function assertLockedPayload(payload: { event: RedactedObservabilityEventName } & object) {
@@ -146,9 +155,17 @@ describe("redacted observability event builders", () => {
       buildDeviceGoalsValidationFailedEvent({ fields: ["protein"], codes: ["invalid_field_value"] }),
       buildDeviceGoalsUpdatedRestEvent({ updatedFields: ["protein", "calories"] }),
       buildSseConnectionStateEvent({ state: "opened" }),
+      buildMutationReceiptGuardTrippedEvent({
+        operation: "orchestrator_receipt",
+        verb: "log",
+        turnId: "turn-receipt-guard-1",
+      }),
     ];
 
-    assert.deepEqual(payloads.map((payload) => payload.event), LOCKED_EVENT_NAMES);
+    assert.deepEqual(payloads.map((payload) => payload.event), [
+      ...LOCKED_EVENT_NAMES,
+      "mutation_receipt_guard_tripped",
+    ]);
     for (const payload of payloads) {
       assertLockedPayload(payload);
     }
@@ -223,6 +240,34 @@ describe("redacted observability event builders", () => {
     });
     assert.deepEqual(Object.keys(withTurnId), ["event", "reason", "route", "operation", "requestId", "turnId"]);
     assertLockedPayload(withTurnId);
+  });
+
+  it("builds mutation receipt guard trip events with metadata-only fields", () => {
+    const payload = buildMutationReceiptGuardTrippedEvent({
+      operation: "proposal_action",
+      verb: "delete",
+      requestId: "req-receipt-guard",
+      turnId: "turn-receipt-guard",
+      matchedTerm: "delete_meal",
+      foodName: "field roast",
+      receiptText: "已完成 delete_meal field roast",
+      prompt: "raw prompt text",
+      cookie: "guest_session=signed-cookie",
+      deviceId: "device_abc123",
+      sessionId: "session_secret",
+      body: { text: "raw body text" },
+      providerPayload: { content: "assistant reply text" },
+    } as never);
+
+    assert.deepEqual(payload, {
+      event: "mutation_receipt_guard_tripped",
+      operation: "proposal_action",
+      verb: "delete",
+      requestId: "req-receipt-guard",
+      turnId: "turn-receipt-guard",
+    });
+    assert.deepEqual(Object.keys(payload), ["event", "operation", "verb", "requestId", "turnId"]);
+    assertLockedPayload(payload);
   });
 
   it("sanitizes ownership bypass blocked dimensions and excludes forbidden telemetry", () => {

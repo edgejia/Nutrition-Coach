@@ -233,6 +233,20 @@ describe("mutationOutcomeFactFromEffects", () => {
   });
 });
 
+describe("direct orchestrator mutation receipt egress", () => {
+  it("routes log, update, delete, and goals receipts through the guarded wrapper", () => {
+    const source = orchestratorIndexSourceWithoutComments();
+
+    assert.match(source, /renderGuardedMutationReceipt/);
+    assert.doesNotMatch(source, /function renderCheckedMutationReceipt/);
+    assert.doesNotMatch(source, /assertNoForbiddenReceiptTerms/);
+    assert.equal(
+      (source.match(/mutationReceiptText\s*=\s*renderGuardedMutationReceipt/g) ?? []).length,
+      4,
+    );
+  });
+});
+
 function codePointLength(value: string) {
   return [...value].length;
 }
