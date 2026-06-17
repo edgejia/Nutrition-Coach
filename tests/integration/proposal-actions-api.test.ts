@@ -23,6 +23,7 @@ interface PublishRecord {
 }
 
 const RECOVERABLE_PROPOSAL_ACTION_COPY = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
+const IDEMPOTENT_PROPOSAL_ACTION_COPY = "這個提案已經處理過，不需要再確認一次。";
 
 function toCookieHeader(rawHeader: string | string[] | undefined) {
   const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -455,12 +456,14 @@ describe("proposal action API", () => {
       ok: boolean;
       status: string;
       didMutateMeal: boolean;
+      reply: string;
       proposalCard?: { status: string; isActionable: boolean };
     };
     assert.equal(replay.statusCode, 200);
     assert.equal(replayBody.ok, false);
-    assert.equal(replayBody.status, "stale");
+    assert.equal(replayBody.status, "idempotent");
     assert.equal(replayBody.didMutateMeal, false);
+    assert.equal(replayBody.reply, IDEMPOTENT_PROPOSAL_ACTION_COPY);
     assert.equal(replayBody.proposalCard?.status, "approved");
     assert.equal(replayBody.proposalCard?.isActionable, false);
     assert.deepEqual(await readTargets(), targets);
