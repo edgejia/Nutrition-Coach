@@ -870,15 +870,29 @@ function projectAssetFields(imagePath: string | null | undefined) {
   };
 }
 
-function providerStreamFallback(error: unknown):
+function providerStreamFallback(
+  error: unknown,
+  fallbackReason: "llm_error" | "partial_success" = "llm_error",
+):
   | {
       fallbackSource: "orchestrator";
       reason: "llm_error";
       providerMetadata: ProviderErrorMetadata;
     }
+  | {
+      fallbackSource: "orchestrator";
+      reason: "partial_success";
+    }
   | undefined {
   if (!isLLMProviderError(error)) {
     return undefined;
+  }
+
+  if (fallbackReason === "partial_success") {
+    return {
+      fallbackSource: "orchestrator",
+      reason: "partial_success",
+    };
   }
 
   return {
@@ -1519,7 +1533,10 @@ async function handleOrchestratorSSE(
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
     let catchSite: RouteCatchSite = "sse_outer";
-    const providerFallback = providerStreamFallback(error);
+    const providerFallback = providerStreamFallback(
+      error,
+      streamDidMutateMeal ? "partial_success" : "llm_error",
+    );
     let sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(error);
     recorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
     try {
@@ -1999,7 +2016,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           : jsonDidMutateMeal
             ? PARTIAL_MUTATION_FALLBACK
             : UNIFIED_FALLBACK;
-        const providerFallback = providerStreamFallback(error);
+        const providerFallback = providerStreamFallback(
+          error,
+          jsonDidMutateMeal ? "partial_success" : "llm_error",
+        );
         const sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(error);
         if (!userMessagePersisted) {
           await chatService.saveMessage(

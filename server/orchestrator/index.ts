@@ -711,7 +711,7 @@ function caloriesCloseEnough(claimed: number, actual: number): boolean {
     && Math.abs(claimed - actual) <= SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL;
 }
 
-async function* appendMutationReceiptStream(
+export async function* appendMutationReceiptStream(
   stream: AsyncGenerator<string>,
   receipt: string | undefined,
 ): AsyncGenerator<string> {
@@ -721,16 +721,9 @@ async function* appendMutationReceiptStream(
   }
 
   let fullReply = "";
-  try {
-    for await (const token of stream) {
-      fullReply += token;
-      yield token;
-    }
-  } catch {
-    if (!fullReply.includes(receipt)) {
-      yield `${fullReply ? "\n\n" : ""}${receipt}`;
-    }
-    return;
+  for await (const token of stream) {
+    fullReply += token;
+    yield token;
   }
 
   if (!fullReply.includes(receipt)) {

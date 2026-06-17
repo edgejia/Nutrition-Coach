@@ -4694,8 +4694,64 @@ describe("chat-streaming", () => {
     }
   });
 
-  it("POST /api/chat D-09: when streamed final reply throws after log_food, meal state is preserved", async () => {
-    mockLLM.queueRoundResponse({ toolCalls: [createTrustedLogFoodToolCall()] });
+  it("POST /api/chat D-09: when a committed log stream throws, meal state is preserved", async () => {
+    assert.ok(services);
+    const originalHandleMessage = services.orchestrator.handleMessage.bind(services.orchestrator);
+    const persistedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
+      ],
+    });
+    const dateKey = formatLocalDate(new Date(persistedMeal.loggedAt));
+    const loggedMeal = {
+      mealId: persistedMeal.id,
+      mealRevisionId: persistedMeal.mealRevisionId,
+      dateKey,
+      loggedAt: persistedMeal.loggedAt,
+      imageAssetId: null,
+      imageUrl: null,
+      foodName: persistedMeal.foodName,
+      calories: persistedMeal.calories,
+      protein: persistedMeal.protein,
+      carbs: persistedMeal.carbs,
+      fat: persistedMeal.fat,
+      itemCount: persistedMeal.itemCount,
+      countedSources: [{ name: "雞腿", protein: 24, category: "anchor" as const, certainty: "clear" as const }],
+      excludedSources: [],
+      usedConservativeAssumption: false,
+    };
+    async function* failingCommittedStream(): AsyncGenerator<string> {
+      yield "模型部分回覆";
+      throw new LLMProviderError(providerMetadataFixture);
+    }
+    services.orchestrator.handleMessage = async (requestDeviceId, userMessage, _imageBase64, _assetRef, opts) => {
+      await services!.chatService.saveMessage(requestDeviceId, "user", userMessage);
+      opts?.onUserMessageSaved?.();
+      return {
+        streamGenerator: failingCommittedStream(),
+        didLogMeal: true,
+        didMutateMeal: true,
+        dailySummary: {
+          totalCalories: 620,
+          totalProtein: 24,
+          totalCarbs: 70,
+          totalFat: 18,
+          mealCount: 1,
+          date: dateKey,
+        },
+        affectedDate: dateKey,
+        loggedMeal,
+        mutationOutcomeFact: {
+          action: "log_food",
+          affectedDate: dateKey,
+          foodName: "雞腿便當",
+          calories: 620,
+          protein: 24,
+          carbs: 70,
+          fat: 18,
+        },
+      };
+    };
     const form = new FormData();
     form.append("message", "我吃了雞腿便當");
 
@@ -4713,17 +4769,26 @@ describe("chat-streaming", () => {
       assert.ok(res.body);
       const reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
 
-      const doneMatch = text.match(/event: done\s+data: (.+)/);
-      assert.ok(doneMatch);
-      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal?: boolean; dailySummary?: { date?: string } };
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        didLogMeal?: boolean;
+        didMutateMeal?: boolean;
+        dailySummary?: { date?: string };
+        loggedMeal?: { mealId?: string; foodName?: string };
+      };
+      assert.match(donePayload.turnId ?? "", UUID_PATTERN);
       assert.equal(donePayload.didLogMeal, true, "stream failure after log_food must preserve didLogMeal");
+      assert.equal(donePayload.didMutateMeal, true, "stream failure after log_food must preserve didMutateMeal");
       assert.ok(donePayload.dailySummary, "stream failure after log_food must preserve dailySummary");
       assert.match(
         donePayload.dailySummary?.date ?? "",
         /^\d{4}-\d{2}-\d{2}$/,
         "stream failure after log_food must preserve dailySummary.date",
       );
+      assert.match(donePayload.loggedMeal?.mealId ?? "", UUID_PATTERN);
+      assert.equal(donePayload.loggedMeal?.foodName, "雞腿便當");
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
         headers: { cookie: sessionCookieHeader },
@@ -4731,9 +4796,35 @@ describe("chat-streaming", () => {
       const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "D-10 invariant: exactly one assistant reply per user message");
-      assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
-      assert.match(assistantMsgs[0]!.content, /蛋白質 24 g。/);
+      assert.match(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗/);
+      assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
+      assert.doesNotMatch(assistantMsgs[0]!.content, /模型部分回覆/);
+
+      const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
+      const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
+      assert.equal(completedEvents.length, 0);
+      assert.equal(fallbackEvents.length, 1);
+      assert.equal(fallbackEvents[0]!.source, "sse");
+      assert.equal(fallbackEvents[0]!.turnId, donePayload.turnId);
+      assert.equal(fallbackEvents[0]!.fallbackSource, "orchestrator");
+      assert.equal(fallbackEvents[0]!.reason, "partial_success");
+      assert.equal(fallbackEvents[0]!.didLogMeal, true);
+      assert.equal(fallbackEvents[0]!.didMutateMeal, true);
+      assert.equal("providerMetadata" in fallbackEvents[0]!, false);
+
+      const trace = traceRecorders[0]!.build({ scenario: "sse-stream-partial-success-fallback", status: "pass" });
+      const routeFallbacks = trace.timeline.filter((event) => event.type === "route_fallback");
+      assert.equal(routeFallbacks.length, 1);
+      assert.equal(routeFallbacks[0]!.transport, "sse");
+      assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
+      assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
+      assert.equal(routeFallbacks[0]!.reason, "partial_success");
+      assert.equal(routeFallbacks[0]!.didLogMeal, true);
+      assert.equal(routeFallbacks[0]!.didMutateMeal, true);
+      assert.equal("providerMetadata" in routeFallbacks[0]!, false);
+      assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
     } finally {
+      services.orchestrator.handleMessage = originalHandleMessage;
       clearTimeout(timeout);
     }
   });

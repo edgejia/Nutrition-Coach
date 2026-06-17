@@ -24,7 +24,7 @@ import type {
   LLMRoundResult,
   LLMProvider,
 } from "../../server/llm/types.js";
-import { createOrchestrator, guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
+import { appendMutationReceiptStream, createOrchestrator, guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
 import {
   createEmptyCommittedMutationState,
   mutationOutcomeFactFromEffects,
@@ -55,6 +55,28 @@ type ExpectedMutationOutcomeFact = {
   affectedDate: string;
   [key: string]: unknown;
 };
+
+describe("appendMutationReceiptStream", () => {
+  it("propagates stream errors without appending receipt text", async () => {
+    const expectedError = new Error("ProviderStreamFailure");
+    async function* failingStream(): AsyncGenerator<string> {
+      yield "模型部分回覆";
+      throw expectedError;
+    }
+
+    const tokens: string[] = [];
+    await assert.rejects(
+      async () => {
+        for await (const token of appendMutationReceiptStream(failingStream(), "已記錄雞腿便當")) {
+          tokens.push(token);
+        }
+      },
+      (error) => error === expectedError,
+    );
+
+    assert.deepEqual(tokens, ["模型部分回覆"]);
+  });
+});
 
 function getMutationOutcomeFact(result: unknown): Record<string, unknown> | undefined {
   const maybeResult = result as { mutationOutcomeFact?: Record<string, unknown> };
