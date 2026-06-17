@@ -13,6 +13,7 @@ import {
   renderMealNumericCancelCopy,
   renderProposalActionEventCopy,
   renderProposalInactiveCopy,
+  renderProposalRecoverableFailureCopy,
   renderGuardedMutationReceipt,
 } from "../orchestrator/mutation-receipts.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
@@ -91,6 +92,13 @@ export type ProposalActionServiceResult =
       status: "stale";
       proposalCard?: ProposalCardClientMetadata;
       didMutateMeal: false;
+    }
+  | {
+      ok: false;
+      status: "retryable";
+      proposalCard?: ProposalCardClientMetadata;
+      didMutateMeal: false;
+      reply: string;
     };
 
 interface ProposalActionDeps {
@@ -252,6 +260,25 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     };
   }
 
+  async function buildRetryableProposalActionResult(input: {
+    deviceId: string;
+    proposalId: string;
+  }): Promise<Extract<ProposalActionServiceResult, { status: "retryable" }>> {
+    const card = await loadCard(input);
+    return {
+      ok: false,
+      status: "retryable",
+      didMutateMeal: false,
+      reply: renderProposalRecoverableFailureCopy(),
+      ...(card ? { proposalCard: projectProposalCardForClient(card) } : {}),
+    };
+  }
+
+  function isMealApprovalRecoveryCandidate(input: ProposalActionServiceInput): boolean {
+    return input.action === "approve"
+      && (input.kind === "meal_numeric" || input.kind === "meal_estimate" || input.kind === "meal_delete");
+  }
+
   async function clearActiveProposal(input: {
     deviceId: string;
     kind: ProposalActionRequestKind;
@@ -411,7 +438,9 @@ export function createProposalActionService(deps: ProposalActionDeps) {
         return markStale(input);
       }
 
-      const decision = await runDurableDecision(async () => {
+      let decision: DurableDecision;
+      try {
+        decision = await runDurableDecision(async () => {
         if (input.kind === "goal") {
           const proposal = await deps.goalProposalService.getLatest({
             deviceId: input.deviceId,
@@ -602,7 +631,13 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           }
           throw error;
         }
-      });
+        });
+      } catch (error) {
+        if (isMealApprovalRecoveryCandidate(input)) {
+          return buildRetryableProposalActionResult(input);
+        }
+        throw error;
+      }
       try {
         publishAfterCommit(decision.publish, input.deviceId);
       } catch {

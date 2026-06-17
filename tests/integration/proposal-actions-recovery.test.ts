@@ -87,22 +87,23 @@ describe("proposal action retryable recovery", () => {
         { foodName: "雞胸便當", calories: 640, protein: 42, carbs: 70, fat: 18 },
       ],
     }) as MealSnapshot;
+    const proposalInput = {
+      mealId: meal.id,
+      expectedMealRevisionId: meal.mealRevisionId,
+      items: [
+        { foodName: "雞胸便當", calories: 590, protein: 45, carbs: 58, fat: 16 },
+      ],
+      affectedFields: [
+        { field: "calories" as const, before: 640, after: 590 },
+        { field: "protein" as const, before: 42, after: 45 },
+      ],
+      sourceOperator: kind === "meal_estimate" ? "estimate" : "set",
+      ...(kind === "meal_estimate" ? { provenance: "model_estimate" as const } : {}),
+    };
     const proposal = await services.mealNumericProposalService.putLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
-      input: {
-        mealId: meal.id,
-        expectedMealRevisionId: meal.mealRevisionId,
-        items: [
-          { foodName: "雞胸便當", calories: 590, protein: 45, carbs: 58, fat: 16 },
-        ],
-        affectedFields: [
-          { field: "calories", before: 640, after: 590 },
-          { field: "protein", before: 42, after: 45 },
-        ],
-        sourceOperator: kind === "meal_estimate" ? "estimate" : "set",
-        provenance: kind === "meal_estimate" ? "model_estimate" : "user_evidence",
-      },
+      input: proposalInput,
     });
     const assistant = await services.chatService.saveMessage(
       deviceId,
@@ -155,7 +156,9 @@ describe("proposal action retryable recovery", () => {
           fat: meal.fat,
           dateKey: "2026-03-25",
           loggedAt: meal.loggedAt,
-          mealPeriod: meal.mealPeriod ?? "lunch",
+          mealPeriod: meal.mealPeriod === "breakfast" || meal.mealPeriod === "lunch" || meal.mealPeriod === "dinner" || meal.mealPeriod === "late_night"
+            ? meal.mealPeriod
+            : "lunch",
           items: [item],
         },
       },
@@ -234,6 +237,19 @@ describe("proposal action retryable recovery", () => {
     return (await readMealsFor(meal)).find((row) => row.id === meal.id);
   }
 
+  async function assertMealUnchanged(meal: MealSnapshot) {
+    const current = await latestMeal(meal);
+    assert.ok(current, "expected original meal to remain visible");
+    assert.equal(current.mealRevisionId, meal.mealRevisionId);
+    assert.equal(current.foodName, meal.foodName);
+    assert.equal(current.calories, meal.calories);
+    assert.equal(current.protein, meal.protein);
+    assert.equal(current.carbs, meal.carbs);
+    assert.equal(current.fat, meal.fat);
+    assert.equal(current.loggedAt, meal.loggedAt);
+    assert.equal(current.mealPeriod, meal.mealPeriod);
+  }
+
   async function historyMessages() {
     const history = await app.inject({
       method: "GET",
@@ -279,7 +295,7 @@ describe("proposal action retryable recovery", () => {
 
     await assertRetryableResponse(failed, proposalId);
     assert.equal(postWriteHookCalls, 1, "expected fault hook to run after the real update path");
-    assert.deepEqual(await latestMeal(meal), meal);
+    await assertMealUnchanged(meal);
     assert.equal(publishedDailySummaries.length, 0);
     assert.equal((await services.mealNumericProposalService.getLatest({
       deviceId,
@@ -312,7 +328,7 @@ describe("proposal action retryable recovery", () => {
 
     await assertRetryableResponse(failed, proposalId);
     assert.equal(postWriteHookCalls, 1, "expected fault hook to run after the real delete path");
-    assert.deepEqual(await latestMeal(meal), meal);
+    await assertMealUnchanged(meal);
     assert.equal(publishedDailySummaries.length, 0);
     assert.equal((await services.mealDeleteProposalService.getLatest({
       deviceId,
@@ -346,7 +362,7 @@ describe("proposal action retryable recovery", () => {
 
     await assertRetryableResponse(failed, proposalId);
     assert.equal(postWriteHookCalls, 1);
-    assert.deepEqual(await latestMeal(meal), meal);
+    await assertMealUnchanged(meal);
     assert.equal((await services.mealNumericProposalService.getLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
@@ -422,9 +438,11 @@ describe("proposal action retryable recovery", () => {
         source.indexOf("const deleted = await deps.mealCorrectionService.deleteMeal"),
       "meal delete approvals must consume before deleteMeal",
     );
-    const durableCallbackStart = source.indexOf("const decision = await runDurableDecision(async () => {");
-    const durableCallbackEnd = source.indexOf("      try {\n        publishAfterCommit", durableCallbackStart);
+    const durableCallbackStart = source.indexOf("decision = await runDurableDecision(async () => {");
+    const durableCallbackEnd = source.indexOf("if (isMealApprovalRecoveryCandidate(input))", durableCallbackStart);
     const durableCallback = source.slice(durableCallbackStart, durableCallbackEnd);
+    assert.notEqual(durableCallbackStart, -1);
+    assert.notEqual(durableCallbackEnd, -1);
     assert.doesNotMatch(durableCallback, /status:\s*"retryable"/);
     assert.match(durableCallback, /MealRevisionPreconditionError[\s\S]*markStale\(input\)/);
   });
