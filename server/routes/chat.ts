@@ -23,6 +23,10 @@ import type {
   LlmTraceRecorder,
 } from "../orchestrator/llm-trace.js";
 import type { ToolExecutionResult } from "../orchestrator/tools.js";
+import {
+  projectCommittedMutationState,
+  type CommittedMutationState,
+} from "../orchestrator/mutation-effects.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { normalizeMealPeriod } from "../lib/meal-period.js";
@@ -129,6 +133,7 @@ async function validateImageBytes(buffer: Buffer, claimedMimeType: string): Prom
 const STOPPED_EMPTY_COPY = "已停止生成。";
 const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
+type RouteMutationState = CommittedMutationState<LoggedMealReceipt, ProposalActionEventClientMetadata>;
 type ReceiptIdentity = {
   mealTransactionId: string;
   mealRevisionId: string;
@@ -376,6 +381,26 @@ function normalizeRouteFinalReply(
       summaryHistoryFacts,
     }),
     composedSummaryHistory,
+  };
+}
+
+function projectRouteMutationState(input: {
+  mutationState?: RouteMutationState;
+  didLogMeal: boolean;
+  didMutateMeal?: boolean;
+}) {
+  if (input.mutationState) {
+    return projectCommittedMutationState(input.mutationState);
+  }
+
+  const didMutateMeal = input.didMutateMeal ?? input.didLogMeal;
+  return {
+    hasCommittedMutation: didMutateMeal,
+    didLogMeal: input.didLogMeal,
+    didMutateMeal,
+    didMutateGoals: false,
+    shouldPublishDailySummary: didMutateMeal,
+    shouldPublishGoalsUpdate: false,
   };
 }
 
@@ -664,7 +689,7 @@ async function parseMultipartRequest(
 function publishSummarySafe(
   publisher: RealtimePublisher,
   deviceId: string,
-  didMutateMeal: boolean,
+  shouldPublishDailySummary: boolean,
   dailySummary: unknown,
   affectedDate: unknown,
   log: FastifyBaseLogger,
@@ -681,7 +706,7 @@ function publishSummarySafe(
     ? affectedDate
     : summaryDate;
   if (
-    !didMutateMeal
+    !shouldPublishDailySummary
     || !publishAffectedDate
     || !summaryDate
     || summaryDate !== publishAffectedDate
@@ -1138,6 +1163,7 @@ async function handleOrchestratorSSE(
   let userMessagePersisted = false;
   let streamDidLogMeal = false;
   let streamDidMutateMeal = false;
+  let streamShouldPublishDailySummary = false;
   let streamDailySummary: unknown;
   let streamSummaryOutcome: SummaryOutcome | undefined;
   let streamDailyTargets: unknown;
@@ -1257,9 +1283,9 @@ async function handleOrchestratorSSE(
     );
 
     if ("streamGenerator" in result) {
+      const mutationProjection = projectRouteMutationState(result);
       const {
         streamGenerator,
-        didLogMeal,
         dailySummary,
         summaryOutcome,
         summaryHistoryFacts,
@@ -1269,8 +1295,10 @@ async function handleOrchestratorSSE(
         proposalCard,
         proposalActionEvent,
       } = result;
+      const didLogMeal = mutationProjection.didLogMeal;
       streamDidLogMeal = didLogMeal;
-      streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
+      streamDidMutateMeal = mutationProjection.didMutateMeal;
+      streamShouldPublishDailySummary = mutationProjection.shouldPublishDailySummary;
       streamDailySummary = dailySummary;
       streamSummaryOutcome = summaryOutcome;
       streamDailyTargets = result.dailyTargets;
@@ -1329,7 +1357,7 @@ async function handleOrchestratorSSE(
           stopped: true,
           tokensStreamed: streamResult.tokensStreamed,
         });
-        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
+        publishSummarySafe(deps.publisher, deviceId, mutationProjection.shouldPublishDailySummary, streamDailySummary, streamAffectedDate, deps.log);
         return;
       }
 
@@ -1359,11 +1387,11 @@ async function handleOrchestratorSSE(
           didMutateMeal: streamDidMutateMeal,
         });
       }
-      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
+      publishSummarySafe(deps.publisher, deviceId, mutationProjection.shouldPublishDailySummary, streamDailySummary, streamAffectedDate, deps.log);
     } else {
+      const mutationProjection = projectRouteMutationState(result);
       const {
         reply: replyText,
-        didLogMeal,
         dailySummary,
         summaryOutcome,
         summaryHistoryFacts,
@@ -1374,12 +1402,14 @@ async function handleOrchestratorSSE(
         proposalCard,
         proposalActionEvent,
       } = result;
+      const didLogMeal = mutationProjection.didLogMeal;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
         shape: result.finalReplyShape ?? "empty_or_missing",
       });
       streamDidLogMeal = didLogMeal;
-      streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
+      streamDidMutateMeal = mutationProjection.didMutateMeal;
+      streamShouldPublishDailySummary = mutationProjection.shouldPublishDailySummary;
       streamDailySummary = dailySummary;
       streamSummaryOutcome = summaryOutcome;
       streamDailyTargets = dailyTargets;
@@ -1463,7 +1493,7 @@ async function handleOrchestratorSSE(
         recordSseCompletion({ didLogMeal, didMutateMeal: streamDidMutateMeal });
       }
       if (!streamProposalActionEvent) {
-        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, affectedDate, deps.log);
+        publishSummarySafe(deps.publisher, deviceId, mutationProjection.shouldPublishDailySummary, dailySummary, affectedDate, deps.log);
       }
     }
   } catch (error) {
@@ -1538,7 +1568,7 @@ async function handleOrchestratorSSE(
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
     });
-    publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
+    publishSummarySafe(deps.publisher, deviceId, streamShouldPublishDailySummary, streamDailySummary, streamAffectedDate, deps.log);
   } finally {
     await cleanupDurableAssetSafe(
       deps.assetService,
@@ -1655,6 +1685,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let userMessagePersisted = false;
       let jsonDidLogMeal = false;
       let jsonDidMutateMeal = false;
+      let jsonShouldPublishDailySummary = false;
       let jsonDailySummary: unknown;
       let jsonSummaryOutcome: SummaryOutcome | undefined;
       let jsonDailyTargets: unknown;
@@ -1761,8 +1792,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             proposalContext,
           },
         );
-        jsonDidLogMeal = result.didLogMeal;
-        jsonDidMutateMeal = result.didMutateMeal ?? result.didLogMeal;
+        const jsonMutationProjection = projectRouteMutationState(result);
+        jsonDidLogMeal = jsonMutationProjection.didLogMeal;
+        jsonDidMutateMeal = jsonMutationProjection.didMutateMeal;
+        jsonShouldPublishDailySummary = jsonMutationProjection.shouldPublishDailySummary;
         jsonDailySummary = result.dailySummary;
         jsonSummaryOutcome = result.summaryOutcome;
         jsonDailyTargets = result.dailyTargets;
@@ -1778,8 +1811,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
-          const { streamGenerator, didLogMeal, dailySummary, summaryHistoryFacts, affectedDate } = result;
-          const didMutateMeal = result.didMutateMeal ?? didLogMeal;
+          const { streamGenerator, dailySummary, summaryHistoryFacts, affectedDate } = result;
+          const didLogMeal = jsonMutationProjection.didLogMeal;
+          const didMutateMeal = jsonMutationProjection.didMutateMeal;
           let fullReply = "";
           let hallucinationDetected = false;
           for await (const token of streamGenerator) {
@@ -1831,7 +1865,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           publishSummarySafe(
             publisher,
             deviceId,
-            didMutateMeal,
+            jsonMutationProjection.shouldPublishDailySummary,
             dailySummary,
             affectedDate,
             turnLog,
@@ -1862,7 +1896,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           };
         }
 
-        const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
+        const { reply: replyText, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
+        const didLogMeal = jsonMutationProjection.didLogMeal;
         jsonProposalActionEvent = result.proposalActionEvent;
         const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
           && !result.fallbackOutcomeContext;
@@ -1911,7 +1946,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
         if (!jsonProposalActionEvent) {
-          publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, affectedDate, turnLog);
+          publishSummarySafe(publisher, deviceId, jsonMutationProjection.shouldPublishDailySummary, dailySummary, affectedDate, turnLog);
         }
         if (result.fallbackOutcomeContext) {
           const providerMetadata = result.providerFallbackContext?.reason === "llm_error"
@@ -1976,7 +2011,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonReceiptPersistence = finalized.receiptPersistence;
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, jsonAffectedDate, turnLog);
+        publishSummarySafe(publisher, deviceId, jsonShouldPublishDailySummary, jsonDailySummary, jsonAffectedDate, turnLog);
         traceRecorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
         recordJsonFallback({
           ...(providerFallback ?? {
