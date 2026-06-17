@@ -14,6 +14,7 @@ import type {
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 
 const RECOVERABLE_COPY = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
+const IDEMPOTENT_COPY = "這個提案已經處理過，不需要再確認一次。";
 
 interface MealSnapshot {
   id: string;
@@ -211,6 +212,21 @@ describe("proposal action retryable recovery", () => {
     return proposalId;
   }
 
+  async function createActiveGoalCard() {
+    const proposal = await services.goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: {
+        calories: 1450,
+        protein: 130,
+        carbs: 135,
+        fat: 45,
+      },
+    });
+    await createGoalCard(proposal.proposalId);
+    return proposal.proposalId;
+  }
+
   async function approveProposal(proposalId: string, kind: ProposalActionRequestKind) {
     return app.inject({
       method: "POST",
@@ -265,6 +281,10 @@ describe("proposal action retryable recovery", () => {
     }).messages;
   }
 
+  async function proposalActionEventCount(proposalId: string) {
+    return (await historyMessages()).filter((message) => message.proposalActionEvent?.proposalId === proposalId).length;
+  }
+
   async function assertNoActionArtifacts(proposalId: string, forbiddenReply: string) {
     const messages = await historyMessages();
     assert.equal(messages.some((message) => message.proposalActionEvent?.proposalId === proposalId), false);
@@ -281,6 +301,12 @@ describe("proposal action retryable recovery", () => {
     assert.equal(body.proposalCard?.proposalId, proposalId);
     assert.equal(body.proposalCard?.status, "active");
     assert.equal(body.proposalCard?.isActionable, true);
+  }
+
+  function assertSourceUsesMealMutationKind(source: string) {
+    assert.match(source, /import\s*\{[\s\S]*isMealMutationKind[\s\S]*\}\s*from\s*"..\/orchestrator\/mutation-effects\.js"/);
+    assert.match(source, /didMutateMeal:\s*isMealMutationKind\(effects\.kind\)/);
+    assert.doesNotMatch(source, /mutation:\s*\{\s*didMutateMeal:\s*(true|false),\s*effects/);
   }
 
   it("keeps meal_estimate approval retryable after a non-precondition post-write failure", async () => {
@@ -401,6 +427,104 @@ describe("proposal action retryable recovery", () => {
     })), undefined);
   });
 
+  it("returns an idempotent no-op when the same approved proposal is sequentially replayed", async () => {
+    const { meal, proposalId } = await createMealNumericCard("meal_numeric");
+
+    const first = await approveProposal(proposalId, "meal_numeric");
+    assert.equal(first.statusCode, 200);
+    const firstBody = first.json() as ProposalActionResponse;
+    assert.equal(firstBody.ok, true);
+    assert.equal(firstBody.status, "approved");
+    assert.equal(firstBody.didMutateMeal, true);
+    assert.equal(firstBody.proposalCard?.status, "approved");
+    assert.equal(firstBody.proposalCard?.isActionable, false);
+    assert.equal(await proposalActionEventCount(proposalId), 1);
+    const updated = await latestMeal(meal);
+    assert.ok(updated, "expected meal to remain visible after numeric approval");
+    assert.equal(updated.calories, 590);
+    assert.equal(updated.protein, 45);
+
+    // Simulates a committed first tap followed by a browser retry/double-tap replay.
+    const replayed = await approveProposal(proposalId, "meal_numeric");
+
+    assert.equal(replayed.statusCode, 200);
+    const replayBody = replayed.json() as ProposalActionResponse;
+    assert.equal(replayBody.ok, false);
+    assert.equal(replayBody.status, "idempotent");
+    assert.equal(replayBody.didMutateMeal, false);
+    assert.equal(replayBody.reply, IDEMPOTENT_COPY);
+    assert.equal(replayBody.proposalCard?.proposalId, proposalId);
+    assert.equal(replayBody.proposalCard?.status, "approved");
+    assert.equal(replayBody.proposalCard?.isActionable, false);
+    assert.equal(await proposalActionEventCount(proposalId), 1);
+    const afterReplay = await latestMeal(meal);
+    assert.ok(afterReplay, "expected meal to remain visible after idempotent replay");
+    assert.equal(afterReplay.calories, 590);
+    assert.equal(afterReplay.protein, 45);
+  });
+
+  it("keeps stale and non-matching replays stale instead of idempotent", async () => {
+    const noCard = await approveProposal("missing-proposal", "meal_delete");
+    assert.equal(noCard.statusCode, 200);
+    assert.equal((noCard.json() as ProposalActionResponse).status, "stale");
+
+    const { proposalId: rejectedProposalId } = await createMealNumericCard("meal_numeric");
+    const rejected = await actOnProposal(rejectedProposalId, "meal_numeric", "reject");
+    assert.equal(rejected.statusCode, 200);
+    assert.equal((rejected.json() as ProposalActionResponse).status, "rejected");
+    const rejectReplay = await approveProposal(rejectedProposalId, "meal_numeric");
+    assert.equal(rejectReplay.statusCode, 200);
+    assert.equal((rejectReplay.json() as ProposalActionResponse).status, "stale");
+
+    const { proposalId: approvedProposalId } = await createMealNumericCard("meal_numeric");
+    const approved = await approveProposal(approvedProposalId, "meal_numeric");
+    assert.equal(approved.statusCode, 200);
+    assert.equal((approved.json() as ProposalActionResponse).status, "approved");
+    const wrongKindReplay = await approveProposal(approvedProposalId, "meal_delete");
+    assert.equal(wrongKindReplay.statusCode, 200);
+    assert.equal((wrongKindReplay.json() as ProposalActionResponse).status, "stale");
+
+    assert.notEqual((noCard.json() as ProposalActionResponse).status, "idempotent");
+    assert.notEqual((rejectReplay.json() as ProposalActionResponse).status, "idempotent");
+    assert.notEqual((wrongKindReplay.json() as ProposalActionResponse).status, "idempotent");
+  });
+
+  it("derives confirm-path didMutateMeal from MutationEffects kind", async () => {
+    const goalProposalId = await createActiveGoalCard();
+    const goalApproved = await approveProposal(goalProposalId, "goal");
+    assert.equal(goalApproved.statusCode, 200);
+    assert.equal((goalApproved.json() as ProposalActionResponse).status, "approved");
+    assert.equal((goalApproved.json() as ProposalActionResponse).didMutateMeal, false);
+
+    const { proposalId: updateProposalId } = await createMealNumericCard("meal_numeric");
+    const updateApproved = await approveProposal(updateProposalId, "meal_numeric");
+    assert.equal(updateApproved.statusCode, 200);
+    assert.equal((updateApproved.json() as ProposalActionResponse).status, "approved");
+    assert.equal((updateApproved.json() as ProposalActionResponse).didMutateMeal, true);
+
+    const { proposalId: deleteProposalId } = await createMealDeleteCard();
+    const deleteApproved = await approveProposal(deleteProposalId, "meal_delete");
+    assert.equal(deleteApproved.statusCode, 200);
+    assert.equal((deleteApproved.json() as ProposalActionResponse).status, "approved");
+    assert.equal((deleteApproved.json() as ProposalActionResponse).didMutateMeal, true);
+
+    const retryable = await createMealNumericCard("meal_estimate");
+    proposalActionTestHooks.afterDomainMutation = () => {
+      throw new Error("injected post-write idempotency drift failure");
+    };
+    const failed = await approveProposal(retryable.proposalId, "meal_estimate");
+    assert.equal(failed.statusCode, 200);
+    assert.equal((failed.json() as ProposalActionResponse).status, "retryable");
+    assert.equal((failed.json() as ProposalActionResponse).didMutateMeal, false);
+    proposalActionTestHooks.afterDomainMutation = undefined;
+
+    const replaySource = await approveProposal(updateProposalId, "meal_numeric");
+    assert.equal((replaySource.json() as ProposalActionResponse).status, "idempotent");
+    assert.equal((replaySource.json() as ProposalActionResponse).didMutateMeal, false);
+
+    assertSourceUsesMealMutationKind(readFileSync("server/services/proposal-actions.ts", "utf8"));
+  });
+
   it("does not convert goal approve, reject, or stale/no-card failures into retryable", async () => {
     const staleGoalProposalId = await createGoalCard();
     const staleGoal = await approveProposal(staleGoalProposalId, "goal");
@@ -445,5 +569,25 @@ describe("proposal action retryable recovery", () => {
     assert.notEqual(durableCallbackEnd, -1);
     assert.doesNotMatch(durableCallback, /status:\s*"retryable"/);
     assert.match(durableCallback, /MealRevisionPreconditionError[\s\S]*markStale\(input\)/);
+  });
+
+  it("checks approved-card replay before active-card validation", () => {
+    const source = readFileSync("server/services/proposal-actions.ts", "utf8");
+    const handleActionStart = source.indexOf("async handleAction(input: ProposalActionServiceInput)");
+    const approvedReplay = source.indexOf("isApprovedProposalReplay(input, card)", handleActionStart);
+    const firstActiveCardGate = source.indexOf("ensureActiveCard(input)", handleActionStart);
+
+    assert.notEqual(handleActionStart, -1);
+    assert.notEqual(approvedReplay, -1);
+    assert.notEqual(firstActiveCardGate, -1);
+    assert.ok(
+      approvedReplay < firstActiveCardGate,
+      "approved-card idempotent replay must be reachable before ensureActiveCard rejects non-active cards",
+    );
+    assert.match(source, /function isApprovedProposalReplay[\s\S]*card\.status === "approved"/);
+    assert.match(source, /function isApprovedProposalReplay[\s\S]*card\.proposalId === input\.proposalId/);
+    assert.match(source, /function isApprovedProposalReplay[\s\S]*card\.proposalKind === input\.kind/);
+    assert.match(source, /function isApprovedProposalReplay[\s\S]*card\.proposalLane === proposalKindToLane\(input\.kind\)/);
+    assertSourceUsesMealMutationKind(source);
   });
 });

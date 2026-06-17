@@ -28,6 +28,7 @@ import {
   getProposalActionLabels,
   getProposalInlineEditHint,
   renderProposalActionEventCopy,
+  renderProposalAlreadyProcessedCopy,
   renderProposalCardIntro,
   renderProposalExpiredCopy,
   renderProposalInactiveCopy,
@@ -600,6 +601,13 @@ describe("proposal card labels, action events, and inactive copy", () => {
       renderProposalInactiveCopy({ proposalKind: "meal_delete", status: "stale" }),
       "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。",
     );
+  });
+
+  it("renders exact already-processed proposal copy without forbidden receipt terms", () => {
+    const text = renderProposalAlreadyProcessedCopy();
+
+    assert.equal(text, "這個提案已經處理過，不需要再確認一次。");
+    assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
   });
 
   it("keeps delete approve and reject copy scoped to a pending proposal", () => {
