@@ -320,6 +320,19 @@ describe("goal proposal and rejection renderers", () => {
   });
 });
 
+describe("recoverable proposal failure renderer", () => {
+  it("returns the locked CFI-01 recovery copy and stays guard-clean", async () => {
+    const receipts = await import("../../server/orchestrator/mutation-receipts.js") as {
+      renderProposalRecoverableFailureCopy?: () => string;
+    };
+    const copy = receipts.renderProposalRecoverableFailureCopy?.();
+
+    assert.equal(typeof receipts.renderProposalRecoverableFailureCopy, "function");
+    assert.equal(copy, "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。");
+    assert.deepEqual(assertNoForbiddenReceiptTerms(copy), []);
+  });
+});
+
 describe("meal numeric proposal and rejection renderers", () => {
   it("renders proposal copy with meal label, every field, before and after values", () => {
     const text = renderMealNumericProposalCopy({
