@@ -280,6 +280,7 @@ const PROPOSAL_EXPIRED_COPY: Record<ProposalKind, string> = {
 
 const PROPOSAL_STALE_COPY = "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。";
 const PROPOSAL_RECOVERABLE_FAILURE_COPY = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
+const PROPOSAL_ALREADY_PROCESSED_COPY = "這個提案已經處理過，不需要再確認一次。";
 
 export function getProposalActionLabels(proposalKind: ProposalKind): ProposalActionLabelSet {
   return { ...PROPOSAL_ACTION_LABELS[proposalKind] };
@@ -361,6 +362,10 @@ export function renderProposalInactiveCopy(input: ProposalInactiveCopyInput): st
 
 export function renderProposalRecoverableFailureCopy(): string {
   return PROPOSAL_RECOVERABLE_FAILURE_COPY;
+}
+
+export function renderProposalAlreadyProcessedCopy(): string {
+  return PROPOSAL_ALREADY_PROCESSED_COPY;
 }
 
 function formatMealNumericValue(field: MealNumericField, value: number): string {

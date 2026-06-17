@@ -2,6 +2,7 @@ import type { RealtimePublisher } from "../realtime/publisher.js";
 import type { FastifyBaseLogger } from "fastify";
 import type { AppDatabase } from "../db/client.js";
 import {
+  isMealMutationKind,
   mutationOutcomeFactFromEffects,
   type CommittedMealFacts,
   type DeletedMealSnapshot,
@@ -11,6 +12,7 @@ import {
   renderGoalCancelCopy,
   renderMealDeleteCancelCopy,
   renderMealNumericCancelCopy,
+  renderProposalAlreadyProcessedCopy,
   renderProposalActionEventCopy,
   renderProposalInactiveCopy,
   renderProposalRecoverableFailureCopy,
@@ -96,6 +98,13 @@ export type ProposalActionServiceResult =
   | {
       ok: false;
       status: "retryable";
+      proposalCard?: ProposalCardClientMetadata;
+      didMutateMeal: false;
+      reply: string;
+    }
+  | {
+      ok: false;
+      status: "idempotent";
       proposalCard?: ProposalCardClientMetadata;
       didMutateMeal: false;
       reply: string;
@@ -274,6 +283,26 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     };
   }
 
+  function buildIdempotentProposalActionResult(
+    card: ProposalCardMetadata,
+  ): Extract<ProposalActionServiceResult, { status: "idempotent" }> {
+    return {
+      ok: false,
+      status: "idempotent",
+      didMutateMeal: false,
+      reply: renderProposalAlreadyProcessedCopy(),
+      proposalCard: projectProposalCardForClient(card),
+    };
+  }
+
+  function isApprovedProposalReplay(input: ProposalActionServiceInput, card: ProposalCardMetadata): boolean {
+    return input.action === "approve"
+      && card.status === "approved"
+      && card.proposalId === input.proposalId
+      && card.proposalKind === input.kind
+      && card.proposalLane === proposalKindToLane(input.kind);
+  }
+
   function isMealApprovalRecoveryCandidate(input: ProposalActionServiceInput): boolean {
     return input.action === "approve"
       && (input.kind === "meal_numeric" || input.kind === "meal_estimate" || input.kind === "meal_delete");
@@ -433,8 +462,13 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     },
 
     async handleAction(input: ProposalActionServiceInput): Promise<ProposalActionServiceResult> {
-      const card = await ensureActiveCard(input);
-      if (!card) {
+      const card = await loadCard(input);
+      if (card && isApprovedProposalReplay(input, card)) {
+        return buildIdempotentProposalActionResult(card);
+      }
+
+      const activeCard = await ensureActiveCard(input);
+      if (!activeCard) {
         return markStale(input);
       }
 
@@ -451,7 +485,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           }
           if (input.action === "reject") {
             await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-            return { result: await completeActiveAction({ ...input, card }) };
+            return { result: await completeActiveAction({ ...input, card: activeCard }) };
           }
           const consumed = await deps.goalProposalService.consumeLatest({
             deviceId: input.deviceId,
@@ -473,8 +507,8 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           return {
             result: await completeActiveAction({
               ...input,
-              card,
-              mutation: { didMutateMeal: false, effects, dailyTargets },
+              card: activeCard,
+              mutation: { didMutateMeal: isMealMutationKind(effects.kind), effects, dailyTargets },
             }),
             publish: { type: "goals_update", targets: dailyTargets },
           };
@@ -490,7 +524,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           }
           if (input.action === "reject") {
             await deps.mealNumericProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-            return { result: await completeActiveAction({ ...input, card }) };
+            return { result: await completeActiveAction({ ...input, card: activeCard }) };
           }
           const activeProposal = proposal as MealNumericProposalPayload;
           const consumed = await deps.mealNumericProposalService.consumeLatest({
@@ -535,9 +569,9 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             return {
               result: await completeActiveAction({
                 ...input,
-                card,
+                card: activeCard,
                 mutation: {
-                  didMutateMeal: true,
+                  didMutateMeal: isMealMutationKind(effects.kind),
                   effects,
                   updatedMeal: updated.updatedMeal,
                   affectedDate: updated.affectedDate,
@@ -572,7 +606,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
         }
         if (input.action === "reject") {
           await deps.mealDeleteProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
-          return { result: await completeActiveAction({ ...input, card }) };
+          return { result: await completeActiveAction({ ...input, card: activeCard }) };
         }
         const activeProposal = proposal as MealDeleteProposalPayload;
         const consumed = await deps.mealDeleteProposalService.consumeLatest({
@@ -605,9 +639,9 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           return {
             result: await completeActiveAction({
               ...input,
-              card,
+              card: activeCard,
               mutation: {
-                didMutateMeal: true,
+                didMutateMeal: isMealMutationKind(effects.kind),
                 effects,
                 deletedMealId: deleted.deletedMealId,
                 affectedDate: deleted.affectedDate,
