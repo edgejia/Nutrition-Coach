@@ -866,18 +866,41 @@ function selectedProposalFallbackReply(kind: ProposalKind, action: ProposalActio
   return renderMealNumericCancelCopy();
 }
 
+function projectProposalActionMutationResult(
+  actionResult: Awaited<ReturnType<ReturnType<typeof createProposalActionService>["handleAction"]>>,
+): Pick<CommittedMutationProjection, "mutationKind" | "hasCommittedMutation" | "didMutateMeal"> {
+  if (!actionResult.ok || !actionResult.mutationOutcomeFact) {
+    return projectCommittedMutationState(createEmptyCommittedMutationState());
+  }
+
+  switch (actionResult.mutationOutcomeFact.action) {
+    case "log_food":
+      return { mutationKind: "log", hasCommittedMutation: true, didMutateMeal: true };
+    case "update_meal":
+      return { mutationKind: "update", hasCommittedMutation: true, didMutateMeal: true };
+    case "delete_meal":
+      return actionResult.deletedMealId
+        ? { mutationKind: "delete", hasCommittedMutation: true, didMutateMeal: true }
+        : projectCommittedMutationState(createEmptyCommittedMutationState());
+    case "update_goals":
+      return { mutationKind: "goals", hasCommittedMutation: true, didMutateMeal: false };
+  }
+}
+
 function buildTypedActionResult(input: {
   actionResult: Awaited<ReturnType<ReturnType<typeof createProposalActionService>["handleAction"]>>;
   fallbackReply: string;
 }): OrchestratorResult {
-  const reply = input.actionResult.ok
+  const mutationProjection = projectProposalActionMutationResult(input.actionResult);
+  const rawReply = input.actionResult.ok
     ? input.actionResult.reply ?? input.actionResult.proposalActionEvent.transcriptCopy
     : input.actionResult.proposalCard?.lapseCopy ?? input.fallbackReply;
+  const reply = guardNoMutationSuccessClaim(rawReply, mutationProjection);
 
   return {
     reply,
     didLogMeal: false,
-    didMutateMeal: input.actionResult.didMutateMeal,
+    didMutateMeal: mutationProjection.didMutateMeal,
     ...(input.actionResult.ok && input.actionResult.dailyTargets ? { dailyTargets: input.actionResult.dailyTargets } : {}),
     ...(input.actionResult.ok && input.actionResult.deletedMealId ? { deletedMealId: input.actionResult.deletedMealId } : {}),
     ...(input.actionResult.ok && input.actionResult.affectedDate ? { affectedDate: input.actionResult.affectedDate } : {}),

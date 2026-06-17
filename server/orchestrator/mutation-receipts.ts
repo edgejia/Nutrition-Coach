@@ -654,6 +654,9 @@ export function renderMutationReceipt(effects: MutationEffects): string {
       return `已更新${datePrefix}${effects.meal.foodName}，${formatNumber(effects.meal.calories)} kcal，蛋白質 ${formatNumber(effects.meal.protein)} g。`;
     }
     case "delete": {
+      if (!effects.deletedMeal) {
+        throw new Error("delete mutation receipt requires deletedMeal");
+      }
       const datePrefix = formatDatePrefix(effects.deletedMeal.dateKey || effects.affectedDate);
       return `已刪除${datePrefix}${effects.deletedMeal.foodName}，已從當日紀錄移除。`;
     }

@@ -3495,6 +3495,9 @@ describe("Orchestrator - didLogMeal", () => {
               editLabel: "改用文字調整",
               rejectLabel: "取消提案",
             },
+            expiresAt: null,
+            lapseCopy: null,
+            supersededByKind: null,
             isActionable: false,
           },
           proposalActionEvent: {
@@ -3503,6 +3506,7 @@ describe("Orchestrator - didLogMeal", () => {
             proposalLane: "meal_mutation" as const,
             action: "approve" as const,
             transcriptCopy: "已選擇確認刪除",
+            createdAt: "2026-04-19T04:00:00.000Z",
           },
         };
       },
