@@ -760,6 +760,12 @@ export function ChatPanel() {
       if (result.proposalCard) {
         replaceProposalCardFromResponse(result.proposalCard);
       }
+      if (!result.ok) {
+        if (result.status === "retryable" || result.status === "idempotent") {
+          appendProposalActionReply(result.reply);
+        }
+        return;
+      }
       if (result.ok) {
         appendProposalActionEvent(result.proposalActionEvent);
         if (result.reply) {

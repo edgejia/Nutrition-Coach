@@ -262,6 +262,21 @@ export type ProposalActionReply =
       status: "stale";
       proposalCard?: ProposalCardMetadata;
       didMutateMeal: false;
+      reply?: string;
+    }
+  | {
+      ok: false;
+      status: "retryable";
+      proposalCard?: ProposalCardMetadata;
+      didMutateMeal: false;
+      reply: string;
+    }
+  | {
+      ok: false;
+      status: "idempotent";
+      proposalCard?: ProposalCardMetadata;
+      didMutateMeal: false;
+      reply: string;
     };
 
 export interface ProposalEditContext {
