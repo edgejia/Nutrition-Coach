@@ -238,10 +238,11 @@ describe("direct orchestrator mutation receipt egress", () => {
     const source = orchestratorIndexSourceWithoutComments();
 
     assert.match(source, /renderGuardedMutationReceipt/);
+    assert.match(source, /const renderReceipt = \(effects: MutationEffects\) =>\s*renderGuardedMutationReceipt/);
     assert.doesNotMatch(source, /function renderCheckedMutationReceipt/);
     assert.doesNotMatch(source, /assertNoForbiddenReceiptTerms/);
     assert.equal(
-      (source.match(/mutationReceiptText\s*=\s*renderGuardedMutationReceipt/g) ?? []).length,
+      (source.match(/mutationReceiptText\s*=\s*renderReceipt\(mutationEffects\)/g) ?? []).length,
       4,
     );
   });

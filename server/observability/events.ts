@@ -20,6 +20,7 @@ export type RedactedObservabilityEventName =
   | "home_cta_option_sent"
   | "chat_turn_completed"
   | "chat_route_fallback"
+  | "mutation_receipt_guard_tripped"
   | "ownership_bypass_blocked"
   | "device_goals_validation_failed"
   | "device_goals_updated_rest"
@@ -75,6 +76,8 @@ const OWNERSHIP_BYPASS_BLOCKED_OPERATIONS = [
   "chat_stop",
   "chat_message",
 ] as const;
+const MUTATION_RECEIPT_GUARD_OPERATIONS = ["orchestrator_receipt", "proposal_action"] as const;
+const MUTATION_RECEIPT_GUARD_VERBS = ["log", "update", "delete", "goals"] as const;
 const TARGET_GENERATION_FIELDS = ["calories", "protein", "carbs", "fat", "coachExplanation", "root"] as const;
 const TARGET_GENERATION_NO_CONTENT_SUBTYPES = ["no_choices", "missing_content", "empty_content"] as const;
 
@@ -84,6 +87,8 @@ const GOAL_VALIDATION_CODE_SET = new Set<string>(GOAL_VALIDATION_CODES);
 const OWNERSHIP_BYPASS_BLOCKED_REASON_SET = new Set<string>(OWNERSHIP_BYPASS_BLOCKED_REASONS);
 const OWNERSHIP_BYPASS_BLOCKED_ROUTE_SET = new Set<string>(OWNERSHIP_BYPASS_BLOCKED_ROUTES);
 const OWNERSHIP_BYPASS_BLOCKED_OPERATION_SET = new Set<string>(OWNERSHIP_BYPASS_BLOCKED_OPERATIONS);
+const MUTATION_RECEIPT_GUARD_OPERATION_SET = new Set<string>(MUTATION_RECEIPT_GUARD_OPERATIONS);
+const MUTATION_RECEIPT_GUARD_VERB_SET = new Set<string>(MUTATION_RECEIPT_GUARD_VERBS);
 const TARGET_GENERATION_FIELD_SET = new Set<string>(TARGET_GENERATION_FIELDS);
 const TARGET_GENERATION_NO_CONTENT_SUBTYPE_SET = new Set<string>(TARGET_GENERATION_NO_CONTENT_SUBTYPES);
 const VALID_IDENTIFIER = /^[a-z0-9_-]{1,64}$/;
@@ -113,6 +118,8 @@ export type GoalUpdateField = (typeof GOAL_UPDATE_FIELDS)[number];
 export type OwnershipBypassBlockedReason = (typeof OWNERSHIP_BYPASS_BLOCKED_REASONS)[number];
 export type OwnershipBypassBlockedRoute = (typeof OWNERSHIP_BYPASS_BLOCKED_ROUTES)[number];
 export type OwnershipBypassBlockedOperation = (typeof OWNERSHIP_BYPASS_BLOCKED_OPERATIONS)[number];
+export type MutationReceiptGuardOperation = (typeof MUTATION_RECEIPT_GUARD_OPERATIONS)[number];
+export type MutationReceiptGuardVerb = (typeof MUTATION_RECEIPT_GUARD_VERBS)[number];
 
 export interface OnboardingSubmitStartedEvent {
   event: "onboarding_submit_started";
@@ -217,6 +224,14 @@ export interface OwnershipBypassBlockedEvent {
   turnId?: string;
 }
 
+export interface MutationReceiptGuardTrippedEvent {
+  event: "mutation_receipt_guard_tripped";
+  operation: MutationReceiptGuardOperation;
+  verb: MutationReceiptGuardVerb;
+  requestId?: string;
+  turnId?: string;
+}
+
 export interface SseConnectionStateEvent {
   event: "sse_connection_state";
   state: SseConnectionState;
@@ -232,6 +247,7 @@ export type RedactedObservabilityEvent =
   | HomeCtaOptionSentEvent
   | ChatTurnCompletedEvent
   | ChatRouteFallbackEvent
+  | MutationReceiptGuardTrippedEvent
   | OwnershipBypassBlockedEvent
   | DeviceGoalsValidationFailedEvent
   | DeviceGoalsUpdatedRestEvent
@@ -303,6 +319,18 @@ function sanitizeOwnershipBypassBlockedOperation(value: unknown): OwnershipBypas
   return typeof value === "string" && OWNERSHIP_BYPASS_BLOCKED_OPERATION_SET.has(value)
     ? value as OwnershipBypassBlockedOperation
     : "legacy_session_bootstrap";
+}
+
+function sanitizeMutationReceiptGuardOperation(value: unknown): MutationReceiptGuardOperation {
+  return typeof value === "string" && MUTATION_RECEIPT_GUARD_OPERATION_SET.has(value)
+    ? value as MutationReceiptGuardOperation
+    : "orchestrator_receipt";
+}
+
+function sanitizeMutationReceiptGuardVerb(value: unknown): MutationReceiptGuardVerb {
+  return typeof value === "string" && MUTATION_RECEIPT_GUARD_VERB_SET.has(value)
+    ? value as MutationReceiptGuardVerb
+    : "log";
 }
 
 function sanitizeCorrelationIdentifier(value: unknown): string {
@@ -599,6 +627,28 @@ export function logChatRouteFallback(
   params: Parameters<typeof buildChatRouteFallbackEvent>[0],
 ) {
   logRedactedEvent(log, buildChatRouteFallbackEvent(params), "Chat route fallback");
+}
+
+export function buildMutationReceiptGuardTrippedEvent(params: {
+  operation: MutationReceiptGuardOperation;
+  verb: MutationReceiptGuardVerb;
+  requestId?: string;
+  turnId?: string;
+}): MutationReceiptGuardTrippedEvent {
+  return {
+    event: "mutation_receipt_guard_tripped",
+    operation: sanitizeMutationReceiptGuardOperation(params.operation),
+    verb: sanitizeMutationReceiptGuardVerb(params.verb),
+    ...(params.requestId !== undefined ? { requestId: sanitizeCorrelationIdentifier(params.requestId) } : {}),
+    ...(params.turnId !== undefined ? { turnId: sanitizeCorrelationIdentifier(params.turnId) } : {}),
+  };
+}
+
+export function logMutationReceiptGuardTripped(
+  log: FastifyBaseLogger,
+  params: Parameters<typeof buildMutationReceiptGuardTrippedEvent>[0],
+) {
+  logRedactedEvent(log, buildMutationReceiptGuardTrippedEvent(params), "Mutation receipt guard tripped");
 }
 
 export function buildOwnershipBypassBlockedEvent(params: {

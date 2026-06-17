@@ -167,6 +167,7 @@ export async function buildApp(opts: AppOptions) {
     mealCorrectionService,
     deviceService,
     publisher,
+    log: app.log,
     testHooks: opts.proposalActionTestHooks,
   });
   const orchestrator = createOrchestrator({

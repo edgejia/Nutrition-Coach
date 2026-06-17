@@ -15,10 +15,11 @@ describe("chat receipt sanitizer integration boundary", () => {
     const source = sourceWithoutComments("server/orchestrator/index.ts");
 
     assert.match(source, /renderGuardedMutationReceipt/);
+    assert.match(source, /const renderReceipt = \(effects: MutationEffects\) =>\s*renderGuardedMutationReceipt/);
     assert.doesNotMatch(source, /renderCheckedMutationReceipt/);
     assert.doesNotMatch(source, /assertNoForbiddenReceiptTerms/);
     assert.equal(
-      (source.match(/mutationReceiptText\s*=\s*renderGuardedMutationReceipt/g) ?? []).length,
+      (source.match(/mutationReceiptText\s*=\s*renderReceipt\(mutationEffects\)/g) ?? []).length,
       4,
     );
   });
@@ -27,6 +28,6 @@ describe("chat receipt sanitizer integration boundary", () => {
     const source = sourceWithoutComments("server/orchestrator/index.ts");
 
     assert.doesNotMatch(source, /renderCheckedMutationReceipt\(mutationEffects\)/);
-    assert.match(source, /renderGuardedMutationReceipt\(mutationEffects/);
+    assert.match(source, /renderReceipt\(mutationEffects\)/);
   });
 });

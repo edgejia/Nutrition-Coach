@@ -1,3 +1,4 @@
+import type { FastifyBaseLogger } from "fastify";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import type {
   MealNumericAffectedField,
@@ -12,6 +13,11 @@ import type {
   ProposalStatus,
 } from "../services/proposal-cards.js";
 import type { MutationEffects } from "./mutation-effects.js";
+import {
+  logMutationReceiptGuardTripped,
+  type MutationReceiptGuardOperation,
+  type MutationReceiptGuardVerb,
+} from "../observability/events.js";
 
 export const FORBIDDEN_RECEIPT_TERMS = [
   "headline",
@@ -52,6 +58,73 @@ export const FORBIDDEN_RECEIPT_TERMS = [
 
 export function assertNoForbiddenReceiptTerms(text: string): string[] {
   return FORBIDDEN_RECEIPT_TERMS.filter((term) => text.includes(term));
+}
+
+export interface MutationReceiptGuardOptions {
+  operation: MutationReceiptGuardOperation;
+  verb: MutationReceiptGuardVerb;
+  requestId?: string;
+  turnId?: string;
+  candidateReceipt?: string;
+  structuredFoodNames?: readonly string[];
+  log?: FastifyBaseLogger;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function foodNamesFromEffects(effects: MutationEffects): string[] {
+  if (effects.kind === "goals") {
+    return [];
+  }
+  if (effects.kind === "delete") {
+    return [effects.deletedMeal.foodName];
+  }
+  return [effects.meal.foodName];
+}
+
+function maskStructuredFoodNames(text: string, foodNames: readonly string[]): string {
+  return foodNames
+    .map((foodName) => foodName.trim())
+    .filter((foodName) => foodName.length > 0)
+    .reduce((masked, foodName) =>
+      masked.replace(new RegExp(escapeRegExp(foodName), "g"), "[food-name]"), text);
+}
+
+function receiptTextForGuard(
+  text: string,
+  effects: MutationEffects,
+  structuredFoodNames: readonly string[] = [],
+): string {
+  return maskStructuredFoodNames(text, [
+    ...foodNamesFromEffects(effects),
+    ...structuredFoodNames,
+  ]);
+}
+
+export function renderGuardedMutationReceipt(
+  effects: MutationEffects,
+  options: MutationReceiptGuardOptions,
+): string {
+  const canonicalReceipt = renderMutationReceipt(effects);
+  const candidateReceipt = options.candidateReceipt ?? canonicalReceipt;
+  const guardText = receiptTextForGuard(candidateReceipt, effects, options.structuredFoodNames);
+  const forbiddenTerms = assertNoForbiddenReceiptTerms(guardText);
+  if (forbiddenTerms.length === 0) {
+    return candidateReceipt;
+  }
+
+  if (options.log) {
+    logMutationReceiptGuardTripped(options.log, {
+      operation: options.operation,
+      verb: options.verb,
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+      ...(options.turnId !== undefined ? { turnId: options.turnId } : {}),
+    });
+  }
+
+  return canonicalReceipt;
 }
 
 function formatReceiptDateLabel(dateKey: string, currentDate = currentAppDate()): string {

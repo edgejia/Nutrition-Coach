@@ -1,4 +1,5 @@
 import type { RealtimePublisher } from "../realtime/publisher.js";
+import type { FastifyBaseLogger } from "fastify";
 import type { AppDatabase } from "../db/client.js";
 import {
   mutationOutcomeFactFromEffects,
@@ -12,7 +13,7 @@ import {
   renderMealNumericCancelCopy,
   renderProposalActionEventCopy,
   renderProposalInactiveCopy,
-  renderMutationReceipt,
+  renderGuardedMutationReceipt,
 } from "../orchestrator/mutation-receipts.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { MealRevisionPreconditionError } from "./meal-transactions.js";
@@ -102,6 +103,7 @@ interface ProposalActionDeps {
   mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   deviceService: ReturnType<typeof createDeviceService>;
   publisher: RealtimePublisher;
+  log?: FastifyBaseLogger;
   testHooks?: ProposalActionTestHooks;
 }
 
@@ -328,7 +330,11 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       throw new Error("proposal action completed without persisted proposal card");
     }
     const reply = input.mutation?.effects
-      ? renderMutationReceipt(input.mutation.effects)
+      ? renderGuardedMutationReceipt(input.mutation.effects, {
+          operation: "proposal_action",
+          verb: input.mutation.effects.kind,
+          ...(deps.log !== undefined ? { log: deps.log } : {}),
+        })
       : input.action === "reject"
         ? cancelReply(input.kind)
         : undefined;

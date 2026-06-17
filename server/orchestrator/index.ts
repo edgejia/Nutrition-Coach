@@ -1,3 +1,4 @@
+import type { FastifyBaseLogger } from "fastify";
 import type { LLMProvider, ChatMessage, ProviderErrorMetadata } from "../llm/types.js";
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createChatService } from "../services/chat.js";
@@ -49,7 +50,6 @@ import {
   type MutationEffects,
 } from "./mutation-effects.js";
 import {
-  assertNoForbiddenReceiptTerms,
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderMealDeleteAuthorityFailureCopy,
@@ -57,7 +57,7 @@ import {
   renderMealDeleteStaleCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericCancelCopy,
-  renderMutationReceipt,
+  renderGuardedMutationReceipt,
   renderProposalKindAmbiguityCopy,
 } from "./mutation-receipts.js";
 import { isGoalProposalCancel, isGoalProposalConsent } from "./source-text-guard.js";
@@ -482,15 +482,6 @@ function appendMutationReceiptText(reply: string, receipt: string | undefined): 
   return `${reply}\n\n${receipt}`;
 }
 
-function renderCheckedMutationReceipt(effects: MutationEffects): string {
-  const reply = renderMutationReceipt(effects);
-  const forbiddenTerms = assertNoForbiddenReceiptTerms(reply);
-  if (forbiddenTerms.length > 0) {
-    throw new Error(`Mutation receipt contains forbidden terms: ${forbiddenTerms.join(", ")}`);
-  }
-  return reply;
-}
-
 function mutationOutcomeFactFields(
   mutationOutcomeFact: ChatMutationOutcomeFact | undefined,
 ): { mutationOutcomeFact?: ChatMutationOutcomeFact } {
@@ -723,6 +714,7 @@ export interface HandleMessageOpts {
   onUserMessageSaved?: () => void;
   signal?: AbortSignal;
   turnId?: string;
+  log?: FastifyBaseLogger;
   proposalContext?: ProposalEditContext;
 }
 
@@ -1111,6 +1103,13 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let loggedMealToolMessageId: string | undefined;
       let lastTool: string | undefined;
       let lastValidationFailureTool: string | undefined;
+      const renderReceipt = (effects: MutationEffects) =>
+        renderGuardedMutationReceipt(effects, {
+          operation: "orchestrator_receipt",
+          verb: effects.kind,
+          ...(opts?.turnId !== undefined ? { turnId: opts.turnId } : {}),
+          ...(opts?.log !== undefined ? { log: opts.log } : {}),
+        });
 
       // The orchestrator may use tools in the first completion, then produce the
       // final assistant reply in a follow-up completion on the same model.
@@ -1425,7 +1424,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   meal: toolLoggedMeal,
                 };
                 mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
-                mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
+                mutationReceiptText = renderReceipt(mutationEffects);
               }
               if (toolCall.function.name === "get_daily_summary" && dailySummary) {
                 logMealSummary = dailySummary;
@@ -1449,7 +1448,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                     meal: toolLoggedMeal,
                   };
                   mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
-                  mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
+                  mutationReceiptText = renderReceipt(mutationEffects);
                 } else {
                   if (!deletedMeal) {
                     throw new Error("delete_meal succeeded without deletedMeal");
@@ -1463,7 +1462,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   };
                   deletedMealId = deletedMeal.mealId;
                   mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
-                  mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
+                  mutationReceiptText = renderReceipt(mutationEffects);
                 }
               }
               if (toolCall.function.name === "update_goals") {
@@ -1487,7 +1486,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                   updatedFields: updatedFields as Array<keyof DailyTargets>,
                 };
                 mutationOutcomeFact = mutationOutcomeFactFromEffects(mutationEffects);
-                mutationReceiptText = renderCheckedMutationReceipt(mutationEffects);
+                mutationReceiptText = renderReceipt(mutationEffects);
               }
               opts?.hooks?.onToolResult?.({
                 tool: toolCall.function.name,
@@ -1549,7 +1548,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             messages.push({ role: "tool", content: result, tool_call_id: toolCall.id });
           }
           if (mutationEffects) {
-            const reply = mutationReceiptText ?? renderCheckedMutationReceipt(mutationEffects);
+            const reply = mutationReceiptText ?? renderReceipt(mutationEffects);
             opts?.hooks?.onLLMEnd?.(round + 1, true);
             return {
               reply,

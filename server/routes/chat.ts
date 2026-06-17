@@ -1251,6 +1251,7 @@ async function handleOrchestratorSSE(
         hooks,
         signal: stopControl?.signal,
         turnId: stopControl.turnId,
+        log: deps.log,
         proposalContext,
       }
     );
@@ -1756,6 +1757,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             },
             hooks,
             turnId,
+            log: turnLog,
             proposalContext,
           },
         );

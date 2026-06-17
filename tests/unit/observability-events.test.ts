@@ -31,6 +31,7 @@ const LOCKED_EVENT_NAMES: RedactedObservabilityEventName[] = [
   "device_goals_validation_failed",
   "device_goals_updated_rest",
   "sse_connection_state",
+  "mutation_receipt_guard_tripped",
 ];
 
 const ALLOWED_METADATA_KEYS = new Set([
@@ -93,13 +94,6 @@ const FORBIDDEN_STRINGS = [
   "x-device-id",
   "192.168.0.42",
   "forged_signature",
-  "log_food",
-  "update_meal",
-  "delete_meal",
-  "update_goals",
-  "body armor",
-  "field roast",
-  "已完成 log_food",
 ];
 
 function assertLockedPayload(payload: { event: RedactedObservabilityEventName } & object) {
@@ -162,10 +156,7 @@ describe("redacted observability event builders", () => {
       }),
     ];
 
-    assert.deepEqual(payloads.map((payload) => payload.event), [
-      ...LOCKED_EVENT_NAMES,
-      "mutation_receipt_guard_tripped",
-    ]);
+    assert.deepEqual(payloads.map((payload) => payload.event), LOCKED_EVENT_NAMES);
     for (const payload of payloads) {
       assertLockedPayload(payload);
     }
@@ -268,6 +259,10 @@ describe("redacted observability event builders", () => {
     });
     assert.deepEqual(Object.keys(payload), ["event", "operation", "verb", "requestId", "turnId"]);
     assertLockedPayload(payload);
+    assert.doesNotMatch(
+      JSON.stringify(payload),
+      /log_food|update_meal|delete_meal|update_goals|body armor|field roast|已完成 log_food/,
+    );
   });
 
   it("sanitizes ownership bypass blocked dimensions and excludes forbidden telemetry", () => {
