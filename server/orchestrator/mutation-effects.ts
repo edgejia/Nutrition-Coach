@@ -67,6 +67,43 @@ export type MutationEffects =
   | DeleteMutationEffects
   | GoalsMutationEffects;
 
+export type CommittedMutationKind = MutationEffects["kind"];
+export type MealMutationKind = Extract<CommittedMutationKind, "log" | "update" | "delete">;
+
+export interface CommittedMutationState<TLoggedMeal = unknown, TProposalActionEvent = unknown> {
+  effects?: MutationEffects;
+  receiptText?: string;
+  mutationOutcomeFact?: ChatMutationOutcomeFact;
+  affectedDate?: string;
+  deletedMealId?: string;
+  loggedMeal?: TLoggedMeal;
+  loggedMealToolMessageId?: string;
+  dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
+  dailyTargets?: DailyTargets;
+  proposalActionEvent?: TProposalActionEvent;
+}
+
+export interface CommittedMutationProjection<TLoggedMeal = unknown, TProposalActionEvent = unknown> {
+  mutationKind?: CommittedMutationKind;
+  hasCommittedMutation: boolean;
+  didLogMeal: boolean;
+  didMutateMeal: boolean;
+  didMutateGoals: boolean;
+  shouldPublishDailySummary: boolean;
+  shouldPublishGoalsUpdate: boolean;
+  receiptText?: string;
+  mutationOutcomeFact?: ChatMutationOutcomeFact;
+  affectedDate?: string;
+  deletedMealId?: string;
+  loggedMeal?: TLoggedMeal;
+  loggedMealToolMessageId?: string;
+  dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
+  dailyTargets?: DailyTargets;
+  proposalActionEvent?: TProposalActionEvent;
+}
+
 type GoalField = keyof DailyTargets;
 
 const GOAL_FACT_LABELS: Record<GoalField, "卡路里" | "蛋白質" | "碳水" | "脂肪"> = {
@@ -100,6 +137,57 @@ function mealFactNutrition(
     ...(finiteNutrition(meal.protein) === undefined ? {} : { protein: finiteNutrition(meal.protein) }),
     ...(finiteNutrition(meal.carbs) === undefined ? {} : { carbs: finiteNutrition(meal.carbs) }),
     ...(finiteNutrition(meal.fat) === undefined ? {} : { fat: finiteNutrition(meal.fat) }),
+  };
+}
+
+export function createEmptyCommittedMutationState<TLoggedMeal = unknown, TProposalActionEvent = unknown>(): CommittedMutationState<TLoggedMeal, TProposalActionEvent> {
+  return {};
+}
+
+export function isMealMutationKind(kind: CommittedMutationKind | undefined): kind is MealMutationKind {
+  return kind === "log" || kind === "update" || kind === "delete";
+}
+
+export function hasCommittedMutationKind(
+  state: CommittedMutationState,
+  kind?: CommittedMutationKind,
+): boolean {
+  if (!state.effects) {
+    return false;
+  }
+  return kind === undefined ? true : state.effects.kind === kind;
+}
+
+export function projectCommittedMutationState<TLoggedMeal = unknown, TProposalActionEvent = unknown>(
+  state: CommittedMutationState<TLoggedMeal, TProposalActionEvent>,
+): CommittedMutationProjection<TLoggedMeal, TProposalActionEvent> {
+  const mutationKind = state.effects?.kind;
+  const hasCommittedMutation = mutationKind !== undefined;
+  const didMutateMeal = isMealMutationKind(mutationKind);
+  const mutationOutcomeFact = state.mutationOutcomeFact
+    ?? (state.effects ? mutationOutcomeFactFromEffects(state.effects) : undefined);
+  const affectedDate = state.affectedDate ?? state.effects?.affectedDate;
+  const deletedMealId = state.deletedMealId
+    ?? (state.effects?.kind === "delete" ? state.effects.deletedMeal.mealId : undefined);
+
+  return {
+    ...(mutationKind ? { mutationKind } : {}),
+    hasCommittedMutation,
+    didLogMeal: mutationKind === "log",
+    didMutateMeal,
+    didMutateGoals: mutationKind === "goals",
+    shouldPublishDailySummary: didMutateMeal,
+    shouldPublishGoalsUpdate: mutationKind === "goals",
+    ...(state.receiptText ? { receiptText: state.receiptText } : {}),
+    ...(mutationOutcomeFact ? { mutationOutcomeFact } : {}),
+    ...(affectedDate ? { affectedDate } : {}),
+    ...(deletedMealId ? { deletedMealId } : {}),
+    ...(state.loggedMeal ? { loggedMeal: state.loggedMeal } : {}),
+    ...(state.loggedMealToolMessageId ? { loggedMealToolMessageId: state.loggedMealToolMessageId } : {}),
+    ...(state.dailySummary ? { dailySummary: state.dailySummary } : {}),
+    ...(state.summaryOutcome ? { summaryOutcome: state.summaryOutcome } : {}),
+    ...(state.dailyTargets ? { dailyTargets: state.dailyTargets } : {}),
+    ...(state.proposalActionEvent ? { proposalActionEvent: state.proposalActionEvent } : {}),
   };
 }
 
