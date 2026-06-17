@@ -25,7 +25,12 @@ import type {
   LLMProvider,
 } from "../../server/llm/types.js";
 import { createOrchestrator, guardNoMutationLoggingClaim } from "../../server/orchestrator/index.js";
-import { mutationOutcomeFactFromEffects } from "../../server/orchestrator/mutation-effects.js";
+import {
+  createEmptyCommittedMutationState,
+  mutationOutcomeFactFromEffects,
+  projectCommittedMutationState,
+  type CommittedMutationState,
+} from "../../server/orchestrator/mutation-effects.js";
 import type { MutationEffects } from "../../server/orchestrator/mutation-effects.js";
 import { currentAppDate, formatLocalDate } from "../../server/lib/time.js";
 import {
@@ -35,6 +40,7 @@ import {
   renderGoalValidationFailureCopy,
   renderMealDeleteCancelCopy,
   renderMealNumericCancelCopy,
+  renderMutationReceipt,
   renderProposalInactiveCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
@@ -245,6 +251,114 @@ describe("direct orchestrator mutation receipt egress", () => {
       (source.match(/mutationReceiptText\s*=\s*renderReceipt\(mutationEffects\)/g) ?? []).length,
       4,
     );
+  });
+});
+
+describe("no-mutation success-claim guard", () => {
+  const committedTargets = {
+    calories: 1800,
+    protein: 130,
+    carbs: 190,
+    fat: 55,
+  };
+  const summaryOutcome = { status: "updated" } as const;
+  const today = formatLocalDate(currentAppDate());
+
+  function guardWithState(reply: string, state: CommittedMutationState = createEmptyCommittedMutationState()) {
+    const projection = projectCommittedMutationState(state);
+    return guardNoMutationLoggingClaim(reply, projection.didLogMeal, projection.didMutateMeal);
+  }
+
+  function stateFor(effects: MutationEffects): CommittedMutationState {
+    return {
+      effects,
+      receiptText: renderMutationReceipt(effects),
+      mutationOutcomeFact: mutationOutcomeFactFromEffects(effects),
+      affectedDate: effects.affectedDate,
+    };
+  }
+
+  const logEffects: MutationEffects = {
+    kind: "log",
+    affectedDate: today,
+    committedTargets,
+    summaryOutcome,
+    meal: {
+      mealId: "log-meal",
+      mealRevisionId: "log-meal:r1",
+      dateKey: today,
+      loggedAt: `${today}T04:30:00.000Z`,
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+      itemCount: 1,
+    },
+  };
+  const updateEffects: MutationEffects = {
+    ...logEffects,
+    kind: "update",
+    meal: {
+      ...logEffects.meal,
+      mealId: "update-meal",
+      mealRevisionId: "update-meal:r2",
+      foodName: "半份雞腿便當",
+      calories: 360,
+      protein: 20,
+      carbs: 45,
+      fat: 10,
+    },
+  };
+  const deleteEffects: MutationEffects = {
+    kind: "delete",
+    affectedDate: today,
+    committedTargets,
+    summaryOutcome,
+    deletedMeal: {
+      mealId: "delete-meal",
+      dateKey: today,
+      loggedAt: `${today}T04:30:00.000Z`,
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+    },
+  };
+  const goalsEffects: MutationEffects = {
+    kind: "goals",
+    affectedDate: today,
+    committedTargets,
+    targets: committedTargets,
+    updatedFields: ["calories", "protein", "carbs", "fat"],
+  };
+
+  it("falls back when no committed mutation exists but copy claims any mutation verb succeeded", () => {
+    for (const claim of [
+      "已記錄雞腿便當，620 kcal，蛋白質 24 g。",
+      "已更新雞腿便當，620 kcal，蛋白質 24 g。",
+      "已刪除雞腿便當，已從當日紀錄移除。",
+      "已更新每日目標：\n• 卡路里 1800 kcal",
+    ]) {
+      const guarded = guardWithState(claim);
+      assert.notEqual(guarded, claim);
+      assert.doesNotMatch(guarded, /已記錄雞腿便當|已更新雞腿便當|已刪除雞腿便當|已更新每日目標/);
+    }
+  });
+
+  it("blocks cross-verb success claims when the committed kind does not match the copy", () => {
+    assert.notEqual(guardWithState("已刪除雞腿便當，已從當日紀錄移除。", stateFor(logEffects)), "已刪除雞腿便當，已從當日紀錄移除。");
+    assert.notEqual(guardWithState("已更新雞腿便當，620 kcal，蛋白質 24 g。", stateFor(deleteEffects)), "已更新雞腿便當，620 kcal，蛋白質 24 g。");
+    assert.notEqual(guardWithState("已記錄雞腿便當，620 kcal，蛋白質 24 g。", stateFor(updateEffects)), "已記錄雞腿便當，620 kcal，蛋白質 24 g。");
+    assert.notEqual(guardWithState("已更新每日目標：\n• 卡路里 1800 kcal", stateFor(updateEffects)), "已更新每日目標：\n• 卡路里 1800 kcal");
+  });
+
+  it("preserves canonical committed receipts byte-for-byte for matching mutation kinds", () => {
+    for (const effects of [logEffects, updateEffects, deleteEffects, goalsEffects]) {
+      const receipt = renderMutationReceipt(effects);
+      assert.equal(guardWithState(receipt, stateFor(effects)), receipt);
+    }
+    assert.equal(renderMutationReceipt(goalsEffects), "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 190 g\n• 脂肪 55 g");
+    assert.equal(renderMutationReceipt(updateEffects), "已更新半份雞腿便當，360 kcal，蛋白質 20 g。");
   });
 });
 
