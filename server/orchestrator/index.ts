@@ -50,6 +50,7 @@ import {
   hasCommittedMutationKind,
   mutationOutcomeFactFromEffects,
   projectCommittedMutationState,
+  type CommittedMutationProjection,
   type CommittedMutationState,
   type MutationEffects,
 } from "./mutation-effects.js";
@@ -92,12 +93,17 @@ const CHOICE_CONFIRM_MESSAGES = new Set(["2", "方式2"]);
 const HALLUCINATED_CHOICE_RECOVERY_REPLY = "這餐剛剛已先依目前估算完成記錄。若你想更精準，我可以再依份量幫你調整。";
 const COMMITTED_MEAL_MUTATION_HISTORY_PATTERN =
   /\[系統已(?:完成餐點(?:記錄|修改|刪除)|(?:記錄|更新|刪除)餐點[：:])/;
-const NO_MUTATION_LOGGING_CLAIM_PATTERN = /已\s*(?:經\s*)?記錄|完成\s*記錄/;
-const NO_MUTATION_LOGGING_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
+const MUTATION_SUCCESS_CLAIM_PATTERNS = {
+  goals: /已\s*(?:經\s*)?更新\s*每日目標|已\s*(?:經\s*)?(?:套用|更新)[^。！？\n]{0,12}目標|目標[^。！？\n]{0,12}(?:已\s*)?(?:更新|套用)/,
+  log: /已\s*(?:經\s*)?記錄|完成\s*記錄/,
+  update: /已\s*(?:經\s*)?更新(?!\s*每日目標)|完成\s*更新/,
+  delete: /已\s*(?:經\s*)?刪除|完成\s*刪除/,
+} as const;
+const NO_MUTATION_SUCCESS_FALLBACK = "我還沒有把這餐寫入紀錄。請再提供餐點或份量，我再幫你估算。";
 // Summary replies often use approximate wording after totals are rounded by the model.
 const SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL = 10;
 
-interface NoMutationLoggingGuardContext {
+interface NoMutationSuccessGuardContext {
   summaryHistoryFacts?: SummaryHistoryFacts;
 }
 
@@ -531,30 +537,62 @@ function classifyFallbackReplyShape(reply: string): LlmTraceFinalReplyShape {
   return reply.trim().length > 0 ? "fallback_text" : "empty_or_missing";
 }
 
-export function guardNoMutationLoggingClaim(
+export function guardNoMutationSuccessClaim(
   reply: string,
-  didLogMeal: boolean,
-  didMutateMeal: boolean,
-  context: NoMutationLoggingGuardContext = {},
+  mutationProjection: Pick<CommittedMutationProjection, "mutationKind" | "hasCommittedMutation">,
+  context: NoMutationSuccessGuardContext = {},
 ): string {
-  const hasNoMutationLoggingClaim = !didLogMeal && !didMutateMeal && NO_MUTATION_LOGGING_CLAIM_PATTERN.test(reply);
-  if (!hasNoMutationLoggingClaim) {
+  const claimedKinds = detectMutationSuccessClaimKinds(reply);
+  if (claimedKinds.length === 0) {
     return reply;
   }
-  if (isFactGroundedSummaryHistoryReply(reply, context.summaryHistoryFacts)) {
+  if (
+    claimedKinds.every((kind) => kind === "log")
+    && !mutationProjection.hasCommittedMutation
+    && isFactGroundedSummaryHistoryReply(reply, context.summaryHistoryFacts)
+  ) {
     return reply;
   }
-  return NO_MUTATION_LOGGING_FALLBACK;
+  if (
+    mutationProjection.mutationKind
+    && claimedKinds.every((kind) => kind === mutationProjection.mutationKind)
+  ) {
+    return reply;
+  }
+  return NO_MUTATION_SUCCESS_FALLBACK;
+}
+
+function detectMutationSuccessClaimKinds(reply: string): Array<NonNullable<CommittedMutationProjection["mutationKind"]>> {
+  const kinds: Array<NonNullable<CommittedMutationProjection["mutationKind"]>> = [];
+  for (const kind of ["goals", "log", "update", "delete"] as const) {
+    MUTATION_SUCCESS_CLAIM_PATTERNS[kind].lastIndex = 0;
+    if (MUTATION_SUCCESS_CLAIM_PATTERNS[kind].test(reply)) {
+      kinds.push(kind);
+    }
+  }
+  return kinds;
 }
 
 function isFactGroundedSummaryHistoryReply(reply: string, facts: SummaryHistoryFacts | undefined): boolean {
-  if (!facts?.dailySummary || facts.dailySummary.mealCount <= 0 || facts.meals.length === 0) {
+  if (!facts?.dailySummary) {
     return false;
   }
 
   const claimedMealCount = extractClaimedMealCount(reply);
   const claimedCalories = extractClaimedCalories(reply);
   const claimedMealFacts = extractClaimedMealFacts(reply);
+  if (
+    claimedMealFacts.length === 0
+    && claimedMealCount !== undefined
+    && claimedCalories !== undefined
+    && claimedMealCount === facts.dailySummary.mealCount
+    && caloriesCloseEnough(claimedCalories, facts.dailySummary.totalCalories)
+  ) {
+    return true;
+  }
+  if (facts.dailySummary.mealCount <= 0 || facts.meals.length === 0) {
+    return false;
+  }
   const matchedClaims = claimedMealFacts.map((claim) => ({
     claim,
     meal: findMatchingFactMeal(claim.name, facts.meals),
@@ -1332,12 +1370,15 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
-          const reply = summaryHistoryFacts
+          const rawReply = summaryHistoryFacts
             ? composeSummaryHistoryReply(summaryHistoryFacts, response.content)
-            : guardNoMutationLoggingClaim(response.content, didLogMeal, didMutateMeal, {
-              summaryHistoryFacts,
-            });
-          const finalReplySource = summaryHistoryFacts
+            : response.content;
+          const reply = guardNoMutationSuccessClaim(
+            rawReply,
+            projectCommittedMutationState(committedMutationState),
+            { summaryHistoryFacts },
+          );
+          const finalReplySource = summaryHistoryFacts && reply === rawReply
             ? "renderer"
             : reply === response.content ? "model" : "fallback";
           return {

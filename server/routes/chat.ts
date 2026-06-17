@@ -16,7 +16,7 @@ import type { DailySummary } from "../services/summary.js";
 import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
-import { buildPartialSuccessLoggedReply, guardNoMutationLoggingClaim } from "../orchestrator/index.js";
+import { buildPartialSuccessLoggedReply, guardNoMutationSuccessClaim } from "../orchestrator/index.js";
 import type {
   LlmTraceFinalReplyShape,
   LlmTraceFinalReplySource,
@@ -25,6 +25,7 @@ import type {
 import type { ToolExecutionResult } from "../orchestrator/tools.js";
 import {
   projectCommittedMutationState,
+  type CommittedMutationProjection,
   type CommittedMutationState,
 } from "../orchestrator/mutation-effects.js";
 import { config } from "../config.js";
@@ -349,24 +350,22 @@ function appendHistoricalDateSuffixIfMissing(text: string, affectedDate?: string
 }
 
 function shouldComposeSummaryHistoryReply(
-  didLogMeal: boolean,
-  didMutateMeal: boolean,
+  mutationProjection: Pick<CommittedMutationProjection, "hasCommittedMutation">,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
 ): summaryHistoryFacts is SummaryHistoryFacts {
-  return !didLogMeal && !didMutateMeal && Boolean(summaryHistoryFacts?.dailySummary);
+  return !mutationProjection.hasCommittedMutation && Boolean(summaryHistoryFacts?.dailySummary);
 }
 
 function normalizeRouteFinalReply(
   rawReply: string,
-  didLogMeal: boolean,
-  didMutateMeal: boolean,
+  mutationProjection: Pick<CommittedMutationProjection, "mutationKind" | "hasCommittedMutation">,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
   opts: { composeSummaryHistory?: boolean; rendererOwnedSummaryHistory?: boolean } = {},
 ): { reply: string; composedSummaryHistory: boolean } {
   const composedSummaryHistory = opts.composeSummaryHistory !== false
-    && shouldComposeSummaryHistoryReply(didLogMeal, didMutateMeal, summaryHistoryFacts);
+    && shouldComposeSummaryHistoryReply(mutationProjection, summaryHistoryFacts);
   const rendererOwnedSummaryHistory = opts.rendererOwnedSummaryHistory === true
-    && shouldComposeSummaryHistoryReply(didLogMeal, didMutateMeal, summaryHistoryFacts);
+    && shouldComposeSummaryHistoryReply(mutationProjection, summaryHistoryFacts);
   const reply = composedSummaryHistory
     ? composeSummaryHistoryReply(summaryHistoryFacts, rawReply)
     : rawReply;
@@ -377,7 +376,7 @@ function normalizeRouteFinalReply(
     };
   }
   return {
-    reply: guardNoMutationLoggingClaim(reply, didLogMeal, didMutateMeal, {
+    reply: guardNoMutationSuccessClaim(reply, mutationProjection, {
       summaryHistoryFacts,
     }),
     composedSummaryHistory,
@@ -388,19 +387,37 @@ function projectRouteMutationState(input: {
   mutationState?: RouteMutationState;
   didLogMeal: boolean;
   didMutateMeal?: boolean;
-}) {
+  deletedMealId?: string;
+  mutationOutcomeFact?: ChatMutationOutcomeFact;
+}): Pick<CommittedMutationProjection<LoggedMealReceipt, ProposalActionEventClientMetadata>, "mutationKind" | "hasCommittedMutation" | "didLogMeal" | "didMutateMeal" | "didMutateGoals" | "shouldPublishDailySummary" | "shouldPublishGoalsUpdate"> {
   if (input.mutationState) {
     return projectCommittedMutationState(input.mutationState);
   }
 
-  const didMutateMeal = input.didMutateMeal ?? input.didLogMeal;
+  const mutationKind = input.mutationOutcomeFact?.action === "log_food"
+    ? "log"
+    : input.mutationOutcomeFact?.action === "update_meal"
+      ? "update"
+      : input.mutationOutcomeFact?.action === "delete_meal"
+        ? "delete"
+        : input.mutationOutcomeFact?.action === "update_goals"
+          ? "goals"
+          : input.didLogMeal
+            ? "log"
+            : input.deletedMealId
+              ? "delete"
+              : input.didMutateMeal
+                ? "update"
+                : undefined;
+  const didMutateMeal = mutationKind === "log" || mutationKind === "update" || mutationKind === "delete";
   return {
-    hasCommittedMutation: didMutateMeal,
-    didLogMeal: input.didLogMeal,
+    ...(mutationKind ? { mutationKind } : {}),
+    hasCommittedMutation: mutationKind !== undefined,
+    didLogMeal: mutationKind === "log",
     didMutateMeal,
-    didMutateGoals: false,
+    didMutateGoals: mutationKind === "goals",
     shouldPublishDailySummary: didMutateMeal,
-    shouldPublishGoalsUpdate: false,
+    shouldPublishGoalsUpdate: mutationKind === "goals",
   };
 }
 
@@ -923,8 +940,7 @@ async function handleStreamingReply(
   streamGenerator: AsyncGenerator<string>,
   chatService: ReturnType<typeof createChatService>,
   deviceId: string,
-  didLogMeal: boolean,
-  didMutateMeal: boolean,
+  mutationProjection: Pick<CommittedMutationProjection, "mutationKind" | "hasCommittedMutation" | "didLogMeal" | "didMutateMeal">,
   dailySummary: unknown,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
   receiptIdentity: ReceiptIdentity | undefined,
@@ -936,9 +952,11 @@ async function handleStreamingReply(
   stopControl?: StreamingStopControl,
 ): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
+  const didLogMeal = mutationProjection.didLogMeal;
+  const didMutateMeal = mutationProjection.didMutateMeal;
   const hasSummaryContext = Boolean(summaryHistoryFacts?.dailySummary ?? dailySummary);
-  const shouldGuardNoMutationModelText = !didLogMeal && !didMutateMeal && !hasSummaryContext;
-  const shouldHoldNoMutationSummaryText = !didLogMeal && !didMutateMeal && hasSummaryContext;
+  const shouldGuardNoMutationModelText = !mutationProjection.hasCommittedMutation && !hasSummaryContext;
+  const shouldHoldNoMutationSummaryText = !mutationProjection.hasCommittedMutation && hasSummaryContext;
   const noMutationClaimGuard = shouldGuardNoMutationModelText
     ? createNoMutationLoggingClaimStreamGuard()
     : undefined;
@@ -1013,7 +1031,7 @@ async function handleStreamingReply(
 
   if (stopControl?.isStopped() || stopControl?.signal.aborted) {
     const stoppedReply = sanitizeReply(
-      guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal, {
+      guardNoMutationSuccessClaim(fullReply, mutationProjection, {
         summaryHistoryFacts,
       }),
     ) || STOPPED_EMPTY_COPY;
@@ -1066,7 +1084,7 @@ async function handleStreamingReply(
   const {
     reply: guardedFullReply,
     composedSummaryHistory,
-  } = normalizeRouteFinalReply(fullReply, didLogMeal, didMutateMeal, summaryHistoryFacts);
+  } = normalizeRouteFinalReply(fullReply, mutationProjection, summaryHistoryFacts);
   if (noMutationLoggingClaimDetected || guardedFullReply !== fullReply) {
     const sanitizedReply = sanitizeReply(guardedFullReply);
     const finalChunk = sanitizer.flush();
@@ -1315,8 +1333,7 @@ async function handleOrchestratorSSE(
         streamGenerator,
         deps.chatService,
         deviceId,
-        didLogMeal,
-        streamDidMutateMeal,
+        mutationProjection,
         dailySummary,
         summaryHistoryFacts,
         streamReceiptIdentity,
@@ -1424,8 +1441,7 @@ async function handleOrchestratorSSE(
         && !result.fallbackOutcomeContext;
       const normalizedReply = normalizeRouteFinalReply(
         appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
-        didLogMeal,
-        streamDidMutateMeal,
+        mutationProjection,
         summaryHistoryFacts,
         {
           composeSummaryHistory: shouldComposeSummaryHistory,
@@ -1831,8 +1847,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
           const { reply: replyText, composedSummaryHistory } = normalizeRouteFinalReply(
             modelReplyText,
-            didLogMeal,
-            didMutateMeal,
+            jsonMutationProjection,
             summaryHistoryFacts,
             { composeSummaryHistory: !hallucinationDetected },
           );
@@ -1903,8 +1918,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           && !result.fallbackOutcomeContext;
         const normalizedReply = normalizeRouteFinalReply(
           appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
-          didLogMeal,
-          jsonDidMutateMeal,
+          jsonMutationProjection,
           summaryHistoryFacts,
           {
             composeSummaryHistory: shouldComposeSummaryHistory,

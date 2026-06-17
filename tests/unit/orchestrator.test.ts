@@ -24,7 +24,7 @@ import type {
   LLMRoundResult,
   LLMProvider,
 } from "../../server/llm/types.js";
-import { createOrchestrator, guardNoMutationLoggingClaim } from "../../server/orchestrator/index.js";
+import { createOrchestrator, guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
 import {
   createEmptyCommittedMutationState,
   mutationOutcomeFactFromEffects,
@@ -261,12 +261,12 @@ describe("no-mutation success-claim guard", () => {
     carbs: 190,
     fat: 55,
   };
-  const summaryOutcome = { status: "updated" } as const;
+  const summaryOutcome = { status: "unavailable", reason: "recompute_failed" } as const;
   const today = formatLocalDate(currentAppDate());
 
   function guardWithState(reply: string, state: CommittedMutationState = createEmptyCommittedMutationState()) {
     const projection = projectCommittedMutationState(state);
-    return guardNoMutationLoggingClaim(reply, projection.didLogMeal, projection.didMutateMeal);
+    return guardNoMutationSuccessClaim(reply, projection);
   }
 
   function stateFor(effects: MutationEffects): CommittedMutationState {
@@ -297,17 +297,21 @@ describe("no-mutation success-claim guard", () => {
     },
   };
   const updateEffects: MutationEffects = {
-    ...logEffects,
     kind: "update",
+    affectedDate: today,
+    committedTargets,
+    summaryOutcome,
     meal: {
-      ...logEffects.meal,
       mealId: "update-meal",
       mealRevisionId: "update-meal:r2",
+      dateKey: today,
+      loggedAt: `${today}T04:30:00.000Z`,
       foodName: "半份雞腿便當",
       calories: 360,
       protein: 20,
       carbs: 45,
       fat: 10,
+      itemCount: 1,
     },
   };
   const deleteEffects: MutationEffects = {
@@ -527,6 +531,8 @@ async function* streamTokensThenThrow(tokens: string[], error: Error): AsyncGene
 }
 
 describe("orchestrator shared patterns", () => {
+  const noMutationProjection = projectCommittedMutationState(createEmptyCommittedMutationState());
+
   it("matches the known 方式1/方式2 hallucinated choice prompt shape", () => {
     assert.equal(
       CHOICE_PROMPT_PATTERN.test("若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算。"),
@@ -568,10 +574,9 @@ describe("orchestrator shared patterns", () => {
   });
 
   it("guards no-mutation meal-specific summary claims against actual facts", () => {
-    const emptyFactsReply = guardNoMutationLoggingClaim(
+    const emptyFactsReply = guardNoMutationSuccessClaim(
       "今天已記錄牛肉飯，650 kcal。",
-      false,
-      false,
+      noMutationProjection,
       {
         summaryHistoryFacts: {
           dailySummary: {
@@ -589,10 +594,9 @@ describe("orchestrator shared patterns", () => {
     assert.doesNotMatch(emptyFactsReply, /已記錄牛肉飯|650 kcal/);
     assert.match(emptyFactsReply, /還沒有把這餐寫入紀錄/);
 
-    const mismatchedFactsReply = guardNoMutationLoggingClaim(
+    const mismatchedFactsReply = guardNoMutationSuccessClaim(
       "今天已記錄牛肉飯，650 kcal。",
-      false,
-      false,
+      noMutationProjection,
       {
         summaryHistoryFacts: {
           dailySummary: {
@@ -609,10 +613,9 @@ describe("orchestrator shared patterns", () => {
     );
     assert.doesNotMatch(mismatchedFactsReply, /已記錄牛肉飯|650 kcal/);
 
-    const matchingFactsReply = guardNoMutationLoggingClaim(
+    const matchingFactsReply = guardNoMutationSuccessClaim(
       "目前已記錄的餐點有豆腐飯，約 520 kcal。",
-      false,
-      false,
+      noMutationProjection,
       {
         summaryHistoryFacts: {
           dailySummary: {
@@ -649,52 +652,47 @@ describe("orchestrator shared patterns", () => {
     };
 
     assert.equal(
-      guardNoMutationLoggingClaim("今天已記錄 2 餐，共 900 kcal。", false, false, facts),
+      guardNoMutationSuccessClaim("今天已記錄 2 餐，共 900 kcal。", noMutationProjection, facts),
       "今天已記錄 2 餐，共 900 kcal。",
     );
 
-    const dayTotalAsSingleMeal = guardNoMutationLoggingClaim(
+    const dayTotalAsSingleMeal = guardNoMutationSuccessClaim(
       "今天已記錄雞胸肉，900 kcal。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.doesNotMatch(dayTotalAsSingleMeal, /已記錄雞胸肉|900 kcal/);
 
-    const wrongCount = guardNoMutationLoggingClaim("今天已記錄 3 餐，共 900 kcal。", false, false, facts);
+    const wrongCount = guardNoMutationSuccessClaim("今天已記錄 3 餐，共 900 kcal。", noMutationProjection, facts);
     assert.doesNotMatch(wrongCount, /今天已記錄 3 餐/);
 
-    const wrongCalories = guardNoMutationLoggingClaim("今天已記錄 2 餐，共 1200 kcal。", false, false, facts);
+    const wrongCalories = guardNoMutationSuccessClaim("今天已記錄 2 餐，共 1200 kcal。", noMutationProjection, facts);
     assert.doesNotMatch(wrongCalories, /1200 kcal/);
 
-    const aggregateWithWrongMeal = guardNoMutationLoggingClaim(
+    const aggregateWithWrongMeal = guardNoMutationSuccessClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.doesNotMatch(aggregateWithWrongMeal, /牛肉飯/);
 
-    const aggregateWithWrongMealCalories = guardNoMutationLoggingClaim(
+    const aggregateWithWrongMealCalories = guardNoMutationSuccessClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯 900 kcal。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.doesNotMatch(aggregateWithWrongMealCalories, /牛肉飯|其中包含牛肉飯 900 kcal/);
 
-    const aggregateWithWrongMealAttribution = guardNoMutationLoggingClaim(
+    const aggregateWithWrongMealAttribution = guardNoMutationSuccessClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉 900 kcal。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.doesNotMatch(aggregateWithWrongMealAttribution, /其中包含雞胸肉 900 kcal/);
 
-    const aggregateWithMatchingMeal = guardNoMutationLoggingClaim(
+    const aggregateWithMatchingMeal = guardNoMutationSuccessClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.equal(aggregateWithMatchingMeal, "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉。");
