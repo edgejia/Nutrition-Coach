@@ -3445,6 +3445,92 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(meals.some((current) => current.id === meal.id), true);
   });
 
+  it("does not surface delete success copy from typed proposal actions without committed delete facts", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const proposal = await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    const falseDeleteReply = "已刪除4/19 雞腿飯，已從當日紀錄移除。";
+    const noFactProposalActionService = {
+      ...proposalActionService,
+      async handleAction() {
+        return {
+          ok: true as const,
+          status: "approved" as const,
+          didMutateMeal: true,
+          reply: falseDeleteReply,
+          proposalCard: {
+            id: "card-false-delete",
+            assistantMessageId: "assistant-false-delete",
+            proposalId: proposal.proposalId,
+            proposalKind: "meal_delete" as const,
+            proposalLane: "meal_mutation" as const,
+            status: "approved" as const,
+            title: "請確認是否刪除這筆餐點。",
+            details: { rows: [] },
+            actions: {
+              approveLabel: "確認刪除",
+              editLabel: "改用文字調整",
+              rejectLabel: "取消提案",
+            },
+            isActionable: false,
+          },
+          proposalActionEvent: {
+            proposalId: proposal.proposalId,
+            proposalKind: "meal_delete" as const,
+            proposalLane: "meal_mutation" as const,
+            action: "approve" as const,
+            transcriptCopy: "已選擇確認刪除",
+          },
+        };
+      },
+    };
+    const noFactOrchestrator = createOrchestrator({
+      llmProvider: mockLLM,
+      chatService,
+      summaryService,
+      foodLoggingService,
+      mealCorrectionService,
+      deviceService,
+      goalProposalService,
+      mealDeleteProposalService,
+      mealNumericProposalService,
+      proposalActionService: noFactProposalActionService,
+    });
+
+    const result = await noFactOrchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.notEqual(result.reply, falseDeleteReply);
+    assert.doesNotMatch(result.reply, /已刪除|完成刪除|成功刪除/);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.deletedMealId, undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((current) => current.id === meal.id), true);
+  });
+
   it("returns stale delete copy when the previewed meal revision changed before confirmation", async () => {
     const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",

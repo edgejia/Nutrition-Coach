@@ -616,6 +616,29 @@ describe("proposal action API", () => {
     });
   });
 
+  it("regression: delete approval failure after consume setup stores no deleted success claim", async () => {
+    const { meal, proposalId } = await createDeleteCard();
+    proposalActionTestHooks.afterDomainMutation = () => {
+      throw new Error("injected delete failure after consume setup");
+    };
+
+    const failed = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "meal_delete", action: "approve" },
+    });
+
+    assert.equal(failed.statusCode, 500);
+    assert.doesNotMatch(failed.body, /已刪除/);
+    assert.equal(await historyHasAssistantReply("已刪除3/25 豆腐雞肉飯，已從當日紀錄移除。"), false);
+    assert.equal((await readMealsFor(meal)).some((row) => row.id === meal.id), true);
+    assert.equal((await services.mealDeleteProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    }))?.proposalId, proposalId);
+  });
+
   it("fails closed for stale proposal actions without mutating targets or creating action events", async () => {
     const defaults = await readTargets();
     const { proposalId } = await createGoalCard(

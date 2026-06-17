@@ -445,6 +445,7 @@ describe("meal delete proposal and rejection renderers", () => {
     const text = renderMealDeleteProposalCopy({ snapshot });
 
     assert.match(text, /即將刪除：牛肉麵、滷蛋/);
+    assert.doesNotMatch(text, /已刪除|成功刪除|完成刪除/);
     assert.match(text, /日期：2026-03-25 晚餐/);
     assert.match(text, /營養：600 kcal，P31g \/ C69g \/ F21g/);
     assert.match(text, /牛肉麵 520 kcal/);
@@ -769,6 +770,18 @@ describe("mutation receipt renderer", () => {
 
     assert.equal(text, "已刪除2025/12/31 拿鐵，已從當日紀錄移除。");
     assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+  });
+
+  it("keeps delete success copy unreachable without the committed deletedMeal fact", () => {
+    assert.throws(
+      () => renderMutationReceipt({
+        kind: "delete",
+        affectedDate: "2025-12-31",
+        summaryOutcome: summaryOutcomes[0],
+        committedTargets,
+      } as unknown as MutationEffects),
+      /deletedMeal/,
+    );
   });
 
   it("renders identical log receipts for fresh recovered and unavailable summary outcomes", () => {
