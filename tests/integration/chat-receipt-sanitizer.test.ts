@@ -1,8 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { asc, eq } from "drizzle-orm";
 import { buildApp } from "../../server/app.js";
+import { createDb } from "../../server/db/client.js";
+import { mealRevisionItems } from "../../server/db/schema.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { createChatService } from "../../server/services/chat.js";
+import { createDeviceService } from "../../server/services/device.js";
+import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { buildReceiptMealEditPayload } from "../../client/src/meal-edit-payload.js";
 import type { FastifyInstance } from "fastify";
 
 function sourceWithoutComments(path: string) {
@@ -19,6 +26,54 @@ function toCookieHeader(rawHeader: string | string[] | undefined) {
 }
 
 describe("chat receipt sanitizer integration boundary", () => {
+  it("round-trips n>=2 receipt item positions as persisted 0-based values", async () => {
+    const db = createDb(":memory:");
+    const deviceService = createDeviceService(db);
+    const chatService = createChatService(db);
+    const foodLoggingService = createFoodLoggingService(db);
+    const deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+
+    const loggedMeal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-06-17T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 15 },
+        { foodName: "白飯", calories: 280, protein: 5, carbs: 62, fat: 1 },
+      ],
+    });
+    const assistant = await chatService.saveMessage(deviceId, "assistant", "已記錄雞腿、白飯。");
+    await chatService.saveMealReceiptReference({
+      deviceId,
+      assistantMessageId: assistant.id,
+      mealTransactionId: loggedMeal.id,
+      mealRevisionId: loggedMeal.mealRevisionId,
+    });
+
+    const storedItems = await db
+      .select({
+        foodName: mealRevisionItems.foodName,
+        position: mealRevisionItems.position,
+      })
+      .from(mealRevisionItems)
+      .where(eq(mealRevisionItems.revisionId, loggedMeal.mealRevisionId))
+      .orderBy(asc(mealRevisionItems.position));
+
+    assert.deepEqual(storedItems, [
+      { foodName: "雞腿", position: 0 },
+      { foodName: "白飯", position: 1 },
+    ]);
+
+    const history = await chatService.getHistory(deviceId, 10);
+    const receipt = history.find((message) => message.id === assistant.id)?.loggedMeal;
+
+    assert.ok(receipt);
+    assert.equal(receipt.itemCount, 2);
+    assert.deepEqual(receipt.items, [
+      { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 15 },
+      { name: "白飯", position: 1, calories: 280, protein: 5, carbs: 62, fat: 1 },
+    ]);
+    assert.deepEqual(buildReceiptMealEditPayload(receipt)?.items, receipt.items);
+  });
+
   it("keeps direct orchestrator receipt egress behind the guarded wrapper", () => {
     const source = sourceWithoutComments("server/orchestrator/index.ts");
 

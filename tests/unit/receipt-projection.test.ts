@@ -5,6 +5,8 @@ import {
   renderGuardedMutationReceipt,
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
+import { projectPublicMealItems } from "../../server/lib/public-meal-items.js";
+import { buildReceiptMealEditPayload } from "../../client/src/meal-edit-payload.js";
 
 const committedTargets = {
   calories: 1800,
@@ -152,5 +154,62 @@ describe("renderGuardedMutationReceipt", () => {
         renderMutationReceipt(effects),
       );
     }
+  });
+});
+
+describe("public meal item projection", () => {
+  it("preserves persisted 0-based grouped item positions", () => {
+    const items = projectPublicMealItems([
+      { foodName: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 15 },
+      { foodName: "白飯", position: 1, calories: 280, protein: 5, carbs: 62, fat: 1 },
+    ]);
+
+    assert.deepEqual(items, [
+      { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 15 },
+      { name: "白飯", position: 1, calories: 280, protein: 5, carbs: 62, fat: 1 },
+    ]);
+  });
+
+  it("keeps receipt edit payloads strict 0-based and rejects one-based contiguous items", () => {
+    const baseReceipt = {
+      receiptStatus: "active" as const,
+      mealId: "receipt-grouped",
+      mealRevisionId: "receipt-grouped:r1",
+      dateKey: "2026-06-17",
+      loggedAt: "2026-06-17T04:00:00.000Z",
+      foodName: "雞腿、白飯",
+      calories: 540,
+      protein: 29,
+      carbs: 62,
+      fat: 16,
+      itemCount: 2,
+      imageAssetId: null,
+      imageUrl: null,
+    };
+
+    assert.deepEqual(
+      buildReceiptMealEditPayload({
+        ...baseReceipt,
+        items: [
+          { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 15 },
+          { name: "白飯", position: 1, calories: 280, protein: 5, carbs: 62, fat: 1 },
+        ],
+      })?.items,
+      [
+        { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 15 },
+        { name: "白飯", position: 1, calories: 280, protein: 5, carbs: 62, fat: 1 },
+      ],
+    );
+
+    assert.equal(
+      buildReceiptMealEditPayload({
+        ...baseReceipt,
+        items: [
+          { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 15 },
+          { name: "白飯", position: 2, calories: 280, protein: 5, carbs: 62, fat: 1 },
+        ],
+      }),
+      null,
+    );
   });
 });
