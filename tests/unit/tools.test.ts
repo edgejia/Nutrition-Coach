@@ -755,9 +755,9 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     assert.ok(result.loggedMeal);
     assert.deepEqual(result.loggedMeal.items, [
-      { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 15 },
-      { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 1 },
-      { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 0.5 },
+      { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 15 },
+      { name: "白飯", position: 1, calories: 280, protein: 0, carbs: 62, fat: 1 },
+      { name: "青菜", position: 2, calories: 40, protein: 0, carbs: 8, fat: 0.5 },
     ]);
   });
 

@@ -2740,7 +2740,7 @@ describe("Chat API", () => {
       carbs: 25,
       fat: 0.3,
       items: [
-        { name: "蘋果", position: 1, calories: 95, protein: 0, carbs: 25, fat: 0.3 },
+        { name: "蘋果", position: 0, calories: 95, protein: 0, carbs: 25, fat: 0.3 },
       ],
     });
     assert.equal("currentRevisionId" in assistantMessage.loggedMeal, false);
@@ -2825,7 +2825,7 @@ describe("Chat API", () => {
     assert.equal(assistantMessage.loggedMeal.foodName, "雞腿便當");
     assert.equal(assistantMessage.loggedMeal.itemCount, 1);
     assert.deepEqual(assistantMessage.loggedMeal.items, [
-      { name: "雞腿便當", position: 1, calories: 620, protein: 24, carbs: 70, fat: 18 },
+      { name: "雞腿便當", position: 0, calories: 620, protein: 24, carbs: 70, fat: 18 },
     ]);
     assert.equal(Object.prototype.hasOwnProperty.call(assistantMessage.loggedMeal, "currentRevisionId"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(assistantMessage.loggedMeal, "inferredMealPeriod"), false);
@@ -2892,9 +2892,9 @@ describe("Chat API", () => {
     assert.equal(body.loggedMeal?.carbs, 70);
     assert.equal(body.loggedMeal?.fat, 13.5);
     assert.deepEqual(body.loggedMeal?.items, [
-      { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 12 },
-      { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
-      { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 1 },
+      { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 12 },
+      { name: "白飯", position: 1, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
+      { name: "青菜", position: 2, calories: 40, protein: 0, carbs: 8, fat: 1 },
     ]);
   });
 
@@ -3156,7 +3156,7 @@ describe("Chat API", () => {
     assert.equal(updateBody.loggedMeal?.fat, 10);
     assert.equal(updateBody.loggedMeal?.mealPeriod, "lunch");
     assert.deepEqual(updateBody.loggedMeal?.items, [
-      { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
+      { name: "半碗牛肉麵", position: 0, calories: 360, protein: 20, carbs: 45, fat: 10 },
     ]);
   });
 

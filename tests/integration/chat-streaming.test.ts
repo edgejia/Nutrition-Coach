@@ -1195,9 +1195,9 @@ describe("chat-streaming", () => {
       assert.equal(donePayload.loggedMeal?.foodName, "雞腿、白飯、青菜");
       assert.equal(donePayload.loggedMeal?.itemCount, 3);
       assert.deepEqual(donePayload.loggedMeal?.items, [
-        { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 12 },
-        { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
-        { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 1 },
+        { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { name: "白飯", position: 1, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
+        { name: "青菜", position: 2, calories: 40, protein: 0, carbs: 8, fat: 1 },
       ]);
       assertNoSuccessfulLogInternalCopy(JSON.stringify(donePayload.loggedMeal));
     } finally {
@@ -2339,7 +2339,7 @@ describe("chat-streaming", () => {
     assert.equal(donePayload.loggedMeal?.carbs, 45);
     assert.equal(donePayload.loggedMeal?.fat, 10);
     assert.deepEqual(donePayload.loggedMeal?.items, [
-      { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
+      { name: "半碗牛肉麵", position: 0, calories: 360, protein: 20, carbs: 45, fat: 10 },
     ]);
     assert.match(chunkText, /已更新(?:3\/25 )?半碗牛肉麵，360 kcal，蛋白質 20 g/);
     assert.doesNotMatch(chunkText, /蛋餅|330 kcal|14 g|5\/5|（5\/5）|可信蛋白/);
