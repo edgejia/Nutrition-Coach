@@ -39,6 +39,7 @@ import {
   extractExplicitMealPeriodFromSourceText,
   type MealPeriod,
 } from "../lib/meal-period.js";
+import { projectPublicMealItems } from "../lib/public-meal-items.js";
 import {
   runContract,
   summarizeContractArgsForLog,
@@ -1250,14 +1251,7 @@ function projectLoggedMealItems(
     fat: number;
   }>,
 ) {
-  return items.map((item, index) => ({
-    name: item.foodName,
-    position: index + 1,
-    calories: item.calories,
-    protein: item.protein,
-    carbs: item.carbs,
-    fat: item.fat,
-  }));
+  return projectPublicMealItems(items.map((item, position) => ({ ...item, position })));
 }
 
 function projectMealIdentityFields(meal: {

@@ -15,6 +15,7 @@ import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
 import { projectMealDisplay } from "./meal-display.js";
 import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
+import { projectPublicMealItems } from "../lib/public-meal-items.js";
 import {
   formatChatMutationOutcomeForCompressedHistory,
   validateChatMutationOutcomeFact,
@@ -359,14 +360,7 @@ export function createChatService(db: AppDatabase) {
       protein: items.reduce((sum, item) => sum + item.protein, 0),
       carbs: items.reduce((sum, item) => sum + item.carbs, 0),
       fat: items.reduce((sum, item) => sum + item.fat, 0),
-      items: items.map((item) => ({
-        name: item.foodName,
-        position: item.position + 1,
-        calories: item.calories,
-        protein: item.protein,
-        carbs: item.carbs,
-        fat: item.fat,
-      })),
+      items: projectPublicMealItems(items),
     };
   }
 

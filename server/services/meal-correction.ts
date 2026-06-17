@@ -29,6 +29,7 @@ import {
 import { makeAssetRef } from "./assets.js";
 import { projectMealDisplay } from "./meal-display.js";
 import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
+import { projectPublicMealItems } from "../lib/public-meal-items.js";
 
 const PENDING_SELECTION_KIND = "meal_target_selection";
 const PENDING_SELECTION_TTL_MS = 15 * 60 * 1000;
@@ -1197,14 +1198,7 @@ export function createMealCorrectionService(db: AppDatabase, deps: MealCorrectio
           carbs: updated.items.reduce((sum, item) => sum + item.carbs, 0),
           fat: updated.items.reduce((sum, item) => sum + item.fat, 0),
           itemCount: display.itemCount,
-          items: updated.items.map((item, index) => ({
-            name: item.foodName,
-            position: index + 1,
-            calories: item.calories,
-            protein: item.protein,
-            carbs: item.carbs,
-            fat: item.fat,
-          })),
+          items: projectPublicMealItems(updated.items.map((item, position) => ({ ...item, position }))),
           imagePath: updated.imageAssetId ? makeAssetRef(updated.imageAssetId) : null,
           loggedAt: updated.loggedAt,
           mealPeriod: updated.mealPeriod,
