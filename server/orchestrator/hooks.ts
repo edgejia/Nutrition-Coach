@@ -1,11 +1,31 @@
 import type { FastifyBaseLogger } from "fastify";
+import type { ProviderErrorMetadata } from "../llm/types.js";
+import type {
+  SideEffectPolicyClass,
+  ToolPolicyDecisionKind,
+  ToolPolicyRuleId,
+} from "./tool-contract.js";
 
 export interface OrchestratorHooks {
   onLLMStart?(round: number): void;
   onLLMEnd?(round: number, hadToolCalls: boolean): void;
   onToolReceived?(tool: string, argsRedacted: string): void;
   onToolResult?(payload: ToolResultPayload): void;
-  onFallback?(reason: FallbackReason): void;
+  onLLMError?(payload: LLMErrorPayload): void;
+  onFallback?(payload: FallbackPayload): void;
+}
+
+export interface LLMErrorPayload {
+  round: number;
+  providerMetadata: ProviderErrorMetadata;
+  lastTool?: string;
+}
+
+export interface FallbackPayload {
+  reason: FallbackReason;
+  round?: number;
+  lastTool?: string;
+  providerMetadata?: ProviderErrorMetadata;
 }
 
 export interface ToolResultPayload {
@@ -18,6 +38,11 @@ export interface ToolResultPayload {
   summary?: string;       // e.g. "成功" or "熱量 450kcal"
   updatedFields?: string[];
   publishedEvents?: string[];
+  policyClass?: SideEffectPolicyClass;
+  decision?: ToolPolicyDecisionKind;
+  ruleId?: ToolPolicyRuleId;
+  proposalId?: string;
+  turnId?: string;
 }
 
 export type FallbackReason =
@@ -30,7 +55,14 @@ const LOG_FOOD_VALIDATION_FIELDS = ["calories", "protein", "carbs", "fat"] as co
 const LOG_FOOD_VALIDATION_FIELD_SET = new Set<string>(LOG_FOOD_VALIDATION_FIELDS);
 
 function sanitizeLogFoodValidationFields(fields: readonly string[]): string[] {
-  return [...new Set(fields.filter((field) => LOG_FOOD_VALIDATION_FIELD_SET.has(field)))].sort();
+  // Plan 83-03: the grouped-only logFoodSchema reports numeric violations as
+  // item-level paths (e.g. "items.0.calories"). Map paths to their leaf name
+  // before whitelisting so the event still identifies the failing macro field
+  // while staying metadata-only (no indices, no raw values).
+  const sanitized = fields
+    .map((field) => field.split(".").at(-1) ?? field)
+    .filter((field) => LOG_FOOD_VALIDATION_FIELD_SET.has(field));
+  return [...new Set(sanitized)].sort();
 }
 
 export function createStructuredHooks(log: FastifyBaseLogger): OrchestratorHooks {
@@ -85,8 +117,28 @@ export function createStructuredHooks(log: FastifyBaseLogger): OrchestratorHooks
         );
       }
     },
-    onFallback(reason) {
-      log.warn({ event: "orchestrator_fallback", reason }, "Orchestrator fallback");
+    onLLMError(payload) {
+      log.warn(
+        {
+          event: "llm_provider_error",
+          round: payload.round,
+          ...(payload.lastTool !== undefined ? { lastTool: payload.lastTool } : {}),
+          providerMetadata: payload.providerMetadata,
+        },
+        "LLM provider error",
+      );
+    },
+    onFallback(payload) {
+      log.warn(
+        {
+          event: "orchestrator_fallback",
+          reason: payload.reason,
+          ...(payload.round !== undefined ? { round: payload.round } : {}),
+          ...(payload.lastTool !== undefined ? { lastTool: payload.lastTool } : {}),
+          ...(payload.providerMetadata !== undefined ? { providerMetadata: payload.providerMetadata } : {}),
+        },
+        "Orchestrator fallback",
+      );
     },
   };
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../../store.js";
 import { submitIntake } from "../../api.js";
 import {
+  applyGoalClarificationQuickNote,
   applyFieldEditRecovery,
   getAdvancedMetricsSkipData,
   getStepAdvanceOutcome,
@@ -9,6 +10,7 @@ import {
 } from "../../lib/onboarding-stepper-flow.js";
 import { SportBoltIcon, SportFlameIcon } from "../SportIcons.js";
 import type { IntakeData, IntakeResult, IntakeValidationIssue, OnboardingField, OnboardingStep } from "../../types.js";
+import type { GoalClarificationQuickNoteState } from "../../lib/onboarding-stepper-flow.js";
 
 type PartialIntake = Partial<IntakeData>;
 type StepState = OnboardingStep | 6;
@@ -16,6 +18,14 @@ type BodyForm = { sex: IntakeData["sex"]; age: string; heightCm: string; weightK
 type LifestyleForm = Pick<IntakeData, "activityLevel" | "trainingFrequency"> & Pick<Partial<IntakeData>, "allergies">;
 type AdvancedForm = { bodyFatPercent: string; tdee: string; advancedNotes: string };
 type StepIssue = Pick<IntakeValidationIssue, "message" | "field">;
+
+const ONBOARDING_NUMERIC_BOUNDS = {
+  age: { min: 10, max: 120 },
+  heightCm: { min: 50, max: 300 },
+  weightKg: { min: 20, max: 500 },
+  bodyFatPercent: { min: 2, max: 70 },
+  tdee: { min: 500, max: 8000, step: 50 },
+} as const;
 
 interface OnboardingStepperPresentationProps {
   step: StepState;
@@ -74,6 +84,76 @@ function SpObActions({ onBack, onNext, nextLabel = "繼續 →" }: { onBack?: ()
   );
 }
 
+type WheelValueItemData = {
+  value: number;
+  className: string;
+};
+
+function clampNumericValue(value: string | number | undefined, min: number, max: number, fallback = min) {
+  const numeric = Number(value ?? fallback);
+  const finiteValue = Number.isFinite(numeric) ? numeric : fallback;
+  return Math.min(max, Math.max(min, finiteValue));
+}
+
+function buildVisibleWheelValues(current: number, min: number, max: number, step: number, visibleCount: number): WheelValueItemData[] {
+  const safeStep = Number.isFinite(step) && step > 0 ? step : 1;
+  const boundedCurrent = clampNumericValue(current, min, max);
+  const values: number[] = [];
+
+  for (let value = min; value <= max; value += safeStep) {
+    values.push(value);
+  }
+  if (!values.includes(boundedCurrent)) {
+    values.push(boundedCurrent);
+    values.sort((a, b) => a - b);
+  }
+
+  const activeIndex = Math.max(0, values.indexOf(boundedCurrent));
+  const targetCount = Math.max(1, Math.min(visibleCount, values.length));
+  const centeredStart = activeIndex - Math.floor(targetCount / 2);
+  const maxStart = Math.max(0, values.length - targetCount);
+  const start = Math.min(Math.max(0, centeredStart), maxStart);
+
+  return values.slice(start, start + targetCount).map((value) => {
+    const steppedDistance = Math.abs((value - boundedCurrent) / safeStep);
+    const className = value === boundedCurrent
+      ? "sp-num-wheel-item active"
+      : steppedDistance <= 1
+        ? "sp-num-wheel-item near"
+        : "sp-num-wheel-item";
+
+    return { value, className };
+  });
+}
+
+function WheelValueItem({
+  item,
+  currentValue,
+  activeValue,
+  onChange,
+}: {
+  item: WheelValueItemData;
+  currentValue: number;
+  activeValue: number;
+  onChange?: (value: string) => void;
+}) {
+  const active = item.value === activeValue;
+  return (
+    <button
+      type="button"
+      className={item.className}
+      aria-current={active ? "true" : undefined}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (item.value === currentValue) return;
+        onChange?.(String(item.value));
+      }}
+    >
+      {item.value}
+    </button>
+  );
+}
+
 function SpNumberWheel({
   label,
   value,
@@ -98,10 +178,11 @@ function SpNumberWheel({
   onChange?: (value: string) => void;
 }) {
   const current = Number(value || 0);
-  const clamp = (n: number) => String(Math.min(max, Math.max(min, n)));
+  const activeValue = clampNumericValue(current, min, max);
+  const clamp = (n: number) => String(clampNumericValue(n, min, max));
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     const startX = event.clientX;
-    const startValue = current;
+    const startValue = activeValue;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const move = (moveEvent: PointerEvent) => {
       const DIRECTION = -1;
@@ -116,13 +197,8 @@ function SpNumberWheel({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop);
   };
-  const offsets = minimal ? [-1, 0, 1] : [-2, -1, 0, 1, 2];
-  const items = offsets.map((offset) => {
-    const next = Math.min(max, Math.max(min, current + offset * step));
-    const key = `${label}-${offset}-${next}`;
-    const className = offset === 0 ? "sp-num-wheel-item active" : Math.abs(offset) === 1 ? "sp-num-wheel-item near" : "sp-num-wheel-item";
-    return <span key={key} className={className}>{next}</span>;
-  });
+  const visibleCount = minimal ? 3 : 5;
+  const items = buildVisibleWheelValues(current, min, max, step, visibleCount);
   return (
     <div>
       {hideHeader ? null : (
@@ -132,8 +208,10 @@ function SpNumberWheel({
         </div>
       )}
       <div className={`${compact ? "sp-num-wheel compact" : "sp-num-wheel"}${minimal ? " minimal" : ""}`}>
-        <div className="sp-num-wheel-track" onPointerDown={startDrag} role="slider" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={current}>
-          {items}
+        <div className="sp-num-wheel-track" onPointerDown={startDrag} role="slider" aria-label={label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={activeValue}>
+          {items.map((item) => (
+            <WheelValueItem key={`${label}-${item.value}`} item={item} currentValue={current} activeValue={activeValue} onChange={onChange} />
+          ))}
         </div>
       </div>
     </div>
@@ -321,28 +399,63 @@ function SpStepGoal({
   );
 }
 
-function SpStepGoalClarification({
+function getGoalClarificationContent(goal?: string) {
+  if (goal === "muscle_gain") {
+    return {
+      goalLabel: "增肌",
+      placeholder: "例如：想增加肌肉量、怕吃太多變胖、訓練日需要多一點碳水...",
+      quickNotes: [
+        "想增加肌肉量",
+        "怕吃太多變胖",
+        "訓練日需要多一點碳水",
+      ],
+    };
+  }
+
+  if (goal === "maintain") {
+    return {
+      goalLabel: "維持",
+      placeholder: "例如：想穩定體態、外食很多需要好執行、訓練表現不要掉...",
+      quickNotes: [
+        "想穩定體態",
+        "外食很多，需要好執行",
+        "訓練表現不要掉",
+      ],
+    };
+  }
+
+  return {
+    goalLabel: "減脂",
+    placeholder: "例如：不想影響重訓表現、想慢慢減不要太激進、外食很多需要好執行...",
+    quickNotes: [
+      "不想影響重訓表現",
+      "想慢慢減，不要太激進",
+      "外食很多，需要好執行",
+    ],
+  };
+}
+
+export function SpStepGoalClarification({
   goal,
   value,
   issues,
+  selectedNotes = [],
   onChange,
+  onQuickNoteClick,
   onNext,
   onBack,
 }: {
   goal?: string;
   value?: string;
   issues?: StepIssue[];
+  selectedNotes?: readonly string[];
   onChange?: (value: string) => void;
+  onQuickNoteClick?: (note: string) => void;
   onNext?: () => void;
   onBack?: () => void;
 }) {
-  const goalLabel = goal === "muscle_gain" ? "增肌" : goal === "maintain" ? "維持" : "減脂";
+  const { goalLabel, quickNotes, placeholder } = getGoalClarificationContent(goal);
   const text = value ?? "";
-  const quickNotes = [
-    "不想影響重訓表現",
-    "想慢慢減，不要太激進",
-    "外食很多，需要好執行",
-  ];
   return (
     <div className="sp-screen">
       <SpObHeader />
@@ -364,7 +477,7 @@ function SpStepGoalClarification({
           <textarea
             value={text}
             onChange={(e) => onChange?.(e.target.value)}
-            placeholder="例如：不想影響重訓表現、想慢慢減不要太激進..."
+            placeholder={placeholder}
             rows={4}
             style={{
               width: "100%",
@@ -382,17 +495,26 @@ function SpStepGoalClarification({
         </section>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {quickNotes.map((note) => (
-            <button
-              key={note}
-              type="button"
-              className="sp-chip"
-              onClick={() => onChange?.(text ? `${text}、${note}` : note)}
-              style={{ cursor: "pointer" }}
-            >
-              <span className="sp-chip-zh">{note}</span>
-            </button>
-          ))}
+          {quickNotes.map((note) => {
+            const isSelected = selectedNotes.includes(note);
+            return (
+              <button
+                key={note}
+                type="button"
+                className={[
+                  "sp-chip",
+                  "sp-onboarding-quick-note",
+                  isSelected ? "sp-chip-applied" : "",
+                ].filter(Boolean).join(" ")}
+                aria-pressed={isSelected}
+                aria-label={isSelected ? `${note}，已套用` : note}
+                onClick={() => onQuickNoteClick?.(note)}
+                style={{ cursor: "pointer" }}
+              >
+                <span className="sp-chip-zh">{note}</span>
+              </button>
+            );
+          })}
         </div>
       </main>
       <SpObActions onBack={onBack} onNext={onNext} nextLabel={text.trim() ? "繼續 →" : "略過 →"} />
@@ -460,9 +582,9 @@ function SpStepBody({
           </div>
         </div>
 
-        <SpNumberWheel label="年齡" value={v.age} unit="歲" min={12} max={90} onChange={(val) => set("age", val)} />
-        <SpNumberWheel label="身高" value={v.heightCm} unit="cm" min={120} max={220} onChange={(val) => set("heightCm", val)} />
-        <SpNumberWheel label="體重" value={v.weightKg} unit="kg" min={35} max={180} onChange={(val) => set("weightKg", val)} />
+        <SpNumberWheel label="年齡" value={v.age} unit="歲" min={ONBOARDING_NUMERIC_BOUNDS.age.min} max={ONBOARDING_NUMERIC_BOUNDS.age.max} onChange={(val) => set("age", val)} />
+        <SpNumberWheel label="身高" value={v.heightCm} unit="cm" min={ONBOARDING_NUMERIC_BOUNDS.heightCm.min} max={ONBOARDING_NUMERIC_BOUNDS.heightCm.max} onChange={(val) => set("heightCm", val)} />
+        <SpNumberWheel label="體重" value={v.weightKg} unit="kg" min={ONBOARDING_NUMERIC_BOUNDS.weightKg.min} max={ONBOARDING_NUMERIC_BOUNDS.weightKg.max} onChange={(val) => set("weightKg", val)} />
       </main>
       <SpObActions onBack={onBack} onNext={onNext} />
     </div>
@@ -659,8 +781,8 @@ function SpStepAdvancedMetrics({
             label="體脂率"
             value={v.bodyFatPercent || "20"}
             unit="%"
-            min={5}
-            max={45}
+            min={ONBOARDING_NUMERIC_BOUNDS.bodyFatPercent.min}
+            max={ONBOARDING_NUMERIC_BOUNDS.bodyFatPercent.max}
             compact={true}
             hideHeader={true}
             onChange={(val) => set("bodyFatPercent", val)}
@@ -679,9 +801,9 @@ function SpStepAdvancedMetrics({
             label="每日消耗"
             value={v.tdee || "2200"}
             unit="kcal"
-            min={1200}
-            max={4200}
-            step={50}
+            min={ONBOARDING_NUMERIC_BOUNDS.tdee.min}
+            max={ONBOARDING_NUMERIC_BOUNDS.tdee.max}
+            step={ONBOARDING_NUMERIC_BOUNDS.tdee.step}
             compact={true}
             minimal={true}
             hideHeader={true}
@@ -911,7 +1033,10 @@ export function OnboardingStepperPresentation({
   onRetry,
   onFieldEdit,
 }: OnboardingStepperPresentationProps) {
-  const [goalClarification, setGoalClarification] = useState(data.goalClarification ?? "");
+  const [goalClarificationDraft, setGoalClarificationDraft] = useState<GoalClarificationQuickNoteState>({
+    goalClarification: data.goalClarification ?? "",
+    selectedNotes: [],
+  });
   const [bodyData, setBodyData] = useState<BodyForm>({
     sex: data.sex ?? "male",
     age: String(data.age ?? "28"),
@@ -930,7 +1055,14 @@ export function OnboardingStepperPresentation({
   });
 
   useEffect(() => {
-    setGoalClarification(data.goalClarification ?? "");
+    const nextGoalClarification = data.goalClarification ?? "";
+    setGoalClarificationDraft((current) => {
+      if (current.goalClarification === nextGoalClarification) {
+        return current;
+      }
+
+      return { goalClarification: nextGoalClarification, selectedNotes: [] };
+    });
     setBodyData({
       sex: data.sex ?? "male",
       age: String(data.age ?? "28"),
@@ -956,13 +1088,27 @@ export function OnboardingStepperPresentation({
   if (step === 2) return (
     <SpStepGoalClarification
       goal={data.goal}
-      value={goalClarification}
+      value={goalClarificationDraft.goalClarification}
       issues={issuesForStep(2)}
+      selectedNotes={goalClarificationDraft.selectedNotes}
       onChange={(value) => {
-        setGoalClarification(value);
+        setGoalClarificationDraft((current) => ({
+          ...current,
+          goalClarification: value,
+        }));
         onFieldEdit("goalClarification");
       }}
-      onNext={() => onGoalClarificationNext(goalClarification)}
+      onQuickNoteClick={(note) => {
+        const outcome = applyGoalClarificationQuickNote(goalClarificationDraft, note);
+        setGoalClarificationDraft({
+          goalClarification: outcome.goalClarification,
+          selectedNotes: outcome.selectedNotes,
+        });
+        if (outcome.inserted) {
+          onFieldEdit("goalClarification");
+        }
+      }}
+      onNext={() => onGoalClarificationNext(goalClarificationDraft.goalClarification)}
       onBack={() => onBack(1)}
     />
   );
@@ -979,9 +1125,19 @@ export function OnboardingStepperPresentation({
       }}
       onNext={() => onBodyDataNext({
         sex: bodyData.sex,
-        age: Number(bodyData.age),
-        heightCm: Number(bodyData.heightCm),
-        weightKg: Number(bodyData.weightKg),
+        age: clampNumericValue(bodyData.age, ONBOARDING_NUMERIC_BOUNDS.age.min, ONBOARDING_NUMERIC_BOUNDS.age.max, 28),
+        heightCm: clampNumericValue(
+          bodyData.heightCm,
+          ONBOARDING_NUMERIC_BOUNDS.heightCm.min,
+          ONBOARDING_NUMERIC_BOUNDS.heightCm.max,
+          175,
+        ),
+        weightKg: clampNumericValue(
+          bodyData.weightKg,
+          ONBOARDING_NUMERIC_BOUNDS.weightKg.min,
+          ONBOARDING_NUMERIC_BOUNDS.weightKg.max,
+          70,
+        ),
       })}
       onBack={() => onBack(2)}
     />
@@ -1011,8 +1167,22 @@ export function OnboardingStepperPresentation({
         setAdvanced(value);
       }}
       onNext={() => onAdvancedMetricsNext({
-        bodyFatPercent: advanced.bodyFatPercent === "" ? undefined : Number(advanced.bodyFatPercent),
-        tdee: advanced.tdee === "" ? undefined : Number(advanced.tdee),
+        bodyFatPercent: advanced.bodyFatPercent === ""
+          ? undefined
+          : clampNumericValue(
+              advanced.bodyFatPercent,
+              ONBOARDING_NUMERIC_BOUNDS.bodyFatPercent.min,
+              ONBOARDING_NUMERIC_BOUNDS.bodyFatPercent.max,
+              20,
+            ),
+        tdee: advanced.tdee === ""
+          ? undefined
+          : clampNumericValue(
+              advanced.tdee,
+              ONBOARDING_NUMERIC_BOUNDS.tdee.min,
+              ONBOARDING_NUMERIC_BOUNDS.tdee.max,
+              2200,
+            ),
         advancedNotes: advanced.advancedNotes,
       })}
       onSkip={onAdvancedMetricsSkip}

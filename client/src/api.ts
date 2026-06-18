@@ -9,13 +9,35 @@ import type {
   IntakeValidationIssue,
   LoggedMealReceipt,
   MealEntry,
+  MealPeriod,
+  MealReceiptStatus,
   MealItemDetail,
   Message,
   CoachCTAIntentId,
   CoachCTAOptionId,
+  DeleteMealOptions,
+  DeleteMealResponse,
+  ProposalActionEventMetadata,
+  ProposalActionReply,
+  ProposalActionRequest,
+  ProposalCardMetadata,
+  ProposalEditContext,
+  ProposalKind,
+  ProposalLane,
+  ProposalStatus,
+  SummaryOutcome,
   UpdateMealInput,
   UpdateMealResponse,
 } from "./types.js";
+import {
+  isDailySummaryDto,
+  isDailyTargetsDto,
+  isFiniteNumber as isDtoFiniteNumber,
+  isRecord as isDtoRecord,
+  isSummaryOutcomeDto,
+  isValidMealPeriod,
+} from "./dto-guards.js";
+import { isRealDateKey } from "./lib/history-week.js";
 import { getEarliestValidationStep } from "./lib/onboarding-intake-validation.js";
 
 export interface GuestSessionBootstrapResult {
@@ -37,6 +59,22 @@ export class IntakeValidationError extends Error {
   }
 }
 
+export type MealRevisionConflictCode = "MEAL_REVISION_REQUIRED" | "MEAL_REVISION_STALE";
+
+export class MealRevisionConflictError extends Error {
+  readonly kind = "meal_revision_conflict";
+
+  constructor(
+    readonly code: MealRevisionConflictCode,
+    readonly mealId: string,
+    readonly affectedDate: string,
+    readonly currentMealRevisionId?: string,
+  ) {
+    super(code);
+    this.name = "MealRevisionConflictError";
+  }
+}
+
 const MOCK_NEXT_INTAKE_VALIDATION_ERROR_KEY = "nutritionCoach:mockNextIntakeValidationError";
 const MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024;
 const CHAT_IMAGE_MAX_DIMENSION = 1600;
@@ -47,6 +85,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeItemCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+}
+
+function normalizeMealPeriod(value: unknown): MealPeriod | undefined {
+  return isValidMealPeriod(value) ? value : undefined;
+}
+
+function normalizeMealReceiptStatus(value: unknown): MealReceiptStatus | undefined {
+  return value === "active" || value === "deleted" || value === "stale_revision" ? value : undefined;
 }
 
 function normalizeMealItems(value: unknown): MealItemDetail[] | undefined {
@@ -128,6 +174,8 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
   ) {
     return (
       (value.mealId === undefined || typeof value.mealId === "string") &&
+      (value.receiptMealId === undefined || typeof value.receiptMealId === "string") &&
+      (value.mealRevisionId === undefined || typeof value.mealRevisionId === "string") &&
       (value.dateKey === undefined || typeof value.dateKey === "string") &&
       (value.loggedAt === undefined || typeof value.loggedAt === "string") &&
       (value.itemCount === undefined ||
@@ -142,33 +190,98 @@ function isLoggedMealReceipt(value: unknown): value is LoggedMealReceipt {
 }
 
 function isDailySummary(value: unknown): value is DailySummary {
-  return (
-    isRecord(value) &&
-    typeof value.date === "string" &&
-    typeof value.totalCalories === "number" &&
-    Number.isFinite(value.totalCalories) &&
-    typeof value.totalProtein === "number" &&
-    Number.isFinite(value.totalProtein) &&
-    typeof value.totalCarbs === "number" &&
-    Number.isFinite(value.totalCarbs) &&
-    typeof value.totalFat === "number" &&
-    Number.isFinite(value.totalFat) &&
-    typeof value.mealCount === "number" &&
-    Number.isFinite(value.mealCount)
-  );
+  return isDailySummaryDto(value);
+}
+
+export function isSummaryOutcome(value: unknown): value is SummaryOutcome {
+  return isSummaryOutcomeDto(value);
 }
 
 function isDailyTargets(value: unknown): value is DailyTargets {
+  return isDailyTargetsDto(value);
+}
+
+const PROPOSAL_KINDS: readonly ProposalKind[] = ["goal", "meal_numeric", "meal_estimate", "meal_delete"];
+const PROPOSAL_LANES: readonly ProposalLane[] = ["goal", "meal_mutation"];
+const PROPOSAL_STATUSES: readonly ProposalStatus[] = [
+  "active",
+  "approved",
+  "rejected",
+  "expired",
+  "superseded",
+  "stale",
+];
+const PROPOSAL_ACTIONS: readonly ProposalActionEventMetadata["action"][] = ["approve", "edit", "reject"];
+
+function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
+  return typeof value === "string" && allowed.includes(value as T);
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isProposalCardDetails(value: unknown): value is ProposalCardMetadata["details"] {
+  if (!isRecord(value) || !Array.isArray(value.rows)) {
+    return false;
+  }
+
+  return value.rows.every((row) => {
+    if (!isRecord(row) || typeof row.label !== "string" || !row.label.trim()) {
+      return false;
+    }
+    return (
+      (row.before === undefined || typeof row.before === "string") &&
+      (row.after === undefined || typeof row.after === "string") &&
+      (row.value === undefined || typeof row.value === "string")
+    );
+  });
+}
+
+function isProposalCardActions(value: unknown): value is ProposalCardMetadata["actions"] {
   return (
     isRecord(value) &&
-    typeof value.calories === "number" &&
-    Number.isFinite(value.calories) &&
-    typeof value.protein === "number" &&
-    Number.isFinite(value.protein) &&
-    typeof value.carbs === "number" &&
-    Number.isFinite(value.carbs) &&
-    typeof value.fat === "number" &&
-    Number.isFinite(value.fat)
+    typeof value.approveLabel === "string" &&
+    value.approveLabel.trim().length > 0 &&
+    typeof value.editLabel === "string" &&
+    value.editLabel.trim().length > 0 &&
+    typeof value.rejectLabel === "string" &&
+    value.rejectLabel.trim().length > 0
+  );
+}
+
+function isProposalCardMetadata(value: unknown): value is ProposalCardMetadata {
+  return (
+    isRecord(value) &&
+    typeof value.proposalId === "string" &&
+    value.proposalId.trim().length > 0 &&
+    isOneOf(value.proposalKind, PROPOSAL_KINDS) &&
+    isOneOf(value.proposalLane, PROPOSAL_LANES) &&
+    isOneOf(value.status, PROPOSAL_STATUSES) &&
+    typeof value.isActionable === "boolean" &&
+    typeof value.title === "string" &&
+    value.title.trim().length > 0 &&
+    isProposalCardDetails(value.details) &&
+    isProposalCardActions(value.actions) &&
+    (value.inputHint === undefined || typeof value.inputHint === "string") &&
+    isStringOrNull(value.expiresAt) &&
+    isStringOrNull(value.lapseCopy) &&
+    (value.supersededByKind === null || isOneOf(value.supersededByKind, PROPOSAL_KINDS))
+  );
+}
+
+function isProposalActionEventMetadata(value: unknown): value is ProposalActionEventMetadata {
+  return (
+    isRecord(value) &&
+    typeof value.proposalId === "string" &&
+    value.proposalId.trim().length > 0 &&
+    isOneOf(value.proposalKind, PROPOSAL_KINDS) &&
+    isOneOf(value.proposalLane, PROPOSAL_LANES) &&
+    isOneOf(value.action, PROPOSAL_ACTIONS) &&
+    typeof value.transcriptCopy === "string" &&
+    value.transcriptCopy.trim().length > 0 &&
+    typeof value.createdAt === "string" &&
+    value.createdAt.trim().length > 0
   );
 }
 
@@ -188,12 +301,32 @@ function getResponseErrorMessage(body: unknown): string | null {
   return body.error;
 }
 
+function getMealRevisionConflictError(status: number, body: unknown): MealRevisionConflictError | null {
+  if (status !== 409 || !isRecord(body)) {
+    return null;
+  }
+
+  const code = body.error;
+  if (code !== "MEAL_REVISION_REQUIRED" && code !== "MEAL_REVISION_STALE") {
+    return null;
+  }
+
+  if (typeof body.mealId !== "string" || typeof body.affectedDate !== "string") {
+    return null;
+  }
+
+  const currentMealRevisionId =
+    typeof body.currentMealRevisionId === "string" ? body.currentMealRevisionId : undefined;
+
+  return new MealRevisionConflictError(code, body.mealId, body.affectedDate, currentMealRevisionId);
+}
+
 function getImageExtension(filename: string): string {
   const match = /\.([a-z0-9]+)$/i.exec(filename.trim());
   return match?.[1]?.toLowerCase() ?? "";
 }
 
-function getSupportedImageMimeType(file: File): "image/jpeg" | "image/png" | "image/webp" | null {
+export function getSupportedImageMimeType(file: File): "image/jpeg" | "image/png" | "image/webp" | null {
   if (file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp") {
     return file.type;
   }
@@ -358,27 +491,205 @@ export function withAuthorizedAssetUrl(
 }
 
 export function normalizeLoggedMealReceipt(receipt: LoggedMealReceipt): LoggedMealReceipt {
+  const {
+    mealPeriod: rawMealPeriod,
+    receiptStatus: rawReceiptStatus,
+    receiptMealId: rawReceiptMealId,
+    items: _items,
+    imageUrl: rawImageUrl,
+    ...rest
+  } = receipt as LoggedMealReceipt & {
+    mealPeriod?: unknown;
+    receiptStatus?: unknown;
+    items?: unknown;
+    imageUrl?: string | null;
+  };
   const items = normalizeMealItems((receipt as { items?: unknown }).items);
+  const mealPeriod = normalizeMealPeriod(rawMealPeriod);
+  const receiptStatus = normalizeMealReceiptStatus(rawReceiptStatus);
 
   return {
-    ...receipt,
+    ...rest,
+    ...(typeof rawReceiptMealId === "string" ? { receiptMealId: rawReceiptMealId } : {}),
     itemCount: normalizeItemCount(receipt.itemCount),
     ...(items ? { items } : {}),
-    ...(receipt.imageUrl === undefined
+    ...(mealPeriod ? { mealPeriod } : {}),
+    ...(receiptStatus ? { receiptStatus } : {}),
+    ...(rawImageUrl === undefined
       ? {}
-      : { imageUrl: withAuthorizedAssetUrl(receipt.imageUrl) ?? null }),
+      : { imageUrl: withAuthorizedAssetUrl(rawImageUrl) ?? null }),
   };
 }
 
-function normalizeChatReply<T extends { loggedMeal?: LoggedMealReceipt }>(reply: T): T {
-  if (!reply.loggedMeal) {
-    return reply;
-  }
+export function formatTurnReference(turnId: string) {
+  return `t-${turnId.slice(0, 8)}`;
+}
 
+function normalizeSummaryOutcomeFields<T extends { dailySummary?: unknown; summaryOutcome?: unknown }>(
+  body: T,
+): Omit<T, "dailySummary" | "summaryOutcome"> & {
+  dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
+} {
+  const { dailySummary, summaryOutcome, ...rest } = body;
   return {
-    ...reply,
-    loggedMeal: normalizeLoggedMealReceipt(reply.loggedMeal),
+    ...rest,
+    ...(isDailySummary(dailySummary) ? { dailySummary } : {}),
+    ...(isSummaryOutcome(summaryOutcome) ? { summaryOutcome } : {}),
   };
+}
+
+function normalizeChatReply<T extends {
+  loggedMeal?: LoggedMealReceipt;
+  dailySummary?: unknown;
+  summaryOutcome?: unknown;
+  deletedMealId?: unknown;
+  proposalCard?: unknown;
+  proposalActionEvent?: unknown;
+}>(
+  reply: T,
+): T {
+  const { loggedMeal, deletedMealId, proposalCard, proposalActionEvent, ...rest } = reply;
+  return {
+    ...normalizeSummaryOutcomeFields(rest),
+    ...(loggedMeal ? { loggedMeal: normalizeLoggedMealReceipt(loggedMeal) } : {}),
+    ...(typeof deletedMealId === "string" ? { deletedMealId } : {}),
+    ...(isProposalCardMetadata(proposalCard) ? { proposalCard } : {}),
+    ...(isProposalActionEventMetadata(proposalActionEvent) ? { proposalActionEvent } : {}),
+  } as T;
+}
+
+function normalizeMessage(message: Message): Message {
+  const { proposalCard, proposalActionEvent, ...rest } = message as Message & {
+    proposalCard?: unknown;
+    proposalActionEvent?: unknown;
+  };
+  return {
+    ...rest,
+    imageUrl: withAuthorizedAssetUrl(message.imageUrl),
+    loggedMeal: message.loggedMeal
+      ? normalizeLoggedMealReceipt(message.loggedMeal)
+      : message.loggedMeal,
+    ...(isProposalCardMetadata(proposalCard) ? { proposalCard } : {}),
+    ...(isProposalActionEventMetadata(proposalActionEvent) ? { proposalActionEvent } : {}),
+  };
+}
+
+function normalizeProposalTerminalPayload(parsed: Record<string, unknown>) {
+  return {
+    ...(isProposalCardMetadata(parsed.proposalCard) ? { proposalCard: parsed.proposalCard } : {}),
+    ...(isProposalActionEventMetadata(parsed.proposalActionEvent)
+      ? { proposalActionEvent: parsed.proposalActionEvent }
+      : {}),
+  };
+}
+
+function isOptionalNullableString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isAuthoritativeMealCoreDto(value: unknown): value is MealEntry {
+  return (
+    isDtoRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.mealRevisionId === "string" &&
+    value.mealRevisionId.trim().length > 0 &&
+    typeof value.foodName === "string" &&
+    value.foodName.trim().length > 0 &&
+    isDtoFiniteNumber(value.calories) &&
+    isDtoFiniteNumber(value.protein) &&
+    isDtoFiniteNumber(value.carbs) &&
+    isDtoFiniteNumber(value.fat) &&
+    isDtoFiniteNumber(value.itemCount) &&
+    value.itemCount > 0 &&
+    typeof value.loggedAt === "string" &&
+    value.loggedAt.trim().length > 0 &&
+    isOptionalNullableString(value.imageAssetId) &&
+    isOptionalNullableString(value.imageUrl)
+  );
+}
+
+function assertUpdateGoalsResponse(value: unknown): asserts value is { dailyTargets: DailyTargets } {
+  if (!isDtoRecord(value) || !isDailyTargetsDto(value.dailyTargets)) {
+    throw new Error("Invalid update goals payload");
+  }
+}
+
+function assertMealsResponse(value: unknown): asserts value is { meals: MealEntry[] } {
+  if (!isDtoRecord(value) || !Array.isArray(value.meals) || !value.meals.every(isAuthoritativeMealCoreDto)) {
+    throw new Error("Invalid meals payload");
+  }
+}
+
+function assertDaySnapshotResponse(
+  value: unknown,
+): asserts value is { date: string; summary: DailySummary; meals: MealEntry[] } {
+  if (
+    !isDtoRecord(value) ||
+    typeof value.date !== "string" ||
+    !isRealDateKey(value.date) ||
+    !isDailySummaryDto(value.summary) ||
+    value.summary.date !== value.date ||
+    !Array.isArray(value.meals) ||
+    !value.meals.every(isAuthoritativeMealCoreDto)
+  ) {
+    throw new Error("Invalid day snapshot payload");
+  }
+}
+
+type HistoryTrendBucketDto = HistoryTrendResponse["daily"][number];
+
+function isHistoryTrendBucketDto(value: unknown): value is HistoryTrendBucketDto {
+  return (
+    isDtoRecord(value) &&
+    typeof value.date === "string" &&
+    isRealDateKey(value.date) &&
+    isDtoFiniteNumber(value.calories) &&
+    isDtoFiniteNumber(value.protein) &&
+    isDtoFiniteNumber(value.carbs) &&
+    isDtoFiniteNumber(value.fat) &&
+    isDtoFiniteNumber(value.mealCount)
+  );
+}
+
+function isHistoryTrendTotalsDto(value: unknown): value is HistoryTrendResponse["totals"] {
+  return (
+    isDtoRecord(value) &&
+    isDtoFiniteNumber(value.calories) &&
+    isDtoFiniteNumber(value.protein) &&
+    isDtoFiniteNumber(value.carbs) &&
+    isDtoFiniteNumber(value.fat) &&
+    isDtoFiniteNumber(value.mealCount)
+  );
+}
+
+function isHistoryTrendAveragesDto(value: unknown): value is HistoryTrendResponse["averages"] {
+  return (
+    isDtoRecord(value) &&
+    isDtoFiniteNumber(value.calories) &&
+    isDtoFiniteNumber(value.protein) &&
+    isDtoFiniteNumber(value.carbs) &&
+    isDtoFiniteNumber(value.fat) &&
+    isDtoFiniteNumber(value.mealsPerDay)
+  );
+}
+
+function assertHistoryTrendResponse(value: unknown): asserts value is HistoryTrendResponse {
+  if (
+    !isDtoRecord(value) ||
+    typeof value.from !== "string" ||
+    !isRealDateKey(value.from) ||
+    typeof value.to !== "string" ||
+    !isRealDateKey(value.to) ||
+    (value.completeness !== "empty" && value.completeness !== "sparse" && value.completeness !== "complete") ||
+    !Array.isArray(value.daily) ||
+    !value.daily.every(isHistoryTrendBucketDto) ||
+    !isHistoryTrendTotalsDto(value.totals) ||
+    !isHistoryTrendAveragesDto(value.averages)
+  ) {
+    throw new Error("Invalid history trends payload");
+  }
 }
 
 export async function registerDevice(goal: string): Promise<{ deviceId: string; dailyTargets: DailyTargets }> {
@@ -456,12 +767,21 @@ export async function updateGoals(goals: Partial<DailyTargets>): Promise<{ daily
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to update goals");
-  return res.json();
+  const body = await res.json() as unknown;
+  assertUpdateGoalsResponse(body);
+  return body;
 }
 
-export async function sendMessage(message: string, image?: File): Promise<ChatReply> {
+export interface SendMessageOptions {
+  proposalContext?: ProposalEditContext;
+}
+
+export async function sendMessage(message: string, image?: File, options?: SendMessageOptions): Promise<ChatReply> {
   const form = new FormData();
   form.append("message", message);
+  if (options?.proposalContext) {
+    form.append("proposalContext", JSON.stringify(options.proposalContext));
+  }
   if (image) {
     form.append("image", await prepareImageForUpload(image));
   }
@@ -479,19 +799,29 @@ export async function sendMessage(message: string, image?: File): Promise<ChatRe
   return normalizeChatReply(body);
 }
 
+export async function sendProposalAction(request: ProposalActionRequest): Promise<ProposalActionReply> {
+  const res = await fetch("/api/proposals/actions", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) {
+    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    throw new Error(errorMessage ?? "Failed to send proposal action");
+  }
+  const body = await res.json() as ProposalActionReply;
+  return normalizeChatReply(body);
+}
+
 export async function loadHistory(limit = 50): Promise<{ messages: Message[] }> {
   const res = await fetch(`/api/chat/history?limit=${limit}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history");
   const body = await res.json() as { messages: Message[] };
   return {
-    messages: body.messages.map((message) => ({
-      ...message,
-      imageUrl: withAuthorizedAssetUrl(message.imageUrl),
-      loggedMeal: message.loggedMeal
-        ? normalizeLoggedMealReceipt(message.loggedMeal)
-        : message.loggedMeal,
-    })),
+    messages: body.messages.map(normalizeMessage),
   };
 }
 
@@ -504,8 +834,13 @@ export interface StreamCallbacks {
     didMutateMeal?: boolean;
     loggedMeal?: LoggedMealReceipt;
     dailySummary?: DailySummary;
+    summaryOutcome?: SummaryOutcome;
     dailyTargets?: DailyTargets;
     affectedDate?: string;
+    deletedMealId?: string;
+    proposalCard?: ProposalCardMetadata;
+    proposalActionEvent?: ProposalActionEventMetadata;
+    turnId?: string;
   }) => void;
   onStopped?: (data: {
     stopped: true;
@@ -515,8 +850,12 @@ export interface StreamCallbacks {
     didMutateMeal?: boolean;
     loggedMeal?: LoggedMealReceipt;
     dailySummary?: DailySummary;
+    summaryOutcome?: SummaryOutcome;
     dailyTargets?: DailyTargets;
     affectedDate?: string;
+    deletedMealId?: string;
+    proposalCard?: ProposalCardMetadata;
+    proposalActionEvent?: ProposalActionEventMetadata;
   }) => void;
   onError: (message: string) => void;
 }
@@ -524,6 +863,7 @@ export interface StreamCallbacks {
 export interface SendMessageStreamOptions {
   signal?: AbortSignal;
   turnId?: string;
+  proposalContext?: ProposalEditContext;
 }
 
 export async function sendMessageStream(
@@ -536,6 +876,9 @@ export async function sendMessageStream(
   form.append("message", message);
   if (options?.turnId) {
     form.append("turnId", options.turnId);
+  }
+  if (options?.proposalContext) {
+    form.append("proposalContext", JSON.stringify(options.proposalContext));
   }
   if (image) {
     form.append("image", await prepareImageForUpload(image));
@@ -565,12 +908,17 @@ export async function sendMessageStream(
   let sawTerminalEvent = false;
   let activeTurnId: string | null = null;
 
+  function getValidTurnId(turnId: unknown): string | undefined {
+    return typeof turnId === "string" && turnId.trim().length > 0 ? turnId : undefined;
+  }
+
   function maybeEmitTurnStart(turnId: unknown) {
-    if (typeof turnId !== "string" || turnId.trim().length === 0 || turnId === activeTurnId) {
+    const validTurnId = getValidTurnId(turnId);
+    if (!validTurnId || validTurnId === activeTurnId) {
       return;
     }
-    activeTurnId = turnId;
-    callbacks.onTurnStart?.(turnId);
+    activeTurnId = validTurnId;
+    callbacks.onTurnStart?.(validTurnId);
   }
 
   while (true) {
@@ -606,7 +954,10 @@ export async function sendMessageStream(
       }
 
       try {
-        const parsed = JSON.parse(data) as Record<string, unknown>;
+        const parsed = JSON.parse(data) as unknown;
+        if (!isRecord(parsed)) {
+          continue;
+        }
 
         if (eventType === "status") {
           maybeEmitTurnStart(parsed.turnId);
@@ -625,15 +976,19 @@ export async function sendMessageStream(
               ? { loggedMeal: normalizeLoggedMealReceipt(parsed.loggedMeal) }
               : {}),
             ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
+            ...(isSummaryOutcome(parsed.summaryOutcome) ? { summaryOutcome: parsed.summaryOutcome } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
+            ...(typeof parsed.deletedMealId === "string" ? { deletedMealId: parsed.deletedMealId } : {}),
+            ...normalizeProposalTerminalPayload(parsed),
+            ...(getValidTurnId(parsed.turnId) ? { turnId: getValidTurnId(parsed.turnId) } : {}),
           });
         } else if (eventType === "stopped") {
           maybeEmitTurnStart(parsed.turnId);
           sawTerminalEvent = true;
           callbacks.onStopped?.({
             stopped: true,
-            ...(typeof parsed.turnId === "string" ? { turnId: parsed.turnId } : {}),
+            ...(getValidTurnId(parsed.turnId) ? { turnId: getValidTurnId(parsed.turnId) } : {}),
             tokensStreamed: typeof parsed.tokensStreamed === "number" && Number.isFinite(parsed.tokensStreamed)
               ? parsed.tokensStreamed
               : 0,
@@ -643,8 +998,11 @@ export async function sendMessageStream(
               ? { loggedMeal: normalizeLoggedMealReceipt(parsed.loggedMeal) }
               : {}),
             ...(isDailySummary(parsed.dailySummary) ? { dailySummary: parsed.dailySummary } : {}),
+            ...(isSummaryOutcome(parsed.summaryOutcome) ? { summaryOutcome: parsed.summaryOutcome } : {}),
             ...(isDailyTargets(parsed.dailyTargets) ? { dailyTargets: parsed.dailyTargets } : {}),
             ...(typeof parsed.affectedDate === "string" ? { affectedDate: parsed.affectedDate } : {}),
+            ...(typeof parsed.deletedMealId === "string" ? { deletedMealId: parsed.deletedMealId } : {}),
+            ...normalizeProposalTerminalPayload(parsed),
           });
         } else if (eventType === "error") {
           sawTerminalEvent = true;
@@ -685,17 +1043,10 @@ export async function getMeals(options?: { refreshReason?: "day_rollover" | "mea
   const res = await fetch("/api/meals", { credentials: "same-origin", headers });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load meals");
-  const body = await res.json() as { meals: MealEntry[] };
+  const body = await res.json() as unknown;
+  assertMealsResponse(body);
   return {
-    meals: body.meals.map((meal) => ({
-      ...meal,
-      itemCount: normalizeItemCount(meal.itemCount),
-      ...(() => {
-        const items = normalizeMealItems((meal as { items?: unknown }).items);
-        return items ? { items } : {};
-      })(),
-      imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
-    })),
+    meals: body.meals.map(normalizeMealEntry),
   };
 }
 
@@ -705,23 +1056,17 @@ export async function getDaySnapshot(
   const res = await fetch(`/api/day-snapshot?date=${encodeURIComponent(dateKey)}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load day snapshot");
-  const body = await res.json() as { date: string; summary: DailySummary; meals: MealEntry[] };
+  const body = await res.json() as unknown;
+  assertDaySnapshotResponse(body);
   return {
     ...body,
-    meals: body.meals.map((meal) => ({
-      ...meal,
-      itemCount: normalizeItemCount(meal.itemCount),
-      ...(() => {
-        const items = normalizeMealItems((meal as { items?: unknown }).items);
-        return items ? { items } : {};
-      })(),
-      imageUrl: withAuthorizedAssetUrl(meal.imageUrl),
-    })),
+    meals: body.meals.map(normalizeMealEntry),
   };
 }
 
 interface HistoryMealDto {
   id: string;
+  mealRevisionId?: string;
   loggedAt: string;
   display?: { title?: string };
   nutrition?: { calories?: number; protein?: number; carbs?: number; fat?: number };
@@ -735,23 +1080,137 @@ interface HistoryMealDto {
   items?: unknown;
   imageAssetId?: string | null;
   imageUrl?: string | null;
+  mealPeriod?: unknown;
+}
+
+function getHistoryMealTitle(meal: HistoryMealDto): string | null {
+  const title = meal.display?.title ?? meal.foodName;
+  return typeof title === "string" && title.trim().length > 0 ? title : null;
+}
+
+function getHistoryMealNutrition(meal: HistoryMealDto): {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+} | null {
+  const calories = meal.nutrition?.calories ?? meal.calories;
+  const protein = meal.nutrition?.protein ?? meal.protein;
+  const carbs = meal.nutrition?.carbs ?? meal.carbs;
+  const fat = meal.nutrition?.fat ?? meal.fat;
+
+  if (
+    !isDtoFiniteNumber(calories) ||
+    !isDtoFiniteNumber(protein) ||
+    !isDtoFiniteNumber(carbs) ||
+    !isDtoFiniteNumber(fat)
+  ) {
+    return null;
+  }
+
+  return { calories, protein, carbs, fat };
+}
+
+function isHistoryMealDtoComplete(value: unknown): value is HistoryMealDto {
+  if (!isDtoRecord(value)) {
+    return false;
+  }
+
+  const meal = value as unknown as HistoryMealDto;
+  return (
+    typeof meal.id === "string" &&
+    meal.id.trim().length > 0 &&
+    typeof meal.mealRevisionId === "string" &&
+    meal.mealRevisionId.trim().length > 0 &&
+    typeof meal.loggedAt === "string" &&
+    meal.loggedAt.trim().length > 0 &&
+    getHistoryMealTitle(meal) !== null &&
+    getHistoryMealNutrition(meal) !== null &&
+    isDtoFiniteNumber(meal.itemCount) &&
+    meal.itemCount > 0
+  );
+}
+
+function normalizeAuthoritativeHistoryMeal(meal: HistoryMealDto): MealEntry {
+  if (!isHistoryMealDtoComplete(meal)) {
+    throw new Error("Invalid history meal payload");
+  }
+
+  return normalizeHistoryMeal(meal);
+}
+
+function assertHistoryDaySnapshotResponse(value: unknown): asserts value is {
+  date: string;
+  summary: DailySummary;
+  meals: HistoryMealDto[];
+} {
+  if (
+    !isDtoRecord(value) ||
+    typeof value.date !== "string" ||
+    !isRealDateKey(value.date) ||
+    !isDailySummaryDto(value.summary) ||
+    value.summary.date !== value.date ||
+    !Array.isArray(value.meals) ||
+    !value.meals.every(isHistoryMealDtoComplete)
+  ) {
+    throw new Error("Invalid history day snapshot payload");
+  }
+}
+
+function normalizeMealEntry(meal: MealEntry): MealEntry {
+  const {
+    mealPeriod: rawMealPeriod,
+    items: rawItems,
+    imageUrl: rawImageUrl,
+    ...rest
+  } = meal as MealEntry & {
+    mealPeriod?: unknown;
+    items?: unknown;
+    imageUrl?: string | null;
+  };
+  const items = normalizeMealItems(rawItems);
+  const mealPeriod = normalizeMealPeriod(rawMealPeriod);
+
+  return {
+    ...rest,
+    itemCount: normalizeItemCount(meal.itemCount),
+    ...(items ? { items } : {}),
+    imageUrl: withAuthorizedAssetUrl(rawImageUrl),
+    ...(mealPeriod ? { mealPeriod } : {}),
+  };
 }
 
 export function normalizeHistoryMeal(meal: HistoryMealDto): MealEntry {
   const items = normalizeMealItems(meal.items);
+  const mealPeriod = normalizeMealPeriod(meal.mealPeriod);
+  const foodName = getHistoryMealTitle(meal);
+  const nutrition = getHistoryMealNutrition(meal);
+
+  if (
+    typeof meal.mealRevisionId !== "string" ||
+    meal.mealRevisionId.trim().length === 0 ||
+    !foodName ||
+    !nutrition ||
+    !isDtoFiniteNumber(meal.itemCount) ||
+    meal.itemCount <= 0
+  ) {
+    throw new Error("Invalid history meal payload");
+  }
 
   return {
     id: meal.id,
-    foodName: meal.display?.title ?? meal.foodName ?? "未命名餐點",
-    calories: meal.nutrition?.calories ?? meal.calories ?? 0,
-    protein: meal.nutrition?.protein ?? meal.protein ?? 0,
-    carbs: meal.nutrition?.carbs ?? meal.carbs ?? 0,
-    fat: meal.nutrition?.fat ?? meal.fat ?? 0,
-    itemCount: normalizeItemCount(meal.itemCount),
+    mealRevisionId: meal.mealRevisionId,
+    foodName,
+    calories: nutrition.calories,
+    protein: nutrition.protein,
+    carbs: nutrition.carbs,
+    fat: nutrition.fat,
+    itemCount: Math.floor(meal.itemCount),
     ...(items ? { items } : {}),
     imageAssetId: meal.asset?.imageAssetId ?? meal.imageAssetId ?? null,
     imageUrl: withAuthorizedAssetUrl(meal.asset?.imageUrl ?? meal.imageUrl ?? null) ?? null,
     loggedAt: meal.loggedAt,
+    ...(mealPeriod ? { mealPeriod } : {}),
   };
 }
 
@@ -760,34 +1219,42 @@ export async function getHistoryTrends(from: string, to: string): Promise<Histor
   const res = await fetch(`/api/history/trends?${params.toString()}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history trends");
-  return res.json() as Promise<HistoryTrendResponse>;
+  const body = await res.json() as unknown;
+  assertHistoryTrendResponse(body);
+  return body;
 }
 
 export async function getHistoryDaySnapshot(dateKey: string): Promise<HistoryDaySnapshot> {
   const res = await fetch(`/api/history/days/${encodeURIComponent(dateKey)}`, { credentials: "same-origin" });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to load history day snapshot");
-  const body = await res.json() as { date: string; summary: DailySummary; meals: HistoryMealDto[] };
+  const body = await res.json() as unknown;
+  assertHistoryDaySnapshotResponse(body);
   return {
     date: body.date,
     summary: body.summary,
-    meals: body.meals.map(normalizeHistoryMeal),
+    meals: body.meals.map(normalizeAuthoritativeHistoryMeal),
   };
 }
 
-export interface DeleteMealResponse {
-  affectedDate: string;
-  dailySummary: DailySummary;
-}
-
-export async function deleteMeal(mealId: string): Promise<DeleteMealResponse> {
-  const res = await fetch(`/api/meals/${mealId}`, {
+export async function deleteMeal(mealId: string, options: DeleteMealOptions): Promise<DeleteMealResponse> {
+  const res = await fetch(`/api/meals/${encodeURIComponent(mealId)}`, {
     method: "DELETE",
     credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedMealRevisionId: options.expectedMealRevisionId }),
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) throw new Error("Failed to delete meal");
-  return res.json() as Promise<DeleteMealResponse>;
+  if (!res.ok) {
+    const body = await readJsonSafe(res);
+    const conflict = getMealRevisionConflictError(res.status, body);
+    if (conflict) {
+      throw conflict;
+    }
+    throw new Error("Failed to delete meal");
+  }
+  const body = await res.json() as DeleteMealResponse;
+  return normalizeSummaryOutcomeFields(body);
 }
 
 export async function updateMeal(mealId: string, input: UpdateMealInput): Promise<UpdateMealResponse> {
@@ -799,16 +1266,18 @@ export async function updateMeal(mealId: string, input: UpdateMealInput): Promis
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) {
-    const errorMessage = getResponseErrorMessage(await readJsonSafe(res));
+    const body = await readJsonSafe(res);
+    const conflict = getMealRevisionConflictError(res.status, body);
+    if (conflict) {
+      throw conflict;
+    }
+    const errorMessage = getResponseErrorMessage(body);
     throw new Error(errorMessage ?? "Failed to update meal");
   }
   const body = await res.json() as UpdateMealResponse;
+  const normalizedBody = normalizeSummaryOutcomeFields(body);
   return {
-    ...body,
-    meal: {
-      ...body.meal,
-      itemCount: normalizeItemCount(body.meal.itemCount),
-      imageUrl: withAuthorizedAssetUrl(body.meal.imageUrl) ?? null,
-    },
+    ...normalizedBody,
+    meal: normalizeMealEntry(normalizedBody.meal),
   };
 }

@@ -1,6 +1,12 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import type { IntakeData } from "../../client/src/types.js";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import type {
+  IntakeData,
+  ProposalActionEventMetadata,
+  ProposalCardMetadata,
+} from "../../client/src/types.js";
 
 // Minimal localStorage shim
 const storage = new Map<string, string>();
@@ -18,6 +24,10 @@ const originalLocationDescriptor = Object.getOwnPropertyDescriptor(globalThis, "
 const originalCreateImageBitmap = globalThis.createImageBitmap;
 const originalDocument = globalThis.document;
 let fetchCalls: Array<{ url: string; init: RequestInit }> = [];
+
+async function readSource(relativePath: string) {
+  return readFile(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+}
 
 function mockFetch(status: number, body: unknown) {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -52,7 +62,72 @@ function mockStreamFetch(status: number, chunks: string[]) {
   }) as typeof fetch;
 }
 
+const validDailySummary = {
+  date: "2026-04-29",
+  totalCalories: 520,
+  totalProtein: 42,
+  totalCarbs: 48,
+  totalFat: 18,
+  mealCount: 1,
+};
+
+const validMeal = {
+  id: "meal-valid",
+  mealRevisionId: "meal-valid:r1",
+  foodName: "雞胸肉便當",
+  calories: 520,
+  protein: 42,
+  carbs: 48,
+  fat: 18,
+  itemCount: 1,
+  loggedAt: "2026-04-29T04:30:00.000Z",
+};
+
+const validHistoryMeal = {
+  id: "meal-history",
+  mealRevisionId: "meal-history:r1",
+  loggedAt: "2026-04-29T07:30:00.000Z",
+  display: { title: "燕麥 + 香蕉 + 杏仁" },
+  nutrition: { calories: 320, protein: 18, carbs: 45, fat: 9 },
+  itemCount: 1,
+};
+
+const validProposalCard = {
+  proposalId: "proposal-1",
+  proposalKind: "meal_estimate",
+  proposalLane: "meal_mutation",
+  status: "active",
+  isActionable: true,
+  title: "確認這個估值修改",
+  details: {
+    rows: [
+      { label: "熱量", before: "520 kcal", after: "460 kcal" },
+      { label: "蛋白質", value: "32 g" },
+    ],
+  },
+  actions: {
+    approveLabel: "套用修改",
+    editLabel: "改成其他數字",
+    rejectLabel: "取消提案",
+  },
+  expiresAt: "2026-04-29T08:00:00.000Z",
+  lapseCopy: null,
+  supersededByKind: null,
+} satisfies ProposalCardMetadata;
+
+const validProposalActionEvent = {
+  proposalId: "proposal-1",
+  proposalKind: "meal_estimate",
+  proposalLane: "meal_mutation",
+  action: "approve",
+  transcriptCopy: "已選擇套用餐點修改",
+  createdAt: "2026-04-29T07:35:00.000Z",
+} satisfies ProposalActionEventMetadata;
+
 const api = await import("../../client/src/api.js");
+const store = await import("../../client/src/store.js");
+const typesSource = await readSource("../../client/src/types.ts");
+const apiSource = await readSource("../../client/src/api.ts");
 
 describe("API Client", () => {
   beforeEach(() => {
@@ -255,6 +330,36 @@ describe("API Client", () => {
     assert.deepEqual(result, { reply: "已記錄", didLogMeal: true });
   });
 
+  it("formatTurnReference returns the short public reference code", () => {
+    assert.equal(
+      api.formatTurnReference("a1b2c3d4-1111-4222-8333-0123456789ab"),
+      "t-a1b2c3d4",
+    );
+  });
+
+  it("classifies supported chat image mime types without accepting unsupported files", () => {
+    const heic = new File(["x"], "meal.heic", { type: "image/heic" });
+    const extensionOnlyJpeg = new File(["jpeg"], "photo.jpg", { type: "" });
+    const png = new File(["png"], "meal.png", { type: "image/png" });
+    const webp = new File(["webp"], "meal.webp", { type: "image/webp" });
+
+    assert.equal(api.getSupportedImageMimeType(heic), null);
+    assert.equal(api.getSupportedImageMimeType(extensionOnlyJpeg), "image/jpeg");
+    assert.equal(api.getSupportedImageMimeType(png), "image/png");
+    assert.equal(api.getSupportedImageMimeType(webp), "image/webp");
+  });
+
+  it("sendMessage preserves the top-level turnId returned by the backend", async () => {
+    storage.set("deviceId", "d-1");
+    const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";
+    mockFetch(200, { turnId, reply: "已記錄", didLogMeal: true });
+
+    const result = await api.sendMessage("我吃了雞胸肉");
+
+    assert.equal(result.turnId, turnId);
+    assert.deepEqual(result, { turnId, reply: "已記錄", didLogMeal: true });
+  });
+
   it("sendMessage normalizes loggedMeal image urls through withAuthorizedAssetUrl", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
@@ -262,6 +367,7 @@ describe("API Client", () => {
       didLogMeal: true,
       loggedMeal: {
         mealId: "meal-1",
+        mealRevisionId: "meal-1:r1",
         foodName: "照片便當",
         calories: 640,
         protein: 32,
@@ -276,6 +382,355 @@ describe("API Client", () => {
 
     assert.equal(result.loggedMeal?.imageAssetId, "asset-1");
     assert.equal(result.loggedMeal?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.loggedMeal?.mealRevisionId, "meal-1:r1");
+  });
+
+  it("sendMessage preserves explicit loggedMeal mealPeriod and omits invalid values", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      reply: "已記錄",
+      didLogMeal: true,
+      loggedMeal: {
+        mealId: "meal-1",
+        mealRevisionId: "meal-1:r1",
+        foodName: "午餐便當",
+        calories: 640,
+        protein: 32,
+        carbs: 78,
+        fat: 21,
+        mealPeriod: "lunch",
+      },
+    });
+
+    const validResult = await api.sendMessage("午餐我吃了便當");
+
+    assert.equal(validResult.loggedMeal?.mealPeriod, "lunch");
+
+    mockFetch(200, {
+      reply: "已記錄",
+      didLogMeal: true,
+      loggedMeal: {
+        mealId: "meal-2",
+        foodName: "早餐時間的午餐",
+        calories: 520,
+        protein: 28,
+        carbs: 64,
+        fat: 16,
+        mealPeriod: "brunch",
+      },
+    });
+
+    const invalidResult = await api.sendMessage("午餐我吃了飯糰");
+
+    assert.equal(invalidResult.loggedMeal?.mealPeriod, undefined);
+  });
+
+  it("normalizes valid proposal metadata from JSON replies and omits malformed proposal metadata", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      turnId: "turn-proposal",
+      reply: "我先幫你整理成提案。",
+      proposalCard: validProposalCard,
+      proposalActionEvent: validProposalActionEvent,
+    });
+
+    const validResult = await api.sendMessage("幫我估合理一點");
+
+    assert.deepEqual(validResult.proposalCard, validProposalCard);
+    assert.deepEqual(validResult.proposalActionEvent, validProposalActionEvent);
+
+    mockFetch(200, {
+      turnId: "turn-malformed",
+      reply: "這是一段普通回覆。",
+      proposalCard: {
+        ...validProposalCard,
+        proposalKind: "localized-copy-only",
+      },
+      proposalActionEvent: {
+        ...validProposalActionEvent,
+        action: "套用修改",
+      },
+    });
+
+    const malformedResult = await api.sendMessage("普通訊息");
+
+    assert.equal(malformedResult.proposalCard, undefined);
+    assert.equal(malformedResult.proposalActionEvent, undefined);
+  });
+
+  it("normalizes proposal metadata consistently from SSE done, stopped payloads, JSON chat, and history", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      turnId: "turn-json",
+      reply: "JSON",
+      proposalCard: validProposalCard,
+      proposalActionEvent: validProposalActionEvent,
+    });
+    const jsonReply = await api.sendMessage("json");
+
+    mockFetch(200, {
+      messages: [
+        {
+          id: "msg-card",
+          role: "assistant",
+          content: "history card",
+          createdAt: "2026-04-29T07:30:00.000Z",
+          proposalCard: validProposalCard,
+        },
+        {
+          id: "msg-action",
+          role: "user",
+          content: validProposalActionEvent.transcriptCopy,
+          createdAt: "2026-04-29T07:35:00.000Z",
+          proposalActionEvent: validProposalActionEvent,
+        },
+      ],
+    });
+    const history = await api.loadHistory();
+
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: false,
+        proposalCard: validProposalCard,
+        proposalActionEvent: validProposalActionEvent,
+      })}\n\n`,
+    ]);
+    let doneCard: unknown;
+    let doneEvent: unknown;
+    await api.sendMessageStream("done", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        doneCard = payload.proposalCard;
+        doneEvent = payload.proposalActionEvent;
+      },
+      onError: () => {},
+    });
+
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 2,
+        proposalCard: validProposalCard,
+        proposalActionEvent: validProposalActionEvent,
+      })}\n\n`,
+    ]);
+    let stoppedCard: unknown;
+    let stoppedEvent: unknown;
+    await api.sendMessageStream("stopped", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedCard = payload.proposalCard;
+        stoppedEvent = payload.proposalActionEvent;
+      },
+      onError: () => {},
+    });
+
+    assert.deepEqual(jsonReply.proposalCard, validProposalCard);
+    assert.deepEqual(jsonReply.proposalActionEvent, validProposalActionEvent);
+    assert.deepEqual(history.messages[0]?.proposalCard, validProposalCard);
+    assert.deepEqual(history.messages[1]?.proposalActionEvent, validProposalActionEvent);
+    assert.deepEqual(doneCard, validProposalCard);
+    assert.deepEqual(doneEvent, validProposalActionEvent);
+    assert.deepEqual(stoppedCard, validProposalCard);
+    assert.deepEqual(stoppedEvent, validProposalActionEvent);
+  });
+
+  it("sendProposalAction posts only proposal id, kind, and action with same-origin credentials", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      ok: true,
+      status: "approved",
+      proposalCard: { ...validProposalCard, status: "approved", isActionable: false },
+      proposalActionEvent: validProposalActionEvent,
+      didMutateMeal: true,
+      reply: "已完成這次餐點修改。",
+    });
+
+    const result = await api.sendProposalAction({
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+
+    assert.equal(fetchCalls[0].url, "/api/proposals/actions");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(fetchCalls[0].init.headers, { "Content-Type": "application/json" });
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), {
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.proposalCard.status, "approved");
+    assert.equal(result.reply, "已完成這次餐點修改。");
+    for (const forbidden of ["targets", "nutrition", "updateInput", "expectedMealRevisionId", "deleteMealId"]) {
+      assert.equal(String(fetchCalls[0].init.body).includes(forbidden), false);
+    }
+  });
+
+  it("sendProposalAction preserves retryable non-ok reply copy and proposal card", async () => {
+    const retryableReply = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
+    const retryableCard = { ...validProposalCard, status: "active", isActionable: true };
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      ok: false,
+      status: "retryable",
+      didMutateMeal: false,
+      reply: retryableReply,
+      proposalCard: retryableCard,
+    });
+
+    const result = await api.sendProposalAction({
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+
+    assert.equal(fetchCalls[0].url, "/api/proposals/actions");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), {
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "retryable");
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.reply, retryableReply);
+    assert.deepEqual(result.proposalCard, retryableCard);
+  });
+
+  it("sendProposalAction preserves idempotent non-ok reply copy and proposal card", async () => {
+    const idempotentReply = "這個提案已經處理過，不需要再確認一次。";
+    const idempotentCard = { ...validProposalCard, status: "approved", isActionable: false };
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      ok: false,
+      status: "idempotent",
+      didMutateMeal: false,
+      reply: idempotentReply,
+      proposalCard: idempotentCard,
+    });
+
+    const result = await api.sendProposalAction({
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+
+    assert.equal(fetchCalls[0].url, "/api/proposals/actions");
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), {
+      proposalId: "proposal-1",
+      kind: "meal_estimate",
+      action: "approve",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "idempotent");
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.reply, idempotentReply);
+    assert.deepEqual(result.proposalCard, idempotentCard);
+  });
+
+  it("declares proposal DTO types and strict client action transport in source", () => {
+    for (const exportedType of [
+      "ProposalKind",
+      "ProposalLane",
+      "ProposalStatus",
+      "ProposalAction",
+      "ProposalCardMetadata",
+      "ProposalActionEventMetadata",
+      "ProposalActionRequest",
+      "ProposalActionReply",
+      "ProposalEditContext",
+    ]) {
+      assert.match(typesSource, new RegExp(`export (type|interface) ${exportedType}\\b`));
+    }
+
+    assert.match(apiSource, /export async function sendProposalAction/);
+    assert.match(typesSource, /type ProposalActionReply[\s\S]*?ok: true;[\s\S]*?reply\?: string;/);
+    assert.match(typesSource, /status: "stale";[\s\S]*?didMutateMeal: false;/);
+    assert.match(typesSource, /status: "retryable";[\s\S]*?didMutateMeal: false;[\s\S]*?reply: string;/);
+    assert.match(typesSource, /status: "idempotent";[\s\S]*?didMutateMeal: false;[\s\S]*?reply: string;/);
+    assert.match(apiSource, /fetch\("\/api\/proposals\/actions",\s*\{\s*method: "POST",\s*credentials: "same-origin"/s);
+    const sendProposalActionSource = apiSource.match(
+      /export async function sendProposalAction[\s\S]*?\n}\n\nexport async function loadHistory/,
+    )?.[0] ?? "";
+    assert.doesNotMatch(sendProposalActionSource, /targets|nutrition|updateInput|expectedMealRevisionId|deleteMealId/);
+  });
+
+  it("sendMessage sends text-only proposalContext without attaching an image from edit state", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, { turnId: "turn-edit", reply: "收到修改說明" });
+
+    await api.sendMessage("蛋白質改 30g", undefined, {
+      proposalContext: {
+        proposalId: "proposal-1",
+        kind: "meal_numeric",
+        action: "edit",
+      },
+    });
+
+    const body = fetchCalls[0].init.body;
+    assert.ok(body instanceof FormData);
+    assert.equal(body.get("message"), "蛋白質改 30g");
+    assert.equal(body.has("image"), false);
+    assert.deepEqual(JSON.parse(String(body.get("proposalContext"))), {
+      proposalId: "proposal-1",
+      kind: "meal_numeric",
+      action: "edit",
+    });
+  });
+
+  it("store provisional commits can attach proposal card and action event metadata", () => {
+    const { useStore } = store;
+    useStore.setState({
+      messages: [],
+      provisionalBubble: {
+        id: "assistant-proposal",
+        statusLabel: "",
+        content: "我先整理成提案。",
+        isStreaming: true,
+      },
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      proposalCard: validProposalCard,
+      proposalActionEvent: validProposalActionEvent,
+    });
+
+    const committed = useStore.getState().messages.at(-1);
+    assert.equal(committed?.id, "assistant-proposal");
+    assert.deepEqual(committed?.proposalCard, validProposalCard);
+    assert.deepEqual(committed?.proposalActionEvent, validProposalActionEvent);
+
+    useStore.setState({
+      messages: [],
+      provisionalBubble: {
+        id: "assistant-stopped-proposal",
+        statusLabel: "",
+        content: "",
+        isStreaming: true,
+      },
+    });
+
+    useStore.getState().commitStoppedProvisionalBubble({
+      didLogMeal: false,
+      proposalCard: validProposalCard,
+      proposalActionEvent: validProposalActionEvent,
+    });
+
+    const stopped = useStore.getState().messages.at(-1);
+    assert.equal(stopped?.status, "stopped");
+    assert.deepEqual(stopped?.proposalCard, validProposalCard);
+    assert.deepEqual(stopped?.proposalActionEvent, validProposalActionEvent);
   });
 
   it("sendMessage throws UNAUTHORIZED on 401", async () => {
@@ -316,6 +771,7 @@ describe("API Client", () => {
           didLogMeal: true,
           loggedMeal: {
             mealId: "meal-1",
+            mealRevisionId: "meal-1:r1",
             foodName: "照片便當",
             calories: 640,
             protein: 32,
@@ -349,6 +805,7 @@ describe("API Client", () => {
 
     assert.equal(result.messages[0]?.loggedMeal?.imageAssetId, "asset-1");
     assert.equal(result.messages[0]?.loggedMeal?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.messages[0]?.loggedMeal?.mealRevisionId, "meal-1:r1");
     assert.equal(result.messages[1]?.loggedMeal?.imageAssetId, null);
     assert.equal(result.messages[1]?.loggedMeal?.imageUrl, null);
   });
@@ -359,11 +816,13 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "雞胸肉便當",
           calories: 520,
           protein: 42,
           carbs: 48,
           fat: 18,
+          itemCount: 1,
           loggedAt: "2026-04-01T04:30:00.000Z",
         },
       ],
@@ -375,6 +834,7 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.deepEqual(fetchCalls[0].init.headers, {});
     assert.equal(result.meals.length, 1);
+    assert.equal(result.meals[0]?.mealRevisionId, "meal-1:r1");
   });
 
   it("getMeals leaves meal image urls on the cookie-backed path", async () => {
@@ -383,11 +843,13 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "雞胸肉便當",
           calories: 520,
           protein: 42,
           carbs: 48,
           fat: 18,
+          itemCount: 1,
           imageAssetId: "asset-1",
           imageUrl: "/api/assets/asset-1",
           loggedAt: "2026-04-01T04:30:00.000Z",
@@ -398,6 +860,7 @@ describe("API Client", () => {
     const result = await api.getMeals();
 
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.meals[0]?.mealRevisionId, "meal-1:r1");
   });
 
   it("getMeals preserves explicit null meal image fields", async () => {
@@ -406,11 +869,13 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "文字點心",
           calories: 120,
           protein: 6,
           carbs: 14,
           fat: 4,
+          itemCount: 1,
           imageAssetId: null,
           imageUrl: null,
           loggedAt: "2026-04-01T04:30:00.000Z",
@@ -422,6 +887,43 @@ describe("API Client", () => {
 
     assert.equal(result.meals[0]?.imageAssetId, null);
     assert.equal(result.meals[0]?.imageUrl, null);
+  });
+
+  it("getMeals preserves only public mealPeriod enum values", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      meals: [
+        {
+          id: "meal-1",
+          mealRevisionId: "meal-1:r1",
+          foodName: "午餐便當",
+          calories: 520,
+          protein: 42,
+          carbs: 48,
+          fat: 18,
+          itemCount: 1,
+          mealPeriod: "lunch",
+          loggedAt: "2026-04-01T00:30:00.000Z",
+        },
+        {
+          id: "meal-2",
+          mealRevisionId: "meal-2:r1",
+          foodName: "不明餐別",
+          calories: 320,
+          protein: 20,
+          carbs: 42,
+          fat: 8,
+          itemCount: 1,
+          mealPeriod: "snack",
+          loggedAt: "2026-04-01T06:30:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.getMeals();
+
+    assert.equal(result.meals[0]?.mealPeriod, "lunch");
+    assert.equal(result.meals[1]?.mealPeriod, undefined);
   });
 
   it("getDaySnapshot requests the explicit day with same-origin credentials", async () => {
@@ -461,11 +963,13 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "雞胸肉便當",
           calories: 520,
           protein: 42,
           carbs: 48,
           fat: 18,
+          itemCount: 1,
           imageAssetId: "asset-1",
           imageUrl: "/api/assets/asset-1",
           loggedAt: "2026-03-25T04:30:00.000Z",
@@ -476,6 +980,7 @@ describe("API Client", () => {
     const result = await api.getDaySnapshot("2026-03-25");
 
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.meals[0]?.mealRevisionId, "meal-1:r1");
   });
 
   it("getDaySnapshot preserves explicit null meal image fields", async () => {
@@ -493,11 +998,13 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "文字點心",
           calories: 120,
           protein: 6,
           carbs: 14,
           fat: 4,
+          itemCount: 1,
           imageAssetId: null,
           imageUrl: null,
           loggedAt: "2026-03-25T04:30:00.000Z",
@@ -509,6 +1016,64 @@ describe("API Client", () => {
 
     assert.equal(result.meals[0]?.imageAssetId, null);
     assert.equal(result.meals[0]?.imageUrl, null);
+  });
+
+  it("getDaySnapshot preserves valid mealPeriod and omits invalid or missing values", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      date: "2026-03-25",
+      summary: {
+        date: "2026-03-25",
+        totalCalories: 920,
+        totalProtein: 54,
+        totalCarbs: 106,
+        totalFat: 28,
+        mealCount: 3,
+      },
+      meals: [
+        {
+          id: "meal-1",
+          mealRevisionId: "meal-1:r1",
+          foodName: "午餐便當",
+          calories: 520,
+          protein: 32,
+          carbs: 64,
+          fat: 18,
+          itemCount: 1,
+          mealPeriod: "lunch",
+          loggedAt: "2026-03-25T00:30:00.000Z",
+        },
+        {
+          id: "meal-2",
+          mealRevisionId: "meal-2:r1",
+          foodName: "未知餐別",
+          calories: 280,
+          protein: 16,
+          carbs: 36,
+          fat: 8,
+          itemCount: 1,
+          mealPeriod: "afternoon_tea",
+          loggedAt: "2026-03-25T06:30:00.000Z",
+        },
+        {
+          id: "meal-3",
+          mealRevisionId: "meal-3:r1",
+          foodName: "未帶餐別",
+          calories: 120,
+          protein: 6,
+          carbs: 14,
+          fat: 2,
+          itemCount: 1,
+          loggedAt: "2026-03-25T21:30:00.000Z",
+        },
+      ],
+    });
+
+    const result = await api.getDaySnapshot("2026-03-25");
+
+    assert.equal(result.meals[0]?.mealPeriod, "lunch");
+    assert.equal(result.meals[1]?.mealPeriod, undefined);
+    assert.equal(result.meals[2]?.mealPeriod, undefined);
   });
 
   it("getDaySnapshot throws UNAUTHORIZED on 401", async () => {
@@ -550,9 +1115,11 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           loggedAt: "2026-04-29T07:30:00.000Z",
           display: { title: "燕麥 + 香蕉 + 杏仁" },
           nutrition: { calories: 320, protein: 18, carbs: 45, fat: 9 },
+          itemCount: 1,
           asset: { imageAssetId: "asset-1", imageUrl: "/api/assets/asset-1?deviceId=legacy" },
         },
       ],
@@ -564,6 +1131,7 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.equal(result.meals[0]?.foodName, "燕麥 + 香蕉 + 杏仁");
     assert.equal(result.meals[0]?.imageUrl, "/api/assets/asset-1");
+    assert.equal(result.meals[0]?.mealRevisionId, "meal-1:r1");
   });
 
   it("getHistoryDaySnapshot normalizes flat image fields and nested null asset fields", async () => {
@@ -581,17 +1149,21 @@ describe("API Client", () => {
       meals: [
         {
           id: "meal-1",
+          mealRevisionId: "meal-1:r1",
           loggedAt: "2026-04-29T07:30:00.000Z",
           display: { title: "照片便當" },
           nutrition: { calories: 320, protein: 30, carbs: 40, fat: 9 },
+          itemCount: 1,
           imageAssetId: "asset-flat",
           imageUrl: "/api/assets/asset-flat?deviceId=legacy",
         },
         {
           id: "meal-2",
+          mealRevisionId: "meal-2:r1",
           loggedAt: "2026-04-29T08:30:00.000Z",
           display: { title: "文字點心" },
           nutrition: { calories: 120, protein: 6, carbs: 14, fat: 4 },
+          itemCount: 1,
           asset: { imageAssetId: null, imageUrl: null },
         },
       ],
@@ -605,13 +1177,87 @@ describe("API Client", () => {
     assert.equal(result.meals[1]?.imageUrl, null);
   });
 
+  it("rejects malformed REST authoritative DTO payloads with stable errors", async () => {
+    storage.set("deviceId", "d-1");
+
+    mockFetch(200, { dailyTargets: { calories: 2000, protein: 120, carbs: 220 } });
+    await assert.rejects(() => api.updateGoals({ calories: 2000 }), {
+      message: "Invalid update goals payload",
+    });
+
+    mockFetch(200, { meals: [{ ...validMeal, foodName: "" }] });
+    await assert.rejects(() => api.getMeals(), { message: "Invalid meals payload" });
+
+    mockFetch(200, { meals: [{ ...validMeal, mealRevisionId: undefined }] });
+    await assert.rejects(() => api.getMeals(), { message: "Invalid meals payload" });
+
+    mockFetch(200, { date: "2026-04-29", summary: { ...validDailySummary, mealCount: "1" }, meals: [] });
+    await assert.rejects(() => api.getDaySnapshot("2026-04-29"), {
+      message: "Invalid day snapshot payload",
+    });
+
+    mockFetch(200, {
+      date: "2026-04-29",
+      summary: validDailySummary,
+      meals: [{ ...validMeal, mealRevisionId: undefined }],
+    });
+    await assert.rejects(() => api.getDaySnapshot("2026-04-29"), {
+      message: "Invalid day snapshot payload",
+    });
+
+    mockFetch(200, {
+      from: "2026-04-27",
+      to: "2026-05-03",
+      completeness: "sparse",
+      daily: [{ date: "2026-04-29", calories: 200, protein: 20, carbs: 10, fat: 8 }],
+      totals: { calories: 200, protein: 20, carbs: 10, fat: 8, mealCount: 1 },
+      averages: { calories: 200, protein: 20, carbs: 10, fat: 8, mealsPerDay: 1 },
+    });
+    await assert.rejects(() => api.getHistoryTrends("2026-04-27", "2026-05-03"), {
+      message: "Invalid history trends payload",
+    });
+
+    mockFetch(200, {
+      date: "2026-04-29",
+      summary: validDailySummary,
+      meals: [{ ...validHistoryMeal, mealRevisionId: undefined }],
+    });
+    await assert.rejects(() => api.getHistoryDaySnapshot("2026-04-29"), {
+      message: "Invalid history day snapshot payload",
+    });
+  });
+
+  it("normalizeHistoryMeal preserves only public mealPeriod enum values", () => {
+    const valid = api.normalizeHistoryMeal({
+      id: "meal-1",
+      mealRevisionId: "meal-1:r1",
+      loggedAt: "2026-04-29T00:30:00.000Z",
+      display: { title: "午餐便當" },
+      nutrition: { calories: 520, protein: 32, carbs: 64, fat: 18 },
+      itemCount: 1,
+      mealPeriod: "lunch",
+    });
+    const invalid = api.normalizeHistoryMeal({
+      id: "meal-2",
+      mealRevisionId: "meal-2:r1",
+      loggedAt: "2026-04-29T21:30:00.000Z",
+      display: { title: "未知餐別" },
+      nutrition: { calories: 120, protein: 6, carbs: 14, fat: 2 },
+      itemCount: 1,
+      mealPeriod: "midnight_snack",
+    });
+
+    assert.equal(valid.mealPeriod, "lunch");
+    assert.equal(invalid.mealPeriod, undefined);
+  });
+
   it("getHistoryDaySnapshot throws UNAUTHORIZED on 401", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
     await assert.rejects(() => api.getHistoryDaySnapshot("2026-04-29"), { message: "UNAUTHORIZED" });
   });
 
-  it("deleteMeal sends DELETE and returns affectedDate metadata", async () => {
+  it("deleteMeal sends expectedMealRevisionId in a JSON body and returns affectedDate metadata", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(200, {
       affectedDate: "2026-03-25",
@@ -625,7 +1271,7 @@ describe("API Client", () => {
       },
     });
 
-    const result = await api.deleteMeal("meal-1");
+    const result = await api.deleteMeal("meal-1", { expectedMealRevisionId: "meal-1:r1" });
 
     assert.deepEqual(result, {
       affectedDate: "2026-03-25",
@@ -641,6 +1287,34 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].url, "/api/meals/meal-1");
     assert.equal(fetchCalls[0].init.method, "DELETE");
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
+    assert.deepEqual(fetchCalls[0].init.headers, { "content-type": "application/json" });
+    assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), {
+      expectedMealRevisionId: "meal-1:r1",
+    });
+  });
+
+  it("deleteMeal resolves committed unavailable summary outcomes without dailySummary", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-03-25",
+      deletedMealId: "meal-1",
+      summaryOutcome: {
+        status: "unavailable",
+        reason: "recompute_failed",
+      },
+    });
+
+    const result = await api.deleteMeal("meal-1", { expectedMealRevisionId: "meal-1:r1" });
+
+    assert.deepEqual(result, {
+      affectedDate: "2026-03-25",
+      deletedMealId: "meal-1",
+      summaryOutcome: {
+        status: "unavailable",
+        reason: "recompute_failed",
+      },
+    });
+    assert.equal(result.dailySummary, undefined);
   });
 
   it("updateMeal sends PATCH with same-origin JSON body and returns refreshed daily summary", async () => {
@@ -657,6 +1331,7 @@ describe("API Client", () => {
       },
       meal: {
         id: "meal-1",
+        mealRevisionId: "meal-1:r2",
         foodName: "雞胸肉沙拉半份",
         calories: 260,
         protein: 20,
@@ -669,6 +1344,7 @@ describe("API Client", () => {
     });
 
     const input = {
+      expectedMealRevisionId: "meal-1:r1",
       foodName: "雞胸肉沙拉半份",
       calories: 260,
       protein: 20,
@@ -683,7 +1359,169 @@ describe("API Client", () => {
     assert.equal(fetchCalls[0].init.credentials, "same-origin");
     assert.deepEqual(fetchCalls[0].init.headers, { "content-type": "application/json" });
     assert.deepEqual(JSON.parse(String(fetchCalls[0].init.body)), input);
-    assert.equal(result.dailySummary.totalCalories, 260);
+    assert.equal(result.dailySummary?.totalCalories, 260);
+    assert.equal(result.meal.foodName, "雞胸肉沙拉半份");
+    assert.equal(result.meal.mealRevisionId, "meal-1:r2");
+  });
+
+  it("updateMeal sends grouped item replacement as an items-only PATCH body", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      meal: {
+        id: "meal-1",
+        mealRevisionId: "meal-1:r2",
+        foodName: "雞腿、白飯",
+        calories: 640,
+        protein: 38,
+        carbs: 78,
+        fat: 20,
+        itemCount: 2,
+        loggedAt: "2026-04-30T04:00:00.000Z",
+      },
+    });
+
+    const input = {
+      expectedMealRevisionId: "meal-1:r1",
+      items: [
+        { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+        { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 2 },
+      ],
+    };
+
+    await api.updateMeal("meal-1", input as any);
+
+    const body = JSON.parse(String(fetchCalls[0].init.body));
+    assert.deepEqual(body, input);
+    assert.deepEqual(Object.keys(body).sort(), ["expectedMealRevisionId", "items"]);
+    for (const rejected of ["foodName", "calories", "protein", "carbs", "fat", "imageAssetId"]) {
+      assert.equal(Object.hasOwn(body, rejected), false);
+    }
+  });
+
+  it("preserves stable meal revision conflict metadata for update and delete errors", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(409, {
+      error: "MEAL_REVISION_STALE",
+      mealId: "meal-1",
+      affectedDate: "2026-04-30",
+      currentMealRevisionId: "meal-1:r2",
+    });
+
+    await assert.rejects(
+      () =>
+        api.updateMeal("meal-1", {
+          expectedMealRevisionId: "meal-1:r1",
+          foodName: "雞胸肉沙拉半份",
+          calories: 260,
+          protein: 20,
+          carbs: 8,
+          fat: 12,
+          imageAssetId: null,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof api.MealRevisionConflictError);
+        assert.equal(error.code, "MEAL_REVISION_STALE");
+        assert.equal(error.mealId, "meal-1");
+        assert.equal(error.affectedDate, "2026-04-30");
+        assert.equal(error.currentMealRevisionId, "meal-1:r2");
+        return true;
+      },
+    );
+
+    mockFetch(409, {
+      error: "MEAL_REVISION_REQUIRED",
+      mealId: "meal-1",
+      affectedDate: "2026-04-30",
+    });
+
+    await assert.rejects(
+      () => api.deleteMeal("meal-1", { expectedMealRevisionId: "meal-1:r1" }),
+      (error: unknown) => {
+        assert.ok(error instanceof api.MealRevisionConflictError);
+        assert.equal(error.code, "MEAL_REVISION_REQUIRED");
+        assert.equal(error.mealId, "meal-1");
+        assert.equal(error.affectedDate, "2026-04-30");
+        assert.equal(error.currentMealRevisionId, undefined);
+        return true;
+      },
+    );
+  });
+
+  it("parses grouped update stale conflicts through MealRevisionConflictError", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(409, {
+      error: "MEAL_REVISION_STALE",
+      mealId: "meal-1",
+      affectedDate: "2026-04-30",
+      currentMealRevisionId: "meal-1:r2",
+    });
+
+    await assert.rejects(
+      () =>
+        api.updateMeal("meal-1", {
+          expectedMealRevisionId: "meal-1:r1",
+          items: [
+            { name: "雞腿", position: 0, calories: 340, protein: 32, carbs: 2, fat: 18 },
+            { name: "白飯", position: 1, calories: 300, protein: 6, carbs: 76, fat: 2 },
+          ],
+        } as any),
+      (error: unknown) => {
+        assert.ok(error instanceof api.MealRevisionConflictError);
+        assert.equal(error.code, "MEAL_REVISION_STALE");
+        assert.equal(error.mealId, "meal-1");
+        assert.equal(error.affectedDate, "2026-04-30");
+        assert.equal(error.currentMealRevisionId, "meal-1:r2");
+        return true;
+      },
+    );
+  });
+
+  it("declares separate scalar and grouped update input contracts", () => {
+    assert.match(typesSource, /export interface ScalarUpdateMealInput/);
+    assert.match(typesSource, /export interface GroupedUpdateMealInput/);
+    assert.match(typesSource, /export type UpdateMealInput\s*=\s*ScalarUpdateMealInput\s*\|\s*GroupedUpdateMealInput/);
+    assert.match(typesSource, /items:\s*MealItemDetail\[\]/);
+  });
+
+  it("updateMeal resolves committed unavailable summary outcomes without dailySummary", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      summaryOutcome: {
+        status: "unavailable",
+        reason: "recompute_failed",
+      },
+      meal: {
+        id: "meal-1",
+        mealRevisionId: "meal-1:r2",
+        foodName: "雞胸肉沙拉半份",
+        calories: 260,
+        protein: 20,
+        carbs: 8,
+        fat: 12,
+        imageAssetId: null,
+        imageUrl: null,
+        loggedAt: "2026-04-30T04:00:00.000Z",
+      },
+    });
+
+    const result = await api.updateMeal("meal-1", {
+      expectedMealRevisionId: "meal-1:r1",
+      foodName: "雞胸肉沙拉半份",
+      calories: 260,
+      protein: 20,
+      carbs: 8,
+      fat: 12,
+      imageAssetId: null,
+    });
+
+    assert.equal(result.affectedDate, "2026-04-30");
+    assert.equal(result.dailySummary, undefined);
+    assert.deepEqual(result.summaryOutcome, {
+      status: "unavailable",
+      reason: "recompute_failed",
+    });
     assert.equal(result.meal.foodName, "雞胸肉沙拉半份");
   });
 
@@ -701,6 +1539,7 @@ describe("API Client", () => {
       },
       meal: {
         id: "meal-1",
+        mealRevisionId: "meal-1:r2",
         foodName: "照片便當更新",
         calories: 660,
         protein: 34,
@@ -713,6 +1552,7 @@ describe("API Client", () => {
     });
 
     const result = await api.updateMeal("meal-1", {
+      expectedMealRevisionId: "meal-1:r1",
       foodName: "照片便當更新",
       calories: 660,
       protein: 34,
@@ -725,6 +1565,63 @@ describe("API Client", () => {
     assert.equal(result.meal.imageUrl, "/api/assets/asset-1");
   });
 
+  it("updateMeal response preserves valid mealPeriod and omits invalid values", async () => {
+    storage.set("deviceId", "d-1");
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      meal: {
+        id: "meal-1",
+        mealRevisionId: "meal-1:r2",
+        foodName: "午餐便當更新",
+        calories: 660,
+        protein: 34,
+        carbs: 80,
+        fat: 22,
+        mealPeriod: "lunch",
+        loggedAt: "2026-04-30T00:00:00.000Z",
+      },
+    });
+
+    const valid = await api.updateMeal("meal-1", {
+      expectedMealRevisionId: "meal-1:r1",
+      foodName: "午餐便當更新",
+      calories: 660,
+      protein: 34,
+      carbs: 80,
+      fat: 22,
+      imageAssetId: null,
+    });
+
+    assert.equal(valid.meal.mealPeriod, "lunch");
+
+    mockFetch(200, {
+      affectedDate: "2026-04-30",
+      meal: {
+        id: "meal-1",
+        mealRevisionId: "meal-1:r3",
+        foodName: "不明餐別更新",
+        calories: 600,
+        protein: 30,
+        carbs: 72,
+        fat: 20,
+        mealPeriod: "brunch",
+        loggedAt: "2026-04-30T00:00:00.000Z",
+      },
+    });
+
+    const invalid = await api.updateMeal("meal-1", {
+      expectedMealRevisionId: "meal-1:r2",
+      foodName: "不明餐別更新",
+      calories: 600,
+      protein: 30,
+      carbs: 72,
+      fat: 20,
+      imageAssetId: null,
+    });
+
+    assert.equal(invalid.meal.mealPeriod, undefined);
+  });
+
   it("updateMeal URL-encodes meal id and throws UNAUTHORIZED on 401", async () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
@@ -732,6 +1629,7 @@ describe("API Client", () => {
     await assert.rejects(
       () =>
         api.updateMeal("meal 1/with slash", {
+          expectedMealRevisionId: "meal-1:r1",
           foodName: "雞胸肉沙拉半份",
           calories: 260,
           protein: 20,
@@ -939,6 +1837,98 @@ describe("sendMessageStream", () => {
     assert.equal(affectedDate, "2026-03-25");
   });
 
+  it("dispatches valid deletedMealId from done and stopped events and omits malformed values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":false,"didMutateMeal":true,"deletedMealId":"meal-deleted"}\n\n',
+    ]);
+    let doneDeletedMealId: string | undefined;
+
+    await api.sendMessageStream("delete meal", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        doneDeletedMealId = payload.deletedMealId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(doneDeletedMealId, "meal-deleted");
+
+    mockStreamFetch(200, [
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":2,"didMutateMeal":true,"deletedMealId":"meal-stopped"}\n\n',
+    ]);
+    let stoppedDeletedMealId: string | undefined;
+
+    await api.sendMessageStream("delete meal", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedDeletedMealId = payload.deletedMealId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(stoppedDeletedMealId, "meal-stopped");
+
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":false,"didMutateMeal":true,"deletedMealId":123}\n\n',
+    ]);
+    doneDeletedMealId = "not-reset";
+
+    await api.sendMessageStream("delete meal", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        doneDeletedMealId = payload.deletedMealId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(doneDeletedMealId, undefined);
+  });
+
+  it("dispatches stopped terminal payloads separately from done and error callbacks", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":0,"didLogMeal":false,"didMutateMeal":false,"turnId":"turn-stopped-separate"}\n\n',
+    ]);
+    let doneCalled = false;
+    const errors: string[] = [];
+    let stoppedPayload:
+      | {
+          stopped: true;
+          turnId?: string;
+          tokensStreamed: number;
+          didLogMeal?: boolean;
+          didMutateMeal?: boolean;
+        }
+      | undefined;
+
+    await api.sendMessageStream("stop", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {
+        doneCalled = true;
+      },
+      onStopped: (payload) => {
+        stoppedPayload = payload;
+      },
+      onError: (message) => errors.push(message),
+    });
+
+    assert.equal(doneCalled, false);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(stoppedPayload, {
+      stopped: true,
+      turnId: "turn-stopped-separate",
+      tokensStreamed: 0,
+      didLogMeal: false,
+      didMutateMeal: false,
+    });
+  });
+
   it("dispatches done loggedMeal image urls through withAuthorizedAssetUrl", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [
@@ -946,6 +1936,7 @@ describe("sendMessageStream", () => {
         didLogMeal: true,
         loggedMeal: {
           mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "照片便當",
           calories: 640,
           protein: 32,
@@ -970,6 +1961,181 @@ describe("sendMessageStream", () => {
     assert.equal(imageUrl, "/api/assets/asset-1");
   });
 
+  it("dispatches done loggedMeal mealRevisionId", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
+          foodName: "照片便當",
+          calories: 640,
+          protein: 32,
+          carbs: 78,
+          fat: 21,
+        },
+      })}\n\n`,
+    ]);
+    let mealRevisionId: string | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        mealRevisionId = payload.loggedMeal?.mealRevisionId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealRevisionId, "meal-1:r1");
+  });
+
+  it("dispatches done loggedMeal mealPeriod only for public enum values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
+          foodName: "宵夜飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+          mealPeriod: "late_night",
+        },
+      })}\n\n`,
+    ]);
+    let mealPeriod: unknown;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        mealPeriod = payload.loggedMeal?.mealPeriod;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealPeriod, "late_night");
+
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-2",
+          mealRevisionId: "meal-2:r1",
+          foodName: "不明餐別",
+          calories: 180,
+          protein: 8,
+          carbs: 24,
+          fat: 6,
+          mealPeriod: "midnight_snack",
+        },
+      })}\n\n`,
+    ]);
+    mealPeriod = "not-reset";
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        mealPeriod = payload.loggedMeal?.mealPeriod;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealPeriod, undefined);
+  });
+
+  it("dispatches valid done summaryOutcome and omits malformed values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":true,"didMutateMeal":true,"summaryOutcome":{"status":"unavailable","reason":"recompute_failed"},"dailySummary":{"date":"bad","totalCalories":"bad"},"turnId":"turn-1"}\n\n',
+    ]);
+    let donePayload: { summaryOutcome?: unknown; didMutateMeal?: boolean; dailySummary?: unknown } | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        donePayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(donePayload?.didMutateMeal, true);
+    assert.equal(donePayload?.dailySummary, undefined);
+    assert.deepEqual(donePayload?.summaryOutcome, {
+      status: "unavailable",
+      reason: "recompute_failed",
+    });
+
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didMutateMeal":true,"summaryOutcome":{"status":"unavailable","reason":"publish_failed"}}\n\n',
+    ]);
+    donePayload = undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        donePayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal((donePayload as { summaryOutcome?: unknown } | undefined)?.summaryOutcome, undefined);
+  });
+
+  it("omits malformed done authoritative additions while preserving the terminal callback", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: done\ndata: ${JSON.stringify({
+        didLogMeal: true,
+        didMutateMeal: true,
+        loggedMeal: { foodName: "", calories: 1, protein: 1, carbs: 1, fat: 1 },
+        dailySummary: { date: "2026-04-30", totalCalories: "bad" },
+        summaryOutcome: { status: "fresh" },
+        dailyTargets: { calories: 1800, protein: 120, carbs: 160 },
+        affectedDate: "2026-04-30",
+        turnId: "turn-done-malformed",
+      })}\n\n`,
+    ]);
+    let donePayload:
+      | {
+          didLogMeal: boolean;
+          didMutateMeal?: boolean;
+          loggedMeal?: unknown;
+          dailySummary?: unknown;
+          summaryOutcome?: unknown;
+          dailyTargets?: unknown;
+          affectedDate?: string;
+          turnId?: string;
+        }
+      | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        donePayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(donePayload?.didLogMeal, true);
+    assert.equal(donePayload?.didMutateMeal, true);
+    assert.equal(donePayload?.affectedDate, "2026-04-30");
+    assert.equal(donePayload?.turnId, "turn-done-malformed");
+    assert.equal(donePayload?.loggedMeal, undefined);
+    assert.equal(donePayload?.dailySummary, undefined);
+    assert.equal(donePayload?.summaryOutcome, undefined);
+    assert.equal(donePayload?.dailyTargets, undefined);
+  });
+
   it("dispatches stopped loggedMeal image urls through withAuthorizedAssetUrl", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [
@@ -979,6 +2145,7 @@ describe("sendMessageStream", () => {
         didLogMeal: true,
         loggedMeal: {
           mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
           foodName: "照片便當",
           calories: 640,
           protein: 32,
@@ -1002,6 +2169,221 @@ describe("sendMessageStream", () => {
     });
 
     assert.equal(imageUrl, "/api/assets/asset-1");
+  });
+
+  it("dispatches stopped loggedMeal mealRevisionId", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 3,
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-2",
+          mealRevisionId: "meal-2:r1",
+          foodName: "飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+        },
+      })}\n\n`,
+    ]);
+    let mealRevisionId: string | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        mealRevisionId = payload.loggedMeal?.mealRevisionId;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealRevisionId, "meal-2:r1");
+  });
+
+  it("dispatches stopped loggedMeal mealPeriod only for public enum values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 3,
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-2",
+          mealRevisionId: "meal-2:r1",
+          foodName: "午餐飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+          mealPeriod: "lunch",
+        },
+      })}\n\n`,
+    ]);
+    let mealPeriod: unknown;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        mealPeriod = payload.loggedMeal?.mealPeriod;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealPeriod, "lunch");
+
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 1,
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-3",
+          foodName: "未知餐別",
+          calories: 180,
+          protein: 8,
+          carbs: 24,
+          fat: 6,
+          mealPeriod: "snack",
+        },
+      })}\n\n`,
+    ]);
+    mealPeriod = "not-reset";
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        mealPeriod = payload.loggedMeal?.mealPeriod;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(mealPeriod, undefined);
+  });
+
+  it("dispatches valid stopped summaryOutcome and omits malformed values", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":2,"didMutateMeal":true,"summaryOutcome":{"status":"recovered","reason":"recompute_failed","dailySummary":{"date":"2026-04-30","totalCalories":260,"totalProtein":20,"totalCarbs":8,"totalFat":12,"mealCount":1}}}\n\n',
+    ]);
+    let stoppedPayload: { summaryOutcome?: unknown; didMutateMeal?: boolean } | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedPayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(stoppedPayload?.didMutateMeal, true);
+    assert.deepEqual(stoppedPayload?.summaryOutcome, {
+      status: "recovered",
+      reason: "recompute_failed",
+      dailySummary: {
+        date: "2026-04-30",
+        totalCalories: 260,
+        totalProtein: 20,
+        totalCarbs: 8,
+        totalFat: 12,
+        mealCount: 1,
+      },
+    });
+
+    mockStreamFetch(200, [
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":2,"summaryOutcome":{"status":"fresh"}}\n\n',
+    ]);
+    stoppedPayload = undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedPayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal((stoppedPayload as { summaryOutcome?: unknown } | undefined)?.summaryOutcome, undefined);
+  });
+
+  it("omits malformed stopped authoritative additions while preserving the terminal callback", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      `event: stopped\ndata: ${JSON.stringify({
+        stopped: true,
+        tokensStreamed: 4,
+        didLogMeal: true,
+        loggedMeal: { foodName: "", calories: 1, protein: 1, carbs: 1, fat: 1 },
+        dailySummary: { date: "2026-04-30", totalCalories: "bad" },
+        summaryOutcome: { status: "fresh" },
+        dailyTargets: { calories: 1800, protein: 120, carbs: 160 },
+        affectedDate: "2026-04-30",
+        turnId: "turn-stopped-malformed",
+      })}\n\n`,
+    ]);
+    let stoppedPayload:
+      | {
+          stopped: true;
+          tokensStreamed: number;
+          didLogMeal?: boolean;
+          loggedMeal?: unknown;
+          dailySummary?: unknown;
+          summaryOutcome?: unknown;
+          dailyTargets?: unknown;
+          affectedDate?: string;
+          turnId?: string;
+        }
+      | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {},
+      onStopped: (payload) => {
+        stoppedPayload = payload;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(stoppedPayload?.stopped, true);
+    assert.equal(stoppedPayload?.tokensStreamed, 4);
+    assert.equal(stoppedPayload?.didLogMeal, true);
+    assert.equal(stoppedPayload?.affectedDate, "2026-04-30");
+    assert.equal(stoppedPayload?.turnId, "turn-stopped-malformed");
+    assert.equal(stoppedPayload?.loggedMeal, undefined);
+    assert.equal(stoppedPayload?.dailySummary, undefined);
+    assert.equal(stoppedPayload?.summaryOutcome, undefined);
+    assert.equal(stoppedPayload?.dailyTargets, undefined);
+  });
+
+  it("ignores malformed terminal event JSON without dispatching lifecycle callbacks", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, ['event: done\ndata: []\n\n']);
+    let done = false;
+    const errors: string[] = [];
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: () => {
+        done = true;
+      },
+      onError: (message) => errors.push(message),
+    });
+
+    assert.equal(done, false);
+    assert.deepEqual(errors, ["Stream interrupted"]);
   });
 
   it("handles SSE event split across two chunks", async () => {

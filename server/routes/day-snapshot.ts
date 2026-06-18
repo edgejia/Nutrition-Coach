@@ -41,6 +41,7 @@ export function registerDaySnapshotRoutes(app: FastifyInstance, deps: Deps) {
           const imageAssetId = parseAssetRef(meal.imagePath);
           return {
             id: meal.id,
+            mealRevisionId: meal.mealRevisionId,
             foodName: meal.foodName,
             itemCount: meal.itemCount ?? 1,
             calories: meal.calories,
@@ -50,6 +51,7 @@ export function registerDaySnapshotRoutes(app: FastifyInstance, deps: Deps) {
             imageAssetId,
             imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
             loggedAt: meal.loggedAt,
+            ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
           };
         }),
       };

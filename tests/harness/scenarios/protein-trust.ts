@@ -4,6 +4,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { validJpegBytes } from "../../fixtures/image-bytes.js";
 import type {
   VerificationScenario,
   ScenarioContext,
@@ -21,6 +22,7 @@ const STEP_NAMES = [
   "carb_dominant_small_protein",
   "high_uncertainty_image",
 ] as const;
+const FORBIDDEN_USER_COPY_TERMS = ["headline", "先抓低", "保守估算"] as const;
 
 type StepName = typeof STEP_NAMES[number];
 
@@ -84,13 +86,7 @@ function failResult(
 }
 
 function makeJpegBytes(): ArrayBuffer {
-  const bytes = new Uint8Array([
-    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-    ...new Array(50).fill(0x00),
-    0xFF, 0xD9,
-  ]);
-  return bytes.buffer as ArrayBuffer;
+  return validJpegBytes();
 }
 
 function toCookieHeader(rawHeader: string | string[] | undefined) {
@@ -114,16 +110,26 @@ async function createFreshDevice(app: ScenarioContext["app"]): Promise<{ deviceI
 }
 
 function parseReplyText(rawSSE: string): string {
-  return parseSSEEvents(rawSSE)
+  const tokens = parseSSEEvents(rawSSE)
     .filter((event) => event.event === "chunk")
-    .map((event) => {
+    .map((event, index) => {
+      let parsed: unknown;
       try {
-        return (JSON.parse(event.data) as { token: string }).token;
-      } catch {
-        return "";
+        parsed = JSON.parse(event.data);
+      } catch (error) {
+        throw new Error(`Malformed chunk JSON at index ${index}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    })
-    .join("");
+      const token = (parsed as { token?: unknown }).token;
+      if (typeof token !== "string" || token.trim().length === 0) {
+        throw new Error(`Malformed chunk payload at index ${index}: missing non-empty token`);
+      }
+      return token;
+    });
+  const replyText = tokens.join("");
+  if (replyText.trim().length === 0) {
+    throw new Error("Assembled chunk reply text is empty");
+  }
+  return replyText;
 }
 
 function parseDonePayload(rawSSE: string): DonePayload | undefined {
@@ -135,6 +141,13 @@ function parseDonePayload(rawSSE: string): DonePayload | undefined {
     return JSON.parse(doneEvent.data) as DonePayload;
   } catch {
     return undefined;
+  }
+}
+
+function assertNoForbiddenUserCopy(label: string, text: string) {
+  const matchedTerms = FORBIDDEN_USER_COPY_TERMS.filter((term) => text.includes(term));
+  if (matchedTerms.length > 0) {
+    throw new Error(`${label} contains forbidden copy: ${matchedTerms.join(", ")}`);
   }
 }
 
@@ -240,6 +253,8 @@ async function runProteinTrustCase(
       throw new Error(`assistant history "${assistantReply}" did not match ${String(pattern)}`);
     }
   }
+  assertNoForbiddenUserCopy("reply", replyText);
+  assertNoForbiddenUserCopy("assistant history", assistantReply);
 
   return {
     caseName: trustCase.stepName,
@@ -276,32 +291,28 @@ const scenario: VerificationScenario = {
         stepName: "mixed_lunchbox",
         message: "我午餐吃雞腿便當",
         toolArgs: {
-          food_name: "雞腿便當",
-          calories: 640,
-          protein: 30,
-          carbs: 78,
-          fat: 20,
+          items: [
+            { food_name: "雞腿便當", calories: 640, protein: 30, carbs: 78, fat: 20 },
+          ],
           protein_sources: [
             { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
             { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
             { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
           ],
         },
-        streamedReply: "已幫你記錄雞腿便當。蛋白質先按雞腿作為主要來源估算，其他配菜不列入 headline。",
+        streamedReply: "已幫你記錄雞腿便當。蛋白質先按雞腿作為主要來源估算，其他配菜不列入主要蛋白質。",
         expectedProtein: 24,
         rawProtein: 30,
         expectedFoodName: "雞腿便當",
-        expectedReplyPatterns: [/雞腿/, /headline/],
+        expectedReplyPatterns: [/雞腿便當/, /蛋白質 24 g/],
       },
       {
         stepName: "plant_protein",
         message: "我吃了豆腐和豆漿",
         toolArgs: {
-          food_name: "豆腐豆漿餐",
-          calories: 420,
-          protein: 30,
-          carbs: 24,
-          fat: 20,
+          items: [
+            { food_name: "豆腐豆漿餐", calories: 420, protein: 30, carbs: 24, fat: 20 },
+          ],
           protein_sources: [
             { name: "豆腐", protein: 20, is_primary: true, certainty: "clear" },
             { name: "豆漿", protein: 10, is_primary: true, certainty: "clear" },
@@ -311,17 +322,20 @@ const scenario: VerificationScenario = {
         expectedProtein: 30,
         rawProtein: 30,
         expectedFoodName: "豆腐豆漿餐",
-        expectedReplyPatterns: [/豆腐/, /豆漿/],
+        expectedReplyPatterns: [/豆腐豆漿餐/, /蛋白質 30 g/],
       },
       {
         stepName: "carb_dominant_small_protein",
         message: "我晚餐吃咖哩飯",
         toolArgs: {
-          food_name: "咖哩飯",
-          calories: 560,
-          protein: 16,
-          carbs: 85,
-          fat: 14,
+          // Plan 83-03: top-level aggregates removed — the grouped-only strict
+          // logFoodSchema rejects them; items[] is the sole input shape.
+          items: [
+            { food_name: "雞肉", calories: 90, protein: 6, carbs: 0, fat: 4 },
+            { food_name: "白飯", calories: 360, protein: 6, carbs: 78, fat: 1 },
+            { food_name: "馬鈴薯", calories: 70, protein: 2, carbs: 7, fat: 4 },
+            { food_name: "紅蘿蔔", calories: 40, protein: 2, carbs: 0, fat: 5 },
+          ],
           protein_sources: [
             { name: "雞肉", protein: 6, is_primary: true, certainty: "clear" },
             { name: "白飯", protein: 6, is_primary: false, certainty: "clear" },
@@ -329,22 +343,20 @@ const scenario: VerificationScenario = {
             { name: "紅蘿蔔", protein: 2, is_primary: false, certainty: "clear" },
           ],
         },
-        streamedReply: "已幫你記錄咖哩飯。蛋白質先按雞肉作為主要來源估算，其他配菜不列入 headline。",
+        streamedReply: "已幫你記錄咖哩飯。蛋白質先按雞肉作為主要來源估算，其他配菜不列入主要蛋白質。",
         expectedProtein: 6,
         rawProtein: 16,
-        expectedFoodName: "咖哩飯",
-        expectedReplyPatterns: [/雞肉/, /headline/],
+        expectedFoodName: "雞肉、白飯、馬鈴薯、紅蘿蔔",
+        expectedReplyPatterns: [/雞肉、白飯、馬鈴薯、紅蘿蔔/, /蛋白質 6 g/],
       },
       {
         stepName: "high_uncertainty_image",
         message: "",
         imageMode: true,
         toolArgs: {
-          food_name: "豆腐便當",
-          calories: 520,
-          protein: 18,
-          carbs: 60,
-          fat: 18,
+          items: [
+            { food_name: "豆腐便當", calories: 520, protein: 18, carbs: 60, fat: 18 },
+          ],
           protein_sources: [
             { name: "豆腐", protein: 18, is_primary: true, certainty: "uncertain" },
             { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
@@ -354,7 +366,7 @@ const scenario: VerificationScenario = {
         expectedProtein: 18,
         rawProtein: 18,
         expectedFoodName: "豆腐便當",
-        expectedReplyPatterns: [/保守估算/, /豆腐/, /先抓低一些/],
+        expectedReplyPatterns: [/豆腐便當/, /蛋白質 18 g/, /若份量不同/],
       },
     ];
 

@@ -4,7 +4,7 @@ export interface SportIconProps {
   size?: number;
   stroke?: number;
   className?: string;
-  "aria-hidden"?: boolean;
+  "aria-hidden"?: boolean | "true" | "false";
 }
 
 function SportIconBase({
@@ -132,6 +132,15 @@ export function SportPlusIcon(props: SportIconProps) {
   return (
     <SportIconBase {...props}>
       <path d="M12 5v14M5 12h14" />
+    </SportIconBase>
+  );
+}
+
+export function SportEditIcon(props: SportIconProps) {
+  return (
+    <SportIconBase {...props}>
+      <path d="M14.5 5.5 18.5 9.5" />
+      <path d="M4.5 19.5 8.7 18.7 19 8.4a2.1 2.1 0 0 0-3-3L5.7 15.7 4.5 19.5Z" />
     </SportIconBase>
   );
 }

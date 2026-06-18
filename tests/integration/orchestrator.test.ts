@@ -1,21 +1,97 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import type OpenAI from "openai";
 import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
-import { chatMessages } from "../../server/db/schema.js";
+import { chatMessages, mealTransactions } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createGoalProposalService } from "../../server/services/goal-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { LLMProviderError } from "../../server/llm/errors.js";
+import { OpenAIProvider } from "../../server/llm/openai.js";
 import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
+import {
+  renderGoalAuthorityFailureCopy,
+  renderGoalValidationFailureCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createSpyHooks } from "../helpers/spy-hooks.js";
 import type { DailyTargets } from "../../server/services/device.js";
+import type {
+  ChatMessage,
+  GenerateObjectRequest,
+  GenerateObjectResult,
+  LLMProvider,
+  ProviderErrorMetadata,
+} from "../../server/llm/types.js";
 
 function assertReplyResult(result: OrchestratorResult): asserts result is Extract<OrchestratorResult, { reply: string }> {
   assert.ok("reply" in result);
+}
+
+function assertStreamResult(
+  result: OrchestratorResult,
+): asserts result is Extract<OrchestratorResult, { streamGenerator: AsyncGenerator<string> }> {
+  assert.ok("streamGenerator" in result);
+}
+
+async function unsupportedGenerateObject<T>(
+  _messages: ChatMessage[],
+  _request: GenerateObjectRequest<T>,
+): Promise<GenerateObjectResult<T>> {
+  throw new Error("generateObject unexpectedly called by this test provider");
+}
+
+async function collectStreamFailure(stream: AsyncGenerator<string>): Promise<{ tokens: string[]; error: unknown }> {
+  const tokens: string[] = [];
+
+  try {
+    for await (const token of stream) {
+      tokens.push(token);
+    }
+  } catch (error) {
+    return { tokens, error };
+  }
+
+  assert.fail("Expected stream to throw");
+}
+
+const providerMetadataFixture: ProviderErrorMetadata = {
+  provider: "openai",
+  operation: "chat",
+  model: "gpt-provider-fixture",
+  aborted: false,
+  status: 429,
+  providerRequestId: "req_provider_fixture",
+  errorName: "RateLimitError",
+  errorType: "rate_limit_exceeded",
+  errorCode: "rate_limit",
+};
+
+function assertProviderMetadataExact(metadata: ProviderErrorMetadata) {
+  assert.deepEqual(Object.keys(metadata).sort(), [
+    "aborted",
+    "errorCode",
+    "errorName",
+    "errorType",
+    "model",
+    "operation",
+    "provider",
+    "providerRequestId",
+    "status",
+  ]);
+  assert.deepEqual(metadata, providerMetadataFixture);
+}
+
+function assertProviderFallbackContextExact(context: NonNullable<OrchestratorResult["providerFallbackContext"]>) {
+  assert.deepEqual(Object.keys(context).sort(), ["providerMetadata", "reason", "round"]);
+  assert.equal(context.reason, "llm_error");
+  assert.equal(context.round, 1);
+  assertProviderMetadataExact(context.providerMetadata);
 }
 
 describe("Orchestrator", () => {
@@ -23,7 +99,9 @@ describe("Orchestrator", () => {
   let mockLLM: MockLLMProvider;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let chatService: ReturnType<typeof createChatService>;
+  let summaryService: ReturnType<typeof createSummaryService>;
   let deviceService: ReturnType<typeof createDeviceService>;
+  let goalProposalService: ReturnType<typeof createGoalProposalService>;
   let db: ReturnType<typeof createDb>;
   let deviceId: string;
   let spyHooks: ReturnType<typeof createSpyHooks>;
@@ -33,7 +111,8 @@ describe("Orchestrator", () => {
     db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
-    const summaryService = createSummaryService(db);
+    goalProposalService = createGoalProposalService(db);
+    summaryService = createSummaryService(db);
     chatService = createChatService(db);
     mockLLM = new MockLLMProvider();
     publishedGoals = [];
@@ -44,6 +123,7 @@ describe("Orchestrator", () => {
       summaryService,
       foodLoggingService,
       deviceService,
+      goalProposalService,
       publisher: {
         publishGoalsUpdate(id: string, targets: DailyTargets) {
           publishedGoals.push({ deviceId: id, targets });
@@ -55,6 +135,23 @@ describe("Orchestrator", () => {
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
     spyHooks = createSpyHooks(); // fresh mocks each test — never at module scope (Pitfall 6)
   });
+
+  function createOrchestratorWithProvider(llmProvider: LLMProvider) {
+    return createOrchestrator({
+      llmProvider,
+      chatService,
+      summaryService,
+      foodLoggingService,
+      deviceService,
+      goalProposalService,
+      publisher: {
+        publishGoalsUpdate(id: string, targets: DailyTargets) {
+          publishedGoals.push({ deviceId: id, targets });
+          return { sent: 1 };
+        },
+      },
+    } as Parameters<typeof createOrchestrator>[0]);
+  }
 
   it("returns text reply when LLM responds with content", async () => {
     mockLLM.queueChatResponse({ content: "你好！我是你的營養教練。" });
@@ -80,11 +177,15 @@ describe("Orchestrator", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "蘋果",
-            calories: 100,
-            protein: 1,
-            carbs: 25,
-            fat: 0.5,
+            items: [
+              {
+                food_name: "蘋果",
+                calories: 100,
+                protein: 1,
+                carbs: 25,
+                fat: 0.5,
+              },
+            ],
           }),
         },
       }],
@@ -94,6 +195,54 @@ describe("Orchestrator", () => {
     assertReplyResult(result);
     assert.equal(result.finalReplySource, "renderer");
     assert.equal(result.finalReplyShape, "plain_text");
+  });
+
+  it("projects source-text explicit mealPeriod on successful log_food receipts", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "intent_lunch_raw_breakfast",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              {
+                food_name: "雞腿便當",
+                calories: 640,
+                protein: 30,
+                carbs: 78,
+                fat: 20,
+              },
+            ],
+            date_text: "2026-03-25",
+            meal_period: "breakfast",
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "幫我補記 2026-03-25 午餐我吃了雞腿便當",
+    );
+
+    assertReplyResult(result);
+    assert.equal(result.didLogMeal, true);
+    assert.equal(result.affectedDate, "2026-03-25");
+    assert.ok(result.loggedMeal);
+    assert.equal((result.loggedMeal as { mealPeriod?: string | null }).mealPeriod, "lunch");
+    assert.equal(new Date(result.loggedMeal.loggedAt).getHours(), 8);
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, result.loggedMeal.mealId))
+    )[0];
+    assert.equal(transaction?.mealPeriod, "lunch");
   });
 
   it("classifies orchestrator fallback replies for route tracing", async () => {
@@ -132,7 +281,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
@@ -142,6 +291,7 @@ describe("Orchestrator", () => {
     assert.equal(partialSuccessResult.finalReplySource, "renderer");
     assert.equal(partialSuccessResult.finalReplyShape, "plain_text");
     assert.equal(partialSuccessResult.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(partialSuccessResult.providerFallbackContext, undefined);
   });
 
   it("executes tool calls and returns final reply", async () => {
@@ -163,7 +313,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 5, carbs: 20, fat: 2 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 5, carbs: 20, fat: 2 }] }),
         },
       }],
     });
@@ -184,6 +334,78 @@ describe("Orchestrator", () => {
     const secondRound = mockLLM.chatCalls[1].messages;
     assert.equal(secondRound[secondRound.length - 2].role, "assistant");
     assert.equal(secondRound[secondRound.length - 1].role, "tool");
+  });
+
+  // Phase 83-01 (D-02): a log_food schema_validation failure is fed back to the
+  // model as a controlled tool failure so it can retry within MAX_ROUNDS.
+  it("Phase 83: failed log_food schema validation feeds back so the model retries with grouped items", async () => {
+    // Round 1: schema-invalid grouped call (empty item food_name) that fails Zod validation.
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "retry_round_1_invalid",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({ items: [{ food_name: "", calories: 600, protein: 35, carbs: 70, fat: 15 }] }),
+        },
+      }],
+    });
+    // Round 2: valid grouped items[] retry.
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "retry_round_2_grouped",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [{ food_name: "雞胸肉飯", calories: 600, protein: 35, carbs: 70, fat: 15 }],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "我吃了雞胸肉飯", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.equal(result.didLogMeal, true);
+    assert.match(result.reply, /已記錄雞胸肉飯/);
+
+    // Round arithmetic: the failed round consumed one model round, the retry the second.
+    assert.equal(mockLLM.chatCalls.length, 2);
+    const secondRound = mockLLM.chatCalls[1].messages;
+    assert.equal(secondRound[secondRound.length - 1].role, "tool", "validation feedback must reach the model as a tool message");
+
+    // Exactly ONE meal row — the failed legacy-style call never mutated state.
+    const transactions = await db.select().from(mealTransactions);
+    assert.equal(transactions.length, 1);
+  });
+
+  it("Phase 83: rounds exhausted on repeated log_food schema failures returns the deterministic FALLBACK with zero meals", async () => {
+    // Every round queues a schema-invalid log_food call until MAX_ROUNDS (3) exhausts.
+    // No terminal text is queued, so the deterministic backend-owned FALLBACK copy
+    // is asserted without guardNoMutationLoggingClaim interference (83-RESEARCH OQ-3).
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `exhaust_round_${i}`,
+          type: "function",
+          function: {
+            name: "log_food",
+            arguments: JSON.stringify({ items: [{ food_name: "", calories: 100, protein: 1, carbs: 20, fat: 0.5 }] }),
+          },
+        }],
+      });
+    }
+
+    const result = await orchestrator.handleMessage(deviceId, "記錄這餐", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.equal(result.reply, "抱歉，我現在無法完成這個請求，請稍後再試。");
+    assert.equal(result.finalReplySource, "fallback");
+    assert.equal(result.didLogMeal, false);
+    assert.equal(mockLLM.chatCalls.length, 3);
+
+    // Zero mutation across every failed validation round.
+    const transactions = await db.select().from(mealTransactions);
+    assert.equal(transactions.length, 0);
   });
 
   it("persists uploaded image metadata while sending the data URI to the LLM", async () => {
@@ -207,11 +429,15 @@ describe("Orchestrator", () => {
         function: {
           name: "log_food",
           arguments: JSON.stringify({
-            food_name: "雞肉沙拉",
-            calories: 180,
-            protein: 8,
-            carbs: 12,
-            fat: 10,
+            items: [
+              {
+                food_name: "雞肉沙拉",
+                calories: 180,
+                protein: 8,
+                carbs: 12,
+                fat: 10,
+              },
+            ],
             protein_sources: [
               { name: "雞肉", protein: 8, is_primary: true, certainty: "clear" },
               { name: "生菜", protein: 1, is_primary: false, certainty: "clear" },
@@ -297,7 +523,7 @@ describe("Orchestrator", () => {
     assert.equal(spyHooks.onLLMEnd.mock.calls[1].arguments[1], false, "Second onLLMEnd should have hadToolCalls=false");
   });
 
-  it("OBS-02: fires onFallback('max_rounds') after 3 rounds of only tool calls", async () => {
+  it("OBS-02: fires onFallback max_rounds after 3 rounds of only tool calls", async () => {
     for (let i = 0; i < 3; i++) {
       mockLLM.queueChatResponse({
         toolCalls: [{
@@ -309,7 +535,310 @@ describe("Orchestrator", () => {
     }
     await orchestrator.handleMessage(deviceId, "test", undefined, undefined, { hooks: spyHooks });
     assert.equal(spyHooks.onFallback.mock.callCount(), 1, "onFallback should fire exactly once");
-    assert.equal(spyHooks.onFallback.mock.calls[0].arguments[0], "max_rounds");
+    assert.deepEqual(spyHooks.onFallback.mock.calls[0].arguments[0], { reason: "max_rounds" });
+  });
+
+  it("HOOK-01: emits LLM provider error before provider-caused fallback with metadata only", async () => {
+    const events: Array<{ event: string; payload: unknown }> = [];
+    mockLLM.queueChatError(new LLMProviderError(providerMetadataFixture));
+
+    const result = await orchestrator.handleMessage(deviceId, "raw user sentinel", undefined, undefined, {
+      hooks: {
+        ...spyHooks,
+        onLLMError(payload) {
+          events.push({ event: "llm_error", payload });
+          spyHooks.onLLMError(payload);
+        },
+        onFallback(payload) {
+          events.push({ event: "fallback", payload });
+          spyHooks.onFallback(payload);
+        },
+      },
+    });
+
+    assertReplyResult(result);
+    assert.equal(result.finalReplySource, "fallback");
+    assert.deepEqual(events.map((event) => event.event), ["llm_error", "fallback"]);
+    assert.equal(spyHooks.onLLMError.mock.callCount(), 1);
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    assert.deepEqual(Object.keys(errorPayload).sort(), ["providerMetadata", "round"]);
+    assert.equal(errorPayload.round, 1);
+    assertProviderMetadataExact(errorPayload.providerMetadata);
+
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.deepEqual(Object.keys(fallbackPayload).sort(), ["providerMetadata", "reason", "round"]);
+    assert.equal(fallbackPayload.reason, "llm_error");
+    assert.equal(fallbackPayload.round, 1);
+    assert.deepEqual(fallbackPayload.providerMetadata, errorPayload.providerMetadata);
+
+    const serialized = JSON.stringify([errorPayload, fallbackPayload]);
+    assert.doesNotMatch(serialized, /raw user sentinel|headers|raw body|tool arguments|assistant final text/);
+  });
+
+  it("CR-01: observes chatRound stream continuation provider errors through LLM error and fallback hooks", async () => {
+    const events: Array<{ event: string; payload: unknown }> = [];
+    const streamMetadata: ProviderErrorMetadata = {
+      ...providerMetadataFixture,
+      operation: "chat_round_stream_continuation",
+      model: "gpt-stream-round",
+      providerRequestId: "req_stream_round",
+    };
+    const llmProvider: LLMProvider = {
+      generateObject: unsupportedGenerateObject,
+      async chat() {
+        return { content: "unused" };
+      },
+      async chatRound() {
+        return {
+          kind: "stream",
+          streamGenerator: (async function* () {
+            yield "先";
+            throw new LLMProviderError(streamMetadata);
+          })(),
+        };
+      },
+    };
+    const streamingOrchestrator = createOrchestratorWithProvider(llmProvider);
+
+    const result = await streamingOrchestrator.handleMessage(deviceId, "串流測試", undefined, undefined, {
+      hooks: {
+        ...spyHooks,
+        onLLMError(payload) {
+          events.push({ event: "llm_error", payload });
+          spyHooks.onLLMError(payload);
+        },
+        onFallback(payload) {
+          events.push({ event: "fallback", payload });
+          spyHooks.onFallback(payload);
+        },
+      },
+    });
+    assertStreamResult(result);
+
+    const failure = await collectStreamFailure(result.streamGenerator);
+
+    assert.deepEqual(failure.tokens, ["先"]);
+    assert.ok(failure.error instanceof LLMProviderError);
+    assert.deepEqual(events.map((event) => event.event), ["llm_error", "fallback"]);
+    assert.equal(spyHooks.onLLMError.mock.callCount(), 1);
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    assert.deepEqual(Object.keys(errorPayload).sort(), ["providerMetadata", "round"]);
+    assert.equal(errorPayload.round, 1);
+    assert.deepEqual(errorPayload.providerMetadata, streamMetadata);
+
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.deepEqual(Object.keys(fallbackPayload).sort(), ["providerMetadata", "reason", "round"]);
+    assert.equal(fallbackPayload.reason, "llm_error");
+    assert.equal(fallbackPayload.round, 1);
+    assert.deepEqual(fallbackPayload.providerMetadata, streamMetadata);
+  });
+
+  it("CR-01: observes chatStream continuation provider errors with safe lastTool context", async () => {
+    const streamMetadata: ProviderErrorMetadata = {
+      ...providerMetadataFixture,
+      operation: "chat_stream_continuation",
+      model: "gpt-stream-final",
+      providerRequestId: "req_stream_final",
+    };
+    const llmProvider: LLMProvider = {
+      generateObject: unsupportedGenerateObject,
+      async chat() {
+        return {
+          toolCalls: [{
+            id: "stream_after_tool",
+            type: "function",
+            function: { name: "get_daily_summary", arguments: "{}" },
+          }],
+        };
+      },
+      async *chatStream() {
+        yield "後";
+        throw new LLMProviderError(streamMetadata);
+      },
+    };
+    const streamingOrchestrator = createOrchestratorWithProvider(llmProvider);
+
+    const result = await streamingOrchestrator.handleMessage(deviceId, "先查摘要再串流", undefined, undefined, {
+      hooks: spyHooks,
+    });
+    assertStreamResult(result);
+
+    const failure = await collectStreamFailure(result.streamGenerator);
+
+    assert.deepEqual(failure.tokens, ["後"]);
+    assert.ok(failure.error instanceof LLMProviderError);
+    assert.equal(spyHooks.onLLMError.mock.callCount(), 1);
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    assert.equal(errorPayload.round, 2);
+    assert.equal(errorPayload.lastTool, "get_daily_summary");
+    assert.deepEqual(errorPayload.providerMetadata, streamMetadata);
+
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.equal(fallbackPayload.reason, "llm_error");
+    assert.equal(fallbackPayload.round, 2);
+    assert.equal(fallbackPayload.lastTool, "get_daily_summary");
+    assert.deepEqual(fallbackPayload.providerMetadata, streamMetadata);
+  });
+
+  it("WR-02: OpenAI empty chat choices reach orchestrator hooks as provider errors", async () => {
+    const events: Array<{ event: string; payload: unknown }> = [];
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async () => ({ choices: [] }),
+        },
+      },
+    } as unknown as OpenAI;
+    const openAIProvider = new OpenAIProvider(fakeClient);
+    const chatOnlyProvider: LLMProvider = {
+      chat: openAIProvider.chat.bind(openAIProvider),
+      generateObject: openAIProvider.generateObject.bind(openAIProvider),
+    };
+    const openAIOrchestrator = createOrchestratorWithProvider(chatOnlyProvider);
+
+    const result = await openAIOrchestrator.handleMessage(deviceId, "empty choices", undefined, undefined, {
+      hooks: {
+        ...spyHooks,
+        onLLMError(payload) {
+          events.push({ event: "llm_error", payload });
+          spyHooks.onLLMError(payload);
+        },
+        onFallback(payload) {
+          events.push({ event: "fallback", payload });
+          spyHooks.onFallback(payload);
+        },
+      },
+    });
+
+    assertReplyResult(result);
+    assert.deepEqual(events.map((event) => event.event), ["llm_error", "fallback"]);
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    assert.deepEqual(errorPayload.providerMetadata, {
+      provider: "openai",
+      operation: "chat",
+      model: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5.4-mini",
+      aborted: false,
+      errorName: "OpenAINoChoicesError",
+    });
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.equal(fallbackPayload.reason, "llm_error");
+    assert.deepEqual(fallbackPayload.providerMetadata, errorPayload.providerMetadata);
+    assert.deepEqual(result.providerFallbackContext?.providerMetadata, errorPayload.providerMetadata);
+  });
+
+  it("HOOK-01: includes only a recognized safe lastTool on provider-caused fallback", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "safe_last_tool",
+        type: "function",
+        function: { name: "get_daily_summary", arguments: "{}" },
+      }],
+    });
+    mockLLM.queueChatError(new LLMProviderError(providerMetadataFixture));
+
+    await orchestrator.handleMessage(deviceId, "raw user sentinel", undefined, undefined, { hooks: spyHooks });
+
+    const errorPayload = spyHooks.onLLMError.mock.calls[0].arguments[0];
+    const fallbackPayload = spyHooks.onFallback.mock.calls[0].arguments[0];
+    assert.equal(errorPayload.lastTool, "get_daily_summary");
+    assert.equal(fallbackPayload.lastTool, "get_daily_summary");
+    assert.deepEqual(fallbackPayload.providerMetadata, errorPayload.providerMetadata);
+
+    const serialized = JSON.stringify([errorPayload.lastTool, fallbackPayload.lastTool]);
+    assert.doesNotMatch(serialized, /raw user sentinel|provider|model|assistant/);
+  });
+
+  it("HOOK-02: omits provider metadata from non-provider max_rounds and hallucination fallbacks", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `no_metadata_${i}`,
+          type: "function",
+          function: { name: "get_daily_summary", arguments: "{}" },
+        }],
+      });
+    }
+
+    const maxRoundResult = await orchestrator.handleMessage(deviceId, "test", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(maxRoundResult);
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+    assert.deepEqual(spyHooks.onFallback.mock.calls[0].arguments[0], { reason: "max_rounds" });
+
+    mockLLM.reset();
+    spyHooks = createSpyHooks();
+    await chatService.saveMessage(deviceId, "assistant", "[系統已完成餐點記錄]\n方式 1：保留\n方式 2：調整");
+    const hallucinationResult = await orchestrator.handleMessage(deviceId, "2", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(hallucinationResult);
+    assert.equal(hallucinationResult.finalReplySource, "fallback");
+    assert.equal(spyHooks.onFallback.mock.callCount(), 1);
+    assert.deepEqual(spyHooks.onFallback.mock.calls[0].arguments[0], { reason: "hallucination_detected" });
+    assert.equal(spyHooks.onLLMError.mock.callCount(), 0);
+  });
+
+  it("HOOK-02: returns route-readable provider fallback context without hook collectors", async () => {
+    mockLLM.queueChatError(new LLMProviderError(providerMetadataFixture));
+
+    const result = await orchestrator.handleMessage(deviceId, "raw user sentinel");
+
+    assertReplyResult(result);
+    assert.ok(result.providerFallbackContext);
+    assertProviderFallbackContextExact(result.providerFallbackContext);
+    const serialized = JSON.stringify(result.providerFallbackContext);
+    assert.doesNotMatch(serialized, /raw user sentinel|headers|raw body|tool arguments|assistant final text/);
+  });
+
+  it("HOOK-02: route-readable provider fallback context matches hook metadata and lastTool", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "bridge_last_tool",
+        type: "function",
+        function: { name: "get_daily_summary", arguments: "{}" },
+      }],
+    });
+    mockLLM.queueChatError(new LLMProviderError(providerMetadataFixture));
+
+    const result = await orchestrator.handleMessage(deviceId, "raw user sentinel", undefined, undefined, { hooks: spyHooks });
+
+    assertReplyResult(result);
+    assert.deepEqual(Object.keys(result.providerFallbackContext ?? {}).sort(), [
+      "lastTool",
+      "providerMetadata",
+      "reason",
+      "round",
+    ]);
+    assert.equal(result.providerFallbackContext?.reason, "llm_error");
+    assert.equal(result.providerFallbackContext?.round, 2);
+    assert.equal(result.providerFallbackContext?.lastTool, "get_daily_summary");
+    assert.deepEqual(result.providerFallbackContext?.providerMetadata, spyHooks.onLLMError.mock.calls[0].arguments[0].providerMetadata);
+    assert.deepEqual(result.providerFallbackContext?.providerMetadata, spyHooks.onFallback.mock.calls[0].arguments[0].providerMetadata);
+  });
+
+  it("HOOK-02: omits route-readable provider fallback context for non-provider fallbacks", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      mockLLM.queueChatResponse({
+        toolCalls: [{
+          id: `bridge_no_metadata_${i}`,
+          type: "function",
+          function: { name: "get_daily_summary", arguments: "{}" },
+        }],
+      });
+    }
+
+    const maxRoundResult = await orchestrator.handleMessage(deviceId, "test");
+    assertReplyResult(maxRoundResult);
+    assert.equal(maxRoundResult.providerFallbackContext, undefined);
+
+    mockLLM.reset();
+    await chatService.saveMessage(deviceId, "assistant", "[系統已完成餐點記錄]\n方式 1：保留\n方式 2：調整");
+    const hallucinationResult = await orchestrator.handleMessage(deviceId, "2");
+    assertReplyResult(hallucinationResult);
+    assert.equal(hallucinationResult.providerFallbackContext, undefined);
   });
 
   it("OBS-03: hook payloads contain no raw deviceId and no raw meal text", async () => {
@@ -319,7 +848,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "蘋果", calories: 100, protein: 1, carbs: 25, fat: 0.5 }),
+          arguments: JSON.stringify({ items: [{ food_name: "蘋果", calories: 100, protein: 1, carbs: 25, fat: 0.5 }] }),
         },
       }],
     });
@@ -342,28 +871,28 @@ describe("Orchestrator", () => {
     assert.ok(argsRedacted.includes("kcal"), `argsRedacted should contain 'kcal' from redactToolArgs: ${argsRedacted}`);
   });
 
-  it("HOOK-01: fires onToolResult with executed:false when validation fails (FatalToolError)", async () => {
-    // Queue a tool call with invalid log_food arguments (missing required numeric fields)
+  it("HOOK-01: fires onToolResult with executed:false when log_food schema validation fails (controlled feedback)", async () => {
+    // Phase 83-01 (D-02): log_food schema_validation no longer throws FatalToolError;
+    // the controlled failure feeds back to the model and handleMessage resolves.
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "c1",
         type: "function",
         function: {
           name: "log_food",
-          arguments: JSON.stringify({ food_name: "bad food" }), // missing calories, protein, carbs, fat
+          arguments: JSON.stringify({ items: [{ food_name: "bad food" }] }), // missing calories, protein, carbs, fat
         },
       }],
     });
-    // FatalToolError propagates — do NOT queue a second reply
+    // Round 2: terminal text that does NOT claim logging (83-RESEARCH OQ-3).
+    mockLLM.queueChatResponse({ content: "請再提供餐點內容和份量，我再幫你估算。" });
 
-    // Assert that handleMessage REJECTS (error propagates)
-    await assert.rejects(
-      () => orchestrator.handleMessage(deviceId, "記錄一個壞食物", undefined, undefined, { hooks: spyHooks }),
-      (err: unknown) => err instanceof Error,
-      "handleMessage should reject when FatalToolError is not caught"
-    );
+    const result = await orchestrator.handleMessage(deviceId, "記錄一個壞食物", undefined, undefined, { hooks: spyHooks });
+    assertReplyResult(result);
+    assert.equal(result.reply, "請再提供餐點內容和份量，我再幫你估算。");
+    assert.equal(result.didLogMeal, false);
 
-    // Despite the rejection, onToolResult must have fired BEFORE the error propagated
+    // onToolResult must have fired on the controlled feedback path
     assert.equal(spyHooks.onToolResult.mock.callCount(), 1, "onToolResult should fire once for the validation failure");
     const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
     assert.equal(payload.tool, "log_food");
@@ -371,6 +900,10 @@ describe("Orchestrator", () => {
     assert.equal(payload.executed, false, "executed:false — tool validation failed before execution");
     assert.ok(typeof payload.failureReason === "string" && payload.failureReason.length > 0);
     assert.ok(!payload.failureReason?.includes(deviceId), "failureReason must not contain deviceId");
+
+    // No mutation from the failed validation round.
+    const transactions = await db.select().from(mealTransactions);
+    assert.equal(transactions.length, 0);
   });
 
   it("GOAL-06: passes current user text and immediately previous assistant message to update_goals", async () => {
@@ -381,13 +914,13 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
     mockLLM.queueChatResponse({ content: "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g" });
 
-    const result = await orchestrator.handleMessage(deviceId, "卡路里改 1800，是", undefined, undefined, { hooks: spyHooks });
+    const result = await orchestrator.handleMessage(deviceId, "卡路里改 1800，蛋白質 130", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
     assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
     assert.equal(result.finalReplySource, "renderer");
@@ -398,14 +931,14 @@ describe("Orchestrator", () => {
     assert.equal(publishedGoals.length, 1);
   });
 
-  it("GOAL-05: controlled validation failure saves a tool message, returns to the LLM, and does not throw", async () => {
+  it("GOAL-05: controlled validation failure returns renderer copy without a later LLM round", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "goal_validation",
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 99999 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 99999 }),
         },
       }],
     });
@@ -414,7 +947,10 @@ describe("Orchestrator", () => {
     const result = await orchestrator.handleMessage(deviceId, "卡路里改 99999", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
     assert.equal(result.didLogMeal, false);
-    assert.equal(result.reply, "請提供 500 到 8000 之間的卡路里目標。");
+    assert.equal(result.reply, renderGoalValidationFailureCopy(["calories"]));
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.finalReplyShape, "plain_text");
+    assert.equal(mockLLM.chatCalls.length, 1);
 
     const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
     assert.equal(payload.tool, "update_goals");
@@ -422,13 +958,8 @@ describe("Orchestrator", () => {
     assert.equal(payload.executed, false);
     assert.match(payload.failureReason ?? "", /validation/);
 
-    const secondRoundMessages = mockLLM.chatCalls[1].messages;
-    const toolMessage = secondRoundMessages.find((message) => message.role === "tool");
-    assert.ok(toolMessage, "validation failure should be pushed into the next LLM round");
-    assert.match(String(toolMessage.content), /validation/);
-
     const storedMessages = await db.select().from(chatMessages).where(eq(chatMessages.deviceId, deviceId));
-    assert.equal(storedMessages.some((message) => message.role === "tool" && message.toolName === "update_goals"), true);
+    assert.equal(storedMessages.some((message) => message.role === "tool" && message.toolName === "update_goals"), false);
   });
 
   it("GOAL-06: controlled guard failure records failureReason:\"guard\" and keeps the fatal unknown-tool path unchanged", async () => {
@@ -438,7 +969,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800 }),
         },
       }],
     });
@@ -447,6 +978,8 @@ describe("Orchestrator", () => {
     const result = await orchestrator.handleMessage(deviceId, "少吃一點", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
     assert.equal(result.didLogMeal, false);
+    assert.equal(result.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(result.finalReplySource, "renderer");
     const payload = spyHooks.onToolResult.mock.calls[0].arguments[0];
     assert.equal(payload.tool, "update_goals");
     assert.equal(payload.success, false);
@@ -475,7 +1008,7 @@ describe("Orchestrator", () => {
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
 import { useStore } from "../store.js";
 import { getMeals } from "../api.js";
 import { connectSSE, disconnectSSE } from "../sse.js";
+import { createSSESummaryCoordinator } from "../sse-summary-coordinator.js";
+import { formatLocalDate } from "../lib/time.js";
 import { useDailyRollover } from "../useDailyRollover.js";
 import { BottomTabBar } from "./BottomTabBar.js";
 import { HomeScreen } from "./HomeScreen.js";
@@ -117,47 +119,56 @@ export function MainLayout() {
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setDailyTargets = useStore((s) => s.setDailyTargets);
   const setMeals = useStore((s) => s.setMeals);
+  const recordMealMutation = useStore((s) => s.recordMealMutation);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setRolloverRefreshHandler = useStore((s) => s.setRolloverRefreshHandler);
   const activeScreen = useStore((s) => s.activeScreen);
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const closeSecondaryScreen = useStore((s) => s.closeSecondaryScreen);
 
+  const sseSummaryCoordinator = useMemo(
+    () =>
+      createSSESummaryCoordinator({
+        getMeals,
+        setMeals,
+        setDailySummary,
+        recordMealMutation,
+        todayKey: () => formatLocalDate(new Date()),
+        onUnauthorized: () => {
+          void recoverGuestSession();
+        },
+      }),
+    [setMeals, setDailySummary, recordMealMutation, recoverGuestSession],
+  );
+
   const refreshForRollover = useCallback(async () => {
     if (!deviceId) return;
     disconnectSSE();
     // After rollover we re-subscribe with both handlers so a goals_update
     // that lands immediately after midnight still reaches setDailyTargets.
-    connectSSE(deviceId, { onSummary: setDailySummary, onGoalsUpdate: setDailyTargets });
-    try {
-      const { meals } = await getMeals({ refreshReason: "day_rollover" });
-      setMeals(meals);
-    } catch (err) {
-      if (err instanceof Error && err.message === "UNAUTHORIZED") {
-        void recoverGuestSession();
-      }
-    }
-  }, [deviceId, setDailySummary, setDailyTargets, setMeals, recoverGuestSession]);
+    connectSSE(deviceId, {
+      onDailySummaryEnvelope: sseSummaryCoordinator.handleSummary,
+      onGoalsUpdate: setDailyTargets,
+    });
+    await sseSummaryCoordinator.runInitialMealsLoad({ refreshReason: "day_rollover" });
+  }, [deviceId, setDailyTargets, sseSummaryCoordinator]);
 
   useEffect(() => {
     if (!deviceId) return;
-    getMeals()
-      .then(({ meals }) => setMeals(meals))
-      .catch((err) => {
-        if (err instanceof Error && err.message === "UNAUTHORIZED") {
-          void recoverGuestSession();
-        }
-      });
-  }, [deviceId, setMeals, recoverGuestSession]);
+    void sseSummaryCoordinator.runInitialMealsLoad();
+  }, [deviceId, sseSummaryCoordinator]);
 
   useEffect(() => {
     if (!deviceId) return;
     // Goal updates flow through the existing `setDailyTargets` store action so
     // Dashboard / Settings / HomeHeader re-render via existing selectors —
     // no new UI affordance (D-25, D-26).
-    connectSSE(deviceId, { onSummary: setDailySummary, onGoalsUpdate: setDailyTargets });
+    connectSSE(deviceId, {
+      onDailySummaryEnvelope: sseSummaryCoordinator.handleSummary,
+      onGoalsUpdate: setDailyTargets,
+    });
     return () => disconnectSSE();
-  }, [deviceId, setDailySummary, setDailyTargets]);
+  }, [deviceId, setDailyTargets, sseSummaryCoordinator]);
 
   useEffect(() => {
     setRolloverRefreshHandler(deviceId ? refreshForRollover : null);

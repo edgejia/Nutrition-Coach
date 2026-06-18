@@ -103,6 +103,7 @@ const MUTATION_TOOLS = new Set(["log_food", "update_meal", "delete_meal", "updat
 const FORBIDDEN_RECEIPT_COPY_TERMS = [
   "headline",
   "先抓低",
+  "保守估算",
   "log_food",
   "update_meal",
   "delete_meal",

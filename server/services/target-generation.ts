@@ -1,22 +1,90 @@
-import type { LLMProvider, ChatMessage } from "../llm/types.js";
-import type { Goal, IntakeFields, DailyTargets } from "./device.js";
 import type { FastifyBaseLogger } from "fastify";
+import { z } from "zod";
+import type {
+  ChatMessage,
+  GenerateObjectResult,
+  GenerateObjectRequest,
+  StructuredJsonSchemaHint,
+  StructuredOutputFailureReason,
+  StructuredValidationIssue,
+  StructuredValidationResult,
+  LLMCallOptions,
+  LLMProvider,
+} from "../llm/types.js";
+import { isLLMProviderError } from "../llm/errors.js";
+import {
+  logTargetGenerationAttemptFailed,
+  logTargetGenerationFallbackUsed,
+  type TargetGenerationTargetReason,
+} from "../observability/events.js";
+import type { Goal, IntakeFields, DailyTargets } from "./device.js";
 import { getGoalDefaults } from "./device.js";
+
+export const TARGET_GENERATION_METADATA_CONTEXT = "target_generation";
+export const TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS = 160;
+
+const TARGET_GENERATION_FIELDS = ["calories", "protein", "carbs", "fat", "coachExplanation"] as const;
+
+export const targetGenerationOutputSchema = z.strictObject({
+  calories: z.number().int().positive(),
+  protein: z.number().int().positive(),
+  carbs: z.number().int().nonnegative(),
+  fat: z.number().int().positive(),
+  coachExplanation: z.string().trim().min(1).max(TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS),
+});
+
+export type TargetGenerationOutput = z.infer<typeof targetGenerationOutputSchema>;
+
+export type { TargetGenerationTargetReason };
+
+export interface TargetGenerationFailureSummary {
+  providerReason: StructuredOutputFailureReason;
+  targetReason: TargetGenerationTargetReason;
+  metadataContext: typeof TARGET_GENERATION_METADATA_CONTEXT;
+  issueCount?: number;
+  fields?: string[];
+  codes?: string[];
+  noContentSubtype?: "no_choices" | "missing_content" | "empty_content";
+}
+
+export const TARGET_GENERATION_SCHEMA_HINT: StructuredJsonSchemaHint = {
+  name: "onboarding_target_generation",
+  description: "Daily nutrition targets and one short Traditional Chinese coach explanation.",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: TARGET_GENERATION_FIELDS,
+    properties: {
+      calories: {
+        type: "integer",
+        minimum: 1,
+      },
+      protein: {
+        type: "integer",
+        minimum: 1,
+      },
+      carbs: {
+        type: "integer",
+        minimum: 0,
+      },
+      fat: {
+        type: "integer",
+        minimum: 1,
+      },
+      coachExplanation: {
+        type: "string",
+        minLength: 1,
+        maxLength: TARGET_GENERATION_MAX_COACH_EXPLANATION_CHARS,
+      },
+    },
+  },
+};
 
 interface TargetGenerationResult {
   dailyTargets: DailyTargets;
   coachExplanation: string;
   usedFallback: boolean;
-}
-
-interface LLMTargetResponse {
-  dailyTargets?: Partial<DailyTargets>;
-  explanation?: string;
-  coachExplanation?: string;
-  calories?: number;
-  protein?: number;
-  carbs?: number;
-  fat?: number;
 }
 
 const CALORIE_BOUNDS: Record<Goal, { min: number; max: number }> = {
@@ -67,81 +135,102 @@ function buildMessages(goal: Goal, intake: IntakeFields): ChatMessage[] {
   ];
 }
 
-function cleanJsonContent(content: string): string {
-  const trimmed = content.trim();
-  const fencedMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return fencedMatch ? fencedMatch[1].trim() : trimmed;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function issuePath(issue: z.core.$ZodIssue): string {
+  return issue.path.length > 0 ? issue.path.join(".") : "root";
 }
 
-const EXPLANATION_KEYS = ["coachExplanation", "explanation", "note", "coachNote", "message", "coach_explanation"];
-
-function readExplanation(obj: Record<string, unknown>): string | null {
-  // Check known keys first
-  for (const key of EXPLANATION_KEYS) {
-    const value = obj[key];
-    if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  }
-  // Fallback: any key containing "note", "explanation", or "coach"
-  for (const key of Object.keys(obj)) {
-    const lower = key.toLowerCase();
-    if (lower.includes("note") || lower.includes("explanation") || lower.includes("coach")) {
-      const value = obj[key];
-      if (typeof value === "string" && value.trim().length > 0) return value.trim();
-    }
-  }
-  return null;
+function issueCode(issue: z.core.$ZodIssue): string {
+  return typeof issue.code === "string" && issue.code.length > 0 ? issue.code : "custom";
 }
 
-function readMacroNumber(obj: Record<string, unknown>, key: string): number | null {
-  return readFiniteNumber(obj[key] ?? obj[`${key}_g`] ?? obj[`${key}_kcal`]);
-}
-
-function parseTargetResponse(content: string): { dailyTargets: DailyTargets; coachExplanation: string } {
-  const cleaned = cleanJsonContent(content);
-  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-  // Support nested "macros" or "dailyTargets" sub-objects
-  const macros = (parsed.macros ?? parsed.dailyTargets ?? parsed) as Record<string, unknown>;
-
-  const calories = readMacroNumber(parsed, "calories") ?? readMacroNumber(macros, "calories");
-  const protein = readMacroNumber(macros, "protein") ?? readMacroNumber(parsed, "protein");
-  const carbs = readMacroNumber(macros, "carbs") ?? readMacroNumber(parsed, "carbs");
-  const fat = readMacroNumber(macros, "fat") ?? readMacroNumber(parsed, "fat");
-  const coachExplanation = readExplanation(parsed);
-
-  if (calories === null || protein === null || carbs === null || fat === null || coachExplanation === null) {
-    throw new Error("Invalid target response");
+function buildMissingFieldIssues(raw: unknown): StructuredValidationIssue[] {
+  if (!isRecord(raw)) {
+    return [];
   }
 
-  const dailyTargets: DailyTargets = { calories, protein, carbs, fat };
-  return { dailyTargets, coachExplanation };
+  return TARGET_GENERATION_FIELDS
+    .filter((field) => !Object.hasOwn(raw, field))
+    .map((field) => ({ path: field, code: "missing_required" }));
 }
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+function fieldFromIssuePath(path: string): string {
+  const first = path.split(".")[0];
+  return TARGET_GENERATION_FIELDS.includes(first as (typeof TARGET_GENERATION_FIELDS)[number]) ? first : "root";
 }
 
-function validateTargets(goal: Goal, targets: DailyTargets): boolean {
+export function validateStructuredTargetOutput(raw: unknown): StructuredValidationResult<TargetGenerationOutput> {
+  const parsed = targetGenerationOutputSchema.safeParse(raw);
+  if (parsed.success) {
+    return { ok: true, value: parsed.data };
+  }
+
+  const missingIssues = buildMissingFieldIssues(raw);
+  const missingPaths = new Set(missingIssues.map((issue) => issue.path));
+  const zodIssues = parsed.error.issues
+    .map((issue) => ({ path: issuePath(issue), code: issueCode(issue) }))
+    .filter((issue) => !(missingPaths.has(issue.path) && issue.code === "invalid_type"));
+
+  return {
+    ok: false,
+    issues: [...missingIssues, ...zodIssues],
+  };
+}
+
+export function buildTargetGenerationRequest(): GenerateObjectRequest<TargetGenerationOutput> {
+  return {
+    validate: validateStructuredTargetOutput,
+    schemaHint: TARGET_GENERATION_SCHEMA_HINT,
+    metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+    maxCompletionTokens: 300,
+  };
+}
+
+export function validateTargetDomain(
+  goal: Goal,
+  output: TargetGenerationOutput,
+): { ok: true; dailyTargets: DailyTargets } | { ok: false; failure: TargetGenerationFailureSummary } {
+  const dailyTargets: DailyTargets = {
+    calories: output.calories,
+    protein: output.protein,
+    carbs: output.carbs,
+    fat: output.fat,
+  };
   const bounds = CALORIE_BOUNDS[goal];
-  if (!isFiniteNumber(targets.calories) || targets.calories < bounds.min || targets.calories > bounds.max) {
-    return false;
-  }
-  if (!isFiniteNumber(targets.protein) || targets.protein <= 0) {
-    return false;
-  }
-  if (!isFiniteNumber(targets.fat) || targets.fat <= 0) {
-    return false;
-  }
-  if (!isFiniteNumber(targets.carbs) || targets.carbs < 0) {
-    return false;
+  if (dailyTargets.calories < bounds.min || dailyTargets.calories > bounds.max) {
+    return {
+      ok: false,
+      failure: {
+        providerReason: "schema_validation",
+        targetReason: "bounds_failed",
+        metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+        issueCount: 1,
+        fields: ["calories"],
+        codes: ["bounds_failed"],
+      },
+    };
   }
 
-  const macroCalories = targets.protein * 4 + targets.carbs * 4 + targets.fat * 9;
-  const diffRatio = Math.abs(macroCalories - targets.calories) / targets.calories;
-  return diffRatio <= 0.1;
+  const macroCalories = dailyTargets.protein * 4 + dailyTargets.carbs * 4 + dailyTargets.fat * 9;
+  const diffRatio = Math.abs(macroCalories - dailyTargets.calories) / dailyTargets.calories;
+  if (diffRatio > 0.1) {
+    return {
+      ok: false,
+      failure: {
+        providerReason: "schema_validation",
+        targetReason: "macro_calorie_mismatch",
+        metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+        issueCount: 4,
+        fields: ["calories", "protein", "carbs", "fat"],
+        codes: ["macro_calorie_mismatch"],
+      },
+    };
+  }
+
+  return { ok: true, dailyTargets };
 }
 
 function getFallbackResult(goal: Goal): TargetGenerationResult {
@@ -152,36 +241,150 @@ function getFallbackResult(goal: Goal): TargetGenerationResult {
   };
 }
 
+function getProviderMetadataContext(response: GenerateObjectResult<TargetGenerationOutput>): typeof TARGET_GENERATION_METADATA_CONTEXT {
+  if ("metadataContext" in response.metadata && response.metadata.metadataContext === TARGET_GENERATION_METADATA_CONTEXT) {
+    return TARGET_GENERATION_METADATA_CONTEXT;
+  }
+  return TARGET_GENERATION_METADATA_CONTEXT;
+}
+
+export function classifyProviderFailure(
+  response: Exclude<GenerateObjectResult<TargetGenerationOutput>, { ok: true }>,
+): TargetGenerationFailureSummary {
+  if (response.reason === "provider_error") {
+    return {
+      providerReason: "provider_error",
+      targetReason: "provider_error",
+      metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+    };
+  }
+
+  if (response.reason === "invalid_json") {
+    return {
+      providerReason: "invalid_json",
+      targetReason: "invalid_json",
+      metadataContext: getProviderMetadataContext(response),
+    };
+  }
+
+  if (response.reason === "no_content") {
+    return {
+      providerReason: "no_content",
+      targetReason: "no_content",
+      metadataContext: getProviderMetadataContext(response),
+      noContentSubtype: response.metadata.noContentSubtype,
+    };
+  }
+
+  const issues = response.metadata.issues ?? [];
+  const fields = issues.map((issue) => fieldFromIssuePath(issue.path));
+  const codes = issues.map((issue) => issue.code);
+  const hasMissingCanonicalField = issues.some((issue) =>
+    issue.code === "missing_required"
+    && TARGET_GENERATION_FIELDS.includes(issue.path as (typeof TARGET_GENERATION_FIELDS)[number])
+  );
+
+  return {
+    providerReason: "schema_validation",
+    targetReason: hasMissingCanonicalField ? "missing_field" : "schema_validation",
+    metadataContext: getProviderMetadataContext(response),
+    issueCount: response.metadata.issueCount ?? issues.length,
+    fields,
+    codes,
+  };
+}
+
+function classifyThrownFailure(error: unknown): TargetGenerationFailureSummary {
+  if (isLLMProviderError(error) && error.providerMetadata.aborted === true) {
+    throw error;
+  }
+
+  return {
+    providerReason: "provider_error",
+    targetReason: "provider_error",
+    metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+  };
+}
+
+function logAttemptFailure(
+  log: FastifyBaseLogger | undefined,
+  attempt: number,
+  failure: TargetGenerationFailureSummary,
+) {
+  if (!log) {
+    return;
+  }
+  logTargetGenerationAttemptFailed(log, {
+    attempt,
+    providerReason: failure.providerReason,
+    targetReason: failure.targetReason,
+    metadataContext: failure.metadataContext,
+    issueCount: failure.issueCount,
+    fields: failure.fields,
+    codes: failure.codes,
+    noContentSubtype: failure.noContentSubtype,
+  });
+}
+
+function logFallback(
+  log: FastifyBaseLogger | undefined,
+  attempt: number,
+  failure: TargetGenerationFailureSummary,
+) {
+  if (!log) {
+    return;
+  }
+  logTargetGenerationFallbackUsed(log, {
+    attempt,
+    providerReason: failure.providerReason,
+    targetReason: failure.targetReason,
+    metadataContext: failure.metadataContext,
+    issueCount: failure.issueCount,
+    fields: failure.fields,
+    codes: failure.codes,
+    noContentSubtype: failure.noContentSubtype,
+  });
+}
+
 export function createTargetGenerationService(llmProvider: LLMProvider, log?: FastifyBaseLogger) {
   return {
-    async generateTargets(goal: Goal, intake: IntakeFields): Promise<TargetGenerationResult> {
+    async generateTargets(goal: Goal, intake: IntakeFields, opts?: LLMCallOptions): Promise<TargetGenerationResult> {
       const messages = buildMessages(goal, intake);
 
-      for (let attempt = 0; attempt < 2; attempt++) {
+      let finalFailure: TargetGenerationFailureSummary | undefined;
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const response = await llmProvider.chat(messages, []);
-          if (!response.content) {
+          const response = await llmProvider.generateObject(messages, buildTargetGenerationRequest(), opts);
+          if (!response.ok) {
+            finalFailure = classifyProviderFailure(response);
+            logAttemptFailure(log, attempt, finalFailure);
             continue;
           }
 
-          const parsed = parseTargetResponse(response.content);
-          if (!validateTargets(goal, parsed.dailyTargets)) {
+          const domainResult = validateTargetDomain(goal, response.value);
+          if (!domainResult.ok) {
+            finalFailure = domainResult.failure;
+            logAttemptFailure(log, attempt, finalFailure);
             continue;
           }
 
           return {
-            dailyTargets: parsed.dailyTargets,
-            coachExplanation: parsed.coachExplanation,
+            dailyTargets: domainResult.dailyTargets,
+            coachExplanation: response.value.coachExplanation,
             usedFallback: false,
           };
-        } catch {
-          if (attempt === 1) {
-            break;
-          }
+        } catch (error) {
+          finalFailure = classifyThrownFailure(error);
+          logAttemptFailure(log, attempt, finalFailure);
         }
       }
 
-      log?.warn({ event: "target_gen_fallback", reason: "llm_attempts_exhausted" }, "Target generation fallback");
+      logFallback(log, 2, finalFailure ?? {
+        providerReason: "provider_error",
+        targetReason: "provider_error",
+        metadataContext: TARGET_GENERATION_METADATA_CONTEXT,
+      });
       return getFallbackResult(goal);
     },
   };

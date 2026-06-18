@@ -1,4 +1,12 @@
-import type { FallbackReason, OrchestratorHooks, ToolResultPayload } from "./hooks.js";
+import type { ProviderErrorMetadata } from "../llm/types.js";
+import { sanitizeRouteFallbackCatchFields } from "../observability/route-fallback-redaction.js";
+import type {
+  FallbackPayload,
+  FallbackReason,
+  LLMErrorPayload,
+  OrchestratorHooks,
+  ToolResultPayload,
+} from "./hooks.js";
 import {
   ACTIVE_SYSTEM_PROMPT_VERSION,
   SYSTEM_PROMPT_SECTION_IDS,
@@ -19,14 +27,47 @@ export type LlmTraceTimelineEvent =
       fields?: string[];
       updatedFields?: string[];
       publishedEvents?: string[];
+      policyClass?: string;
+      decision?: string;
+      ruleId?: string;
+      proposalId?: string;
+      turnId?: string;
     }
-  | { type: "orchestrator_fallback"; reason: FallbackReason }
+  | {
+      type: "llm_error";
+      round: number;
+      lastTool?: string;
+      providerMetadata: ProviderErrorMetadata;
+    }
+  | {
+      type: "orchestrator_fallback";
+      reason: FallbackReason;
+      round?: number;
+      lastTool?: string;
+      providerMetadata?: ProviderErrorMetadata;
+    }
   | {
       type: "route_completion";
-      transport: "sse";
+      transport: "json" | "sse";
+      turnId?: string;
       didLogMeal: boolean;
       didMutateMeal: boolean;
-      completed: boolean;
+      completed: true;
+    }
+  | {
+      type: "route_fallback";
+      transport: "json" | "sse";
+      turnId: string;
+      fallbackSource: "orchestrator" | "route_hallucination" | "route_catch";
+      didLogMeal: boolean;
+      didMutateMeal: boolean;
+      reason?: string;
+      catchSite?: string;
+      providerMetadata?: ProviderErrorMetadata;
+      round?: number;
+      lastTool?: string;
+      errorName?: string;
+      errorMessage?: string;
     };
 
 // Phase 53 migration inputs:
@@ -60,6 +101,7 @@ export interface LlmTraceSummary {
   roundCount: number;
   toolCount: number;
   fallbackCount: number;
+  providerErrorCount: number;
   latencyMs?: number;
   prompt: {
     version: typeof ACTIVE_SYSTEM_PROMPT_VERSION;
@@ -69,7 +111,7 @@ export interface LlmTraceSummary {
 }
 
 export interface LlmTraceArtifact {
-  schemaVersion: "llm-trace.v1";
+  schemaVersion: "llm-trace.v2";
   scenario: string;
   status: string;
   summary: LlmTraceSummary;
@@ -82,10 +124,26 @@ interface RecordFinalReplyInput {
 }
 
 interface RecordRouteCompletionInput {
-  transport: "sse";
+  transport: "json" | "sse";
+  turnId?: string;
   didLogMeal: boolean;
   didMutateMeal: boolean;
-  completed: boolean;
+  completed: true;
+}
+
+interface RecordRouteFallbackInput {
+  transport: "json" | "sse";
+  turnId: string;
+  fallbackSource: "orchestrator" | "route_hallucination" | "route_catch";
+  didLogMeal: boolean;
+  didMutateMeal: boolean;
+  reason?: string;
+  catchSite?: string;
+  providerMetadata?: ProviderErrorMetadata;
+  round?: number;
+  lastTool?: string;
+  errorName?: string;
+  errorMessage?: string;
 }
 
 interface RecordMetricsInput {
@@ -101,6 +159,7 @@ export interface LlmTraceRecorder {
   asOrchestratorHooks(): OrchestratorHooks;
   recordFinalReply(input: RecordFinalReplyInput): void;
   recordRouteCompletion(input: RecordRouteCompletionInput): void;
+  recordRouteFallback(input: RecordRouteFallbackInput): void;
   recordMetrics(input: RecordMetricsInput): void;
   build(input: BuildInput): LlmTraceArtifact;
 }
@@ -139,6 +198,115 @@ function sanitizeTraceLabels(values: string[]): string[] {
   return [...new Set(values.map(sanitizeTraceLabel))];
 }
 
+const SAFE_PROVIDER_OPERATIONS = new Set<ProviderErrorMetadata["operation"]>([
+  "chat",
+  "chat_round_initial",
+  "chat_round_stream_continuation",
+  "chat_stream_initial",
+  "chat_stream_continuation",
+]);
+
+function sanitizeProviderOperation(operation: ProviderErrorMetadata["operation"]): ProviderErrorMetadata["operation"] {
+  return SAFE_PROVIDER_OPERATIONS.has(operation) ? operation : "chat";
+}
+
+function sanitizeProviderMetadata(metadata: ProviderErrorMetadata): ProviderErrorMetadata {
+  const sanitized: ProviderErrorMetadata = {
+    provider: "openai",
+    operation: sanitizeProviderOperation(metadata.operation),
+    model: sanitizeTraceLabel(metadata.model),
+    aborted: metadata.aborted,
+  };
+
+  if (typeof metadata.status === "number") {
+    sanitized.status = metadata.status;
+  }
+  if (metadata.providerRequestId !== undefined) {
+    sanitized.providerRequestId = sanitizeTraceLabel(metadata.providerRequestId);
+  }
+  if (metadata.errorName !== undefined) {
+    sanitized.errorName = sanitizeTraceLabel(metadata.errorName);
+  }
+  if (metadata.errorType !== undefined) {
+    sanitized.errorType = sanitizeTraceLabel(metadata.errorType);
+  }
+  if (metadata.errorCode !== undefined) {
+    sanitized.errorCode = sanitizeTraceLabel(metadata.errorCode);
+  }
+
+  return sanitized;
+}
+
+function buildFallbackEvent(payload: FallbackPayload): Extract<LlmTraceTimelineEvent, { type: "orchestrator_fallback" }> {
+  const event: Extract<LlmTraceTimelineEvent, { type: "orchestrator_fallback" }> = {
+    type: "orchestrator_fallback",
+    reason: payload.reason,
+  };
+
+  if (payload.round !== undefined) {
+    event.round = payload.round;
+  }
+  if (payload.lastTool !== undefined) {
+    event.lastTool = sanitizeTraceLabel(payload.lastTool);
+  }
+  if (payload.providerMetadata !== undefined) {
+    event.providerMetadata = sanitizeProviderMetadata(payload.providerMetadata);
+  }
+
+  return event;
+}
+
+function buildLLMErrorEvent(payload: LLMErrorPayload): Extract<LlmTraceTimelineEvent, { type: "llm_error" }> {
+  const event: Extract<LlmTraceTimelineEvent, { type: "llm_error" }> = {
+    type: "llm_error",
+    round: payload.round,
+    providerMetadata: sanitizeProviderMetadata(payload.providerMetadata),
+  };
+
+  if (payload.lastTool !== undefined) {
+    event.lastTool = sanitizeTraceLabel(payload.lastTool);
+  }
+
+  return event;
+}
+
+function buildRouteFallbackEvent(
+  input: RecordRouteFallbackInput,
+): Extract<LlmTraceTimelineEvent, { type: "route_fallback" }> {
+  const catchFields = sanitizeRouteFallbackCatchFields({
+    errorName: input.errorName,
+    errorMessage: input.errorMessage,
+  });
+
+  const event: Extract<LlmTraceTimelineEvent, { type: "route_fallback" }> = {
+    type: "route_fallback",
+    transport: input.transport,
+    turnId: sanitizeTraceLabel(input.turnId),
+    fallbackSource: input.fallbackSource,
+    didLogMeal: input.didLogMeal,
+    didMutateMeal: input.didMutateMeal,
+  };
+
+  if (input.reason !== undefined) {
+    event.reason = sanitizeTraceLabel(input.reason);
+  }
+  if (input.catchSite !== undefined) {
+    event.catchSite = sanitizeTraceLabel(input.catchSite);
+  }
+  if (input.providerMetadata !== undefined) {
+    event.providerMetadata = sanitizeProviderMetadata(input.providerMetadata);
+  }
+  if (input.round !== undefined) {
+    event.round = Math.max(0, Math.round(input.round));
+  }
+  if (input.lastTool !== undefined) {
+    event.lastTool = sanitizeTraceLabel(input.lastTool);
+  }
+  Object.assign(event, catchFields);
+
+  return event;
+}
+
 function buildToolResultEvent(
   payload: ToolResultPayload,
   round?: number,
@@ -165,6 +333,21 @@ function buildToolResultEvent(
   }
   if (payload.publishedEvents !== undefined) {
     event.publishedEvents = sanitizeTraceLabels(payload.publishedEvents);
+  }
+  if (payload.policyClass !== undefined) {
+    event.policyClass = sanitizeTraceLabel(payload.policyClass);
+  }
+  if (payload.decision !== undefined) {
+    event.decision = sanitizeTraceLabel(payload.decision);
+  }
+  if (payload.ruleId !== undefined) {
+    event.ruleId = sanitizeTraceLabel(payload.ruleId);
+  }
+  if (payload.proposalId !== undefined) {
+    event.proposalId = sanitizeTraceLabel(payload.proposalId);
+  }
+  if (payload.turnId !== undefined) {
+    event.turnId = sanitizeTraceLabel(payload.turnId);
   }
 
   return event;
@@ -199,8 +382,11 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
         onToolResult(payload) {
           timeline.push(buildToolResultEvent(payload, currentRound));
         },
-        onFallback(reason) {
-          timeline.push({ type: "orchestrator_fallback", reason });
+        onLLMError(payload) {
+          timeline.push(buildLLMErrorEvent(payload));
+        },
+        onFallback(payload) {
+          timeline.push(buildFallbackEvent(payload));
         },
       };
     },
@@ -211,13 +397,20 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
       };
     },
     recordRouteCompletion(input) {
-      timeline.push({
+      const event: Extract<LlmTraceTimelineEvent, { type: "route_completion" }> = {
         type: "route_completion",
         transport: input.transport,
         didLogMeal: input.didLogMeal,
         didMutateMeal: input.didMutateMeal,
         completed: input.completed,
-      });
+      };
+      if (input.turnId !== undefined) {
+        event.turnId = sanitizeTraceLabel(input.turnId);
+      }
+      timeline.push(event);
+    },
+    recordRouteFallback(input) {
+      timeline.push(buildRouteFallbackEvent(input));
     },
     recordMetrics(input) {
       latencyMs = input.latencyMs;
@@ -227,6 +420,7 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
         roundCount: countTimelineEvents(timeline, "llm_round_start"),
         toolCount: countTimelineEvents(timeline, "tool_received"),
         fallbackCount: countTimelineEvents(timeline, "orchestrator_fallback"),
+        providerErrorCount: countTimelineEvents(timeline, "llm_error"),
         prompt: {
           version: ACTIVE_SYSTEM_PROMPT_VERSION,
           sectionIds: Object.values(SYSTEM_PROMPT_SECTION_IDS),
@@ -239,7 +433,7 @@ export function createLlmTraceRecorder(): LlmTraceRecorder {
       }
 
       return {
-        schemaVersion: "llm-trace.v1",
+        schemaVersion: "llm-trace.v2",
         scenario: input.scenario,
         status: input.status,
         summary,

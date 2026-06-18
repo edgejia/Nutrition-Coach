@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getHistoryDaySnapshot } from "../api.js";
 import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
+import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
 import { useStore } from "../store.js";
+import type { DayDetailPayload } from "../types.js";
 import type { HistoryDaySnapshot, MealEntry } from "../types.js";
+import { formatMealRowTime, getDisplayMealLabel } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportChevronLeftIcon } from "./SportIcons.js";
+import { SportChevronLeftIcon, SportEditIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportProgressBar, SportScreen } from "./SportPrimitives.js";
 
 function formatDetailDate(dateKey: string): string {
@@ -43,14 +46,25 @@ function getProgressVariant(tone: ReturnType<typeof getHistorySportStatusMeta>["
   return "default";
 }
 
+function getFocusedEditPayload(meal: MealEntry, dateKey: string, targetMealId: string | undefined) {
+  if (targetMealId === meal.id) {
+    const editPayload = buildMealEditPayloadIfComplete(meal, dateKey);
+    return editPayload;
+  }
+
+  return null;
+}
+
 function MealDetailRow({
   meal,
   registerRef,
   highlighted,
+  onEdit,
 }: {
   meal: MealEntry;
   registerRef: (node: HTMLDivElement | null) => void;
   highlighted: boolean;
+  onEdit?: () => void;
 }) {
   return (
     <article
@@ -73,15 +87,22 @@ function MealDetailRow({
         <div className="sp-history-detail-meal-copy">
           <h3>{meal.foodName}</h3>
           <div className="sp-history-detail-meal-time">
-            {new Intl.DateTimeFormat("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false }).format(
-              new Date(meal.loggedAt),
-            )}
+            {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}
           </div>
         </div>
         <div className="sp-history-detail-meal-energy">
           <span>{Math.round(meal.calories).toLocaleString("en-US")}</span>
           <small>kcal</small>
         </div>
+        {onEdit ? (
+          <SportIconButton
+            aria-label={`編輯餐點：${meal.foodName}`}
+            className="sp-history-detail-edit"
+            onClick={onEdit}
+          >
+            <SportEditIcon />
+          </SportIconButton>
+        ) : null}
       </div>
       <div className="sp-history-detail-meal-macros">
         <div>
@@ -104,6 +125,8 @@ function MealDetailRow({
 export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
+  const lastMealMutation = useStore((s) => s.lastMealMutation);
+  const openMealEdit = useStore((s) => s.openMealEdit);
   const todayKey = useMemo(() => formatLocalDate(new Date()), []);
   const payload = secondaryScreen?.screen === "dayDetail" ? secondaryScreen.payload : undefined;
   const dateKey = payload?.dateKey ?? todayKey;
@@ -114,33 +137,57 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [highlightedMealId, setHighlightedMealId] = useState<string | null>(targetMealId ?? null);
   const mealRefs = useRef(new Map<string, HTMLDivElement>());
+  const loadTokenRef = useRef(0);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const isToday = payloadLabel === "today-live" || dateKey === todayKey;
 
+  const loadSnapshot = useCallback(
+    (cancelledRef?: { current: boolean }) => {
+      const requestDateKey = dateKey;
+      const requestToken = loadTokenRef.current + 1;
+      loadTokenRef.current = requestToken;
+      const isCurrent = () => !cancelledRef?.current && loadTokenRef.current === requestToken;
+
+      setLoading(true);
+      setError(null);
+      setSnapshot(null);
+
+      return getHistoryDaySnapshot(requestDateKey)
+        .then((nextSnapshot) => {
+          if (isCurrent()) setSnapshot(nextSnapshot);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof Error && err.message === "UNAUTHORIZED") {
+            void recoverGuestSession();
+          }
+          if (isCurrent()) setError("當日詳情暫時載入失敗。請稍後再試。");
+        })
+        .finally(() => {
+          if (isCurrent()) setLoading(false);
+        });
+    },
+    [dateKey, recoverGuestSession],
+  );
+
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setSnapshot(null);
-
-    getHistoryDaySnapshot(dateKey)
-      .then((nextSnapshot) => {
-        if (!cancelled) setSnapshot(nextSnapshot);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof Error && err.message === "UNAUTHORIZED") {
-          void recoverGuestSession();
-        }
-        if (!cancelled) setError("當日詳情暫時載入失敗。請稍後再試。");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
+    const cancelledRef = { current: false };
+    void loadSnapshot(cancelledRef);
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
-  }, [dateKey, recoverGuestSession]);
+  }, [loadSnapshot]);
+
+  useEffect(() => {
+    if (!lastMealMutation || lastMealMutation?.affectedDate !== dateKey) {
+      return;
+    }
+
+    const cancelledRef = { current: false };
+    void loadSnapshot(cancelledRef);
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, [dateKey, lastMealMutation?.affectedDate, lastMealMutation?.nonce, loadSnapshot]);
 
   useEffect(() => {
     if (!snapshot || !targetMealId) return;
@@ -220,9 +267,7 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
               </div>
             </div>
             <p className="sp-history-detail-note">
-              {isToday
-                ? "今天的資料會隨記錄更新；此頁仍維持只讀檢視。"
-                : "這是當日營養快照；點選歷史中的餐點可修改內容。"}
+              {isToday ? "今天的資料會隨記錄更新。" : "這是當日營養快照。"}
             </p>
           </SportCard>
 
@@ -249,17 +294,36 @@ export function HistoryDayDetailScreen({ onBack }: { onBack: () => void }) {
             </SportCard>
           ) : null}
           <div className="sp-history-detail-meal-list">
-            {snapshot?.meals.map((meal) => (
-              <MealDetailRow
-                key={meal.id}
-                meal={meal}
-                highlighted={highlightedMealId === meal.id}
-                registerRef={(node) => {
-                  if (node) mealRefs.current.set(meal.id, node);
-                  else mealRefs.current.delete(meal.id);
-                }}
-              />
-            ))}
+            {snapshot?.meals.map((meal) => {
+              const editPayload = getFocusedEditPayload(meal, dateKey, targetMealId);
+              const returnToDayDetail: DayDetailPayload | null =
+                editPayload && targetMealId
+                  ? {
+                      dateKey,
+                      targetMealId,
+                      label: payloadLabel,
+                    }
+                  : null;
+              const onEdit =
+                editPayload && returnToDayDetail
+                  ? () => {
+                      openMealEdit(editPayload, "history", { returnToDayDetail });
+                    }
+                  : undefined;
+
+              return (
+                <MealDetailRow
+                  key={meal.id}
+                  meal={meal}
+                  highlighted={highlightedMealId === meal.id}
+                  onEdit={onEdit}
+                  registerRef={(node) => {
+                    if (node) mealRefs.current.set(meal.id, node);
+                    else mealRefs.current.delete(meal.id);
+                  }}
+                />
+              );
+            })}
           </div>
         </main>
       </SportScreen>

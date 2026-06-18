@@ -1,8 +1,10 @@
-import type { MealEditPayload, Message } from "../types.js";
+import type { MealEditPayload, Message, ProposalActionRequest, ProposalCardMetadata } from "../types.js";
 import type { KeyboardEvent } from "react";
+import { formatTurnReference } from "../api.js";
 import { buildReceiptMealEditPayload } from "../meal-edit-payload.js";
 import { AssistantMarkdown } from "./AssistantMarkdown.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
+import { ProposalActionEvent, ProposalCard } from "./ProposalCard.js";
 import { SportBoltIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportReceipt } from "./SportPrimitives.js";
 
@@ -11,8 +13,40 @@ type ProvisionalBubbleProps = {
   isStatusLabel: boolean;
 };
 
+type ActiveProposalEdit = {
+  messageId: string;
+  proposalId: string;
+  value: string;
+};
+
+const STOPPED_EMPTY_COPY = "已停止生成。";
+const STOPPED_STATUS_LABEL = "已停止";
+const RAW_STOPPED_PLACEHOLDER = "（已停止）";
+
 function isImagePlaceholderContent(content: string): boolean {
   return content.trim() === "(圖片)";
+}
+
+function getStoppedPresentation(message: Message) {
+  if (message.status !== "stopped") {
+    return {
+      content: message.content,
+      showStoppedStatus: false,
+    };
+  }
+
+  const trimmedContent = message.content.trim();
+  if (trimmedContent.length === 0 || trimmedContent === RAW_STOPPED_PLACEHOLDER) {
+    return {
+      content: STOPPED_EMPTY_COPY,
+      showStoppedStatus: false,
+    };
+  }
+
+  return {
+    content: message.content,
+    showStoppedStatus: true,
+  };
 }
 
 function formatNutritionValue(value: number) {
@@ -69,7 +103,12 @@ function ReceiptCard(props: {
     return null;
   }
 
-  const canEdit = editPayload !== null && onOpenMealEdit !== undefined;
+  const isDeletedReceipt = loggedMeal.receiptStatus === "deleted";
+  const receiptLabel = isDeletedReceipt ? "已刪除" : "已記錄";
+  const canEdit = !isDeletedReceipt && editPayload !== null && onOpenMealEdit !== undefined;
+  const receiptClassName = `sp-receipt-card${canEdit ? " sp-receipt-button" : ""}${
+    isDeletedReceipt ? " sp-receipt-deleted" : ""
+  }`;
 
   function handleOpenReceipt() {
     if (!editPayload) {
@@ -90,8 +129,14 @@ function ReceiptCard(props: {
   return (
     <div className="sp-message-row sp-message-row-assistant">
       <SportReceipt
-        className={`sp-receipt-card${canEdit ? " sp-receipt-button" : ""}`}
-        aria-label={canEdit ? `編輯 ${loggedMeal.foodName}` : undefined}
+        className={receiptClassName}
+        aria-label={
+          canEdit
+            ? `編輯 ${loggedMeal.foodName}`
+            : isDeletedReceipt
+              ? `${loggedMeal.foodName}，已刪除，歷史餐點快照`
+              : undefined
+        }
         onClick={canEdit ? handleOpenReceipt : undefined}
         onKeyDown={canEdit ? handleReceiptKeyDown : undefined}
         role={canEdit ? "button" : undefined}
@@ -111,7 +156,7 @@ function ReceiptCard(props: {
             </div>
           ) : null}
           <div className="sp-receipt-title">
-            <div className="sp-receipt-label">已記錄</div>
+            <div className="sp-receipt-label">{receiptLabel}</div>
             <div className="sp-receipt-food">{loggedMeal.foodName}</div>
           </div>
           <div className="sp-receipt-kcal">
@@ -140,9 +185,20 @@ function AssistantTextBubble(props: {
   isStatusLabel?: boolean;
 }) {
   const { message, isProvisional, isStatusLabel } = props;
-  const isError = !isProvisional && message.content.includes("抱歉，發生錯誤");
+  const isStopped = message.status === "stopped";
+  const { content, showStoppedStatus } = getStoppedPresentation(message);
+  const isFallbackOrError = !isStopped && (message.status === "error" || content.includes("抱歉，發生錯誤"));
+  const isError = !isProvisional && isFallbackOrError;
+  const turnReference =
+    !isProvisional &&
+    !isStatusLabel &&
+    isFallbackOrError &&
+    typeof message.turnId === "string" &&
+    message.turnId.trim().length > 0
+      ? formatTurnReference(message.turnId)
+      : null;
 
-  if (!message.content.trim()) {
+  if (!content.trim()) {
     return null;
   }
 
@@ -151,7 +207,7 @@ function AssistantTextBubble(props: {
       <div className="sp-message-row sp-message-row-assistant">
         <div className="sp-status-bubble">
           <SportBoltIcon size={14} stroke={2} />
-          <span>{message.content}</span>
+          <span>{content}</span>
           {isProvisional ? <i className="sp-status-dot" aria-hidden="true" /> : null}
         </div>
       </div>
@@ -160,17 +216,19 @@ function AssistantTextBubble(props: {
 
   return (
     <div className="sp-message-row sp-message-row-assistant">
-      <div className={`sp-bubble-asst${isError ? " sp-bubble-error" : ""}`}>
+      <div className={`sp-bubble-asst${isError ? " sp-bubble-error" : ""}${isStopped ? " sp-bubble-stopped" : ""}`}>
         {isProvisional ? (
           <p className="whitespace-pre-wrap">
-            {message.content}
+            {content}
             <span className="sp-stream-caret" aria-hidden="true">
               |
             </span>
           </p>
         ) : (
-          <AssistantMarkdown content={message.content} />
+          <AssistantMarkdown content={content} />
         )}
+        {showStoppedStatus ? <div className="sp-stopped-status">{STOPPED_STATUS_LABEL}</div> : null}
+        {turnReference ? <div className="sp-turn-reference">引用碼 {turnReference}</div> : null}
       </div>
     </div>
   );
@@ -180,11 +238,39 @@ export function MessageBubble(props: {
   message: Message;
   onImageSettle?: () => void;
   onOpenMealEdit?: (payload: MealEditPayload) => void;
+  onProposalApprove?: (request: ProposalActionRequest) => void;
+  onProposalEdit?: (input: { messageId: string; proposalCard: ProposalCardMetadata }) => void;
+  onProposalReject?: (request: ProposalActionRequest) => void;
+  activeEdit?: ActiveProposalEdit | null;
+  pendingAction?: ProposalActionRequest["action"] | null;
+  actionError?: string | null;
+  onInlineEditChange?: (value: string) => void;
+  onInlineEditSubmit?: () => void;
+  onCancelProposalEdit?: () => void;
 } & Partial<ProvisionalBubbleProps>) {
-  const { message, onImageSettle, onOpenMealEdit, isProvisional, isStatusLabel } = props;
+  const {
+    message,
+    onImageSettle,
+    onOpenMealEdit,
+    onProposalApprove,
+    onProposalEdit,
+    onProposalReject,
+    activeEdit,
+    pendingAction,
+    actionError,
+    onInlineEditChange,
+    onInlineEditSubmit,
+    onCancelProposalEdit,
+    isProvisional,
+    isStatusLabel,
+  } = props;
   const isUser = message.role === "user";
 
   if (isUser) {
+    if (message.proposalActionEvent) {
+      return <ProposalActionEvent event={message.proposalActionEvent} />;
+    }
+
     const { imageSrc, text, hasImage, hasText, isImageOnly } = getUserMessagePresentation(message);
 
     return (
@@ -217,16 +303,38 @@ export function MessageBubble(props: {
 
   const editPayload = getCompleteReceiptEditPayload(message);
   const shouldRenderReceipt = Boolean(message.loggedMeal);
-  const shouldRenderText = message.content.trim().length > 0;
+  const shouldRenderProposal = Boolean(message.proposalCard);
+  const shouldRenderText = getStoppedPresentation(message).content.trim().length > 0;
 
-  if (shouldRenderReceipt) {
+  if (shouldRenderProposal || shouldRenderReceipt) {
     return (
       <>
-        <ReceiptCard
-          message={message}
-          editPayload={isCompleteLoggedMealReceipt(message) ? editPayload : null}
-          onOpenMealEdit={onOpenMealEdit}
-        />
+        {message.proposalCard ? (
+          <ProposalCard
+            proposalCard={message.proposalCard}
+            onApprove={onProposalApprove}
+            onEdit={(proposalCard) => onProposalEdit?.({ messageId: message.id, proposalCard })}
+            onReject={onProposalReject}
+            activeEdit={
+              activeEdit?.messageId === message.id &&
+              activeEdit.proposalId === message.proposalCard.proposalId
+                ? activeEdit
+                : undefined
+            }
+            pendingAction={pendingAction}
+            actionError={actionError}
+            onInlineEditChange={onInlineEditChange}
+            onInlineEditSubmit={onInlineEditSubmit}
+            onCancelEdit={onCancelProposalEdit}
+          />
+        ) : null}
+        {shouldRenderReceipt ? (
+          <ReceiptCard
+            message={message}
+            editPayload={isCompleteLoggedMealReceipt(message) ? editPayload : null}
+            onOpenMealEdit={onOpenMealEdit}
+          />
+        ) : null}
         {shouldRenderText ? (
           <AssistantTextBubble
             message={message}

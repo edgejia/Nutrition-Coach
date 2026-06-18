@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { IntakeData } from "../../client/src/types.js";
 
 const storage = new Map<string, string>();
 globalThis.localStorage = {
@@ -21,8 +24,13 @@ globalThis.localStorage = {
   key: (index: number) => [...storage.keys()][index] ?? null,
 } as Storage;
 
-const { OnboardingStepperPresentation } = await import("../../client/src/components/onboarding/OnboardingStepper.js");
+const onboardingStepperModule = await import("../../client/src/components/onboarding/OnboardingStepper.js");
+const { OnboardingStepperPresentation, SpStepGoalClarification } = onboardingStepperModule;
 const { StepCoachHandoff } = await import("../../client/src/components/onboarding/StepCoachHandoff.js");
+const onboardingStepperSource = await readFile(
+  fileURLToPath(new URL("../../client/src/components/onboarding/OnboardingStepper.tsx", import.meta.url)),
+  "utf8",
+);
 
 function renderStepSix(props: {
   loading?: boolean;
@@ -62,7 +70,128 @@ function renderStepSix(props: {
   }));
 }
 
+function renderStepThree(data: Partial<IntakeData>) {
+  return renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
+    step: 3,
+    data: {
+      goal: "fat_loss",
+      sex: "female",
+      age: 31,
+      heightCm: 165,
+      weightKg: 58,
+      ...data,
+    },
+    validationIssues: [],
+    loading: false,
+    transportError: null,
+    result: null,
+    onGoalSelect: () => undefined,
+    onGoalClarificationNext: () => undefined,
+    onBodyDataNext: () => undefined,
+    onLifestyleNext: () => undefined,
+    onAdvancedMetricsNext: () => undefined,
+    onAdvancedMetricsSkip: () => undefined,
+    onBack: () => undefined,
+    onStart: () => undefined,
+    onRetry: () => undefined,
+    onFieldEdit: () => undefined,
+  }));
+}
+
+function wheelButtonValues(html: string, ariaLabel: string) {
+  const track = html.match(new RegExp(`<div class="sp-num-wheel-track"[^>]*aria-label="${ariaLabel}"[\\s\\S]*?</div>`))?.[0] ?? "";
+  assert.ok(track, `expected ${ariaLabel} wheel track`);
+  const buttonMatches = track.match(/<button\b[^>]*class="[^"]*\bsp-num-wheel-item\b[^"]*"[^>]*>[\s\S]*?<\/button>/g) ?? [];
+  return buttonMatches.map((button) => {
+    const value = button.match(/>(-?\d+)</)?.[1];
+    assert.ok(value, `expected numeric wheel button value in ${button}`);
+    return Number(value);
+  });
+}
+
+function assertUnique(values: readonly number[]) {
+  assert.deepEqual([...new Set(values)], values);
+}
+
 describe("onboarding stepper UI", () => {
+  it("renders Step 2 quick-note selected state from selectedNotes without changing visible text", () => {
+    assert.equal(typeof SpStepGoalClarification, "function");
+
+    const html = renderToStaticMarkup(createElement(SpStepGoalClarification, {
+      goal: "fat_loss",
+      value: "不想影響重訓表現",
+      selectedNotes: ["不想影響重訓表現"],
+      onChange: () => undefined,
+      onQuickNoteClick: () => undefined,
+      onNext: () => undefined,
+      onBack: () => undefined,
+    }));
+
+    assert.match(html, /aria-pressed="true"/);
+    assert.match(html, /aria-label="不想影響重訓表現，已套用"/);
+    assert.match(html, />不想影響重訓表現</);
+    const selectedButton = html.match(/<button[^>]+aria-pressed="true"[^>]*>[\s\S]*?不想影響重訓表現[\s\S]*?<\/button>/)?.[0] ?? "";
+    const unselectedButtons = html.match(/<button[^>]+aria-pressed="false"[^>]*>[\s\S]*?<\/button>/g) ?? [];
+
+    assert.match(selectedButton, /sp-chip-applied/);
+    assert.doesNotMatch(selectedButton, /sp-chip-on/);
+    assert.doesNotMatch(selectedButton, /disabled/);
+    assert.equal(unselectedButtons.length, 2);
+    for (const button of unselectedButtons) {
+      assert.doesNotMatch(button, /sp-chip-applied/);
+      assert.doesNotMatch(button, /sp-chip-on/);
+    }
+  });
+
+  it("renders goal-aware Step 2 quick notes and placeholders", () => {
+    const fatLossHtml = renderToStaticMarkup(createElement(SpStepGoalClarification, {
+      goal: "fat_loss",
+      value: "",
+      selectedNotes: [],
+      onChange: () => undefined,
+      onQuickNoteClick: () => undefined,
+      onNext: () => undefined,
+      onBack: () => undefined,
+    }));
+    const muscleGainHtml = renderToStaticMarkup(createElement(SpStepGoalClarification, {
+      goal: "muscle_gain",
+      value: "",
+      selectedNotes: [],
+      onChange: () => undefined,
+      onQuickNoteClick: () => undefined,
+      onNext: () => undefined,
+      onBack: () => undefined,
+    }));
+
+    assert.match(fatLossHtml, /你選了「減脂」/);
+    assert.match(fatLossHtml, /想慢慢減，不要太激進/);
+    assert.match(fatLossHtml, /想慢慢減不要太激進/);
+
+    assert.match(muscleGainHtml, /你選了「增肌」/);
+    assert.match(muscleGainHtml, /想增加肌肉量/);
+    assert.match(muscleGainHtml, /怕吃太多變胖/);
+    assert.match(muscleGainHtml, /訓練日需要多一點碳水/);
+    assert.doesNotMatch(muscleGainHtml, /想慢慢減/);
+    assert.doesNotMatch(muscleGainHtml, /不要太激進/);
+  });
+
+  it("wires Step 2 quick-note taps through the selectedNotes draft helper", () => {
+    for (const contract of [
+      "applyGoalClarificationQuickNote",
+      "GoalClarificationQuickNoteState",
+      "goalClarificationDraft",
+      "selectedNotes",
+      "onQuickNoteClick",
+      "setGoalClarificationDraft",
+    ]) {
+      assert.match(onboardingStepperSource, new RegExp(contract));
+    }
+
+    assert.ok(onboardingStepperSource.includes("onGoalClarificationNext(goalClarificationDraft.goalClarification)"));
+    assert.doesNotMatch(onboardingStepperSource, /selectedNotes:\s*parse/);
+    assert.doesNotMatch(onboardingStepperSource, /goalClarification\.split/);
+  });
+
   it("renders Step 1 goal recovery with validation copy and selectable goals", () => {
     const html = renderToStaticMarkup(createElement(OnboardingStepperPresentation, {
       step: 1,
@@ -149,13 +278,64 @@ describe("onboarding stepper UI", () => {
 
     assert.match(html, /身體資料/);
     assert.match(html, /第 03 步 \/ 共 06 步/);
-    assert.match(html, /aria-valuenow="9"/);
-    assert.match(html, />12</);
+    assert.match(html, /aria-valuenow="10"/);
+    assert.match(html, />10</);
     assert.match(html, />165</);
     assert.match(html, />58</);
     assert.match(html, /sp-num-wheel/);
     assert.doesNotMatch(html, /連線失敗/);
     assert.doesNotMatch(html, /重試/);
+  });
+
+  it("renders tappable duplicate-free Sport UI number wheel values", () => {
+    const lowerHtml = renderStepThree({ age: 10 });
+    const upperHtml = renderStepThree({ age: 120 });
+
+    const lowerAgeValues = wheelButtonValues(lowerHtml, "年齡");
+    const upperAgeValues = wheelButtonValues(upperHtml, "年齡");
+
+    assert.deepEqual(lowerAgeValues, [10, 11, 12, 13, 14]);
+    assert.deepEqual(upperAgeValues, [116, 117, 118, 119, 120]);
+    assertUnique(lowerAgeValues);
+    assertUnique(upperAgeValues);
+    assert.equal(lowerAgeValues.filter((value) => value === 10).length, 1);
+    assert.equal(upperAgeValues.filter((value) => value === 120).length, 1);
+
+    assert.match(lowerHtml, /<button type="button" class="sp-num-wheel-item active" aria-current="true">10<\/button>/);
+    assert.match(lowerHtml, /<button type="button" class="sp-num-wheel-item near">11<\/button>/);
+    assert.doesNotMatch(lowerHtml, /<span[^>]*class="sp-num-wheel-item/);
+
+    const defaultHtml = renderStepThree({ age: 31, heightCm: 165, weightKg: 58 });
+    assert.deepEqual(wheelButtonValues(defaultHtml, "年齡"), [29, 30, 31, 32, 33]);
+    assert.deepEqual(wheelButtonValues(defaultHtml, "身高"), [163, 164, 165, 166, 167]);
+    assert.deepEqual(wheelButtonValues(defaultHtml, "體重"), [56, 57, 58, 59, 60]);
+  });
+
+  it("keeps shared wheel source contracts for tap, compact/minimal variants, and TDEE steps", () => {
+    assert.match(onboardingStepperSource, /function buildVisibleWheelValues/);
+    assert.match(onboardingStepperSource, /function clampNumericValue/);
+    assert.match(onboardingStepperSource, /function WheelValueItem/);
+    assert.match(onboardingStepperSource, /ONBOARDING_NUMERIC_BOUNDS/);
+    assert.match(onboardingStepperSource, /age: \{ min: 10, max: 120 \}/);
+    assert.match(onboardingStepperSource, /heightCm: \{ min: 50, max: 300 \}/);
+    assert.match(onboardingStepperSource, /weightKg: \{ min: 20, max: 500 \}/);
+    assert.match(onboardingStepperSource, /bodyFatPercent: \{ min: 2, max: 70 \}/);
+    assert.match(onboardingStepperSource, /tdee: \{ min: 500, max: 8000, step: 50 \}/);
+    assert.match(onboardingStepperSource, /type="button"/);
+    assert.match(onboardingStepperSource, /aria-current=\{active \? "true" : undefined\}/);
+    assert.match(onboardingStepperSource, /currentValue=\{current\}/);
+    assert.match(onboardingStepperSource, /aria-valuenow=\{activeValue\}/);
+    assert.match(onboardingStepperSource, /if \(item\.value === currentValue\) return;/);
+    assert.match(onboardingStepperSource, /age: clampNumericValue\(bodyData\.age, ONBOARDING_NUMERIC_BOUNDS\.age\.min, ONBOARDING_NUMERIC_BOUNDS\.age\.max, 28\)/);
+    assert.match(onboardingStepperSource, /heightCm: clampNumericValue\(\s*bodyData\.heightCm,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.max,\s*175,\s*\)/);
+    assert.match(onboardingStepperSource, /weightKg: clampNumericValue\(\s*bodyData\.weightKg,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.max,\s*70,\s*\)/);
+    assert.match(onboardingStepperSource, /bodyFatPercent: advanced\.bodyFatPercent === ""\s*\?\s*undefined\s*:\s*clampNumericValue\(\s*advanced\.bodyFatPercent,\s*ONBOARDING_NUMERIC_BOUNDS\.bodyFatPercent\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.bodyFatPercent\.max,\s*20,\s*\)/);
+    assert.match(onboardingStepperSource, /tdee: advanced\.tdee === ""\s*\?\s*undefined\s*:\s*clampNumericValue\(\s*advanced\.tdee,\s*ONBOARDING_NUMERIC_BOUNDS\.tdee\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.tdee\.max,\s*2200,\s*\)/);
+    assert.doesNotMatch(onboardingStepperSource, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/);
+    assert.match(onboardingStepperSource, /visibleCount = minimal \? 3 : 5/);
+    assert.match(onboardingStepperSource, /label="體脂率"[\s\S]*compact=\{true\}/);
+    assert.match(onboardingStepperSource, /label="每日消耗"[\s\S]*step=\{ONBOARDING_NUMERIC_BOUNDS\.tdee\.step\}[\s\S]*compact=\{true\}[\s\S]*minimal=\{true\}/);
+    assert.doesNotMatch(onboardingStepperSource, /label\s*===\s*["']年齡["']/);
   });
 
   it("renders transport retry copy only in StepCoachHandoff transport mode", () => {

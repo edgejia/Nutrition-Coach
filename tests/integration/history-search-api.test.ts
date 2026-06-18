@@ -11,6 +11,7 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 
 type HistoryMeal = {
   id: string;
+  mealRevisionId: string;
   dateKey: string;
   loggedAt: string;
   display: {
@@ -120,21 +121,17 @@ describe("History search API", () => {
   async function seedSearchContractMeals() {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const chickenMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "Chicken Salad",
-      calories: 420,
-      protein: 38,
-      carbs: 18,
-      fat: 21,
+    const chickenMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
+      items: [
+        { foodName: "Chicken Salad", calories: 420, protein: 38, carbs: 18, fat: 21 },
+      ],
     });
-    const chineseMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "雞胸便當",
-      calories: 610,
-      protein: 46,
-      carbs: 72,
-      fat: 16,
+    const chineseMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T05:00:00.000Z",
+      items: [
+        { foodName: "雞胸便當", calories: 610, protein: 46, carbs: 72, fat: 16 },
+      ],
     });
     await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T06:00:00.000Z",
@@ -144,39 +141,34 @@ describe("History search API", () => {
         { foodName: "菠菜", calories: 25, protein: 3, carbs: 4, fat: 0 },
       ],
     });
-    const updatedMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "Superseded Beef Bowl",
-      calories: 700,
-      protein: 36,
-      carbs: 80,
-      fat: 24,
+    const updatedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T07:00:00.000Z",
+      items: [
+        { foodName: "Superseded Beef Bowl", calories: 700, protein: 36, carbs: 80, fat: 24 },
+      ],
     });
-    await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+    const currentMeal = await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+      expectedMealRevisionId: updatedMeal.mealRevisionId,
       loggedAt: "2026-03-25T07:00:00.000Z",
       items: [
         { foodName: "Current Tofu Bowl", calories: 520, protein: 28, carbs: 64, fat: 18 },
       ],
     });
-    const deletedMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "Deleted Chicken Wrap",
-      calories: 390,
-      protein: 24,
-      carbs: 42,
-      fat: 12,
+    const deletedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T08:00:00.000Z",
+      items: [
+        { foodName: "Deleted Chicken Wrap", calories: 390, protein: 24, carbs: 42, fat: 12 },
+      ],
     });
-    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id);
-    await services.foodLoggingService.logFood(foreignDeviceId, {
-      foodName: "Chicken Salad",
-      calories: 999,
-      protein: 99,
-      carbs: 99,
-      fat: 99,
+    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
+    await services.foodLoggingService.logGroupedMeal(foreignDeviceId, {
       loggedAt: "2026-03-25T09:00:00.000Z",
+      items: [
+        { foodName: "Chicken Salad", calories: 999, protein: 99, carbs: 99, fat: 99 },
+      ],
     });
 
-    return { chickenMeal, chineseMeal, updatedMeal, deletedMeal };
+    return { chickenMeal, chineseMeal, updatedMeal: currentMeal, deletedMeal };
   }
 
   async function seedNutritionBoundMeal() {
@@ -216,6 +208,7 @@ describe("History search API", () => {
       },
       meal: {
         id: seeded.chickenMeal.id,
+        mealRevisionId: seeded.chickenMeal.mealRevisionId,
         dateKey: "2026-03-25",
         loggedAt: "2026-03-25T04:00:00.000Z",
         display: { title: "Chicken Salad" },
@@ -279,6 +272,7 @@ describe("History search API", () => {
     assert.equal(currentRevisionRes.statusCode, 200);
     const currentRevisionBody = currentRevisionRes.json() as { results: HistorySearchResult[]; nextCursor: string | null };
     assert.deepEqual(currentRevisionBody.results.map((result) => result.meal.id), [seeded.updatedMeal.id]);
+    assert.equal(currentRevisionBody.results[0]?.meal.mealRevisionId, seeded.updatedMeal.mealRevisionId);
     assert.equal(currentRevisionBody.results[0]?.meal.revision.currentRevisionNumber, 2);
 
     const deletedRes = await app.inject({
@@ -367,13 +361,11 @@ describe("History search API", () => {
     const boundedMeal = await seedNutritionBoundMeal();
 
     for (let index = 0; index < 3; index += 1) {
-      await services.foodLoggingService.logFood(deviceId, {
-        foodName: `Chicken filler ${index}`,
-        calories: 120,
-        protein: 5,
-        carbs: 12,
-        fat: 4,
+      await services.foodLoggingService.logGroupedMeal(deviceId, {
         loggedAt: `2026-03-25T11:0${index}:00.000Z`,
+        items: [
+          { foodName: `Chicken filler ${index}`, calories: 120, protein: 5, carbs: 12, fat: 4 },
+        ],
       });
     }
 

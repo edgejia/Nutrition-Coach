@@ -4,7 +4,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createScenarioApp } from "../harness/app-fixture.js";
-import { parseSSEEvents, collectEventSequence, readStreamUntilEvent } from "../harness/sse.js";
+import { parseSSEEvents, collectEventSequence, readStreamThroughClose, readStreamUntilEvent } from "../harness/sse.js";
 import { StreamingLLMProvider } from "../harness/streaming-llm.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../harness/scenario-types.js";
 
@@ -104,6 +104,56 @@ describe("harness-foundation", () => {
     assert.match(result, /event: done/);
     assert.match(result, /event: chunk/);
     assert.match(result, /event: status/);
+  });
+
+  test("readStreamThroughClose reports terminal done contract evidence", async () => {
+    const sseFrames = [
+      "event: status\ndata: 記錄中\n\n",
+      "event: chunk\ndata: {\"token\":\"hello\"}\n\n",
+      "event: done\ndata: {\"reply\":\"hello\"}\n\n",
+    ];
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const frame of sseFrames) {
+          controller.enqueue(encoder.encode(frame));
+        }
+        controller.close();
+      },
+    });
+
+    const result = await readStreamThroughClose(stream.getReader(), { maxReads: 10, readTimeoutMs: 1000 });
+    assert.equal(result.closed, true);
+    assert.equal(result.firstDoneIndex, 2);
+    assert.equal(result.nonEmptyChunkBeforeDone, true);
+    assert.deepEqual(result.eventsAfterFirstDone, []);
+    assert.deepEqual(result.events.map((event) => event.event), ["status", "chunk", "done"]);
+  });
+
+  test("readStreamThroughClose exposes chunk and status events after first done", async () => {
+    const sseFrames = [
+      "event: chunk\ndata: {\"token\":\"hello\"}\n\n",
+      "event: done\ndata: {\"reply\":\"hello\"}\n\n",
+      "event: status\ndata: late\n\n",
+      "event: chunk\ndata: {\"token\":\"late\"}\n\n",
+    ];
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const frame of sseFrames) {
+          controller.enqueue(encoder.encode(frame));
+        }
+        controller.close();
+      },
+    });
+
+    const result = await readStreamThroughClose(stream.getReader(), { maxReads: 10, readTimeoutMs: 1000 });
+    assert.equal(result.closed, true);
+    assert.equal(result.firstDoneIndex, 1);
+    assert.equal(result.nonEmptyChunkBeforeDone, true);
+    assert.deepEqual(result.eventsAfterFirstDone.map((event) => event.event), ["status", "chunk"]);
   });
 
   test("StreamingLLMProvider returns queued round data", async () => {

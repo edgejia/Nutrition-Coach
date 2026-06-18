@@ -1,0 +1,442 @@
+{
+  "ok": true,
+  "steps": [
+    {
+      "name": "legacy_migration",
+      "ok": true,
+      "actual": {
+        "request": {
+          "method": "POST",
+          "url": "/api/device/session",
+          "status": 200,
+          "issuedCookieCount": 2,
+          "establishedBy": "legacy_migration"
+        },
+        "snapshot": {
+          "localIdentity": "present",
+          "goal": "fat_loss",
+          "activeScreen": "home",
+          "guestSessionStatus": "ready",
+          "guestSessionRecoveryAttempted": false,
+          "dailyTargets": {
+            "calories": 1500,
+            "protein": 120,
+            "carbs": 150,
+            "fat": 50
+          }
+        },
+        "storage": {
+          "localIdentity": "present",
+          "goal": "fat_loss",
+          "dailyTargets": {
+            "calories": 1500,
+            "protein": 120,
+            "carbs": 150,
+            "fat": 50
+          }
+        },
+        "browserCookieCount": 2,
+        "stepResult": {
+          "bootstrapReturned": true,
+          "establishedBy": "legacy_migration"
+        }
+      }
+    },
+    {
+      "name": "deployed_like_legacy_rejected",
+      "ok": true,
+      "actual": {
+        "simulatedDeployedLikeRuntime": {
+          "guestSessionCookieSecure": true
+        },
+        "request": {
+          "method": "POST",
+          "url": "/api/device/session",
+          "status": 401,
+          "issuedCookieCount": 0
+        },
+        "snapshot": {
+          "localIdentity": null,
+          "goal": "fat_loss",
+          "activeScreen": "home",
+          "guestSessionStatus": "recovery_required",
+          "guestSessionRecoveryAttempted": false,
+          "dailyTargets": {
+            "calories": 1500,
+            "protein": 120,
+            "carbs": 150,
+            "fat": 50
+          }
+        },
+        "storageAfterCleanup": {
+          "localIdentity": null,
+          "goal": "fat_loss",
+          "dailyTargets": {
+            "calories": 1500,
+            "protein": 120,
+            "carbs": 150,
+            "fat": 50
+          }
+        },
+        "stepResult": {
+          "bootstrapReturned": false,
+          "staleLocalIdentityCleared": true,
+          "recoveryStatus": "recovery_required"
+        }
+      }
+    },
+    {
+      "name": "same_browser_resume",
+      "ok": true,
+      "actual": {
+        "request": {
+          "method": "POST",
+          "url": "/api/device/session",
+          "status": 200,
+          "issuedCookieCount": 2,
+          "establishedBy": "resume"
+        },
+        "snapshot": {
+          "localIdentity": "present",
+          "goal": "fat_loss",
+          "activeScreen": "home",
+          "guestSessionStatus": "ready",
+          "guestSessionRecoveryAttempted": true,
+          "dailyTargets": {
+            "calories": 1500,
+            "protein": 120,
+            "carbs": 150,
+            "fat": 50
+          }
+        },
+        "storage": {
+          "localIdentity": "present",
+          "goal": "fat_loss",
+          "dailyTargets": {
+            "calories": 1500,
+            "protein": 120,
+            "carbs": 150,
+            "fat": 50
+          }
+        },
+        "browserCookieCount": 2,
+        "stepResult": {
+          "recoveryReturned": true,
+          "establishedBy": "resume"
+        }
+      }
+    },
+    {
+      "name": "tampered_access_fail_closed",
+      "ok": true,
+      "actual": {
+        "validSseEventTypes": [
+          "daily_summary"
+        ],
+        "validHistory": {
+          "status": 200,
+          "messageCount": 1,
+          "seededMessageVisible": true
+        },
+        "validAsset": {
+          "status": 200,
+          "contentType": "image/png"
+        },
+        "invalidHistory": {
+          "status": 401,
+          "error": "[REDACTED]"
+        },
+        "invalidAsset": {
+          "status": 401,
+          "error": "[REDACTED]"
+        },
+        "invalidSse": {
+          "status": 401,
+          "error": "[REDACTED]"
+        }
+      }
+    },
+    {
+      "name": "raw_selector_fail_closed",
+      "ok": true,
+      "actual": {
+        "validCookieForeignSelectors": {
+          "historyStatus": 200,
+          "ownerHistoryVisible": true,
+          "foreignHistoryVisible": false,
+          "ownerAssetStatus": 200,
+          "foreignAssetStatus": 404
+        },
+        "missingCookieRawSelectors": {
+          "historyStatus": 401,
+          "assetStatus": 401,
+          "sseStatus": 401
+        },
+        "stepResult": {
+          "cookieOwnerAuthoritative": true,
+          "rawSelectorsAuthorizeMissingCookie": false
+        }
+      }
+    },
+    {
+      "name": "blocking_rebuild_flow",
+      "ok": true,
+      "actual": {
+        "firstRecover": false,
+        "secondRecover": false,
+        "afterFirstRecover": {
+          "localIdentity": "present",
+          "goal": null,
+          "activeScreen": "home",
+          "guestSessionStatus": "recovery_required",
+          "guestSessionRecoveryAttempted": true,
+          "dailyTargets": null
+        },
+        "afterSecondRecover": {
+          "localIdentity": "present",
+          "goal": null,
+          "activeScreen": "home",
+          "guestSessionStatus": "recovery_required",
+          "guestSessionRecoveryAttempted": true,
+          "dailyTargets": null
+        },
+        "afterRebuild": {
+          "localIdentity": null,
+          "goal": null,
+          "activeScreen": "onboarding",
+          "guestSessionStatus": "ready",
+          "guestSessionRecoveryAttempted": false,
+          "dailyTargets": null
+        },
+        "storageAfterRebuild": {
+          "localIdentity": null,
+          "goal": null,
+          "dailyTargets": null
+        },
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/device/session",
+            "status": 401,
+            "issuedCookieCount": 0
+          },
+          {
+            "method": "DELETE",
+            "url": "/api/device/session",
+            "status": 204,
+            "issuedCookieCount": 2
+          }
+        ],
+        "browserCookieCount": 0
+      }
+    }
+  ],
+  "artifacts": {
+    "legacy_migration": {
+      "request": {
+        "method": "POST",
+        "url": "/api/device/session",
+        "status": 200,
+        "issuedCookieCount": 2,
+        "establishedBy": "legacy_migration"
+      },
+      "snapshot": {
+        "localIdentity": "present",
+        "goal": "fat_loss",
+        "activeScreen": "home",
+        "guestSessionStatus": "ready",
+        "guestSessionRecoveryAttempted": false,
+        "dailyTargets": {
+          "calories": 1500,
+          "protein": 120,
+          "carbs": 150,
+          "fat": 50
+        }
+      },
+      "storage": {
+        "localIdentity": "present",
+        "goal": "fat_loss",
+        "dailyTargets": {
+          "calories": 1500,
+          "protein": 120,
+          "carbs": 150,
+          "fat": 50
+        }
+      },
+      "browserCookieCount": 2,
+      "stepResult": {
+        "bootstrapReturned": true,
+        "establishedBy": "legacy_migration"
+      }
+    },
+    "deployed_like_legacy_rejected": {
+      "simulatedDeployedLikeRuntime": {
+        "guestSessionCookieSecure": true
+      },
+      "request": {
+        "method": "POST",
+        "url": "/api/device/session",
+        "status": 401,
+        "issuedCookieCount": 0
+      },
+      "snapshot": {
+        "localIdentity": null,
+        "goal": "fat_loss",
+        "activeScreen": "home",
+        "guestSessionStatus": "recovery_required",
+        "guestSessionRecoveryAttempted": false,
+        "dailyTargets": {
+          "calories": 1500,
+          "protein": 120,
+          "carbs": 150,
+          "fat": 50
+        }
+      },
+      "storageAfterCleanup": {
+        "localIdentity": null,
+        "goal": "fat_loss",
+        "dailyTargets": {
+          "calories": 1500,
+          "protein": 120,
+          "carbs": 150,
+          "fat": 50
+        }
+      },
+      "stepResult": {
+        "bootstrapReturned": false,
+        "staleLocalIdentityCleared": true,
+        "recoveryStatus": "recovery_required"
+      }
+    },
+    "same_browser_resume": {
+      "request": {
+        "method": "POST",
+        "url": "/api/device/session",
+        "status": 200,
+        "issuedCookieCount": 2,
+        "establishedBy": "resume"
+      },
+      "snapshot": {
+        "localIdentity": "present",
+        "goal": "fat_loss",
+        "activeScreen": "home",
+        "guestSessionStatus": "ready",
+        "guestSessionRecoveryAttempted": true,
+        "dailyTargets": {
+          "calories": 1500,
+          "protein": 120,
+          "carbs": 150,
+          "fat": 50
+        }
+      },
+      "storage": {
+        "localIdentity": "present",
+        "goal": "fat_loss",
+        "dailyTargets": {
+          "calories": 1500,
+          "protein": 120,
+          "carbs": 150,
+          "fat": 50
+        }
+      },
+      "browserCookieCount": 2,
+      "stepResult": {
+        "recoveryReturned": true,
+        "establishedBy": "resume"
+      }
+    },
+    "tampered_access_fail_closed": {
+      "validSseEventTypes": [
+        "daily_summary"
+      ],
+      "validHistory": {
+        "status": 200,
+        "messageCount": 1,
+        "seededMessageVisible": true
+      },
+      "validAsset": {
+        "status": 200,
+        "contentType": "image/png"
+      },
+      "invalidHistory": {
+        "status": 401,
+        "error": "[REDACTED]"
+      },
+      "invalidAsset": {
+        "status": 401,
+        "error": "[REDACTED]"
+      },
+      "invalidSse": {
+        "status": 401,
+        "error": "[REDACTED]"
+      }
+    },
+    "raw_selector_fail_closed": {
+      "validCookieForeignSelectors": {
+        "historyStatus": 200,
+        "ownerHistoryVisible": true,
+        "foreignHistoryVisible": false,
+        "ownerAssetStatus": 200,
+        "foreignAssetStatus": 404
+      },
+      "missingCookieRawSelectors": {
+        "historyStatus": 401,
+        "assetStatus": 401,
+        "sseStatus": 401
+      },
+      "stepResult": {
+        "cookieOwnerAuthoritative": true,
+        "rawSelectorsAuthorizeMissingCookie": false
+      }
+    },
+    "blocking_rebuild_flow": {
+      "firstRecover": false,
+      "secondRecover": false,
+      "afterFirstRecover": {
+        "localIdentity": "present",
+        "goal": null,
+        "activeScreen": "home",
+        "guestSessionStatus": "recovery_required",
+        "guestSessionRecoveryAttempted": true,
+        "dailyTargets": null
+      },
+      "afterSecondRecover": {
+        "localIdentity": "present",
+        "goal": null,
+        "activeScreen": "home",
+        "guestSessionStatus": "recovery_required",
+        "guestSessionRecoveryAttempted": true,
+        "dailyTargets": null
+      },
+      "afterRebuild": {
+        "localIdentity": null,
+        "goal": null,
+        "activeScreen": "onboarding",
+        "guestSessionStatus": "ready",
+        "guestSessionRecoveryAttempted": false,
+        "dailyTargets": null
+      },
+      "storageAfterRebuild": {
+        "localIdentity": null,
+        "goal": null,
+        "dailyTargets": null
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "url": "/api/device/session",
+          "status": 401,
+          "issuedCookieCount": 0
+        },
+        {
+          "method": "DELETE",
+          "url": "/api/device/session",
+          "status": 204,
+          "issuedCookieCount": 2
+        }
+      ],
+      "browserCookieCount": 0
+    }
+  },
+  "consoleSummary": "PASS guest-session-hardening 6/6"
+}

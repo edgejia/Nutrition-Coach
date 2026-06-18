@@ -63,10 +63,10 @@ export interface HistorySportStatusMeta {
 const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const WEEKDAY_LABELS: HistoryWeekDay["weekday"][] = ["一", "二", "三", "四", "五", "六", "日"];
 
-function parseDateKey(dateKey: string): Date {
+export function isRealDateKey(dateKey: string): boolean {
   const match = DATE_KEY_PATTERN.exec(dateKey);
   if (!match) {
-    throw new Error("INVALID_DATE_KEY");
+    return false;
   }
 
   const year = Number(match[1]);
@@ -78,10 +78,19 @@ function parseDateKey(dateKey: string): Date {
     date.getMonth() !== month - 1 ||
     date.getDate() !== day
   ) {
+    return false;
+  }
+
+  return true;
+}
+
+function parseDateKey(dateKey: string): Date {
+  if (!isRealDateKey(dateKey)) {
     throw new Error("INVALID_DATE_KEY");
   }
 
-  return date;
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 function addDays(dateKey: string, deltaDays: number): string {
@@ -144,6 +153,24 @@ export function getMondayWeekStart(dateKey: string): string {
 
 export function shiftHistoryWeek(weekStartKey: string, deltaWeeks: -1 | 1): string {
   return addDays(weekStartKey, deltaWeeks * 7);
+}
+
+export function getHistoryWeekHeaderLabel(
+  weekStartKey: string,
+  todayKey: string,
+): "本週" | "上週" | "歷史紀錄" {
+  const currentWeekStartKey = getMondayWeekStart(todayKey);
+  const previousWeekStartKey = shiftHistoryWeek(currentWeekStartKey, -1);
+
+  if (weekStartKey === currentWeekStartKey) {
+    return "本週";
+  }
+
+  if (weekStartKey === previousWeekStartKey) {
+    return "上週";
+  }
+
+  return "歷史紀錄";
 }
 
 export function buildHistoryWeek(input: {

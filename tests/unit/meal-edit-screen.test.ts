@@ -8,9 +8,30 @@ async function readSource(relativePath: string) {
 }
 
 const source = await readSource("../../client/src/components/MealEditScreen.tsx");
+const summaryDetailSource = await readSource("../../client/src/components/SummaryDetailScreen.tsx");
 
 function escapedPattern(text: string) {
   return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
+function functionBody(sourceText: string, functionName: string) {
+  const startToken = `function ${functionName}`;
+  const startIndex = sourceText.indexOf(startToken);
+  assert.notEqual(startIndex, -1, `${functionName} should exist`);
+  const bodyStart = sourceText.indexOf("{", startIndex);
+  assert.notEqual(bodyStart, -1, `${functionName} should have a body`);
+
+  let depth = 0;
+  for (let index = bodyStart; index < sourceText.length; index += 1) {
+    const char = sourceText[index];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      return sourceText.slice(bodyStart + 1, index);
+    }
+  }
+
+  assert.fail(`${functionName} body should be closed`);
 }
 
 describe("Meal Edit source contract", () => {
@@ -29,7 +50,7 @@ describe("Meal Edit source contract", () => {
       "尚未附上餐點照片",
       "這筆餐點是文字記錄，仍可編輯名稱與營養數值。",
       "圖片載入失敗，餐點資料仍可編輯。請稍後再試。",
-      "取消",
+      "取消編輯",
       "儲存",
       "PersistedAssetImage",
     ]) {
@@ -41,6 +62,9 @@ describe("Meal Edit source contract", () => {
     for (const expected of [
       "updateMeal",
       "deleteMeal",
+      "MealRevisionConflictError",
+      "refreshAfterMealMutation",
+      "expectedMealRevisionId: payload.mealRevisionId",
       "confirm",
       "setDailySummary",
       "redactChatReceiptIdentity",
@@ -51,6 +75,92 @@ describe("Meal Edit source contract", () => {
       "recoverGuestSession",
     ]) {
       assert.match(source, escapedPattern(expected));
+    }
+  });
+
+  it("uses origin-specific back labels for Home, Chat, and History Meal Edit entry", () => {
+    assert.match(source, /origin === "home"\s*\?\s*"返回首頁"/);
+    assert.match(source, /origin === "chat"\s*\?\s*"返回對話"/);
+    assert.match(
+      source,
+      /returnToDayDetail[\s\S]{0,240}"返回詳情"/,
+      "NAV-02 Meal Edit opened from Day Detail should use 返回詳情",
+    );
+    assert.match(source, /origin === "history"[\s\S]{0,240}"返回歷史"/);
+    assert.match(source, escapedPattern("aria-label={backLabel}"));
+  });
+
+  it("NAV-02 preserves Day Detail return context while keeping delete inside Meal Edit", () => {
+    for (const expected of [
+      "returnToDayDetail",
+      "返回詳情",
+      "取消編輯",
+      "deleteMeal",
+      "刪除這筆餐點？系統會保留歷史紀錄。",
+    ]) {
+      assert.match(source, escapedPattern(expected), `NAV-02 Meal Edit source must include ${expected}`);
+    }
+
+    assert.match(
+      source,
+      /onBack\(\)/,
+      "NAV-02 save/cancel/back still routes through the existing Meal Edit exit boundary",
+    );
+  });
+
+  it("handles stale revision conflicts with deterministic copy and stale-editor blocking", () => {
+    for (const expected of [
+      "餐點已被更新，請重新載入最新餐點後再編輯。",
+      "餐點版本已失效，請重新載入最新餐點後再編輯。",
+      "餐點已被更新，未刪除。請重新載入最新餐點後再決定是否刪除。",
+      "重新載入餐點",
+      "MEAL_REVISION_STALE",
+      "MEAL_REVISION_REQUIRED",
+      "staleBlocked",
+      "setStaleBlocked(true)",
+      "handleReloadStaleMeal",
+      'getMeals({ refreshReason: "meal_mutation" })',
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(source, /if \(!payload \|\| staleBlocked/);
+    assert.match(source, /disabled=\{pending \|\| staleBlocked\}/);
+  });
+
+  it("preserves committed direct mutation side effects when dailySummary is absent", () => {
+    assert.match(source, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
+    assert.doesNotMatch(source, /if \(!dailySummary \|\| dailySummary\.date !== formatLocalDate\(new Date\(\)\)\) \{\s*return;\s*\}/);
+    assert.match(source, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId: payload\.mealId,\s*affectedDate: response\.affectedDate,\s*dailySummary: response\.dailySummary,\s*\}\);/);
+    assert.match(source, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId: payload\.mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
+
+    for (const rejected of [
+      "summary unavailable",
+      "summaryOutcome.status",
+      "摘要暫時無法更新",
+      "重新整理摘要",
+    ]) {
+      assert.doesNotMatch(source, escapedPattern(rejected));
+    }
+  });
+
+  it("keeps Summary Detail direct delete side effects on the shared committed-mutation refresh path", () => {
+    assert.match(summaryDetailSource, /const \{ affectedDate, dailySummary \} = await deleteMeal\(mealId, \{\s*expectedMealRevisionId: meal\.mealRevisionId,\s*\}\);/);
+    assert.match(summaryDetailSource, /import \{ refreshAfterMealMutation \} from "\.\.\/meal-edit-refresh\.js";/);
+    assert.match(summaryDetailSource, /MealRevisionConflictError/);
+    assert.match(summaryDetailSource, /redactChatReceiptIdentity,/);
+    assert.match(summaryDetailSource, /await refreshAfterMealMutation\(\{\s*redactChatReceiptIdentity,\s*recordMealMutation,\s*setDailySummary,\s*getMeals,\s*setMeals,\s*todayKey: \(\) => formatLocalDate\(new Date\(\)\),\s*\}, \{\s*mealId,\s*affectedDate,\s*dailySummary,\s*\}\);/);
+    assert.match(summaryDetailSource, /if \(err instanceof MealRevisionConflictError\) \{/);
+    assert.match(summaryDetailSource, /mealId: err\.mealId,\s*affectedDate: err\.affectedDate,/);
+    assert.doesNotMatch(summaryDetailSource, /if \(dailySummary\?\.date === todayKey\) \{/);
+
+    for (const rejected of [
+      "summary unavailable",
+      "summaryOutcome.status",
+      "摘要暫時無法更新",
+      "重新整理摘要",
+    ]) {
+      assert.doesNotMatch(summaryDetailSource, escapedPattern(rejected));
     }
   });
 
@@ -79,39 +189,123 @@ describe("Meal Edit source contract", () => {
     assert.match(source, /imageAssetId:\s*payload\.imageAssetId \?\? null/);
   });
 
-  it("locks direct editing for grouped Meal Edit payloads and points users to chat correction", () => {
+  it("replaces grouped-lock editing with grouped editor rows and controls", () => {
     const groupedPayloadFixture = {
       foodName: "雞腿、白飯、青菜",
       itemCount: 3,
     };
     assert.equal(groupedPayloadFixture.itemCount, 3);
 
-    assert.match(source, /payload\.itemCount\s*>\s*1/);
-    assert.match(source, escapedPattern("組合餐點"));
-    assert.match(source, escapedPattern("這筆是組合餐點"));
-    assert.match(source, /包含 \{payload\.itemCount\} 項：\{payload\.foodName\}/);
-    assert.match(source, /payload\.items/);
-    assert.match(source, escapedPattern("sp-meal-edit-grouped-items"));
-    assert.match(source, escapedPattern("sp-meal-edit-grouped-item-name"));
-    assert.match(source, escapedPattern("sp-meal-edit-grouped-item-macros"));
-    assert.match(source, escapedPattern("熱量"));
-    assert.match(source, escapedPattern("蛋白質"));
-    assert.match(source, escapedPattern("碳水"));
-    assert.match(source, escapedPattern("脂肪"));
-    assert.match(source, escapedPattern("避免把多項餐點合併成一項"));
-    assert.match(source, escapedPattern("到對話修正"));
-    assert.match(source, escapedPattern("MULTI_ITEM_UPDATE_ERROR_CODE"));
-    assert.match(source, escapedPattern("這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。"));
-    assert.match(source, escapedPattern("closeSecondaryScreen"));
-    assert.match(source, escapedPattern('setActiveScreen("chat")'));
-    assert.match(source, /if \(!payload\) \{[\s\S]+?if \(payload\.itemCount\s*>\s*1\) \{[\s\S]+?if \(!draft\) \{/);
+    for (const expected of [
+      "GroupedMealEditor",
+      "GroupedMealRow",
+      "formatGroupedItemSummary",
+      "sp-meal-edit-grouped-card",
+      "sp-meal-edit-grouped-row",
+      "sp-meal-edit-grouped-row-expanded",
+      "sp-meal-edit-grouped-add",
+      "sp-meal-edit-grouped-empty",
+      "sp-meal-edit-grouped-final-delete-error",
+      "新增項目",
+      "儲存餐點",
+      "找不到項目明細",
+      "至少要保留一個項目；若要移除整筆餐點，請使用刪除餐點。",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
 
-    const groupedBranch = source.match(/if \(payload\.itemCount\s*>\s*1\) \{[\s\S]+?sp-meal-edit-grouped-primary[\s\S]+?\n\s*\);\n\s*\}/)?.[0] ?? "";
-    assert.match(groupedBranch, escapedPattern("sp-meal-edit-grouped-lock"));
-    assert.match(groupedBranch, /payload\.items\.map/);
-    assert.doesNotMatch(groupedBranch, escapedPattern("儲存"));
-    assert.doesNotMatch(groupedBranch, /<input\b/);
-    assert.doesNotMatch(groupedBranch, /sp-meal-edit-macro-field/);
-    assert.doesNotMatch(groupedBranch, escapedPattern("刪除"));
+    assert.match(source, /items\.map/);
+    assert.match(source, /<GroupedMealRow\s+key=\{index\}/);
+    assert.doesNotMatch(source, /key=\{`[^`]*item\.name[^`]*`\}/);
+    assert.match(source, /<input\b/);
+    assert.doesNotMatch(source, escapedPattern("sp-meal-edit-grouped-lock"));
+    assert.doesNotMatch(source, escapedPattern("到對話修正"));
+    assert.doesNotMatch(source, escapedPattern("這筆餐點包含多個項目，請到「對話」修正，避免把多項餐點合併成單一餐點。"));
+  });
+
+  it("MOB-03 keeps grouped row actions icon-only with localized stateful labels", () => {
+    const groupedRow = functionBody(source, "GroupedMealRow");
+    const actionsStart = groupedRow.indexOf('className="sp-meal-edit-grouped-row-actions"');
+    assert.notEqual(actionsStart, -1, "MOB-03 grouped row action container should exist");
+    const actionsSource = groupedRow.slice(actionsStart);
+
+    assert.doesNotMatch(actionsSource, />\s*edit\s*</i, "MOB-03 forbids visible English grouped action label edit");
+    assert.doesNotMatch(actionsSource, />\s*delete\s*</i, "MOB-03 forbids visible English grouped action label delete");
+    assert.match(
+      actionsSource,
+      /aria-label=\{`\$\{expanded \? "收合項目：" : "展開項目："\}\$\{rowName\}`\}/,
+      "MOB-03 edit action should expose stateful localized aria-labels",
+    );
+    assert.match(
+      actionsSource,
+      /aria-label=\{`刪除項目：\$\{rowName\}`\}/,
+      "MOB-03 delete action should keep the fixed localized aria-label",
+    );
+    assert.match(actionsSource, /aria-hidden="true"/, "MOB-03 grouped action icons should be hidden from accessible text");
+    assert.match(actionsSource, /<Sport[A-Za-z]+Icon\b/, "MOB-03 grouped actions should render icon components");
+  });
+
+  it("MOB-03 grouped edit action toggles expansion while preserving final-item delete blocking", () => {
+    assert.match(source, escapedPattern("至少要保留一個項目；若要移除整筆餐點，請使用刪除餐點。"));
+    assert.match(source, /setGroupedFinalDeleteError\(GROUPED_FINAL_DELETE_COPY\)/);
+    assert.match(source, /setExpandedGroupedRowIndex\(index\)/);
+    assert.match(
+      source,
+      /setExpandedGroupedRowIndex\(\(currentIndex\) => currentIndex === index \? null : index\)/,
+      "MOB-03 edit action should toggle expanded/collapsed state instead of expand-only behavior",
+    );
+    assert.doesNotMatch(source, /onClick=\{\(\) => onExpand\(index\)\}[\s\S]{0,80}>\s*edit\s*</i);
+  });
+
+  it("blocks invalid grouped saves, opens the first invalid row, and preserves stale recovery", () => {
+    for (const expected of [
+      "尚未儲存。請先修正標示的項目。",
+      "餐點已儲存，但畫面暫時無法更新。請重新整理後確認。",
+      "MealRevisionConflictError",
+      "refreshAfterMealMutation",
+      "recoverGuestSession",
+      "setStaleBlocked(true)",
+      "handleReloadStaleMeal",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(source, /firstInvalid/i);
+    assert.match(source, /expanded.*firstInvalid|firstInvalid.*expanded/s);
+    assert.match(source, /if \(err instanceof MealRevisionConflictError\)/);
+    assert.match(source, /await refreshAfterMealMutation\(/);
+    assert.match(source, /catch \{\s*setError\(GROUPED_REFRESH_FAILED_COPY\);\s*return;\s*\}\s*onBack\(\);/);
+    assert.match(source, /onBack\(\)/);
+  });
+
+  it("prompts once before discarding dirty grouped drafts", () => {
+    for (const expected of [
+      "放棄尚未儲存的變更？",
+      "isGroupedMealDraftDirty",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(source, /confirm\("放棄尚未儲存的變更？"\)/);
+  });
+
+  it("keeps grouped item rows media-free while preserving whole-meal image copy", () => {
+    assert.match(source, escapedPattern("整餐照片"));
+    assert.match(source, escapedPattern("這張照片代表整餐，不是單一食物裁切。"));
+    assert.doesNotMatch(source, /dangerouslySetInnerHTML/);
+
+    for (const rejected of [
+      "perItemImage",
+      "itemImage",
+      "crop",
+      "thumbnail",
+      "imageAssetId",
+      "照片區域",
+      "圖片區域",
+    ]) {
+      const groupedWriteConstruction =
+        source.match(/buildGroupedMealUpdateItems[\s\S]+?updateMeal\([\s\S]+?\}\);/)?.[0] ?? "";
+      assert.doesNotMatch(groupedWriteConstruction, escapedPattern(rejected));
+    }
   });
 });

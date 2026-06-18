@@ -21,6 +21,7 @@ globalThis.localStorage = {
 } as Storage;
 
 const { useStore } = await import("../../client/src/store.js");
+const { getEmptyStateCopy } = await import("../../client/src/coach-advice.js");
 const { getDashboardCells } = await import("../../client/src/components/Dashboard.js");
 const { splitAdvice, getAdvicePresentation } = await import("../../client/src/components/CoachAdviceCard.js");
 const { getUserMessagePresentation } = await import("../../client/src/components/MessageBubble.js");
@@ -107,12 +108,14 @@ describe("Editorial UI", () => {
       },
       useStore.getState().dailyTargets,
       null,
+      "fat_loss",
     );
 
-    assert.deepEqual(presentation, {
-      state: "empty",
-      message: "先用對話記下第一餐。今天還沒有紀錄。到「對話」描述你吃了什麼。",
-    });
+    assert.equal(presentation.state, "empty");
+    assert.equal(
+      presentation.message,
+      getEmptyStateCopy("fat_loss", useStore.getState().dailyTargets),
+    );
   });
 
   it("returns split advice text and dynamic nutrition tags in Chinese", () => {
@@ -164,6 +167,28 @@ describe("Editorial UI", () => {
     assert.match(chatPanelSource, /重試送出/);
     assert.match(chatPanelSource, /取消送出/);
     assert.doesNotMatch(chatPanelSource, /上一筆草稿送出失敗。|取消草稿/);
+  });
+
+  it("CHAT-02 D-10..D-15 failed banner cancel uses named local cleanup instead of direct draft clearing", async () => {
+    const chatPanelSource = await readFile(
+      fileURLToPath(new URL("../../client/src/components/ChatPanel.tsx", import.meta.url)),
+      "utf8",
+    );
+
+    assert.match(chatPanelSource, /上一筆任務送出失敗。/);
+    assert.match(chatPanelSource, /重試送出/);
+    assert.match(chatPanelSource, /取消送出/);
+    assert.match(
+      chatPanelSource,
+      /function cancelFailedPendingDraft\(draft: PendingHomeChatDraft\)/,
+      "D-10/D-12 cancel must use a named local cleanup handler that can remove only the draft-linked artifact",
+    );
+    assert.match(chatPanelSource, /onClick=\{\(\) => cancelFailedPendingDraft\(pendingHomeChatDraft\)\}/);
+    assert.doesNotMatch(
+      chatPanelSource,
+      /onClick=\{clearPendingHomeChatDraft\}/,
+      "D-13/D-14 cancel must not be a generic draft clear or active-stream abort path",
+    );
   });
 
   it("prefers persisted imageUrl when restoring image-only user chat messages", () => {

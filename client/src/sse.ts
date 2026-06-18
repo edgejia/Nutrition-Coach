@@ -1,25 +1,19 @@
-import type { DailySummary, DailyTargets, GoalsUpdatePayload } from "./types.js";
+import {
+  isDailySummarySSEPayloadDto,
+  isGoalsUpdatePayloadDto,
+} from "./dto-guards.js";
+import type {
+  DailySummary,
+  DailySummarySSEPayload,
+  DailyTargets,
+} from "./types.js";
 
 let eventSource: EventSource | null = null;
 
 export interface SSEHandlers {
-  onSummary: (summary: DailySummary) => void;
+  onSummary?: (summary: DailySummary) => void;
+  onDailySummaryEnvelope?: (payload: DailySummarySSEPayload) => void;
   onGoalsUpdate: (targets: DailyTargets) => void;
-}
-
-// Shape-check guard for `goals_update` payloads: the SSE boundary is untrusted
-// (T-10-14). We reject anything that does not match `{ targets: { calories,
-// protein, carbs, fat } }` with finite numbers so malformed JSON or malicious
-// partial payloads never mutate `dailyTargets` state.
-function isValidTargets(value: unknown): value is DailyTargets {
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.calories === "number" && Number.isFinite(obj.calories) &&
-    typeof obj.protein === "number" && Number.isFinite(obj.protein) &&
-    typeof obj.carbs === "number" && Number.isFinite(obj.carbs) &&
-    typeof obj.fat === "number" && Number.isFinite(obj.fat)
-  );
 }
 
 export function connectSSE(_deviceId: string, handlers: SSEHandlers) {
@@ -27,8 +21,19 @@ export function connectSSE(_deviceId: string, handlers: SSEHandlers) {
   eventSource = new EventSource("/api/sse");
 
   eventSource.addEventListener("daily_summary", (event) => {
-    const summary = JSON.parse((event as MessageEvent<string>).data) as DailySummary;
-    handlers.onSummary(summary);
+    try {
+      const raw = (event as MessageEvent<string>).data;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isDailySummarySSEPayloadDto(parsed)) return;
+      if (handlers.onDailySummaryEnvelope) {
+        handlers.onDailySummaryEnvelope(parsed);
+        return;
+      }
+      handlers.onSummary?.(parsed.summary);
+    } catch {
+      // Malformed JSON or invalid shapes are ignored without propagating into
+      // the EventSource dispatcher, matching the goals_update precedent.
+    }
   });
 
   // `goals_update` event: Plan 10-04 wires the payload through the same
@@ -39,8 +44,8 @@ export function connectSSE(_deviceId: string, handlers: SSEHandlers) {
   eventSource.addEventListener("goals_update", (event) => {
     try {
       const raw = (event as MessageEvent<string>).data;
-      const parsed = JSON.parse(raw) as GoalsUpdatePayload;
-      if (parsed && typeof parsed === "object" && isValidTargets(parsed.targets)) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (isGoalsUpdatePayloadDto(parsed)) {
         handlers.onGoalsUpdate(parsed.targets);
       }
     } catch {

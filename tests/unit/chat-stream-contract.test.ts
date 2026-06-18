@@ -129,6 +129,86 @@ describe("chat stream contract", () => {
     assert.equal(donePayload?.loggedMeal, undefined);
   });
 
+  it("sendMessageStream emits turn start before later stream effects and passes done turnId", async () => {
+    const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";
+    mockStreamFetch([
+      `event: start\ndata: ${JSON.stringify({ turnId })}\n\n`,
+      `event: status\ndata: ${JSON.stringify({ label: "思考中...", turnId })}\n\n`,
+      'event: chunk\ndata: {"token":"已"}\n\n',
+      `event: done\ndata: ${JSON.stringify({ turnId, didLogMeal: false })}\n\n`,
+    ]);
+
+    const events: string[] = [];
+    let donePayload: { didLogMeal: boolean; turnId?: string } | undefined;
+
+    await sendMessageStream("hello", {
+      onTurnStart: (receivedTurnId) => events.push(`start:${receivedTurnId}`),
+      onStatus: (label) => events.push(`status:${label}`),
+      onToken: (token) => events.push(`chunk:${token}`),
+      onDone: (data) => {
+        events.push("done");
+        donePayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.deepEqual(events, [`start:${turnId}`, "status:思考中...", "chunk:已", "done"]);
+    assert.equal(donePayload?.turnId, turnId);
+  });
+
+  it("sendMessageStream dedupes later turn ids and ignores malformed turn ids", async () => {
+    const turnId = "b2c3d4e5-1111-4222-8333-0123456789ab";
+    mockStreamFetch([
+      `event: start\ndata: ${JSON.stringify({ turnId })}\n\n`,
+      `event: status\ndata: ${JSON.stringify({ label: "分析中...", turnId })}\n\n`,
+      `event: done\ndata: ${JSON.stringify({ turnId, didLogMeal: false })}\n\n`,
+    ]);
+
+    const turnStarts: string[] = [];
+    let donePayload: { didLogMeal: boolean; turnId?: string } | undefined;
+
+    await sendMessageStream("hello", {
+      onTurnStart: (receivedTurnId) => turnStarts.push(receivedTurnId),
+      onStatus: () => undefined,
+      onToken: () => undefined,
+      onDone: (data) => {
+        donePayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.deepEqual(turnStarts, [turnId]);
+    assert.equal(donePayload?.turnId, turnId);
+
+    mockStreamFetch([
+      'event: start\ndata: {"turnId":""}\n\n',
+      'event: status\ndata: {"label":"思考中...","turnId":42}\n\n',
+      'event: done\ndata: {"didLogMeal":false}\n\n',
+    ]);
+
+    const malformedTurnStarts: string[] = [];
+    let malformedDonePayload: { didLogMeal: boolean; turnId?: string } | undefined;
+
+    await sendMessageStream("missing id", {
+      onTurnStart: (receivedTurnId) => malformedTurnStarts.push(receivedTurnId),
+      onStatus: () => undefined,
+      onToken: () => undefined,
+      onDone: (data) => {
+        malformedDonePayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.deepEqual(malformedTurnStarts, []);
+    assert.equal(malformedDonePayload?.turnId, undefined);
+  });
+
   it("sendMessageStream exposes turnId status metadata and parses event: stopped as terminal", async () => {
     const todayKey = formatLocalDate(new Date());
     mockStreamFetch([
@@ -265,7 +345,7 @@ describe("chat stream contract", () => {
     assert.equal(message?.loggedMeal?.dateKey, "2026-03-25");
   });
 
-  it("commitStoppedProvisionalBubble preserves partial text, stopped marker, receipt, and summary extras", () => {
+  it("commitStoppedProvisionalBubble preserves partial text without appending stopped copy", () => {
     const todayKey = formatLocalDate(new Date());
     useStore.getState().setProvisionalBubble({
       id: "bubble-stopped",
@@ -275,6 +355,7 @@ describe("chat stream contract", () => {
     });
 
     useStore.getState().commitStoppedProvisionalBubble({
+      turnId: "turn-stopped-1",
       loggedMeal: {
         foodName: "雞腿便當",
         calories: 720,
@@ -300,7 +381,9 @@ describe("chat stream contract", () => {
 
     const message = useStore.getState().messages[0];
     assert.equal(message?.status, "stopped");
-    assert.equal(message?.content, "已記錄\n\n已停止");
+    assert.equal(message?.turnId, "turn-stopped-1");
+    assert.equal(message?.content, "已記錄");
+    assert.doesNotMatch(message?.content ?? "", /已停止/);
     assert.equal(message?.loggedMeal?.foodName, "雞腿便當");
     assert.equal(useStore.getState().dailySummary?.totalCalories, 720);
     assert.equal(useStore.getState().provisionalBubble, null);
@@ -318,7 +401,22 @@ describe("chat stream contract", () => {
 
     const message = useStore.getState().messages[0];
     assert.equal(message?.status, "stopped");
-    assert.equal(message?.content, "已停止，沒有產生新的回覆。");
+    assert.equal(message?.content, "已停止生成。");
+  });
+
+  it("commitStoppedProvisionalBubble normalizes raw stopped placeholder content", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "bubble-raw-stopped",
+      statusLabel: "",
+      content: "（已停止）",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitStoppedProvisionalBubble({});
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message?.status, "stopped");
+    assert.equal(message?.content, "已停止生成。");
   });
 
   it("clears unauthorized Chat sends out of the provisional sending state", async () => {
@@ -332,5 +430,73 @@ describe("chat stream contract", () => {
     assert.match(branchSource, /setProvisionalBubble\(null\)/);
     assert.match(branchSource, /setSending\(false\)/);
     assert.match(branchSource, /recoverGuestSession\(\)/);
+  });
+
+  it("classifies server fallback done payloads as error messages with turn references", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+
+    assert.match(chatPanel, /function isFallbackReplyContent\(content: string\)/);
+    for (const expected of [
+      "抱歉，這次無法完成請求",
+      "抱歉，無法辨識這次的請求",
+      "已完成記錄，但回覆生成失敗",
+      "已完成餐點",
+      "回覆生成失敗",
+    ]) {
+      assert.match(chatPanel, new RegExp(expected));
+    }
+
+    assert.match(chatPanel, /onDone: \(\{[^}]*turnId[^}]*\}\) =>/);
+    assert.match(chatPanel, /onStopped: \(\{[^}]*turnId[^}]*\}\) =>/);
+    assert.match(chatPanel, /const content = useStore\.getState\(\)\.provisionalBubble\?\.content \?\? ""/);
+    assert.match(chatPanel, /const isFallbackReply = isFallbackReplyContent\(content\)/);
+    assert.match(chatPanel, /const fallbackTurnId = turnId \?\? activeTurnIdRef\.current/);
+    assert.match(chatPanel, /\.\.\.\(isFallbackReply \? \{ status: "error" as const \} : \{\}\)/);
+    assert.match(chatPanel, /\.\.\.\(isFallbackReply && fallbackTurnId \? \{ turnId: fallbackTurnId \} : \{\}\)/);
+    assert.match(chatPanel, /\.\.\.\(turnId \? \{ turnId \} : \{\}\)/);
+  });
+
+  it("stop fallback keeps stop mode active until abort fallout commits stopped state", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const fallbackStart = chatPanel.indexOf("function armStopFallback()");
+    const nextFunctionStart = chatPanel.indexOf("function disarmEntrySettleWindow()", fallbackStart);
+    const fallbackSource = chatPanel.slice(fallbackStart, nextFunctionStart);
+
+    assert.match(fallbackSource, /activeAbortControllerRef\.current\?\.abort\(\)/);
+    assert.doesNotMatch(fallbackSource, /setStoppingMode\(false\)/);
+    assert.doesNotMatch(fallbackSource, /activeTurnIdRef\.current = null/);
+    assert.doesNotMatch(fallbackSource, /setActiveTurnId\(null\)/);
+  });
+
+  it("CHAT-01 D-01..D-09 retries remove draft-linked artifacts before a new provisional bubble", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const sendPendingDraftStart = chatPanel.indexOf("async function sendPendingDraft(draft: PendingHomeChatDraft)");
+    const nextEffectStart = chatPanel.indexOf("useEffect(() =>", sendPendingDraftStart);
+    const sendPendingDraftSource = chatPanel.slice(sendPendingDraftStart, nextEffectStart);
+
+    const failedArtifactReadIndex = sendPendingDraftSource.indexOf("draft.failedAssistantArtifactId");
+    const cleanupIndex = sendPendingDraftSource.indexOf(
+      "clearDraftLinkedAssistantArtifact(draft.failedAssistantArtifactId)",
+    );
+    const sendingIndex = sendPendingDraftSource.indexOf("setPendingHomeChatDraft(");
+    const handleSendIndex = sendPendingDraftSource.indexOf("await handleSend(");
+
+    assert.notEqual(sendPendingDraftStart, -1, "sendPendingDraft source contract should locate the retry handler");
+    assert.notEqual(failedArtifactReadIndex, -1, "D-07 retry must read explicit failedAssistantArtifactId");
+    assert.notEqual(cleanupIndex, -1, "D-01/D-04 retry must call clearDraftLinkedAssistantArtifact with the draft id");
+    assert.match(
+      sendPendingDraftSource,
+      /const \{ failedAssistantArtifactId: _failedAssistantArtifactId, \.\.\.draftWithoutFailedArtifact \} = draft/,
+      "D-04/D-09 retry must omit stale failedAssistantArtifactId before storing sending draft state",
+    );
+    assert.ok(
+      cleanupIndex < sendingIndex,
+      "D-04 cleanup must happen before the draft is marked sending",
+    );
+    assert.ok(
+      cleanupIndex < handleSendIndex,
+      "D-05 cleanup must happen before handleSend creates a new provisional bubble",
+    );
+    assert.match(sendPendingDraftSource, /appendUserBubble:\s*draft\.status !== "failed"/);
   });
 });

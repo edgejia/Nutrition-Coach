@@ -32,6 +32,12 @@ interface DailySummary {
   mealCount: number;
 }
 
+interface DailySummaryEnvelope {
+  summary?: DailySummary;
+  affectedDate?: string;
+  source?: "initial" | "meal_mutation";
+}
+
 interface MealRecord {
   id: string;
   foodName: string;
@@ -110,6 +116,14 @@ function expectRecord(value: unknown, name: string): Record<string, unknown> {
   return value;
 }
 
+function parseDailySummaryFrame(data: string): DailySummary {
+  const parsed = JSON.parse(data) as DailySummary | DailySummaryEnvelope;
+  if ("summary" in parsed && parsed.summary) {
+    return parsed.summary;
+  }
+  return parsed as DailySummary;
+}
+
 // ---------------------------------------------------------------------------
 // Scenario implementation
 // ---------------------------------------------------------------------------
@@ -148,11 +162,15 @@ const textLogScenario: VerificationScenario = {
           function: {
             name: "log_food",
             arguments: JSON.stringify({
-              food_name: "蘋果",
-              calories: 95,
-              protein: 0.5,
-              carbs: 25,
-              fat: 0.3,
+              items: [
+                {
+                  food_name: "蘋果",
+                  calories: 95,
+                  protein: 0.5,
+                  carbs: 25,
+                  fat: 0.3,
+                },
+              ],
             }),
           },
         },
@@ -238,7 +256,7 @@ const textLogScenario: VerificationScenario = {
 
         let initialSummary: DailySummary | undefined;
         try {
-          initialSummary = JSON.parse(initialSummaryEvent.data) as DailySummary;
+          initialSummary = parseDailySummaryFrame(initialSummaryEvent.data);
         } catch {
           clearTimeout(sseTimeout);
           const stepResult = fail("subscribe_summary", "Failed to parse initial daily_summary JSON");
@@ -539,7 +557,7 @@ const textLogScenario: VerificationScenario = {
               const secondSummaryEvent = summaryEvents[summaryEvents.length - 1];
               if (secondSummaryEvent) {
                 try {
-                  updatedSummary = JSON.parse(secondSummaryEvent.data) as DailySummary;
+                  updatedSummary = parseDailySummaryFrame(secondSummaryEvent.data);
                 } catch {
                   // fall through to donePayload.dailySummary
                 }
@@ -619,17 +637,17 @@ const textLogScenario: VerificationScenario = {
         const topLevelKeys = Object.keys(trace).sort();
 
         if (topLevelKeys.join(",") !== "scenario,schemaVersion,status,summary,timeline") {
-          const stepResult = fail("verify_llm_trace", "Trace top-level keys did not match the llm-trace.v1 contract", {
+          const stepResult = fail("verify_llm_trace", "Trace top-level keys did not match the llm-trace.v2 contract", {
             topLevelKeys,
           });
           steps.push(stepResult);
           return failScenario("verify_llm_trace");
         }
 
-        if (trace.schemaVersion !== "llm-trace.v1") {
+        if (trace.schemaVersion !== "llm-trace.v2") {
           const stepResult = fail(
             "verify_llm_trace",
-            `Expected llmTrace.schemaVersion === "llm-trace.v1", got ${String(trace.schemaVersion)}`,
+            `Expected llmTrace.schemaVersion === "llm-trace.v2", got ${String(trace.schemaVersion)}`,
             { schemaVersion: trace.schemaVersion },
           );
           steps.push(stepResult);
@@ -662,6 +680,7 @@ const textLogScenario: VerificationScenario = {
           || typeof summary.toolCount !== "number"
           || summary.toolCount < 1
           || summary.fallbackCount !== 0
+          || summary.providerErrorCount !== 0
           || typeof summary.latencyMs !== "number"
           || summary.latencyMs < 0
         ) {
@@ -714,13 +733,24 @@ const textLogScenario: VerificationScenario = {
           );
         });
         const roundEndIndex = timeline.findIndex((event) => isRecord(event) && event.type === "llm_round_end");
+        const routeCompletionIndex = timeline.findIndex((event) => {
+          return (
+            isRecord(event)
+            && event.type === "route_completion"
+            && event.transport === "sse"
+            && event.didLogMeal === true
+            && event.didMutateMeal === true
+            && event.completed === true
+          );
+        });
 
         if (
           roundStartIndex < 0
           || toolReceivedIndex < 0
           || toolResultIndex < 0
           || roundEndIndex < 0
-          || !(roundStartIndex < toolReceivedIndex && toolReceivedIndex < toolResultIndex && toolResultIndex < roundEndIndex)
+          || routeCompletionIndex < 0
+          || !(roundStartIndex < toolReceivedIndex && toolReceivedIndex < toolResultIndex && toolResultIndex < roundEndIndex && roundEndIndex < routeCompletionIndex)
         ) {
           const stepResult = fail("verify_llm_trace", "Trace timeline did not preserve llm/tool event ordering for log_food", {
             eventIndexes: {
@@ -728,7 +758,16 @@ const textLogScenario: VerificationScenario = {
               tool_received: toolReceivedIndex,
               tool_result: toolResultIndex,
               llm_round_end: roundEndIndex,
+              route_completion: routeCompletionIndex,
             },
+          });
+          steps.push(stepResult);
+          return failScenario("verify_llm_trace");
+        }
+
+        if (timeline.some((event) => isRecord(event) && (event.type === "llm_error" || event.type === "route_fallback"))) {
+          const stepResult = fail("verify_llm_trace", "Clean text-log trace contained failure-only timeline facts", {
+            timeline,
           });
           steps.push(stepResult);
           return failScenario("verify_llm_trace");
@@ -740,6 +779,19 @@ const textLogScenario: VerificationScenario = {
           finalAssistantContent,
           "/uploads/",
           "data:image",
+          "device_",
+          "guest_session",
+          "authorization",
+          "api_key",
+          "messages",
+          "rawPrompt",
+          "promptText",
+          "providerPayload",
+          "rawProviderPayload",
+          "headers",
+          "body",
+          "toolArguments",
+          "toolResult",
           "historySnapshot",
           "mealsSnapshot",
           "streamFrames",

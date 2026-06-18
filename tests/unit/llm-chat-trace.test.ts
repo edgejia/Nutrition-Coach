@@ -9,6 +9,32 @@ import {
   type LlmTraceFinalReplyShape,
   type LlmTraceFinalReplySource,
 } from "../../server/orchestrator/llm-trace.js";
+import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
+import type { ProviderErrorMetadata } from "../../server/llm/types.js";
+
+const providerMetadata: ProviderErrorMetadata = {
+  provider: "openai",
+  operation: "chat_round_initial",
+  model: "gpt-test",
+  aborted: false,
+  status: 429,
+  providerRequestId: "req_safe_123",
+  errorName: "RateLimitError",
+  errorType: "rate_limit_error",
+  errorCode: "rate_limit_exceeded",
+};
+
+const providerMetadataKeys = [
+  "provider",
+  "operation",
+  "model",
+  "aborted",
+  "status",
+  "providerRequestId",
+  "errorName",
+  "errorType",
+  "errorCode",
+];
 
 describe("createLlmTraceRecorder", () => {
   it("records orchestrator timeline entries in call order", () => {
@@ -25,7 +51,7 @@ describe("createLlmTraceRecorder", () => {
       publishedEvents: ["daily_summary"],
     });
     hooks.onLLMEnd?.(1, true);
-    hooks.onFallback?.("max_rounds");
+    hooks.onFallback?.({ reason: "max_rounds" });
 
     const trace = recorder.build({ scenario: "unit-trace", status: "pass" });
 
@@ -60,12 +86,13 @@ describe("createLlmTraceRecorder", () => {
     const trace = recorder.build({ scenario: "unit-trace", status: "pass" });
 
     assert.deepEqual(Object.keys(trace), ["schemaVersion", "scenario", "status", "summary", "timeline"]);
-    assert.equal(trace.schemaVersion, "llm-trace.v1");
+    assert.equal(trace.schemaVersion, "llm-trace.v2");
     assert.equal(trace.scenario, "unit-trace");
     assert.equal(trace.status, "pass");
     assert.equal(trace.summary.roundCount, 1);
     assert.equal(trace.summary.toolCount, 1);
     assert.equal(trace.summary.fallbackCount, 0);
+    assert.equal(trace.summary.providerErrorCount, 0);
     assert.equal(trace.summary.latencyMs, 42);
     assert.deepEqual(trace.summary.finalReply, {
       source: "model",
@@ -153,7 +180,7 @@ describe("createLlmTraceRecorder", () => {
       transport: "sse" as const,
       didLogMeal: false,
       didMutateMeal: false,
-      completed: true,
+      completed: true as const,
       cookie: "guest_session=secret",
       reply: "final assistant text",
     };
@@ -166,7 +193,7 @@ describe("createLlmTraceRecorder", () => {
     hooks.onToolReceived?.("log_food", "我吃了隱私測試餐點 /uploads/raw-secret.jpg");
     hooks.onToolResult?.(unsafeToolPayload);
     hooks.onLLMEnd?.(1, true);
-    hooks.onFallback?.("llm_error");
+    hooks.onFallback?.({ reason: "llm_error" });
     recorder.recordFinalReply(unsafeFinalReply);
     recorder.recordRouteCompletion(unsafeRouteCompletion);
     recorder.recordMetrics(unsafeMetrics);
@@ -206,6 +233,421 @@ describe("createLlmTraceRecorder", () => {
       "shape",
     ]) {
       assert.equal(traceJson.includes(key), true, `trace should include ${key}`);
+    }
+  });
+
+  it("records metadata-only policy facts on tool result trace events", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+
+    hooks.onLLMStart?.(2);
+    hooks.onToolResult?.({
+      tool: "update_goals",
+      success: false,
+      executed: false,
+      failureReason: "guard",
+      policyClass: "direct-execute",
+      decision: "blocked",
+      ruleId: "update_goals_latest_proposal_consume",
+      proposalId: "proposal-safe-123",
+      turnId: "turn-safe-456",
+      args: { calories: 1800 },
+      rawUserText: "我今天想把熱量改成 1800",
+      payload: { provider: "raw provider body" },
+      candidateId: "meal-secret-candidate",
+      sessionMaterial: "guest_session=secret",
+      databaseSnapshot: "meal_transactions row dump",
+    } as never);
+
+    const trace = recorder.build({ scenario: "unit-policy-trace", status: "pass" });
+
+    assert.deepEqual(trace.timeline, [
+      { type: "llm_round_start", round: 2 },
+      {
+        type: "tool_result",
+        round: 2,
+        tool: "update_goals",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        policyClass: "direct-execute",
+        decision: "blocked",
+        ruleId: "update_goals_latest_proposal_consume",
+        proposalId: "proposal-safe-123",
+        turnId: "turn-safe-456",
+      },
+    ]);
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "calories",
+      "1800",
+      "我今天想把熱量改成 1800",
+      "raw provider body",
+      "meal-secret-candidate",
+      "guest_session=secret",
+      "meal_transactions row dump",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("records route fallback as a dedicated terminal trace fact", () => {
+    const recorder = createLlmTraceRecorder();
+    const unsafeProviderMetadata: ProviderErrorMetadata = {
+      ...providerMetadata,
+      providerRequestId: "Authorization Bearer",
+      errorName: "raw prompt",
+    };
+
+    recorder.recordRouteFallback({
+      transport: "json",
+      turnId: "t_safe_123",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      reason: "llm_error",
+      catchSite: "json_outer",
+      providerMetadata: unsafeProviderMetadata,
+      providerPayload: { body: "raw provider body" },
+      finalAssistantContent: "final assistant text",
+    } as never);
+
+    const trace = recorder.build({ scenario: "unit-route-fallback", status: "pass" });
+
+    assert.deepEqual(trace.timeline.at(-1), {
+      type: "route_fallback",
+      transport: "json",
+      turnId: "t_safe_123",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      reason: "llm_error",
+      catchSite: "json_outer",
+      providerMetadata: {
+        ...providerMetadata,
+        providerRequestId: "redacted",
+        errorName: "redacted",
+      },
+    });
+    assert.equal(
+      trace.timeline.some((event) => event.type === "route_completion"),
+      false,
+    );
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of ["Authorization", "Bearer", "raw prompt", "raw provider body", "final assistant text"]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("omits unsafe route fallback catch fields from trace facts", () => {
+    const forbiddenValues = [
+      "prompt: system says log the meal",
+      "messages[0].content user nutrition text",
+      "provider body raw payload",
+      "tool payload {\"food\":\"secret\"}",
+      "guest_session=signed-session",
+      "image data:image/png;base64,abc123",
+      "assistant final reply text",
+      "stack: at route handler",
+      "cause: nested raw error",
+    ];
+
+    for (const forbidden of forbiddenValues) {
+      const recorder = createLlmTraceRecorder();
+
+      recorder.recordRouteFallback({
+        transport: "json",
+        turnId: "t_safe_unsafe_catch",
+        fallbackSource: "route_catch",
+        didLogMeal: false,
+        didMutateMeal: false,
+        reason: "route_catch",
+        catchSite: "json_outer",
+        errorName: forbidden,
+        errorMessage: forbidden,
+      });
+
+      const routeFallback = recorder.build({ scenario: "unit-route-fallback-catch", status: "pass" })
+        .timeline.at(-1) as Record<string, unknown>;
+      assert.equal("errorName" in routeFallback, false);
+      assert.equal("errorMessage" in routeFallback, false);
+      assert.equal(JSON.stringify(routeFallback).includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("omits route fallback catch fields from trace facts when unsafe markers appear after truncation limits", () => {
+    const recorder = createLlmTraceRecorder();
+
+    recorder.recordRouteFallback({
+      transport: "json",
+      turnId: "t_safe_late_unsafe_catch",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      reason: "route_catch",
+      catchSite: "json_outer",
+      errorName: `${"SafeRouteError".repeat(7)} prompt`,
+      errorMessage: `${"Safe route error. ".repeat(11)} guest_session`,
+    });
+
+    const routeFallback = recorder.build({ scenario: "unit-route-fallback-late-unsafe-catch", status: "pass" })
+      .timeline.at(-1) as Record<string, unknown>;
+    assert.equal("errorName" in routeFallback, false);
+    assert.equal("errorMessage" in routeFallback, false);
+  });
+
+  it("preserves safe route fallback catch fields in trace facts", () => {
+    const recorder = createLlmTraceRecorder();
+
+    recorder.recordRouteFallback({
+      transport: "sse",
+      turnId: "t_safe_route_catch",
+      fallbackSource: "route_catch",
+      didLogMeal: false,
+      didMutateMeal: false,
+      reason: "route_catch",
+      catchSite: "sse_outer",
+      errorName: "SseOuterSafeFailure",
+      errorMessage: "Safe route error",
+    });
+
+    const routeFallback = recorder.build({ scenario: "unit-route-fallback-safe-catch", status: "pass" })
+      .timeline.at(-1) as Record<string, unknown>;
+    assert.equal(routeFallback.errorName, "SseOuterSafeFailure");
+    assert.equal(routeFallback.errorMessage, "Safe route error");
+  });
+
+  it("records provider-caused fallback hook facts with metadata-only trace fields", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+
+    hooks.onLLMStart?.(2);
+    hooks.onLLMError?.({ round: 2, lastTool: "log_food", providerMetadata });
+    hooks.onFallback?.({
+      reason: "llm_error",
+      round: 2,
+      lastTool: "log_food",
+      providerMetadata,
+    });
+
+    const trace = recorder.build({ scenario: "unit-provider-fallback", status: "pass" });
+
+    assert.equal(trace.schemaVersion, "llm-trace.v2");
+    assert.equal(trace.summary.providerErrorCount, 1);
+    assert.deepEqual(trace.timeline.at(-2), {
+      type: "llm_error",
+      round: 2,
+      lastTool: "log_food",
+      providerMetadata,
+    });
+    assert.deepEqual(trace.timeline.at(-1), {
+      type: "orchestrator_fallback",
+      reason: "llm_error",
+      round: 2,
+      lastTool: "log_food",
+      providerMetadata,
+    });
+    const fallbackEvent = trace.timeline.at(-1) as {
+      providerMetadata?: Record<string, unknown>;
+    };
+    assert.deepEqual(Object.keys(fallbackEvent.providerMetadata ?? {}), providerMetadataKeys);
+    const providerErrorEvent = trace.timeline.at(-2) as {
+      providerMetadata?: Record<string, unknown>;
+    };
+    assert.deepEqual(Object.keys(providerErrorEvent.providerMetadata ?? {}), providerMetadataKeys);
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "Authorization",
+      "Bearer",
+      "raw provider body",
+      "raw prompt",
+      "raw user text",
+      "raw tool arguments",
+      "raw tool results",
+      "final assistant text",
+      "guest_session",
+      "data:image",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("sanitizes fallback trace fields without spreading extra payload properties", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+    const unsafeProviderMetadata: ProviderErrorMetadata = {
+      ...providerMetadata,
+      model: "raw provider model",
+      providerRequestId: "Authorization Bearer",
+      errorName: "raw prompt",
+      errorType: "guest_session",
+      errorCode: "sk-secret",
+    };
+
+    hooks.onFallback?.({
+      reason: "llm_error",
+      round: 1,
+      lastTool: "raw prompt",
+      providerMetadata: unsafeProviderMetadata,
+      rawProviderBody: "raw provider body",
+      headers: "Authorization",
+      finalReply: "final assistant text",
+    } as never);
+
+    const trace = recorder.build({ scenario: "unit-sanitized-fallback", status: "pass" });
+
+    assert.deepEqual(trace.timeline.at(-1), {
+      type: "orchestrator_fallback",
+      reason: "llm_error",
+      round: 1,
+      lastTool: "redacted",
+      providerMetadata: {
+        provider: "openai",
+        operation: "chat_round_initial",
+        model: "redacted",
+        aborted: false,
+        status: 429,
+        providerRequestId: "redacted",
+        errorName: "redacted",
+        errorType: "redacted",
+        errorCode: "redacted",
+      },
+    });
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "Authorization",
+      "Bearer",
+      "raw provider body",
+      "raw prompt",
+      "raw provider model",
+      "final assistant text",
+      "guest_session",
+      "sk-secret",
+      "headers",
+      "rawProviderBody",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("sanitizes provider error trace fields without spreading extra payload properties", () => {
+    const recorder = createLlmTraceRecorder();
+    const hooks = recorder.asOrchestratorHooks();
+    const unsafeProviderMetadata: ProviderErrorMetadata = {
+      ...providerMetadata,
+      model: "raw provider model",
+      providerRequestId: "Authorization Bearer",
+      errorName: "raw prompt",
+      errorType: "guest_session",
+      errorCode: "sk-secret",
+    };
+
+    hooks.onLLMError?.({
+      round: 4,
+      lastTool: "raw prompt",
+      providerMetadata: unsafeProviderMetadata,
+      rawProviderBody: "raw provider body",
+      headers: "Authorization",
+      finalReply: "final assistant text",
+    } as never);
+
+    const trace = recorder.build({ scenario: "unit-sanitized-provider-error", status: "pass" });
+
+    assert.equal(trace.summary.providerErrorCount, 1);
+    assert.deepEqual(trace.timeline.at(-1), {
+      type: "llm_error",
+      round: 4,
+      lastTool: "redacted",
+      providerMetadata: {
+        provider: "openai",
+        operation: "chat_round_initial",
+        model: "redacted",
+        aborted: false,
+        status: 429,
+        providerRequestId: "redacted",
+        errorName: "redacted",
+        errorType: "redacted",
+        errorCode: "redacted",
+      },
+    });
+
+    const traceJson = JSON.stringify(trace);
+    for (const forbidden of [
+      "Authorization",
+      "Bearer",
+      "raw provider body",
+      "raw prompt",
+      "raw provider model",
+      "final assistant text",
+      "guest_session",
+      "sk-secret",
+      "headers",
+      "rawProviderBody",
+    ]) {
+      assert.equal(traceJson.includes(forbidden), false, `trace should exclude ${forbidden}`);
+    }
+  });
+
+  it("structured hooks log exact metadata-only LLM error and fallback payloads", () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const log = {
+      info(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+      warn(payload: Record<string, unknown>) {
+        captured.push(payload);
+      },
+    };
+    const hooks = createStructuredHooks(log as never);
+
+    hooks.onLLMError?.({ round: 3, lastTool: "get_daily_summary", providerMetadata });
+    hooks.onFallback?.({
+      reason: "llm_error",
+      round: 3,
+      lastTool: "get_daily_summary",
+      providerMetadata,
+    });
+
+    assert.deepEqual(captured, [
+      {
+        event: "llm_provider_error",
+        round: 3,
+        lastTool: "get_daily_summary",
+        providerMetadata,
+      },
+      {
+        event: "orchestrator_fallback",
+        reason: "llm_error",
+        round: 3,
+        lastTool: "get_daily_summary",
+        providerMetadata,
+      },
+    ]);
+    assert.deepEqual(Object.keys(captured[0]), ["event", "round", "lastTool", "providerMetadata"]);
+    assert.deepEqual(Object.keys(captured[1]), ["event", "reason", "round", "lastTool", "providerMetadata"]);
+    assert.deepEqual(
+      Object.keys(captured[0]?.providerMetadata as unknown as Record<string, unknown>),
+      providerMetadataKeys,
+    );
+
+    const logJson = JSON.stringify(captured);
+    for (const forbidden of [
+      "Authorization",
+      "Bearer",
+      "raw provider body",
+      "raw prompt",
+      "raw user text",
+      "raw tool arguments",
+      "raw tool results",
+      "final assistant text",
+      "guest_session",
+      "data:image",
+    ]) {
+      assert.equal(logJson.includes(forbidden), false, `structured hook log should exclude ${forbidden}`);
     }
   });
 });

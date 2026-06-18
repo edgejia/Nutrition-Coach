@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { createClientId } from "../lib/clientId.js";
 import { formatLocalDate } from "../lib/time.js";
+import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
@@ -16,14 +17,16 @@ import type {
   DailySummary,
   DailyTargets,
   MealEntry,
+  MealPeriod,
 } from "../types.js";
 
 export function getDisplayedCoachAdvice(
   storedAdvice: string | null,
   dailySummary: ReturnType<typeof useStore.getState>["dailySummary"],
   dailyTargets: ReturnType<typeof useStore.getState>["dailyTargets"],
+  goal: string | null = null,
 ) {
-  return getCoachAdvice(dailySummary, dailyTargets) ?? storedAdvice;
+  return getCoachAdvice(dailySummary, dailyTargets, goal) ?? storedAdvice;
 }
 
 export function formatHomeHeaderDate(dateKey: string): string {
@@ -47,7 +50,21 @@ export function getHomeGreeting(now: Date = new Date()): "早安" | "午安" | "
   return "晚安";
 }
 
-export function getDisplayMealLabel(loggedAt?: string | null): "早餐" | "午餐" | "點心" | "晚餐" | "餐點" {
+export function getDisplayMealLabel(
+  mealPeriod?: MealPeriod | null,
+  loggedAt?: string | null,
+): "早餐" | "午餐" | "點心" | "晚餐" | "宵夜" | "餐點" {
+  switch (mealPeriod) {
+    case "breakfast":
+      return "早餐";
+    case "lunch":
+      return "午餐";
+    case "dinner":
+      return "晚餐";
+    case "late_night":
+      return "宵夜";
+  }
+
   if (!loggedAt) return "餐點";
   const date = new Date(loggedAt);
   if (Number.isNaN(date.getTime())) return "餐點";
@@ -196,8 +213,8 @@ export function getMealMacroSummary(meal: Pick<MealEntry, "protein" | "carbs" | 
   return `P ${Math.max(0, Math.round(meal.protein ?? 0))} · C ${Math.max(0, Math.round(meal.carbs ?? 0))} · F ${Math.max(0, Math.round(meal.fat ?? 0))}`;
 }
 
-export function getMealBadge(loggedAt?: string | null): "B" | "L" | "S" | "D" | "M" {
-  switch (getDisplayMealLabel(loggedAt)) {
+export function getMealBadge(mealPeriod?: MealPeriod | null, loggedAt?: string | null): "B" | "L" | "S" | "D" | "N" | "M" {
+  switch (getDisplayMealLabel(mealPeriod, loggedAt)) {
     case "早餐":
       return "B";
     case "午餐":
@@ -206,6 +223,8 @@ export function getMealBadge(loggedAt?: string | null): "B" | "L" | "S" | "D" | 
       return "S";
     case "晚餐":
       return "D";
+    case "宵夜":
+      return "N";
     default:
       return "M";
   }
@@ -362,7 +381,51 @@ function CalorieHero({
   );
 }
 
-function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChatClick: () => void }) {
+function MealRowContent({ meal }: { meal: MealEntry }) {
+  return (
+    <>
+      <span className="home-sport-meal-media">
+        {meal.imageUrl ? (
+          <PersistedAssetImage
+            src={meal.imageUrl}
+            alt={`${meal.foodName} 縮圖`}
+            imgClassName="home-sport-meal-image"
+            fallbackClassName="home-sport-meal-fallback"
+          />
+        ) : (
+          <span role="img" aria-label={`${meal.foodName} 無照片`} className="home-sport-meal-fallback">
+            無照片
+          </span>
+        )}
+      </span>
+      <span className="home-sport-meal-main">
+        <span className="home-sport-meal-meta">
+          <span>{formatMealRowTime(meal.loggedAt)}</span>
+          <span>{getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}</span>
+          <span>{getMealBadge(meal.mealPeriod, meal.loggedAt)}</span>
+        </span>
+        <span className="home-sport-meal-title">{meal.foodName}</span>
+        <span className="home-sport-meal-macros">{getMealMacroSummary(meal)}</span>
+      </span>
+      <span className="home-sport-meal-calories">
+        <span>{Math.max(0, Math.round(meal.calories)).toLocaleString("en-US")}</span>
+        <small>kcal</small>
+      </span>
+    </>
+  );
+}
+
+function MealRows({
+  meals,
+  todayDateKey,
+  openMealEdit,
+  onEmptyChatClick,
+}: {
+  meals: MealEntry[];
+  todayDateKey: string;
+  openMealEdit: ReturnType<typeof useStore.getState>["openMealEdit"];
+  onEmptyChatClick: () => void;
+}) {
   const emptyCopy = getHomeEmptyCoachCopy();
 
   return (
@@ -381,37 +444,30 @@ function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChat
         </SportCard>
       ) : (
         <div className="home-sport-meal-list">
-          {meals.map((meal) => (
-            <article key={meal.id} className="home-sport-meal-row">
-              <div className="home-sport-meal-media">
-                {meal.imageUrl ? (
-                  <PersistedAssetImage
-                    src={meal.imageUrl}
-                    alt={`${meal.foodName} 縮圖`}
-                    imgClassName="home-sport-meal-image"
-                    fallbackClassName="home-sport-meal-fallback"
-                  />
+          {meals.map((meal) => {
+            const editPayload = buildMealEditPayloadIfComplete(meal, todayDateKey);
+
+            return (
+              <Fragment key={meal.id}>
+                {editPayload ? (
+                  <button
+                    type="button"
+                    className="home-sport-meal-row"
+                    aria-label={`編輯 ${getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)} ${meal.foodName}`}
+                    onClick={() => {
+                      openMealEdit(editPayload, "home");
+                    }}
+                  >
+                    <MealRowContent meal={meal} />
+                  </button>
                 ) : (
-                  <div role="img" aria-label={`${meal.foodName} 無照片`} className="home-sport-meal-fallback">
-                    無照片
-                  </div>
+                  <article key={meal.id} className="home-sport-meal-row">
+                    <MealRowContent meal={meal} />
+                  </article>
                 )}
-              </div>
-              <div className="home-sport-meal-main">
-                <div className="home-sport-meal-meta">
-                  <span>{formatMealRowTime(meal.loggedAt)}</span>
-                  <span>{getDisplayMealLabel(meal.loggedAt)}</span>
-                  <span>{getMealBadge(meal.loggedAt)}</span>
-                </div>
-                <div className="home-sport-meal-title">{meal.foodName}</div>
-                <div className="home-sport-meal-macros">{getMealMacroSummary(meal)}</div>
-              </div>
-              <div className="home-sport-meal-calories">
-                <span>{Math.max(0, Math.round(meal.calories)).toLocaleString("en-US")}</span>
-                <small>kcal</small>
-              </div>
-            </article>
-          ))}
+              </Fragment>
+            );
+          })}
         </div>
       )}
     </section>
@@ -421,15 +477,18 @@ function MealRows({ meals, onEmptyChatClick }: { meals: MealEntry[]; onEmptyChat
 export function HomeScreen() {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
+  const goal = useStore((s) => s.goal);
   const storedCoachAdvice = useStore((s) => s.coachAdvice);
   const setCoachAdvice = useStore((s) => s.setCoachAdvice);
   const sending = useStore((s) => s.sending);
   const meals = useStore((s) => s.meals);
+  const openMealEdit = useStore((s) => s.openMealEdit);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const setActiveScreen = useStore((s) => s.setActiveScreen);
-  const coachAdvice = getDisplayedCoachAdvice(storedCoachAdvice, dailySummary, dailyTargets);
-  const cta = getCoachCTA(dailySummary, dailyTargets);
+  const coachAdvice = getDisplayedCoachAdvice(storedCoachAdvice, dailySummary, dailyTargets, goal);
+  const cta = getCoachCTA(dailySummary, dailyTargets, undefined, goal);
   const emptyCopy = getHomeEmptyCoachCopy();
+  const todayDateKey = dailySummary?.date ?? formatLocalDate(new Date());
 
   useEffect(() => {
     setCoachAdvice(coachAdvice);
@@ -451,7 +510,7 @@ export function HomeScreen() {
         <main className="screen-scroll home-sport-scroll">
           <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
           <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
-          <MealRows meals={meals} onEmptyChatClick={handleEmptyChatClick} />
+          <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
         </main>
       </SportScreen>
     </div>

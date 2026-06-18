@@ -157,12 +157,15 @@ export async function runCase02UncertainQuantity(): Promise<BehaviorCaseOutcome>
   const llm = new StreamingLLMProvider();
   const recorder = createLlmTraceRecorder();
   const foodName = "雞肉沙拉";
-  const toolArgs: LogFoodArgs = {
+  const toolArgsItem = {
     food_name: foodName,
     calories: 420,
     protein: 32,
     carbs: 28,
     fat: 18,
+  };
+  const toolArgs: LogFoodArgs = {
+    items: [toolArgsItem],
     protein_sources: [
       { name: "雞肉", protein: 32, is_primary: true, certainty: "clear" },
     ],
@@ -243,7 +246,7 @@ export async function runCase02UncertainQuantity(): Promise<BehaviorCaseOutcome>
       : undefined;
     const trace = recorder.build({ scenario: "CASE-02", status: "pass" });
     const sources = buildNumberSources({
-      toolArgs: [toolArgs.calories, toolArgs.protein, toolArgs.carbs, toolArgs.fat],
+      toolArgs: [toolArgsItem.calories, toolArgsItem.protein, toolArgsItem.carbs, toolArgsItem.fat],
       donePayload,
       persistedMeal: persistedEvidence,
     });

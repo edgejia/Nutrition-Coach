@@ -11,6 +11,7 @@ import { MockLLMProvider } from "../../server/llm/mock.js";
 
 type HistoryMeal = {
   id: string;
+  mealRevisionId: string;
   dateKey: string;
   loggedAt: string;
   display: {
@@ -39,10 +40,95 @@ type HistoryMeal = {
   };
   imageAssetId: string | null;
   imageUrl: string | null;
+  mealPeriod?: "breakfast" | "lunch" | "dinner" | "late_night";
   revision: {
     currentRevisionNumber: number;
   };
 };
+
+const VALID_MEAL_PERIODS = new Set(["breakfast", "lunch", "dinner", "late_night"]);
+
+function assertRecord(value: unknown): asserts value is Record<string, unknown> {
+  assert.equal(typeof value, "object");
+  assert.notEqual(value, null);
+  assert.equal(Array.isArray(value), false);
+}
+
+function assertFiniteNumber(value: unknown, field: string): asserts value is number {
+  assert.equal(typeof value, "number", `expected ${field} to be a number`);
+  assert.ok(Number.isFinite(value), `expected ${field} to be finite`);
+}
+
+function assertNullableString(value: unknown, field: string) {
+  assert.ok(value === null || typeof value === "string", `expected ${field} to be string or null`);
+}
+
+function assertNutritionDto(value: unknown, pathName: string) {
+  assertRecord(value);
+  assert.deepEqual(Object.keys(value).sort(), ["calories", "carbs", "fat", "protein"]);
+  assertFiniteNumber(value.calories, `${pathName}.calories`);
+  assertFiniteNumber(value.protein, `${pathName}.protein`);
+  assertFiniteNumber(value.carbs, `${pathName}.carbs`);
+  assertFiniteNumber(value.fat, `${pathName}.fat`);
+}
+
+function assertPublicHistoryMealDto(value: unknown) {
+  assertRecord(value);
+  const allowedKeys = new Set([
+    "id",
+    "mealRevisionId",
+    "dateKey",
+    "loggedAt",
+    "display",
+    "itemCount",
+    "nutrition",
+    "items",
+    "asset",
+    "imageAssetId",
+    "imageUrl",
+    "mealPeriod",
+    "revision",
+  ]);
+  for (const key of Object.keys(value)) {
+    assert.ok(allowedKeys.has(key), `expected history meal to exclude ${key}`);
+  }
+  assert.equal(typeof value.id, "string");
+  assert.equal(typeof value.mealRevisionId, "string");
+  assert.equal(typeof value.dateKey, "string");
+  assert.equal(typeof value.loggedAt, "string");
+  assertRecord(value.display);
+  assert.ok(typeof value.display.title === "string" && value.display.title.length > 0);
+  assertFiniteNumber(value.itemCount, "meal.itemCount");
+  assertNutritionDto(value.nutrition, "meal.nutrition");
+  assert.ok(Array.isArray(value.items), "expected meal.items to be an array");
+  for (const item of value.items) {
+    assertRecord(item);
+    assert.equal(typeof item.name, "string");
+    assert.ok(typeof item.name === "string" && item.name.length > 0);
+    assertFiniteNumber(item.position, "meal.items[].position");
+    assertNutritionDto(item.nutrition, "meal.items[].nutrition");
+  }
+  assertRecord(value.asset);
+  assert.deepEqual(Object.keys(value.asset).sort(), ["imageAssetId", "imageUrl"]);
+  assertNullableString(value.asset.imageAssetId, "meal.asset.imageAssetId");
+  assertNullableString(value.asset.imageUrl, "meal.asset.imageUrl");
+  assertNullableString(value.imageAssetId, "meal.imageAssetId");
+  assertNullableString(value.imageUrl, "meal.imageUrl");
+  assert.deepEqual(value.asset.imageAssetId, value.imageAssetId);
+  assert.deepEqual(value.asset.imageUrl, value.imageUrl);
+  if (typeof value.imageUrl === "string") {
+    assert.doesNotMatch(value.imageUrl, /deviceId=/);
+  }
+  if ("mealPeriod" in value) {
+    assert.ok(
+      typeof value.mealPeriod === "string" && VALID_MEAL_PERIODS.has(value.mealPeriod),
+      `expected valid mealPeriod, got ${String(value.mealPeriod)}`,
+    );
+  }
+  assertRecord(value.revision);
+  assert.deepEqual(Object.keys(value.revision), ["currentRevisionNumber"]);
+  assertFiniteNumber(value.revision.currentRevisionNumber, "meal.revision.currentRevisionNumber");
+}
 
 describe("History API", () => {
   let app: FastifyInstance;
@@ -95,6 +181,8 @@ describe("History API", () => {
 
   function assertNoUnsafeHistoryFields(value: unknown) {
     const serialized = JSON.stringify(value);
+    assert.ok(!serialized.includes("deviceId"), "history response must not expose raw deviceId");
+    assert.ok(!serialized.includes("deviceId="), "history response must not expose legacy asset deviceId queries");
     assert.ok(!serialized.includes("imagePath"), "history response must not expose imagePath");
     assert.ok(!serialized.includes("storageKey"), "history response must not expose storageKey");
     assert.ok(!serialized.includes("currentRevisionId"), "history response must not expose currentRevisionId");
@@ -106,29 +194,23 @@ describe("History API", () => {
   async function seedPaginationMeals() {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const newest = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "晚餐",
-      calories: 650,
-      protein: 36,
-      carbs: 70,
-      fat: 22,
+    const newest = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T12:30:00.000Z",
+      items: [
+        { foodName: "晚餐", calories: 650, protein: 36, carbs: 70, fat: 22 },
+      ],
     });
-    const middle = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午餐",
-      calories: 520,
-      protein: 28,
-      carbs: 58,
-      fat: 18,
+    const middle = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T05:30:00.000Z",
+      items: [
+        { foodName: "午餐", calories: 520, protein: 28, carbs: 58, fat: 18 },
+      ],
     });
-    const oldest = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "早餐",
-      calories: 330,
-      protein: 18,
-      carbs: 36,
-      fat: 10,
+    const oldest = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T00:30:00.000Z",
+      items: [
+        { foodName: "早餐", calories: 330, protein: 18, carbs: 36, fat: 10 },
+      ],
     });
 
     return { newest, middle, oldest };
@@ -137,13 +219,11 @@ describe("History API", () => {
   async function seedDaySnapshotMeals() {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const boundaryMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午夜點心",
-      calories: 120,
-      protein: 6,
-      carbs: 14,
-      fat: 4,
+    const boundaryMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-24T16:30:00.000Z",
+      items: [
+        { foodName: "午夜點心", calories: 120, protein: 6, carbs: 14, fat: 4 },
+      ],
     });
     const assetMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
@@ -154,21 +234,17 @@ describe("History API", () => {
         { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "隔天早餐",
-      calories: 300,
-      protein: 18,
-      carbs: 28,
-      fat: 10,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T16:30:00.000Z",
+      items: [
+        { foodName: "隔天早餐", calories: 300, protein: 18, carbs: 28, fat: 10 },
+      ],
     });
-    await services.foodLoggingService.logFood(foreignDeviceId, {
-      foodName: "外部裝置餐點",
-      calories: 999,
-      protein: 99,
-      carbs: 99,
-      fat: 99,
+    await services.foodLoggingService.logGroupedMeal(foreignDeviceId, {
       loggedAt: "2026-03-25T10:00:00.000Z",
+      items: [
+        { foodName: "外部裝置餐點", calories: 999, protein: 99, carbs: 99, fat: 99 },
+      ],
     });
 
     return { boundaryMeal, assetMeal };
@@ -177,13 +253,11 @@ describe("History API", () => {
   it("GET /api/history/meals returns owner-only current active meals with safe nested projections", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
 
-    const boundaryMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "午夜點心",
-      calories: 120,
-      protein: 6,
-      carbs: 14,
-      fat: 4,
+    const boundaryMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-24T16:30:00.000Z",
+      items: [
+        { foodName: "午夜點心", calories: 120, protein: 6, carbs: 14, fat: 4 },
+      ],
     });
     const assetMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:00:00.000Z",
@@ -194,52 +268,43 @@ describe("History API", () => {
         { foodName: "青菜", calories: 40, protein: 2, carbs: 8, fat: 2 },
       ],
     });
-    const nearbyMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "鄰近茶葉蛋",
-      calories: 80,
-      protein: 7,
-      carbs: 1,
-      fat: 5,
+    const nearbyMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T03:59:00.000Z",
+      items: [
+        { foodName: "鄰近茶葉蛋", calories: 80, protein: 7, carbs: 1, fat: 5 },
+      ],
     });
-    const updatedMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "待修正便當",
-      calories: 500,
-      protein: 20,
-      carbs: 65,
-      fat: 18,
+    const updatedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T08:00:00.000Z",
+      items: [
+        { foodName: "待修正便當", calories: 500, protein: 20, carbs: 65, fat: 18 },
+      ],
     });
-    await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+    const correctedMeal = await services.foodLoggingService.updateMeal(deviceId, updatedMeal.id, {
+      expectedMealRevisionId: updatedMeal.mealRevisionId,
       loggedAt: "2026-03-25T08:00:00.000Z",
       items: [
         { foodName: "修正雞腿便當", calories: 620, protein: 34, carbs: 70, fat: 22 },
       ],
     });
-    const deletedMeal = await services.foodLoggingService.logFood(deviceId, {
-      foodName: "已刪除餐點",
-      calories: 400,
-      protein: 16,
-      carbs: 50,
-      fat: 14,
+    const deletedMeal = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T09:00:00.000Z",
+      items: [
+        { foodName: "已刪除餐點", calories: 400, protein: 16, carbs: 50, fat: 14 },
+      ],
     });
-    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id);
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: "隔天早餐",
-      calories: 300,
-      protein: 18,
-      carbs: 28,
-      fat: 10,
+    await services.foodLoggingService.deleteMeal(deviceId, deletedMeal.id, deletedMeal.mealRevisionId);
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T16:30:00.000Z",
+      items: [
+        { foodName: "隔天早餐", calories: 300, protein: 18, carbs: 28, fat: 10 },
+      ],
     });
-    await services.foodLoggingService.logFood(foreignDeviceId, {
-      foodName: "外部裝置餐點",
-      calories: 999,
-      protein: 99,
-      carbs: 99,
-      fat: 99,
+    await services.foodLoggingService.logGroupedMeal(foreignDeviceId, {
       loggedAt: "2026-03-25T10:00:00.000Z",
+      items: [
+        { foodName: "外部裝置餐點", calories: 999, protein: 99, carbs: 99, fat: 99 },
+      ],
     });
 
     const res = await app.inject({
@@ -252,6 +317,9 @@ describe("History API", () => {
     const body = res.json() as { meals: HistoryMeal[]; nextCursor: string | null };
 
     assert.equal(body.nextCursor, null);
+    for (const meal of body.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
     assert.deepEqual(
       body.meals.map((meal) => meal.id),
       [updatedMeal.id, assetMeal.id, nearbyMeal.id, boundaryMeal.id],
@@ -264,6 +332,7 @@ describe("History API", () => {
     const assetProjection = body.meals.find((meal) => meal.id === assetMeal.id);
     assert.deepEqual(assetProjection, {
       id: assetMeal.id,
+      mealRevisionId: assetMeal.mealRevisionId,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
       display: { title: "雞胸、地瓜、青菜" },
@@ -295,6 +364,7 @@ describe("History API", () => {
     const correctedProjection = body.meals.find((meal) => meal.id === updatedMeal.id);
     assert.deepEqual(correctedProjection, {
       id: updatedMeal.id,
+      mealRevisionId: correctedMeal.mealRevisionId,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T08:00:00.000Z",
       display: { title: "修正雞腿便當" },
@@ -314,7 +384,89 @@ describe("History API", () => {
     });
 
     assert.equal(body.meals.find((meal) => meal.id === boundaryMeal.id)?.dateKey, "2026-03-25");
+    assert.equal(
+      body.meals.find((meal) => meal.id === boundaryMeal.id)?.mealRevisionId,
+      boundaryMeal.mealRevisionId,
+    );
     assertNoUnsafeHistoryFields(body);
+  });
+
+  it("projects explicit mealPeriod through history list, search, and day detail without inferring legacy rows", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const explicitLunch = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T00:30:00.000Z",
+      mealPeriod: "lunch",
+      items: [
+        { foodName: "雞腿便當", calories: 650, protein: 36, carbs: 72, fat: 24 },
+      ],
+    });
+    const legacyBreakfastHour = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T00:45:00.000Z",
+      items: [
+        { foodName: "蛋餅", calories: 360, protein: 18, carbs: 42, fat: 14 },
+      ],
+    });
+
+    const listRes = await app.inject({
+      method: "GET",
+      url: "/api/history/meals?from=2026-03-25&to=2026-03-25&limit=10",
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(listRes.statusCode, 200);
+    const listBody = listRes.json() as { meals: HistoryMeal[] };
+    for (const meal of listBody.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
+    assertNoUnsafeHistoryFields(listBody);
+    const listExplicitMeal = listBody.meals.find((meal) => meal.id === explicitLunch.id);
+    assert.ok(listExplicitMeal, "expected history list to include explicit lunch meal");
+    assert.equal(listExplicitMeal.mealPeriod, "lunch");
+    const listLegacyMeal = listBody.meals.find((meal) => meal.id === legacyBreakfastHour.id);
+    assert.ok(listLegacyMeal, "expected history list to include legacy breakfast-hour meal");
+    assert.equal(Object.prototype.hasOwnProperty.call(listLegacyMeal, "mealPeriod"), false);
+
+    const searchRes = await app.inject({
+      method: "GET",
+      url: "/api/history/search?q=%E9%9B%9E%E8%85%BF&from=2026-03-25&to=2026-03-25&limit=10",
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(searchRes.statusCode, 200);
+    const searchBody = searchRes.json() as {
+      results: Array<{
+        item: { name: string; position: number; nutrition: { calories: number; protein: number; carbs: number; fat: number } };
+        meal: HistoryMeal;
+      }>;
+    };
+    for (const result of searchBody.results) {
+      assertRecord(result);
+      assertRecord(result.item);
+      assert.equal(typeof result.item.name, "string");
+      assert.ok(result.item.name.length > 0);
+      assertFiniteNumber(result.item.position, "history.search.item.position");
+      assertNutritionDto(result.item.nutrition, "history.search.item.nutrition");
+      assertPublicHistoryMealDto(result.meal);
+    }
+    assertNoUnsafeHistoryFields(searchBody);
+    assert.equal(searchBody.results.find((result) => result.meal.id === explicitLunch.id)?.meal.mealPeriod, "lunch");
+
+    const dayRes = await app.inject({
+      method: "GET",
+      url: "/api/history/days/2026-03-25",
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(dayRes.statusCode, 200);
+    const dayBody = dayRes.json() as { meals: HistoryMeal[] };
+    for (const meal of dayBody.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
+    assertNoUnsafeHistoryFields(dayBody);
+    const dayExplicitMeal = dayBody.meals.find((meal) => meal.id === explicitLunch.id);
+    assert.ok(dayExplicitMeal, "expected history day detail to include explicit lunch meal");
+    assert.equal(dayExplicitMeal.mealPeriod, "lunch");
+    const dayLegacyMeal = dayBody.meals.find((meal) => meal.id === legacyBreakfastHour.id);
+    assert.ok(dayLegacyMeal, "expected history day detail to include legacy breakfast-hour meal");
+    assert.equal(Object.prototype.hasOwnProperty.call(dayLegacyMeal, "mealPeriod"), false);
   });
 
   it("GET /api/history/meals returns opaque cursor pages without duplicate meals", async () => {
@@ -328,6 +480,9 @@ describe("History API", () => {
 
     assert.equal(firstPage.statusCode, 200);
     const firstBody = firstPage.json() as { meals: HistoryMeal[]; nextCursor: string | null };
+    for (const meal of firstBody.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
     assert.deepEqual(firstBody.meals.map((meal) => meal.id), [seeded.newest.id, seeded.middle.id]);
     assert.equal(typeof firstBody.nextCursor, "string");
     const nextCursor = firstBody.nextCursor;
@@ -342,6 +497,9 @@ describe("History API", () => {
 
     assert.equal(secondPage.statusCode, 200);
     const secondBody = secondPage.json() as { meals: HistoryMeal[]; nextCursor: string | null };
+    for (const meal of secondBody.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
     assert.deepEqual(secondBody.meals.map((meal) => meal.id), [seeded.oldest.id]);
     assert.equal(secondBody.nextCursor, null);
 
@@ -429,6 +587,7 @@ describe("History API", () => {
     });
 
     assert.equal(res.statusCode, 200);
+    assertNoUnsafeHistoryFields(res.json());
     const body = res.json() as {
       date: string;
       summary: {
@@ -441,6 +600,9 @@ describe("History API", () => {
       };
       meals: HistoryMeal[];
     };
+    for (const meal of body.meals) {
+      assertPublicHistoryMealDto(meal);
+    }
 
     assert.equal(body.date, "2026-03-25");
     assert.deepEqual(body.summary, {
@@ -457,6 +619,7 @@ describe("History API", () => {
     );
     assert.deepEqual(body.meals[0], {
       id: seeded.assetMeal.id,
+      mealRevisionId: seeded.assetMeal.mealRevisionId,
       dateKey: "2026-03-25",
       loggedAt: "2026-03-25T04:00:00.000Z",
       display: { title: "鮭魚、白飯、青菜" },

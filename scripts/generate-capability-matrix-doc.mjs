@@ -6,7 +6,6 @@ import { capabilityMatrix } from "../client/src/contracts/capability-matrix.ts";
 
 const OUTPUT_PATH = "docs/capability-matrix.md";
 const SOURCE_PATH = "client/src/contracts/capability-matrix.ts";
-const FROZEN_CLOSEOUT_PATH = ".planning/phases/44-capability-alignment-audit-and-repair/44-capability-matrix.md";
 const CHECK_FLAG = "--check";
 
 function escapeCell(value) {
@@ -32,7 +31,7 @@ function renderMarkdown() {
     "",
     `Generated from ${SOURCE_PATH}.`,
     "",
-    `Run \`yarn matrix:gen\` to update this file and \`yarn matrix:gen:check\` before commit. Phase closeout may freeze a copy at \`${FROZEN_CLOSEOUT_PATH}\`.`,
+    "Run `yarn matrix:gen` to update this file and `yarn matrix:gen:check` before commit.",
     "",
     "| Surface | Affordance | Source | Support State | Client/Store | Backend | Handling | Requirements | Future |",
     "|---|---|---|---|---|---|---|---|---|",

@@ -27,6 +27,7 @@ describe("History screen source contract", () => {
       "SportChevronRightIcon",
       "buildHistoryWeek",
       "buildHistoryWeekStats",
+      "getHistoryWeekHeaderLabel",
       "getHistorySportStatusMeta",
       "getHistoryTrends",
       "getHistoryDaySnapshot",
@@ -38,7 +39,6 @@ describe("History screen source contract", () => {
 
   it("renders locked Traditional Chinese sport History copy", () => {
     for (const expected of [
-      "本週",
       "查看上一週",
       "查看下一週",
       "平均熱量",
@@ -46,8 +46,7 @@ describe("History screen source contract", () => {
       "紀錄餐數",
       "當日餐點",
       "開啟當日詳情",
-      "載入這週紀錄中...",
-      "載入這天餐點中...",
+      "同步這天紀錄中...",
       "這天還沒有餐點",
       "選擇其他日期，或到「對話」記錄今天吃了什麼。",
       "目標同步中，暫不顯示目標比較。",
@@ -57,16 +56,49 @@ describe("History screen source contract", () => {
     }
   });
 
-  it("opens Meal Edit from meal rows with complete History-origin payload", () => {
+  it("NAV-03 renders relative week label with the visible date range", () => {
+    assert.match(
+      source,
+      /<h1>\{getHistoryWeekHeaderLabel\(weekStartKey, todayKey\)\}<\/h1>/,
+      "NAV-03 History header label must come from relative week helper",
+    );
+    assert.match(
+      source,
+      /<div>\{formatHistoryDateRange\(weekStartKey, weekEndKey\)\}<\/div>/,
+      "NAV-03 History header must keep the visible date range subtitle",
+    );
+    assert.match(source, /const nextWeekIsFuture = nextWeekStartKey > todayKey/);
+    assert.match(source, /disabled=\{nextWeekIsFuture\}/);
+    assert.doesNotMatch(source, /<h1>本週<\/h1>/);
+  });
+
+  it("NAV-01 opens History meal rows as read-only Day Detail targets", () => {
     for (const expected of [
-      "buildHistoryMealEditPayload",
-      "openMealEdit",
+      "openDayDetail",
       "event.stopPropagation()",
-      "buildHistoryMealEditPayload(meal, selectedDateKey)",
+      "targetMealId: meal.id",
+      "openDayDetail({ dateKey: selectedDateKey, targetMealId: meal.id, label }, \"history\")",
+      "開啟餐點詳情",
       '"history"',
     ]) {
-      assert.match(source, escapedPattern(expected));
+      assert.match(source, escapedPattern(expected), `NAV-01 History row entry must include ${expected}`);
     }
+
+    assert.doesNotMatch(
+      source,
+      /function onMealOpen[\s\S]*openMealEdit/,
+      "NAV-01 History row tap must not call openMealEdit directly",
+    );
+    assert.doesNotMatch(
+      source,
+      escapedPattern("buildHistoryMealEditPayload(meal, selectedDateKey)"),
+      "NAV-01 History row tap must reject buildHistoryMealEditPayload(meal, selectedDateKey)",
+    );
+    assert.doesNotMatch(
+      source,
+      /aria-label=\{`編輯/,
+      "NAV-01 History row aria-label must not begin with 編輯",
+    );
   });
 
   it("renders History timeline thumbnails from meal-level imageUrl inside the row target", () => {
@@ -77,7 +109,7 @@ describe("History screen source contract", () => {
       "sp-history-meal-fallback",
       "meal.imageUrl",
       "無照片",
-      "buildHistoryMealEditPayload(meal, selectedDateKey)",
+      "開啟餐點詳情",
     ]) {
       assert.match(source, escapedPattern(expected));
     }
@@ -103,7 +135,13 @@ describe("History screen source contract", () => {
   it("sorts timeline meals from morning to night and hides meal-period tags", () => {
     assert.match(source, /\[\.\.\.meals\]\.sort\(\s*\(\s*left,\s*right\s*\) => new Date\(left\.loggedAt\)\.getTime\(\) - new Date\(right\.loggedAt\)\.getTime\(\)/);
     assert.match(source, /sortedMeals\.map\(\(meal\) =>/);
-    assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\}/);
+    assert.match(source, /import \{ formatMealRowTime, getDisplayMealLabel, getMealMacroSummary \} from "\.\/HomeScreen\.js";/);
+    assert.match(source, /\{formatMealRowTime\(meal\.loggedAt\)\} · \{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\}/);
+    assert.match(
+      source,
+      /aria-label=\{`開啟餐點詳情：\$\{meal\.foodName\}`\}/,
+      "NAV-01 History row accessible label must describe detail browsing",
+    );
     assert.doesNotMatch(source, /getDisplayMealLabel\(meal\.loggedAt\)/);
     assert.match(source, /\{displayMealCount === null \? "--" : displayMealCount\}筆/);
     assert.doesNotMatch(source, /\{meals\.length\} entries/);
@@ -138,12 +176,21 @@ describe("History screen source contract", () => {
     assert.doesNotMatch(source, /setSelectedSnapshot\(null\);\s+return getHistoryDaySnapshot\(selectedDateKey\)/);
   });
 
-  it("reserves weekly loading copy for true first load only", () => {
+  it("keeps cold week switches in target context with inline pending placeholders", () => {
     assert.match(source, /loadingTrends/);
     assert.match(
       source,
-      /loadingTrends && !hasCurrentWeekCache|loadingTrends && !trendsCache\.get\(weekStartKey\)|const hasCurrentWeekCache = Boolean\(trendsCache\.get\(weekStartKey\)\)/,
+      /buildHistoryWeek\(\{\s*weekStartKey,[\s\S]*?selectedDateKey,[\s\S]*?pending: !hasCurrentWeekCache,[\s\S]*?\}\)/,
     );
+    assert.match(
+      source,
+      /buildHistoryWeekStats\(\{\s*days: weekDays,[\s\S]*?pending: !hasCurrentWeekCache,[\s\S]*?\}\)/,
+    );
+    assert.doesNotMatch(source, /loadingTrends && !hasCurrentWeekCache[\s\S]{0,240}載入這週紀錄中\.\.\./);
+    assert.doesNotMatch(source, /載入這週紀錄中\.\.\./);
+    assert.doesNotMatch(source, /previousSnapshot|previousDate/);
+    assert.doesNotMatch(source, /previous(?:Rows|Meals|WeekRows|DayRows|MealRows|SnapshotRows|DateRows)/);
+    assert.doesNotMatch(source, /skeleton|placeholderMeal|pendingMealRows|disabledMealRows/i);
   });
 
   it("wires cache-hit weekly revalidation to neutral pending treatment", () => {
@@ -163,18 +210,104 @@ describe("History screen source contract", () => {
       source,
       /affectedWeekStartKey !== weekStartKey[\s\S]*?\.delete\(affectedWeekStartKey\)/,
     );
+    assert.doesNotMatch(source, /setDayCache\(\(\) => new Map\(\)\)/);
+    assert.doesNotMatch(source, /setDayCache\(new Map\(\)\)/);
+    assert.doesNotMatch(source, /setTrendsCache\(\(\) => new Map\(\)\)/);
+    assert.doesNotMatch(source, /setTrendsCache\(new Map\(\)\)/);
   });
 
-  it("preserves visible selected-day display from same-date week cache during day revalidation", () => {
+  it("refreshes History only when the selected day or visible week matches the mutation date", () => {
+    assert.match(source, /const shouldRefreshDay = affectedDate === selectedDateKey/);
+    assert.match(source, /const shouldRefreshWeek = affectedWeekStartKey === weekStartKey/);
+    assert.match(source, /if \(!shouldRefreshDay && !shouldRefreshWeek\) \{\s*return;\s*\}/);
+    assert.match(source, /shouldRefreshDay \? loadSelectedDay\(cancelledRef\) : Promise\.resolve\(\)/);
+    assert.match(source, /shouldRefreshWeek \? loadTrends\(cancelledRef\) : Promise\.resolve\(\)/);
+
+    assert.doesNotMatch(source, /activeScreen === "history"[\s\S]*loadSelectedDay/);
+    assert.doesNotMatch(source, /activeScreen === "history"[\s\S]*loadTrends/);
+    assert.doesNotMatch(source, /secondaryScreen[\s\S]*loadSelectedDay/);
+    assert.doesNotMatch(source, /secondaryScreen[\s\S]*loadTrends/);
+  });
+
+  it("keeps selected-day pending, empty, and detail activation snapshot-backed", () => {
+    for (const expected of [
+      "hasSelectedDaySnapshot",
+      "selectedDaySnapshotPending",
+      "confirmedEmptyDay",
+      "showInlineDayPending",
+      "openConfirmedEmptyDayDetail",
+      "同步這天紀錄中...",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(source, /const hasSelectedDaySnapshot = selectedSnapshot !== null/);
+    assert.match(source, /const selectedDaySnapshotPending = selectedSnapshot === null && !dayError/);
+    assert.match(source, /const confirmedEmptyDay = selectedSnapshot !== null && selectedSnapshot\.meals\.length === 0/);
+    assert.match(
+      source,
+      /const showInlineDayPending =[\s\S]*selectedDaySnapshotPending[\s\S]*loadingDay[\s\S]*!dayError[\s\S]*delayedInlineDayPending/,
+    );
+    assert.match(source, /openConfirmedEmptyDayDetail[\s\S]*confirmedEmptyDay[\s\S]*openDayDetail/);
+    assert.doesNotMatch(source, /selectedWeekDay\.mealCount === 0[\s\S]*這天還沒有餐點/);
+    assert.doesNotMatch(source, /displayMealCount === 0 && meals\.length === 0/);
+    assert.doesNotMatch(source, /selectedDayMealCount === 0[\s\S]*openDayDetail/);
+  });
+
+  it("suppresses fast selected-day pending copy while preserving longer cold-load copy", () => {
+    for (const expected of [
+      "DAY_PENDING_COPY_DELAY_MS",
+      "delayedInlineDayPending",
+      "setDelayedInlineDayPending",
+      "inlineDayPendingTimerRef",
+      "window.setTimeout",
+      "window.clearTimeout",
+      "同步這天紀錄中...",
+    ]) {
+      assert.match(source, escapedPattern(expected));
+    }
+
+    assert.match(source, /const DAY_PENDING_COPY_DELAY_MS = (18\d|19\d|2[0-4]\d|250)/);
+    assert.match(source, /useState\(false\)/);
+    assert.match(source, /useRef<number \| null>\(null\)/);
+    assert.match(source, /window\.setTimeout\(\(\) => \{[\s\S]*setDelayedInlineDayPending\(true\)/);
+    assert.match(source, /DAY_PENDING_COPY_DELAY_MS/);
+    assert.match(source, /window\.clearTimeout\(inlineDayPendingTimerRef\.current\)/);
+    assert.match(source, /setDelayedInlineDayPending\(false\)/);
+    assert.match(
+      source,
+      /const showInlineDayPending =[\s\S]*selectedDaySnapshotPending[\s\S]*loadingDay[\s\S]*!dayError[\s\S]*delayedInlineDayPending/,
+    );
+    assert.match(
+      source,
+      /if \(!selectedDaySnapshotPending \|\| !loadingDay \|\| dayError\) \{[\s\S]*setDelayedInlineDayPending\(false\)/,
+    );
+    assert.match(source, /selectedDateKey/);
+
+    assert.doesNotMatch(source, /const showInlineDayPending = selectedDaySnapshotPending && !dayError/);
+    assert.doesNotMatch(source, /const showInlineDayPending = selectedSnapshot === null && !dayError/);
+    assert.doesNotMatch(source, /const showInlineDayPending = !hasSelectedDaySnapshot && !dayError/);
+  });
+
+  it("uses day snapshots as the only timeline row and Meal Edit authority", () => {
+    assert.match(source, /const meals = snapshot\?\.meals \?\? \[\]/);
+    assert.match(source, /snapshot !== null && meals\.length > 0[\s\S]*<TimelineRows[\s\S]*meals=\{meals\}/);
+    assert.match(source, /openDayDetail[\s\S]*targetMealId: meal\.id/);
+    assert.doesNotMatch(source, /function TimelinePanel[\s\S]*selectedWeekDay[\s\S]*<TimelineRows/);
+    assert.doesNotMatch(source, /function TimelinePanel[\s\S]*selectedDayMealCount[\s\S]*<TimelineRows/);
+    assert.doesNotMatch(source, /trends(?:Cache|\.daily|\.averages)[\s\S]*buildHistoryMealEditPayload/);
+  });
+
+  it("preserves selected-day hero display from same-date week cache while timeline facts stay snapshot-backed", () => {
     assert.match(source, /const selectedWeekDay = weekDays\.find\(\(day\) => day\.dateKey === selectedDateKey\)/);
     assert.match(
       source,
       /const hasSelectedWeekDayDisplay =[\s\S]*selectedWeekDay\?\.status !== "pending"[\s\S]*selectedWeekDay\?\.calories !== null[\s\S]*selectedWeekDay\?\.mealCount !== null/,
     );
-    assert.match(source, /const hasSelectedDayDisplay = selectedSnapshot !== null \|\| hasSelectedWeekDayDisplay/);
+    assert.match(source, /const hasSelectedDayDisplay = hasSelectedDaySnapshot \|\| hasSelectedWeekDayDisplay/);
     assert.match(source, /const isSelectedDayCacheMiss = !hasSelectedDayDisplay/);
     assert.match(source, /const displayCalories = snapshot\?\.summary\.totalCalories \?\? selectedDayCalories/);
-    assert.match(source, /const displayMealCount = cacheMiss \? null : \(snapshot\?\.meals\.length \?\? selectedDayMealCount\)/);
+    assert.match(source, /const displayMealCount = snapshot === null \? null : meals\.length/);
     assert.match(source, /<span>\{displayMealCount === null \? "--" : displayMealCount\}筆<\/span>/);
     assert.match(source, /meals=\{meals\}/);
     assert.doesNotMatch(source, /snapshot === null \? previous|previousSnapshot|previousDate/);
@@ -187,7 +320,6 @@ describe("History screen source contract", () => {
       "STREAK",
       "SP_WEEK",
       "SP_HIST_MEALS",
-      "window.",
       "ui_kits/sport",
       "ChatEntryBar",
       "screen-scroll-with-input",

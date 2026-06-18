@@ -1,5 +1,7 @@
 export type PrimaryTab = "home" | "chat" | "history";
 export type SecondaryScreen = "settings" | "dayDetail" | "mealEdit";
+export type MealPeriod = "breakfast" | "lunch" | "dinner" | "late_night";
+export type MealReceiptStatus = "active" | "deleted" | "stale_revision";
 export interface DayDetailPayload {
   dateKey: string;
   targetMealId?: string;
@@ -7,6 +9,7 @@ export interface DayDetailPayload {
 }
 export interface MealEditPayload {
   mealId: string;
+  mealRevisionId: string;
   dateKey: string;
   foodName: string;
   calories: number;
@@ -18,11 +21,12 @@ export interface MealEditPayload {
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt?: string;
+  mealPeriod?: MealPeriod;
 }
 export type SecondaryScreenState =
   | { screen: "dayDetail"; origin: PrimaryTab; payload?: DayDetailPayload }
   | { screen: "settings"; origin: PrimaryTab }
-  | { screen: "mealEdit"; origin: PrimaryTab; payload: MealEditPayload }
+  | { screen: "mealEdit"; origin: PrimaryTab; payload: MealEditPayload; returnToDayDetail?: DayDetailPayload }
   | null;
 export type ActiveScreen = PrimaryTab | "onboarding";
 
@@ -50,6 +54,21 @@ export interface DailySummary {
   mealCount: number;
 }
 
+export type DailySummarySSESource = "initial" | "meal_mutation";
+
+export interface DailySummarySSEPayload {
+  summary: DailySummary;
+  affectedDate: string;
+  source: DailySummarySSESource;
+}
+
+export type SummaryOutcome =
+  | { status: "fresh"; dailySummary: DailySummary }
+  | { status: "recovered"; dailySummary: DailySummary; reason: "recompute_failed" }
+  | { status: "unavailable"; reason: "recompute_failed" };
+
+// Phase 76 keeps item rows media-free: whole-meal photos remain meal-level
+// evidence per D-01/D-03 until a future item-media contract exists.
 export interface MealItemDetail {
   name: string;
   position: number;
@@ -67,15 +86,20 @@ export interface LoggedMealReceipt {
   fat: number;
   itemCount: number;
   items?: MealItemDetail[];
+  receiptMealId?: string;
   mealId?: string;
+  mealRevisionId?: string;
   dateKey?: string;
+  receiptStatus?: MealReceiptStatus;
   loggedAt?: string;
   imageAssetId?: string | null;
   imageUrl?: string | null;
+  mealPeriod?: MealPeriod;
 }
 
 export interface MealEntry {
   id: string;
+  mealRevisionId?: string;
   foodName: string;
   calories: number;
   protein: number;
@@ -86,9 +110,11 @@ export interface MealEntry {
   imageAssetId?: string | null;
   imageUrl?: string | null;
   loggedAt: string;
+  mealPeriod?: MealPeriod;
 }
 
-export interface UpdateMealInput {
+export interface ScalarUpdateMealInput {
+  expectedMealRevisionId: string;
   foodName: string;
   calories: number;
   protein: number;
@@ -97,10 +123,29 @@ export interface UpdateMealInput {
   imageAssetId?: string | null;
 }
 
+export interface GroupedUpdateMealInput {
+  expectedMealRevisionId: string;
+  items: MealItemDetail[];
+}
+
+export type UpdateMealInput = ScalarUpdateMealInput | GroupedUpdateMealInput;
+
+export interface DeleteMealOptions {
+  expectedMealRevisionId: string;
+}
+
 export interface UpdateMealResponse {
   affectedDate: string;
-  dailySummary: DailySummary;
+  dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
   meal: MealEntry;
+}
+
+export interface DeleteMealResponse {
+  affectedDate: string;
+  dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
+  deletedMealId?: string;
 }
 
 export interface MealMutationNotice {
@@ -144,10 +189,107 @@ export interface HistoryDaySnapshot {
   meals: MealEntry[];
 }
 
+export type ProposalKind = "goal" | "meal_numeric" | "meal_estimate" | "meal_delete";
+export type ProposalLane = "goal" | "meal_mutation";
+export type ProposalStatus = "active" | "approved" | "rejected" | "expired" | "superseded" | "stale";
+export type ProposalAction = "approve" | "edit" | "reject";
+
+export interface ProposalCardDetailRow {
+  label: string;
+  before?: string;
+  after?: string;
+  value?: string;
+}
+
+export interface ProposalCardDetails {
+  rows: ProposalCardDetailRow[];
+  [key: string]: unknown;
+}
+
+export interface ProposalCardActions {
+  approveLabel: string;
+  editLabel: string;
+  rejectLabel: string;
+}
+
+export interface ProposalCardMetadata {
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  status: ProposalStatus;
+  isActionable: boolean;
+  title: string;
+  details: ProposalCardDetails;
+  actions: ProposalCardActions;
+  inputHint?: string;
+  expiresAt: string | null;
+  lapseCopy: string | null;
+  supersededByKind: ProposalKind | null;
+}
+
+export interface ProposalActionEventMetadata {
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  action: ProposalAction;
+  transcriptCopy: string;
+  createdAt: string;
+}
+
+export interface ProposalActionRequest {
+  proposalId: string;
+  kind: ProposalKind;
+  action: Extract<ProposalAction, "approve" | "reject">;
+}
+
+export type ProposalActionReply =
+  | {
+      ok: true;
+      status: "approved" | "rejected";
+      proposalCard: ProposalCardMetadata;
+      proposalActionEvent: ProposalActionEventMetadata;
+      didMutateMeal: boolean;
+      reply?: string;
+      dailyTargets?: DailyTargets;
+      updatedMeal?: unknown;
+      deletedMealId?: string;
+      affectedDate?: string;
+      summaryOutcome?: SummaryOutcome;
+      dailySummary?: DailySummary;
+    }
+  | {
+      ok: false;
+      status: "stale";
+      proposalCard?: ProposalCardMetadata;
+      didMutateMeal: false;
+      reply?: string;
+    }
+  | {
+      ok: false;
+      status: "retryable";
+      proposalCard?: ProposalCardMetadata;
+      didMutateMeal: false;
+      reply: string;
+    }
+  | {
+      ok: false;
+      status: "idempotent";
+      proposalCard?: ProposalCardMetadata;
+      didMutateMeal: false;
+      reply: string;
+    };
+
+export interface ProposalEditContext {
+  proposalId: string;
+  kind: ProposalKind;
+  action: "edit";
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  turnId?: string;
   imagePath?: string | null;
   imageAssetId?: string | null;
   imageUrl?: string | null;
@@ -156,6 +298,8 @@ export interface Message {
   status?: "complete" | "stopped" | "error";
   didLogMeal?: boolean;
   loggedMeal?: LoggedMealReceipt;
+  proposalCard?: ProposalCardMetadata;
+  proposalActionEvent?: ProposalActionEventMetadata;
 }
 
 export interface PendingHomeChatDraft {
@@ -163,16 +307,22 @@ export interface PendingHomeChatDraft {
   text: string;
   image?: File;
   status: "staged" | "sending" | "failed";
+  failedAssistantArtifactId?: string;
 }
 
 export interface ChatReply {
+  turnId: string;
   reply: string;
   didLogMeal?: boolean;
   didMutateMeal?: boolean;
   loggedMeal?: LoggedMealReceipt;
   dailySummary?: DailySummary;
+  summaryOutcome?: SummaryOutcome;
   dailyTargets?: DailyTargets;
   affectedDate?: string;
+  deletedMealId?: string;
+  proposalCard?: ProposalCardMetadata;
+  proposalActionEvent?: ProposalActionEventMetadata;
 }
 
 export type CoachCTAIntentId = "protein" | "next_meal" | "calorie_control" | "food_logging";

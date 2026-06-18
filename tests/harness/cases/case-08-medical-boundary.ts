@@ -15,6 +15,8 @@ import type {
   LLMProvider,
   LLMResponse,
   LLMRoundResult,
+  GenerateObjectRequest,
+  GenerateObjectResult,
   ToolDefinition,
 } from "../../../server/llm/types.js";
 
@@ -49,6 +51,13 @@ class MedicalBoundaryPromptProvider implements LLMProvider {
   async chatRound(messages: ChatMessage[], tools: ToolDefinition[]): Promise<LLMRoundResult> {
     this.chatCalls.push({ messages, tools });
     return { kind: "response", response: { content: this.replyFor(messages) } };
+  }
+
+  async generateObject<T>(
+    _messages: ChatMessage[],
+    _request: GenerateObjectRequest<T>,
+  ): Promise<GenerateObjectResult<T>> {
+    throw new Error("generateObject unexpectedly called by this test provider");
   }
 
   private replyFor(messages: ChatMessage[]): string {

@@ -1,6 +1,14 @@
-import type { DailySummary } from "../services/summary.js";
 import type { DailyTargets } from "../services/device.js";
 import type { FastifyReply } from "fastify";
+import type { DailySummary } from "../services/summary.js";
+
+export type DailySummarySSESource = "initial" | "meal_mutation";
+
+export interface DailySummarySSEPayload {
+  summary: DailySummary;
+  affectedDate: string;
+  source: DailySummarySSESource;
+}
 
 export class RealtimePublisher {
   private connections = new Map<string, FastifyReply[]>();
@@ -47,8 +55,8 @@ export class RealtimePublisher {
     return { sent };
   }
 
-  publishDailySummary(deviceId: string, summary: DailySummary) {
-    return this.publish(deviceId, "daily_summary", summary);
+  publishDailySummary(deviceId: string, payload: DailySummarySSEPayload) {
+    return this.publish(deviceId, "daily_summary", payload);
   }
 
   // Emits a `goals_update` SSE event carrying the freshly persisted daily

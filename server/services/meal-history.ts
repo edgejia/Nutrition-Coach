@@ -5,12 +5,23 @@ import {
   mealRevisions,
   mealTransactions,
 } from "../db/schema.js";
+import type { MealPeriod } from "../lib/meal-period.js";
 import { getLocalDayBounds } from "../lib/time.js";
 import { makeAssetRef } from "./assets.js";
 import { projectMealDisplay } from "./meal-display.js";
 
+export interface MealHistoryItem {
+  name: string;
+  position: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 export interface MealHistoryEntry {
   id: string;
+  mealRevisionId: string;
   foodName: string;
   itemCount: number;
   calories: number;
@@ -19,6 +30,8 @@ export interface MealHistoryEntry {
   fat: number;
   imagePath: string | null;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
+  items?: MealHistoryItem[];
 }
 
 export function createMealHistoryService(db: AppDatabase) {
@@ -29,6 +42,7 @@ export function createMealHistoryService(db: AppDatabase) {
         .select({
           id: mealTransactions.id,
           loggedAt: mealTransactions.loggedAt,
+          mealPeriod: mealTransactions.mealPeriod,
           currentRevisionId: mealTransactions.currentRevisionId,
         })
         .from(mealTransactions)
@@ -52,26 +66,32 @@ export function createMealHistoryService(db: AppDatabase) {
         .from(mealRevisions)
         .where(inArray(mealRevisions.id, revisionIds));
       const items = await db
-        .select()
+        .select({
+          revisionId: mealRevisionItems.revisionId,
+          position: mealRevisionItems.position,
+          foodName: mealRevisionItems.foodName,
+          calories: mealRevisionItems.calories,
+          protein: mealRevisionItems.protein,
+          carbs: mealRevisionItems.carbs,
+          fat: mealRevisionItems.fat,
+        })
         .from(mealRevisionItems)
         .where(inArray(mealRevisionItems.revisionId, revisionIds))
-        .orderBy(asc(mealRevisionItems.position));
+        .orderBy(asc(mealRevisionItems.revisionId), asc(mealRevisionItems.position));
 
       const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
       const itemsByRevisionId = new Map<
         string,
-        Array<{
+        Array<MealHistoryItem & {
           foodName: string;
-          calories: number;
-          protein: number;
-          carbs: number;
-          fat: number;
         }>
       >();
 
       for (const item of items) {
         const revisionItems = itemsByRevisionId.get(item.revisionId) ?? [];
         revisionItems.push({
+          name: item.foodName,
+          position: item.position,
           foodName: item.foodName,
           calories: item.calories,
           protein: item.protein,
@@ -85,9 +105,18 @@ export function createMealHistoryService(db: AppDatabase) {
         const revision = revisionById.get(header.currentRevisionId);
         const revisionItems = itemsByRevisionId.get(header.currentRevisionId) ?? [];
         const display = projectMealDisplay(revisionItems);
+        const publicItems = revisionItems.map(({ name, position, calories, protein, carbs, fat }) => ({
+          name,
+          position,
+          calories,
+          protein,
+          carbs,
+          fat,
+        }));
 
         return {
           id: header.id,
+          mealRevisionId: header.currentRevisionId,
           foodName: display.foodName,
           itemCount: display.itemCount,
           calories: revisionItems.reduce((sum, item) => sum + item.calories, 0),
@@ -96,6 +125,8 @@ export function createMealHistoryService(db: AppDatabase) {
           fat: revisionItems.reduce((sum, item) => sum + item.fat, 0),
           imagePath: revision?.imageAssetId ? makeAssetRef(revision.imageAssetId) : null,
           loggedAt: header.loggedAt,
+          mealPeriod: header.mealPeriod,
+          ...(publicItems.length > 0 ? { items: publicItems } : {}),
         };
       });
     },

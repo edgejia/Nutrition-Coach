@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getEmptyStateCopy } from "../coach-advice.js";
 import { useStore } from "../store.js";
 import { recordHomeCtaIntentSelected } from "../api.js";
 import { SportBoltIcon } from "./SportIcons.js";
@@ -53,6 +54,7 @@ export function getAdvicePresentation(
   summary: DailySummary | null,
   targets: DailyTargets | null,
   advice: string | null,
+  goal: string | null = null,
 ) {
   if (summary === null) {
     return { state: "loading" as const };
@@ -61,7 +63,7 @@ export function getAdvicePresentation(
   if (summary.mealCount === 0) {
     return {
       state: "empty" as const,
-      message: "先用對話記下第一餐。今天還沒有紀錄。到「對話」描述你吃了什麼。",
+      message: getEmptyStateCopy(goal, targets),
     };
   }
 
@@ -150,7 +152,8 @@ export function CoachAdviceCard({
   const [selectedIntentId, setSelectedIntentId] = useState<CoachCTAIntentId | null>(null);
   const summary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
-  const presentation = getAdvicePresentation(summary, targets, advice);
+  const goal = useStore((s) => s.goal);
+  const presentation = getAdvicePresentation(summary, targets, advice, goal);
 
   const ctaBlock = cta && presentation.state !== "loading" && (
     <CoachCTAControls
@@ -165,6 +168,13 @@ export function CoachAdviceCard({
   if (presentation.state === "loading") {
     return (
       <div className="sp-coach-cta sp-coach-cta-loading" aria-busy="true">
+        <div className="sp-coach-cta-label">
+          <SportBoltIcon size={14} stroke={2} />
+          <span>教練建議 · 載入中</span>
+        </div>
+        <p className="sp-coach-cta-loading-copy">
+          正在整理今天的營養進度，稍後會顯示即時建議。
+        </p>
         <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-label" />
         <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-headline" />
         <div className="sp-coach-cta-skeleton sp-coach-cta-skeleton-body" />

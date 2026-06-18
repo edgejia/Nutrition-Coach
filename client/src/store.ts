@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import { clearGuestSession, establishGuestSession } from "./api.js";
+import {
+  isAuthoritativeMealEntryArray,
+  isDailySummaryDto,
+  isDailyTargetsDto,
+} from "./dto-guards.js";
 import type {
   ActiveScreen,
   DailyTargets,
@@ -12,6 +17,8 @@ import type {
   LoggedMealReceipt,
   PendingHomeChatDraft,
   PrimaryTab,
+  ProposalActionEventMetadata,
+  ProposalCardMetadata,
   ProvisionalBubble,
   SecondaryScreen,
   SecondaryScreenState,
@@ -26,6 +33,27 @@ function readStoredJson<T>(key: string): T | null {
   }
 }
 
+function buildSummaryFromCurrentMeals(meals: MealEntry[]): DailySummary {
+  return meals.reduce<DailySummary>(
+    (summary, meal) => ({
+      date: summary.date,
+      totalCalories: summary.totalCalories + meal.calories,
+      totalProtein: summary.totalProtein + meal.protein,
+      totalCarbs: summary.totalCarbs + meal.carbs,
+      totalFat: summary.totalFat + meal.fat,
+      mealCount: summary.mealCount + 1,
+    }),
+    {
+      date: formatLocalDate(new Date()),
+      totalCalories: 0,
+      totalProtein: 0,
+      totalCarbs: 0,
+      totalFat: 0,
+      mealCount: 0,
+    },
+  );
+}
+
 // Rollover refresh handler: fire-and-forget callback invoked when a stale/future-dated
 // summary is rejected by the store's date guard. Stored at module scope (not in state)
 // so SSE/chat callers never see it as a reactive field and tests can reset per case (D-13, D-19).
@@ -37,12 +65,52 @@ type CommitProvisionalBubbleExtra = {
   loggedMeal?: LoggedMealReceipt;
   dailySummary?: DailySummary;
   dailyTargets?: DailyTargets;
+  deletedMealId?: string;
+  proposalCard?: ProposalCardMetadata;
+  proposalActionEvent?: ProposalActionEventMetadata;
   status?: Message["status"];
+  turnId?: string;
 };
+
+function redactReceiptIdentityFromMessages(messages: Message[], mealId: string): Message[] {
+  return messages.map((message) => {
+    const loggedMeal = message.loggedMeal;
+    if (!loggedMeal) {
+      return message;
+    }
+
+    const receiptMealId = loggedMeal.receiptMealId ?? loggedMeal.mealId;
+    if (receiptMealId !== mealId) {
+      return message;
+    }
+
+    const {
+      mealId: _mealId,
+      mealRevisionId: _mealRevisionId,
+      dateKey: _dateKey,
+      receiptMealId: _receiptMealId,
+      ...displayOnlyReceipt
+    } = loggedMeal;
+    return {
+      ...message,
+      loggedMeal: {
+        ...displayOnlyReceipt,
+        receiptMealId: mealId,
+        receiptStatus: "deleted",
+      },
+    };
+  });
+}
+
+const STOPPED_EMPTY_COPY = "已停止生成。";
+const RAW_STOPPED_PLACEHOLDER = "（已停止）";
 
 function getStoppedMessageContent(content: string) {
   const trimmedContent = content.trim();
-  return trimmedContent.length > 0 ? `${trimmedContent}\n\n已停止` : "已停止，沒有產生新的回覆。";
+  if (trimmedContent.length === 0 || trimmedContent === RAW_STOPPED_PLACEHOLDER) {
+    return STOPPED_EMPTY_COPY;
+  }
+  return content;
 }
 
 interface AppState {
@@ -64,7 +132,11 @@ interface AppState {
   setActiveScreen: (screen: ActiveScreen) => void;
   openSecondaryScreen: (screen: Exclude<SecondaryScreen, "mealEdit">, origin?: PrimaryTab) => void;
   openDayDetail: (payload: DayDetailPayload, origin?: PrimaryTab) => void;
-  openMealEdit: (payload: MealEditPayload, origin?: PrimaryTab) => void;
+  openMealEdit: (
+    payload: MealEditPayload,
+    origin?: PrimaryTab,
+    options?: { returnToDayDetail?: DayDetailPayload },
+  ) => void;
   closeSecondaryScreen: () => void;
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
@@ -73,6 +145,7 @@ interface AppState {
   recordMealMutation: (affectedDate: string) => void;
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void;
   clearPendingHomeChatDraft: () => void;
+  clearDraftLinkedAssistantArtifact: (artifactId: string) => void;
   setShowSettings: (showSettings: boolean) => void;
   setDevice: (deviceId: string, goal: string, dailyTargets: DailyTargets) => void;
   bootstrapGuestSession: () => Promise<boolean>;
@@ -130,28 +203,40 @@ export const useStore = create<AppState>((set, get) => ({
         payload,
       },
     })),
-  openMealEdit: (payload, origin) =>
+  openMealEdit: (payload, origin, options) =>
     set((state) => ({
       secondaryScreen: {
         screen: "mealEdit",
         origin: origin ?? (state.activeScreen === "onboarding" ? "home" : state.activeScreen),
         payload,
+        ...(options?.returnToDayDetail ? { returnToDayDetail: options.returnToDayDetail } : {}),
       },
     })),
-  closeSecondaryScreen: () => set({ secondaryScreen: null }),
+  closeSecondaryScreen: () =>
+    set((state) => {
+      const current = state.secondaryScreen;
+      if (current?.screen === "mealEdit" && current.returnToDayDetail) {
+        return {
+          secondaryScreen: {
+            screen: "dayDetail",
+            origin: current.origin,
+            payload: current.returnToDayDetail,
+          },
+        };
+      }
+      return { secondaryScreen: null };
+    }),
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
-  setMeals: (meals) => set({ meals }),
+  setMeals: (meals) => {
+    if (!isAuthoritativeMealEntryArray(meals)) {
+      return;
+    }
+    set({ meals, dailySummary: buildSummaryFromCurrentMeals(meals) });
+  },
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
   redactChatReceiptIdentity: (mealId) =>
     set((state) => ({
-      messages: state.messages.map((message) => {
-        if (message.loggedMeal?.mealId !== mealId) {
-          return message;
-        }
-
-        const { mealId: _mealId, dateKey: _dateKey, ...displayOnlyReceipt } = message.loggedMeal;
-        return { ...message, loggedMeal: displayOnlyReceipt };
-      }),
+      messages: redactReceiptIdentityFromMessages(state.messages, mealId),
     })),
   recordMealMutation: (affectedDate) =>
     set((state) => ({
@@ -162,6 +247,11 @@ export const useStore = create<AppState>((set, get) => ({
     })),
   setPendingHomeChatDraft: (pendingHomeChatDraft) => set({ pendingHomeChatDraft }),
   clearPendingHomeChatDraft: () => set({ pendingHomeChatDraft: null }),
+  clearDraftLinkedAssistantArtifact: (artifactId) =>
+    set((state) => ({
+      messages: state.messages.filter((message) => !(message.role === "assistant" && message.id === artifactId)),
+      provisionalBubble: state.provisionalBubble?.id === artifactId ? null : state.provisionalBubble,
+    })),
   setShowSettings: (showSettings) => set({ showSettings }),
 
   setDevice: (deviceId, goal, dailyTargets) => {
@@ -201,7 +291,8 @@ export const useStore = create<AppState>((set, get) => ({
       }));
       return true;
     } catch {
-      set({ guestSessionStatus: "recovery_required" });
+      localStorage.removeItem("deviceId");
+      set({ deviceId: null, guestSessionStatus: "recovery_required" });
       return false;
     }
   },
@@ -257,6 +348,9 @@ export const useStore = create<AppState>((set, get) => ({
   // Writes only when `summary.date` equals local today. Mismatches fire the
   // registered rollover refresh handler without propagating errors to callers.
   setDailySummary: (summary) => {
+    if (!isDailySummaryDto(summary)) {
+      return;
+    }
     const activeDate = formatLocalDate(new Date());
     if (summary.date === activeDate) {
       set({ dailySummary: summary });
@@ -278,6 +372,9 @@ export const useStore = create<AppState>((set, get) => ({
     rolloverRefreshHandler = handler;
   },
   setDailyTargets: (dailyTargets) => {
+    if (!isDailyTargetsDto(dailyTargets)) {
+      return;
+    }
     localStorage.setItem("dailyTargets", JSON.stringify(dailyTargets));
     set({ dailyTargets });
   },
@@ -324,11 +421,18 @@ export const useStore = create<AppState>((set, get) => ({
         content: state.provisionalBubble.content,
         createdAt: new Date().toISOString(),
         ...(extra.status ? { status: extra.status } : {}),
+        ...(extra.turnId ? { turnId: extra.turnId } : {}),
         didLogMeal: extra.didLogMeal,
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
+        ...(extra.proposalCard ? { proposalCard: extra.proposalCard } : {}),
+        ...(extra.proposalActionEvent ? { proposalActionEvent: extra.proposalActionEvent } : {}),
       };
 
-      return { messages: [...state.messages, finalMessage], provisionalBubble: null };
+      const messages = extra.deletedMealId
+        ? redactReceiptIdentityFromMessages(state.messages, extra.deletedMealId)
+        : state.messages;
+
+      return { messages: [...messages, finalMessage], provisionalBubble: null };
     });
     if (extra.dailySummary) {
       get().setDailySummary(extra.dailySummary);
@@ -349,11 +453,18 @@ export const useStore = create<AppState>((set, get) => ({
         content: getStoppedMessageContent(state.provisionalBubble.content),
         createdAt: new Date().toISOString(),
         status: "stopped",
+        ...(extra.turnId ? { turnId: extra.turnId } : {}),
         didLogMeal: extra.didLogMeal ?? Boolean(extra.loggedMeal),
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
+        ...(extra.proposalCard ? { proposalCard: extra.proposalCard } : {}),
+        ...(extra.proposalActionEvent ? { proposalActionEvent: extra.proposalActionEvent } : {}),
       };
 
-      return { messages: [...state.messages, finalMessage], provisionalBubble: null };
+      const messages = extra.deletedMealId
+        ? redactReceiptIdentityFromMessages(state.messages, extra.deletedMealId)
+        : state.messages;
+
+      return { messages: [...messages, finalMessage], provisionalBubble: null };
     });
     if (extra.dailySummary) {
       get().setDailySummary(extra.dailySummary);

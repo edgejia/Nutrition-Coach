@@ -31,13 +31,25 @@ async function readSource(relativePath: string) {
   return readFile(sourcePath(relativePath), "utf8");
 }
 
+function cssBlock(source: string, selector: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`${escapedSelector}\\s*\\{([^}]+)\\}`).exec(source);
+  assert.ok(match, `${selector} should be defined`);
+  return match[1] ?? "";
+}
+
 describe("Home dashboard display contracts", () => {
-  it("derives display-only meal labels from loggedAt", () => {
-    assert.equal(getDisplayMealLabel("2026-04-29T07:30:00+08:00"), "早餐");
-    assert.equal(getDisplayMealLabel("2026-04-29T12:30:00+08:00"), "午餐");
-    assert.equal(getDisplayMealLabel("2026-04-29T15:00:00+08:00"), "點心");
-    assert.equal(getDisplayMealLabel("2026-04-29T19:00:00+08:00"), "晚餐");
-    assert.equal(getDisplayMealLabel("not-a-date"), "餐點");
+  it("prefers explicit mealPeriod before falling back to loggedAt labels", () => {
+    assert.equal(getDisplayMealLabel("lunch", "2026-04-29T07:30:00+08:00"), "午餐");
+    assert.equal(getDisplayMealLabel("breakfast", "2026-04-29T12:30:00+08:00"), "早餐");
+    assert.equal(getDisplayMealLabel("dinner", "2026-04-29T15:00:00+08:00"), "晚餐");
+    assert.equal(getDisplayMealLabel("late_night", "2026-04-29T19:00:00+08:00"), "宵夜");
+    assert.equal(getDisplayMealLabel(null, "2026-04-29T07:30:00+08:00"), "早餐");
+    assert.equal(getDisplayMealLabel(undefined, "2026-04-29T12:30:00+08:00"), "午餐");
+    assert.equal(getDisplayMealLabel(undefined, "2026-04-29T15:00:00+08:00"), "點心");
+    assert.equal(getDisplayMealLabel(undefined, "2026-04-29T19:00:00+08:00"), "晚餐");
+    assert.equal(getDisplayMealLabel("invalid" as never, "2026-04-29T15:00:00+08:00"), "點心");
+    assert.equal(getDisplayMealLabel(null, "not-a-date"), "餐點");
     assert.equal(getDisplayMealLabel(), "餐點");
   });
 
@@ -106,11 +118,12 @@ describe("Home dashboard display contracts", () => {
     }
 
     assert.equal(getMealMacroSummary({ protein: 18, carbs: 42, fat: 8 }), "P 18 · C 42 · F 8");
-    assert.equal(getMealBadge("2026-04-29T07:30:00+08:00"), "B");
-    assert.equal(getMealBadge("2026-04-29T12:30:00+08:00"), "L");
-    assert.equal(getMealBadge("2026-04-29T15:00:00+08:00"), "S");
-    assert.equal(getMealBadge("2026-04-29T19:00:00+08:00"), "D");
-    assert.equal(getMealBadge("not-a-date"), "M");
+    assert.equal(getMealBadge("breakfast", "2026-04-29T12:30:00+08:00"), "B");
+    assert.equal(getMealBadge("lunch", "2026-04-29T07:30:00+08:00"), "L");
+    assert.equal(getMealBadge("late_night", "2026-04-29T19:00:00+08:00"), "N");
+    assert.equal(getMealBadge(undefined, "2026-04-29T15:00:00+08:00"), "S");
+    assert.equal(getMealBadge(undefined, "2026-04-29T19:00:00+08:00"), "D");
+    assert.equal(getMealBadge(undefined, "not-a-date"), "M");
   });
 
   it("provides empty coach handoff copy", () => {
@@ -176,19 +189,35 @@ describe("Home dashboard display contracts", () => {
     assert.doesNotMatch(homeSource, /openSecondaryScreen\("mealEdit"/);
   });
 
-  it("Home meal rows stay read-only and empty state routes through Chat", async () => {
+  it("Home meal rows split eligible edit buttons from silent read-only fallbacks", async () => {
     const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
 
+    assert.match(homeSource, /buildMealEditPayloadIfComplete/);
+    assert.match(homeSource, /import \{ buildMealEditPayloadIfComplete \} from "\.\.\/meal-edit-payload\.js"/);
+    assert.match(homeSource, /const openMealEdit = useStore\(\(s\) => s\.openMealEdit\)/);
+    assert.match(homeSource, /const todayDateKey = dailySummary\?\.date \?\? formatLocalDate\(new Date\(\)\)/);
+    assert.match(homeSource, /<MealRows meals=\{meals\} todayDateKey=\{todayDateKey\}/);
+    assert.match(homeSource, /buildMealEditPayloadIfComplete\(meal, todayDateKey\)/);
+    assert.match(homeSource, /openMealEdit\(editPayload, "home"\)/);
+    assert.match(homeSource, /<button\s+type="button"\s+className="home-sport-meal-row"/);
+    assert.match(homeSource, /aria-label=\{`編輯 \$\{getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)\} \$\{meal\.foodName\}`\}/);
     assert.match(homeSource, /<article key=\{meal\.id\} className="home-sport-meal-row">/);
-    assert.match(homeSource, /getMealBadge\(meal\.loggedAt\)/);
+    assert.match(homeSource, /getMealBadge\(meal\.mealPeriod, meal\.loggedAt\)/);
     assert.match(homeSource, /formatMealRowTime\(meal\.loggedAt\)/);
-    assert.match(homeSource, /getDisplayMealLabel\(meal\.loggedAt\)/);
+    assert.match(homeSource, /getDisplayMealLabel\(meal\.mealPeriod, meal\.loggedAt\)/);
     assert.match(homeSource, /getMealMacroSummary\(meal\)/);
     assert.match(homeSource, /Math\.max\(0, Math\.round\(meal\.calories\)\)/);
     assert.match(homeSource, /stageHomeTaskOptionPrompt\(prompt, setPendingHomeChatDraft, setActiveScreen\)/);
     assert.match(homeSource, /<button type="button" className="home-sport-empty-action" onClick=\{onEmptyChatClick\}>/);
-    assert.doesNotMatch(homeSource, /<button[^>]+home-sport-meal-row/);
+    assert.match(cssSource, /\.home-sport-meal-row\[type="button"\][\s\S]*cursor:\s*pointer/);
+    assert.match(cssSource, /\.home-sport-meal-row\[type="button"\]:hover[\s\S]*background:\s*var\(--sp-surface-2\)/);
+    assert.match(cssSource, /\.home-sport-meal-row\[type="button"\]:focus-visible[\s\S]*outline:\s*2px solid var\(--sp-lime\)/);
     assert.doesNotMatch(homeSource, /SportPlusIcon/);
+    assert.doesNotMatch(homeSource, /SportChevronRightIcon|SportEditIcon|EditIcon/);
+    assert.doesNotMatch(homeSource, /openSecondaryScreen\("mealEdit"/);
+    assert.doesNotMatch(homeSource, /homeMealEdit|HomeMealEdit|openHomeMealEdit/);
+    assert.doesNotMatch(homeSource, /disabled[^=]|暫不可編輯|不可編輯|無法編輯|tooltip|title=\{`編輯/);
   });
 
   it("scopes count-up animation to consumed calories and ring percent", async () => {
@@ -227,5 +256,24 @@ describe("Home dashboard display contracts", () => {
     assert.doesNotMatch(homeSource, /coachFade/);
     assert.doesNotMatch(homeSource, /CoachAdviceCard[\s\S]{0,160}transition/);
     assert.doesNotMatch(homeSource, /targetAnimation/);
+  });
+
+  it("MOB-02 keeps Home CTA inside the primary scroller with bottom-nav reserve", async () => {
+    const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
+    const homeScrollBlock = cssBlock(cssSource, ".home-sport-scroll");
+
+    assert.match(homeSource, /<main className="screen-scroll home-sport-scroll">/);
+    assert.match(homeSource, /<CoachAdviceCard advice=\{coachAdvice\} cta=\{cta\}/);
+    assert.match(homeSource, /sendHomeCtaTaskOption\(option, intent, setPendingHomeChatDraft, setActiveScreen\)/);
+    assert.match(homeScrollBlock, /display:\s*flex/);
+    assert.match(homeScrollBlock, /flex-direction:\s*column/);
+    assert.match(homeScrollBlock, /gap:\s*16px/);
+    assert.match(
+      homeScrollBlock,
+      /calc\(128px \+ var\(--app-bottom-occlusion,\s*0px\) \+ env\(safe-area-inset-bottom\)\)/,
+      "MOB-02 Home scroller must reserve enough bottom space above the fixed nav for expanded CTA options",
+    );
+    assert.doesNotMatch(homeSource, /new mobile action strip|collapse choices|sp-home-action-strip/i);
   });
 });

@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { AppDatabase } from "../db/client.js";
 import {
   assetReferences,
@@ -8,6 +8,7 @@ import {
   mealTransactions,
 } from "../db/schema.js";
 import { parseAssetRef } from "./assets.js";
+import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
 import { formatLocalDate } from "../lib/time.js";
 import { projectMealDisplay } from "./meal-display.js";
 
@@ -21,6 +22,7 @@ export interface MealTransactionItemInput {
 
 export interface CreateMealTransactionInput {
   loggedAt?: string;
+  mealPeriod?: MealPeriod | null;
   imagePath?: string | null;
   items: MealTransactionItemInput[];
 }
@@ -29,6 +31,7 @@ export interface MealTransactionWriteResult {
   transactionId: string;
   revisionId: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   imagePath: string | null;
   items: MealTransactionItemInput[];
 }
@@ -36,6 +39,7 @@ export interface MealTransactionWriteResult {
 export interface MealTransactionDeleteResult {
   transactionId: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   affectedDateKey: string;
   deletedMeal: DeletedMealSnapshot;
 }
@@ -44,12 +48,14 @@ export interface DeletedMealSnapshot {
   mealId: string;
   dateKey: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   foodName: string;
   calories?: number;
   protein?: number;
 }
 
 export interface MealTransactionUpdateInput {
+  expectedMealRevisionId?: string | null;
   imagePath?: string | null;
   items: MealTransactionItemInput[];
 }
@@ -58,6 +64,7 @@ export interface MealTransactionUpdateResult {
   transactionId: string;
   revisionId: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   affectedDateKey: string;
   imageAssetId: string | null;
   items: MealTransactionItemInput[];
@@ -67,13 +74,47 @@ interface MealTransactionRow {
   id: string;
   deviceId: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   currentRevisionId: string;
   currentRevisionNumber: number;
   deletedAt: string | null;
   createdAt: string;
 }
 
+type MealRevisionAssertionTarget = Pick<MealTransactionRow, "id" | "loggedAt" | "currentRevisionId">;
+
+export interface MealMutationGuard {
+  mealId: string;
+  affectedDate: string;
+  currentMealRevisionId: string;
+  itemCount: number;
+}
+
 type AssetReferenceWriter = Pick<AppDatabase, "insert">;
+type MealTransactionReader = Pick<AppDatabase, "select">;
+
+export type MealRevisionPreconditionCode = "MEAL_REVISION_REQUIRED" | "MEAL_REVISION_STALE";
+
+export class MealRevisionPreconditionError extends Error {
+  readonly code: MealRevisionPreconditionCode;
+  readonly mealId: string;
+  readonly affectedDate: string;
+  readonly currentMealRevisionId: string;
+
+  constructor(input: {
+    code: MealRevisionPreconditionCode;
+    mealId: string;
+    affectedDate: string;
+    currentMealRevisionId: string;
+  }) {
+    super(input.code);
+    this.name = "MealRevisionPreconditionError";
+    this.code = input.code;
+    this.mealId = input.mealId;
+    this.affectedDate = input.affectedDate;
+    this.currentMealRevisionId = input.currentMealRevisionId;
+  }
+}
 
 export function createMealTransactionsService(db: AppDatabase) {
   function normalizeItems(items: MealTransactionItemInput[]) {
@@ -110,33 +151,52 @@ export function createMealTransactionsService(db: AppDatabase) {
       .run();
   }
 
-  function getActiveTransactionByDeviceAndId(
+  function getTransactionByDeviceAndIdFromReader(
+    reader: MealTransactionReader,
     deviceId: string,
     transactionId: string,
   ): MealTransactionRow | undefined {
-    // Keep the shared delete/correction lookup pinned to the composite
-    // device_id + id index so the hot path remains regression-testable.
-    return db.$client
-      .prepare(
-        `
-          SELECT
-            id,
-            device_id AS deviceId,
-            logged_at AS loggedAt,
-            current_revision_id AS currentRevisionId,
-            current_revision_number AS currentRevisionNumber,
-            deleted_at AS deletedAt,
-            created_at AS createdAt
-          FROM meal_transactions INDEXED BY meal_tx_device_id_id_idx
-          WHERE device_id = ? AND id = ? AND deleted_at IS NULL
-          LIMIT 1
-        `,
-      )
-      .get(deviceId, transactionId) as MealTransactionRow | undefined;
+    return reader
+      .select({
+        id: mealTransactions.id,
+        deviceId: mealTransactions.deviceId,
+        loggedAt: mealTransactions.loggedAt,
+        mealPeriod: mealTransactions.mealPeriod,
+        currentRevisionId: mealTransactions.currentRevisionId,
+        currentRevisionNumber: mealTransactions.currentRevisionNumber,
+        deletedAt: mealTransactions.deletedAt,
+        createdAt: mealTransactions.createdAt,
+      })
+      .from(mealTransactions)
+      .where(and(
+        eq(mealTransactions.deviceId, deviceId),
+        eq(mealTransactions.id, transactionId),
+      ))
+      .limit(1)
+      .get();
   }
 
-  async function loadDeletedMealSnapshot(existing: MealTransactionRow): Promise<DeletedMealSnapshot> {
-    const items = await db
+  function assertMutableExpectedRevision(
+    existing: MealTransactionRow,
+    expectedMealRevisionId: string | null | undefined,
+  ) {
+    assertExpectedMealRevision(existing, expectedMealRevisionId);
+
+    if (existing.deletedAt !== null) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_STALE",
+        mealId: existing.id,
+        affectedDate: formatLocalDate(new Date(existing.loggedAt)),
+        currentMealRevisionId: existing.currentRevisionId,
+      });
+    }
+  }
+
+  function loadDeletedMealSnapshotFromReader(
+    reader: MealTransactionReader,
+    existing: MealTransactionRow,
+  ): DeletedMealSnapshot {
+    const items = reader
       .select({
         foodName: mealRevisionItems.foodName,
         calories: mealRevisionItems.calories,
@@ -144,7 +204,8 @@ export function createMealTransactionsService(db: AppDatabase) {
       })
       .from(mealRevisionItems)
       .where(eq(mealRevisionItems.revisionId, existing.currentRevisionId))
-      .orderBy(asc(mealRevisionItems.position));
+      .orderBy(asc(mealRevisionItems.position))
+      .all();
     const dateKey = formatLocalDate(new Date(existing.loggedAt));
     const display = projectMealDisplay(items, "未知餐點");
     const calories = items.length > 0
@@ -158,13 +219,127 @@ export function createMealTransactionsService(db: AppDatabase) {
       mealId: existing.id,
       dateKey,
       loggedAt: existing.loggedAt,
+      mealPeriod: existing.mealPeriod,
       foodName: display.foodName,
       ...(calories === undefined ? {} : { calories }),
       ...(protein === undefined ? {} : { protein }),
     };
   }
 
+  function assertExpectedMealRevision(
+    existing: MealRevisionAssertionTarget,
+    expectedMealRevisionId: string | null | undefined,
+  ) {
+    const expected = typeof expectedMealRevisionId === "string" ? expectedMealRevisionId.trim() : "";
+    const affectedDate = formatLocalDate(new Date(existing.loggedAt));
+
+    if (!expected) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_REQUIRED",
+        mealId: existing.id,
+        affectedDate,
+        currentMealRevisionId: existing.currentRevisionId,
+      });
+    }
+
+    if (expected !== existing.currentRevisionId) {
+      throw new MealRevisionPreconditionError({
+        code: "MEAL_REVISION_STALE",
+        mealId: existing.id,
+        affectedDate,
+        currentMealRevisionId: existing.currentRevisionId,
+      });
+    }
+  }
+
   return {
+    async assertExpectedMealRevision(
+      deviceId: string,
+      transactionId: string,
+      expectedMealRevisionId?: string | null,
+    ): Promise<void> {
+      const existing = getTransactionByDeviceAndIdFromReader(db, deviceId, transactionId);
+
+      if (!existing) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      assertMutableExpectedRevision(existing, expectedMealRevisionId);
+    },
+
+    async getCurrentItemsForMutation(
+      deviceId: string,
+      transactionId: string,
+      expectedMealRevisionId?: string | null,
+    ): Promise<MealTransactionItemInput[]> {
+      const existing = getTransactionByDeviceAndIdFromReader(db, deviceId, transactionId);
+
+      if (!existing) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      assertMutableExpectedRevision(existing, expectedMealRevisionId);
+
+      const items = db
+        .select({
+          foodName: mealRevisionItems.foodName,
+          calories: mealRevisionItems.calories,
+          protein: mealRevisionItems.protein,
+          carbs: mealRevisionItems.carbs,
+          fat: mealRevisionItems.fat,
+        })
+        .from(mealRevisionItems)
+        .where(eq(mealRevisionItems.revisionId, existing.currentRevisionId))
+        .orderBy(asc(mealRevisionItems.position))
+        .all();
+
+      if (items.length === 0) {
+        throw new Error("MEAL_ITEMS_REQUIRED");
+      }
+
+      return items;
+    },
+
+    async getMealMutationGuard(
+      deviceId: string,
+      transactionId: string,
+      expectedMealRevisionId?: string | null,
+    ): Promise<MealMutationGuard> {
+      const existing = db.$client
+        .prepare(
+          `
+            SELECT
+              mt.id,
+              mt.logged_at AS loggedAt,
+              mt.current_revision_id AS currentRevisionId,
+              mt.current_revision_number AS currentRevisionNumber,
+              mt.deleted_at AS deletedAt,
+              mt.created_at AS createdAt,
+              COUNT(mri.revision_id) AS itemCount
+            FROM meal_transactions AS mt INDEXED BY meal_tx_device_id_id_idx
+            LEFT JOIN meal_revision_items AS mri
+              ON mri.revision_id = mt.current_revision_id
+            WHERE mt.device_id = ? AND mt.id = ?
+            GROUP BY mt.id, mt.logged_at, mt.current_revision_id, mt.current_revision_number, mt.deleted_at, mt.created_at
+            LIMIT 1
+          `,
+        )
+        .get(deviceId, transactionId) as (MealTransactionRow & { itemCount: number }) | undefined;
+
+      if (!existing) {
+        throw new Error("MEAL_NOT_FOUND");
+      }
+
+      assertMutableExpectedRevision(existing, expectedMealRevisionId);
+
+      return {
+        mealId: existing.id,
+        affectedDate: formatLocalDate(new Date(existing.loggedAt)),
+        currentMealRevisionId: existing.currentRevisionId,
+        itemCount: existing.itemCount,
+      };
+    },
+
     async createTransaction(
       deviceId: string,
       input: CreateMealTransactionInput,
@@ -172,6 +347,7 @@ export function createMealTransactionsService(db: AppDatabase) {
       const items = normalizeItems(input.items);
       const transactionId = crypto.randomUUID();
       const loggedAt = input.loggedAt ?? new Date().toISOString();
+      const mealPeriod = normalizeMealPeriod(input.mealPeriod) ?? null;
       const revisionNumber = 1;
       const revisionId = `${transactionId}:r${revisionNumber}`;
       const createdAt = new Date().toISOString();
@@ -210,6 +386,7 @@ export function createMealTransactionsService(db: AppDatabase) {
             id: transactionId,
             deviceId,
             loggedAt,
+            mealPeriod,
             currentRevisionId: revisionId,
             currentRevisionNumber: revisionNumber,
             deletedAt: null,
@@ -251,6 +428,7 @@ export function createMealTransactionsService(db: AppDatabase) {
           transactionId,
           revisionId,
           loggedAt,
+          mealPeriod,
           imagePath,
           items,
         };
@@ -260,19 +438,22 @@ export function createMealTransactionsService(db: AppDatabase) {
     async softDeleteTransaction(
       deviceId: string,
       transactionId: string,
+      expectedMealRevisionId?: string | null,
     ): Promise<MealTransactionDeleteResult> {
-      const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
-
-      if (!existing) {
-        throw new Error("MEAL_NOT_FOUND");
-      }
-
-      const deletedMeal = await loadDeletedMealSnapshot(existing);
       const deletedAt = new Date().toISOString();
-      const revisionNumber = existing.currentRevisionNumber + 1;
-      const revisionId = `${existing.id}:r${revisionNumber}`;
 
       return db.transaction((tx) => {
+        const existing = getTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
+
+        if (!existing) {
+          throw new Error("MEAL_NOT_FOUND");
+        }
+        assertMutableExpectedRevision(existing, expectedMealRevisionId);
+
+        const deletedMeal = loadDeletedMealSnapshotFromReader(tx, existing);
+        const revisionNumber = existing.currentRevisionNumber + 1;
+        const revisionId = `${existing.id}:r${revisionNumber}`;
+
         tx.insert(mealRevisions)
           .values({
             id: revisionId,
@@ -291,12 +472,17 @@ export function createMealTransactionsService(db: AppDatabase) {
             currentRevisionNumber: revisionNumber,
             deletedAt,
           })
-          .where(eq(mealTransactions.id, existing.id))
+          .where(and(
+            eq(mealTransactions.id, existing.id),
+            eq(mealTransactions.currentRevisionId, existing.currentRevisionId),
+            isNull(mealTransactions.deletedAt),
+          ))
           .run();
 
         return {
           transactionId: existing.id,
           loggedAt: existing.loggedAt,
+          mealPeriod: existing.mealPeriod,
           affectedDateKey: deletedMeal.dateKey,
           deletedMeal,
         };
@@ -308,28 +494,30 @@ export function createMealTransactionsService(db: AppDatabase) {
       transactionId: string,
       input: MealTransactionUpdateInput,
     ): Promise<MealTransactionUpdateResult> {
-      const existing = getActiveTransactionByDeviceAndId(deviceId, transactionId);
-
-      if (!existing) {
-        throw new Error("MEAL_NOT_FOUND");
-      }
-
       const items = normalizeItems(input.items);
       const createdAt = new Date().toISOString();
-      const revisionNumber = existing.currentRevisionNumber + 1;
-      const revisionId = `${existing.id}:r${revisionNumber}`;
       const explicitImageAssetId = parseAssetRef(input.imagePath);
-      const currentRevision = db
-        .select({
-          imageAssetId: mealRevisions.imageAssetId,
-        })
-        .from(mealRevisions)
-        .where(eq(mealRevisions.id, existing.currentRevisionId))
-        .limit(1)
-        .get();
-      const imageAssetId = explicitImageAssetId ?? currentRevision?.imageAssetId ?? null;
 
       return db.transaction((tx) => {
+        const existing = getTransactionByDeviceAndIdFromReader(tx, deviceId, transactionId);
+
+        if (!existing) {
+          throw new Error("MEAL_NOT_FOUND");
+        }
+        assertMutableExpectedRevision(existing, input.expectedMealRevisionId);
+
+        const revisionNumber = existing.currentRevisionNumber + 1;
+        const revisionId = `${existing.id}:r${revisionNumber}`;
+        const currentRevision = tx
+          .select({
+            imageAssetId: mealRevisions.imageAssetId,
+          })
+          .from(mealRevisions)
+          .where(eq(mealRevisions.id, existing.currentRevisionId))
+          .limit(1)
+          .get();
+        const imageAssetId = explicitImageAssetId ?? currentRevision?.imageAssetId ?? null;
+
         if (imageAssetId) {
           const existingAsset = tx
             .select({ id: assets.id })
@@ -383,7 +571,11 @@ export function createMealTransactionsService(db: AppDatabase) {
             currentRevisionId: revisionId,
             currentRevisionNumber: revisionNumber,
           })
-          .where(eq(mealTransactions.id, existing.id))
+          .where(and(
+            eq(mealTransactions.id, existing.id),
+            eq(mealTransactions.currentRevisionId, existing.currentRevisionId),
+            isNull(mealTransactions.deletedAt),
+          ))
           .run();
 
         if (imageAssetId) {
@@ -394,6 +586,7 @@ export function createMealTransactionsService(db: AppDatabase) {
           transactionId: existing.id,
           revisionId,
           loggedAt: existing.loggedAt,
+          mealPeriod: existing.mealPeriod,
           affectedDateKey: formatLocalDate(new Date(existing.loggedAt)),
           imageAssetId,
           items,

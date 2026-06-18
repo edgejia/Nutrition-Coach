@@ -13,9 +13,11 @@ globalThis.localStorage = {
 } as Storage;
 
 const { useStore } = await import("../../client/src/store.js");
+const { normalizeLoggedMealReceipt } = await import("../../client/src/api.js");
 const { formatLocalDate } = await import("../../client/src/lib/time.js");
 const { buildReceiptMealEditPayload } = await import("../../client/src/meal-edit-payload.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
+const originalFetch = globalThis.fetch;
 
 async function loadFreshStore(suffix: string) {
   return import(`${storeModuleUrl.href}?${suffix}`);
@@ -24,6 +26,7 @@ async function loadFreshStore(suffix: string) {
 const sampleMeals = [
   {
     id: "meal-1",
+    mealRevisionId: "meal-1:r1",
     foodName: "雞胸肉便當",
     calories: 520,
     protein: 42,
@@ -34,6 +37,7 @@ const sampleMeals = [
   },
   {
     id: "meal-2",
+    mealRevisionId: "meal-2:r1",
     foodName: "優格",
     calories: 180,
     protein: 12,
@@ -60,9 +64,12 @@ describe("AppStore", () => {
       meals: [],
       pendingHomeChatDraft: null,
       lastMealMutation: null,
+      showSettings: false,
+      secondaryScreen: null,
       sending: false,
       provisionalBubble: null,
     });
+    globalThis.fetch = originalFetch;
     // Reset rollover refresh handler to avoid cross-test leakage (D-19)
     useStore.getState().setRolloverRefreshHandler(null);
   });
@@ -105,6 +112,37 @@ describe("AppStore", () => {
 
     useStore.getState().resetGuestSessionRecovery();
     assert.equal(useStore.getState().guestSessionRecoveryAttempted, false);
+  });
+
+  it("clears stale device identity and enters recovery when bootstrap returns 401", async () => {
+    useStore.getState().setDevice("stale-device", "fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+
+    let requestBody: unknown;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(input, "/api/device/session");
+      assert.equal(init?.method, "POST");
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ error: "No guest session available" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const bootstrapped = await useStore.getState().bootstrapGuestSession();
+
+    assert.equal(bootstrapped, false);
+    assert.deepEqual(requestBody, { legacyDeviceId: "stale-device" });
+    assert.equal(storage.get("deviceId"), undefined);
+    assert.equal(localStorage.getItem("deviceId"), null);
+    assert.equal(storage.get("goal"), "fat_loss");
+    assert.equal(storage.get("dailyTargets"), JSON.stringify({ calories: 1500, protein: 120, carbs: 150, fat: 50 }));
+    assert.equal(useStore.getState().deviceId, null);
+    assert.equal(useStore.getState().guestSessionStatus, "recovery_required");
   });
 
   it("clearDevice removes all localStorage entries and resets dashboard-first state", () => {
@@ -209,11 +247,93 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().dailySummary?.totalCalories, 100);
   });
 
+  it("setDailySummary rejects malformed summary shapes without mutating state or firing rollover", () => {
+    let handlerCallCount = 0;
+    useStore.getState().setRolloverRefreshHandler(() => {
+      handlerCallCount++;
+    });
+
+    const today = formatLocalDate(new Date());
+    const trusted = {
+      date: today,
+      totalCalories: 500,
+      totalProtein: 30,
+      totalCarbs: 60,
+      totalFat: 15,
+      mealCount: 1,
+    };
+    useStore.getState().setDailySummary(trusted);
+
+    assert.doesNotThrow(() => {
+      useStore.getState().setDailySummary({
+        date: today,
+        totalCalories: "999",
+        totalProtein: 0,
+        totalCarbs: 0,
+        totalFat: 0,
+        mealCount: 1,
+      } as any);
+    });
+
+    assert.deepEqual(useStore.getState().dailySummary, trusted);
+    assert.equal(handlerCallCount, 0);
+  });
+
   it("setDailyTargets persists to localStorage", () => {
     const targets = { calories: 2000, protein: 150, carbs: 200, fat: 60 };
     useStore.getState().setDailyTargets(targets);
     assert.deepEqual(useStore.getState().dailyTargets, targets);
     assert.equal(storage.get("dailyTargets"), JSON.stringify(targets));
+  });
+
+  it("setDailyTargets rejects malformed targets without mutating state or localStorage", () => {
+    const trusted = { calories: 2000, protein: 150, carbs: 200, fat: 60 };
+    useStore.getState().setDailyTargets(trusted);
+    const storedBefore = storage.get("dailyTargets");
+
+    assert.doesNotThrow(() => {
+      useStore.getState().setDailyTargets({ calories: 1800, protein: "130", carbs: 200, fat: 60 } as any);
+    });
+
+    assert.deepEqual(useStore.getState().dailyTargets, trusted);
+    assert.equal(storage.get("dailyTargets"), storedBefore);
+  });
+
+  it("setMeals rejects malformed meal rows without replacing previous state", () => {
+    useStore.getState().setMeals(sampleMeals);
+
+    assert.doesNotThrow(() => {
+      useStore.getState().setMeals([
+        sampleMeals[0],
+        {
+          id: "meal-bad",
+          foodName: "壞資料",
+          calories: 100,
+          protein: 5,
+          carbs: 10,
+          fat: 4,
+          itemCount: 1,
+          loggedAt: "2026-04-01T09:00:00.000Z",
+          mealPeriod: "brunch",
+        },
+      ] as any);
+    });
+
+    assert.deepEqual(useStore.getState().meals, sampleMeals);
+  });
+
+  it("setMeals derives a same-day daily summary fallback for reload before SSE arrives", () => {
+    useStore.getState().setMeals(sampleMeals);
+
+    assert.deepEqual(useStore.getState().meals, sampleMeals);
+    assert.deepEqual(useStore.getState().dailySummary, {
+      date: formatLocalDate(new Date()),
+      totalCalories: 700,
+      totalProtein: 54,
+      totalCarbs: 68,
+      totalFat: 24,
+      mealCount: 2,
+    });
   });
 
   it("tracks activeScreen changes and meal collection helpers", () => {
@@ -267,6 +387,7 @@ describe("AppStore", () => {
         mealId: "meal-1",
         dateKey: "2026-04-30",
         foodName: "雞胸肉沙拉",
+        mealRevisionId: "meal-1:r1",
         calories: 420,
         protein: 32,
         carbs: 14,
@@ -279,11 +400,12 @@ describe("AppStore", () => {
     assert.deepEqual(useStore.getState().secondaryScreen, {
       screen: "mealEdit",
       origin: "chat",
-      payload: {
-        mealId: "meal-1",
-        dateKey: "2026-04-30",
-        foodName: "雞胸肉沙拉",
-        calories: 420,
+        payload: {
+          mealId: "meal-1",
+          dateKey: "2026-04-30",
+          foodName: "雞胸肉沙拉",
+          mealRevisionId: "meal-1:r1",
+          calories: 420,
         protein: 32,
         carbs: 14,
         fat: 22,
@@ -291,6 +413,49 @@ describe("AppStore", () => {
       },
     });
     assert.equal(useStore.getState().pendingHomeChatDraft?.id, "draft-3");
+  });
+
+  it("NAV-02 returns Meal Edit launched from Day Detail back to the same detail context", () => {
+    const returnToDayDetail = {
+      dateKey: "2026-05-06",
+      targetMealId: "meal-focused",
+      label: "history-snapshot" as const,
+    };
+    const payload = {
+      mealId: "meal-focused",
+      dateKey: "2026-05-06",
+      foodName: "雞腿便當",
+      mealRevisionId: "meal-focused:r1",
+      calories: 640,
+      protein: 36,
+      carbs: 72,
+      fat: 18,
+      itemCount: 1,
+    };
+
+    useStore.getState().openMealEdit(payload, "history", { returnToDayDetail });
+
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "mealEdit",
+      origin: "history",
+      payload,
+      returnToDayDetail,
+    }, "NAV-02 openMealEdit(payload, \"history\", { returnToDayDetail }) must retain focused Day Detail context");
+
+    useStore.getState().closeSecondaryScreen();
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "dayDetail",
+      origin: "history",
+      payload: returnToDayDetail,
+    }, "NAV-02 closeSecondaryScreen() must restore Day Detail when Meal Edit has returnToDayDetail");
+
+    useStore.getState().openMealEdit(payload, "home");
+    useStore.getState().closeSecondaryScreen();
+    assert.equal(useStore.getState().secondaryScreen, null, "NAV-02 Home Meal Edit closes to null");
+
+    useStore.getState().openMealEdit(payload, "chat");
+    useStore.getState().closeSecondaryScreen();
+    assert.equal(useStore.getState().secondaryScreen, null, "NAV-02 Chat Meal Edit closes to null");
   });
 
   it("recordMealMutation tracks affected date with a monotonic nonce", () => {
@@ -313,7 +478,9 @@ describe("AppStore", () => {
         didLogMeal: true,
         loggedMeal: {
           mealId: "meal-1",
+          mealRevisionId: "meal-1:r1",
           dateKey: "2026-04-30",
+          receiptStatus: "active",
           loggedAt: "2026-04-30T04:00:00.000Z",
           foodName: "雞腿便當",
           calories: 640,
@@ -326,6 +493,26 @@ describe("AppStore", () => {
         },
       },
       {
+        id: "assistant-1-stale",
+        role: "assistant",
+        content: "舊版雞腿便當。",
+        createdAt: "2026-04-30T04:05:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          receiptMealId: "meal-1",
+          receiptStatus: "stale_revision",
+          loggedAt: "2026-04-30T04:00:00.000Z",
+          foodName: "舊版雞腿便當",
+          calories: 700,
+          protein: 32,
+          carbs: 84,
+          fat: 22,
+          itemCount: 1,
+          imageAssetId: "asset-lunch-old",
+          imageUrl: "/api/assets/asset-lunch-old",
+        },
+      },
+      {
         id: "assistant-2",
         role: "assistant",
         content: "已幫你記錄鮭魚飯糰。",
@@ -333,7 +520,9 @@ describe("AppStore", () => {
         didLogMeal: true,
         loggedMeal: {
           mealId: "meal-2",
+          mealRevisionId: "meal-2:r1",
           dateKey: "2026-04-30",
+          receiptStatus: "active",
           loggedAt: "2026-04-30T08:00:00.000Z",
           foodName: "鮭魚飯糰",
           calories: 280,
@@ -349,14 +538,119 @@ describe("AppStore", () => {
 
     useStore.getState().redactChatReceiptIdentity("meal-1");
 
-    const [redactedMessage, untouchedMessage] = useStore.getState().messages;
+    const [redactedMessage, redactedStaleMessage, untouchedMessage] = useStore.getState().messages;
     assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.mealRevisionId, undefined);
     assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.receiptMealId, "meal-1");
+    assert.equal((redactedMessage?.loggedMeal as any)?.receiptStatus, "deleted");
     assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(redactedMessage?.loggedMeal?.calories, 640);
+    assert.equal(redactedMessage?.loggedMeal?.protein, 30);
+    assert.equal(redactedMessage?.loggedMeal?.carbs, 78);
+    assert.equal(redactedMessage?.loggedMeal?.fat, 20);
+    assert.equal(redactedMessage?.loggedMeal?.itemCount, 1);
     assert.equal(redactedMessage?.loggedMeal?.imageAssetId, "asset-lunch");
+    assert.equal(redactedMessage?.loggedMeal?.imageUrl, "/api/assets/asset-lunch");
     assert.equal(buildReceiptMealEditPayload(redactedMessage?.loggedMeal), null);
+
+    assert.equal(redactedStaleMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(redactedStaleMessage?.loggedMeal?.mealRevisionId, undefined);
+    assert.equal(redactedStaleMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal(redactedStaleMessage?.loggedMeal?.receiptMealId, "meal-1");
+    assert.equal((redactedStaleMessage?.loggedMeal as any)?.receiptStatus, "deleted");
+    assert.equal(redactedStaleMessage?.loggedMeal?.foodName, "舊版雞腿便當");
+    assert.equal(redactedStaleMessage?.loggedMeal?.calories, 700);
+    assert.equal(redactedStaleMessage?.loggedMeal?.imageAssetId, "asset-lunch-old");
+    assert.equal(buildReceiptMealEditPayload(redactedStaleMessage?.loggedMeal), null);
+
     assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-2");
+    assert.equal(untouchedMessage?.loggedMeal?.receiptMealId, undefined);
+    assert.equal(untouchedMessage?.loggedMeal?.mealRevisionId, "meal-2:r1");
+    assert.equal((untouchedMessage?.loggedMeal as any)?.receiptStatus, "active");
     assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-2");
+    assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealRevisionId, "meal-2:r1");
+  });
+
+  it("normalizes receiptStatus values and omits malformed transport statuses", () => {
+    const active = normalizeLoggedMealReceipt({
+      mealId: "meal-active",
+      mealRevisionId: "meal-active:r1",
+      dateKey: "2026-04-30",
+      receiptStatus: "active",
+      foodName: "雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+    } as any);
+    assert.equal((active as any).receiptStatus, "active");
+
+    const deleted = normalizeLoggedMealReceipt({
+      foodName: "已刪除雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+      receiptStatus: "deleted",
+    } as any);
+    assert.equal((deleted as any).receiptStatus, "deleted");
+
+    const stale = normalizeLoggedMealReceipt({
+      foodName: "舊版鮭魚飯糰",
+      calories: 280,
+      protein: 14,
+      carbs: 36,
+      fat: 8,
+      itemCount: 1,
+      receiptStatus: "stale_revision",
+    } as any);
+    assert.equal((stale as any).receiptStatus, "stale_revision");
+
+    const malformed = normalizeLoggedMealReceipt({
+      foodName: "壞狀態便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+      receiptStatus: "removed",
+    } as any);
+    assert.equal((malformed as any).receiptStatus, undefined);
+  });
+
+  it("buildReceiptMealEditPayload rejects display-only receipts even when identity fields remain", () => {
+    assert.equal(buildReceiptMealEditPayload({
+      mealId: "meal-deleted",
+      mealRevisionId: "meal-deleted:r1",
+      dateKey: "2026-04-30",
+      receiptStatus: "deleted",
+      loggedAt: "2026-04-30T04:00:00.000Z",
+      foodName: "已刪除雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+      imageAssetId: "asset-lunch",
+      imageUrl: "/api/assets/asset-lunch",
+    } as any), null);
+
+    assert.equal(buildReceiptMealEditPayload({
+      mealId: "meal-stale",
+      mealRevisionId: "meal-stale:r1",
+      dateKey: "2026-04-30",
+      receiptStatus: "stale_revision",
+      loggedAt: "2026-04-30T04:00:00.000Z",
+      foodName: "舊版雞腿便當",
+      calories: 640,
+      protein: 30,
+      carbs: 78,
+      fat: 20,
+      itemCount: 1,
+    } as any), null);
   });
 
   it("stores and clears the pending home chat draft", () => {
@@ -369,6 +663,96 @@ describe("AppStore", () => {
 
     useStore.getState().clearPendingHomeChatDraft();
     assert.equal(useStore.getState().pendingHomeChatDraft, null);
+  });
+
+  it("CHAT-01 D-01..D-09 removes only the explicit draft-linked failed assistant message", () => {
+    useStore.getState().setMessages([
+      {
+        id: "artifact-draft-failed",
+        role: "assistant",
+        content: "抱歉，發生錯誤，請再試一次。",
+        createdAt: "2026-06-05T04:00:00.000Z",
+        status: "error",
+      },
+      {
+        id: "artifact-unrelated-error",
+        role: "assistant",
+        content: "另一筆較新的錯誤也要保留",
+        createdAt: "2026-06-05T04:01:00.000Z",
+        status: "error",
+      },
+      {
+        id: "user-draft",
+        role: "user",
+        content: "午餐吃了飯糰",
+        createdAt: "2026-06-05T04:00:00.000Z",
+      },
+    ]);
+
+    useStore.getState().clearDraftLinkedAssistantArtifact("artifact-draft-failed");
+
+    assert.deepEqual(
+      useStore.getState().messages.map((message) => message.id),
+      ["artifact-unrelated-error", "user-draft"],
+      "D-03/D-07/D-08 cleanup must key by explicit artifact id and preserve unrelated assistant errors plus user bubbles",
+    );
+  });
+
+  it("CHAT-02 D-10..D-15 clears only the matching draft-linked provisional artifact", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-history",
+        role: "assistant",
+        content: "歷史回覆保留",
+        createdAt: "2026-06-05T04:00:00.000Z",
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "artifact-provisional",
+      statusLabel: "",
+      content: "送出失敗",
+      isStreaming: false,
+      status: "error",
+    });
+
+    useStore.getState().clearDraftLinkedAssistantArtifact("artifact-provisional");
+
+    assert.equal(useStore.getState().provisionalBubble, null, "D-10 clears the linked provisional artifact");
+    assert.deepEqual(
+      useStore.getState().messages.map((message) => message.id),
+      ["assistant-history"],
+      "D-11/D-12 cancel cleanup must not delete durable messages",
+    );
+  });
+
+  it("CHAT-01/CHAT-02 D-07 and D-08 leave state unchanged for an unknown artifact id", () => {
+    const messages = [
+      {
+        id: "assistant-failed",
+        role: "assistant" as const,
+        content: "失敗訊息保留",
+        createdAt: "2026-06-05T04:00:00.000Z",
+        status: "error" as const,
+      },
+      {
+        id: "user-message",
+        role: "user" as const,
+        content: "午餐吃了飯糰",
+        createdAt: "2026-06-05T04:00:00.000Z",
+      },
+    ];
+    useStore.getState().setMessages(messages);
+    useStore.getState().setProvisionalBubble({
+      id: "artifact-live",
+      statusLabel: "思考中...",
+      content: "",
+      isStreaming: true,
+    });
+
+    useStore.getState().clearDraftLinkedAssistantArtifact("missing-artifact");
+
+    assert.deepEqual(useStore.getState().messages, messages);
+    assert.equal(useStore.getState().provisionalBubble?.id, "artifact-live");
   });
 });
 
@@ -484,6 +868,148 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(useStore.getState().messages[0].didLogMeal, true);
   });
 
+  it("commitProvisionalBubble redacts prior matching receipt identity when a delete commits", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-logged-deleted",
+        role: "assistant",
+        content: "已幫你記錄雞腿便當。",
+        createdAt: "2026-04-30T04:00:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-delete",
+          mealRevisionId: "meal-delete:r1",
+          dateKey: "2026-04-30",
+          receiptStatus: "active",
+          loggedAt: "2026-04-30T04:00:00.000Z",
+          foodName: "雞腿便當",
+          calories: 640,
+          protein: 30,
+          carbs: 78,
+          fat: 20,
+          itemCount: 1,
+          imageAssetId: "asset-lunch",
+          imageUrl: "/api/assets/asset-lunch",
+        },
+      },
+      {
+        id: "assistant-logged-kept",
+        role: "assistant",
+        content: "已幫你記錄鮭魚飯糰。",
+        createdAt: "2026-04-30T08:00:00.000Z",
+        didLogMeal: true,
+        loggedMeal: {
+          mealId: "meal-keep",
+          mealRevisionId: "meal-keep:r1",
+          dateKey: "2026-04-30",
+          receiptStatus: "active",
+          loggedAt: "2026-04-30T08:00:00.000Z",
+          foodName: "鮭魚飯糰",
+          calories: 280,
+          protein: 14,
+          carbs: 36,
+          fat: 8,
+          itemCount: 1,
+          imageAssetId: "asset-salmon",
+          imageUrl: "/api/assets/asset-salmon",
+        },
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "assistant-delete-confirmation",
+      statusLabel: "",
+      content: "已刪除雞腿便當，已從當日紀錄移除。",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: true,
+      deletedMealId: "meal-delete",
+    });
+
+    const [redactedMessage, untouchedMessage, deleteConfirmation] = useStore.getState().messages;
+    assert.equal(redactedMessage?.loggedMeal?.mealId, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.mealRevisionId, undefined);
+    assert.equal(redactedMessage?.loggedMeal?.dateKey, undefined);
+    assert.equal((redactedMessage?.loggedMeal as any)?.receiptStatus, "deleted");
+    assert.equal(redactedMessage?.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(redactedMessage?.loggedMeal?.calories, 640);
+    assert.equal(redactedMessage?.loggedMeal?.protein, 30);
+    assert.equal(redactedMessage?.loggedMeal?.carbs, 78);
+    assert.equal(redactedMessage?.loggedMeal?.fat, 20);
+    assert.equal(redactedMessage?.loggedMeal?.itemCount, 1);
+    assert.equal(redactedMessage?.loggedMeal?.imageAssetId, "asset-lunch");
+    assert.equal(redactedMessage?.loggedMeal?.imageUrl, "/api/assets/asset-lunch");
+    assert.equal(buildReceiptMealEditPayload(redactedMessage?.loggedMeal), null);
+
+    assert.equal(untouchedMessage?.loggedMeal?.mealId, "meal-keep");
+    assert.equal(untouchedMessage?.loggedMeal?.mealRevisionId, "meal-keep:r1");
+    assert.equal(untouchedMessage?.loggedMeal?.dateKey, "2026-04-30");
+    assert.equal((untouchedMessage?.loggedMeal as any)?.receiptStatus, "active");
+    assert.equal(buildReceiptMealEditPayload(untouchedMessage?.loggedMeal)?.mealId, "meal-keep");
+
+    assert.equal(deleteConfirmation?.id, "assistant-delete-confirmation");
+    assert.equal(deleteConfirmation?.loggedMeal, undefined);
+    assert.equal(deleteConfirmation?.content, "已刪除雞腿便當，已從當日紀錄移除。");
+  });
+
+  it("commitProvisionalBubble retains supplied full turnId for finalized error messages", () => {
+    const turnId = "a1b2c3d4-1111-4222-8333-0123456789ab";
+    useStore.getState().setProvisionalBubble({
+      id: "msg-error",
+      statusLabel: "",
+      content: "抱歉，發生錯誤，請再試一次。",
+      isStreaming: false,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      status: "error",
+      turnId,
+    });
+
+    const message = useStore.getState().messages[0];
+    const messageRecord = message as unknown as Record<string, unknown>;
+    assert.equal(message.status, "error");
+    assert.equal(message.turnId, turnId);
+    assert.equal(messageRecord.referenceCode, undefined);
+    assert.equal(messageRecord.turnReference, undefined);
+  });
+
+  it("commitStoppedProvisionalBubble retains supplied full turnId for stopped messages", () => {
+    const turnId = "b2c3d4e5-1111-4222-8333-0123456789ab";
+    useStore.getState().setProvisionalBubble({
+      id: "msg-stopped",
+      statusLabel: "",
+      content: "部分回覆",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitStoppedProvisionalBubble({ didLogMeal: false, turnId });
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message.status, "stopped");
+    assert.equal(message.turnId, turnId);
+  });
+
+  it("commitProvisionalBubble does not synthesize turnId or reference fields for normal completion", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "msg-normal",
+      statusLabel: "",
+      content: "完整回覆",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({ didLogMeal: true });
+
+    const message = useStore.getState().messages[0];
+    const messageRecord = message as unknown as Record<string, unknown>;
+    assert.equal(message.status, undefined);
+    assert.equal(message.turnId, undefined);
+    assert.equal(messageRecord.referenceCode, undefined);
+    assert.equal(messageRecord.turnReference, undefined);
+  });
+
   it("commitProvisionalBubble is no-op when provisionalBubble is null", () => {
     useStore.getState().commitProvisionalBubble({ didLogMeal: false });
 
@@ -547,6 +1073,51 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(useStore.getState().messages.length, 1);
     assert.equal(useStore.getState().dailySummary, null);
     assert.equal(handlerCallCount, 1);
+  });
+
+  it("commitProvisionalBubble finalizes message when malformed authoritative additions are rejected", () => {
+    const trustedTargets = { calories: 2000, protein: 150, carbs: 200, fat: 60 };
+    useStore.getState().setDailyTargets(trustedTargets);
+    const storedTargetsBefore = storage.get("dailyTargets");
+
+    const today = formatLocalDate(new Date());
+    useStore.getState().setDailySummary({
+      date: today,
+      totalCalories: 400,
+      totalProtein: 25,
+      totalCarbs: 50,
+      totalFat: 12,
+      mealCount: 1,
+    });
+
+    useStore.getState().setProvisionalBubble({
+      id: "msg-malformed-authority",
+      statusLabel: "",
+      content: "已記錄",
+      isStreaming: true,
+    });
+
+    assert.doesNotThrow(() => {
+      useStore.getState().commitProvisionalBubble({
+        didLogMeal: true,
+        dailyTargets: { calories: 1800, protein: 130, carbs: "200", fat: 60 } as any,
+        dailySummary: {
+          date: today,
+          totalCalories: 999,
+          totalProtein: null,
+          totalCarbs: 0,
+          totalFat: 0,
+          mealCount: 1,
+        } as any,
+      });
+    });
+
+    assert.equal(useStore.getState().provisionalBubble, null);
+    assert.equal(useStore.getState().messages.length, 1);
+    assert.equal(useStore.getState().messages[0].id, "msg-malformed-authority");
+    assert.deepEqual(useStore.getState().dailyTargets, trustedTargets);
+    assert.equal(storage.get("dailyTargets"), storedTargetsBefore);
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 400);
   });
 
   it("commitProvisionalBubble without dailySummary leaves dailySummary untouched and handler unfired", () => {

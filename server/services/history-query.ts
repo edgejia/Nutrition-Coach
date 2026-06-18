@@ -5,6 +5,7 @@ import {
   mealRevisions,
   mealTransactions,
 } from "../db/schema.js";
+import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
 import { formatLocalDate, getLocalDayBounds } from "../lib/time.js";
 import { buildAssetUrl } from "./assets.js";
 import { projectMealDisplay } from "./meal-display.js";
@@ -19,6 +20,7 @@ export interface HistoryQueryIssue {
 
 export interface HistoryMealDto {
   id: string;
+  mealRevisionId: string;
   dateKey: string;
   loggedAt: string;
   display: { title: string };
@@ -32,6 +34,7 @@ export interface HistoryMealDto {
   asset: { imageAssetId: string | null; imageUrl: string | null };
   imageAssetId: string | null;
   imageUrl: string | null;
+  mealPeriod?: MealPeriod;
   revision: { currentRevisionNumber: number };
 }
 
@@ -96,6 +99,7 @@ export class HistoryQueryValidationError extends Error {
 interface HistoryMealHeader {
   id: string;
   loggedAt: string;
+  mealPeriod: MealPeriod | null;
   createdAt: string;
   currentRevisionId: string;
   currentRevisionNumber: number;
@@ -402,9 +406,11 @@ async function projectHistoryMeals(
     const imageAssetId = revision?.imageAssetId ?? null;
     const imageUrl = imageAssetId ? buildAssetUrl(imageAssetId) : null;
     const display = projectMealDisplay(revisionItems);
+    const mealPeriod = normalizeMealPeriod(header.mealPeriod);
 
     return {
       id: header.id,
+      mealRevisionId: header.currentRevisionId,
       dateKey: formatLocalDate(new Date(header.loggedAt)),
       loggedAt: header.loggedAt,
       display: { title: display.foodName },
@@ -431,6 +437,7 @@ async function projectHistoryMeals(
       },
       imageAssetId,
       imageUrl,
+      ...(mealPeriod ? { mealPeriod } : {}),
       revision: { currentRevisionNumber: header.currentRevisionNumber },
     };
   });
@@ -470,6 +477,7 @@ export function createHistoryQueryService(
         .select({
           id: mealTransactions.id,
           loggedAt: mealTransactions.loggedAt,
+          mealPeriod: mealTransactions.mealPeriod,
           createdAt: mealTransactions.createdAt,
           currentRevisionId: mealTransactions.currentRevisionId,
           currentRevisionNumber: mealTransactions.currentRevisionNumber,
@@ -532,6 +540,7 @@ export function createHistoryQueryService(
           .select({
             id: mealTransactions.id,
             loggedAt: mealTransactions.loggedAt,
+            mealPeriod: mealTransactions.mealPeriod,
             createdAt: mealTransactions.createdAt,
             currentRevisionId: mealTransactions.currentRevisionId,
             currentRevisionNumber: mealTransactions.currentRevisionNumber,

@@ -81,7 +81,9 @@ describe("sport UI source contract", () => {
       ".sp-chip-on",
       ".sp-chip-warn",
       ".sp-chip-good",
+      ".sp-chip-applied",
       ".sp-chip-zh",
+      ".sp-onboarding-quick-note",
       ".sp-iconbtn",
       ".sp-bar-track",
       ".sp-bar-fill",
@@ -92,6 +94,23 @@ describe("sport UI source contract", () => {
     ]) {
       assert.match(sources.appCss, escapedPattern(contract));
     }
+  });
+
+  it("defines selected quick-note typography and quiet applied styling", () => {
+    assert.match(sources.appCss, /\.sp-onboarding-quick-note\s*\{[\s\S]*min-height:\s*44px/);
+    assert.match(sources.appCss, /\.sp-onboarding-quick-note\s*\{[\s\S]*white-space:\s*normal/);
+    assert.match(sources.appCss, /\.sp-onboarding-quick-note\s*\{[\s\S]*overflow-wrap:\s*anywhere/);
+    assert.match(sources.appCss, /\.sp-onboarding-quick-note\s+\.sp-chip-zh\s*\{[\s\S]*font-size:\s*10px/);
+    assert.match(sources.appCss, /\.sp-onboarding-quick-note\s+\.sp-chip-zh\s*\{[\s\S]*line-height:\s*1\.25/);
+    assert.match(sources.appCss, /\.sp-onboarding-quick-note\s+\.sp-chip-zh\s*\{[\s\S]*font-weight:\s*400/);
+    assert.match(sources.appCss, /\.sp-onboarding-quick-note\s+\.sp-chip-zh\s*\{[\s\S]*letter-spacing:\s*0/);
+    assert.match(sources.appCss, /\.sp-chip-applied\s*\{[\s\S]*border-color:\s*var\(--sp-lime-line\)/);
+    assert.match(sources.appCss, /\.sp-chip-applied\s*\{[\s\S]*background:\s*var\(--sp-lime-soft\)/);
+    assert.match(sources.appCss, /\.sp-chip-applied\s*\{[\s\S]*color:\s*var\(--sp-lime\)/);
+    assert.match(
+      sources.appCss,
+      /\.sp-onboarding-quick-note\.sp-chip-applied\s+\.sp-chip-zh\s*\{[\s\S]*color:\s*var\(--sp-ink\)/,
+    );
   });
 
   it("keeps demo globals and frame-only CSS out of production sport CSS", () => {

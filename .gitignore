@@ -1,24 +1,42 @@
+# Local agent/workflow state
 .worktrees/
 .codex/
 .claude/
-.planning/
+.superpowers/
+chatgpt/
 CLAUDE.md
 AGENTS.md
 MILESTONES.md
-.superpowers/
+
+# Dependencies, build output, and runtime data
 node_modules/
 dist/
 output/
+.venv-webwright/
 data/*
 !data/.gitkeep
 server/uploads/
+
+# Local GSD workflow state and generated planning evidence
+.planning/
+graphify-out/
+scripts/check-planning-closeout.mjs
+
+# Harness artifacts are generated evidence, not source
 tests/harness/artifacts/
 tests/harness/tmp/
+
+# Local research, personal notes, and project-level agent habits
 docs/research/
 docs/superpowers/
+docs/local/
+docs/notes/
+docs/personal/
 docs/README.md
 docs/codex.md
-chatgpt/
+docs/HANDOFF
+
+# Secrets, databases, OS files, and browser/tool cache
 .env
 .env.*
 !.env.example

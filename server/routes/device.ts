@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { createDeviceService, Goal, IntakeFields } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
+import { config, isDeployedLikeRuntime } from "../config.js";
 import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import {
   logDeviceGoalsValidationFailed,
@@ -9,6 +10,7 @@ import {
   logOnboardingSubmitStarted,
   logOnboardingSubmitSucceeded,
   logOnboardingValidationFailed,
+  logOwnershipBypassBlocked,
 } from "../observability/events.js";
 
 interface Deps {
@@ -159,7 +161,7 @@ function buildDeviceSessionResponse(device: Awaited<ReturnType<ReturnType<typeof
 }
 
 function buildGoalValidationIssue(): IntakeValidationIssue {
-  return createValidationIssue("goal", "INVALID_GOAL", 1, "請選擇減脂或增肌目標");
+  return createValidationIssue("goal", "INVALID_GOAL", 1, "請選擇減脂、增肌或維持目標");
 }
 
 function logOnboardingValidationIssues(
@@ -443,6 +445,16 @@ export function registerDeviceRoutes(
 
     const legacyDeviceId = typeof body.legacyDeviceId === "string" ? body.legacyDeviceId.trim() : "";
     if (!legacyDeviceId) {
+      return reply.code(401).send({ error: "No guest session available" });
+    }
+
+    if (isDeployedLikeRuntime({ nodeEnv: config.nodeEnv, guestSessionCookieSecure: config.guestSessionCookieSecure })) {
+      logOwnershipBypassBlocked(request.log, {
+        reason: "legacy_device_id_rejected",
+        route: "api_device_session",
+        operation: "legacy_session_bootstrap",
+        requestId: request.id,
+      });
       return reply.code(401).send({ error: "No guest session available" });
     }
 

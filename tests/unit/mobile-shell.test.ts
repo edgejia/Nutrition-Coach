@@ -7,6 +7,11 @@ const relatedScrollTests = [
   "chat-scroll-contract.test.ts",
   "chat-scroll-live-updates.test.ts",
 ];
+const phase81StarterLabels = [
+  "我想記錄今天吃的東西",
+  "示範怎麼描述一餐",
+  "我不確定份量怎麼說",
+];
 
 function sourcePath(relativePath: string) {
   return fileURLToPath(new URL(relativePath, import.meta.url));
@@ -143,8 +148,8 @@ describe("mobile shell source contract", () => {
     assert.match(sources.mainLayout, /--app-bottom-occlusion/);
     assert.doesNotMatch(sources.mainLayout, /IOSDevice/);
     assert.doesNotMatch(sources.mainLayout, /document\.body\.style\.overflow/);
-    assert.match(sources.mainLayout, /getMeals\(\)/);
-    assert.match(sources.mainLayout, /setMeals\(meals\)/);
+    assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\)/);
+    assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\)/);
   });
 
   it("does not introduce sport demo device-frame chrome", () => {
@@ -291,14 +296,53 @@ describe("mobile shell source contract", () => {
     assert.match(submitMessage, /onSend\(trimmedText, image \?\? undefined\)/);
   });
 
-  it("keeps Chat textarea at mobile-safe font size and four-line growth cap", () => {
+  it("keeps Chat textarea at mobile-safe font size with viewport-relative growth cap", () => {
     const textareaBlock = cssBlock(".sp-chat-textarea");
 
     assert.match(textareaBlock, /font-size:\s*16px/);
     assert.match(textareaBlock, /line-height:\s*1\.5/);
-    assert.match(textareaBlock, /max-height:\s*96px/);
-    assert.match(textareaBlock, /overflow-y:\s*auto/);
+    assert.match(textareaBlock, /max-height:\s*min\(42dvh,\s*360px\)/);
+    assert.match(textareaBlock, /overflow-y:\s*hidden/);
     assert.match(textareaBlock, /resize:\s*none/);
+  });
+
+  it("keeps proposal rows and action labels mobile wrapping safe", () => {
+    const rowBlock = cssBlock(".sp-proposal-row");
+    const rowValueBlock = cssBlock(".sp-proposal-row span:last-child");
+    const actionBlock = cssBlock(".sp-proposal-action");
+
+    assert.match(rowBlock, /grid-template-columns:\s*minmax\(0,\s*88px\) minmax\(0,\s*1fr\)/);
+    assert.match(rowBlock, /min-width:\s*0/);
+    assert.match(rowBlock, /overflow-wrap:\s*anywhere/);
+    assert.match(rowBlock, /word-break:\s*break-word/);
+
+    assert.match(sources.appCss, /\.sp-proposal-row span:first-child\s*\{[^}]*min-width:\s*0/s);
+    assert.match(sources.appCss, /\.sp-proposal-row span:first-child\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+    assert.match(sources.appCss, /\.sp-proposal-row span:first-child\s*\{[^}]*word-break:\s*break-word/s);
+
+    assert.match(rowValueBlock, /min-width:\s*0/);
+    assert.match(rowValueBlock, /flex-wrap:\s*wrap/);
+    assert.match(rowValueBlock, /overflow-wrap:\s*anywhere/);
+    assert.match(rowValueBlock, /word-break:\s*break-word/);
+    assert.match(sources.appCss, /\.sp-proposal-row i,\s*\.sp-proposal-row b,\s*\.sp-proposal-row strong\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+
+    assert.match(actionBlock, /min-height:\s*44px/);
+    assert.match(actionBlock, /min-width:\s*0/);
+    assert.match(actionBlock, /white-space:\s*normal/);
+    assert.match(actionBlock, /overflow-wrap:\s*anywhere/);
+
+    assert.match(
+      sources.appCss,
+      /@media \(max-width:\s*430px\)\s*\{[\s\S]*?\.sp-proposal-row\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    );
+    assert.match(
+      sources.appCss,
+      /@media \(max-width:\s*430px\)\s*\{[\s\S]*?\.sp-proposal-row span:last-child\s*\{[\s\S]*?justify-content:\s*flex-start/,
+    );
+    assert.match(
+      sources.appCss,
+      /@media \(max-width:\s*430px\)\s*\{[\s\S]*?\.sp-proposal-row span:last-child\s*\{[\s\S]*?text-align:\s*left/,
+    );
   });
 
   it("keeps Chat composer and Meal Edit controls reserved above bottom occlusion without moving the bottom bar twice", () => {
@@ -310,6 +354,94 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".sp-meal-edit-footer"), /var\(--app-bottom-occlusion,\s*0px\)/);
     assert.match(cssBlock(".sp-meal-edit-footer button"), /min-width:\s*0/);
     assert.match(cssBlock(".sp-meal-edit-field input"), /min-width:\s*0/);
+  });
+
+  it("MOB-01 reserves single and grouped Meal Edit scrollers above the fixed footer", () => {
+    const singleScroll = cssBlock(".sp-meal-edit-scroll");
+    const groupedScroll = cssBlock(".sp-meal-edit-grouped-scroll");
+    const footer = cssBlock(".sp-meal-edit-footer");
+
+    assert.match(singleScroll, /calc\(128px \+ var\(--app-bottom-occlusion,\s*0px\) \+ env\(safe-area-inset-bottom\)\)/);
+    assert.match(
+      groupedScroll,
+      /calc\(128px \+ var\(--app-bottom-occlusion,\s*0px\) \+ env\(safe-area-inset-bottom\)\)/,
+      "MOB-01 grouped Meal Edit must keep the same bottom reserve as the fixed-footer single editor",
+    );
+    assert.match(footer, /position:\s*absolute/);
+    assert.match(footer, /bottom:\s*0/);
+    assert.match(footer, /var\(--app-bottom-occlusion,\s*0px\)/);
+  });
+
+  it("MOB-04 renders Chat starter only for a true-empty chat and keeps failed draft precedence", () => {
+    for (const label of phase81StarterLabels) {
+      assert.match(sources.chatPanel, new RegExp(label), `MOB-04 approved starter chip missing: ${label}`);
+    }
+
+    assert.match(
+      sources.chatPanel,
+      /messages\.length === 0/,
+      "MOB-04 starter must require no persisted messages",
+    );
+    assert.match(
+      sources.chatPanel,
+      /historyLoaded && messages\.length === 0/,
+      "MOB-04 starter must wait for chat history hydration before treating chat as empty",
+    );
+    assert.match(
+      sources.chatPanel,
+      /provisionalBubble === null/,
+      "MOB-04 starter must hide when a provisional bubble exists",
+    );
+    assert.match(
+      sources.chatPanel,
+      /pendingHomeChatDraft === null/,
+      "MOB-04 starter must hide when a Home draft is staged or sending",
+    );
+    assert.match(
+      sources.chatPanel,
+      /pendingHomeChatDraft\?\.status === "failed"[\s\S]*上一筆任務送出失敗。[\s\S]*sp-chat-starter/s,
+      "MOB-04 failed draft banner should take precedence before any starter block",
+    );
+    assert.match(sources.chatPanel, /handleSend\(/, "MOB-04 starter chips must reuse the existing handleSend path");
+    assert.match(
+      sources.chatPanel,
+      /async function handleSend[\s\S]*const state = useStore\.getState\(\);[\s\S]*if \(state\.sending\) return;/,
+      "MOB-04 starter chips and composer sends must share an in-flight send guard",
+    );
+    assert.match(
+      functionBody(sources.chatPanel, "handleStarterPromptClick"),
+      /if \(useStore\.getState\(\)\.sending\) return;/,
+      "MOB-04 starter chip taps must fail closed during an active send before React disables the buttons",
+    );
+    assert.match(
+      functionBody(sources.chatPanel, "sendPendingDraft"),
+      /if \(useStore\.getState\(\)\.sending\) return;[\s\S]*setPendingHomeChatDraft\(\{ \.\.\.draftWithoutFailedArtifact, status: "sending" \}\)/,
+      "MOB-04 failed draft retry must check active sending before mutating retry state",
+    );
+    assert.match(
+      sources.chatPanel,
+      /onClick=\{\(\) => sendPendingDraft\(pendingHomeChatDraft\)\}[\s\S]*disabled=\{isChatLocked\}/,
+      "MOB-04 failed draft retry button must be disabled while Chat is locked",
+    );
+    assert.match(
+      sources.chatPanel,
+      /setHistoryLoaded\(false\);[\s\S]*loadHistory\(\)[\s\S]*setHistoryLoaded\(true\);/s,
+      "MOB-04 starter must stay hidden until loadHistory succeeds",
+    );
+    assert.doesNotMatch(sources.chatPanel, /stageHomeTaskOptionPrompt|recordHomeCtaOptionSent/);
+  });
+
+  it("MOB-04 keeps Chat starter copy compact, approved, and separate from the composer", () => {
+    const starterBlock = cssBlock(".sp-chat-starter");
+
+    assert.match(starterBlock, /display:\s*grid/);
+    assert.match(starterBlock, /gap:\s*8px/);
+    assert.match(starterBlock, /margin-bottom:\s*16px/);
+    assert.doesNotMatch(starterBlock, /min-height:\s*100vh|height:\s*100%|font-size:\s*28px/);
+
+    assert.match(sources.chatPanel, /從第一餐開始/, "MOB-04 starter heading should match the UI spec");
+    assert.match(sources.chatPanel, /也可以點下方相機附加照片。/, "MOB-04 starter body should mention photo upload without making it a chip");
+    assert.doesNotMatch(sources.chatPanel, /雞胸|飯糰|沙拉|500\s*kcal|修正上一筆/);
   });
 
   it("keeps stop generation in the send-control slot instead of a separate composer button", () => {

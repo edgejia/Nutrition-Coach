@@ -1,6 +1,7 @@
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { validJpegBytes } from "../../fixtures/image-bytes.js";
 import type {
   ScenarioContext,
   ScenarioResult,
@@ -39,6 +40,7 @@ interface MealDto {
 
 interface LoggedMealDto {
   mealId?: string;
+  mealRevisionId?: string;
   dateKey?: string;
   foodName?: string;
   itemCount?: number;
@@ -103,13 +105,7 @@ function passResult(steps: ScenarioStepResult[], artifacts: Record<string, unkno
 }
 
 function makeJpegBytes(): ArrayBuffer {
-  const bytes = new Uint8Array([
-    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-    ...new Array(32).fill(0x00),
-    0xFF, 0xD9,
-  ]);
-  return bytes.buffer as ArrayBuffer;
+  return validJpegBytes();
 }
 
 async function postChatStream(
@@ -318,11 +314,15 @@ const groupedMealCanonicalScenario: VerificationScenario = {
           function: {
             name: "log_food",
             arguments: JSON.stringify({
-              food_name: "蘋果",
-              calories: 95,
-              protein: 1,
-              carbs: 25,
-              fat: 0.3,
+              items: [
+                {
+                  food_name: "蘋果",
+                  calories: 95,
+                  protein: 1,
+                  carbs: 25,
+                  fat: 0.3,
+                },
+              ],
               protein_sources: [
                 { name: "蘋果", protein: 1, is_primary: false, certainty: "clear" },
               ],
@@ -442,6 +442,11 @@ const groupedMealCanonicalScenario: VerificationScenario = {
         protein: 22,
       }));
 
+      const groupedMealRevisionId = chatGroupedEdit.donePayload.loggedMeal?.mealRevisionId;
+      if (!groupedMealRevisionId) {
+        steps.push(fail("direct_edit_block", "Expected chat grouped edit receipt to expose mealRevisionId", chatGroupedEdit.donePayload.loggedMeal));
+        return failResult(steps, "direct_edit_block", artifacts);
+      }
       const directEditRes = await fetch(`${fixture.address}/api/meals/${groupedMeal.id}`, {
         method: "PATCH",
         headers: {
@@ -455,6 +460,7 @@ const groupedMealCanonicalScenario: VerificationScenario = {
           carbs: 62,
           fat: 12.5,
           imageAssetId: null,
+          expectedMealRevisionId: groupedMealRevisionId,
         }),
       });
       const directEditBody = await directEditRes.json().catch(() => ({}));

@@ -15,6 +15,7 @@ import {
 } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { MealRevisionPreconditionError } from "../../server/services/meal-transactions.js";
 
 describe("FoodLoggingService", () => {
   let db: ReturnType<typeof createDb>;
@@ -43,17 +44,29 @@ describe("FoodLoggingService", () => {
     });
   }
 
+  function assertMealRevisionPrecondition(
+    code: "MEAL_REVISION_REQUIRED" | "MEAL_REVISION_STALE",
+    mealId: string,
+    currentMealRevisionId: string,
+  ) {
+    return (error: unknown) => {
+      assert.ok(error instanceof MealRevisionPreconditionError);
+      assert.equal(error.code, code);
+      assert.equal(error.mealId, mealId);
+      assert.equal(error.currentMealRevisionId, currentMealRevisionId);
+      return true;
+    };
+  }
+
   it("logs a compatibility meal entry while writing only canonical transaction rows", async () => {
     await createOwnedAsset("asset-apple");
 
-    const meal = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const meal = await foodService.logGroupedMeal(deviceId, {
       imagePath: "asset:asset-apple",
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
 
     const transactions = await db.select().from(mealTransactions);
@@ -120,17 +133,60 @@ describe("FoodLoggingService", () => {
     assert.equal(legacyMeals.length, 0);
   });
 
-  it("returns the current revision identity when updating a compatibility meal entry", async () => {
-    const created = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+  it("exposes explicit mealPeriod on compatibility entries", async () => {
+    const meal = await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      mealPeriod: "lunch",
+      items: [
+        {
+          foodName: "雞腿便當",
+          calories: 720,
+          protein: 38,
+          carbs: 82,
+          fat: 24,
+        },
+      ],
+    });
+
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, meal.id))
+    )[0];
+
+    assert.equal(meal.loggedAt, "2026-03-25T04:30:00.000Z");
+    assert.equal(meal.mealPeriod, "lunch");
+    assert.equal(transaction?.mealPeriod, "lunch");
+
+    const [byDate] = await foodService.getMealsByDate(
+      deviceId,
+      new Date("2026-03-25T04:00:00.000Z"),
+    );
+    assert.equal(byDate?.mealPeriod, "lunch");
+  });
+
+  it("exposes null mealPeriod on compatibility entries without explicit authority", async () => {
+    const meal = await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
+    });
+
+    assert.equal(meal.mealPeriod, null);
+  });
+
+  it("returns the current revision identity when updating a compatibility meal entry", async () => {
+    const created = await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
 
     const updated = await foodService.updateMeal(deviceId, created.id, {
+      expectedMealRevisionId: created.mealRevisionId,
       items: [
         {
           foodName: "蘋果半顆",
@@ -175,7 +231,8 @@ describe("FoodLoggingService", () => {
     assert.equal(await foodService.getMealItemCount(foreignDeviceId, grouped.id), null);
     assert.equal(await foodService.getMealItemCount(deviceId, "missing-meal-id"), null);
 
-    await foodService.updateMeal(deviceId, grouped.id, {
+    const updated = await foodService.updateMeal(deviceId, grouped.id, {
+      expectedMealRevisionId: grouped.mealRevisionId,
       items: [
         { foodName: "蛋餅", calories: 320, protein: 12, carbs: 30, fat: 16 },
         { foodName: "豆漿", calories: 180, protein: 12, carbs: 14, fat: 8 },
@@ -183,18 +240,16 @@ describe("FoodLoggingService", () => {
     });
     assert.equal(await foodService.getMealItemCount(deviceId, grouped.id), 2);
 
-    await foodService.deleteMeal(deviceId, grouped.id);
+    await foodService.deleteMeal(deviceId, grouped.id, updated.mealRevisionId);
     assert.equal(await foodService.getMealItemCount(deviceId, grouped.id), null);
   });
 
   it("preserves the MEAL_NOT_FOUND contract for foreign deletes while soft-deleting the owner row", async () => {
-    const meal = await foodService.logFood(deviceId, {
-      foodName: "蘋果",
-      calories: 95,
-      protein: 0.5,
-      carbs: 25,
-      fat: 0.3,
+    const meal = await foodService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
     });
 
     await assert.rejects(
@@ -205,7 +260,7 @@ describe("FoodLoggingService", () => {
       }
     );
 
-    await foodService.deleteMeal(deviceId, meal.id);
+    await foodService.deleteMeal(deviceId, meal.id, meal.mealRevisionId);
 
     const transaction = (
       await db
@@ -226,5 +281,53 @@ describe("FoodLoggingService", () => {
         return true;
       }
     );
+  });
+
+  it("passes expected revision through for compatibility updates and deletes only", async () => {
+    const meal = await foodService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "蘋果", calories: 95, protein: 0.5, carbs: 25, fat: 0.3 },
+      ],
+      expectedMealRevisionId: "ignored-create-token",
+    } as Parameters<typeof foodService.logGroupedMeal>[1] & { expectedMealRevisionId: string });
+
+    assert.equal(meal.mealRevisionId, `${meal.id}:r1`);
+
+    await assert.rejects(
+      () =>
+        foodService.updateMeal(deviceId, meal.id, {
+          items: [
+            { foodName: "蘋果半顆", calories: 48, protein: 0.2, carbs: 12, fat: 0.1 },
+          ],
+        }),
+      assertMealRevisionPrecondition("MEAL_REVISION_REQUIRED", meal.id, meal.mealRevisionId),
+    );
+
+    const updated = await foodService.updateMeal(deviceId, meal.id, {
+      expectedMealRevisionId: meal.mealRevisionId,
+      items: [
+        { foodName: "蘋果半顆", calories: 48, protein: 0.2, carbs: 12, fat: 0.1 },
+      ],
+    });
+    assert.notEqual(updated.mealRevisionId, meal.mealRevisionId);
+
+    await assert.rejects(
+      () => foodService.deleteMeal(deviceId, meal.id),
+      assertMealRevisionPrecondition("MEAL_REVISION_REQUIRED", meal.id, updated.mealRevisionId),
+    );
+    await assert.rejects(
+      () => foodService.deleteMeal(deviceId, meal.id, meal.mealRevisionId),
+      assertMealRevisionPrecondition("MEAL_REVISION_STALE", meal.id, updated.mealRevisionId),
+    );
+
+    await foodService.deleteMeal(deviceId, meal.id, updated.mealRevisionId);
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, meal.id))
+    )[0];
+    assert.ok(transaction?.deletedAt);
   });
 });

@@ -1,3 +1,33 @@
+export const DEFAULT_GUEST_SESSION_SECRET = "dev-guest-session-secret-change-me";
+
+export interface GuestSessionRuntimeConfig {
+  guestSessionSecret: string | undefined;
+  guestSessionCookieSecure: boolean;
+  nodeEnv: string | undefined;
+}
+
+const GUEST_SESSION_SECRET_ERROR =
+  "GUEST_SESSION_SECRET must be set in deployed-like runtime (NODE_ENV=production or GUEST_SESSION_COOKIE_SECURE=true) to a non-empty, non-default value at least 32 characters long.";
+
+export function isDeployedLikeRuntime(input: Pick<GuestSessionRuntimeConfig, "guestSessionCookieSecure" | "nodeEnv">) {
+  return input.nodeEnv === "production" || input.guestSessionCookieSecure === true;
+}
+
+export function validateGuestSessionSecretForRuntime(input: GuestSessionRuntimeConfig) {
+  if (!isDeployedLikeRuntime(input)) {
+    return;
+  }
+
+  const trimmedSecret = input.guestSessionSecret?.trim() ?? "";
+  if (
+    !trimmedSecret
+    || trimmedSecret === DEFAULT_GUEST_SESSION_SECRET
+    || trimmedSecret.length < 32
+  ) {
+    throw new Error(GUEST_SESSION_SECRET_ERROR);
+  }
+}
+
 /**
  * Centralised server configuration (CFG-01).
  *
@@ -7,11 +37,14 @@
  * Phase 8 (Structured Observability) will consume config.debug.
  */
 export const config = {
+  /** Node environment used for deployed-like runtime detection. */
+  nodeEnv: process.env.NODE_ENV,
+
   /** LLM model used by the orchestrator. */
   orchestratorModel: process.env.OPENAI_ORCHESTRATOR_MODEL ?? "gpt-5.4-mini",
 
   /** HMAC secret used to sign guest-session cookies. */
-  guestSessionSecret: process.env.GUEST_SESSION_SECRET ?? "dev-guest-session-secret-change-me",
+  guestSessionSecret: process.env.GUEST_SESSION_SECRET ?? DEFAULT_GUEST_SESSION_SECRET,
 
   /** Active guest-session cookie name. */
   guestSessionCookieName: process.env.GUEST_SESSION_COOKIE_NAME ?? "guest_session",

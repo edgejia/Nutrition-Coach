@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteMeal, getDaySnapshot, getMeals } from "../api.js";
+import { deleteMeal, getDaySnapshot, getMeals, MealRevisionConflictError } from "../api.js";
 import {
   browseSummaryCalendarMonth,
   closeSummaryCalendar,
@@ -13,8 +13,10 @@ import {
 import { buildCalendarWeeks, getInitialSummaryDateKey, isHistoricalSummaryDate } from "../lib/summary-calendar.js";
 import { getHistoryCalorieStatus, getHistorySportStatusMeta } from "../lib/history-week.js";
 import { formatLocalDate } from "../lib/time.js";
+import { refreshAfterMealMutation } from "../meal-edit-refresh.js";
 import { useStore } from "../store.js";
-import type { DailySummary, DailyTargets } from "../types.js";
+import type { DailySummary, DailyTargets, MealEntry } from "../types.js";
+import { formatMealRowTime, getDisplayMealLabel } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
 import { SportCard, SportChip, SportIconButton, SportProgressBar, SportScreen } from "./SportPrimitives.js";
 import { SportChevronLeftIcon } from "./SportIcons.js";
@@ -37,7 +39,7 @@ interface SummaryDetailScreenPresentationProps {
   onToggleCalendar: () => void;
   onBrowseMonth: (delta: -1 | 1) => void;
   onSelectDate: (dateKey: string) => void;
-  onDeleteMeal: (mealId: string) => void | Promise<void>;
+  onDeleteMeal: (meal: MealEntry) => void | Promise<void>;
 }
 
 function formatSummaryDateLabel(dateKey: string) {
@@ -69,14 +71,6 @@ function getProgressVariant(barTone: ReturnType<typeof getHistorySportStatusMeta
   return "default";
 }
 
-function formatSummaryTime(loggedAt: string) {
-  return new Intl.DateTimeFormat("zh-TW", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(loggedAt));
-}
-
 function formatMacroLine(calories: number, protein: number, carbs: number, fat: number) {
   return `${Math.round(calories).toLocaleString("en-US")} kcal · P${Math.round(protein)} · C${Math.round(carbs)} · F${Math.round(fat)}`;
 }
@@ -89,7 +83,7 @@ function SummaryDetailMealRow({
 }: {
   meal: Awaited<ReturnType<typeof getDaySnapshot>>["meals"][number];
   isReadOnly: boolean;
-  onDelete: (mealId: string) => void | Promise<void>;
+  onDelete: (meal: MealEntry) => void | Promise<void>;
   deletingMealId: string | null;
 }) {
   return (
@@ -108,16 +102,19 @@ function SummaryDetailMealRow({
         />
         <div className="sp-summary-meal-copy">
           <h3>{meal.foodName}</h3>
-          <div className="sp-summary-meal-time">{formatSummaryTime(meal.loggedAt)}</div>
+          <div className="sp-summary-meal-time">
+            {formatMealRowTime(meal.loggedAt)} · {getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)}
+          </div>
           <div className="sp-summary-meal-macro-line">{formatMacroLine(meal.calories, meal.protein, meal.carbs, meal.fat)}</div>
         </div>
       </div>
       {!isReadOnly && (
         <button
           type="button"
-          onClick={() => onDelete(meal.id)}
+          onClick={() => onDelete(meal)}
           disabled={deletingMealId === meal.id}
           className="sp-summary-delete-btn"
+          aria-label={`刪除 ${getDisplayMealLabel(meal.mealPeriod, meal.loggedAt)} ${meal.foodName}`}
         >
           刪除
         </button>
@@ -387,6 +384,7 @@ export function SummaryDetailScreen() {
   const setActiveScreen = useStore((s) => s.setActiveScreen);
   const setDailySummary = useStore((s) => s.setDailySummary);
   const setMeals = useStore((s) => s.setMeals);
+  const redactChatReceiptIdentity = useStore((s) => s.redactChatReceiptIdentity);
   const recordMealMutation = useStore((s) => s.recordMealMutation);
   const liveSummary = useStore((s) => s.dailySummary);
   const targets = useStore((s) => s.dailyTargets);
@@ -494,7 +492,12 @@ export function SummaryDetailScreen() {
     setIsCalendarOpen(nextState.isCalendarOpen);
   }
 
-  async function handleDelete(mealId: string) {
+  async function handleDelete(meal: MealEntry) {
+    const mealId = meal.id;
+    if (!meal.mealRevisionId) {
+      alert("刪除失敗，請再試一次。");
+      return;
+    }
     const previousSnapshot = snapshot;
     setDeletingMealId(mealId);
     setSnapshot((currentSnapshot) =>
@@ -507,16 +510,50 @@ export function SummaryDetailScreen() {
     );
 
     try {
-      const { affectedDate, dailySummary } = await deleteMeal(mealId);
-      recordMealMutation(affectedDate);
-      if (dailySummary.date === todayKey) {
-        setDailySummary(dailySummary);
-        const { meals } = await getMeals({ refreshReason: "meal_mutation" });
-        setMeals(meals);
+      const { affectedDate, dailySummary } = await deleteMeal(mealId, {
+        expectedMealRevisionId: meal.mealRevisionId,
+      });
+      try {
+        await refreshAfterMealMutation({
+          redactChatReceiptIdentity,
+          recordMealMutation,
+          setDailySummary,
+          getMeals,
+          setMeals,
+          todayKey: () => formatLocalDate(new Date()),
+        }, {
+          mealId,
+          affectedDate,
+          dailySummary,
+        });
+        const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
+        setSnapshot(refreshedSnapshot);
+      } catch {
+        recordMealMutation(affectedDate);
       }
-      const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
-      setSnapshot(refreshedSnapshot);
     } catch (err) {
+      if (err instanceof MealRevisionConflictError) {
+        try {
+          await refreshAfterMealMutation({
+            redactChatReceiptIdentity,
+            recordMealMutation,
+            setDailySummary,
+            getMeals,
+            setMeals,
+            todayKey: () => formatLocalDate(new Date()),
+          }, {
+            mealId: err.mealId,
+            affectedDate: err.affectedDate,
+          });
+          const refreshedSnapshot = await getDaySnapshot(selectedDateKey);
+          setSnapshot(refreshedSnapshot);
+        } catch {
+          recordMealMutation(err.affectedDate);
+        }
+        alert("餐點已被更新，未刪除。請重新載入最新餐點後再決定是否刪除。");
+        return;
+      }
+
       setSnapshot(previousSnapshot);
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         void recoverGuestSession();

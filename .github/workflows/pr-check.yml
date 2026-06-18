@@ -36,4 +36,3 @@ jobs:
 
       - name: Run release gate
         run: yarn release:check --base=origin/${{ github.base_ref }}
-

@@ -19,6 +19,7 @@ import type { FastifyReply } from "fastify";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { validJpegBytes } from "../../fixtures/image-bytes.js";
 import { RealtimePublisher } from "../../../server/realtime/publisher.js";
 import type { createScenarioApp as createScenarioAppFn } from "../app-fixture.js";
 import type {
@@ -65,13 +66,7 @@ function failResult(
 }
 
 function makeJpegBytes(): ArrayBuffer {
-  const bytes = new Uint8Array([
-    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-    ...new Array(50).fill(0x00),
-    0xFF, 0xD9,
-  ]);
-  return bytes.buffer as ArrayBuffer;
+  return validJpegBytes();
 }
 
 async function waitForFinally(): Promise<void> {
@@ -195,7 +190,7 @@ async function runUploadCleanup(): Promise<ScenarioResult> {
       type: "function",
       function: {
         name: "log_food",
-        arguments: JSON.stringify({ food_name: "蛋炒飯", calories: 450, protein: 12, carbs: 65, fat: 14 }),
+        arguments: JSON.stringify({ items: [{ food_name: "蛋炒飯", calories: 450, protein: 12, carbs: 65, fat: 14 }] }),
       },
     }],
   });
@@ -426,6 +421,11 @@ async function runStalePublisher(): Promise<ScenarioResult> {
     mealCount: 0,
     date: "2026-03-25",
   };
+  const summaryPayload = {
+    summary,
+    affectedDate: summary.date,
+    source: "meal_mutation" as const,
+  };
 
   const publisher = new RealtimePublisher();
   steps.push(pass("create_publisher"));
@@ -454,7 +454,7 @@ async function runStalePublisher(): Promise<ScenarioResult> {
   steps.push(pass("subscribe_connections", { subscribed: 2 }));
 
   try {
-    publisher.publishDailySummary(deviceId, summary);
+    publisher.publishDailySummary(deviceId, summaryPayload);
   } catch (err) {
     steps.push(fail("publish_with_stale", `publishDailySummary threw: ${err instanceof Error ? err.message : String(err)}`));
     return failResult(scenarioName, steps, "publish_with_stale", artifacts);
@@ -466,7 +466,7 @@ async function runStalePublisher(): Promise<ScenarioResult> {
   steps.push(pass("publish_with_stale", { writesAfterFirst: writeLog.length }));
 
   try {
-    publisher.publishDailySummary(deviceId, summary);
+    publisher.publishDailySummary(deviceId, summaryPayload);
   } catch (err) {
     steps.push(fail("verify_stale_removed", `Second publishDailySummary threw: ${err instanceof Error ? err.message : String(err)}`));
     return failResult(scenarioName, steps, "verify_stale_removed", artifacts);

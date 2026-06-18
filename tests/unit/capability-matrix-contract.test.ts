@@ -74,6 +74,12 @@ function literalPattern(value: string) {
   return new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
 
+function findMatrixRow(surface: string, affordance: string): CapabilityMatrixRow {
+  const row = capabilityMatrix.find((candidate) => candidate.surface === surface && candidate.affordance === affordance);
+  assert.ok(row, `missing ${surface} ${affordance} row`);
+  return row;
+}
+
 describe("capability matrix contract", () => {
   it("keeps schema, taxonomy, surface, and requirement coverage locked", () => {
     const rows: readonly CapabilityMatrixRow[] = capabilityMatrix;
@@ -228,6 +234,88 @@ describe("capability matrix contract", () => {
       assert.equal(row.backendService.length, 0, `${label} must not claim backendService support`);
       assert.ok(row.futurePhaseRef, `${label} must include futurePhaseRef`);
       assert.ok(ROADMAP_FUTURES.includes(row.futurePhaseRef), `${label} futurePhaseRef must be a stable title`);
+    }
+  });
+
+  it("keeps Home meal row edit evidence aligned with the implemented Home handler", async () => {
+    const row = findMatrixRow("Home", "Today meal rows and authorized thumbnails");
+    const homeSource = await cachedSource(row.sourceFile);
+
+    assert.equal(row.supportState, "supported");
+    assert.deepEqual(row.storeAction, ["openMealEdit"]);
+    assert.deepEqual(row.backendRoute, ["/api/meals", "/api/assets/:id"]);
+    assert.deepEqual(row.backendService, ["createFoodLoggingService", "readOwnedAsset"]);
+    assert.match(row.handlingDecision, /eligible complete meals/i);
+    assert.match(row.handlingDecision, /incomplete rows read-only/i);
+    assert.doesNotMatch(row.handlingDecision, /grouped direct/i);
+
+    for (const evidence of [
+      "MealRows",
+      "home-sport-meal-row",
+      "buildMealEditPayloadIfComplete",
+      "openMealEdit(editPayload, \"home\")",
+    ]) {
+      assert.ok(row.sourceMatchers.includes(evidence), `Home row must cite ${evidence}`);
+      assert.match(homeSource, literalPattern(evidence), `Home source must include ${evidence}`);
+    }
+
+    assert.ok(
+      row.handlerMatchers?.includes("openMealEdit(editPayload, \"home\")"),
+      "Home handlerMatchers must cite the concrete Home-origin edit handoff",
+    );
+  });
+
+  it("NAV-01 keeps History meal rows as read-only Day Detail browsing", () => {
+    const row = findMatrixRow("History", "Trend and day browsing");
+
+    assert.equal(row.supportState, "supported-read-only");
+    assert.deepEqual(row.storeAction, ["openDayDetail"], "NAV-01 History rows route through openDayDetail only");
+    assert.doesNotMatch(row.sourceMatchers.join(" "), /\bopenMealEdit\b/, "NAV-01 History matrix must not cite row openMealEdit");
+    assert.doesNotMatch(row.handlerMatchers?.join(" ") ?? "", /\bopenMealEdit\b/, "NAV-01 History handlers must not cite direct edit");
+    assert.doesNotMatch(row.handlingDecision, /edit/i, "NAV-01 History handling text must not describe direct edit evidence");
+    assert.match(
+      row.handlingDecision,
+      /read-only.*meal evidence browsing/i,
+      "NAV-01 History handling text must name read-only meal evidence browsing",
+    );
+    assert.ok(
+      row.sourceMatchers.includes("開啟餐點詳情"),
+      "NAV-01 History source matchers must cite the read-only meal detail accessible label",
+    );
+    assert.ok(
+      row.sourceMatchers.includes("targetMealId: meal.id"),
+      "NAV-01 History source matchers must cite targetMealId: meal.id",
+    );
+  });
+
+  it("NAV-02 updates Day Detail from back-only read-only to focused eligible edit handoff", () => {
+    const row = findMatrixRow("Day Detail", "Read-only day snapshot");
+
+    assert.equal(row.supportState, "supported-read-only");
+    assert.equal(row.activeHandler, "present");
+    assert.notDeepEqual(
+      row.handlerMatchers,
+      ["onBack"],
+      "NAV-02 stale Day Detail matcher set ['onBack'] must fail; expected focused openMealEdit handoff",
+    );
+    assert.deepEqual(row.storeAction, ["openMealEdit"], "NAV-02 Day Detail focused edit uses openMealEdit");
+
+    for (const expected of [
+      "buildMealEditPayloadIfComplete",
+      "targetMealId",
+      "openMealEdit",
+      "returnToDayDetail",
+    ]) {
+      assert.ok(row.sourceMatchers.includes(expected), `NAV-02 Day Detail sourceMatchers must cite ${expected}`);
+    }
+
+    assert.ok(row.handlerMatchers?.includes('openMealEdit(editPayload, "history"'), "NAV-02 Day Detail handler must cite openMealEdit");
+    assert.match(row.handlingDecision, /focused eligible edit handoff/i);
+    assert.match(row.handlingDecision, /delete remains in Meal Edit/i);
+
+    for (const rejected of ["handleDelete", "deleteMeal", "刪除"]) {
+      assert.doesNotMatch(row.sourceMatchers.join(" "), literalPattern(rejected), `NAV-02 Day Detail matrix must not cite ${rejected}`);
+      assert.doesNotMatch(row.handlerMatchers?.join(" ") ?? "", literalPattern(rejected), `NAV-02 Day Detail handlers must not cite ${rejected}`);
     }
   });
 });

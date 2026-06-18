@@ -177,10 +177,14 @@ export async function seedInsightFixture(
   fixture: InsightFixture,
 ): Promise<void> {
   for (const meal of fixture.meals) {
-    await services.foodLoggingService.logFood(deviceId, {
-      foodName: meal.name,
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        {
+          foodName: meal.name,
+          ...meal.nutrition,
+        },
+      ],
       loggedAt: meal.loggedAt,
-      ...meal.nutrition,
     });
   }
 }

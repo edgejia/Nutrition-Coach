@@ -16,13 +16,14 @@
  *   6. Removes the temp directory and asserts no residual files remain.
  */
 
-import fs from "node:fs";
 import path from "node:path";
+import { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { rm, readdir, mkdir } from "node:fs/promises";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
+import { validJpegBytes } from "../../fixtures/image-bytes.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
 
 // ---------------------------------------------------------------------------
@@ -32,20 +33,41 @@ import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioSte
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCENARIO_UPLOADS_DIR = path.resolve(__dirname, "..", "tmp", "image-log", "uploads");
 const SCENARIO_ASSETS_DIR = path.resolve(__dirname, "..", "tmp", "image-log", "assets");
+const FORBIDDEN_USER_COPY_TERMS = ["headline", "先抓低", "保守估算"] as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Minimal valid JPEG bytes (JFIF header + EOI marker). */
 function makeJpegBytes(): ArrayBuffer {
-  const bytes = new Uint8Array([
-    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
-    ...new Array(50).fill(0x00),
-    0xFF, 0xD9,
-  ]);
-  return bytes.buffer as ArrayBuffer;
+  return validJpegBytes();
+}
+
+function parseReplyText(rawSSE: string): string {
+  const tokens = parseSSEEvents(rawSSE)
+    .filter((event) => event.event === "chunk")
+    .map((event, index) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(event.data);
+      } catch (error) {
+        throw new Error(`Malformed chunk JSON at index ${index}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const token = (parsed as { token?: unknown }).token;
+      if (typeof token !== "string" || token.length === 0) {
+        throw new Error(`Malformed chunk payload at index ${index}: missing non-empty token`);
+      }
+      return token;
+    });
+  const replyText = tokens.join("");
+  if (replyText.trim().length === 0) {
+    throw new Error("Assembled chunk reply text is empty");
+  }
+  return replyText;
+}
+
+function findForbiddenUserCopy(text: string): string[] {
+  return FORBIDDEN_USER_COPY_TERMS.filter((term) => text.includes(term));
 }
 
 function stepOk(name: string, actual?: unknown): ScenarioStepResult {
@@ -56,8 +78,74 @@ function stepFail(name: string, error: string, actual?: unknown): ScenarioStepRe
   return { name, ok: false, error, actual };
 }
 
+function createLogCapture() {
+  const logLines: string[] = [];
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+      callback();
+    },
+  });
+
+  return { logLines, stream };
+}
+
+function hasRouteUploadCleanupLog(logLines: string[]): boolean {
+  return logLines.some((line) => {
+    try {
+      return (JSON.parse(line) as { event?: unknown }).event === "upload_cleanup_success";
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function readUploadFiles(): Promise<string[]> {
+  try {
+    return await readdir(SCENARIO_UPLOADS_DIR);
+  } catch {
+    return [];
+  }
+}
+
+async function waitForRouteUploadCleanup(logLines: string[]) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const files = await readUploadFiles();
+    const cleanupLogSeen = hasRouteUploadCleanupLog(logLines);
+    if (files.length === 0 && cleanupLogSeen) {
+      return { files, cleanupLogSeen, attempts: attempt + 1 };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const files = await readUploadFiles();
+  return {
+    files,
+    cleanupLogSeen: hasRouteUploadCleanupLog(logLines),
+    attempts: 20,
+  };
+}
+
 interface DailySummaryPayload {
   date: string;
+}
+
+interface LoggedMealReceiptPayload {
+  mealId?: string;
+  foodName?: string;
+  itemCount?: number;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  items?: Array<{
+    name?: string;
+    position?: number;
+    calories?: number;
+    protein?: number;
+    carbs?: number;
+    fat?: number;
+  }>;
 }
 
 interface ImageAssetDto {
@@ -72,6 +160,37 @@ function hasValidDailySummaryDate(summary: DailySummaryPayload | undefined): boo
   return typeof summary?.date === "string" && DATE_KEY_PATTERN.test(summary.date);
 }
 
+function verifyLoggedMealReceiptShape(receipt: LoggedMealReceiptPayload | undefined): { ok: boolean; error?: string } {
+  if (!receipt) {
+    return { ok: false, error: "missing done.loggedMeal receipt" };
+  }
+  if (typeof receipt.mealId !== "string" || !/^[0-9a-f-]{36}$/i.test(receipt.mealId)) {
+    return { ok: false, error: "missing loggedMeal meal identity" };
+  }
+  if (typeof receipt.foodName !== "string" || receipt.foodName.trim().length === 0) {
+    return { ok: false, error: "missing loggedMeal foodName" };
+  }
+  if (!Number.isFinite(receipt.itemCount) || (receipt.itemCount ?? 0) <= 0) {
+    return { ok: false, error: "expected positive loggedMeal itemCount" };
+  }
+  for (const field of ["calories", "protein", "carbs", "fat"] as const) {
+    if (!Number.isFinite(receipt[field])) {
+      return { ok: false, error: `expected finite loggedMeal ${field}` };
+    }
+  }
+  for (const item of receipt.items ?? []) {
+    if (typeof item.name !== "string" || item.name.trim().length === 0) {
+      return { ok: false, error: "expected non-empty loggedMeal item name" };
+    }
+    for (const field of ["position", "calories", "protein", "carbs", "fat"] as const) {
+      if (!Number.isFinite(item[field])) {
+        return { ok: false, error: `expected finite loggedMeal item ${field}` };
+      }
+    }
+  }
+  return { ok: true };
+}
+
 // ---------------------------------------------------------------------------
 // Scenario definition
 // ---------------------------------------------------------------------------
@@ -84,6 +203,7 @@ const scenario: VerificationScenario = {
     const artifacts: Record<string, unknown> = {};
     let failedStep: string | undefined;
     let uploadFilesBeforeCleanup: string[] = [];
+    const { logLines, stream: logStream } = createLogCapture();
 
     // Boot our own app instance with the scenario-local uploads directory so
     // uploads never land in `server/uploads/`.
@@ -100,11 +220,15 @@ const scenario: VerificationScenario = {
           function: {
             name: "log_food",
             arguments: JSON.stringify({
-              food_name: "豬肉燒烤飯盒",
-              calories: 680,
-              protein: 35,
-              carbs: 86,
-              fat: 22,
+              items: [
+                {
+                  food_name: "豬肉燒烤飯盒",
+                  calories: 680,
+                  protein: 35,
+                  carbs: 86,
+                  fat: 22,
+                },
+              ],
             }),
           },
         },
@@ -112,7 +236,7 @@ const scenario: VerificationScenario = {
     });
     // Round 2: streamed final reply
     llm.queueChatStream([
-      "已先依照片做保守估算並完成記錄：",
+      "已先依照片完成記錄：",
       "豬肉燒烤飯盒，約 680 kcal。",
     ]);
 
@@ -120,6 +244,7 @@ const scenario: VerificationScenario = {
       llmProvider: llm,
       uploadsDir: SCENARIO_UPLOADS_DIR,
       assetsDir: SCENARIO_ASSETS_DIR,
+      logger: { level: "info", stream: logStream },
     });
 
     try {
@@ -169,6 +294,16 @@ const scenario: VerificationScenario = {
       }
 
       const sseEvents = parseSSEEvents(rawSSE);
+      let replyText = "";
+      try {
+        replyText = parseReplyText(rawSSE);
+      } catch (error) {
+        const parseError = error instanceof Error ? error.message : String(error);
+        steps.push(stepFail("collect_stream_chunks", parseError, { rawLength: rawSSE.length }));
+        failedStep = "collect_stream_chunks";
+        artifacts.stream = { parseError, rawLength: rawSSE.length };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
       const statusLabels = sseEvents
         .filter((e) => e.event === "status")
         .map((e) => {
@@ -179,7 +314,11 @@ const scenario: VerificationScenario = {
           }
         });
       const doneEvent = sseEvents.find((e) => e.event === "done");
-      let donePayload: { didLogMeal?: boolean; dailySummary?: DailySummaryPayload } = {};
+      let donePayload: {
+        didLogMeal?: boolean;
+        dailySummary?: DailySummaryPayload;
+        loggedMeal?: LoggedMealReceiptPayload;
+      } = {};
       if (doneEvent) {
         try {
           donePayload = JSON.parse(doneEvent.data) as typeof donePayload;
@@ -202,7 +341,7 @@ const scenario: VerificationScenario = {
           .join("; ");
         steps.push(stepFail("collect_stream", err, { statusLabels, hasDone }));
         failedStep = "collect_stream";
-        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length };
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length };
         return buildResult(false, failedStep, steps, artifacts);
       }
 
@@ -232,7 +371,7 @@ const scenario: VerificationScenario = {
           { analysisIdx, loggingIdx },
         ));
         failedStep = "collect_stream_order";
-        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
         return buildResult(false, failedStep, steps, artifacts);
       }
 
@@ -242,7 +381,19 @@ const scenario: VerificationScenario = {
       if (donePayload.didLogMeal !== true) {
         steps.push(stepFail("collect_stream_didlogmeal", "D-12.2 failed: done.didLogMeal is not true", { donePayload }));
         failedStep = "collect_stream_didlogmeal";
-        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+
+      const loggedMealReceiptCheck = verifyLoggedMealReceiptShape(donePayload.loggedMeal);
+      if (!loggedMealReceiptCheck.ok) {
+        steps.push(stepFail(
+          "collect_stream_logged_meal",
+          loggedMealReceiptCheck.error ?? "invalid loggedMeal receipt",
+          { donePayload },
+        ));
+        failedStep = "collect_stream_logged_meal";
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
         return buildResult(false, failedStep, steps, artifacts);
       }
 
@@ -253,14 +404,30 @@ const scenario: VerificationScenario = {
           { donePayload },
         ));
         failedStep = "collect_stream_summary_date";
-        artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+        artifacts.stream = { statusLabels, replyText, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
         return buildResult(false, failedStep, steps, artifacts);
       }
 
       steps.push(
-        stepOk("collect_stream", { statusLabels, donePayload, d12_order_ok: true, analysisIdx, loggingIdx }),
+        stepOk("collect_stream", {
+          statusLabels,
+          replyText,
+          donePayload,
+          d12_order_ok: true,
+          analysisIdx,
+          loggingIdx,
+          loggedMealReceiptVerified: true,
+        }),
       );
-      artifacts.stream = { statusLabels, donePayload, rawLength: rawSSE.length, analysisIdx, loggingIdx };
+      artifacts.stream = {
+        statusLabels,
+        replyText,
+        donePayload,
+        rawLength: rawSSE.length,
+        analysisIdx,
+        loggingIdx,
+        loggedMealReceiptVerified: true,
+      };
 
       // ------------------------------------------------------------------
       // Step: verify_history
@@ -284,6 +451,20 @@ const scenario: VerificationScenario = {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       if (assistantMsgs.length === 0) {
         steps.push(stepFail("verify_history", "no assistant message persisted", historyJson));
+        failedStep = "verify_history";
+        artifacts.history = historyJson;
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+      const assistantReply = assistantMsgs.at(-1)?.content ?? "";
+      const forbiddenReplyTerms = findForbiddenUserCopy(replyText);
+      const forbiddenHistoryTerms = findForbiddenUserCopy(assistantReply);
+      if (forbiddenReplyTerms.length > 0 || forbiddenHistoryTerms.length > 0) {
+        steps.push(stepFail("verify_history", "reachable reply contains forbidden internal copy", {
+          forbiddenReplyTerms,
+          forbiddenHistoryTerms,
+          replyText,
+          assistantReply,
+        }));
         failedStep = "verify_history";
         artifacts.history = historyJson;
         return buildResult(false, failedStep, steps, artifacts);
@@ -403,13 +584,25 @@ const scenario: VerificationScenario = {
         status: assetRes.status,
         contentType: assetRes.headers.get("content-type"),
       };
+
+      // ------------------------------------------------------------------
+      // Step: verify_route_upload_cleanup
+      // ------------------------------------------------------------------
+      const routeCleanupEvidence = await waitForRouteUploadCleanup(logLines);
+      artifacts.route_upload_cleanup = {
+        filesAfterRouteCleanup: routeCleanupEvidence.files,
+        cleanupLogSeen: routeCleanupEvidence.cleanupLogSeen,
+        attempts: routeCleanupEvidence.attempts,
+      };
+      if (routeCleanupEvidence.files.length > 0 || !routeCleanupEvidence.cleanupLogSeen) {
+        steps.push(stepFail("verify_route_upload_cleanup", "route-level staged upload cleanup did not complete", artifacts.route_upload_cleanup));
+        failedStep = "verify_route_upload_cleanup";
+        return buildResult(false, failedStep, steps, artifacts);
+      }
+      steps.push(stepOk("verify_route_upload_cleanup", artifacts.route_upload_cleanup));
     } finally {
       await scenarioCtx.close();
-      try {
-        uploadFilesBeforeCleanup = await readdir(SCENARIO_UPLOADS_DIR);
-      } catch {
-        uploadFilesBeforeCleanup = [];
-      }
+      uploadFilesBeforeCleanup = await readUploadFiles();
       await rm(SCENARIO_UPLOADS_DIR, { recursive: true, force: true });
       await rm(SCENARIO_ASSETS_DIR, { recursive: true, force: true });
     }

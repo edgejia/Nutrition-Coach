@@ -96,6 +96,38 @@ async function seedSchemaThrough0004(dbPath: string) {
   }
 }
 
+async function seedSchemaThrough0008(dbPath: string) {
+  const sqlite = new Database(dbPath);
+
+  try {
+    sqlite.pragma("journal_mode = WAL");
+    sqlite.pragma("foreign_keys = ON");
+    for (const fileName of [
+      "0000_brainy_rocket_racer.sql",
+      "0001_sleepy_vivisector.sql",
+      "0002_meal_transaction_v2_foundation.sql",
+      "0003_aspiring_masque.sql",
+      "0004_history_query_hot_path_indexes.sql",
+      "0005_chat_message_status.sql",
+      "0006_colossal_selene.sql",
+      "0007_violet_living_lightning.sql",
+      "0008_shiny_stellaris.sql",
+    ]) {
+      sqlite.exec(await readMigrationSql(fileName));
+    }
+    sqlite.exec(`CREATE TABLE "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )`);
+    sqlite
+      .prepare('INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)')
+      .run("0008-test-hash", 1780307250026);
+  } finally {
+    sqlite.close();
+  }
+}
+
 function getCanonicalTableNames(sqlite: Database.Database) {
   return sqlite
     .prepare(
@@ -480,6 +512,151 @@ describe("database migration contract", () => {
         migrated.prepare("SELECT status FROM chat_messages WHERE id = ?").get("chat-stopped"),
         { status: "stopped" },
       );
+    } finally {
+      migrated.close();
+    }
+  });
+
+  it("drops pre-migration pending rows and enforces the session-scoped unique key", async () => {
+    const dbPath = await makeTempDbPath();
+    await seedSchemaThrough0008(dbPath);
+
+    const sqlite = new Database(dbPath);
+    try {
+      sqlite.pragma("foreign_keys = ON");
+      seedDevice(sqlite);
+      sqlite
+        .prepare(
+          `INSERT INTO turn_states (
+            id,
+            device_id,
+            kind,
+            payload,
+            expires_at,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "device-1:goal_proposal",
+          "device-1",
+          "goal_proposal",
+          JSON.stringify({ pending: true }),
+          "2026-04-19T08:40:00.000Z",
+          "2026-04-19T08:30:00.000Z",
+          "2026-04-19T08:30:00.000Z",
+        );
+
+      assert.deepEqual(sqlite.prepare("SELECT COUNT(*) AS count FROM turn_states").get(), {
+        count: 1,
+      });
+    } finally {
+      sqlite.close();
+    }
+
+    await runMigrations(dbPath);
+
+    const migrated = new Database(dbPath);
+    try {
+      migrated.pragma("foreign_keys = ON");
+
+      assert.deepEqual(migrated.prepare("SELECT COUNT(*) AS count FROM turn_states").get(), {
+        count: 0,
+      });
+
+      const indexRows = migrated.prepare("PRAGMA index_list(turn_states)").all() as Array<{
+        name: string;
+        unique: number;
+      }>;
+      assert.ok(
+        indexRows.some((row) => row.name === "turn_states_device_session_kind_uq" && row.unique === 1),
+      );
+      assert.equal(
+        indexRows.some((row) => row.name === "turn_states_device_kind_uq"),
+        false,
+      );
+
+      assert.throws(() => {
+        migrated
+          .prepare(
+            `INSERT INTO turn_states (
+              id,
+              device_id,
+              kind,
+              payload,
+              expires_at,
+              created_at,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            "device-1:missing-session",
+            "device-1",
+            "goal_proposal",
+            "{}",
+            "2026-04-19T08:40:00.000Z",
+            "2026-04-19T08:30:00.000Z",
+            "2026-04-19T08:30:00.000Z",
+          );
+      }, /NOT NULL constraint failed: turn_states\.session_id|SQLITE_CONSTRAINT_NOTNULL/);
+
+      const insertScopedState = migrated.prepare(
+        `INSERT INTO turn_states (
+          id,
+          device_id,
+          session_id,
+          kind,
+          payload,
+          expires_at,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      insertScopedState.run(
+        "device-1:session-a:goal_proposal",
+        "device-1",
+        "session-a",
+        "goal_proposal",
+        JSON.stringify({ session: "a" }),
+        "2026-04-19T08:40:00.000Z",
+        "2026-04-19T08:30:00.000Z",
+        "2026-04-19T08:30:00.000Z",
+      );
+      insertScopedState.run(
+        "device-1:session-b:goal_proposal",
+        "device-1",
+        "session-b",
+        "goal_proposal",
+        JSON.stringify({ session: "b" }),
+        "2026-04-19T08:40:00.000Z",
+        "2026-04-19T08:30:00.000Z",
+        "2026-04-19T08:30:00.000Z",
+      );
+
+      assert.deepEqual(
+        migrated
+          .prepare(
+            `SELECT session_id
+             FROM turn_states
+             WHERE device_id = ? AND kind = ?
+             ORDER BY session_id`,
+          )
+          .all("device-1", "goal_proposal"),
+        [{ session_id: "session-a" }, { session_id: "session-b" }],
+      );
+
+      assert.throws(() => {
+        insertScopedState.run(
+          "device-1:session-a:goal_proposal:duplicate",
+          "device-1",
+          "session-a",
+          "goal_proposal",
+          JSON.stringify({ session: "a-replacement" }),
+          "2026-04-19T08:45:00.000Z",
+          "2026-04-19T08:35:00.000Z",
+          "2026-04-19T08:35:00.000Z",
+        );
+      }, /UNIQUE constraint failed/);
     } finally {
       migrated.close();
     }

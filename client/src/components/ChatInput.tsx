@@ -1,5 +1,12 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import { getSupportedImageMimeType } from "../api.js";
 import { SportCameraIcon, SportCloseIcon, SportSendIcon, SportStopIcon } from "./SportIcons.js";
+
+const UPLOAD_ERROR_COPY = "目前只支援 JPG、PNG、WebP 照片。iPhone HEIC 請先轉成 JPG 後再上傳。";
+
+function shouldUseMobileNewlineBehavior() {
+  return window.matchMedia("(pointer: coarse), (hover: none)").matches;
+}
 
 interface ChatInputProps {
   onSend: (message: string, image?: File) => void;
@@ -22,9 +29,44 @@ export function ChatInput({
 }: ChatInputProps) {
   const [text, setText] = useState("");
   const [image, setImage] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isComposingRef = useRef(false);
   const canSend = Boolean(text.trim() || image);
+
+  function resizeTextarea() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    textarea.style.overflowY = "hidden";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+
+    const isOverflowing = textarea.scrollHeight > textarea.clientHeight + 1;
+    textarea.style.overflowY = isOverflowing ? "auto" : "hidden";
+  }
+
+  useLayoutEffect(() => {
+    resizeTextarea();
+  }, [text]);
+
+  function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFile = event.target.files?.[0] ?? null;
+    if (selectedFile) {
+      const supportedMimeType = getSupportedImageMimeType(selectedFile);
+      if (!supportedMimeType) {
+        setUploadError(UPLOAD_ERROR_COPY);
+        setImage(null);
+        if (fileRef.current) fileRef.current.value = "";
+        return;
+      }
+    }
+
+    setUploadError("");
+    setImage(selectedFile);
+    if (!selectedFile && fileRef.current) fileRef.current.value = "";
+  }
 
   function submitMessage() {
     if (disabled || !canSend) return;
@@ -36,6 +78,7 @@ export function ChatInput({
     onSend(trimmedText, image ?? undefined);
     setText("");
     setImage(null);
+    setUploadError("");
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -49,6 +92,7 @@ export function ChatInput({
     if (isComposingRef.current) return;
     if (e.key !== "Enter") return;
     if (e.shiftKey) return;
+    if (!e.metaKey && !e.ctrlKey && shouldUseMobileNewlineBehavior()) return;
 
     if (!e.metaKey && !e.ctrlKey) {
       e.preventDefault();
@@ -69,7 +113,7 @@ export function ChatInput({
         type="file"
         accept="image/jpeg,image/png,image/webp"
         className="hidden"
-        onChange={(e) => setImage(e.target.files?.[0] ?? null)}
+        onChange={handleImageChange}
       />
       <button
         type="button"
@@ -88,6 +132,7 @@ export function ChatInput({
               type="button"
               onClick={() => {
                 setImage(null);
+                setUploadError("");
                 if (fileRef.current) fileRef.current.value = "";
               }}
               aria-label="移除照片"
@@ -96,7 +141,13 @@ export function ChatInput({
             </button>
           </span>
         )}
+        {uploadError && (
+          <p className="sp-chat-upload-error" role="alert">
+            {uploadError}
+          </p>
+        )}
         <textarea
+          ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -107,6 +158,7 @@ export function ChatInput({
             isComposingRef.current = false;
           }}
           placeholder="描述你吃了什麼…"
+          enterKeyHint="enter"
           rows={1}
           className="sp-chat-textarea"
         />

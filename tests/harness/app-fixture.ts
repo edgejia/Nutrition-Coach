@@ -7,7 +7,7 @@
  * ephemeral port, and returns handles needed by scenarios.
  */
 import { StreamingLLMProvider } from "./streaming-llm.js";
-import type { AppServices } from "../../server/app.js";
+import type { AppOptions, AppServices } from "../../server/app.js";
 import type { LLMProvider } from "../../server/llm/types.js";
 import type { LlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import type { FastifyInstance } from "fastify";
@@ -25,6 +25,8 @@ export interface ScenarioAppOptions {
   assetsDir?: string;
   /** Optional trace recorder factory for scenarios that emit llm-trace.json. */
   llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
+  /** Optional Fastify logger config for scenarios that assert structured route logs. */
+  logger?: AppOptions["logger"];
 }
 
 export interface ScenarioAppContext {
@@ -44,7 +46,13 @@ export interface ScenarioAppContext {
 export interface ScenarioAppServices {
   assetService: AppServices["assetService"];
   chatService: AppServices["chatService"];
+  db: AppServices["db"];
   foodLoggingService: AppServices["foodLoggingService"];
+  goalProposalService: AppServices["goalProposalService"];
+  mealCorrectionService: AppServices["mealCorrectionService"];
+  mealDeleteProposalService: AppServices["mealDeleteProposalService"];
+  mealNumericProposalService: AppServices["mealNumericProposalService"];
+  publisher: AppServices["publisher"];
   summaryService: AppServices["summaryService"];
 }
 
@@ -76,11 +84,18 @@ export async function createScenarioApp(
     ...(opts.uploadsDir !== undefined ? { uploadsDir: opts.uploadsDir } : {}),
     ...(opts.assetsDir !== undefined ? { assetsDir: opts.assetsDir } : {}),
     ...(opts.llmTraceRecorderFactory !== undefined ? { llmTraceRecorderFactory: opts.llmTraceRecorderFactory } : {}),
+    ...(opts.logger !== undefined ? { logger: opts.logger } : {}),
     onServicesReady: (readyServices: AppServices) => {
       services = {
         assetService: readyServices.assetService,
         chatService: readyServices.chatService,
+        db: readyServices.db,
         foodLoggingService: readyServices.foodLoggingService,
+        goalProposalService: readyServices.goalProposalService,
+        mealCorrectionService: readyServices.mealCorrectionService,
+        mealDeleteProposalService: readyServices.mealDeleteProposalService,
+        mealNumericProposalService: readyServices.mealNumericProposalService,
+        publisher: readyServices.publisher,
         summaryService: readyServices.summaryService,
       };
     },

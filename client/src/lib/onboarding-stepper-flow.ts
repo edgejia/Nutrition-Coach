@@ -5,6 +5,36 @@ import { getEarliestValidationStep, validateIntake, validateOnboardingStep } fro
 
 const TRANSPORT_ERROR_MESSAGE = "無法連線，請稍後再試。";
 
+export type GoalClarificationQuickNoteState = {
+  goalClarification: string;
+  selectedNotes: readonly string[];
+};
+
+export type GoalClarificationQuickNoteOutcome = GoalClarificationQuickNoteState & {
+  inserted: boolean;
+};
+
+export function applyGoalClarificationQuickNote(
+  state: GoalClarificationQuickNoteState,
+  note: string,
+): GoalClarificationQuickNoteOutcome {
+  if (state.selectedNotes.includes(note)) {
+    return {
+      goalClarification: state.goalClarification,
+      selectedNotes: state.selectedNotes,
+      inserted: false,
+    };
+  }
+
+  return {
+    goalClarification: state.goalClarification.length > 0
+      ? `${state.goalClarification}、${note}`
+      : note,
+    selectedNotes: [...state.selectedNotes, note],
+    inserted: true,
+  };
+}
+
 export function getStepAdvanceOutcome(
   step: OnboardingStep,
   mergedDraft: Partial<IntakeData>,

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "../store.js";
-import { getMeals, sendMessageStream, loadHistory, stopChatTurn } from "../api.js";
+import { getMeals, sendMessageStream, loadHistory, sendProposalAction, stopChatTurn } from "../api.js";
 import { formatLocalDate } from "../lib/time.js";
 import { createClientId } from "../lib/clientId.js";
 import {
@@ -17,7 +17,14 @@ import {
 import { MessageBubble } from "./MessageBubble.js";
 import { ChatInput } from "./ChatInput.js";
 import { SportChevronLeftIcon } from "./SportIcons.js";
-import type { Message, PendingHomeChatDraft } from "../types.js";
+import type {
+  Message,
+  PendingHomeChatDraft,
+  ProposalActionEventMetadata,
+  ProposalActionRequest,
+  ProposalCardMetadata,
+  ProposalEditContext,
+} from "../types.js";
 
 const USER_SCROLL_INTENT_WINDOW_MS = 400;
 const ENTRY_SETTLE_WINDOW_MS = 240;
@@ -25,6 +32,19 @@ const UPLOAD_SETTLE_WINDOW_MS = 320;
 const STOP_FALLBACK_TIMEOUT_MS = 1000;
 const PHASE40_INCOMPLETE_RECEIPT_FLAG = "phase40IncompleteReceipt";
 const PHASE40_INCOMPLETE_RECEIPT_ID = "phase40-incomplete-receipt-mock";
+const PROPOSAL_ACTION_ERROR_COPY = "這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。";
+const CHAT_EMPTY_STARTER_PROMPTS = [
+  "我想記錄今天吃的東西",
+  "示範怎麼描述一餐",
+  "我不確定份量怎麼說",
+] as const;
+
+type ActiveProposalEdit = {
+  messageId: string;
+  proposalId: string;
+  kind: ProposalCardMetadata["proposalKind"];
+  value: string;
+};
 
 function getNowMs() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -36,6 +56,15 @@ function formatMealCountSummary(mealCount: number) {
 
 function formatMealCountCompact(mealCount: number) {
   return `${mealCount} 餐`;
+}
+
+function isFallbackReplyContent(content: string) {
+  return (
+    content.includes("抱歉，這次無法完成請求") ||
+    content.includes("抱歉，無法辨識這次的請求") ||
+    content.includes("已完成記錄，但回覆生成失敗") ||
+    (content.includes("已完成餐點") && content.includes("回覆生成失敗"))
+  );
 }
 
 function shouldShowPhase40IncompleteReceiptMock() {
@@ -62,7 +91,7 @@ function createPhase40IncompleteReceiptMock(): Message {
     content: "",
     createdAt: new Date().toISOString(),
     loggedMeal: {
-      foodName: "鮭魚飯糰",
+      foodName: "本機測試餐點",
       calories: 780,
       protein: 38,
       carbs: 82,
@@ -105,6 +134,7 @@ export function ChatPanel() {
   const pendingHomeChatDraft = useStore((s) => s.pendingHomeChatDraft);
   const setPendingHomeChatDraft = useStore((s) => s.setPendingHomeChatDraft);
   const clearPendingHomeChatDraft = useStore((s) => s.clearPendingHomeChatDraft);
+  const clearDraftLinkedAssistantArtifact = useStore((s) => s.clearDraftLinkedAssistantArtifact);
   const meals = useStore((s) => s.meals);
   const openMealEdit = useStore((s) => s.openMealEdit);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -126,11 +156,19 @@ export function ChatPanel() {
   const activeTurnIdRef = useRef<string | null>(null);
   const stopFallbackTimeoutRef = useRef<number | null>(null);
   const stoppingRef = useRef(false);
+  const pendingProposalActionRef = useRef<Set<string>>(new Set());
   const [followMode, setFollowMode] = useState<FollowMode>("attached");
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [activeProposalEdit, setActiveProposalEdit] = useState<ActiveProposalEdit | null>(null);
+  const [pendingProposalActionById, setPendingProposalActionById] = useState<
+    Record<string, ProposalActionRequest["action"]>
+  >({});
+  const [proposalActionErrorById, setProposalActionErrorById] = useState<Record<string, string>>({});
 
   const isChatLocked = sending;
+  const isComposerLocked = activeProposalEdit ? true : isChatLocked;
   const todayKey = formatLocalDate(new Date());
   const todayMeals = meals.filter((meal) => formatLocalDate(new Date(meal.loggedAt)) === todayKey);
   const consumedCalories = Math.round(dailySummary?.totalCalories ?? 0).toLocaleString("en-US");
@@ -143,6 +181,8 @@ export function ChatPanel() {
     hasMessages: messages.length > 0,
     hasProvisionalBubble: provisionalBubble !== null,
   });
+  const showChatStarter =
+    historyLoaded && messages.length === 0 && provisionalBubble === null && pendingHomeChatDraft === null;
 
   function setLocalFollowMode(nextMode: FollowMode) {
     followModeRef.current = nextMode;
@@ -244,18 +284,10 @@ export function ChatPanel() {
     clearStopFallbackTimeout();
     if (typeof window === "undefined") {
       activeAbortControllerRef.current?.abort();
-      activeAbortControllerRef.current = null;
-      activeTurnIdRef.current = null;
-      setActiveTurnId(null);
-      setStoppingMode(false);
       return;
     }
     stopFallbackTimeoutRef.current = window.setTimeout(() => {
       activeAbortControllerRef.current?.abort();
-      activeAbortControllerRef.current = null;
-      activeTurnIdRef.current = null;
-      setActiveTurnId(null);
-      setStoppingMode(false);
     }, STOP_FALLBACK_TIMEOUT_MS);
   }
 
@@ -446,8 +478,14 @@ export function ChatPanel() {
     });
   }
 
-  async function handleSend(text: string, image?: File, opts?: { draftId?: string; appendUserBubble?: boolean }) {
-    const activeDeviceId = useStore.getState().deviceId;
+  async function handleSend(
+    text: string,
+    image?: File,
+    opts?: { draftId?: string; appendUserBubble?: boolean; proposalContext?: ProposalEditContext },
+  ) {
+    const state = useStore.getState();
+    if (state.sending) return;
+    const activeDeviceId = state.deviceId;
     if (!activeDeviceId) return;
 
     if (
@@ -495,7 +533,17 @@ export function ChatPanel() {
           onToken: (token) => {
             useStore.getState().appendProvisionalToken(token);
           },
-          onDone: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets }) => {
+          onDone: ({
+            didLogMeal,
+            didMutateMeal,
+            loggedMeal,
+            dailySummary,
+            dailyTargets,
+            deletedMealId,
+            proposalCard,
+            proposalActionEvent,
+            turnId,
+          }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -509,11 +557,33 @@ export function ChatPanel() {
             if (didLogMeal || didMutateMeal) {
               void refreshTodayMeals();
             }
-            commitProvisionalBubble({ didLogMeal: didLogMeal || didMutateMeal, dailySummary, loggedMeal });
+            const content = useStore.getState().provisionalBubble?.content ?? "";
+            const isFallbackReply = isFallbackReplyContent(content);
+            const fallbackTurnId = turnId ?? activeTurnIdRef.current;
+            commitProvisionalBubble({
+              didLogMeal: didLogMeal || didMutateMeal,
+              dailySummary,
+              loggedMeal,
+              deletedMealId,
+              proposalCard,
+              proposalActionEvent,
+              ...(isFallbackReply ? { status: "error" as const } : {}),
+              ...(isFallbackReply && fallbackTurnId ? { turnId: fallbackTurnId } : {}),
+            });
             setSending(false);
             clearActiveStreamAfterTerminal();
           },
-          onStopped: ({ didLogMeal, didMutateMeal, loggedMeal, dailySummary, dailyTargets }) => {
+          onStopped: ({
+            didLogMeal,
+            didMutateMeal,
+            loggedMeal,
+            dailySummary,
+            dailyTargets,
+            deletedMealId,
+            proposalCard,
+            proposalActionEvent,
+            turnId,
+          }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
             if (opts?.draftId && useStore.getState().pendingHomeChatDraft?.id === opts.draftId) {
               clearPendingHomeChatDraft();
@@ -532,12 +602,17 @@ export function ChatPanel() {
               dailySummary,
               dailyTargets,
               loggedMeal,
+              deletedMealId,
+              proposalCard,
+              proposalActionEvent,
+              ...(turnId ? { turnId } : {}),
             });
             setSending(false);
             clearActiveStreamAfterTerminal();
           },
           onError: (errorMessage) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
+            const turnId = activeTurnIdRef.current;
             if (stoppingRef.current) {
               commitStoppedProvisionalBubble({ didLogMeal: false });
               if (opts?.draftId) {
@@ -556,11 +631,15 @@ export function ChatPanel() {
               content: errorMessage || "抱歉，發生錯誤，請再試一次。",
               isStreaming: false,
             });
-            commitProvisionalBubble({ didLogMeal: false });
+            commitProvisionalBubble({
+              didLogMeal: false,
+              status: "error",
+              ...(turnId ? { turnId } : {}),
+            });
             if (opts?.draftId) {
               const currentDraft = useStore.getState().pendingHomeChatDraft;
               if (currentDraft && currentDraft.id === opts.draftId) {
-                setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+                setPendingHomeChatDraft({ ...currentDraft, status: "failed", failedAssistantArtifactId: bubbleId });
               }
             }
             setSending(false);
@@ -568,7 +647,7 @@ export function ChatPanel() {
           },
         },
         image,
-        { signal: abortController.signal },
+        { signal: abortController.signal, proposalContext: opts?.proposalContext },
       );
     } catch (err) {
       if (useStore.getState().deviceId !== activeDeviceId) return;
@@ -596,17 +675,22 @@ export function ChatPanel() {
       const errorMessage = err instanceof Error && err.message
         ? err.message
         : "抱歉，發生錯誤，請再試一次。";
+      const turnId = activeTurnIdRef.current;
       useStore.getState().setProvisionalBubble({
         id: bubbleId,
         statusLabel: "",
         content: errorMessage,
         isStreaming: false,
       });
-      commitProvisionalBubble({ didLogMeal: false });
+      commitProvisionalBubble({
+        didLogMeal: false,
+        status: "error",
+        ...(turnId ? { turnId } : {}),
+      });
       if (opts?.draftId) {
         const currentDraft = useStore.getState().pendingHomeChatDraft;
         if (currentDraft && currentDraft.id === opts.draftId) {
-          setPendingHomeChatDraft({ ...currentDraft, status: "failed" });
+          setPendingHomeChatDraft({ ...currentDraft, status: "failed", failedAssistantArtifactId: bubbleId });
         }
       }
       setSending(false);
@@ -614,16 +698,169 @@ export function ChatPanel() {
     }
   }
 
+  function handleStarterPromptClick(prompt: string) {
+    if (useStore.getState().sending) return;
+    void handleSend(prompt);
+  }
+
+  function replaceProposalCardFromResponse(proposalCard: ProposalCardMetadata) {
+    const currentMessages = useStore.getState().messages;
+    setMessages(
+      currentMessages.map((message) =>
+        message.proposalCard?.proposalId === proposalCard.proposalId
+          ? { ...message, proposalCard }
+          : message,
+      ),
+    );
+  }
+
+  function appendProposalActionEvent(event: ProposalActionEventMetadata) {
+    addMessage({
+      id: createClientId("usr-action"),
+      role: "user",
+      content: event.transcriptCopy,
+      createdAt: event.createdAt,
+      proposalActionEvent: event,
+    });
+  }
+
+  function appendProposalActionReply(reply: string) {
+    const trimmedReply = reply.trim();
+    if (trimmedReply.length === 0) {
+      return;
+    }
+    addMessage({
+      id: createClientId("ast-action"),
+      role: "assistant",
+      content: trimmedReply,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  async function handleProposalAction(request: ProposalActionRequest) {
+    if (useStore.getState().sending) return;
+    if (pendingProposalActionRef.current.has(request.proposalId)) return;
+
+    pendingProposalActionRef.current.add(request.proposalId);
+    setPendingProposalActionById((current) => ({ ...current, [request.proposalId]: request.action }));
+    setProposalActionErrorById((current) => {
+      if (!current[request.proposalId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[request.proposalId];
+      return next;
+    });
+    try {
+      const result = await sendProposalAction({
+        proposalId: request.proposalId,
+        kind: request.kind,
+        action: request.action,
+      });
+      if (result.proposalCard) {
+        replaceProposalCardFromResponse(result.proposalCard);
+      }
+      if (!result.ok) {
+        if (result.status === "retryable" || result.status === "idempotent") {
+          appendProposalActionReply(result.reply);
+        }
+        return;
+      }
+      if (result.ok) {
+        appendProposalActionEvent(result.proposalActionEvent);
+        if (result.reply) {
+          appendProposalActionReply(result.reply);
+        }
+        if (result.dailyTargets) {
+          setDailyTargets(result.dailyTargets);
+        }
+        if (result.didMutateMeal) {
+          if (result.dailySummary) {
+            setDailySummary(result.dailySummary);
+          }
+          void refreshTodayMeals();
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === "UNAUTHORIZED") {
+        void recoverGuestSession();
+        return;
+      }
+      setProposalActionErrorById((current) => ({
+        ...current,
+        [request.proposalId]: PROPOSAL_ACTION_ERROR_COPY,
+      }));
+    } finally {
+      pendingProposalActionRef.current.delete(request.proposalId);
+      setPendingProposalActionById((current) => {
+        if (!current[request.proposalId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[request.proposalId];
+        return next;
+      });
+    }
+  }
+
+  function handleProposalApprove(request: ProposalActionRequest) {
+    void handleProposalAction({ ...request, action: "approve" });
+  }
+
+  function handleProposalReject(request: ProposalActionRequest) {
+    void handleProposalAction({ ...request, action: "reject" });
+  }
+
+  function handleProposalEdit(input: { messageId: string; proposalCard: ProposalCardMetadata }) {
+    if (input.proposalCard.status !== "active" || !input.proposalCard.isActionable) {
+      return;
+    }
+    setActiveProposalEdit({
+      messageId: input.messageId,
+      proposalId: input.proposalCard.proposalId,
+      kind: input.proposalCard.proposalKind,
+      value: "",
+    });
+  }
+
+  function handleInlineEditSubmit() {
+    if (!activeProposalEdit || activeProposalEdit.value.trim().length === 0) {
+      return;
+    }
+    const text = activeProposalEdit.value;
+    setActiveProposalEdit(null);
+    void handleSend(text, undefined, {
+      proposalContext: {
+        proposalId: activeProposalEdit.proposalId,
+        kind: activeProposalEdit.kind,
+        action: "edit",
+      },
+    });
+  }
+
   async function sendPendingDraft(draft: PendingHomeChatDraft) {
+    if (useStore.getState().sending) return;
     attemptedDraftIdsRef.current.add(draft.id);
-    setPendingHomeChatDraft({ ...draft, status: "sending" });
+    if (draft.failedAssistantArtifactId) {
+      clearDraftLinkedAssistantArtifact(draft.failedAssistantArtifactId);
+    }
+    const { failedAssistantArtifactId: _failedAssistantArtifactId, ...draftWithoutFailedArtifact } = draft;
+    setPendingHomeChatDraft({ ...draftWithoutFailedArtifact, status: "sending" });
     await handleSend(draft.text, draft.image, {
       draftId: draft.id,
       appendUserBubble: draft.status !== "failed",
     });
   }
 
+  function cancelFailedPendingDraft(draft: PendingHomeChatDraft) {
+    if (draft.failedAssistantArtifactId) {
+      clearDraftLinkedAssistantArtifact(draft.failedAssistantArtifactId);
+    }
+    clearPendingHomeChatDraft();
+  }
+
   useEffect(() => {
+    setHistoryLoaded(false);
     if (!deviceId) return;
     let cancelled = false;
     const activeDeviceId = deviceId;
@@ -641,6 +878,7 @@ export function ChatPanel() {
         });
         setMessages(messages);
         addPhase40IncompleteReceiptMockIfNeeded(messages, addMessage);
+        setHistoryLoaded(true);
         const draft = useStore.getState().pendingHomeChatDraft;
         if (draft && draft.status === "staged" && !attemptedDraftIdsRef.current.has(draft.id)) {
           await sendPendingDraft(draft);
@@ -652,6 +890,7 @@ export function ChatPanel() {
           void recoverGuestSession();
           return;
         }
+        setHistoryLoaded(false);
         const draft = useStore.getState().pendingHomeChatDraft;
         if (draft && draft.status === "staged" && !attemptedDraftIdsRef.current.has(draft.id)) {
           await sendPendingDraft(draft);
@@ -852,10 +1091,15 @@ export function ChatPanel() {
           }}
         >
           上一筆任務送出失敗。
-          <button type="button" onClick={() => sendPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
+          <button
+            type="button"
+            onClick={() => sendPendingDraft(pendingHomeChatDraft)}
+            disabled={isChatLocked}
+            className="ml-3 font-semibold underline disabled:opacity-60"
+          >
             重試送出
           </button>
-          <button type="button" onClick={clearPendingHomeChatDraft} className="ml-3 font-semibold underline">
+          <button type="button" onClick={() => cancelFailedPendingDraft(pendingHomeChatDraft)} className="ml-3 font-semibold underline">
             取消送出
           </button>
         </div>
@@ -864,12 +1108,48 @@ export function ChatPanel() {
       <div className="relative min-h-0 flex-1">
         <div ref={scrollContainerRef} className="screen-scroll-with-input sp-chat-scroll">
           <div ref={contentRef} className="sp-chat-stack">
+            {showChatStarter && (
+              <section className="sp-chat-starter sp-chat-empty-starter" aria-labelledby="chat-empty-starter-heading">
+                <div>
+                  <h3 id="chat-empty-starter-heading" className="sp-chat-empty-starter-heading">
+                    從第一餐開始
+                  </h3>
+                  <p className="sp-chat-empty-starter-body">
+                    描述你吃了什麼，我會幫你整理成今天的紀錄。也可以點下方相機附加照片。
+                  </p>
+                </div>
+                <div className="sp-chat-empty-starter-chips" aria-label="快速開始記錄">
+                  {CHAT_EMPTY_STARTER_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="sp-chat-empty-starter-chip"
+                      onClick={() => handleStarterPromptClick(prompt)}
+                      disabled={isChatLocked}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
             {messages.map((m) => (
               <MessageBubble
                 key={m.id}
                 message={m}
                 onImageSettle={handleMessageImageSettle}
                 onOpenMealEdit={(payload) => openMealEdit(payload, "chat")}
+                onProposalApprove={handleProposalApprove}
+                onProposalEdit={handleProposalEdit}
+                onProposalReject={handleProposalReject}
+                activeEdit={activeProposalEdit}
+                pendingAction={m.proposalCard ? pendingProposalActionById[m.proposalCard.proposalId] : null}
+                actionError={m.proposalCard ? proposalActionErrorById[m.proposalCard.proposalId] : null}
+                onInlineEditChange={(value) => {
+                  setActiveProposalEdit((current) => current ? { ...current, value } : current);
+                }}
+                onInlineEditSubmit={handleInlineEditSubmit}
+                onCancelProposalEdit={() => setActiveProposalEdit(null)}
               />
             ))}
             {provisionalBubble && (
@@ -911,7 +1191,7 @@ export function ChatPanel() {
           onSend={handleSend}
           onBeforeSend={handleBeforeSend}
           onStop={handleStopStreaming}
-          disabled={sending}
+          disabled={isComposerLocked}
           streaming={sending}
           stopDisabled={stopping || !activeTurnId}
           stopping={stopping}

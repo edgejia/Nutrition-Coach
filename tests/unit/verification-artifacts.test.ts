@@ -193,6 +193,28 @@ describe("verification-artifacts", () => {
     assert.equal(summary.failedStep, undefined);
   });
 
+  test("summary.json redacts untrusted console, failed step, and step name text", async () => {
+    const result = makeFailResult("summary-redaction");
+    result.consoleSummary =
+      "FAIL summary-redaction raw user meal text should not persist /absolute/path/to/server/uploads/photo.jpg";
+    result.failedStep = "raw user meal text should not persist";
+    result.steps[1]!.name = "raw prompt text should not persist";
+
+    await writeScenarioArtifacts("summary-redaction", result);
+
+    const raw = readArtifact(tmpDir, "summary-redaction", "summary.json");
+    const summary = JSON.parse(raw) as {
+      consoleSummary: string;
+      failedStep: string;
+      stepNames: string[];
+    };
+
+    assert.equal(summary.consoleSummary, "FAIL summary-redaction [REDACTED]");
+    assert.equal(summary.failedStep, "[REDACTED]");
+    assert.deepEqual(summary.stepNames, ["send-message", "[REDACTED]"]);
+    assert.doesNotMatch(raw, /raw user meal text should not persist|raw prompt text should not persist|\/uploads\//);
+  });
+
   test("steps.json contains ordered steps with name, ok, and evidence", async () => {
     const result = makeFailResult("image-log-steps");
     await writeScenarioArtifacts("image-log-steps", result);
@@ -239,6 +261,26 @@ describe("verification-artifacts", () => {
     );
   });
 
+  test("session query parameter values are redacted in saved JSON", async () => {
+    const result = makeFailResult("redact-session-query");
+    result.artifacts.requestUrl =
+      "http://127.0.0.1:54321/api/sse?guest_session=session-secret&guest_session_resume=resume-secret&guestSession=camel-secret&guestSessionResume=camel-resume-secret&sessionToken=token-secret&resumeToken=resume-token-secret&token=plain-secret";
+
+    await writeScenarioArtifacts("redact-session-query", result);
+
+    for (const fileName of ["snapshots.json", "scenario-result.json"]) {
+      const raw = readArtifact(tmpDir, "redact-session-query", fileName);
+      assert.doesNotMatch(raw, /session-secret|resume-secret|camel-secret|camel-resume-secret|token-secret|resume-token-secret|plain-secret/);
+      assert.match(raw, /guest_session=\[REDACTED\]/);
+      assert.match(raw, /guest_session_resume=\[REDACTED\]/);
+      assert.match(raw, /guestSession=\[REDACTED\]/);
+      assert.match(raw, /guestSessionResume=\[REDACTED\]/);
+      assert.match(raw, /sessionToken=\[REDACTED\]/);
+      assert.match(raw, /resumeToken=\[REDACTED\]/);
+      assert.match(raw, /token=\[REDACTED\]/);
+    }
+  });
+
   test("absolute upload paths are redacted in saved JSON", async () => {
     const result = makeFailResult("redact-upload-path");
     await writeScenarioArtifacts("redact-upload-path", result);
@@ -263,6 +305,137 @@ describe("verification-artifacts", () => {
 
     // mealsSnapshot contains a deviceId field with the secret value
     assert.doesNotMatch(raw, /secret-device-id-xyz/, "all occurrences of deviceId value must be redacted");
+  });
+
+  test("database snapshot evidence keys are omitted from saved artifact files", async () => {
+    const result = makeFailResult("omit-database-snapshots");
+    result.artifacts.historySnapshot = [{ role: "user", content: "raw user meal text should not persist" }];
+
+    await writeScenarioArtifacts("omit-database-snapshots", result);
+
+    const latestDir = path.join(tmpDir, "omit-database-snapshots", "latest");
+    for (const fileName of ["snapshots.json", "scenario-result.json"]) {
+      const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
+      assert.doesNotMatch(raw, /mealsSnapshot|historySnapshot/, `${fileName} must omit database snapshot keys`);
+      assert.doesNotMatch(
+        raw,
+        /raw user meal text should not persist|secret-device-id-xyz/,
+        `${fileName} must not persist database snapshot values`,
+      );
+    }
+  });
+
+  test("raw prompt and message keys are omitted while safe prompt metadata survives", async () => {
+    const result = makePassResult("omit-raw-text-keys") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.steps[0]!.actual = {
+      prompt: "raw prompt text should not persist",
+      userPrompt: "raw user meal text should not persist",
+      message: "raw user meal text should not persist",
+      reply: "assistant final answer should not persist",
+      response: "raw provider body should not persist",
+    };
+    result.artifacts.rawTextKeys = {
+      systemPrompt: "raw prompt text should not persist",
+      prompt: "raw prompt text should not persist",
+      message: "raw user meal text should not persist",
+      reply: "assistant final answer should not persist",
+    };
+    result.llmTrace = {
+      summary: {
+        prompt: {
+          version: "system-prompt.test",
+          sectionIds: ["role"],
+          text: "raw prompt text should not persist",
+          rawText: "raw prompt text should not persist",
+        },
+        message: "raw user meal text should not persist",
+      },
+      timeline: [
+        {
+          prompt: "raw prompt text should not persist",
+          response: "raw provider body should not persist",
+          reply: "assistant final answer should not persist",
+        },
+      ],
+    };
+
+    await writeScenarioArtifacts("omit-raw-text-keys", result);
+
+    const trace = JSON.parse(readArtifact(tmpDir, "omit-raw-text-keys", "llm-trace.json")) as {
+      summary: { prompt: { version: string; sectionIds: string[] } };
+    };
+    assert.deepEqual(trace.summary.prompt, {
+      version: "system-prompt.test",
+      sectionIds: ["role"],
+    });
+
+    for (const fileName of ["steps.json", "snapshots.json", "scenario-result.json", "llm-trace.json"]) {
+      const raw = readArtifact(tmpDir, "omit-raw-text-keys", fileName);
+      assert.doesNotMatch(raw, /raw prompt text should not persist|raw user meal text should not persist|assistant final answer should not persist|raw provider body should not persist/);
+      assert.doesNotMatch(raw, /"userPrompt"|"systemPrompt"|"message"|"reply"|"response"/);
+    }
+  });
+
+  test("safe prompt metadata values reject raw text payloads", async () => {
+    const result = makePassResult("redact-unsafe-prompt-metadata") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.llmTrace = {
+      summary: {
+        prompt: {
+          version: "raw prompt text should not persist",
+          sectionIds: ["role", "raw user meal text should not persist"],
+        },
+      },
+    };
+
+    await writeScenarioArtifacts("redact-unsafe-prompt-metadata", result);
+
+    const raw = readArtifact(tmpDir, "redact-unsafe-prompt-metadata", "llm-trace.json");
+    const trace = JSON.parse(raw) as {
+      summary: { prompt: { version: string; sectionIds: string[] } };
+    };
+    assert.deepEqual(trace.summary.prompt, {
+      version: "[REDACTED]",
+      sectionIds: ["role", "[REDACTED]"],
+    });
+    assert.doesNotMatch(raw, /raw prompt text should not persist|raw user meal text should not persist/);
+  });
+
+  test("error-like artifact keys are redacted across persisted artifacts", async () => {
+    const result = makeFailResult("redact-error-like-keys");
+    result.artifacts.diagnostic = {
+      errorMessage: "raw user meal text should not persist",
+      errorStack: "Error: raw provider body should not persist\n    at internal",
+      providerErrorMessage: "assistant final answer should not persist",
+    };
+
+    await writeScenarioArtifacts("redact-error-like-keys", result);
+
+    for (const fileName of ["snapshots.json", "scenario-result.json"]) {
+      const raw = readArtifact(tmpDir, "redact-error-like-keys", fileName);
+      const parsed = JSON.parse(raw) as {
+        diagnostic?: {
+          errorMessage?: string;
+          errorStack?: string;
+          providerErrorMessage?: string;
+        };
+        artifacts?: {
+          diagnostic?: {
+            errorMessage?: string;
+            errorStack?: string;
+            providerErrorMessage?: string;
+          };
+        };
+      };
+      const diagnostic = parsed.diagnostic ?? parsed.artifacts?.diagnostic;
+      assert.equal(diagnostic?.errorMessage, "[REDACTED]");
+      assert.equal(diagnostic?.errorStack, "[REDACTED]");
+      assert.equal(diagnostic?.providerErrorMessage, "[REDACTED]");
+      assert.doesNotMatch(raw, /raw user meal text should not persist|raw provider body should not persist|assistant final answer should not persist/);
+    }
   });
 
   test("camelCase device id evidence keys are redacted across all artifact files", async () => {
@@ -440,6 +613,182 @@ describe("verification-artifacts", () => {
     );
   });
 
+  test("persisted llm-trace.json preserves provider metadata while removing raw provider payload material", async () => {
+    const result = makePassResult("trace-provider-metadata-redaction") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.llmTrace = {
+      schemaVersion: "llm-trace.v2",
+      scenario: "trace-provider-metadata-redaction",
+      status: "pass",
+      summary: {
+        roundCount: 1,
+        toolCount: 0,
+        fallbackCount: 1,
+        providerErrorCount: 1,
+        prompt: { version: "system-prompt.test", sectionIds: ["role"] },
+        finalReply: { source: "fallback", shape: "fallback_text" },
+      },
+      timeline: [
+        {
+          type: "llm_error",
+          round: 1,
+          providerMetadata: {
+            provider: "openai",
+            operation: "chat_round_initial",
+            model: "gpt-test",
+            aborted: false,
+            status: 429,
+            providerRequestId: "req_safe_123",
+            errorName: "RateLimitError",
+            errorType: "rate_limit_error",
+            errorCode: "rate_limit_exceeded",
+            providerPayload: { raw: "raw provider body should not persist" },
+            headers: { authorization: "Bearer provider-token" },
+            body: "raw provider body should not persist",
+            messages: [{ role: "user", content: "raw user text should not persist" }],
+            tools: [{ function: { name: "log_food" } }],
+            promptText: "raw prompt text should not persist",
+            rawUserMessage: "raw user text should not persist",
+            rawToolResult: { reply: "raw tool result should not persist" },
+            finalAssistantContent: "assistant final answer should not persist",
+          },
+        },
+      ],
+    };
+
+    await writeScenarioArtifacts("trace-provider-metadata-redaction", result);
+
+    const raw = readArtifact(tmpDir, "trace-provider-metadata-redaction", "llm-trace.json");
+    const trace = JSON.parse(raw) as {
+      summary: {
+        providerErrorCount: number;
+      };
+      timeline: Array<{
+        providerMetadata?: Record<string, unknown>;
+      }>;
+    };
+
+    assert.equal(trace.summary.providerErrorCount, 1);
+    assert.deepEqual(trace.timeline[0]!.providerMetadata, {
+      provider: "openai",
+      operation: "chat_round_initial",
+      model: "gpt-test",
+      aborted: false,
+      status: 429,
+      providerRequestId: "req_safe_123",
+      errorName: "RateLimitError",
+      errorType: "rate_limit_error",
+      errorCode: "rate_limit_exceeded",
+    });
+    assert.doesNotMatch(
+      raw,
+      /providerPayload|headers|body|messages|tools|promptText|rawUserMessage|rawToolResult|finalAssistantContent|raw provider body should not persist|Bearer provider-token|raw prompt text should not persist|raw user text should not persist|raw tool result should not persist|assistant final answer should not persist/,
+    );
+  });
+
+  test("structured SSE terminal proof metadata persists while raw SSE transcript keys are omitted", async () => {
+    const result = makePassResult("sse-terminal-proof-redaction") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.steps[0]!.actual = {
+      terminalProof: {
+        closed: true,
+        firstDoneObserved: true,
+        firstDoneIndex: 2,
+        noPostDoneChunkOrStatus: true,
+        terminalViolationEvents: [],
+        rawLength: 123,
+      },
+      rawSSE: "event: chunk\ndata: {\"token\":\"secret step token\"}\n\n",
+      rawSse: "event: status\ndata: secret status text\n\n",
+      sseTranscript: "event: chunk\ndata: secret transcript text\n\n",
+      streamFrames: [{ event: "chunk", data: "secret frame text" }],
+      token: "secret token text",
+    };
+    result.artifacts = {
+      terminalProof: {
+        closed: true,
+        firstDoneObserved: true,
+        firstDoneIndex: 2,
+        noPostDoneChunkOrStatus: true,
+        postDoneEventNames: [],
+        terminalViolationEvents: [],
+        nonEmptyChunkBeforeDone: true,
+        readCount: 4,
+        rawLength: 456,
+      },
+      rawSSE: "event: chunk\ndata: {\"token\":\"secret artifact token\"}\n\n",
+      rawSse: "event: status\ndata: secret artifact status\n\n",
+      sseTranscript: "event: chunk\ndata: secret artifact transcript\n\n",
+      streamFrames: [{ event: "chunk", data: "secret artifact frame" }],
+      token: "secret artifact token text",
+    };
+    result.llmTrace = {
+      summary: {
+        terminalProof: {
+          closed: true,
+          firstDoneObserved: true,
+          firstDoneIndex: 2,
+          noPostDoneChunkOrStatus: true,
+          terminalViolationEvents: [],
+          rawLength: 789,
+        },
+        rawSSE: "event: chunk\ndata: {\"token\":\"secret trace token\"}\n\n",
+      },
+      timeline: [
+        {
+          type: "sse_terminal_proof",
+          terminalProof: {
+            closed: true,
+            firstDoneObserved: true,
+            firstDoneIndex: 2,
+            noPostDoneChunkOrStatus: true,
+            terminalViolationEvents: [],
+            rawLength: 789,
+          },
+          rawSse: "event: status\ndata: secret trace status\n\n",
+          streamFrames: [{ event: "chunk", data: "secret trace frame" }],
+          token: "secret trace token text",
+        },
+      ],
+    };
+
+    await writeScenarioArtifacts("sse-terminal-proof-redaction", result);
+
+    const snapshotsRaw = readArtifact(tmpDir, "sse-terminal-proof-redaction", "snapshots.json");
+    const snapshots = JSON.parse(snapshotsRaw) as {
+      terminalProof: {
+        closed: boolean;
+        firstDoneObserved: boolean;
+        firstDoneIndex: number;
+        noPostDoneChunkOrStatus: boolean;
+        terminalViolationEvents: string[];
+        rawLength: number;
+      };
+    };
+    assert.deepEqual(snapshots.terminalProof, {
+      closed: true,
+      firstDoneObserved: true,
+      firstDoneIndex: 2,
+      noPostDoneChunkOrStatus: true,
+      postDoneEventNames: [],
+      terminalViolationEvents: [],
+      nonEmptyChunkBeforeDone: true,
+      readCount: 4,
+      rawLength: 456,
+    });
+
+    for (const fileName of ["summary.json", "steps.json", "snapshots.json", "scenario-result.json", "llm-trace.json"]) {
+      const raw = readArtifact(tmpDir, "sse-terminal-proof-redaction", fileName);
+      assert.doesNotMatch(raw, /rawSSE|rawSse|sseTranscript|streamFrames|token/);
+      assert.doesNotMatch(
+        raw,
+        /event: chunk|event: status|secret step token|secret status text|secret transcript text|secret frame text|secret token text|secret artifact token|secret artifact status|secret artifact transcript|secret artifact frame|secret artifact token text|secret trace token|secret trace status|secret trace frame|secret trace token text/,
+      );
+    }
+  });
+
   test("failed scenario produces ok=false and populated failedStep in summary.json", async () => {
     const result = makeFailResult("image-log-fail");
     await writeScenarioArtifacts("image-log-fail", result);
@@ -465,9 +814,25 @@ describe("verification-artifacts", () => {
     const latestDir = path.join(tmpDir, "repeated-run", "latest");
     const summary = JSON.parse(
       fs.readFileSync(path.join(latestDir, "summary.json"), "utf-8"),
-    ) as { consoleSummary: string };
+    ) as { consoleSummary: string; ok: boolean; failedStep?: string };
 
     // latest/ must reflect the most recent run
-    assert.match(summary.consoleSummary, /run-2/);
+    assert.equal(summary.ok, false);
+    assert.equal(summary.failedStep, "verify-meal-persisted");
+    assert.equal(summary.consoleSummary, "FAIL repeated-run verify-meal-persisted");
+  });
+
+  test("writeScenarioArtifacts rejects scenario paths that escape the artifact root", async () => {
+    const outsideDir = path.join(tmpDir, "outside");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    const sentinel = path.join(outsideDir, "sentinel.txt");
+    fs.writeFileSync(sentinel, "do not delete", "utf-8");
+
+    await assert.rejects(
+      writeScenarioArtifacts("../outside", makePassResult("escape")),
+      /Invalid scenario name/,
+    );
+
+    assert.equal(fs.readFileSync(sentinel, "utf-8"), "do not delete");
   });
 });

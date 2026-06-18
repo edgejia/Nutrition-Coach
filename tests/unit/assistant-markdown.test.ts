@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -145,5 +147,17 @@ describe("Assistant Markdown", () => {
 
     assert.match(markup, /<h3>點心提醒<\/h3>/);
     assert.doesNotMatch(markup, /####### 點心提醒/);
+  });
+
+  it("keeps ordered list numbers visibly styled in chat markdown CSS", async () => {
+    const cssSource = await readFile(
+      fileURLToPath(new URL("../../client/src/app.css", import.meta.url)),
+      "utf8",
+    );
+
+    assert.match(cssSource, /\.assistant-markdown ol\s*\{[\s\S]*list-style-type:\s*decimal/);
+    assert.match(cssSource, /\.assistant-markdown ol\s*\{[\s\S]*padding-left:\s*28px/);
+    assert.match(cssSource, /\.assistant-markdown ol > li::marker\s*\{[\s\S]*color:\s*var\(--sp-lime\)/);
+    assert.match(cssSource, /\.assistant-markdown ol > li::marker\s*\{[\s\S]*font-weight:\s*800/);
   });
 });

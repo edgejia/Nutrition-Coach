@@ -11,7 +11,7 @@
  *   - Paths containing `/uploads/` or upload staging directories  → "[REDACTED_PATH]"
  *   - Image data URIs, bearer tokens, and OpenAI-style API keys  → "[REDACTED]"
  *   - Object keys containing `deviceId` in camelCase, snake_case, or kebab-case  → "[REDACTED]"
- *   - Raw prompt/message/provider/tool/final-assistant payload keys are omitted
+ *   - Raw prompt/message/provider/tool/final-assistant/database snapshot payload keys are omitted
  */
 
 import fs from "node:fs";
@@ -33,7 +33,16 @@ function getArtifactsRoot(): string {
 }
 
 function latestDir(scenarioName: string): string {
-  return path.join(getArtifactsRoot(), scenarioName, "latest");
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(scenarioName)) {
+    throw new Error(`Invalid scenario name: ${scenarioName}`);
+  }
+
+  const root = path.resolve(getArtifactsRoot());
+  const dir = path.resolve(root, scenarioName, "latest");
+  if (!dir.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`Scenario artifact path escapes root: ${scenarioName}`);
+  }
+  return dir;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,8 +77,11 @@ function redactString(s: string): string {
   if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(s)) {
     return REDACTED;
   }
-  // Redact deviceId= query parameter values in URLs
-  s = s.replace(/(deviceId=)[^&\s"']+/gi, `$1${REDACTED}`);
+  // Redact sensitive query parameter values in URLs.
+  s = s.replace(
+    /((?:deviceId|guest_session|guest_session_resume|guestSession|guestSessionResume|sessionToken|resumeToken|token)=)[^&\s"']+/gi,
+    `$1${REDACTED}`,
+  );
   s = s.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, `Bearer ${REDACTED}`);
   s = s.replace(/\bsk-[A-Za-z0-9_-]+/g, REDACTED);
   return s;
@@ -78,7 +90,11 @@ function redactString(s: string): string {
 function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(obj)) {
-    if (shouldOmitKey(key)) {
+    const normalized = normalizeKey(key);
+    const promptMetadata = normalized === "prompt" ? redactPromptMetadata(val) : undefined;
+    if (promptMetadata !== undefined) {
+      result[key] = promptMetadata;
+    } else if (RAW_TEXT_KEYS.has(normalized) || shouldOmitKey(key)) {
       continue;
     } else if (shouldRedactKey(key)) {
       result[key] = REDACTED;
@@ -91,7 +107,10 @@ function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
 
 function shouldRedactKey(key: string): boolean {
   const normalized = normalizeKey(key);
-  return normalized.includes("deviceid") || normalized === "error";
+  if (SAFE_ERROR_METADATA_KEYS.has(normalized)) {
+    return false;
+  }
+  return normalized.includes("deviceid") || normalized.includes("error");
 }
 
 function shouldOmitKey(key: string): boolean {
@@ -103,6 +122,50 @@ function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function isSafePromptMetadata(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.prototype.hasOwnProperty.call(value, "version") &&
+    Object.prototype.hasOwnProperty.call(value, "sectionIds")
+  );
+}
+
+function redactPromptMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!isSafePromptMetadata(value)) {
+    return undefined;
+  }
+  const prompt = value as { version: unknown; sectionIds: unknown };
+  return {
+    version: safeTraceIdentifier(prompt.version),
+    sectionIds: Array.isArray(prompt.sectionIds)
+      ? prompt.sectionIds.map(safeTraceIdentifier)
+      : REDACTED,
+  };
+}
+
+function safeTraceIdentifier(value: unknown): string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9._:-]*$/i.test(value)
+    ? value
+    : REDACTED;
+}
+
+const RAW_TEXT_KEYS = new Set([
+  "message",
+  "prompt",
+  "reply",
+  "response",
+  "systemprompt",
+  "userprompt",
+]);
+const SAFE_ERROR_METADATA_KEYS = new Set([
+  "errorname",
+  "errortype",
+  "errorcode",
+  "providererrorcount",
+]);
+
 const OMITTED_KEYS = new Set([
   "apikey",
   "arguments",
@@ -110,6 +173,7 @@ const OMITTED_KEYS = new Set([
   "assistantmessages",
   "authorization",
   "bearer",
+  "body",
   "content",
   "cookie",
   "assistantcontent",
@@ -118,10 +182,12 @@ const OMITTED_KEYS = new Set([
   "finalassistantcontent",
   "guestsession",
   "historysnapshot",
+  "headers",
   "imagebase64",
   "imagedata",
   "imagedatauri",
   "messages",
+  "mealssnapshot",
   "openaiapikey",
   "providerpayload",
   "prompttext",
@@ -129,12 +195,17 @@ const OMITTED_KEYS = new Set([
   "rawmessages",
   "rawprompt",
   "rawproviderpayload",
+  "rawsse",
+  "rawsseframes",
+  "rawssetranscript",
+  "rawstreamframes",
   "rawtoolresult",
   "sessiontoken",
   "setcookie",
   "ssetranscript",
   "streamframes",
   "token",
+  "tools",
   "toolarguments",
   "toolresult",
   "uploadstagingpath",
@@ -161,18 +232,34 @@ interface SummaryArtifact {
 function buildSummary(scenarioName: string, result: ScenarioResult): SummaryArtifact {
   const passedSteps = result.steps.filter((s: ScenarioStepResult) => s.ok).length;
   const summary: SummaryArtifact = {
-    scenarioName,
+    scenarioName: redactIdentifier(scenarioName),
     ok: result.ok,
-    consoleSummary: result.consoleSummary,
+    consoleSummary: buildSafeConsoleSummary(scenarioName, result, passedSteps),
     totalSteps: result.steps.length,
     passedSteps,
-    stepNames: result.steps.map((step) => step.name),
+    stepNames: result.steps.map((step) => redactIdentifier(step.name)),
     writtenAt: new Date().toISOString(),
   };
   if (result.failedStep !== undefined) {
-    summary.failedStep = result.failedStep;
+    summary.failedStep = redactIdentifier(result.failedStep);
   }
   return summary;
+}
+
+function buildSafeConsoleSummary(
+  scenarioName: string,
+  result: ScenarioResult,
+  passedSteps: number,
+): string {
+  const safeScenarioName = redactIdentifier(scenarioName);
+  if (result.ok) {
+    return `PASS ${safeScenarioName} ${passedSteps}/${result.steps.length}`;
+  }
+  return `FAIL ${safeScenarioName} ${redactIdentifier(result.failedStep ?? "unknown")}`;
+}
+
+function redactIdentifier(value: string): string {
+  return /^[a-z0-9][a-z0-9._:-]*$/i.test(value) ? value : REDACTED;
 }
 
 /**
@@ -198,7 +285,7 @@ export async function writeScenarioArtifacts(
   fs.mkdirSync(dir, { recursive: true });
 
   // summary.json
-  const summary = buildSummary(scenarioName, result);
+  const summary = redact(buildSummary(scenarioName, result));
   fs.writeFileSync(
     path.join(dir, "summary.json"),
     JSON.stringify(summary, null, 2),
@@ -208,7 +295,7 @@ export async function writeScenarioArtifacts(
   // steps.json — redact all step evidence, including assertion strings that may
   // embed model/user transcript excerpts.
   const steps = result.steps.map((s: ScenarioStepResult) => ({
-    name: s.name,
+    name: redactIdentifier(s.name),
     ok: s.ok,
     ...(s.actual !== undefined ? { actual: redact(s.actual) } : {}),
     ...(s.expected !== undefined ? { expected: redact(s.expected) } : {}),

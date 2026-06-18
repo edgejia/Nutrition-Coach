@@ -1,9 +1,10 @@
 // server/services/chat.ts
-import { eq, and, asc, desc, sql } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import {
   assetReferences,
   assets,
   chatMealReceipts,
+  chatMutationOutcomes,
   chatMessages,
   mealRevisions,
   mealRevisionItems,
@@ -13,13 +14,55 @@ import type { AppDatabase } from "../db/client.js";
 import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
 import { projectMealDisplay } from "./meal-display.js";
+import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
+import { projectPublicMealItems } from "../lib/public-meal-items.js";
+import {
+  formatChatMutationOutcomeForCompressedHistory,
+  validateChatMutationOutcomeFact,
+  type ChatMutationOutcomeFact,
+} from "./chat-mutation-outcomes.js";
+import {
+  createProposalCardService,
+  projectProposalActionEventForClient,
+  projectProposalCardForClient,
+  type ProposalActionEventClientMetadata,
+  type ProposalCardClientMetadata,
+  type ProposalKind,
+  type ProposalLane,
+} from "./proposal-cards.js";
 
 type ChatMessageStatus = "complete" | "stopped" | "error";
+type ChatMessageRole = "user" | "assistant" | "tool" | string;
+export type MealReceiptStatus = "active" | "deleted" | "stale_revision";
+
+interface SavedChatMessage {
+  id: string;
+  createdAt: string;
+}
+
+interface ChatMealReceiptReferenceInput {
+  toolMessageId?: string;
+  mealTransactionId: string;
+  mealRevisionId: string;
+}
+
+interface SaveAssistantReplyWithReceiptInput {
+  deviceId: string;
+  content: string;
+  status?: ChatMessageStatus;
+  receipt?: ChatMealReceiptReferenceInput;
+  mutationOutcomeFact?: unknown;
+  outcomeFact?: unknown;
+}
 
 interface LoggedMealReceipt {
+  receiptStatus: MealReceiptStatus;
+  receiptMealId?: string;
   mealId?: string;
   dateKey?: string;
+  mealRevisionId?: string;
   loggedAt: string;
+  mealPeriod?: MealPeriod;
   imageAssetId: string | null;
   imageUrl: string | null;
   foodName: string;
@@ -38,15 +81,18 @@ interface LoggedMealReceipt {
   }>;
 }
 
-function formatToolSummary(toolName: string, content: string): string {
+function formatToolSummary(toolName: string, content: string): string | undefined {
   if (toolName === "log_food") {
-    return "[系統已完成餐點記錄]";
+    return undefined;
   }
   if (toolName === "update_meal") {
-    return "[系統已完成餐點修改]";
+    return undefined;
   }
   if (toolName === "delete_meal") {
-    return "[系統已完成餐點刪除]";
+    return undefined;
+  }
+  if (toolName === "update_goals") {
+    return undefined;
   }
   if (toolName === "find_meals") {
     return "[系統已完成餐點查找]";
@@ -58,6 +104,186 @@ function formatToolSummary(toolName: string, content: string): string {
 }
 
 export function createChatService(db: AppDatabase) {
+  const proposalCardService = createProposalCardService(db);
+
+  function deriveReceiptStatus(input: {
+    deletedAt: string | null;
+    mealRevisionId: string;
+    currentRevisionId: string;
+  }): MealReceiptStatus {
+    if (input.deletedAt !== null) {
+      return "deleted";
+    }
+    return input.mealRevisionId === input.currentRevisionId ? "active" : "stale_revision";
+  }
+
+  function mutationOutcomeFactToRow(
+    fact: ChatMutationOutcomeFact,
+  ): Pick<
+    typeof chatMutationOutcomes.$inferInsert,
+    | "action"
+    | "affectedDate"
+    | "foodName"
+    | "calories"
+    | "protein"
+    | "carbs"
+    | "fat"
+    | "goalCalories"
+    | "goalProtein"
+    | "goalCarbs"
+    | "goalFat"
+    | "updatedGoalFields"
+  > {
+    if (fact.action !== "update_goals") {
+      return {
+        action: fact.action,
+        affectedDate: fact.affectedDate,
+        foodName: fact.foodName,
+        calories: fact.calories ?? null,
+        protein: fact.protein ?? null,
+        carbs: fact.carbs ?? null,
+        fat: fact.fat ?? null,
+        goalCalories: null,
+        goalProtein: null,
+        goalCarbs: null,
+        goalFat: null,
+        updatedGoalFields: null,
+      };
+    }
+
+    const goals = new Map(fact.updatedGoals.map((goal) => [goal.label, goal.value]));
+    return {
+      action: fact.action,
+      affectedDate: fact.affectedDate,
+      foodName: null,
+      calories: null,
+      protein: null,
+      carbs: null,
+      fat: null,
+      goalCalories: goals.get("卡路里") ?? null,
+      goalProtein: goals.get("蛋白質") ?? null,
+      goalCarbs: goals.get("碳水") ?? null,
+      goalFat: goals.get("脂肪") ?? null,
+      updatedGoalFields: JSON.stringify(fact.updatedGoals.map((goal) => goal.label)),
+    };
+  }
+
+  function mutationOutcomeRowToFact(
+    row: typeof chatMutationOutcomes.$inferSelect,
+  ): ChatMutationOutcomeFact | undefined {
+    if (row.action === "update_goals") {
+      let labels: unknown;
+      try {
+        labels = row.updatedGoalFields ? JSON.parse(row.updatedGoalFields) : [];
+      } catch {
+        return undefined;
+      }
+      if (!Array.isArray(labels)) {
+        return undefined;
+      }
+
+      const goalValues = new Map([
+        ["卡路里", { value: row.goalCalories, unit: "kcal" }],
+        ["蛋白質", { value: row.goalProtein, unit: "g" }],
+        ["碳水", { value: row.goalCarbs, unit: "g" }],
+        ["脂肪", { value: row.goalFat, unit: "g" }],
+      ] as const);
+      const updatedGoals = labels.map((label) => {
+        if (typeof label !== "string") {
+          return undefined;
+        }
+        const goal = goalValues.get(label as "卡路里" | "蛋白質" | "碳水" | "脂肪");
+        if (!goal || goal.value === null) {
+          return undefined;
+        }
+        return { label, value: goal.value, unit: goal.unit };
+      });
+
+      return validateChatMutationOutcomeFact({
+        action: row.action,
+        affectedDate: row.affectedDate,
+        updatedGoals,
+      });
+    }
+
+    return validateChatMutationOutcomeFact({
+      action: row.action,
+      affectedDate: row.affectedDate,
+      foodName: row.foodName,
+      ...(row.calories === null ? {} : { calories: row.calories }),
+      ...(row.protein === null ? {} : { protein: row.protein }),
+      ...(row.carbs === null ? {} : { carbs: row.carbs }),
+      ...(row.fat === null ? {} : { fat: row.fat }),
+    });
+  }
+
+  async function loadReceiptStatuses(deviceId: string, assistantMessageIds: string[]) {
+    if (assistantMessageIds.length === 0) {
+      return new Map<string, MealReceiptStatus>();
+    }
+
+    const rows = await db
+      .select({
+        assistantMessageId: chatMealReceipts.assistantMessageId,
+        currentRevisionId: mealTransactions.currentRevisionId,
+        deletedAt: mealTransactions.deletedAt,
+        mealRevisionId: chatMealReceipts.mealRevisionId,
+      })
+      .from(chatMealReceipts)
+      .innerJoin(mealTransactions, eq(mealTransactions.id, chatMealReceipts.mealTransactionId))
+      .where(
+        and(
+          eq(chatMealReceipts.deviceId, deviceId),
+          eq(mealTransactions.deviceId, deviceId),
+          inArray(chatMealReceipts.assistantMessageId, assistantMessageIds),
+        ),
+      );
+
+    const statuses = new Map<string, MealReceiptStatus>();
+    for (const row of rows) {
+      statuses.set(row.assistantMessageId, deriveReceiptStatus(row));
+    }
+    return statuses;
+  }
+
+  async function loadMutationOutcomeSummaries(
+    deviceId: string,
+    assistantMessageIds: string[],
+    receiptStatuses?: Map<string, MealReceiptStatus>,
+  ) {
+    if (assistantMessageIds.length === 0) {
+      return new Map<string, string>();
+    }
+
+    const statuses = receiptStatuses ?? await loadReceiptStatuses(deviceId, assistantMessageIds);
+    const rows = await db
+      .select()
+      .from(chatMutationOutcomes)
+      .where(
+        and(
+          eq(chatMutationOutcomes.deviceId, deviceId),
+          inArray(chatMutationOutcomes.assistantMessageId, assistantMessageIds),
+        ),
+      );
+
+    const summaries = new Map<string, string>();
+    for (const row of rows) {
+      const fact = mutationOutcomeRowToFact(row);
+      if (
+        fact &&
+        (fact.action === "log_food" || fact.action === "update_meal") &&
+        statuses.get(row.assistantMessageId) === "deleted"
+      ) {
+        continue;
+      }
+      const summary = fact ? formatChatMutationOutcomeForCompressedHistory(fact) : undefined;
+      if (summary) {
+        summaries.set(row.assistantMessageId, summary);
+      }
+    }
+    return summaries;
+  }
+
   async function getMealReceiptForAssistantMessage(
     deviceId: string,
     assistantMessageId: string,
@@ -69,6 +295,7 @@ export function createChatService(db: AppDatabase) {
         deletedAt: mealTransactions.deletedAt,
         mealRevisionId: mealRevisions.id,
         loggedAt: mealTransactions.loggedAt,
+        mealPeriod: mealTransactions.mealPeriod,
         imageAssetId: mealRevisions.imageAssetId,
       })
       .from(chatMealReceipts)
@@ -108,18 +335,23 @@ export function createChatService(db: AppDatabase) {
       return undefined;
     }
 
-    const isCurrentActiveReceipt =
-      receipt.deletedAt === null && receipt.mealRevisionId === receipt.currentRevisionId;
+    const receiptStatus = deriveReceiptStatus(receipt);
+    const isCurrentActiveReceipt = receiptStatus === "active";
+    const mealPeriod = normalizeMealPeriod(receipt.mealPeriod);
     const display = projectMealDisplay(items);
 
     return {
+      receiptStatus,
+      ...(!isCurrentActiveReceipt ? { receiptMealId: receipt.mealTransactionId } : {}),
       ...(isCurrentActiveReceipt
         ? {
             mealId: receipt.mealTransactionId,
             dateKey: formatLocalDate(new Date(receipt.loggedAt)),
+            mealRevisionId: receipt.mealRevisionId,
           }
         : {}),
       loggedAt: receipt.loggedAt,
+      ...(mealPeriod ? { mealPeriod } : {}),
       imageAssetId: receipt.imageAssetId ?? null,
       imageUrl: receipt.imageAssetId ? buildAssetUrl(receipt.imageAssetId) : null,
       foodName: display.foodName,
@@ -128,14 +360,7 @@ export function createChatService(db: AppDatabase) {
       protein: items.reduce((sum, item) => sum + item.protein, 0),
       carbs: items.reduce((sum, item) => sum + item.carbs, 0),
       fat: items.reduce((sum, item) => sum + item.fat, 0),
-      items: items.map((item) => ({
-        name: item.foodName,
-        position: item.position + 1,
-        calories: item.calories,
-        protein: item.protein,
-        carbs: item.carbs,
-        fat: item.fat,
-      })),
+      items: projectPublicMealItems(items),
     };
   }
 
@@ -165,9 +390,59 @@ export function createChatService(db: AppDatabase) {
 
     getMealReceiptForAssistantMessage,
 
+    async saveAssistantReplyWithReceipt(input: SaveAssistantReplyWithReceiptInput): Promise<SavedChatMessage> {
+      const id = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      const receiptId = crypto.randomUUID();
+      const outcomeFactInput = input.mutationOutcomeFact ?? input.outcomeFact;
+
+      return db.transaction((tx) => {
+        tx.insert(chatMessages).values({
+          id,
+          deviceId: input.deviceId,
+          role: "assistant",
+          content: input.content,
+          toolName: null,
+          imagePath: null,
+          createdAt,
+          status: input.status ?? "complete",
+        }).run();
+
+        if (input.receipt) {
+          tx.insert(chatMealReceipts).values({
+            id: receiptId,
+            deviceId: input.deviceId,
+            assistantMessageId: id,
+            toolMessageId: input.receipt.toolMessageId ?? null,
+            mealTransactionId: input.receipt.mealTransactionId,
+            mealRevisionId: input.receipt.mealRevisionId,
+            createdAt,
+          }).run();
+        }
+
+        if (outcomeFactInput !== undefined) {
+          const outcomeFact = validateChatMutationOutcomeFact(outcomeFactInput);
+          if (!outcomeFact) {
+            throw new Error("Invalid structured mutation outcome fact");
+          }
+
+          tx.insert(chatMutationOutcomes).values({
+            id: crypto.randomUUID(),
+            deviceId: input.deviceId,
+            assistantMessageId: id,
+            toolMessageId: input.receipt?.toolMessageId ?? null,
+            ...mutationOutcomeFactToRow(outcomeFact),
+            createdAt,
+          }).run();
+        }
+
+        return { id, createdAt };
+      });
+    },
+
     async saveMessage(
       deviceId: string,
-      role: string,
+      role: ChatMessageRole,
       content: string,
       opts?: { toolName?: string; imagePath?: string; status?: ChatMessageStatus }
     ) {
@@ -227,7 +502,18 @@ export function createChatService(db: AppDatabase) {
       });
     },
 
-    async getHistory(deviceId: string, limit: number) {
+    async getHistory(
+      deviceId: string,
+      limit: number,
+      opts?: {
+        activeProposals?: Array<{
+          proposalId: string;
+          proposalKind: ProposalKind;
+          proposalLane: ProposalLane;
+          expiresAt?: string | null;
+        }>;
+      },
+    ) {
       // Fetch all roles (including tool) to preserve the existing history window,
       // then filter to user+assistant before returning. Fetch limit*4 to ensure
       // we have enough rows after tool messages are dropped.
@@ -239,6 +525,28 @@ export function createChatService(db: AppDatabase) {
         .limit(limit * 4);
 
       const chronological = rows.reverse();
+      const assistantMessageIds = chronological
+        .filter((row) => row.role === "assistant")
+        .map((row) => row.id);
+      const userMessageIds = chronological
+        .filter((row) => row.role === "user")
+        .map((row) => row.id);
+      const proposalCards = await proposalCardService.getCardsForAssistantMessages({
+        deviceId,
+        assistantMessageIds,
+      });
+      const proposalActionEvents = await proposalCardService.getActionEventsForMessages({
+        deviceId,
+        messageIds: userMessageIds,
+      });
+      const proposalStatusProjections = proposalCardService.projectStatusForCards({
+        deviceId,
+        cards: [...proposalCards.values()],
+        activeProposals: opts?.activeProposals ?? [],
+      });
+      const projectionByProposal = new Map(
+        proposalStatusProjections.map((projection) => [projection.proposalId, projection]),
+      );
       const projected: Array<{
         id: string;
         deviceId: string;
@@ -250,6 +558,8 @@ export function createChatService(db: AppDatabase) {
         status: string;
         didLogMeal?: boolean;
         loggedMeal?: LoggedMealReceipt;
+        proposalCard?: ProposalCardClientMetadata;
+        proposalActionEvent?: ProposalActionEventClientMetadata;
       }> = [];
 
       for (const row of chronological) {
@@ -263,15 +573,30 @@ export function createChatService(db: AppDatabase) {
 
         if (row.role === "assistant") {
           const loggedMeal = await getMealReceiptForAssistantMessage(deviceId, row.id);
+          const proposalCard = proposalCards.get(row.id);
           projected.push({
             ...row,
             didLogMeal: loggedMeal ? true : undefined,
             ...(loggedMeal ? { loggedMeal } : {}),
+            ...(proposalCard
+              ? {
+                  proposalCard: projectProposalCardForClient(
+                    proposalCard,
+                    projectionByProposal.get(proposalCard.proposalId),
+                  ),
+                }
+              : {}),
           });
           continue;
         }
 
-        projected.push(row);
+        const proposalActionEvent = proposalActionEvents.get(row.id);
+        projected.push({
+          ...row,
+          ...(proposalActionEvent
+            ? { proposalActionEvent: projectProposalActionEventForClient(proposalActionEvent) }
+            : {}),
+        });
       }
 
       return projected.slice(-limit);
@@ -305,6 +630,14 @@ export function createChatService(db: AppDatabase) {
         )
         .orderBy(asc(sql`rowid`));
 
+      const assistantMessageIds = msgs.filter((msg) => msg.role === "assistant").map((msg) => msg.id);
+      const receiptStatuses = await loadReceiptStatuses(deviceId, assistantMessageIds);
+      const mutationOutcomeSummaries = await loadMutationOutcomeSummaries(
+        deviceId,
+        assistantMessageIds,
+        receiptStatuses,
+      );
+
       // Group into turns: each turn starts with a user message.
       // Tool summaries are merged into the assistant reply to avoid
       // consecutive assistant messages that confuse the OpenAI chat API.
@@ -322,13 +655,25 @@ export function createChatService(db: AppDatabase) {
           current = [];
         }
         if (msg.role === "tool") {
-          pendingToolSummaries.push(formatToolSummary(msg.toolName ?? "", msg.content));
+          const summary = formatToolSummary(msg.toolName ?? "", msg.content);
+          if (summary) {
+            pendingToolSummaries.push(summary);
+          }
         } else if (msg.role === "user" && msg.imagePath) {
           current.push({ role: "user", content: `${msg.content}\n[附帶圖片]` });
         } else if (msg.role === "assistant") {
+          if (receiptStatuses.get(msg.id) === "deleted") {
+            pendingToolSummaries = [];
+            current = [];
+            continue;
+          }
           // Merge pending tool summaries into the assistant message
-          const toolPrefix = pendingToolSummaries.length > 0
-            ? pendingToolSummaries.join("\n") + "\n"
+          const assistantSummaries = [
+            ...pendingToolSummaries,
+            mutationOutcomeSummaries.get(msg.id),
+          ].filter((summary): summary is string => Boolean(summary));
+          const toolPrefix = assistantSummaries.length > 0
+            ? assistantSummaries.join("\n") + "\n"
             : "";
           current.push({ role: "assistant", content: toolPrefix + msg.content });
           pendingToolSummaries = [];
