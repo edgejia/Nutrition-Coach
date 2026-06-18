@@ -1,0 +1,90 @@
+name: Chore
+description: Track maintenance work with no direct user-facing behavior change.
+title: "[Chore]: "
+labels: ["type: chore", "needs-triage"]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: This is maintenance work with no intended user-facing behavior change.
+          required: true
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I can define completion criteria for this maintenance task.
+          required: true
+    validations:
+      required: true
+
+  - type: textarea
+    id: maintenance-task
+    attributes:
+      label: What is the maintenance task?
+      placeholder: Clean up...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: maintenance-type
+    attributes:
+      label: Type of maintenance
+      options:
+        - Refactor
+        - Test coverage
+        - Documentation
+        - Dependency/tooling
+        - CI/release process
+        - Cleanup
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-state
+    attributes:
+      label: Current state
+      description: Describe the current maintenance gap with specifics.
+      placeholder: Currently...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-work
+    attributes:
+      label: Proposed work
+      description: List concrete tasks or files.
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: Testable completion criteria.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area affected
+      options:
+        - UI
+        - API/routes
+        - Persistence
+        - Orchestrator/LLM
+        - Realtime/SSE
+        - Deployment/runtime
+        - Tests/harness
+        - Documentation
+        - Other
+    validations:
+      required: true
+

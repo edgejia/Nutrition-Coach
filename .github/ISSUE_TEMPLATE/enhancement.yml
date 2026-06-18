@@ -1,0 +1,103 @@
+name: Enhancement
+description: Improve an existing capability without changing its core purpose.
+title: "[Enhancement]: "
+labels: ["enhancement", "needs-review"]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: This improves an existing feature rather than proposing a new one.
+          required: true
+        - label: I can describe current behavior with examples.
+          required: true
+        - label: I understand this must be approved before an enhancement PR is opened.
+          required: true
+    validations:
+      required: true
+
+  - type: input
+    id: existing-feature
+    attributes:
+      label: What existing feature is being improved?
+      placeholder: Chat meal logging receipt wording
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior
+      description: Describe the current behavior with concrete examples.
+      placeholder: Today...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the proposed behavior with concrete examples.
+      placeholder: After this enhancement...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason-benefit
+    attributes:
+      label: Reason and benefit
+      description: Explain why this change is worth doing now.
+      placeholder: This matters because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope of changes
+      description: List likely files, systems, APIs, data, migrations, prompts, harness scenarios, or docs.
+      placeholder: |
+        - client/src/...
+        - server/routes/...
+        - tests/...
+    validations:
+      required: true
+
+  - type: textarea
+    id: breaking-changes
+    attributes:
+      label: Breaking changes assessment
+      description: State whether this affects public APIs, persisted data, deploy settings, user workflows, or existing tests.
+      placeholder: No breaking changes expected because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Name at least one alternative and why it is not preferred.
+      placeholder: We considered...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area affected
+      options:
+        - UI
+        - API/routes
+        - Persistence
+        - Orchestrator/LLM
+        - Realtime/SSE
+        - Deployment/runtime
+        - Tests/harness
+        - Documentation
+        - Other
+    validations:
+      required: true
+
