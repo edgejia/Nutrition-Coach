@@ -1,0 +1,117 @@
+name: Bug report
+description: Report broken behavior that should be confirmed before a fix PR.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: input
+    id: gsd-version
+    attributes:
+      label: GSD version or milestone
+      description: Version, milestone, branch, or commit where the bug was found.
+      placeholder: v2.10 / feature branch / commit SHA
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      options:
+        - Local development
+        - Staging/Railway beta
+        - Production
+        - Test suite
+        - Harness
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Browser only
+        - Not OS-specific
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      placeholder: "22.x"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the observed broken behavior.
+      placeholder: The app...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe what should have happened instead.
+      placeholder: I expected...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact steps, commands, requests, or test names.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Frequency
+      options:
+        - Always
+        - Often
+        - Sometimes
+        - Once
+        - Unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity / impact
+      options:
+        - P0 - production down or data loss
+        - P1 - security, privacy, or high-impact correctness
+        - P2 - user-visible regression
+        - P3 - low-risk defect or test gap
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: pii
+    attributes:
+      label: Privacy / PII checklist
+      options:
+        - label: I removed or anonymized personal data, images, tokens, cookies, and secrets.
+          required: true
+        - label: I included only the minimum reproduction evidence needed for triage.
+          required: true
+    validations:
+      required: true
+

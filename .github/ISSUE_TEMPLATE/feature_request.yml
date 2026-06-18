@@ -1,0 +1,140 @@
+name: Feature request
+description: Propose a new user-facing capability.
+title: "[Feature]: "
+labels: ["feature-request", "needs-review"]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I can describe the user problem before describing the solution.
+          required: true
+        - label: I can name the affected runtime or product surface.
+          required: true
+        - label: I understand this must be approved before a feature PR is opened.
+          required: true
+    validations:
+      required: true
+
+  - type: input
+    id: feature-name
+    attributes:
+      label: Feature name
+      description: Short, specific name for the capability.
+      placeholder: Meal photo item mapping
+    validations:
+      required: true
+
+  - type: dropdown
+    id: addition-type
+    attributes:
+      label: Type of addition
+      options:
+        - User workflow
+        - UI capability
+        - Backend capability
+        - LLM/orchestrator capability
+        - Deployment/runtime capability
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user-facing or operational problem does this solve?
+      placeholder: Describe the current gap, who hits it, and why it matters.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-feature
+    attributes:
+      label: What is being added
+      description: Describe the capability with concrete examples.
+      placeholder: |
+        Example:
+        - When the user...
+        - The app should...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Full scope of changes
+      description: List likely files, systems, APIs, data, migrations, prompts, harness scenarios, or docs.
+      placeholder: |
+        - client/src/...
+        - server/routes/...
+        - tests/...
+    validations:
+      required: true
+
+  - type: textarea
+    id: user-stories
+    attributes:
+      label: User stories
+      description: Provide at least two testable user stories.
+      placeholder: |
+        - As a user, I can...
+        - As an operator, I can...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: Testable conditions that must be true before the issue can close.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: runtimes
+    attributes:
+      label: Applicable runtimes
+      options:
+        - label: Local development
+        - label: Staging/Railway beta
+        - label: Production
+        - label: Browser/mobile viewport
+        - label: Server/API
+        - label: LLM provider path
+    validations:
+      required: true
+
+  - type: textarea
+    id: breaking-changes
+    attributes:
+      label: Breaking changes assessment
+      description: State whether this affects public APIs, persisted data, deploy settings, user workflows, or existing tests.
+      placeholder: No breaking changes expected because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: maintenance
+    attributes:
+      label: Maintenance burden
+      description: What new ongoing ownership, data shape, test, prompt, or operational burden does this add?
+      placeholder: This adds...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Name at least one alternative and why it is not preferred.
+      placeholder: We considered...
+    validations:
+      required: true
+
