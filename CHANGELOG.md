@@ -1,5 +1,22 @@
 # 更新日誌
 
+## v2.10 - 2026-06-18
+
+### 變更
+
+- Protected browser routes 現在以 signed guest-session cookie 作為 ownership authority,不再接受 raw `legacyDeviceId`、`x-device-id` 或 `deviceId` selector 來擴大讀寫範圍。
+- Deployed-like runtime 會拒絕 missing/default/short `GUEST_SESSION_SECRET`,避免 guest-session HMAC fallback 變成可偽造 session；dev/test legacy migration 仍保留。
+- Mutation receipts 現在由 committed backend facts 驅動:沒有實際 mutation 的 turn 不會產生 log/update/delete/goal 成功文案,delete 也必須有 committed delete fact 才能說已刪除。
+- Multi-item meal receipt 的 public `position` 改為保留 persisted 0-based contract,讓 receipt 內每個 item 都能回到 strict edit payload。
+- Confirm-first proposal 在 non-precondition failure 後會保留為 retryable,重複確認已處理 proposal 則回 deterministic idempotent copy,不會 double mutate。
+
+### 驗證
+
+- Phase 92-94 verification 全部通過:Ownership & Session Integrity `4/4`,Mutation Truthfulness `5/5`,Confirm-First Integrity `20/20`。
+- `guest-session-hardening` deterministic harness 通過,ownership-bypass 與 receipt guard evidence 維持 metadata-only。
+- Closeout 前本機 `yarn release:check` 通過:TypeScript、`1,625` node tests、frontend production build 全部 green。
+- v2.10 closeout 維持本機驗證範圍;沒有 push、merge、deploy、Railway smoke、staging promotion 或 main promotion。
+
 ## v2.9 - 2026-06-15
 
 ### 新增
