@@ -394,8 +394,19 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       : input.action === "reject"
         ? cancelReply(input.kind)
         : undefined;
+    const mutationOutcomeFact = input.mutation?.effects
+      ? mutationOutcomeFactFromEffects(input.mutation.effects)
+      : undefined;
     if (reply?.trim()) {
-      await deps.chatService.saveMessage(input.deviceId, "assistant", reply);
+      if (mutationOutcomeFact) {
+        await deps.chatService.saveAssistantReplyWithReceipt({
+          deviceId: input.deviceId,
+          content: reply,
+          mutationOutcomeFact,
+        });
+      } else {
+        await deps.chatService.saveMessage(input.deviceId, "assistant", reply);
+      }
     }
     return {
       ok: true,
@@ -404,7 +415,7 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       proposalActionEvent: event,
       didMutateMeal: input.mutation?.didMutateMeal ?? false,
       reply,
-      ...(input.mutation?.effects ? { mutationOutcomeFact: mutationOutcomeFactFromEffects(input.mutation.effects) } : {}),
+      ...(mutationOutcomeFact ? { mutationOutcomeFact } : {}),
       ...(input.mutation?.dailyTargets ? { dailyTargets: input.mutation.dailyTargets } : {}),
       ...(input.mutation?.updatedMeal ? { updatedMeal: input.mutation.updatedMeal } : {}),
       ...(input.mutation?.deletedMealId ? { deletedMealId: input.mutation.deletedMealId } : {}),

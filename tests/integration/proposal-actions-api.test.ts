@@ -244,6 +244,48 @@ describe("proposal action API", () => {
     );
   }
 
+  function mutationOutcomeRows() {
+    return services.db.$client
+      .prepare(`
+        SELECT
+          assistant_message_id AS assistantMessageId,
+          action,
+          affected_date AS affectedDate,
+          food_name AS foodName,
+          calories,
+          protein,
+          carbs,
+          fat,
+          goal_calories AS goalCalories,
+          goal_protein AS goalProtein,
+          goal_carbs AS goalCarbs,
+          goal_fat AS goalFat,
+          updated_goal_fields AS updatedGoalFields
+        FROM chat_mutation_outcomes
+        ORDER BY rowid
+      `)
+      .all() as Array<{
+        assistantMessageId: string;
+        action: string;
+        affectedDate: string;
+        foodName: string | null;
+        calories: number | null;
+        protein: number | null;
+        carbs: number | null;
+        fat: number | null;
+        goalCalories: number | null;
+        goalProtein: number | null;
+        goalCarbs: number | null;
+        goalFat: number | null;
+        updatedGoalFields: string | null;
+      }>;
+  }
+
+  async function compressedHistoryContent() {
+    const compressed = await services.chatService.getCompressedHistory(deviceId, 10);
+    return compressed.map((message) => message.content).join("\n");
+  }
+
   async function assertHistoryActionReply(input: {
     proposalId: string;
     action: string;
@@ -417,6 +459,11 @@ describe("proposal action API", () => {
       didMutateMeal: boolean;
       reply?: string;
       dailyTargets?: DailyTargets;
+      mutationOutcomeFact?: {
+        action: string;
+        affectedDate: string;
+        updatedGoals: Array<{ label: string; value: number; unit: string }>;
+      };
       proposalCard?: { status: string; isActionable: boolean; proposalId: string };
       proposalActionEvent?: { proposalId: string; proposalKind: string; action: string; transcriptCopy: string };
     };
@@ -438,6 +485,32 @@ describe("proposal action API", () => {
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
     assert.equal(publishedGoalUpdates.length, 1);
     assert.equal(publishedGoalUpdates[0]?.actionEventCount, 1);
+    assert.equal(body.mutationOutcomeFact?.action, "update_goals");
+    assert.deepEqual(
+      body.mutationOutcomeFact?.updatedGoals,
+      [
+        { label: "卡路里", value: 1400, unit: "kcal" },
+        { label: "蛋白質", value: 125, unit: "g" },
+        { label: "碳水", value: 130, unit: "g" },
+        { label: "脂肪", value: 45, unit: "g" },
+      ],
+    );
+
+    const outcomes = mutationOutcomeRows();
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0]?.action, "update_goals");
+    assert.equal(outcomes[0]?.affectedDate, body.mutationOutcomeFact?.affectedDate);
+    assert.equal(outcomes[0]?.goalCalories, 1400);
+    assert.equal(outcomes[0]?.goalProtein, 125);
+    assert.equal(outcomes[0]?.goalCarbs, 130);
+    assert.equal(outcomes[0]?.goalFat, 45);
+    assert.deepEqual(JSON.parse(outcomes[0]?.updatedGoalFields ?? "[]"), ["卡路里", "蛋白質", "碳水", "脂肪"]);
+    assert.ok(
+      (await compressedHistoryContent()).includes(
+        `[系統已更新目標：${outcomes[0]?.affectedDate} 卡路里 1400 kcal、蛋白質 125 g、碳水 130 g、脂肪 45 g]`,
+      ),
+      "expected compressed history to include structured goal outcome summary",
+    );
 
     await assertHistoryActionReply({
       proposalId,
@@ -467,6 +540,50 @@ describe("proposal action API", () => {
     assert.equal(replayBody.proposalCard?.status, "approved");
     assert.equal(replayBody.proposalCard?.isActionable, false);
     assert.deepEqual(await readTargets(), targets);
+  });
+
+  it("rolls back goal approval when structured outcome persistence fails", async () => {
+    const defaults = await readTargets();
+    const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
+    const { proposalId } = await createGoalCard(targets);
+    const goalReply = "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g";
+    const originalSaveAssistantReplyWithReceipt = services.chatService.saveAssistantReplyWithReceipt;
+    services.chatService.saveAssistantReplyWithReceipt = async () => {
+      throw new Error("injected structured outcome persistence failure");
+    };
+
+    const failed = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(failed.statusCode, 500);
+    assert.deepEqual(await readTargets(), defaults);
+    assert.equal(await historyHasActionEvent(proposalId), false);
+    assert.equal(await historyHasAssistantReply(goalReply), false);
+    assert.equal(mutationOutcomeRows().length, 0);
+    assert.equal((await services.goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    }))?.proposalId, proposalId);
+    assert.equal((await services.proposalCardService.getLatestCardForProposal({
+      deviceId,
+      proposalId,
+    }))?.status, "active");
+
+    services.chatService.saveAssistantReplyWithReceipt = originalSaveAssistantReplyWithReceipt;
+    const recovered = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(recovered.statusCode, 200);
+    assert.deepEqual(await readTargets(), targets);
+    assert.equal(mutationOutcomeRows().length, 1);
   });
 
   it("rejects an active goal proposal with deterministic assistant reply copy", async () => {
@@ -863,6 +980,13 @@ describe("proposal action API", () => {
       deletedMealId?: string;
       affectedDate?: string;
       dailySummary?: unknown;
+      mutationOutcomeFact?: {
+        action: string;
+        affectedDate: string;
+        foodName: string;
+        calories?: number;
+        protein?: number;
+      };
       proposalCard?: { proposalId: string; status: string; isActionable: boolean };
       proposalActionEvent?: { proposalId: string; action: string; transcriptCopy: string };
     };
@@ -880,6 +1004,27 @@ describe("proposal action API", () => {
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇確認刪除");
     assert.equal((await readMealsFor(meal)).some((row) => row.id === meal.id), false);
     assert.equal(body.reply, "已刪除3/25 豆腐雞肉飯，已從當日紀錄移除。");
+    assert.deepEqual(body.mutationOutcomeFact, {
+      action: "delete_meal",
+      affectedDate: "2026-03-25",
+      foodName: "豆腐雞肉飯",
+      calories: 520,
+      protein: 38,
+    });
+
+    const outcomes = mutationOutcomeRows();
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0]?.action, "delete_meal");
+    assert.equal(outcomes[0]?.affectedDate, "2026-03-25");
+    assert.equal(outcomes[0]?.foodName, "豆腐雞肉飯");
+    assert.equal(outcomes[0]?.calories, 520);
+    assert.equal(outcomes[0]?.protein, 38);
+    assert.ok(
+      (await compressedHistoryContent()).includes(
+        "[系統已刪除餐點：2026-03-25 豆腐雞肉飯，520 kcal、蛋白質 38 g]",
+      ),
+      "expected compressed history to include structured delete outcome summary",
+    );
     await assertHistoryActionReply({
       proposalId,
       action: "approve",
