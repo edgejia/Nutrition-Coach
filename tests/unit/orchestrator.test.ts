@@ -6,11 +6,15 @@ import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
 import { createGoalProposalService } from "../../server/services/goal-proposals.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
+import { createMealDeleteProposalService } from "../../server/services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
+import { createProposalActionService } from "../../server/services/proposal-actions.js";
+import { createProposalCardService } from "../../server/services/proposal-cards.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import type {
   ChatMessage,
   GenerateObjectRequest,
@@ -20,8 +24,13 @@ import type {
   LLMRoundResult,
   LLMProvider,
 } from "../../server/llm/types.js";
-import { createOrchestrator, guardNoMutationLoggingClaim } from "../../server/orchestrator/index.js";
-import { mutationOutcomeFactFromEffects } from "../../server/orchestrator/mutation-effects.js";
+import { appendMutationReceiptStream, createOrchestrator, guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
+import {
+  createEmptyCommittedMutationState,
+  mutationOutcomeFactFromEffects,
+  projectCommittedMutationState,
+  type CommittedMutationState,
+} from "../../server/orchestrator/mutation-effects.js";
 import type { MutationEffects } from "../../server/orchestrator/mutation-effects.js";
 import { currentAppDate, formatLocalDate } from "../../server/lib/time.js";
 import {
@@ -29,7 +38,10 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderMealDeleteCancelCopy,
   renderMealNumericCancelCopy,
+  renderMutationReceipt,
+  renderProposalInactiveCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
@@ -43,6 +55,28 @@ type ExpectedMutationOutcomeFact = {
   affectedDate: string;
   [key: string]: unknown;
 };
+
+describe("appendMutationReceiptStream", () => {
+  it("propagates stream errors without appending receipt text", async () => {
+    const expectedError = new Error("ProviderStreamFailure");
+    async function* failingStream(): AsyncGenerator<string> {
+      yield "模型部分回覆";
+      throw expectedError;
+    }
+
+    const tokens: string[] = [];
+    await assert.rejects(
+      async () => {
+        for await (const token of appendMutationReceiptStream(failingStream(), "已記錄雞腿便當")) {
+          tokens.push(token);
+        }
+      },
+      (error) => error === expectedError,
+    );
+
+    assert.deepEqual(tokens, ["模型部分回覆"]);
+  });
+});
 
 function getMutationOutcomeFact(result: unknown): Record<string, unknown> | undefined {
   const maybeResult = result as { mutationOutcomeFact?: Record<string, unknown> };
@@ -227,6 +261,144 @@ describe("mutationOutcomeFactFromEffects", () => {
   });
 });
 
+describe("direct orchestrator mutation receipt egress", () => {
+  it("routes log, update, delete, and goals receipts through the guarded wrapper", () => {
+    const source = orchestratorIndexSourceWithoutComments();
+
+    assert.match(source, /renderGuardedMutationReceipt/);
+    assert.match(source, /const renderReceipt = \(effects: MutationEffects\) =>\s*renderGuardedMutationReceipt/);
+    assert.doesNotMatch(source, /function renderCheckedMutationReceipt/);
+    assert.doesNotMatch(source, /assertNoForbiddenReceiptTerms/);
+    assert.equal(
+      (source.match(/mutationReceiptText\s*=\s*renderReceipt\(mutationEffects\)/g) ?? []).length,
+      4,
+    );
+  });
+});
+
+describe("no-mutation success-claim guard", () => {
+  const committedTargets = {
+    calories: 1800,
+    protein: 130,
+    carbs: 190,
+    fat: 55,
+  };
+  const summaryOutcome = { status: "unavailable", reason: "recompute_failed" } as const;
+  const today = formatLocalDate(currentAppDate());
+
+  function guardWithState(reply: string, state: CommittedMutationState = createEmptyCommittedMutationState()) {
+    const projection = projectCommittedMutationState(state);
+    return guardNoMutationSuccessClaim(reply, projection);
+  }
+
+  function stateFor(effects: MutationEffects): CommittedMutationState {
+    return {
+      effects,
+      receiptText: renderMutationReceipt(effects),
+      mutationOutcomeFact: mutationOutcomeFactFromEffects(effects),
+      affectedDate: effects.affectedDate,
+    };
+  }
+
+  const logEffects: MutationEffects = {
+    kind: "log",
+    affectedDate: today,
+    committedTargets,
+    summaryOutcome,
+    meal: {
+      mealId: "log-meal",
+      mealRevisionId: "log-meal:r1",
+      dateKey: today,
+      loggedAt: `${today}T04:30:00.000Z`,
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+      carbs: 70,
+      fat: 18,
+      itemCount: 1,
+    },
+  };
+  const updateEffects: MutationEffects = {
+    kind: "update",
+    affectedDate: today,
+    committedTargets,
+    summaryOutcome,
+    meal: {
+      mealId: "update-meal",
+      mealRevisionId: "update-meal:r2",
+      dateKey: today,
+      loggedAt: `${today}T04:30:00.000Z`,
+      foodName: "半份雞腿便當",
+      calories: 360,
+      protein: 20,
+      carbs: 45,
+      fat: 10,
+      itemCount: 1,
+    },
+  };
+  const deleteEffects: MutationEffects = {
+    kind: "delete",
+    affectedDate: today,
+    committedTargets,
+    summaryOutcome,
+    deletedMeal: {
+      mealId: "delete-meal",
+      dateKey: today,
+      loggedAt: `${today}T04:30:00.000Z`,
+      foodName: "雞腿便當",
+      calories: 620,
+      protein: 24,
+    },
+  };
+  const goalsEffects: MutationEffects = {
+    kind: "goals",
+    affectedDate: today,
+    committedTargets,
+    targets: committedTargets,
+    updatedFields: ["calories", "protein", "carbs", "fat"],
+  };
+
+  it("falls back when no committed mutation exists but copy claims any mutation verb succeeded", () => {
+    for (const claim of [
+      "已記錄雞腿便當，620 kcal，蛋白質 24 g。",
+      "已更新雞腿便當，620 kcal，蛋白質 24 g。",
+      "已刪除雞腿便當，已從當日紀錄移除。",
+      "已更新每日目標：\n• 卡路里 1800 kcal",
+    ]) {
+      const guarded = guardWithState(claim);
+      assert.notEqual(guarded, claim);
+      assert.doesNotMatch(guarded, /已記錄雞腿便當|已更新雞腿便當|已刪除雞腿便當|已更新每日目標/);
+    }
+  });
+
+  it("preserves renderer-owned no-mutation goal and proposal failure copy", () => {
+    for (const reply of [
+      renderGoalAuthorityFailureCopy(),
+      renderGoalValidationFailureCopy(["calories"]),
+      renderGoalCancelCopy(),
+      renderProposalKindAmbiguityCopy(),
+    ]) {
+      assert.equal(guardWithState(reply), reply);
+    }
+  });
+
+  it("blocks cross-verb success claims when the committed kind does not match the copy", () => {
+    assert.notEqual(guardWithState("已刪除雞腿便當，已從當日紀錄移除。", stateFor(logEffects)), "已刪除雞腿便當，已從當日紀錄移除。");
+    assert.notEqual(guardWithState("已更新雞腿便當，620 kcal，蛋白質 24 g。", stateFor(deleteEffects)), "已更新雞腿便當，620 kcal，蛋白質 24 g。");
+    assert.notEqual(guardWithState("已記錄雞腿便當，620 kcal，蛋白質 24 g。", stateFor(updateEffects)), "已記錄雞腿便當，620 kcal，蛋白質 24 g。");
+    assert.notEqual(guardWithState("已更新每日目標：\n• 卡路里 1800 kcal", stateFor(updateEffects)), "已更新每日目標：\n• 卡路里 1800 kcal");
+  });
+
+  it("preserves canonical committed receipts byte-for-byte for matching mutation kinds", () => {
+    for (const effects of [logEffects, updateEffects, deleteEffects, goalsEffects]) {
+      const receipt = renderMutationReceipt(effects);
+      assert.equal(guardWithState(receipt, stateFor(effects)), receipt);
+    }
+    assert.equal(renderMutationReceipt(goalsEffects), "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 190 g\n• 脂肪 55 g");
+    assert.equal(renderMutationReceipt(updateEffects), "已更新半份雞腿便當，360 kcal，蛋白質 20 g。");
+  });
+});
+
 function codePointLength(value: string) {
   return [...value].length;
 }
@@ -392,6 +564,8 @@ async function* streamTokensThenThrow(tokens: string[], error: Error): AsyncGene
 }
 
 describe("orchestrator shared patterns", () => {
+  const noMutationProjection = projectCommittedMutationState(createEmptyCommittedMutationState());
+
   it("matches the known 方式1/方式2 hallucinated choice prompt shape", () => {
     assert.equal(
       CHOICE_PROMPT_PATTERN.test("若你選擇方式1，我會請你補充份量；若你選擇方式2，我會直接估算。"),
@@ -433,10 +607,9 @@ describe("orchestrator shared patterns", () => {
   });
 
   it("guards no-mutation meal-specific summary claims against actual facts", () => {
-    const emptyFactsReply = guardNoMutationLoggingClaim(
+    const emptyFactsReply = guardNoMutationSuccessClaim(
       "今天已記錄牛肉飯，650 kcal。",
-      false,
-      false,
+      noMutationProjection,
       {
         summaryHistoryFacts: {
           dailySummary: {
@@ -454,10 +627,9 @@ describe("orchestrator shared patterns", () => {
     assert.doesNotMatch(emptyFactsReply, /已記錄牛肉飯|650 kcal/);
     assert.match(emptyFactsReply, /還沒有把這餐寫入紀錄/);
 
-    const mismatchedFactsReply = guardNoMutationLoggingClaim(
+    const mismatchedFactsReply = guardNoMutationSuccessClaim(
       "今天已記錄牛肉飯，650 kcal。",
-      false,
-      false,
+      noMutationProjection,
       {
         summaryHistoryFacts: {
           dailySummary: {
@@ -474,10 +646,9 @@ describe("orchestrator shared patterns", () => {
     );
     assert.doesNotMatch(mismatchedFactsReply, /已記錄牛肉飯|650 kcal/);
 
-    const matchingFactsReply = guardNoMutationLoggingClaim(
+    const matchingFactsReply = guardNoMutationSuccessClaim(
       "目前已記錄的餐點有豆腐飯，約 520 kcal。",
-      false,
-      false,
+      noMutationProjection,
       {
         summaryHistoryFacts: {
           dailySummary: {
@@ -514,52 +685,47 @@ describe("orchestrator shared patterns", () => {
     };
 
     assert.equal(
-      guardNoMutationLoggingClaim("今天已記錄 2 餐，共 900 kcal。", false, false, facts),
+      guardNoMutationSuccessClaim("今天已記錄 2 餐，共 900 kcal。", noMutationProjection, facts),
       "今天已記錄 2 餐，共 900 kcal。",
     );
 
-    const dayTotalAsSingleMeal = guardNoMutationLoggingClaim(
+    const dayTotalAsSingleMeal = guardNoMutationSuccessClaim(
       "今天已記錄雞胸肉，900 kcal。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.doesNotMatch(dayTotalAsSingleMeal, /已記錄雞胸肉|900 kcal/);
 
-    const wrongCount = guardNoMutationLoggingClaim("今天已記錄 3 餐，共 900 kcal。", false, false, facts);
+    const wrongCount = guardNoMutationSuccessClaim("今天已記錄 3 餐，共 900 kcal。", noMutationProjection, facts);
     assert.doesNotMatch(wrongCount, /今天已記錄 3 餐/);
 
-    const wrongCalories = guardNoMutationLoggingClaim("今天已記錄 2 餐，共 1200 kcal。", false, false, facts);
+    const wrongCalories = guardNoMutationSuccessClaim("今天已記錄 2 餐，共 1200 kcal。", noMutationProjection, facts);
     assert.doesNotMatch(wrongCalories, /1200 kcal/);
 
-    const aggregateWithWrongMeal = guardNoMutationLoggingClaim(
+    const aggregateWithWrongMeal = guardNoMutationSuccessClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.doesNotMatch(aggregateWithWrongMeal, /牛肉飯/);
 
-    const aggregateWithWrongMealCalories = guardNoMutationLoggingClaim(
+    const aggregateWithWrongMealCalories = guardNoMutationSuccessClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含牛肉飯 900 kcal。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.doesNotMatch(aggregateWithWrongMealCalories, /牛肉飯|其中包含牛肉飯 900 kcal/);
 
-    const aggregateWithWrongMealAttribution = guardNoMutationLoggingClaim(
+    const aggregateWithWrongMealAttribution = guardNoMutationSuccessClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉 900 kcal。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.doesNotMatch(aggregateWithWrongMealAttribution, /其中包含雞胸肉 900 kcal/);
 
-    const aggregateWithMatchingMeal = guardNoMutationLoggingClaim(
+    const aggregateWithMatchingMeal = guardNoMutationSuccessClaim(
       "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉。",
-      false,
-      false,
+      noMutationProjection,
       facts,
     );
     assert.equal(aggregateWithMatchingMeal, "今天已記錄 2 餐，共 900 kcal，其中包含雞胸肉。");
@@ -567,6 +733,7 @@ describe("orchestrator shared patterns", () => {
 });
 
 describe("Orchestrator - didLogMeal", () => {
+  let db: ReturnType<typeof createDb>;
   let orchestrator: ReturnType<typeof createOrchestrator>;
   let mockLLM: MockLLMProvider;
   let deviceId: string;
@@ -574,19 +741,123 @@ describe("Orchestrator - didLogMeal", () => {
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let mealCorrectionService: ReturnType<typeof createMealCorrectionService>;
   let goalProposalService: ReturnType<typeof createGoalProposalService>;
+  let mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   let mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  let proposalCardService: ReturnType<typeof createProposalCardService>;
+  let proposalActionService: ReturnType<typeof createProposalActionService>;
+  let publisher: RealtimePublisher;
+  let summaryService: ReturnType<typeof createSummaryService>;
   let chatService: ReturnType<typeof createChatService>;
   let shouldFailSummary = false;
 
   beforeEach(async () => {
-    const db = createDb(":memory:");
+    db = createDb(":memory:");
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
-    goalProposalService = createGoalProposalService(db);
-    mealNumericProposalService = createMealNumericProposalService(db);
-    const summaryService = createSummaryService(db);
+    summaryService = createSummaryService(db);
     chatService = createChatService(db);
+    proposalCardService = createProposalCardService(db);
+    const baseGoalProposalService = createGoalProposalService(db);
+    const baseMealDeleteProposalService = createMealDeleteProposalService(db);
+    const baseMealNumericProposalService = createMealNumericProposalService(db);
+    goalProposalService = {
+      ...baseGoalProposalService,
+      async putLatest(input) {
+        const proposal = await baseGoalProposalService.putLatest(input);
+        const assistant = await chatService.saveMessage(input.deviceId, "assistant", "請確認這組每日目標提案。");
+        await proposalCardService.saveAssistantProposalCard({
+          deviceId: input.deviceId,
+          assistantMessageId: assistant.id,
+          proposalId: proposal.proposalId,
+          proposalKind: "goal",
+          proposalLane: "goal",
+          title: "請確認這組每日目標提案。",
+          details: {
+            rows: [
+              { label: "卡路里", after: `${input.targets.calories} kcal` },
+              { label: "蛋白質", after: `${input.targets.protein} g` },
+            ],
+          },
+          actions: {
+            approveLabel: "套用目標",
+            editLabel: "調整目標",
+            rejectLabel: "取消提案",
+          },
+        });
+        return proposal;
+      },
+    };
+    mealDeleteProposalService = {
+      ...baseMealDeleteProposalService,
+      async putLatest(input) {
+        const proposal = await baseMealDeleteProposalService.putLatest(input);
+        const assistant = await chatService.saveMessage(input.deviceId, "assistant", "請確認是否刪除這筆餐點。");
+        await proposalCardService.saveAssistantProposalCard({
+          deviceId: input.deviceId,
+          assistantMessageId: assistant.id,
+          proposalId: proposal.proposalId,
+          proposalKind: "meal_delete",
+          proposalLane: "meal_mutation",
+          title: "請確認是否刪除這筆餐點。",
+          details: {
+            rows: [
+              { label: "餐點", value: input.input.snapshot.mealLabel },
+              { label: "熱量", value: `${input.input.snapshot.calories} kcal` },
+            ],
+          },
+          actions: {
+            approveLabel: "確認刪除",
+            editLabel: "改用文字調整",
+            rejectLabel: "取消提案",
+          },
+          expiresAt: proposal.expiresAt,
+        });
+        return proposal;
+      },
+    };
+    mealNumericProposalService = {
+      ...baseMealNumericProposalService,
+      async putLatest(input) {
+        const proposal = await baseMealNumericProposalService.putLatest(input);
+        const proposalKind = input.input.provenance === "model_estimate" ? "meal_estimate" : "meal_numeric";
+        const assistant = await chatService.saveMessage(input.deviceId, "assistant", "請確認這組餐點修正提案。");
+        await proposalCardService.saveAssistantProposalCard({
+          deviceId: input.deviceId,
+          assistantMessageId: assistant.id,
+          proposalId: proposal.proposalId,
+          proposalKind,
+          proposalLane: "meal_mutation",
+          title: "請確認這組餐點修正提案。",
+          details: {
+            rows: input.input.affectedFields.map((field) => ({
+              label: field.field,
+              before: String(field.before),
+              after: String(field.after),
+            })),
+          },
+          actions: {
+            approveLabel: "套用修改",
+            editLabel: "改用文字調整",
+            rejectLabel: "取消提案",
+          },
+          expiresAt: proposal.expiresAt,
+        });
+        return proposal;
+      },
+    };
+    publisher = new RealtimePublisher();
+    proposalActionService = createProposalActionService({
+      db,
+      chatService,
+      proposalCardService,
+      goalProposalService,
+      mealDeleteProposalService,
+      mealNumericProposalService,
+      mealCorrectionService,
+      deviceService,
+      publisher,
+    });
     mockLLM = new MockLLMProvider();
     shouldFailSummary = false;
 
@@ -606,7 +877,9 @@ describe("Orchestrator - didLogMeal", () => {
       mealCorrectionService,
       deviceService,
       goalProposalService,
+      mealDeleteProposalService,
       mealNumericProposalService,
+      proposalActionService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -1275,7 +1548,7 @@ describe("Orchestrator - didLogMeal", () => {
     assert.doesNotMatch(result.reply, /summaryOutcome|recompute_failed|dailySummary|publish_failed/);
   });
 
-  it("returns the delete receipt when a later tool in the same batch fails fatally", async () => {
+  it("previews delete setup before confirmation commits the delete receipt", async () => {
     const seeded = await foodLoggingService.logGroupedMeal(deviceId, {
       items: [
         { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
@@ -1307,7 +1580,18 @@ describe("Orchestrator - didLogMeal", () => {
       ],
     });
 
-    const result = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+    const setupResult = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in setupResult);
+    assert.match(setupResult.reply, /即將刪除：雞腿便當/);
+    assert.equal(setupResult.didLogMeal, false);
+    assert.equal(setupResult.didMutateMeal, false);
+    assert.equal(setupResult.finalReplySource, "renderer");
+    assert.equal(setupResult.finalReplyShape, "plain_text");
+    assert.equal(setupResult.deletedMealId, undefined);
+    assert.equal(setupResult.dailySummary, undefined);
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
 
     assert.ok("reply" in result);
     assert.equal(result.reply, "已刪除雞腿便當，已從當日紀錄移除。");
@@ -1325,12 +1609,39 @@ describe("Orchestrator - didLogMeal", () => {
     const localDeviceService = createDeviceService(db);
     const localFoodLoggingService = createFoodLoggingService(db);
     const localChatService = createChatService(db);
+    const localProposalCardService = createProposalCardService(db);
+    const localGoalProposalService = createGoalProposalService(db);
+    const localMealNumericProposalService = createMealNumericProposalService(db);
+    const localMealDeleteProposalService = createMealDeleteProposalService(db);
     const localLLM = new MockLLMProvider();
     const localDeviceId = (await localDeviceService.createDevice("fat_loss")).deviceId;
     const seeded = await localFoodLoggingService.logGroupedMeal(localDeviceId, {
       items: [
         { foodName: "雞腿便當", calories: 620, protein: 24, carbs: 70, fat: 18 },
       ],
+    });
+    const localMealCorrectionService = createMealCorrectionService(db, {
+      summaryService: {
+        async getDailySummary() {
+          throw new Error("summary recomputation failed");
+        },
+      },
+      foodLoggingService: {
+        async getMealsByDate() {
+          throw new Error("persisted meal recovery failed");
+        },
+      },
+    });
+    const localProposalActionService = createProposalActionService({
+      db,
+      chatService: localChatService,
+      proposalCardService: localProposalCardService,
+      goalProposalService: localGoalProposalService,
+      mealDeleteProposalService: localMealDeleteProposalService,
+      mealNumericProposalService: localMealNumericProposalService,
+      mealCorrectionService: localMealCorrectionService,
+      deviceService: localDeviceService,
+      publisher: new RealtimePublisher(),
     });
 
     orchestrator = createOrchestrator({
@@ -1347,19 +1658,12 @@ describe("Orchestrator - didLogMeal", () => {
           throw new Error("persisted meal recovery failed");
         },
       },
-      mealCorrectionService: createMealCorrectionService(db, {
-        summaryService: {
-          async getDailySummary() {
-            throw new Error("summary recomputation failed");
-          },
-        },
-        foodLoggingService: {
-          async getMealsByDate() {
-            throw new Error("persisted meal recovery failed");
-          },
-        },
-      }),
+      mealCorrectionService: localMealCorrectionService,
       deviceService: localDeviceService,
+      goalProposalService: localGoalProposalService,
+      mealDeleteProposalService: localMealDeleteProposalService,
+      mealNumericProposalService: localMealNumericProposalService,
+      proposalActionService: localProposalActionService,
     });
 
     localLLM.queueChatResponse({
@@ -1383,7 +1687,24 @@ describe("Orchestrator - didLogMeal", () => {
       ],
     });
 
-    const result = await orchestrator.handleMessage(localDeviceId, "刪掉雞腿便當");
+    const setupResult = await orchestrator.handleMessage(localDeviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in setupResult);
+    assert.match(setupResult.reply, /即將刪除：雞腿便當/);
+    assert.equal(setupResult.didMutateMeal, false);
+    assert.equal(setupResult.summaryOutcome, undefined);
+    assert.equal(setupResult.dailySummary, undefined);
+    if (!setupResult.proposalCard) {
+      throw new Error("expected pending delete proposal card");
+    }
+    const setupAssistant = await localChatService.saveMessage(localDeviceId, "assistant", setupResult.reply);
+    await localProposalCardService.saveAssistantProposalCard({
+      ...setupResult.proposalCard,
+      deviceId: localDeviceId,
+      assistantMessageId: setupAssistant.id,
+    });
+
+    const result = await orchestrator.handleMessage(localDeviceId, "好");
 
     assert.ok("reply" in result);
     assert.equal(result.reply, "已刪除雞腿便當，已從當日紀錄移除。");
@@ -1524,7 +1845,14 @@ describe("Orchestrator - didLogMeal", () => {
       ],
     });
 
-    const result = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+    const setupResult = await orchestrator.handleMessage(deviceId, "刪掉雞腿便當");
+
+    assert.ok("reply" in setupResult);
+    assert.match(setupResult.reply, /即將刪除：雞腿便當/);
+    assert.equal(setupResult.didMutateMeal, false);
+    assert.equal(getMutationOutcomeFact(setupResult), undefined);
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
 
     assert.ok("reply" in result);
     assertMutationOutcomeFact(result, {
@@ -2709,6 +3037,107 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(meals.find((current) => current.id === meal.id)?.protein, 30);
   });
 
+  it("fails closed on bare consent when goal and delete proposals are both active", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: {
+        calories: 1750,
+        protein: 125,
+        carbs: 180,
+        fat: 55,
+      },
+    });
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該被呼叫" });
+
+    for (const message of ["好", "確認", "確定"]) {
+      const result = await orchestrator.handleMessage(deviceId, message);
+
+      assert.ok("reply" in result);
+      assert.equal(result.reply, renderProposalKindAmbiguityCopy(), message);
+      assert.equal(result.didLogMeal, false);
+      assert.equal(result.didMutateMeal, false);
+      assert.equal(result.finalReplySource, "renderer");
+      assert.equal(result.finalReplyShape, "plain_text");
+      assert.equal(mockLLM.chatCalls.length, 0);
+      assert.ok(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
+      assert.ok(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
+      const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+      assert.equal(meals.find((current) => current.id === meal.id)?.calories, 650);
+    }
+  });
+
+  it("treats negated delete phrases as cancel instead of approval", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+
+    for (const message of ["我不想刪除", "先別刪除"]) {
+      await mealDeleteProposalService.putLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        input: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          snapshot: {
+            mealId: meal.id,
+            expectedMealRevisionId: meal.mealRevisionId,
+            mealLabel: "雞腿飯",
+            calories: 650,
+            protein: 30,
+            carbs: 80,
+            fat: 20,
+            dateKey: "2026-04-19",
+            loggedAt: meal.loggedAt,
+            mealPeriod: "lunch",
+          },
+        },
+      });
+
+      const result = await orchestrator.handleMessage(deviceId, message);
+
+      assert.ok("reply" in result);
+      assert.equal(result.reply, renderMealDeleteCancelCopy(), message);
+      assert.equal(result.didLogMeal, false);
+      assert.equal(result.didMutateMeal, false);
+      assert.equal(result.finalReplySource, "renderer");
+      assert.equal(result.finalReplyShape, "plain_text");
+      assert.equal(mockLLM.chatCalls.length, 0);
+      assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+      const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+      assert.equal(meals.find((current) => current.id === meal.id)?.calories, 650);
+    }
+  });
+
   it("clears goal and meal proposals on broad cancel before any model call", async () => {
     const meal = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",
@@ -2742,14 +3171,14 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(deviceId, "不要");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, renderMealNumericCancelCopy());
+    assert.equal(result.reply, renderProposalKindAmbiguityCopy());
     assert.equal(result.didLogMeal, false);
     assert.equal(result.didMutateMeal, false);
     assert.equal(result.finalReplySource, "renderer");
     assert.equal(result.finalReplyShape, "plain_text");
     assert.equal(mockLLM.chatCalls.length, 0);
-    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
-    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    assert.ok(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
+    assert.ok(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
   });
 
   it("clears only the meal proposal on kind-specific meal cancel", async () => {
@@ -2833,5 +3262,343 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
     assert.equal(meals.find((current) => current.id === meal.id)?.protein, 15);
+  });
+
+  it("confirms the active delete proposal by consuming before deleting exactly that meal", async () => {
+    const firstMeal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const secondMeal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T10:00:00.000Z",
+      items: [
+        { foodName: "鮭魚飯", calories: 520, protein: 32, carbs: 58, fat: 14 },
+      ],
+    });
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: firstMeal.id,
+        expectedMealRevisionId: firstMeal.mealRevisionId,
+        snapshot: {
+          mealId: firstMeal.id,
+          expectedMealRevisionId: firstMeal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: firstMeal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    const deleteCalls: Array<{ mealId: string; expectedMealRevisionId?: string | null }> = [];
+    let clearPendingSelectionCalls = 0;
+    const trackedMealCorrectionService = {
+      ...mealCorrectionService,
+      async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+        deleteCalls.push({ mealId: args[1], expectedMealRevisionId: args[2] });
+        return mealCorrectionService.deleteMeal(...args);
+      },
+      async clearPendingSelection(...args: Parameters<typeof mealCorrectionService.clearPendingSelection>) {
+        clearPendingSelectionCalls += 1;
+        return mealCorrectionService.clearPendingSelection(...args);
+      },
+    };
+    const trackedProposalActionService = createProposalActionService({
+      db,
+      chatService,
+      proposalCardService,
+      goalProposalService,
+      mealDeleteProposalService,
+      mealNumericProposalService,
+      mealCorrectionService: trackedMealCorrectionService,
+      deviceService,
+      publisher,
+    });
+    const approvalOrchestrator = createOrchestrator({
+      llmProvider: mockLLM,
+      chatService,
+      summaryService,
+      foodLoggingService,
+      mealCorrectionService: trackedMealCorrectionService,
+      deviceService,
+      goalProposalService,
+      mealDeleteProposalService,
+      mealNumericProposalService,
+      proposalActionService: trackedProposalActionService,
+    });
+
+    const result = await approvalOrchestrator.handleMessage(deviceId, "確認");
+
+    assert.ok("reply" in result);
+    assert.match(result.reply, /已刪除4\/19 雞腿飯，已從當日紀錄移除。/);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.deletedMealId, firstMeal.id);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.deepEqual(deleteCalls, [{ mealId: firstMeal.id, expectedMealRevisionId: firstMeal.mealRevisionId }]);
+    assert.equal(clearPendingSelectionCalls, 1);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((meal) => meal.id === firstMeal.id), false);
+    assert.equal(meals.some((meal) => meal.id === secondMeal.id), true);
+  });
+
+  it("clears an active delete proposal on cancel without deleting or calling the model", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "取消");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderMealDeleteCancelCopy());
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((current) => current.id === meal.id), true);
+  });
+
+  it("fails closed when delete proposal consume returns no payload", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const proposal = await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    let deleteCalls = 0;
+    const authorityFailureMealCorrectionService = {
+      ...mealCorrectionService,
+      async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+        deleteCalls += 1;
+        return mealCorrectionService.deleteMeal(...args);
+      },
+    };
+    const authorityFailureMealDeleteProposalService = {
+      ...mealDeleteProposalService,
+      async getLatest() {
+        return proposal;
+      },
+      async consumeLatest() {
+        return undefined;
+      },
+    };
+    const authorityFailureProposalActionService = createProposalActionService({
+      db,
+      chatService,
+      proposalCardService,
+      goalProposalService,
+      mealDeleteProposalService: authorityFailureMealDeleteProposalService,
+      mealNumericProposalService,
+      mealCorrectionService: authorityFailureMealCorrectionService,
+      deviceService,
+      publisher,
+    });
+    const authorityFailureOrchestrator = createOrchestrator({
+      llmProvider: mockLLM,
+      chatService,
+      summaryService,
+      foodLoggingService,
+      mealCorrectionService: authorityFailureMealCorrectionService,
+      deviceService,
+      goalProposalService,
+      mealDeleteProposalService: authorityFailureMealDeleteProposalService,
+      mealNumericProposalService,
+      proposalActionService: authorityFailureProposalActionService,
+    });
+
+    const result = await authorityFailureOrchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderProposalInactiveCopy({ proposalKind: "meal_delete", status: "stale" }));
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(deleteCalls, 0);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((current) => current.id === meal.id), true);
+  });
+
+  it("does not surface delete success copy from typed proposal actions without committed delete facts", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    const proposal = await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    const falseDeleteReply = "已刪除4/19 雞腿飯，已從當日紀錄移除。";
+    const noFactProposalActionService = {
+      ...proposalActionService,
+      async handleAction() {
+        return {
+          ok: true as const,
+          status: "approved" as const,
+          didMutateMeal: true,
+          reply: falseDeleteReply,
+          proposalCard: {
+            id: "card-false-delete",
+            assistantMessageId: "assistant-false-delete",
+            proposalId: proposal.proposalId,
+            proposalKind: "meal_delete" as const,
+            proposalLane: "meal_mutation" as const,
+            status: "approved" as const,
+            title: "請確認是否刪除這筆餐點。",
+            details: { rows: [] },
+            actions: {
+              approveLabel: "確認刪除",
+              editLabel: "改用文字調整",
+              rejectLabel: "取消提案",
+            },
+            expiresAt: null,
+            lapseCopy: null,
+            supersededByKind: null,
+            isActionable: false,
+          },
+          proposalActionEvent: {
+            proposalId: proposal.proposalId,
+            proposalKind: "meal_delete" as const,
+            proposalLane: "meal_mutation" as const,
+            action: "approve" as const,
+            transcriptCopy: "已選擇確認刪除",
+            createdAt: "2026-04-19T04:00:00.000Z",
+          },
+        };
+      },
+    };
+    const noFactOrchestrator = createOrchestrator({
+      llmProvider: mockLLM,
+      chatService,
+      summaryService,
+      foodLoggingService,
+      mealCorrectionService,
+      deviceService,
+      goalProposalService,
+      mealDeleteProposalService,
+      mealNumericProposalService,
+      proposalActionService: noFactProposalActionService,
+    });
+
+    const result = await noFactOrchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.notEqual(result.reply, falseDeleteReply);
+    assert.doesNotMatch(result.reply, /已刪除|完成刪除|成功刪除/);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.deletedMealId, undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((current) => current.id === meal.id), true);
+  });
+
+  it("returns stale delete copy when the previewed meal revision changed before confirmation", async () => {
+    const meal = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: meal.id,
+        expectedMealRevisionId: meal.mealRevisionId,
+        snapshot: {
+          mealId: meal.id,
+          expectedMealRevisionId: meal.mealRevisionId,
+          mealLabel: "雞腿飯",
+          calories: 650,
+          protein: 30,
+          carbs: 80,
+          fat: 20,
+          dateKey: "2026-04-19",
+          loggedAt: meal.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    await mealCorrectionService.updateMeal(
+      deviceId,
+      meal.id,
+      { patch: { foodName: "新版雞腿飯", calories: 700, protein: 35, carbs: 82, fat: 22 } },
+      meal.mealRevisionId,
+    );
+
+    const result = await orchestrator.handleMessage(deviceId, "好");
+
+    assert.ok("reply" in result);
+    assert.equal(result.reply, renderProposalInactiveCopy({ proposalKind: "meal_delete", status: "stale" }));
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(mockLLM.chatCalls.length, 0);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-04-19T12:00:00.000Z"));
+    assert.equal(meals.some((current) => current.id === meal.id), true);
   });
 });

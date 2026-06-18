@@ -21,6 +21,7 @@ globalThis.localStorage = {
 } as Storage;
 
 const { useStore } = await import("../../client/src/store.js");
+const { getEmptyStateCopy } = await import("../../client/src/coach-advice.js");
 const { getDashboardCells } = await import("../../client/src/components/Dashboard.js");
 const { splitAdvice, getAdvicePresentation } = await import("../../client/src/components/CoachAdviceCard.js");
 const { getUserMessagePresentation } = await import("../../client/src/components/MessageBubble.js");
@@ -107,12 +108,14 @@ describe("Editorial UI", () => {
       },
       useStore.getState().dailyTargets,
       null,
+      "fat_loss",
     );
 
-    assert.deepEqual(presentation, {
-      state: "empty",
-      message: "先用對話記下第一餐。今天還沒有紀錄。到「對話」描述你吃了什麼。",
-    });
+    assert.equal(presentation.state, "empty");
+    assert.equal(
+      presentation.message,
+      getEmptyStateCopy("fat_loss", useStore.getState().dailyTargets),
+    );
   });
 
   it("returns split advice text and dynamic nutrition tags in Chinese", () => {

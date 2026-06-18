@@ -73,6 +73,23 @@ function assertUpdateGoalsRuleEscalation(content: string): void {
   );
 }
 
+function assertDeleteMealConfirmFirstNarrative(content: string): void {
+  const reversalPath = content
+    .split("### Classification Rationale")[0]
+    .split("### Per-Tool Reversal Paths")[1];
+  assert.ok(reversalPath, "ADR must include per-tool reversal path narrative");
+  assert.match(
+    reversalPath,
+    /`delete_meal` is `confirm-first`:[\s\S]*pending delete proposal[\s\S]*explicit confirmation consumes/,
+    "delete_meal narrative must describe confirm-first proposal authority",
+  );
+  assert.doesNotMatch(
+    reversalPath,
+    /`delete_meal` is `direct-execute`|no delete confirmation proposal/i,
+    "delete_meal narrative must not claim direct-execute or missing confirmation proposals",
+  );
+}
+
 describe("Phase 86-03: policy taxonomy ADR", () => {
   it("policy taxonomy ADR contains required NC-LLM-004 sections", () => {
     const adr = readAdr();
@@ -88,6 +105,7 @@ describe("Phase 86-03: policy taxonomy ADR", () => {
       "yarn verify:harness -- policy-side-effect-gate",
       "tests/harness/artifacts/policy-side-effect-gate/latest/",
       "yarn policy-taxonomy:check",
+      "Pending goal, meal numeric, and meal delete proposals are scoped by device, session, kind, proposal id",
       "expired or missing pending state is treated as no pending proposal and users must restate or repropose",
     ]);
 
@@ -113,6 +131,7 @@ describe("Phase 86-03: policy taxonomy ADR", () => {
   it("policy taxonomy distinguishes base class from named rule escalation", () => {
     const adr = readAdr();
     assertUpdateGoalsRuleEscalation(adr);
+    assertDeleteMealConfirmFirstNarrative(adr);
 
     const mislabeled = adr.replace(
       "| `update_goals` | `direct-execute` |",
@@ -122,5 +141,11 @@ describe("Phase 86-03: policy taxonomy ADR", () => {
 
     const missingNamedRule = adr.replace("update_goals_latest_proposal_confirm_first", "");
     assert.throws(() => assertUpdateGoalsRuleEscalation(missingNamedRule), /named rule escalation/);
+
+    const staleDeleteNarrative = adr.replace(
+      /`delete_meal` is `confirm-first`:[^\n]+/,
+      "`delete_meal` is `direct-execute`: no delete confirmation proposal exists in this milestone.",
+    );
+    assert.throws(() => assertDeleteMealConfirmFirstNarrative(staleDeleteNarrative), /confirm-first/);
   });
 });

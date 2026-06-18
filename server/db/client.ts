@@ -14,6 +14,8 @@ const requiredTables = [
   "meal_revision_items",
   "asset_references",
   "turn_states",
+  "chat_proposal_cards",
+  "chat_proposal_action_events",
 ] as const;
 
 function hasTable(sqlite: Database.Database, name: string) {

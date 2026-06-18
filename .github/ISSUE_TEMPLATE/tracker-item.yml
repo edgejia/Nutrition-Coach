@@ -1,0 +1,80 @@
+name: Tracker Item
+description: Record actionable Nutrition Coach work so it can be triaged and picked as a next direction.
+title: "[Tracker]: "
+labels: ["tracker"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is broken, risky, or missing?
+      placeholder: Describe the user-facing behavior, code risk, or gap.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Used to rank and pick the next development direction. After creating, also apply the matching `priority:*` label.
+      options:
+        - P0
+        - P1
+        - P2
+        - P3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      description: After creating, also apply the matching `type:*` label.
+      options:
+        - Bug
+        - Feature
+        - Tech Debt
+        - ADR
+        - Release
+        - Incident
+        - Milestone
+    validations:
+      required: true
+
+  - type: input
+    id: area
+    attributes:
+      label: Area
+      description: Optional subsystem hint.
+      placeholder: security / orchestrator / device / realtime / ui / mutation-truthfulness
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: What must be true before this can close? (optional)
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: related-files
+    attributes:
+      label: Related Files
+      description: Likely files or directories, one per line. (optional)
+      placeholder: |
+        server/routes/device.ts
+        server/orchestrator/index.ts
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / Notes
+      description: Links to prior Notion rows (e.g. NC-CR-20260614-002), PRs, findings, or audit evidence. (optional)
+    validations:
+      required: false

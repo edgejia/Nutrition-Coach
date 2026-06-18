@@ -3,7 +3,7 @@ import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
-import type { createOrchestrator } from "../orchestrator/index.js";
+import type { createOrchestrator, ProposalEditContext } from "../orchestrator/index.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -16,13 +16,18 @@ import type { DailySummary } from "../services/summary.js";
 import { CHOICE_PROMPT_PATTERN } from "../orchestrator/patterns.js";
 import { createStructuredHooks } from "../orchestrator/hooks.js";
 import type { OrchestratorHooks } from "../orchestrator/hooks.js";
-import { buildPartialSuccessLoggedReply, guardNoMutationLoggingClaim } from "../orchestrator/index.js";
+import { buildPartialSuccessLoggedReply, guardNoMutationSuccessClaim } from "../orchestrator/index.js";
 import type {
   LlmTraceFinalReplyShape,
   LlmTraceFinalReplySource,
   LlmTraceRecorder,
 } from "../orchestrator/llm-trace.js";
 import type { ToolExecutionResult } from "../orchestrator/tools.js";
+import {
+  projectCommittedMutationState,
+  type CommittedMutationProjection,
+  type CommittedMutationState,
+} from "../orchestrator/mutation-effects.js";
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { normalizeMealPeriod } from "../lib/meal-period.js";
@@ -33,6 +38,7 @@ import type { SummaryOutcome } from "../services/summary-outcome.js";
 import {
   logChatRouteFallback,
   logChatTurnCompleted,
+  logOwnershipBypassBlocked,
   sanitizeRouteCatchError,
   type RouteCatchSite,
   type RouteFallbackReason,
@@ -40,13 +46,34 @@ import {
 } from "../observability/events.js";
 import type { ProviderErrorMetadata } from "../llm/types.js";
 import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
+import {
+  projectProposalCardForClient,
+  PROPOSAL_KINDS,
+  type PendingProposalCardInput,
+  type ProposalActionEventClientMetadata,
+  type ProposalCardClientMetadata,
+  type ProposalKind,
+  type ProposalLane,
+  type createProposalCardService,
+} from "../services/proposal-cards.js";
+import {
+  renderProposalSupersededCopy,
+} from "../orchestrator/mutation-receipts.js";
+import type { createGoalProposalService } from "../services/goal-proposals.js";
+import type { createMealNumericProposalService } from "../services/meal-numeric-proposals.js";
+import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
+import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
   assetService: ReturnType<typeof createAssetService>;
   chatService: ReturnType<typeof createChatService>;
+  proposalCardService: ReturnType<typeof createProposalCardService>;
   deviceService: ReturnType<typeof createDeviceService>;
   guestSessionService: ReturnType<typeof createGuestSessionService>;
+  goalProposalService: ReturnType<typeof createGoalProposalService>;
+  mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
   publisher: RealtimePublisher;
   /**
    * Override the upload storage directory. When undefined the route falls back
@@ -76,6 +103,18 @@ const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasRawDeviceIdSelector(request: FastifyRequest) {
+  return (
+    request.headers["x-device-id"] !== undefined
+    || (isPlainRecord(request.query) && "deviceId" in request.query)
+    || (isPlainRecord(request.body) && "deviceId" in request.body)
+  );
+}
+
 async function validateImageBytes(buffer: Buffer, claimedMimeType: string): Promise<boolean> {
   const expectedFormat = IMAGE_FORMAT_BY_MIME_TYPE.get(claimedMimeType);
   if (!expectedFormat) return false;
@@ -95,6 +134,7 @@ async function validateImageBytes(buffer: Buffer, claimedMimeType: string): Prom
 const STOPPED_EMPTY_COPY = "已停止生成。";
 const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
+type RouteMutationState = CommittedMutationState<LoggedMealReceipt, ProposalActionEventClientMetadata>;
 type ReceiptIdentity = {
   mealTransactionId: string;
   mealRevisionId: string;
@@ -123,6 +163,99 @@ interface StreamingReplyResult {
   finalReplySource: LlmTraceFinalReplySource;
   finalReplyShape: LlmTraceFinalReplyShape;
   receiptPersistence: ReceiptPersistence;
+}
+
+type RouteProposalCard = PendingProposalCardInput | ProposalCardClientMetadata;
+
+function isProjectedProposalCard(card: RouteProposalCard): card is ProposalCardClientMetadata {
+  return "status" in card && "isActionable" in card;
+}
+
+async function loadActiveProposalSnapshots(deps: {
+  goalProposalService: ReturnType<typeof createGoalProposalService>;
+  mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
+  mealDeleteProposalService: ReturnType<typeof createMealDeleteProposalService>;
+}, deviceId: string): Promise<Array<{
+  proposalId: string;
+  proposalKind: ProposalKind;
+  proposalLane: ProposalLane;
+  expiresAt?: string | null;
+}>> {
+  const [goal, mealNumeric, mealDelete] = await Promise.all([
+    deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+    deps.mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+    deps.mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+  ]);
+  return [
+    ...(goal ? [{
+      proposalId: goal.proposalId,
+      proposalKind: "goal" as const,
+      proposalLane: "goal" as const,
+    }] : []),
+    ...(mealNumeric ? [{
+      proposalId: mealNumeric.proposalId,
+      proposalKind: mealNumeric.provenance === "model_estimate" ? "meal_estimate" as const : "meal_numeric" as const,
+      proposalLane: "meal_mutation" as const,
+      expiresAt: mealNumeric.expiresAt,
+    }] : []),
+    ...(mealDelete ? [{
+      proposalId: mealDelete.proposalId,
+      proposalKind: "meal_delete" as const,
+      proposalLane: "meal_mutation" as const,
+      expiresAt: mealDelete.expiresAt,
+    }] : []),
+  ];
+}
+
+async function persistProposalCardForAssistant(input: {
+  proposalCardService: ReturnType<typeof createProposalCardService>;
+  deviceId: string;
+  assistantMessageId: string;
+  proposalCard?: RouteProposalCard;
+}): Promise<ProposalCardClientMetadata | undefined> {
+  if (!input.proposalCard) {
+    return undefined;
+  }
+  if (isProjectedProposalCard(input.proposalCard)) {
+    return input.proposalCard;
+  }
+  if (input.proposalCard.proposalLane === "meal_mutation") {
+    await input.proposalCardService.markSupersededInLane({
+      deviceId: input.deviceId,
+      proposalLane: input.proposalCard.proposalLane,
+      replacementProposalId: input.proposalCard.proposalId,
+      supersededByKind: input.proposalCard.proposalKind,
+      lapseCopy: renderProposalSupersededCopy({
+        proposalKind: input.proposalCard.proposalKind,
+        supersededByKind: input.proposalCard.proposalKind,
+      }),
+    });
+  } else {
+    await input.proposalCardService.markSupersededInLane({
+      deviceId: input.deviceId,
+      proposalLane: "goal",
+      replacementProposalId: input.proposalCard.proposalId,
+      supersededByKind: "goal",
+      lapseCopy: renderProposalSupersededCopy({
+        proposalKind: "goal",
+        supersededByKind: "goal",
+      }),
+    });
+  }
+  const saved = await input.proposalCardService.saveAssistantProposalCard({
+    ...input.proposalCard,
+    deviceId: input.deviceId,
+    assistantMessageId: input.assistantMessageId,
+  });
+  return projectProposalCardForClient(saved, {
+    proposalId: saved.proposalId,
+    proposalKind: saved.proposalKind,
+    proposalLane: saved.proposalLane,
+    status: saved.status,
+    isActionable: saved.status === "active",
+    expiresAt: saved.expiresAt,
+    lapseCopy: saved.lapseCopy,
+  });
 }
 
 const activeChatTurns = new Map<string, ActiveChatTurn>();
@@ -217,24 +350,22 @@ function appendHistoricalDateSuffixIfMissing(text: string, affectedDate?: string
 }
 
 function shouldComposeSummaryHistoryReply(
-  didLogMeal: boolean,
-  didMutateMeal: boolean,
+  mutationProjection: Pick<CommittedMutationProjection, "hasCommittedMutation">,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
 ): summaryHistoryFacts is SummaryHistoryFacts {
-  return !didLogMeal && !didMutateMeal && Boolean(summaryHistoryFacts?.dailySummary);
+  return !mutationProjection.hasCommittedMutation && Boolean(summaryHistoryFacts?.dailySummary);
 }
 
 function normalizeRouteFinalReply(
   rawReply: string,
-  didLogMeal: boolean,
-  didMutateMeal: boolean,
+  mutationProjection: Pick<CommittedMutationProjection, "mutationKind" | "hasCommittedMutation">,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
   opts: { composeSummaryHistory?: boolean; rendererOwnedSummaryHistory?: boolean } = {},
 ): { reply: string; composedSummaryHistory: boolean } {
   const composedSummaryHistory = opts.composeSummaryHistory !== false
-    && shouldComposeSummaryHistoryReply(didLogMeal, didMutateMeal, summaryHistoryFacts);
+    && shouldComposeSummaryHistoryReply(mutationProjection, summaryHistoryFacts);
   const rendererOwnedSummaryHistory = opts.rendererOwnedSummaryHistory === true
-    && shouldComposeSummaryHistoryReply(didLogMeal, didMutateMeal, summaryHistoryFacts);
+    && shouldComposeSummaryHistoryReply(mutationProjection, summaryHistoryFacts);
   const reply = composedSummaryHistory
     ? composeSummaryHistoryReply(summaryHistoryFacts, rawReply)
     : rawReply;
@@ -245,10 +376,48 @@ function normalizeRouteFinalReply(
     };
   }
   return {
-    reply: guardNoMutationLoggingClaim(reply, didLogMeal, didMutateMeal, {
+    reply: guardNoMutationSuccessClaim(reply, mutationProjection, {
       summaryHistoryFacts,
     }),
     composedSummaryHistory,
+  };
+}
+
+function projectRouteMutationState(input: {
+  mutationState?: RouteMutationState;
+  didLogMeal: boolean;
+  didMutateMeal?: boolean;
+  deletedMealId?: string;
+  mutationOutcomeFact?: ChatMutationOutcomeFact;
+}): Pick<CommittedMutationProjection<LoggedMealReceipt, ProposalActionEventClientMetadata>, "mutationKind" | "hasCommittedMutation" | "didLogMeal" | "didMutateMeal" | "didMutateGoals" | "shouldPublishDailySummary" | "shouldPublishGoalsUpdate"> {
+  if (input.mutationState) {
+    return projectCommittedMutationState(input.mutationState);
+  }
+
+  const mutationKind = input.mutationOutcomeFact?.action === "log_food"
+    ? "log"
+    : input.mutationOutcomeFact?.action === "update_meal"
+      ? "update"
+      : input.mutationOutcomeFact?.action === "delete_meal"
+        ? "delete"
+        : input.mutationOutcomeFact?.action === "update_goals"
+          ? "goals"
+          : input.didLogMeal
+            ? "log"
+            : input.deletedMealId
+              ? "delete"
+              : input.didMutateMeal
+                ? "update"
+                : undefined;
+  const didMutateMeal = mutationKind === "log" || mutationKind === "update" || mutationKind === "delete";
+  return {
+    ...(mutationKind ? { mutationKind } : {}),
+    hasCommittedMutation: mutationKind !== undefined,
+    didLogMeal: mutationKind === "log",
+    didMutateMeal,
+    didMutateGoals: mutationKind === "goals",
+    shouldPublishDailySummary: didMutateMeal,
+    shouldPublishGoalsUpdate: mutationKind === "goals",
   };
 }
 
@@ -397,6 +566,53 @@ function createNoMutationLoggingClaimStreamGuard() {
   };
 }
 
+function parseProposalContext(rawValue: unknown):
+  | { proposalContext: ProposalEditContext }
+  | { error: string } {
+  if (typeof rawValue !== "string") {
+    return { error: "Invalid proposalContext" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch {
+    return { error: "Invalid proposalContext JSON" };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { error: "Invalid proposalContext shape" };
+  }
+
+  const keys = Object.keys(parsed);
+  if (
+    keys.length !== 3
+    || !keys.includes("proposalId")
+    || !keys.includes("kind")
+    || !keys.includes("action")
+  ) {
+    return { error: "Invalid proposalContext keys" };
+  }
+
+  const candidate = parsed as Record<string, unknown>;
+  if (typeof candidate.proposalId !== "string" || candidate.proposalId.trim().length === 0) {
+    return { error: "Invalid proposalContext proposalId" };
+  }
+  if (typeof candidate.kind !== "string" || !(PROPOSAL_KINDS as readonly string[]).includes(candidate.kind)) {
+    return { error: "Invalid proposalContext kind" };
+  }
+  if (candidate.action !== "edit") {
+    return { error: "Invalid proposalContext action" };
+  }
+
+  return {
+    proposalContext: {
+      proposalId: candidate.proposalId,
+      kind: candidate.kind as ProposalKind,
+      action: "edit",
+    },
+  };
+}
+
 async function parseMultipartRequest(
   request: FastifyRequest,
   uploadsDir: string,
@@ -404,6 +620,7 @@ async function parseMultipartRequest(
   | {
       message: string;
       image?: { dataUri: string; path: string; mimeType: string; originalFilename?: string };
+      proposalContext?: ProposalEditContext;
     }
   | { error: string; code: number }
 > {
@@ -411,6 +628,8 @@ async function parseMultipartRequest(
   let image:
     | { dataUri: string; path: string; mimeType: string; originalFilename?: string }
     | undefined;
+  let proposalContext: ProposalEditContext | undefined;
+  let proposalContextSeen = false;
   const savedImagePaths: string[] = [];
 
   async function reject(error: string, code: number) {
@@ -427,6 +646,16 @@ async function parseMultipartRequest(
   for await (const part of parts) {
     if (part.type === "field" && part.fieldname === "message") {
       message = part.value as string;
+    } else if (part.type === "field" && part.fieldname === "proposalContext") {
+      if (proposalContextSeen) {
+        return reject("Only one proposalContext field is allowed", 400);
+      }
+      proposalContextSeen = true;
+      const parsedContext = parseProposalContext(part.value);
+      if ("error" in parsedContext) {
+        return reject(parsedContext.error, 400);
+      }
+      proposalContext = parsedContext.proposalContext;
     } else if (part.type === "file" && part.fieldname === "image") {
       if (!ALLOWED_TYPES.includes(part.mimetype)) {
         return reject("Invalid image type. Allowed: jpeg, png, webp", 400);
@@ -455,6 +684,10 @@ async function parseMultipartRequest(
     }
   }
 
+  if (proposalContext && image) {
+    return reject("proposalContext is text-only and cannot be combined with image upload", 400);
+  }
+
   if (!message && image) {
     message = "(圖片)";
   }
@@ -463,13 +696,17 @@ async function parseMultipartRequest(
     return { error: "Message or image required", code: 400 };
   }
 
-  return { message, image };
+  return {
+    message,
+    image,
+    ...(proposalContext ? { proposalContext } : {}),
+  };
 }
 
 function publishSummarySafe(
   publisher: RealtimePublisher,
   deviceId: string,
-  didMutateMeal: boolean,
+  shouldPublishDailySummary: boolean,
   dailySummary: unknown,
   affectedDate: unknown,
   log: FastifyBaseLogger,
@@ -486,7 +723,7 @@ function publishSummarySafe(
     ? affectedDate
     : summaryDate;
   if (
-    !didMutateMeal
+    !shouldPublishDailySummary
     || !publishAffectedDate
     || !summaryDate
     || summaryDate !== publishAffectedDate
@@ -633,15 +870,29 @@ function projectAssetFields(imagePath: string | null | undefined) {
   };
 }
 
-function providerStreamFallback(error: unknown):
+function providerStreamFallback(
+  error: unknown,
+  fallbackReason: "llm_error" | "partial_success" = "llm_error",
+):
   | {
       fallbackSource: "orchestrator";
       reason: "llm_error";
       providerMetadata: ProviderErrorMetadata;
     }
+  | {
+      fallbackSource: "orchestrator";
+      reason: "partial_success";
+    }
   | undefined {
   if (!isLLMProviderError(error)) {
     return undefined;
+  }
+
+  if (fallbackReason === "partial_success") {
+    return {
+      fallbackSource: "orchestrator",
+      reason: "partial_success",
+    };
   }
 
   return {
@@ -703,8 +954,7 @@ async function handleStreamingReply(
   streamGenerator: AsyncGenerator<string>,
   chatService: ReturnType<typeof createChatService>,
   deviceId: string,
-  didLogMeal: boolean,
-  didMutateMeal: boolean,
+  mutationProjection: Pick<CommittedMutationProjection, "mutationKind" | "hasCommittedMutation" | "didLogMeal" | "didMutateMeal">,
   dailySummary: unknown,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
   receiptIdentity: ReceiptIdentity | undefined,
@@ -716,9 +966,11 @@ async function handleStreamingReply(
   stopControl?: StreamingStopControl,
 ): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
+  const didLogMeal = mutationProjection.didLogMeal;
+  const didMutateMeal = mutationProjection.didMutateMeal;
   const hasSummaryContext = Boolean(summaryHistoryFacts?.dailySummary ?? dailySummary);
-  const shouldGuardNoMutationModelText = !didLogMeal && !didMutateMeal && !hasSummaryContext;
-  const shouldHoldNoMutationSummaryText = !didLogMeal && !didMutateMeal && hasSummaryContext;
+  const shouldGuardNoMutationModelText = !mutationProjection.hasCommittedMutation && !hasSummaryContext;
+  const shouldHoldNoMutationSummaryText = !mutationProjection.hasCommittedMutation && hasSummaryContext;
   const noMutationClaimGuard = shouldGuardNoMutationModelText
     ? createNoMutationLoggingClaimStreamGuard()
     : undefined;
@@ -793,7 +1045,7 @@ async function handleStreamingReply(
 
   if (stopControl?.isStopped() || stopControl?.signal.aborted) {
     const stoppedReply = sanitizeReply(
-      guardNoMutationLoggingClaim(fullReply, didLogMeal, didMutateMeal, {
+      guardNoMutationSuccessClaim(fullReply, mutationProjection, {
         summaryHistoryFacts,
       }),
     ) || STOPPED_EMPTY_COPY;
@@ -846,7 +1098,7 @@ async function handleStreamingReply(
   const {
     reply: guardedFullReply,
     composedSummaryHistory,
-  } = normalizeRouteFinalReply(fullReply, didLogMeal, didMutateMeal, summaryHistoryFacts);
+  } = normalizeRouteFinalReply(fullReply, mutationProjection, summaryHistoryFacts);
   if (noMutationLoggingClaimDetected || guardedFullReply !== fullReply) {
     const sanitizedReply = sanitizeReply(guardedFullReply);
     const finalChunk = sanitizer.flush();
@@ -921,12 +1173,14 @@ async function handleOrchestratorSSE(
     assetService: ReturnType<typeof createAssetService>;
     orchestrator: ReturnType<typeof createOrchestrator>;
     chatService: ReturnType<typeof createChatService>;
+    proposalCardService: ReturnType<typeof createProposalCardService>;
     publisher: RealtimePublisher;
     log: FastifyBaseLogger;
   },
   deviceId: string,
   message: string,
   image: { dataUri: string; path: string; mimeType: string; originalFilename?: string } | undefined,
+  proposalContext: ProposalEditContext | undefined,
   startedAt: number,
   hooks?: OrchestratorHooks,
   recorder?: LlmTraceRecorder,
@@ -941,11 +1195,14 @@ async function handleOrchestratorSSE(
   let userMessagePersisted = false;
   let streamDidLogMeal = false;
   let streamDidMutateMeal = false;
+  let streamShouldPublishDailySummary = false;
   let streamDailySummary: unknown;
   let streamSummaryOutcome: SummaryOutcome | undefined;
   let streamDailyTargets: unknown;
   let streamAffectedDate: string | undefined;
   let streamDeletedMealId: string | undefined;
+  let streamProposalCard: ProposalCardClientMetadata | undefined;
+  let streamProposalActionEvent: ProposalActionEventClientMetadata | undefined;
   let streamLoggedMeal: ReturnType<typeof buildPartialSuccessLoggedReply> | undefined;
   let streamLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
   let streamReceiptIdentity: ReceiptIdentity | undefined;
@@ -1052,22 +1309,28 @@ async function handleOrchestratorSSE(
         hooks,
         signal: stopControl?.signal,
         turnId: stopControl.turnId,
+        log: deps.log,
+        proposalContext,
       }
     );
 
     if ("streamGenerator" in result) {
+      const mutationProjection = projectRouteMutationState(result);
       const {
         streamGenerator,
-        didLogMeal,
         dailySummary,
         summaryOutcome,
         summaryHistoryFacts,
         affectedDate,
         deletedMealId,
         loggedMeal,
+        proposalCard,
+        proposalActionEvent,
       } = result;
+      const didLogMeal = mutationProjection.didLogMeal;
       streamDidLogMeal = didLogMeal;
-      streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
+      streamDidMutateMeal = mutationProjection.didMutateMeal;
+      streamShouldPublishDailySummary = mutationProjection.shouldPublishDailySummary;
       streamDailySummary = dailySummary;
       streamSummaryOutcome = summaryOutcome;
       streamDailyTargets = result.dailyTargets;
@@ -1077,14 +1340,14 @@ async function handleOrchestratorSSE(
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
       streamMutationOutcomeFact = result.mutationOutcomeFact;
+      streamProposalActionEvent = proposalActionEvent;
 
       const streamResult = await handleStreamingReply(
         stream,
         streamGenerator,
         deps.chatService,
         deviceId,
-        didLogMeal,
-        streamDidMutateMeal,
+        mutationProjection,
         dailySummary,
         summaryHistoryFacts,
         streamReceiptIdentity,
@@ -1125,7 +1388,7 @@ async function handleOrchestratorSSE(
           stopped: true,
           tokensStreamed: streamResult.tokensStreamed,
         });
-        publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
+        publishSummarySafe(deps.publisher, deviceId, mutationProjection.shouldPublishDailySummary, streamDailySummary, streamAffectedDate, deps.log);
         return;
       }
 
@@ -1139,6 +1402,7 @@ async function handleOrchestratorSSE(
         ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
         ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
         ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
+        ...(streamProposalActionEvent ? { proposalActionEvent: streamProposalActionEvent } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (streamResult.finalReplySource === "fallback") {
@@ -1154,11 +1418,11 @@ async function handleOrchestratorSSE(
           didMutateMeal: streamDidMutateMeal,
         });
       }
-      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
+      publishSummarySafe(deps.publisher, deviceId, mutationProjection.shouldPublishDailySummary, streamDailySummary, streamAffectedDate, deps.log);
     } else {
+      const mutationProjection = projectRouteMutationState(result);
       const {
         reply: replyText,
-        didLogMeal,
         dailySummary,
         summaryOutcome,
         summaryHistoryFacts,
@@ -1166,13 +1430,17 @@ async function handleOrchestratorSSE(
         affectedDate,
         deletedMealId,
         loggedMeal,
+        proposalCard,
+        proposalActionEvent,
       } = result;
+      const didLogMeal = mutationProjection.didLogMeal;
       recorder?.recordFinalReply({
         source: result.finalReplySource ?? "model",
         shape: result.finalReplyShape ?? "empty_or_missing",
       });
       streamDidLogMeal = didLogMeal;
-      streamDidMutateMeal = result.didMutateMeal ?? didLogMeal;
+      streamDidMutateMeal = mutationProjection.didMutateMeal;
+      streamShouldPublishDailySummary = mutationProjection.shouldPublishDailySummary;
       streamDailySummary = dailySummary;
       streamSummaryOutcome = summaryOutcome;
       streamDailyTargets = dailyTargets;
@@ -1182,31 +1450,45 @@ async function handleOrchestratorSSE(
       streamLoggedMealReceipt = projectLoggedMealReceipt(loggedMeal);
       streamReceiptIdentity = buildReceiptIdentity(loggedMeal, result.loggedMealToolMessageId);
       streamMutationOutcomeFact = result.mutationOutcomeFact;
+      streamProposalActionEvent = proposalActionEvent;
       const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
         && !result.fallbackOutcomeContext;
       const normalizedReply = normalizeRouteFinalReply(
         appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
-        didLogMeal,
-        streamDidMutateMeal,
+        mutationProjection,
         summaryHistoryFacts,
         {
           composeSummaryHistory: shouldComposeSummaryHistory,
           rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
         },
       ).reply;
-      const finalized = await finalizeAssistantReply(
-        deps.chatService,
-        deviceId,
-        normalizedReply,
-        streamReceiptIdentity,
-        {
-          mutationOutcomeFact: streamMutationOutcomeFact,
-          log: deps.log,
-          transport: "sse",
-        },
-      );
-      const sanitizedFallback = finalized.sanitized;
-      streamReceiptPersistence = finalized.receiptPersistence;
+      const alreadyPersistedAssistantReply = result.assistantReplyPersistence === "already_persisted";
+      let sanitizedFallback = sanitizeReply(normalizedReply);
+      if (alreadyPersistedAssistantReply) {
+        streamProposalCard = proposalCard && isProjectedProposalCard(proposalCard)
+          ? proposalCard
+          : undefined;
+      } else {
+        const finalized = await finalizeAssistantReply(
+          deps.chatService,
+          deviceId,
+          normalizedReply,
+          streamReceiptIdentity,
+          {
+            mutationOutcomeFact: streamMutationOutcomeFact,
+            log: deps.log,
+            transport: "sse",
+          },
+        );
+        streamProposalCard = await persistProposalCardForAssistant({
+          proposalCardService: deps.proposalCardService,
+          deviceId,
+          assistantMessageId: finalized.assistantMessageId,
+          proposalCard,
+        });
+        sanitizedFallback = finalized.sanitized;
+        streamReceiptPersistence = finalized.receiptPersistence;
+      }
       const canProjectStreamReceipt = streamReceiptPersistence === "persisted";
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
       const doneData = {
@@ -1219,6 +1501,8 @@ async function handleOrchestratorSSE(
         ...(dailyTargets ? { dailyTargets } : {}),
         ...(affectedDate ? { affectedDate } : {}),
         ...(deletedMealId ? { deletedMealId } : {}),
+        ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
+        ...(streamProposalActionEvent ? { proposalActionEvent: streamProposalActionEvent } : {}),
       };
       stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
       if (result.fallbackOutcomeContext) {
@@ -1238,7 +1522,9 @@ async function handleOrchestratorSSE(
       } else {
         recordSseCompletion({ didLogMeal, didMutateMeal: streamDidMutateMeal });
       }
-      publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, dailySummary, affectedDate, deps.log);
+      if (!streamProposalActionEvent) {
+        publishSummarySafe(deps.publisher, deviceId, mutationProjection.shouldPublishDailySummary, dailySummary, affectedDate, deps.log);
+      }
     }
   } catch (error) {
     const fallback = streamDidLogMeal
@@ -1247,7 +1533,10 @@ async function handleOrchestratorSSE(
         ? PARTIAL_MUTATION_FALLBACK
         : UNIFIED_FALLBACK;
     let catchSite: RouteCatchSite = "sse_outer";
-    const providerFallback = providerStreamFallback(error);
+    const providerFallback = providerStreamFallback(
+      error,
+      streamDidMutateMeal ? "partial_success" : "llm_error",
+    );
     let sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(error);
     recorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
     try {
@@ -1299,6 +1588,7 @@ async function handleOrchestratorSSE(
       ...(streamDailyTargets ? { dailyTargets: streamDailyTargets } : {}),
       ...(streamAffectedDate ? { affectedDate: streamAffectedDate } : {}),
       ...(streamDeletedMealId ? { deletedMealId: streamDeletedMealId } : {}),
+      ...(streamProposalCard ? { proposalCard: streamProposalCard } : {}),
     };
     stream.write(`event: done\ndata: ${JSON.stringify(doneData)}\n\n`);
     recordSseFallback({
@@ -1311,7 +1601,7 @@ async function handleOrchestratorSSE(
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
     });
-    publishSummarySafe(deps.publisher, deviceId, streamDidMutateMeal, streamDailySummary, streamAffectedDate, deps.log);
+    publishSummarySafe(deps.publisher, deviceId, streamShouldPublishDailySummary, streamDailySummary, streamAffectedDate, deps.log);
   } finally {
     await cleanupDurableAssetSafe(
       deps.assetService,
@@ -1330,8 +1620,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     orchestrator,
     assetService,
     chatService,
+    proposalCardService,
     deviceService,
     guestSessionService,
+    goalProposalService,
+    mealNumericProposalService,
+    mealDeleteProposalService,
     publisher,
     uploadsDir: injectedUploadsDir,
     llmTraceRecorderFactory,
@@ -1354,8 +1648,18 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     if (typeof turnId !== "string" || !turnId.trim()) {
       return reply.code(400).send({ error: "turnId is required" });
     }
+    const trimmedTurnId = turnId.trim();
 
-    const activeTurn = activeChatTurns.get(activeChatTurnKey(session.deviceId, turnId));
+    if (hasRawDeviceIdSelector(request)) {
+      logOwnershipBypassBlocked(request.log, {
+        reason: "raw_device_id_param",
+        route: "api_chat_stop",
+        operation: "chat_stop",
+        requestId: request.id,
+      });
+    }
+
+    const activeTurn = activeChatTurns.get(activeChatTurnKey(session.deviceId, trimmedTurnId));
     if (!activeTurn) {
       return reply.code(404).send({ error: "Active turn not found" });
     }
@@ -1365,7 +1669,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       activeTurn.controller.abort();
     }
 
-    return { stopped: true, turnId };
+    return { stopped: true, turnId: trimmedTurnId };
   });
 
   app.post("/api/chat", async (request, reply) => {
@@ -1389,10 +1693,20 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       return reply.code(parseResult.code).send({ error: parseResult.error });
     }
 
-    const { message, image } = parseResult;
+    const { message, image, proposalContext } = parseResult;
     const chatTurnStartedAt = Date.now();
     const hadImage = Boolean(image);
     const { turnId, turnLog, orchLog } = createChatTurnContext(request);
+
+    if (hasRawDeviceIdSelector(request)) {
+      logOwnershipBypassBlocked(request.log, {
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+        requestId: request.id,
+        turnId,
+      });
+    }
 
     // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
     const acceptHeader = request.headers["accept"] ?? "";
@@ -1404,11 +1718,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
       let userMessagePersisted = false;
       let jsonDidLogMeal = false;
       let jsonDidMutateMeal = false;
+      let jsonShouldPublishDailySummary = false;
       let jsonDailySummary: unknown;
       let jsonSummaryOutcome: SummaryOutcome | undefined;
       let jsonDailyTargets: unknown;
       let jsonAffectedDate: string | undefined;
       let jsonDeletedMealId: string | undefined;
+      let jsonProposalCard: ProposalCardClientMetadata | undefined;
+      let jsonProposalActionEvent: ProposalActionEventClientMetadata | undefined;
       let jsonLoggedMealFallback: string | undefined;
       let jsonLoggedMealReceipt: ReturnType<typeof projectLoggedMealReceipt>;
       let jsonReceiptIdentity: ReceiptIdentity | undefined;
@@ -1504,10 +1821,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             },
             hooks,
             turnId,
+            log: turnLog,
+            proposalContext,
           },
         );
-        jsonDidLogMeal = result.didLogMeal;
-        jsonDidMutateMeal = result.didMutateMeal ?? result.didLogMeal;
+        const jsonMutationProjection = projectRouteMutationState(result);
+        jsonDidLogMeal = jsonMutationProjection.didLogMeal;
+        jsonDidMutateMeal = jsonMutationProjection.didMutateMeal;
+        jsonShouldPublishDailySummary = jsonMutationProjection.shouldPublishDailySummary;
         jsonDailySummary = result.dailySummary;
         jsonSummaryOutcome = result.summaryOutcome;
         jsonDailyTargets = result.dailyTargets;
@@ -1519,11 +1840,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonLoggedMealReceipt = projectLoggedMealReceipt(result.loggedMeal);
         jsonReceiptIdentity = buildReceiptIdentity(result.loggedMeal, result.loggedMealToolMessageId);
         jsonMutationOutcomeFact = result.mutationOutcomeFact;
+        jsonProposalActionEvent = result.proposalActionEvent;
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
-          const { streamGenerator, didLogMeal, dailySummary, summaryHistoryFacts, affectedDate } = result;
-          const didMutateMeal = result.didMutateMeal ?? didLogMeal;
+          const { streamGenerator, dailySummary, summaryHistoryFacts, affectedDate } = result;
+          const didLogMeal = jsonMutationProjection.didLogMeal;
+          const didMutateMeal = jsonMutationProjection.didMutateMeal;
           let fullReply = "";
           let hallucinationDetected = false;
           for await (const token of streamGenerator) {
@@ -1541,8 +1864,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
           const { reply: replyText, composedSummaryHistory } = normalizeRouteFinalReply(
             modelReplyText,
-            didLogMeal,
-            didMutateMeal,
+            jsonMutationProjection,
             summaryHistoryFacts,
             { composeSummaryHistory: !hallucinationDetected },
           );
@@ -1560,6 +1882,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const sanitized = finalized.sanitized;
           jsonReceiptPersistence = finalized.receiptPersistence;
           const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
+          jsonProposalCard = await persistProposalCardForAssistant({
+            proposalCardService,
+            deviceId,
+            assistantMessageId: finalized.assistantMessageId,
+            proposalCard: result.proposalCard,
+          });
           traceRecorder?.recordFinalReply({
             source: hallucinationDetected ? "fallback" : composedSummaryHistory ? "renderer" : "model",
             shape: sanitized.trim() ? (hallucinationDetected ? "fallback_text" : "streamed_text") : "empty_or_missing",
@@ -1569,7 +1897,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           publishSummarySafe(
             publisher,
             deviceId,
-            didMutateMeal,
+            jsonMutationProjection.shouldPublishDailySummary,
             dailySummary,
             affectedDate,
             turnLog,
@@ -1595,35 +1923,52 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             ...(result.dailyTargets ? { dailyTargets: result.dailyTargets } : {}),
             ...(affectedDate ? { affectedDate } : {}),
             ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+            ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+            ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
           };
         }
 
-        const { reply: replyText, didLogMeal, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
+        const { reply: replyText, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
+        const didLogMeal = jsonMutationProjection.didLogMeal;
+        jsonProposalActionEvent = result.proposalActionEvent;
         const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
           && !result.fallbackOutcomeContext;
         const normalizedReply = normalizeRouteFinalReply(
           appendHistoricalDateSuffixIfMissing(replyText, affectedDate),
-          didLogMeal,
-          jsonDidMutateMeal,
+          jsonMutationProjection,
           summaryHistoryFacts,
           {
             composeSummaryHistory: shouldComposeSummaryHistory,
             rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
           },
         ).reply;
-        const finalized = await finalizeAssistantReply(
-          chatService,
-          deviceId,
-          normalizedReply,
-          jsonReceiptIdentity,
-          {
-            mutationOutcomeFact: jsonMutationOutcomeFact,
-            log: turnLog,
-            transport: "json",
-          },
-        );
-        const sanitizedJson = finalized.sanitized;
-        jsonReceiptPersistence = finalized.receiptPersistence;
+        const alreadyPersistedAssistantReply = result.assistantReplyPersistence === "already_persisted";
+        let sanitizedJson = sanitizeReply(normalizedReply);
+        if (alreadyPersistedAssistantReply) {
+          jsonProposalCard = result.proposalCard && isProjectedProposalCard(result.proposalCard)
+            ? result.proposalCard
+            : undefined;
+        } else {
+          const finalized = await finalizeAssistantReply(
+            chatService,
+            deviceId,
+            normalizedReply,
+            jsonReceiptIdentity,
+            {
+              mutationOutcomeFact: jsonMutationOutcomeFact,
+              log: turnLog,
+              transport: "json",
+            },
+          );
+          sanitizedJson = finalized.sanitized;
+          jsonReceiptPersistence = finalized.receiptPersistence;
+          jsonProposalCard = await persistProposalCardForAssistant({
+            proposalCardService,
+            deviceId,
+            assistantMessageId: finalized.assistantMessageId,
+            proposalCard: result.proposalCard,
+          });
+        }
         const canProjectJsonReceipt = jsonReceiptPersistence === "persisted";
         traceRecorder?.recordFinalReply({
           source: result.finalReplySource ?? "model",
@@ -1631,7 +1976,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         });
         // D-03/C6: JSON path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, dailySummary, affectedDate, turnLog);
+        if (!jsonProposalActionEvent) {
+          publishSummarySafe(publisher, deviceId, jsonMutationProjection.shouldPublishDailySummary, dailySummary, affectedDate, turnLog);
+        }
         if (result.fallbackOutcomeContext) {
           const providerMetadata = result.providerFallbackContext?.reason === "llm_error"
             && result.fallbackOutcomeContext.reason === "llm_error"
@@ -1660,6 +2007,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(dailyTargets ? { dailyTargets } : {}),
           ...(affectedDate ? { affectedDate } : {}),
           ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+          ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+          ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
         };
       } catch (error) {
         const fallback = jsonDidLogMeal
@@ -1667,7 +2016,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           : jsonDidMutateMeal
             ? PARTIAL_MUTATION_FALLBACK
             : UNIFIED_FALLBACK;
-        const providerFallback = providerStreamFallback(error);
+        const providerFallback = providerStreamFallback(
+          error,
+          jsonDidMutateMeal ? "partial_success" : "llm_error",
+        );
         const sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(error);
         if (!userMessagePersisted) {
           await chatService.saveMessage(
@@ -1693,7 +2045,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         jsonReceiptPersistence = finalized.receiptPersistence;
         // D-03/C6: JSON catch path publish boundary — immediately before reply.send().
         // C1: try/catch ensures publish failure never changes the HTTP response or status code.
-        publishSummarySafe(publisher, deviceId, jsonDidMutateMeal, jsonDailySummary, jsonAffectedDate, turnLog);
+        publishSummarySafe(publisher, deviceId, jsonShouldPublishDailySummary, jsonDailySummary, jsonAffectedDate, turnLog);
         traceRecorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
         recordJsonFallback({
           ...(providerFallback ?? {
@@ -1716,6 +2068,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           ...(jsonDailyTargets ? { dailyTargets: jsonDailyTargets } : {}),
           ...(jsonAffectedDate ? { affectedDate: jsonAffectedDate } : {}),
           ...(jsonDeletedMealId ? { deletedMealId: jsonDeletedMealId } : {}),
+          ...(jsonProposalCard ? { proposalCard: jsonProposalCard } : {}),
+          ...(jsonProposalActionEvent ? { proposalActionEvent: jsonProposalActionEvent } : {}),
         };
       } finally {
         await cleanupDurableAssetSafe(
@@ -1764,10 +2118,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     setImmediate(() => {
       void handleOrchestratorSSE(
         stream,
-        { assetService, orchestrator, chatService, publisher, log: turnLog },
+        { assetService, orchestrator, chatService, proposalCardService, publisher, log: turnLog },
         deviceId,
         message,
         image,
+        proposalContext,
         chatTurnStartedAt,
         hooks,
         traceRecorder,
@@ -1803,7 +2158,11 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
       return reply.code(400).send({ error: "Invalid limit. Must be an integer between 1 and 200." });
     }
-    const messages = await chatService.getHistory(deviceId, parsedLimit);
+    const activeProposals = await loadActiveProposalSnapshots(
+      { goalProposalService, mealNumericProposalService, mealDeleteProposalService },
+      deviceId,
+    );
+    const messages = await chatService.getHistory(deviceId, parsedLimit, { activeProposals });
     return {
       messages: messages.map((message) => {
         const { deviceId: _deviceId, ...publicMessage } = message;

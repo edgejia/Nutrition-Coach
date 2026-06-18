@@ -17,6 +17,7 @@ const { normalizeLoggedMealReceipt } = await import("../../client/src/api.js");
 const { formatLocalDate } = await import("../../client/src/lib/time.js");
 const { buildReceiptMealEditPayload } = await import("../../client/src/meal-edit-payload.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
+const originalFetch = globalThis.fetch;
 
 async function loadFreshStore(suffix: string) {
   return import(`${storeModuleUrl.href}?${suffix}`);
@@ -68,6 +69,7 @@ describe("AppStore", () => {
       sending: false,
       provisionalBubble: null,
     });
+    globalThis.fetch = originalFetch;
     // Reset rollover refresh handler to avoid cross-test leakage (D-19)
     useStore.getState().setRolloverRefreshHandler(null);
   });
@@ -110,6 +112,37 @@ describe("AppStore", () => {
 
     useStore.getState().resetGuestSessionRecovery();
     assert.equal(useStore.getState().guestSessionRecoveryAttempted, false);
+  });
+
+  it("clears stale device identity and enters recovery when bootstrap returns 401", async () => {
+    useStore.getState().setDevice("stale-device", "fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+
+    let requestBody: unknown;
+    globalThis.fetch = async (input, init) => {
+      assert.equal(input, "/api/device/session");
+      assert.equal(init?.method, "POST");
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ error: "No guest session available" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const bootstrapped = await useStore.getState().bootstrapGuestSession();
+
+    assert.equal(bootstrapped, false);
+    assert.deepEqual(requestBody, { legacyDeviceId: "stale-device" });
+    assert.equal(storage.get("deviceId"), undefined);
+    assert.equal(localStorage.getItem("deviceId"), null);
+    assert.equal(storage.get("goal"), "fat_loss");
+    assert.equal(storage.get("dailyTargets"), JSON.stringify({ calories: 1500, protein: 120, carbs: 150, fat: 50 }));
+    assert.equal(useStore.getState().deviceId, null);
+    assert.equal(useStore.getState().guestSessionStatus, "recovery_required");
   });
 
   it("clearDevice removes all localStorage entries and resets dashboard-first state", () => {

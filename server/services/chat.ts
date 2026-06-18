@@ -15,11 +15,21 @@ import { buildAssetUrl, parseAssetRef } from "./assets.js";
 import { formatLocalDate } from "../lib/time.js";
 import { projectMealDisplay } from "./meal-display.js";
 import { normalizeMealPeriod, type MealPeriod } from "../lib/meal-period.js";
+import { projectPublicMealItems } from "../lib/public-meal-items.js";
 import {
   formatChatMutationOutcomeForCompressedHistory,
   validateChatMutationOutcomeFact,
   type ChatMutationOutcomeFact,
 } from "./chat-mutation-outcomes.js";
+import {
+  createProposalCardService,
+  projectProposalActionEventForClient,
+  projectProposalCardForClient,
+  type ProposalActionEventClientMetadata,
+  type ProposalCardClientMetadata,
+  type ProposalKind,
+  type ProposalLane,
+} from "./proposal-cards.js";
 
 type ChatMessageStatus = "complete" | "stopped" | "error";
 type ChatMessageRole = "user" | "assistant" | "tool" | string;
@@ -94,6 +104,8 @@ function formatToolSummary(toolName: string, content: string): string | undefine
 }
 
 export function createChatService(db: AppDatabase) {
+  const proposalCardService = createProposalCardService(db);
+
   function deriveReceiptStatus(input: {
     deletedAt: string | null;
     mealRevisionId: string;
@@ -348,14 +360,7 @@ export function createChatService(db: AppDatabase) {
       protein: items.reduce((sum, item) => sum + item.protein, 0),
       carbs: items.reduce((sum, item) => sum + item.carbs, 0),
       fat: items.reduce((sum, item) => sum + item.fat, 0),
-      items: items.map((item) => ({
-        name: item.foodName,
-        position: item.position + 1,
-        calories: item.calories,
-        protein: item.protein,
-        carbs: item.carbs,
-        fat: item.fat,
-      })),
+      items: projectPublicMealItems(items),
     };
   }
 
@@ -497,7 +502,18 @@ export function createChatService(db: AppDatabase) {
       });
     },
 
-    async getHistory(deviceId: string, limit: number) {
+    async getHistory(
+      deviceId: string,
+      limit: number,
+      opts?: {
+        activeProposals?: Array<{
+          proposalId: string;
+          proposalKind: ProposalKind;
+          proposalLane: ProposalLane;
+          expiresAt?: string | null;
+        }>;
+      },
+    ) {
       // Fetch all roles (including tool) to preserve the existing history window,
       // then filter to user+assistant before returning. Fetch limit*4 to ensure
       // we have enough rows after tool messages are dropped.
@@ -509,6 +525,28 @@ export function createChatService(db: AppDatabase) {
         .limit(limit * 4);
 
       const chronological = rows.reverse();
+      const assistantMessageIds = chronological
+        .filter((row) => row.role === "assistant")
+        .map((row) => row.id);
+      const userMessageIds = chronological
+        .filter((row) => row.role === "user")
+        .map((row) => row.id);
+      const proposalCards = await proposalCardService.getCardsForAssistantMessages({
+        deviceId,
+        assistantMessageIds,
+      });
+      const proposalActionEvents = await proposalCardService.getActionEventsForMessages({
+        deviceId,
+        messageIds: userMessageIds,
+      });
+      const proposalStatusProjections = proposalCardService.projectStatusForCards({
+        deviceId,
+        cards: [...proposalCards.values()],
+        activeProposals: opts?.activeProposals ?? [],
+      });
+      const projectionByProposal = new Map(
+        proposalStatusProjections.map((projection) => [projection.proposalId, projection]),
+      );
       const projected: Array<{
         id: string;
         deviceId: string;
@@ -520,6 +558,8 @@ export function createChatService(db: AppDatabase) {
         status: string;
         didLogMeal?: boolean;
         loggedMeal?: LoggedMealReceipt;
+        proposalCard?: ProposalCardClientMetadata;
+        proposalActionEvent?: ProposalActionEventClientMetadata;
       }> = [];
 
       for (const row of chronological) {
@@ -533,15 +573,30 @@ export function createChatService(db: AppDatabase) {
 
         if (row.role === "assistant") {
           const loggedMeal = await getMealReceiptForAssistantMessage(deviceId, row.id);
+          const proposalCard = proposalCards.get(row.id);
           projected.push({
             ...row,
             didLogMeal: loggedMeal ? true : undefined,
             ...(loggedMeal ? { loggedMeal } : {}),
+            ...(proposalCard
+              ? {
+                  proposalCard: projectProposalCardForClient(
+                    proposalCard,
+                    projectionByProposal.get(proposalCard.proposalId),
+                  ),
+                }
+              : {}),
           });
           continue;
         }
 
-        projected.push(row);
+        const proposalActionEvent = proposalActionEvents.get(row.id);
+        projected.push({
+          ...row,
+          ...(proposalActionEvent
+            ? { proposalActionEvent: projectProposalActionEventForClient(proposalActionEvent) }
+            : {}),
+        });
       }
 
       return projected.slice(-limit);

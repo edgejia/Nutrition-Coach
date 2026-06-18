@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageBubble } from "../../client/src/components/MessageBubble.js";
+import { ProposalCard } from "../../client/src/components/ProposalCard.js";
 import type { Message } from "../../client/src/types.js";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
@@ -17,8 +18,75 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function getCssRule(css: string, selector: string) {
+  const selectorMatch = new RegExp(`(^|\\n)${escapeRegExp(selector)}(?:,|\\s*\\{)`).exec(css);
+  assert.ok(selectorMatch?.index !== undefined, `Missing CSS selector: ${selector}`);
+  const selectorIndex = selectorMatch.index + selectorMatch[1].length;
+  const openIndex = css.indexOf("{", selectorIndex);
+  const closeIndex = css.indexOf("}", openIndex);
+  assert.ok(openIndex > selectorIndex && closeIndex > openIndex, `Malformed CSS selector: ${selector}`);
+  return css.slice(openIndex + 1, closeIndex);
+}
+
+function getCssAtRuleBlock(css: string, atRule: string) {
+  const startIndex = css.indexOf(atRule);
+  assert.notEqual(startIndex, -1, `Missing CSS at-rule: ${atRule}`);
+  const openIndex = css.indexOf("{", startIndex);
+  assert.ok(openIndex > startIndex, `Malformed CSS at-rule: ${atRule}`);
+
+  let depth = 0;
+  for (let index = openIndex; index < css.length; index += 1) {
+    const char = css[index];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      return css.slice(openIndex + 1, index);
+    }
+  }
+
+  assert.fail(`CSS at-rule should be closed: ${atRule}`);
+}
+
 function renderMessageBubble(message: Message, options?: { isProvisional?: boolean; isStatusLabel?: boolean }) {
   return renderToStaticMarkup(createElement(MessageBubble, { message, ...options }));
+}
+
+function renderProposalCard(props: Parameters<typeof ProposalCard>[0]) {
+  return renderToStaticMarkup(createElement(ProposalCard, props));
+}
+
+const activeMealEstimateProposal = {
+  proposalId: "proposal-meal-estimate-1",
+  proposalKind: "meal_estimate" as const,
+  proposalLane: "meal_mutation" as const,
+  status: "active" as const,
+  isActionable: true,
+  title: "確認這個估值修改",
+  details: {
+    rows: [
+      { label: "熱量", before: "520 kcal", after: "460 kcal" },
+      { label: "蛋白質", value: "32 g" },
+    ],
+  },
+  actions: {
+    approveLabel: "套用修改",
+    editLabel: "改成其他數字",
+    rejectLabel: "取消提案",
+  },
+  expiresAt: "2026-04-29T08:00:00.000Z",
+  lapseCopy: null,
+  supersededByKind: null,
+};
+
+function proposalMessage(message: Partial<Message> = {}): Message {
+  return {
+    id: "proposal-message-1",
+    role: "assistant",
+    content: "我先把這次修改整理成提案。",
+    createdAt: "2026-04-29T07:30:00.000Z",
+    proposalCard: activeMealEstimateProposal,
+    ...message,
+  };
 }
 
 describe("chat bubble source contract", () => {
@@ -321,6 +389,381 @@ describe("chat bubble source contract", () => {
     assert.match(css, /height:\s*56px/);
     assert.match(css, /\.sp-receipt-thumbnail/);
     assert.match(css, /\.sp-receipt-thumbnail-fallback/);
+  });
+
+  it("renders active proposal cards before assistant intro text with approve, edit, and reject controls", () => {
+    const html = renderMessageBubble(proposalMessage());
+    const cardIndex = html.indexOf("sp-proposal-card");
+    const textIndex = html.indexOf("我先把這次修改整理成提案");
+
+    assert.ok(cardIndex >= 0, "proposal card should render");
+    assert.ok(textIndex > cardIndex, "assistant intro text should render after proposal card");
+    assert.match(html, /確認這個估值修改/);
+    assert.match(html, /熱量/);
+    assert.match(html, /520 kcal/);
+    assert.match(html, /460 kcal/);
+    assert.match(html, /蛋白質/);
+    assert.match(html, /32 g/);
+    assert.match(html, /套用修改/);
+    assert.match(html, /改成其他數字/);
+    assert.match(html, /取消提案/);
+    assert.match(html, /button/);
+  });
+
+  it("renders each proposal kind from backend labels and inactive lapse copy without parsing assistant text", () => {
+    const cases = [
+      {
+        kind: "goal" as const,
+        title: "確認每日目標",
+        approveLabel: "套用目標",
+        lapseCopy: "這個目標提案已超過 30 分鐘，請重新提出目標調整。",
+      },
+      {
+        kind: "meal_numeric" as const,
+        title: "確認餐點修改",
+        approveLabel: "套用修改",
+        lapseCopy: "這個餐點修改提案已超過 30 分鐘，請重新提出修改。",
+      },
+      {
+        kind: "meal_estimate" as const,
+        title: "確認估值修改",
+        approveLabel: "套用修改",
+        lapseCopy: "這個估值修改提案已超過 30 分鐘，請重新提出修改。",
+      },
+      {
+        kind: "meal_delete" as const,
+        title: "確認刪除餐點",
+        approveLabel: "確認刪除",
+        lapseCopy: "這個刪除確認已超過 30 分鐘，請重新選擇要刪除的餐點。",
+      },
+    ];
+
+    for (const item of cases) {
+      const html = renderMessageBubble(
+        proposalMessage({
+          content: "這段文字不含任何可解析的提案種類",
+          proposalCard: {
+            ...activeMealEstimateProposal,
+            proposalId: `proposal-${item.kind}`,
+            proposalKind: item.kind,
+            proposalLane: item.kind === "goal" ? "goal" : "meal_mutation",
+            status: "expired",
+            isActionable: false,
+            title: item.title,
+            actions: {
+              ...activeMealEstimateProposal.actions,
+              approveLabel: item.approveLabel,
+            },
+            lapseCopy: item.lapseCopy,
+          },
+        }),
+      );
+
+      assert.match(html, new RegExp(escapeRegExp(item.title)));
+      assert.match(html, new RegExp(escapeRegExp(item.lapseCopy)));
+      assert.doesNotMatch(html, /<button/);
+    }
+  });
+
+  it("renders structured proposal action events as user-side events distinct from typed bubbles", () => {
+    const message: Message = {
+      id: "proposal-action-event-1",
+      role: "user",
+      content: "這段文字不應該成為普通使用者泡泡",
+      createdAt: "2026-04-29T07:35:00.000Z",
+      proposalActionEvent: {
+        proposalId: "proposal-meal-estimate-1",
+        proposalKind: "meal_estimate",
+        proposalLane: "meal_mutation",
+        action: "approve",
+        transcriptCopy: "已選擇套用餐點修改",
+        createdAt: "2026-04-29T07:35:00.000Z",
+      },
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, /sp-proposal-action-event/);
+    assert.match(html, /已選擇套用餐點修改/);
+    assert.doesNotMatch(html, /sp-bubble-user/);
+    assert.doesNotMatch(html, /這段文字不應該成為普通使用者泡泡/);
+  });
+
+  it("renders proposal action completion replies through the normal assistant bubble path", () => {
+    const message: Message = {
+      id: "proposal-action-reply-1",
+      role: "assistant",
+      content: "已完成這次餐點修改。",
+      createdAt: "2026-04-29T07:35:01.000Z",
+    };
+
+    const html = renderMessageBubble(message);
+
+    assert.match(html, /sp-bubble-asst/);
+    assert.match(html, /已完成這次餐點修改。/);
+    assert.doesNotMatch(html, /sp-proposal-action-event/);
+    assert.doesNotMatch(html, /提案動作/);
+  });
+
+  it("renders delete proposal approval as destructive confirmation while reject stays non-destructive", () => {
+    const html = renderMessageBubble(
+      proposalMessage({
+        proposalCard: {
+          ...activeMealEstimateProposal,
+          proposalId: "proposal-delete-1",
+          proposalKind: "meal_delete",
+          title: "確認刪除這筆餐點",
+          actions: {
+            approveLabel: "確認刪除",
+            editLabel: "先不要刪，改問別的",
+            rejectLabel: "取消刪除",
+          },
+        },
+      }),
+    );
+
+    assert.match(html, /確認刪除/);
+    assert.match(html, /sp-proposal-danger/);
+    assert.match(html, /取消刪除/);
+    assert.doesNotMatch(html, /sp-proposal-reject[^"]*sp-proposal-danger/);
+  });
+
+  it("keeps proposal rendering sourced from metadata and styled with Sport-safe card controls", async () => {
+    const card = await readSource("client/src/components/ProposalCard.tsx");
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const css = await readSource("client/src/app.css");
+
+    assert.match(card, /proposalCard/);
+    assert.match(card, /details\.rows/);
+    assert.doesNotMatch(card, /message\.content/);
+    assert.doesNotMatch(card, /includes\(/);
+    assert.doesNotMatch(card, /確認刪除[\s\S]*proposalKind/);
+
+    assert.match(bubble, /message\.proposalCard/);
+    assert.match(bubble, /message\.proposalActionEvent/);
+    assert.match(bubble, /ReceiptCard/);
+
+    assert.match(css, /\.sp-proposal-card/);
+    assert.match(css, /width:\s*min\(92%, 320px\)/);
+    assert.match(css, /max-width:\s*92%/);
+    assert.match(css, /min-height:\s*44px/);
+    assert.match(css, /var\(--sp-lime\)/);
+    assert.match(css, /var\(--sp-red\)/);
+    assert.match(css, /var\(--sp-font-zh\)/);
+    assert.match(css, /var\(--sp-font-mono\)/);
+  });
+
+  it("keeps proposal CSS on the Phase 90 spacing scale and reserves lime for controls", async () => {
+    const css = await readSource("client/src/app.css");
+    const proposalSelectors = [
+      ".sp-proposal-head",
+      ".sp-proposal-row",
+      ".sp-proposal-actions",
+      ".sp-proposal-action",
+      ".sp-proposal-lapse",
+      ".sp-proposal-inline-edit",
+      ".sp-proposal-inline-input",
+    ];
+
+    for (const selector of proposalSelectors) {
+      const rule = getCssRule(css, selector);
+      assert.doesNotMatch(rule, /padding:\s*12px 14px(?: 14px)?/);
+      assert.doesNotMatch(rule, /padding:\s*10px 12px/);
+    }
+
+    assert.doesNotMatch(getCssRule(css, ".sp-proposal-row strong"), /var\(--sp-lime\)/);
+    assert.match(getCssRule(css, ".sp-proposal-action"), /min-height:\s*44px/);
+    assert.match(getCssRule(css, ".sp-proposal-inactive .sp-proposal-head h3"), /var\(--sp-ink-2\)/);
+  });
+
+  it("keeps browser-preview proposal row stacking scoped to proposal selectors", async () => {
+    const css = await readSource("client/src/app.css");
+    const previewBlock = getCssAtRuleBlock(css, "@media (max-width: 430px)");
+
+    assert.match(previewBlock, /\.sp-proposal-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+    assert.match(previewBlock, /\.sp-proposal-row\s*\{[^}]*align-items:\s*start/s);
+    assert.match(previewBlock, /\.sp-proposal-row span:last-child\s*\{[^}]*justify-content:\s*flex-start/s);
+    assert.match(previewBlock, /\.sp-proposal-row span:last-child\s*\{[^}]*text-align:\s*left/s);
+    assert.doesNotMatch(previewBlock, /\.sp-chat-textarea|\.sp-chat-input|\.screen-scroll|\.sp-receipt-row/);
+  });
+
+  it("renders an empty focused inline edit input with backend numeric hint and distinct close control", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      activeEdit: {
+        messageId: "proposal-message-1",
+        proposalId: activeMealEstimateProposal.proposalId,
+        value: "",
+      },
+      onInlineEditChange: () => {},
+      onInlineEditSubmit: () => {},
+      onCancelEdit: () => {},
+    });
+
+    assert.match(html, /sp-proposal-inline-edit/);
+    assert.match(html, /autoFocus|autofocus/);
+    assert.match(html, /輸入明確數字，例如：熱量改 460 kcal 或蛋白質改 30g/);
+    assert.doesNotMatch(html, /熱量再低一點/);
+    assert.match(html, /關閉編輯/);
+    assert.match(html, /送出/);
+    assert.doesNotMatch(html, /sp-proposal-inline-cancel[^>]*>取消提案/);
+  });
+
+  it("disables active proposal actions and exposes pending copy for the matching request", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      isActionPending: true,
+      onApprove: () => {},
+      onEdit: () => {},
+      onReject: () => {},
+    } as Parameters<typeof ProposalCard>[0] & { isActionPending: boolean });
+
+    assert.match(html, /aria-busy="true"/);
+    assert.match(html, /處理中\.\.\./);
+    assert.match(html, /disabled="">套用修改/);
+    assert.match(html, /disabled="">改成其他數字/);
+    assert.match(html, /disabled="">取消提案/);
+  });
+
+  it("renders deterministic proposal action error copy without retiring the active card", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      actionError: "這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。",
+      onApprove: () => {},
+      onEdit: () => {},
+      onReject: () => {},
+    } as Parameters<typeof ProposalCard>[0] & { actionError: string });
+
+    assert.match(html, /這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。/);
+    assert.match(html, /套用修改/);
+    assert.match(html, /改成其他數字/);
+    assert.match(html, /取消提案/);
+  });
+
+  it("disables inline edit submit while the trimmed edit value is empty", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      activeEdit: {
+        messageId: "proposal-message-1",
+        proposalId: activeMealEstimateProposal.proposalId,
+        value: "   ",
+      },
+      onInlineEditChange: () => {},
+      onInlineEditSubmit: () => {},
+      onCancelEdit: () => {},
+    });
+
+    assert.match(html, /class="sp-proposal-action sp-proposal-inline-send" type="submit" disabled=""[^>]*>送出/);
+    assert.match(html, /aria-disabled="true"/);
+  });
+
+  it("enables inline edit submit when the edit value contains text", () => {
+    const html = renderProposalCard({
+      proposalCard: activeMealEstimateProposal,
+      activeEdit: {
+        messageId: "proposal-message-1",
+        proposalId: activeMealEstimateProposal.proposalId,
+        value: "熱量改 480 kcal",
+      },
+      onInlineEditChange: () => {},
+      onInlineEditSubmit: () => {},
+      onCancelEdit: () => {},
+    });
+
+    assert.doesNotMatch(html, /sp-proposal-inline-send" type="submit" disabled/);
+  });
+
+  it("wires ChatPanel inline edit through one active state, composer lock, and proposal context send", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const bubble = await readSource("client/src/components/MessageBubble.tsx");
+    const proposalCard = await readSource("client/src/components/ProposalCard.tsx");
+
+    assert.match(chatPanel, /activeProposalEdit/);
+    assert.match(chatPanel, /setActiveProposalEdit/);
+    assert.match(chatPanel, /pendingProposalActionById/);
+    assert.match(chatPanel, /setPendingProposalActionById/);
+    assert.match(chatPanel, /proposalActionErrorById/);
+    assert.match(chatPanel, /setProposalActionErrorById/);
+    assert.match(chatPanel, /messageId/);
+    assert.match(chatPanel, /proposalId/);
+    assert.match(chatPanel, /setActiveProposalEdit\(null\)/);
+    assert.match(chatPanel, /sendProposalAction\(\{/);
+    assert.match(chatPanel, /action: "approve"/);
+    assert.match(chatPanel, /action: "reject"/);
+    assert.match(chatPanel, /proposalContext:\s*\{/);
+    assert.match(chatPanel, /action: "edit"/);
+    assert.match(chatPanel, /handleSend\([^,\n]+,\s*undefined,/);
+    assert.match(chatPanel, /activeProposalEdit\s*\?\s*true\s*:\s*isChatLocked/);
+    assert.match(chatPanel, /onProposalApprove=/);
+    assert.match(chatPanel, /onProposalEdit=/);
+    assert.match(chatPanel, /onProposalReject=/);
+    assert.match(chatPanel, /activeEdit=/);
+    assert.match(chatPanel, /pendingAction=/);
+    assert.match(chatPanel, /actionError=/);
+    assert.match(chatPanel, /finally/);
+    assert.match(chatPanel, /這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。/);
+    assert.doesNotMatch(chatPanel, /關閉編輯[\s\S]{0,240}sendProposalAction/);
+
+    assert.match(bubble, /pendingAction/);
+    assert.match(bubble, /actionError/);
+    assert.match(proposalCard, /autoFocus/);
+    assert.match(proposalCard, /sp-proposal-inline-edit/);
+    assert.match(proposalCard, /關閉編輯/);
+  });
+
+  it("keeps inline proposal edit keyboard handling IME-safe and submit guarded", async () => {
+    const proposalCard = await readSource("client/src/components/ProposalCard.tsx");
+    const chatInput = await readSource("client/src/components/ChatInput.tsx");
+
+    assert.match(chatInput, /e\.nativeEvent\.isComposing/);
+    assert.match(proposalCard, /isComposingRef/);
+    assert.match(proposalCard, /event\.nativeEvent\.isComposing/);
+    assert.match(proposalCard, /onCompositionStart=\{\(\) => \{/);
+    assert.match(proposalCard, /onCompositionEnd=\{\(\) => \{/);
+    assert.match(proposalCard, /if \(event\.key !== "Enter"\) return;/);
+    assert.match(proposalCard, /if \(event\.shiftKey\) return;/);
+    assert.match(proposalCard, /event\.preventDefault\(\);/);
+    assert.match(proposalCard, /canSubmitInlineEdit/);
+    assert.match(proposalCard, /if \(!canSubmitInlineEdit\) \{/);
+    assert.match(proposalCard, /onInlineEditSubmit\?\.\(\)/);
+  });
+
+  it("appends proposal action replies as assistant messages after the user action event", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+
+    assert.match(chatPanel, /function appendProposalActionReply\(reply: string\)/);
+    assert.match(chatPanel, /createClientId\("ast-action"\)/);
+    assert.match(chatPanel, /role: "assistant"/);
+    assert.match(chatPanel, /content: trimmedReply/);
+    assert.match(chatPanel, /result\.reply/);
+
+    const okBranch = chatPanel.match(/if \(result\.ok\) \{[\s\S]*?\n\s*\}/)?.[0] ?? "";
+    const actionEventIndex = okBranch.indexOf("appendProposalActionEvent(result.proposalActionEvent)");
+    const replyIndex = okBranch.indexOf("appendProposalActionReply(result.reply)");
+    assert.ok(actionEventIndex >= 0, "ChatPanel should append the structured proposal action event");
+    assert.ok(replyIndex > actionEventIndex, "assistant completion reply should be appended after the action event");
+  });
+
+  it("appends retryable and idempotent non-ok proposal replies without success events", async () => {
+    const chatPanel = await readSource("client/src/components/ChatPanel.tsx");
+    const nonOkBranch = chatPanel.match(/if \(!result\.ok\) \{[\s\S]*?return;\s*\n\s*\}/)?.[0] ?? "";
+
+    assert.match(
+      nonOkBranch,
+      /result\.status === "retryable" \|\| result\.status === "idempotent"/,
+      "source-only proof: residual risk is runtime wiring, covered by transport and typed /api/chat tests",
+    );
+    assert.match(nonOkBranch, /appendProposalActionReply\(result\.reply\)/);
+    assert.doesNotMatch(nonOkBranch, /appendProposalActionEvent/);
+    assert.doesNotMatch(nonOkBranch, /proposalActionEvent/);
+    assert.doesNotMatch(nonOkBranch, /setDailyTargets/);
+    assert.doesNotMatch(nonOkBranch, /setDailySummary/);
+    assert.doesNotMatch(nonOkBranch, /refreshTodayMeals/);
+
+    const nonOkIndex = chatPanel.indexOf("if (!result.ok)");
+    const okIndex = chatPanel.indexOf("if (result.ok)");
+    assert.ok(nonOkIndex >= 0, "ChatPanel should contain a distinct non-ok branch");
+    assert.ok(okIndex > nonOkIndex, "success side effects should remain in the later ok branch");
   });
 
   it("delete mutation confirmations stay assistant text only without receipt affordances", async () => {

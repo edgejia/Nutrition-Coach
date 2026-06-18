@@ -6,6 +6,8 @@ import { mealRevisionItems, mealRevisions, mealTransactions } from "../../server
 import { createDeviceService } from "../../server/services/device.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
+import { createGoalProposalService } from "../../server/services/goal-proposals.js";
+import { createMealDeleteProposalService } from "../../server/services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
@@ -16,6 +18,7 @@ import {
 import {
   executeTool,
   getToolDefinitions,
+  redactToolArgsForHook,
   toolRegistry,
   FatalToolError,
   type ToolDeps,
@@ -752,9 +755,9 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     assert.ok(result.loggedMeal);
     assert.deepEqual(result.loggedMeal.items, [
-      { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 15 },
-      { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 1 },
-      { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 0.5 },
+      { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 15 },
+      { name: "白飯", position: 1, calories: 280, protein: 0, carbs: 62, fat: 1 },
+      { name: "青菜", position: 2, calories: 40, protein: 0, carbs: 8, fat: 0.5 },
     ]);
   });
 
@@ -1759,6 +1762,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
 
     const call: ToolCall = {
       id: "call_delete_id_only_state",
@@ -1775,6 +1779,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       foodLoggingService,
       summaryService,
       mealCorrectionService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealIds: [created.id],
       },
@@ -1809,6 +1814,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
     const updated = await foodLoggingService.updateMeal(deviceId, updateTarget.id, {
       expectedMealRevisionId: updateTarget.mealRevisionId,
       items: [{
@@ -1844,6 +1850,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       foodLoggingService,
       summaryService,
       mealCorrectionService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealTargets: [{
           mealId: updateTarget.id,
@@ -1864,6 +1871,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       foodLoggingService,
       summaryService,
       mealCorrectionService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealTargets: [{
           mealId: deleteTarget.id,
@@ -2105,14 +2113,30 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.loggedMeal.calories, 48);
   });
 
-  it("returns committed deleted meal facts from delete_meal", async () => {
+  it("stores a delete proposal preview from delete_meal without mutating meals or summaries", async () => {
     const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
       items: [
         { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+        { foodName: "滷蛋", calories: 80, protein: 7, carbs: 1, fat: 5 },
       ],
     });
     const mealCorrectionService = createMealCorrectionService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
+    const mealNumericProposalService = createMealNumericProposalService(db);
+    let deleteCalls = 0;
+
+    await mealNumericProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: created.id,
+        expectedMealRevisionId: created.mealRevisionId,
+        updateInput: { calories: 300 },
+        affectedFields: [{ field: "calories", before: 600, after: 300 }],
+        sourceOperator: "half",
+      },
+    });
 
     const call: ToolCall = {
       id: "call_delete",
@@ -2128,26 +2152,132 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     const result = await executeTool(call, deviceId, {
       foodLoggingService,
       summaryService,
+      mealCorrectionService: {
+        ...mealCorrectionService,
+        async deleteMeal(...args: Parameters<typeof mealCorrectionService.deleteMeal>) {
+          deleteCalls += 1;
+          return mealCorrectionService.deleteMeal(...args);
+        },
+      },
+      mealDeleteProposalService,
+      mealNumericProposalService,
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    });
+    const proposal = await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, created.id))
+    )[0];
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, created.id);
+    assert.equal(proposal.expectedMealRevisionId, created.mealRevisionId);
+    assert.deepEqual(proposal.snapshot, {
+      mealId: created.id,
+      expectedMealRevisionId: created.mealRevisionId,
+      mealLabel: "牛肉麵、滷蛋",
+      calories: 600,
+      protein: 31,
+      carbs: 69,
+      fat: 21,
+      dateKey: "2026-03-25",
+      loggedAt: created.loggedAt,
+      mealPeriod: "dinner",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+        { foodName: "滷蛋", calories: 80, protein: 7, carbs: 1, fat: 5 },
+      ],
+    });
+    assert.equal(result.summary, "status: proposal");
+    assert.equal(result.success, true);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, undefined);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.deletedMeal, undefined);
+    assert.equal(result.policyFact?.policyClass, "confirm-first");
+    assert.match(result.result, /即將刪除/);
+    assert.match(result.result, /牛肉麵、滷蛋/);
+    assert.match(result.result, /600 kcal/);
+    assert.match(result.result, /P31g \/ C69g \/ F21g/);
+    assert.match(result.result, /2026-03-25/);
+    assert.match(result.result, /晚餐/);
+    assert.match(result.result, /牛肉麵 520 kcal/);
+    assert.match(result.result, /滷蛋 80 kcal/);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_delete_proposal",
+      text: result.result,
+    });
+    assert.equal(deleteCalls, 0);
+    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    assert.equal(transaction?.deletedAt, null);
+    assert.equal(transaction?.currentRevisionId, created.mealRevisionId);
+    assert.equal(revisions.length, 1);
+  });
+
+  it("adds the explicit-confirm hint to delete proposal copy only when a goal proposal is pending", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T10:30:00.000Z",
+      items: [
+        { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      ],
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
+    const goalProposalService = createGoalProposalService(db);
+
+    const withoutGoal = await executeTool({
+      id: "call_delete_without_goal",
+      type: "function",
+      function: {
+        name: "delete_meal",
+        arguments: JSON.stringify({ meal_id: created.id }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
       mealCorrectionService,
+      mealDeleteProposalService,
+      goalProposalService,
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    });
+    assert.doesNotMatch(withoutGoal.result, /明確回覆「刪除這筆餐點」/);
+
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: { calories: 1500, protein: 120, carbs: 150, fat: 50 },
+    });
+    const withGoal = await executeTool({
+      id: "call_delete_with_goal",
+      type: "function",
+      function: {
+        name: "delete_meal",
+        arguments: JSON.stringify({ meal_id: created.id }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      mealDeleteProposalService,
+      goalProposalService,
       toolSessionState: {
         resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
     });
 
-    assert.equal(result.mealMutationKind, "delete");
-    assert.equal(result.affectedDate, "2026-03-25");
-    assert.equal(result.dailySummary?.date, "2026-03-25");
-    assert.equal(result.dailySummary?.mealCount, 0);
-    assert.equal(result.summary, "成功");
-    assert.ok(result.deletedMeal);
-    const deletedMeal = result.deletedMeal;
-    assert.equal(deletedMeal.foodName, "牛肉麵");
-    assert.equal(deletedMeal.dateKey, "2026-03-25");
-    assert.equal(deletedMeal.mealId, created.id);
-    assert.doesNotMatch(JSON.stringify(deletedMeal), /deviceId|revision|delete_meal/);
+    assert.match(withGoal.result, /明確回覆「刪除這筆餐點」/);
   });
 
-  it("returns delete_meal service-provided recovered summaryOutcome with compatibility dailySummary", async () => {
+  it("does not compute delete summaries during delete_meal setup", async () => {
     const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T10:30:00.000Z",
       items: [
@@ -2162,6 +2292,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       },
       foodLoggingService,
     });
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
 
     const call: ToolCall = {
       id: "call_delete_recovered",
@@ -2178,20 +2309,27 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       foodLoggingService,
       summaryService,
       mealCorrectionService: recoveredMealCorrectionService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
     });
+    const transaction = (
+      await db
+        .select()
+        .from(mealTransactions)
+        .where(eq(mealTransactions.id, created.id))
+    )[0];
 
-    assert.equal(result.mealMutationKind, "delete");
-    assert.equal(result.affectedDate, "2026-03-25");
-    assert.equal(result.summaryOutcome?.status, "recovered");
-    assert.equal(result.summaryOutcome?.reason, "recompute_failed");
-    assert.equal(result.summaryOutcome?.dailySummary.mealCount, 0);
-    assert.equal(result.dailySummary, result.summaryOutcome?.dailySummary);
-    assert.ok(result.deletedMeal);
-    assert.equal(result.deletedMeal.mealId, created.id);
-    assert.equal(result.deletedMeal.foodName, "牛肉麵");
+    assert.equal(result.summary, "status: proposal");
+    assert.equal(result.executed, false);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.affectedDate, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.deletedMeal, undefined);
+    assert.equal(transaction?.deletedAt, null);
+    assert.ok(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }));
   });
 
   it("returns affectedDate when log_food targets an explicit historical day", async () => {
@@ -2718,6 +2856,27 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     });
     const mealCorrectionService = createMealCorrectionService(db);
     const mealNumericProposalService = createMealNumericProposalService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: created.id,
+        expectedMealRevisionId: created.mealRevisionId,
+        snapshot: {
+          mealId: created.id,
+          expectedMealRevisionId: created.mealRevisionId,
+          mealLabel: "雞腿、白飯",
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          dateKey: "2026-03-25",
+          loggedAt: created.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
     const contract = toolRegistry.get("propose_meal_numeric_correction");
     assert.ok(contract, "propose_meal_numeric_correction contract must be registered");
     assert.equal(contract.zodSchema.safeParse({
@@ -2753,6 +2912,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       summaryService,
       mealCorrectionService,
       mealNumericProposalService,
+      mealDeleteProposalService,
       toolSessionState: {
         resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
       },
@@ -2781,5 +2941,185 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(revisions.length, 1);
     assert.equal(result.mealMutationKind, undefined);
     assert.equal(result.summaryOutcome, undefined);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
+  it("registers propose_meal_estimate with strict bounded confirm-first schema", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      ],
+    });
+    const contract = toolRegistry.get("propose_meal_estimate");
+    assert.ok(contract, "propose_meal_estimate contract must be registered");
+    assert.equal(contract.policyClass, "confirm-first");
+    assert.ok(
+      getToolDefinitions().some((definition) => definition.function.name === "propose_meal_estimate"),
+      "propose_meal_estimate must be exposed to the model",
+    );
+    assert.equal(contract.parameters.additionalProperties, false);
+    assert.deepEqual(contract.parameters.required, ["meal_id", "fields", "estimated"]);
+    assert.equal(
+      ((contract.parameters.properties as any).estimated as Record<string, unknown>).additionalProperties,
+      false,
+    );
+
+    assert.equal(contract.zodSchema.safeParse({
+      meal_id: created.id,
+      fields: ["calories", "protein"],
+      estimated: { calories: 600, protein: 30 },
+    }).success, true);
+    for (const invalid of [
+      { meal_id: created.id, fields: ["protein"], estimated: {} },
+      { meal_id: created.id, fields: ["protein", "protein"], estimated: { protein: 30 } },
+      { meal_id: created.id, fields: ["protein"], estimated: { protein: -1 } },
+      { meal_id: created.id, fields: ["calories"], estimated: { calories: 5001 } },
+      { meal_id: created.id, fields: ["protein"], estimated: { protein: 401 } },
+      { meal_id: created.id, fields: ["carbs"], estimated: { carbs: 801 } },
+      { meal_id: created.id, fields: ["fat"], estimated: { fat: 401 } },
+      { meal_id: created.id, fields: ["protein"], estimated: { protein: 30, note: "raw meal text" } },
+      { meal_id: created.id, fields: ["protein"], estimated: { protein: 30 }, note: "raw meal text" },
+    ]) {
+      assert.equal(contract.zodSchema.safeParse(invalid).success, false, JSON.stringify(invalid));
+    }
+  });
+
+  it("stores a bounded model-estimate proposal without mutating meals or summaries", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const mealNumericProposalService = createMealNumericProposalService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
+    let updateCalls = 0;
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: created.id,
+        expectedMealRevisionId: created.mealRevisionId,
+        snapshot: {
+          mealId: created.id,
+          expectedMealRevisionId: created.mealRevisionId,
+          mealLabel: "雞腿、白飯",
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          dateKey: "2026-03-25",
+          loggedAt: created.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+
+    const result = await executeTool({
+      id: "call_propose_meal_estimate",
+      type: "function",
+      function: {
+        name: "propose_meal_estimate",
+        arguments: JSON.stringify({
+          meal_id: created.id,
+          fields: ["calories", "protein"],
+          estimated: { calories: 600, protein: 30 },
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: {
+        ...mealCorrectionService,
+        async updateMeal(...args: Parameters<typeof mealCorrectionService.updateMeal>) {
+          updateCalls += 1;
+          return mealCorrectionService.updateMeal(...args);
+        },
+      },
+      mealNumericProposalService,
+      mealDeleteProposalService,
+      toolSessionState: {
+        resolvedMealTargets: [{ mealId: created.id, mealRevisionId: created.mealRevisionId }],
+      },
+    } as ToolDeps, {
+      currentUserMessage: "雞腿飯幫我估合理一點然後更新",
+    });
+    const proposal = await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
+    const revisions = await db.select().from(mealRevisions);
+
+    assert.ok(proposal);
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(proposal.mealId, created.id);
+    assert.equal(proposal.expectedMealRevisionId, created.mealRevisionId);
+    assert.deepEqual(proposal.updateInput, { calories: 600, protein: 30 });
+    assert.deepEqual(proposal.affectedFields, [
+      { field: "calories", before: 540, after: 600 },
+      { field: "protein", before: 28, after: 30 },
+    ]);
+    assert.equal(result.result, renderMealNumericProposalCopy({
+      mealLabel: "雞腿、白飯",
+      affectedFields: proposal.affectedFields,
+    }));
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_numeric_proposal",
+      text: result.result,
+    });
+    assert.equal(result.policyFact?.policyClass, "confirm-first");
+    assert.equal(updateCalls, 0);
+    assert.equal(revisions.length, 1);
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
+  it("returns sanitized retryable validation diagnostics for invalid estimate proposals", async () => {
+    const result = await executeTool({
+      id: "call_invalid_estimate",
+      type: "function",
+      function: {
+        name: "propose_meal_estimate",
+        arguments: JSON.stringify({
+          meal_id: "not-a-uuid",
+          fields: ["protein"],
+          estimated: { protein: 999, note: "raw meal text" },
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: createMealCorrectionService(db),
+      mealNumericProposalService: createMealNumericProposalService(db),
+    } as ToolDeps, {
+      currentUserMessage: "雞腿飯蛋白質幫我估",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "validation");
+    assert.deepEqual(result.validationDiagnostic, {
+      reason: "schema_validation",
+      fields: ["meal_id", "estimated.protein", "estimated"],
+    });
+    assert.doesNotMatch(result.result, /999|raw meal text|雞腿飯/);
+    assert.equal(
+      await createMealNumericProposalService(db).getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+      undefined,
+    );
+  });
+
+  it("redacts estimate hook args to field metadata without raw estimates", () => {
+    const redacted = redactToolArgsForHook("propose_meal_estimate", JSON.stringify({
+      meal_id: "11111111-1111-4111-8111-111111111111",
+      fields: ["calories", "protein"],
+      estimated: { calories: 610, protein: 31 },
+    }));
+
+    assert.equal(redacted, "fields: calories,protein");
+    assert.doesNotMatch(redacted, /610|31|11111111/);
   });
 });

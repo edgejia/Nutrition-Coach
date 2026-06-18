@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -111,7 +112,7 @@ function assertGoalsResponseDto(value: unknown) {
 }
 
 function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
-  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg"]);
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
   const allowed = new Set(allowedKeys);
   for (const key of Object.keys(event)) {
     assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
@@ -143,6 +144,83 @@ function createMigratedDeviceTestDb(dbPath: string) {
   } finally {
     sqlite.close();
   }
+}
+
+const deployedLikeLegacySessionProbeScript = `
+const { Writable } = await import("node:stream");
+const { buildApp } = await import("./server/app.ts");
+const { MockLLMProvider } = await import("./server/llm/mock.ts");
+
+const logLines = [];
+const logStream = new Writable({
+  write(chunk, _, cb) {
+    chunk.toString().split("\\n").filter(Boolean).forEach((line) => logLines.push(line));
+    cb();
+  },
+});
+
+const app = await buildApp({
+  dbPath: ":memory:",
+  llmProvider: new MockLLMProvider(),
+  logger: { level: "info", stream: logStream },
+});
+try {
+  const create = await app.inject({
+    method: "POST",
+    url: "/api/device",
+    payload: { goal: "fat_loss" },
+  });
+  const deviceId = create.json().deviceId;
+  const requestPayload = { legacyDeviceId: deviceId };
+  const session = await app.inject({
+    method: "POST",
+    url: "/api/device/session",
+    payload: requestPayload,
+  });
+  const rawSetCookie = session.headers["set-cookie"];
+  const setCookieHeaders = Array.isArray(rawSetCookie)
+    ? rawSetCookie
+    : typeof rawSetCookie === "string"
+      ? [rawSetCookie]
+      : [];
+  console.log(JSON.stringify({
+    deviceId,
+    requestBodyJson: JSON.stringify(requestPayload),
+    statusCode: session.statusCode,
+    setCookieHeaders,
+    body: session.json(),
+    logLines,
+  }));
+} finally {
+  await app.close();
+}
+`;
+
+function runDeployedLikeLegacySessionProbe() {
+  const result = spawnSync(process.execPath, ["--import", "tsx", "--eval", deployedLikeLegacySessionProbeScript], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      TZ: "Asia/Taipei",
+      GUEST_SESSION_COOKIE_SECURE: "true",
+      GUEST_SESSION_SECRET: "test-guest-session-secret-strong-value",
+    },
+    encoding: "utf8",
+  });
+
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(result.status, 0, output);
+  const probeLine = result.stdout.trim().split("\n").at(-1);
+  assert.ok(probeLine, output);
+  return JSON.parse(probeLine) as {
+    deviceId: string;
+    requestBodyJson: string;
+    statusCode: number;
+    setCookieHeaders: string[];
+    body: unknown;
+    logLines: string[];
+  };
 }
 
 describe("Device API", () => {
@@ -466,6 +544,37 @@ describe("Device API", () => {
     assert.equal(setCookieHeaders.length, 2);
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session_resume=")));
+  });
+
+  it("POST /api/device/session rejects raw legacy device ids in deployed-like runtime without cookies", () => {
+    const result = runDeployedLikeLegacySessionProbe();
+
+    assert.equal(result.statusCode, 401);
+    assert.deepEqual(result.setCookieHeaders, []);
+
+    const events = findLogEvents(result.logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.deepEqual(pickEventMetadata(events[0]!, ["event", "reason", "route", "operation"]), {
+      event: "ownership_bypass_blocked",
+      reason: "legacy_device_id_rejected",
+      route: "api_device_session",
+      operation: "legacy_session_bootstrap",
+    });
+    assert.equal(typeof events[0]!.requestId, "string");
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude(
+      [events[0]!],
+      [
+        result.deviceId,
+        "legacyDeviceId",
+        "guest_session",
+        "guest_session_resume",
+        "cookie",
+        "x-device-id",
+        result.requestBodyJson,
+        "forged_signature",
+      ],
+    );
   });
 
   it("POST /api/device/session preserves maintain goal for active and legacy sessions", async () => {

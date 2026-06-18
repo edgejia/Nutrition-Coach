@@ -46,9 +46,11 @@ export interface ScenarioAppContext {
 export interface ScenarioAppServices {
   assetService: AppServices["assetService"];
   chatService: AppServices["chatService"];
+  db: AppServices["db"];
   foodLoggingService: AppServices["foodLoggingService"];
   goalProposalService: AppServices["goalProposalService"];
   mealCorrectionService: AppServices["mealCorrectionService"];
+  mealDeleteProposalService: AppServices["mealDeleteProposalService"];
   mealNumericProposalService: AppServices["mealNumericProposalService"];
   publisher: AppServices["publisher"];
   summaryService: AppServices["summaryService"];
@@ -87,9 +89,11 @@ export async function createScenarioApp(
       services = {
         assetService: readyServices.assetService,
         chatService: readyServices.chatService,
+        db: readyServices.db,
         foodLoggingService: readyServices.foodLoggingService,
         goalProposalService: readyServices.goalProposalService,
         mealCorrectionService: readyServices.mealCorrectionService,
+        mealDeleteProposalService: readyServices.mealDeleteProposalService,
         mealNumericProposalService: readyServices.mealNumericProposalService,
         publisher: readyServices.publisher,
         summaryService: readyServices.summaryService,

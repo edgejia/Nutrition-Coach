@@ -1,0 +1,20 @@
+{
+  "scenarioName": "proposal-three-way-confirmation",
+  "ok": true,
+  "consoleSummary": "PASS proposal-three-way-confirmation 10/10",
+  "totalSteps": 10,
+  "passedSteps": 10,
+  "stepNames": [
+    "goal_card_approve_action",
+    "meal_estimate_card_edit_context",
+    "delete_card_reject_and_approve",
+    "history_reload_recovers_actionability",
+    "meal_lane_supersede_lapse_copy",
+    "expiry_lapse_on_refresh",
+    "stale_action_misses_without_mutation",
+    "cross_session_action_rejected",
+    "duplicate_action_noops",
+    "metadata_only_artifact_guard"
+  ],
+  "writtenAt": "2026-06-15T13:29:29.228Z"
+}

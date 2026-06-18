@@ -120,6 +120,21 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /沒有可信蛋白來源/);
   });
 
+  it("routes delete_meal as confirm-first preview setup after find_meals", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = mealCorrectionSection(prompt);
+
+    assert.match(section, /find_meals[\s\S]*唯一目標[\s\S]*delete_meal[\s\S]*確認預覽/);
+    assert.match(section, /delete_meal[\s\S]*不代表已刪除/);
+    assert.match(section, /刪除成功[\s\S]*確認/);
+    assert.doesNotMatch(section, /只有當 find_meals 已解析出唯一目標時，才可以呼叫 update_meal 或 delete_meal；/);
+  });
+
   it("renders the no-intake legacy fat_loss prompt byte-for-byte", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1500,
@@ -541,6 +556,36 @@ describe("buildSystemPrompt", () => {
     assert.doesNotMatch(section, /先決定一個具體數字，再直接套用/);
     assert.doesNotMatch(section, /正常平均幾g就幾g/);
     assert.match(section, /本輪使用者明確提供最後目標數字/);
+    assert.match(section, /不要從模型判斷補出使用者沒有說出的數字後直接套用/);
+  });
+
+  it("routes explicit meal estimate requests through propose_meal_estimate after target resolution", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /propose_meal_estimate/);
+    assert.match(section, /幫我估合理值|幫我估合理一點/);
+    assert.match(section, /find_meals.*唯一目標.*propose_meal_estimate/s);
+    assert.match(section, /未指定欄位.*卡路里.*蛋白質.*碳水.*脂肪/s);
+    assert.match(section, /只要求.*單一欄位.*只估.*該欄位/s);
+  });
+
+  it("keeps vague non-estimate corrections out of estimated direct update paths", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /太高了/);
+    assert.match(section, /改合理一點/);
+    assert.match(section, /沒有明確要求.*估.*不得.*propose_meal_estimate/s);
+    assert.match(section, /不得直接.*update_meal|不要直接.*update_meal/);
     assert.match(section, /不要從模型判斷補出使用者沒有說出的數字後直接套用/);
   });
 

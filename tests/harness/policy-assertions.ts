@@ -6,6 +6,8 @@ import type {
 } from "../../server/orchestrator/tool-contract.js";
 
 type PolicyFactEvidence = ToolPolicyDecisionFact & {
+  success?: unknown;
+  executed?: unknown;
   turnId?: unknown;
 };
 
@@ -91,6 +93,8 @@ const POLICY_FACT_ALLOWED_KEYS = new Set([
   "tool",
   "policyClass",
   "decision",
+  "success",
+  "executed",
   "ruleId",
   "proposalId",
   "turnId",

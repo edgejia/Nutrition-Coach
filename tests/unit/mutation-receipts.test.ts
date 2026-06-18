@@ -13,6 +13,10 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderGoalValidationFailureCopy,
+  renderMealDeleteAuthorityFailureCopy,
+  renderMealDeleteCancelCopy,
+  renderMealDeleteProposalCopy,
+  renderMealDeleteStaleCopy,
   renderMealNumericAuthorityFailureCopy,
   renderMealNumericCancelCopy,
   renderMealNumericClarificationCopy,
@@ -21,6 +25,14 @@ import {
   renderCorrectionTargetNoMealsForDateCopy,
   renderCorrectionTargetSameDateRecoveryCopy,
   renderProposalKindAmbiguityCopy,
+  getProposalActionLabels,
+  getProposalInlineEditHint,
+  renderProposalActionEventCopy,
+  renderProposalAlreadyProcessedCopy,
+  renderProposalCardIntro,
+  renderProposalExpiredCopy,
+  renderProposalInactiveCopy,
+  renderProposalSupersededCopy,
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
 
@@ -86,6 +98,21 @@ const MEAL_NUMERIC_INTERNAL_TERMS = [
   "payload",
 ] as const;
 
+const MEAL_DELETE_INTERNAL_TERMS = [
+  "proposalId",
+  "mealId",
+  "expectedMealRevisionId",
+  "turn_states",
+  "delete_meal",
+  "revision",
+  "payload",
+  "summaryOutcome",
+  "dailySummary",
+  "API",
+  "tool",
+  "DELETE",
+] as const;
+
 const CORRECTION_TARGET_INTERNAL_TERMS = [
   "find_meals",
   "update_meal",
@@ -140,6 +167,12 @@ function assertNoGoalInternalTerms(text: string) {
 
 function assertNoMealNumericInternalTerms(text: string) {
   const leaked = MEAL_NUMERIC_INTERNAL_TERMS.filter((term) => text.includes(term));
+  assert.deepEqual(leaked, []);
+  assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+}
+
+function assertNoMealDeleteInternalTerms(text: string) {
+  const leaked = MEAL_DELETE_INTERNAL_TERMS.filter((term) => text.includes(term));
   assert.deepEqual(leaked, []);
   assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
 }
@@ -288,6 +321,19 @@ describe("goal proposal and rejection renderers", () => {
   });
 });
 
+describe("recoverable proposal failure renderer", () => {
+  it("returns the locked CFI-01 recovery copy and stays guard-clean", async () => {
+    const receipts = await import("../../server/orchestrator/mutation-receipts.js") as {
+      renderProposalRecoverableFailureCopy?: () => string;
+    };
+    const copy = receipts.renderProposalRecoverableFailureCopy?.();
+
+    assert.equal(typeof receipts.renderProposalRecoverableFailureCopy, "function");
+    assert.equal(copy, "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。");
+    assert.deepEqual(assertNoForbiddenReceiptTerms(copy), []);
+  });
+});
+
 describe("meal numeric proposal and rejection renderers", () => {
   it("renders proposal copy with meal label, every field, before and after values", () => {
     const text = renderMealNumericProposalCopy({
@@ -349,6 +395,32 @@ describe("meal numeric proposal and rejection renderers", () => {
     assertNoMealNumericInternalTerms(clarification);
   });
 
+  it("renders estimate-compatible proposal copy from affected fields only without internal provenance terms", () => {
+    const text = renderMealNumericProposalCopy({
+      mealLabel: "雞腿飯",
+      affectedFields: [
+        { field: "protein", before: 30, after: 28 },
+      ],
+    });
+
+    assert.equal(
+      text,
+      "我可以幫你把雞腿飯這樣調整：\n• 蛋白質：30 g 改為 28 g\n如果要套用，請回覆「好」；如果要調整，請直接給新的目標數字。",
+    );
+    assert.doesNotMatch(text, /卡路里|碳水|脂肪/);
+    assert.doesNotMatch(text, /model_estimate|provenance|propose_meal_estimate|AI 估計/);
+    assertNoMealNumericInternalTerms(text);
+  });
+
+  it("adds a deterministic estimate hint to vague numeric clarification without implying mutation", () => {
+    const text = renderMealNumericClarificationCopy();
+
+    assert.match(text, /^這次沒有更新餐點紀錄。/);
+    assert.match(text, /也可以請我幫你估合理/);
+    assert.doesNotMatch(text, /已更新|已套用|model_estimate|propose_meal_estimate/);
+    assertNoMealNumericInternalTerms(text);
+  });
+
   it("renders cancel and cross-kind ambiguity copy without success wording", () => {
     const cancel = renderMealNumericCancelCopy();
     const ambiguity = renderProposalKindAmbiguityCopy();
@@ -362,6 +434,190 @@ describe("meal numeric proposal and rejection renderers", () => {
     assert.doesNotMatch(ambiguity, /已更新餐點|已更新每日目標/);
     assertNoMealNumericInternalTerms(cancel);
     assertNoMealNumericInternalTerms(ambiguity);
+  });
+});
+
+describe("meal delete proposal and rejection renderers", () => {
+  const snapshot = {
+    mealId: "meal-internal",
+    expectedMealRevisionId: "revision-internal",
+    mealLabel: "牛肉麵、滷蛋",
+    calories: 600,
+    protein: 31,
+    carbs: 69,
+    fat: 21,
+    dateKey: "2026-03-25",
+    loggedAt: "2026-03-25T10:30:00.000Z",
+    mealPeriod: "dinner" as const,
+    items: [
+      { foodName: "牛肉麵", calories: 520, protein: 24, carbs: 68, fat: 16 },
+      { foodName: "滷蛋", calories: 80, protein: 7, carbs: 1, fat: 5 },
+    ],
+  };
+
+  it("renders proposal copy with persisted user-visible meal facts only", () => {
+    const text = renderMealDeleteProposalCopy({ snapshot });
+
+    assert.match(text, /即將刪除：牛肉麵、滷蛋/);
+    assert.doesNotMatch(text, /已刪除|成功刪除|完成刪除/);
+    assert.match(text, /日期：2026-03-25 晚餐/);
+    assert.match(text, /營養：600 kcal，P31g \/ C69g \/ F21g/);
+    assert.match(text, /牛肉麵 520 kcal/);
+    assert.match(text, /滷蛋 80 kcal/);
+    assert.match(text, /確認.*刪除/);
+    assert.match(text, /取消.*不會變更/);
+    assert.doesNotMatch(text, /照片|圖片|image/);
+    assertNoMealDeleteInternalTerms(text);
+  });
+
+  it("adds the explicit delete confirmation hint only when another proposal kind is active", () => {
+    const withoutOtherProposal = renderMealDeleteProposalCopy({ snapshot });
+    const withOtherProposal = renderMealDeleteProposalCopy({
+      snapshot,
+      otherProposalKindActive: true,
+    });
+
+    assert.doesNotMatch(withoutOtherProposal, /明確回覆「刪除這筆餐點」/);
+    assert.match(withOtherProposal, /明確回覆「刪除這筆餐點」/);
+    assertNoMealDeleteInternalTerms(withoutOtherProposal);
+    assertNoMealDeleteInternalTerms(withOtherProposal);
+  });
+
+  it("renders no-delete cancel, authority failure, and stale copy", () => {
+    const cancel = renderMealDeleteCancelCopy();
+    const authorityFailure = renderMealDeleteAuthorityFailureCopy();
+    const stale = renderMealDeleteStaleCopy();
+
+    assert.equal(cancel, "已取消刪除這筆餐點，餐點紀錄沒有變更。");
+    assert.match(authorityFailure, /^這次沒有刪除餐點紀錄。/);
+    assert.match(stale, /^這次沒有刪除餐點紀錄。/);
+    assert.match(stale, /餐點內容已經變更/);
+    for (const text of [cancel, authorityFailure, stale]) {
+      assert.doesNotMatch(text, /已刪除|成功刪除/);
+      assertNoMealDeleteInternalTerms(text);
+    }
+  });
+});
+
+describe("proposal card labels, action events, and inactive copy", () => {
+  it("renders proposal-kind-specific action labels including edit-close copy", () => {
+    assert.deepEqual(getProposalActionLabels("goal"), {
+      approveLabel: "套用目標",
+      editLabel: "調整目標",
+      rejectLabel: "取消提案",
+      closeEditLabel: "關閉編輯",
+    });
+    assert.deepEqual(getProposalActionLabels("meal_numeric"), {
+      approveLabel: "套用修改",
+      editLabel: "改成其他數字",
+      rejectLabel: "取消提案",
+      closeEditLabel: "關閉編輯",
+    });
+    assert.deepEqual(getProposalActionLabels("meal_estimate"), {
+      approveLabel: "套用修改",
+      editLabel: "改成其他數字",
+      rejectLabel: "取消提案",
+      closeEditLabel: "關閉編輯",
+    });
+    assert.deepEqual(getProposalActionLabels("meal_delete"), {
+      approveLabel: "確認刪除",
+      editLabel: "先不要刪，改問別的",
+      rejectLabel: "取消刪除",
+      closeEditLabel: "關閉編輯",
+      destructiveConfirmationLabel: "確認刪除這筆餐點",
+    });
+  });
+
+  it("renders empty-input inline edit hints and short card intros", () => {
+    assert.equal(getProposalInlineEditHint("goal"), "輸入新的每日目標，例如：蛋白質改 120g");
+    assert.equal(getProposalInlineEditHint("meal_numeric"), "輸入你想改成的數字，例如：蛋白質改 30g");
+    assert.equal(getProposalInlineEditHint("meal_estimate"), "輸入你想怎麼調整，例如：熱量再低一點");
+    assert.equal(getProposalInlineEditHint("meal_delete"), "輸入新的需求；這不會直接刪除餐點");
+
+    assert.equal(renderProposalCardIntro("goal"), "請確認這組每日目標提案。");
+    assert.equal(renderProposalCardIntro("meal_numeric"), "請確認這組餐點修改提案。");
+    assert.equal(renderProposalCardIntro("meal_estimate"), "請確認這組估值修改提案。");
+    assert.equal(renderProposalCardIntro("meal_delete"), "請確認是否刪除這筆餐點。");
+  });
+
+  it("renders structured action-event copy separately from typed user text", () => {
+    assert.equal(
+      renderProposalActionEventCopy({ proposalKind: "goal", action: "approve" }),
+      "已選擇套用目標",
+    );
+    assert.equal(
+      renderProposalActionEventCopy({ proposalKind: "meal_numeric", action: "approve" }),
+      "已選擇套用餐點修改",
+    );
+    assert.equal(
+      renderProposalActionEventCopy({ proposalKind: "meal_estimate", action: "approve" }),
+      "已選擇套用餐點修改",
+    );
+    assert.equal(
+      renderProposalActionEventCopy({ proposalKind: "meal_delete", action: "approve" }),
+      "已選擇確認刪除",
+    );
+    assert.equal(
+      renderProposalActionEventCopy({ proposalKind: "goal", action: "reject" }),
+      "已取消目標提案",
+    );
+    assert.equal(
+      renderProposalActionEventCopy({ proposalKind: "meal_numeric", action: "reject" }),
+      "已取消餐點修改提案",
+    );
+    assert.equal(
+      renderProposalActionEventCopy({ proposalKind: "meal_estimate", action: "reject" }),
+      "已取消餐點修改提案",
+    );
+    assert.equal(
+      renderProposalActionEventCopy({ proposalKind: "meal_delete", action: "reject" }),
+      "已取消刪除提案",
+    );
+  });
+
+  it("renders exact expired, superseded, and stale inactive copy", () => {
+    assert.equal(renderProposalExpiredCopy("goal"), "這個目標提案已超過 30 分鐘，請重新提出目標調整。");
+    assert.equal(renderProposalExpiredCopy("meal_numeric"), "這個餐點修改提案已超過 30 分鐘，請重新提出修改。");
+    assert.equal(renderProposalExpiredCopy("meal_estimate"), "這個估值修改提案已超過 30 分鐘，請重新提出修改。");
+    assert.equal(renderProposalExpiredCopy("meal_delete"), "這個刪除確認已超過 30 分鐘，請重新選擇要刪除的餐點。");
+
+    assert.equal(
+      renderProposalSupersededCopy({ proposalKind: "meal_numeric", supersededByKind: "meal_numeric" }),
+      "這個提案已被新的餐點修改取代。",
+    );
+    assert.equal(
+      renderProposalSupersededCopy({ proposalKind: "meal_numeric", supersededByKind: "meal_estimate" }),
+      "這個提案已被新的估值修改取代。",
+    );
+    assert.equal(
+      renderProposalSupersededCopy({ proposalKind: "meal_estimate", supersededByKind: "meal_delete" }),
+      "這個提案已被新的刪除確認取代。",
+    );
+    assert.equal(
+      renderProposalSupersededCopy({ proposalKind: "goal", supersededByKind: "goal" }),
+      "這個目標提案已被新的目標提案取代。",
+    );
+    assert.equal(
+      renderProposalInactiveCopy({ proposalKind: "meal_delete", status: "stale" }),
+      "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。",
+    );
+  });
+
+  it("renders exact already-processed proposal copy without forbidden receipt terms", () => {
+    const text = renderProposalAlreadyProcessedCopy();
+
+    assert.equal(text, "這個提案已經處理過，不需要再確認一次。");
+    assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+  });
+
+  it("keeps delete approve and reject copy scoped to a pending proposal", () => {
+    const labels = getProposalActionLabels("meal_delete");
+
+    assert.equal(labels.approveLabel, "確認刪除");
+    assert.equal(labels.destructiveConfirmationLabel, "確認刪除這筆餐點");
+    assert.equal(labels.rejectLabel, "取消刪除");
+    assert.equal(renderProposalActionEventCopy({ proposalKind: "meal_delete", action: "reject" }), "已取消刪除提案");
+    assert.doesNotMatch(labels.rejectLabel, /復原|還原|已刪除/);
   });
 });
 
@@ -535,6 +791,18 @@ describe("mutation receipt renderer", () => {
 
     assert.equal(text, "已刪除2025/12/31 拿鐵，已從當日紀錄移除。");
     assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
+  });
+
+  it("keeps delete success copy unreachable without the committed deletedMeal fact", () => {
+    assert.throws(
+      () => renderMutationReceipt({
+        kind: "delete",
+        affectedDate: "2025-12-31",
+        summaryOutcome: summaryOutcomes[0],
+        committedTargets,
+      } as unknown as MutationEffects),
+      /deletedMeal/,
+    );
   });
 
   it("renders identical log receipts for fresh recovered and unavailable summary outcomes", () => {

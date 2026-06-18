@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { config } from "../../../server/config.js";
 import { createScenarioApp } from "../app-fixture.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
@@ -77,8 +78,10 @@ function failResult(
 
 const STEP_NAMES = [
   "legacy_migration",
+  "deployed_like_legacy_rejected",
   "same_browser_resume",
   "tampered_access_fail_closed",
+  "raw_selector_fail_closed",
   "blocking_rebuild_flow",
 ] as const;
 
@@ -195,6 +198,75 @@ function snapshotStoreState(state: {
     guestSessionRecoveryAttempted: state.guestSessionRecoveryAttempted,
     dailyTargets: state.dailyTargets,
   };
+}
+
+function sanitizeStoreSnapshot(snapshot: AppStateSnapshot) {
+  return {
+    localIdentity: snapshot.deviceId === null ? null : "present",
+    goal: snapshot.goal,
+    activeScreen: snapshot.activeScreen,
+    guestSessionStatus: snapshot.guestSessionStatus,
+    guestSessionRecoveryAttempted: snapshot.guestSessionRecoveryAttempted,
+    dailyTargets: snapshot.dailyTargets,
+  };
+}
+
+function parseStoredTargets(value: string | undefined) {
+  if (value === undefined) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as DailyTargets;
+  } catch {
+    return "unparseable";
+  }
+}
+
+function sanitizeStorageValues(storage: Record<string, string>) {
+  return {
+    localIdentity: Object.prototype.hasOwnProperty.call(storage, "deviceId") ? "present" : null,
+    goal: storage.goal ?? null,
+    dailyTargets: parseStoredTargets(storage.dailyTargets),
+  };
+}
+
+function summarizeSessionCall(call: BrowserSessionCall | undefined) {
+  if (!call) {
+    return null;
+  }
+
+  let establishedBy: string | undefined;
+  try {
+    const parsed = JSON.parse(call.responseBody) as { establishedBy?: unknown };
+    if (typeof parsed.establishedBy === "string") {
+      establishedBy = parsed.establishedBy;
+    }
+  } catch {
+    // Non-JSON or error responses still provide useful status/cookie-count evidence.
+  }
+
+  return {
+    method: call.method,
+    url: call.url,
+    status: call.status,
+    issuedCookieCount: call.setCookieHeaders.length,
+    ...(establishedBy ? { establishedBy } : {}),
+  };
+}
+
+function cookieCount(cookieHeader: string) {
+  return parseCookieHeader(cookieHeader).size;
+}
+
+async function withSimulatedDeployedLikeRuntime<T>(fn: () => Promise<T>): Promise<T> {
+  const mutableConfig = config as { guestSessionCookieSecure: boolean };
+  const originalSecure = mutableConfig.guestSessionCookieSecure;
+  mutableConfig.guestSessionCookieSecure = true;
+  try {
+    return await fn();
+  } finally {
+    mutableConfig.guestSessionCookieSecure = originalSecure;
+  }
 }
 
 function responseHeadersFromInject(
@@ -376,16 +448,82 @@ const scenario: VerificationScenario = {
         }
         resumeOnlyCookieHeader = `${resumeCookieName}=${migratedJar.get(resumeCookieName)}`;
         artifacts.legacy_migration = {
-          migrationCall,
-          snapshot: migrationEvidence.snapshot,
-          storage: migrationEvidence.storage,
-          cookieHeader: migratedCookieHeader,
+          request: summarizeSessionCall(migrationCall),
+          snapshot: sanitizeStoreSnapshot(migrationEvidence.snapshot),
+          storage: sanitizeStorageValues(migrationEvidence.storage),
+          browserCookieCount: cookieCount(migratedCookieHeader),
+          stepResult: {
+            bootstrapReturned: migrationEvidence.ok,
+            establishedBy: migrationBody.establishedBy,
+          },
         };
         steps.push(pass("legacy_migration", artifacts.legacy_migration));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         steps.push(fail("legacy_migration", message, artifacts.legacy_migration));
         return failResult("guest-session-hardening", steps, "legacy_migration", artifacts);
+      }
+
+      try {
+        const rejectionEvidence = await withSimulatedDeployedLikeRuntime(async () => runStoreFlow({
+          app: fixture.app,
+          storageSeed: {
+            deviceId: fixture.deviceId,
+            goal: "fat_loss",
+            dailyTargets: JSON.stringify({ calories: 1500, protein: 120, carbs: 150, fat: 50 }),
+          },
+          tag: `guest-session-hardening-deployed-like-reject-${Date.now()}`,
+          run: async (store, session, storage) => {
+            const ok = await store.getState().bootstrapGuestSession();
+            return {
+              ok,
+              snapshot: snapshotStoreState(store.getState()),
+              storage: Object.fromEntries(storage.entries()),
+              calls: session.calls,
+              cookieHeader: cookieHeaderFromJar(session.jar),
+            } satisfies StoreHarnessResult & { ok: boolean };
+          },
+        })) as StoreHarnessResult & { ok: boolean };
+
+        const rejectionCall = rejectionEvidence.calls[0];
+        if (rejectionEvidence.ok !== false) {
+          throw new Error("Expected bootstrapGuestSession to return false for deployed-like legacy rejection");
+        }
+        if (!rejectionCall) {
+          throw new Error("bootstrapGuestSession did not make a deployed-like rejection request");
+        }
+        if (rejectionCall.status !== 401) {
+          throw new Error(`Expected deployed-like legacy rejection status 401, got ${rejectionCall.status}`);
+        }
+        if (rejectionCall.setCookieHeaders.length !== 0) {
+          throw new Error(`Expected no cookies issued on deployed-like rejection, got ${rejectionCall.setCookieHeaders.length}`);
+        }
+        if (Object.prototype.hasOwnProperty.call(rejectionEvidence.storage, "deviceId")) {
+          throw new Error("Expected stale local device identity to be removed after deployed-like rejection");
+        }
+        if (rejectionEvidence.snapshot.deviceId !== null) {
+          throw new Error("Expected store deviceId to be null after deployed-like rejection");
+        }
+        if (rejectionEvidence.snapshot.guestSessionStatus !== "recovery_required") {
+          throw new Error(`Expected recovery_required, got ${rejectionEvidence.snapshot.guestSessionStatus}`);
+        }
+
+        artifacts.deployed_like_legacy_rejected = {
+          simulatedDeployedLikeRuntime: { guestSessionCookieSecure: true },
+          request: summarizeSessionCall(rejectionCall),
+          snapshot: sanitizeStoreSnapshot(rejectionEvidence.snapshot),
+          storageAfterCleanup: sanitizeStorageValues(rejectionEvidence.storage),
+          stepResult: {
+            bootstrapReturned: rejectionEvidence.ok,
+            staleLocalIdentityCleared: true,
+            recoveryStatus: rejectionEvidence.snapshot.guestSessionStatus,
+          },
+        };
+        steps.push(pass("deployed_like_legacy_rejected", artifacts.deployed_like_legacy_rejected));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        steps.push(fail("deployed_like_legacy_rejected", message, artifacts.deployed_like_legacy_rejected));
+        return failResult("guest-session-hardening", steps, "deployed_like_legacy_rejected", artifacts);
       }
 
       try {
@@ -429,10 +567,14 @@ const scenario: VerificationScenario = {
 
         migratedCookieHeader = resumeEvidence.cookieHeader;
         artifacts.same_browser_resume = {
-          resumeCall,
-          snapshot: resumeEvidence.snapshot,
-          storage: resumeEvidence.storage,
-          cookieHeader: migratedCookieHeader,
+          request: summarizeSessionCall(resumeCall),
+          snapshot: sanitizeStoreSnapshot(resumeEvidence.snapshot),
+          storage: sanitizeStorageValues(resumeEvidence.storage),
+          browserCookieCount: cookieCount(migratedCookieHeader),
+          stepResult: {
+            recoveryReturned: resumeEvidence.ok,
+            establishedBy: resumeBody.establishedBy,
+          },
         };
         steps.push(pass("same_browser_resume", artifacts.same_browser_resume));
       } catch (error) {
@@ -516,12 +658,11 @@ const scenario: VerificationScenario = {
           }
 
           artifacts.tampered_access_fail_closed = {
-            historyMessageId: historyMessage.id,
-            assetId: asset.id,
-            validSseEvents,
+            validSseEventTypes: validSseEvents.map((event) => event.event),
             validHistory: {
               status: validHistoryRes.status,
-              messages: validHistoryBody.messages,
+              messageCount: validHistoryBody.messages.length,
+              seededMessageVisible: validHistoryBody.messages.some((message) => message.id === historyMessage.id),
             },
             validAsset: {
               status: validAssetRes.status,
@@ -529,15 +670,15 @@ const scenario: VerificationScenario = {
             },
             invalidHistory: {
               status: invalidHistoryRes.status,
-              body: invalidHistoryBody,
+              error: invalidHistoryBody.error,
             },
             invalidAsset: {
               status: invalidAssetRes.status,
-              body: invalidAssetBody,
+              error: invalidAssetBody.error,
             },
             invalidSse: {
               status: invalidSseRes.status,
-              body: invalidSseBody,
+              error: invalidSseBody.error,
             },
           };
         } finally {
@@ -551,6 +692,118 @@ const scenario: VerificationScenario = {
         const message = error instanceof Error ? error.message : String(error);
         steps.push(fail("tampered_access_fail_closed", message, artifacts.tampered_access_fail_closed));
         return failResult("guest-session-hardening", steps, "tampered_access_fail_closed", artifacts);
+      }
+
+      try {
+        const foreignDeviceRes = await fixture.app.inject({
+          method: "POST",
+          url: "/api/device",
+          payload: { goal: "muscle_gain" },
+        });
+        if (foreignDeviceRes.statusCode !== 200 && foreignDeviceRes.statusCode !== 201) {
+          throw new Error(`Expected foreign device seed status 200/201, got ${foreignDeviceRes.statusCode}`);
+        }
+        const foreignDeviceId = (foreignDeviceRes.json() as { deviceId: string }).deviceId;
+        const ownerMessage = await fixture.services.chatService.saveMessage(fixture.deviceId, "assistant", "owner selector baseline");
+        const foreignMessage = await fixture.services.chatService.saveMessage(foreignDeviceId, "assistant", "foreign selector baseline");
+
+        const ownerAssetPath = path.join(tempRoot, "raw-selector-owner.png");
+        const foreignAssetPath = path.join(tempRoot, "raw-selector-foreign.png");
+        await writeFile(ownerAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01]));
+        await writeFile(foreignAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x02]));
+        const ownerAsset = await fixture.services.assetService.createAsset(fixture.deviceId, {
+          stagedPath: ownerAssetPath,
+          mimeType: "image/png",
+          originalFilename: "raw-selector-owner.png",
+        });
+        const foreignAsset = await fixture.services.assetService.createAsset(foreignDeviceId, {
+          stagedPath: foreignAssetPath,
+          mimeType: "image/png",
+          originalFilename: "raw-selector-foreign.png",
+        });
+
+        const validSelectorHeaders = {
+          cookie: migratedCookieHeader,
+          "x-device-id": foreignDeviceId,
+        };
+        const invalidSelectorHeaders = {
+          "x-device-id": fixture.deviceId,
+        };
+
+        const validHistoryRes = await fetch(
+          `${fixture.address}/api/chat/history?limit=10&deviceId=${encodeURIComponent(foreignDeviceId)}`,
+          { headers: validSelectorHeaders },
+        );
+        const validHistoryBody = await validHistoryRes.json() as { messages: Array<{ id: string }> };
+        const ownerAssetWithForeignSelectorRes = await fetch(
+          `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(foreignDeviceId)}`,
+          { headers: validSelectorHeaders },
+        );
+        const foreignAssetWithOwnerCookieRes = await fetch(
+          `${fixture.address}/api/assets/${foreignAsset.id}?deviceId=${encodeURIComponent(foreignDeviceId)}`,
+          { headers: validSelectorHeaders },
+        );
+        const missingCookieHistoryRes = await fetch(
+          `${fixture.address}/api/chat/history?limit=5&deviceId=${encodeURIComponent(fixture.deviceId)}`,
+          { headers: invalidSelectorHeaders },
+        );
+        const missingCookieAssetRes = await fetch(
+          `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+          { headers: invalidSelectorHeaders },
+        );
+        const missingCookieSseRes = await fetch(
+          `${fixture.address}/api/sse?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+          { headers: invalidSelectorHeaders },
+        );
+
+        if (validHistoryRes.status !== 200) {
+          throw new Error(`Expected valid cookie history with raw selectors to return 200, got ${validHistoryRes.status}`);
+        }
+        if (!validHistoryBody.messages.some((message) => message.id === ownerMessage.id)) {
+          throw new Error("Expected cookie-owner history to remain visible with foreign raw selectors");
+        }
+        if (validHistoryBody.messages.some((message) => message.id === foreignMessage.id)) {
+          throw new Error("Foreign history became visible through raw selectors");
+        }
+        if (ownerAssetWithForeignSelectorRes.status !== 200) {
+          throw new Error(`Expected cookie-owner asset with foreign raw selectors to return 200, got ${ownerAssetWithForeignSelectorRes.status}`);
+        }
+        if (foreignAssetWithOwnerCookieRes.status !== 404) {
+          throw new Error(`Expected foreign asset with cookie owner plus raw selectors to return 404, got ${foreignAssetWithOwnerCookieRes.status}`);
+        }
+        if (missingCookieHistoryRes.status !== 401) {
+          throw new Error(`Expected missing-cookie history with raw selectors to return 401, got ${missingCookieHistoryRes.status}`);
+        }
+        if (missingCookieAssetRes.status !== 401) {
+          throw new Error(`Expected missing-cookie asset with raw selectors to return 401, got ${missingCookieAssetRes.status}`);
+        }
+        if (missingCookieSseRes.status !== 401) {
+          throw new Error(`Expected missing-cookie SSE with raw selectors to return 401, got ${missingCookieSseRes.status}`);
+        }
+
+        artifacts.raw_selector_fail_closed = {
+          validCookieForeignSelectors: {
+            historyStatus: validHistoryRes.status,
+            ownerHistoryVisible: validHistoryBody.messages.some((message) => message.id === ownerMessage.id),
+            foreignHistoryVisible: validHistoryBody.messages.some((message) => message.id === foreignMessage.id),
+            ownerAssetStatus: ownerAssetWithForeignSelectorRes.status,
+            foreignAssetStatus: foreignAssetWithOwnerCookieRes.status,
+          },
+          missingCookieRawSelectors: {
+            historyStatus: missingCookieHistoryRes.status,
+            assetStatus: missingCookieAssetRes.status,
+            sseStatus: missingCookieSseRes.status,
+          },
+          stepResult: {
+            cookieOwnerAuthoritative: true,
+            rawSelectorsAuthorizeMissingCookie: false,
+          },
+        };
+        steps.push(pass("raw_selector_fail_closed", artifacts.raw_selector_fail_closed));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        steps.push(fail("raw_selector_fail_closed", message, artifacts.raw_selector_fail_closed));
+        return failResult("guest-session-hardening", steps, "raw_selector_fail_closed", artifacts);
       }
 
       try {
@@ -627,12 +880,31 @@ const scenario: VerificationScenario = {
           throw new Error("Rebuild should clear persisted deviceId");
         }
 
-        artifacts.blocking_rebuild_flow = rebuildEvidence;
+        artifacts.blocking_rebuild_flow = {
+          firstRecover: rebuildEvidence.firstRecover,
+          secondRecover: rebuildEvidence.secondRecover,
+          afterFirstRecover: sanitizeStoreSnapshot(rebuildEvidence.afterFirstRecover),
+          afterSecondRecover: sanitizeStoreSnapshot(rebuildEvidence.afterSecondRecover),
+          afterRebuild: sanitizeStoreSnapshot(rebuildEvidence.afterRebuild),
+          storageAfterRebuild: sanitizeStorageValues(rebuildEvidence.storage),
+          requests: rebuildEvidence.calls.map(summarizeSessionCall),
+          browserCookieCount: cookieCount(rebuildEvidence.cookieHeader),
+        };
         steps.push(pass("blocking_rebuild_flow", artifacts.blocking_rebuild_flow));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         steps.push(fail("blocking_rebuild_flow", message, artifacts.blocking_rebuild_flow));
         return failResult("guest-session-hardening", steps, "blocking_rebuild_flow", artifacts);
+      }
+
+      const missingStepNames = STEP_NAMES.filter((stepName) => !steps.some((step) => step.name === stepName));
+      if (missingStepNames.length > 0) {
+        artifacts.artifact_contract = {
+          stepNames: [...STEP_NAMES],
+          missingStepNames,
+        };
+        steps.push(fail(missingStepNames[0], `Missing step names: ${missingStepNames.join(", ")}`, artifacts.artifact_contract));
+        return failResult("guest-session-hardening", steps, missingStepNames[0], artifacts);
       }
 
       return {

@@ -92,6 +92,39 @@ describe("meal numeric proposal service", () => {
     assert.deepEqual(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), proposal);
   });
 
+  it("round-trips model-estimate provenance through read and consume", async () => {
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { calories: 520, protein: 32 },
+        affectedFields: [
+          { field: "calories", before: 700, after: 520 },
+          { field: "protein", before: 40, after: 32 },
+        ],
+        sourceOperator: "model_estimate",
+        provenance: "model_estimate",
+      },
+    });
+
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.equal(
+      (await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.provenance,
+      "model_estimate",
+    );
+    assert.equal(
+      (await service.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: proposal.proposalId,
+        expectedMealRevisionId: "rev-1",
+      }))?.provenance,
+      "model_estimate",
+    );
+  });
+
   it("stores and reads a backend-computed grouped items proposal", async () => {
     const proposal = await service.putLatest({
       deviceId,
@@ -172,6 +205,42 @@ describe("meal numeric proposal service", () => {
         { kind: MEAL_NUMERIC_PROPOSAL_KIND, count: 1 },
       ],
     );
+  });
+
+  it("supersedes model-estimate and explicit numeric proposals on the shared kind", async () => {
+    const estimate = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { calories: 520 },
+        affectedFields: [{ field: "calories", before: 700, after: 520 }],
+        sourceOperator: "model_estimate",
+        provenance: "model_estimate",
+      },
+    });
+    const explicit = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { protein: 30 },
+        affectedFields: [{ field: "protein", before: 40, after: 30 }],
+        sourceOperator: "explicit_numeric",
+      },
+    });
+
+    assert.equal(estimate.provenance, "model_estimate");
+    assert.notEqual(explicit.proposalId, estimate.proposalId);
+    assert.equal(explicit.provenance, undefined);
+    assert.deepEqual(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), explicit);
+
+    const rows = db.$client
+      .prepare("SELECT kind, COUNT(*) AS count FROM turn_states WHERE device_id = ? AND session_id = ? GROUP BY kind")
+      .all(deviceId, DEFAULT_SESSION_ID) as Array<{ kind: string; count: number }>;
+    assert.deepEqual(rows, [{ kind: MEAL_NUMERIC_PROPOSAL_KIND, count: 1 }]);
   });
 
   it("returns undefined after the row expires", async () => {
@@ -301,6 +370,68 @@ describe("meal numeric proposal service", () => {
       undefined,
     );
     assert.equal(await service.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
+  it("keeps TTL and revision consume behavior unchanged for provenance-bearing proposals", async () => {
+    const proposal = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { fat: 10 },
+        affectedFields: [{ field: "fat", before: 18, after: 10 }],
+        sourceOperator: "model_estimate",
+        provenance: "model_estimate",
+      },
+    });
+
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: proposal.proposalId,
+        expectedMealRevisionId: "rev-2",
+      }),
+      undefined,
+    );
+    assert.equal(
+      (await service.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: proposal.proposalId,
+        expectedMealRevisionId: "rev-1",
+      }))?.provenance,
+      "model_estimate",
+    );
+
+    const expired = await service.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: "meal-1",
+        expectedMealRevisionId: "rev-1",
+        updateInput: { fat: 12 },
+        affectedFields: [{ field: "fat", before: 18, after: 12 }],
+        sourceOperator: "model_estimate",
+        provenance: "model_estimate",
+      },
+    });
+    db.$client
+      .prepare(
+        "UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND session_id = ? AND kind = ?",
+      )
+      .run("2026-05-16T00:00:00.000Z", deviceId, DEFAULT_SESSION_ID, MEAL_NUMERIC_PROPOSAL_KIND);
+
+    assert.equal(
+      await service.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: expired.proposalId,
+        expectedMealRevisionId: "rev-1",
+      }),
+      undefined,
+    );
   });
 
   it("does not consume when proposal id, session, or expected revision does not match", async () => {

@@ -79,6 +79,16 @@ describe("startup guest-session security guard", () => {
     );
   });
 
+  it("fails deployed-like boot when secure guest cookies are enabled with the development default secret", () => {
+    const result = runBootProbe({
+      ...baseEnv(),
+      GUEST_SESSION_COOKIE_SECURE: "true",
+      GUEST_SESSION_SECRET: DEFAULT_GUEST_SESSION_SECRET,
+    });
+
+    assertWeakSecretBootFailure(result, DEFAULT_GUEST_SESSION_SECRET);
+  });
+
   it("fails production boot on weak guest-session secret before file-backed schema validation", () => {
     const dbPath = path.join(mkdtempSync(path.join(tmpdir(), "nc-weak-secret-")), "fresh.sqlite");
     const result = runBootProbe({

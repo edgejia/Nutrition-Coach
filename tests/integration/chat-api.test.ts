@@ -75,6 +75,21 @@ function observabilityEvents(logLines: string[], eventName: string) {
   return parseLogLines(logLines).filter((record) => record.event === eventName);
 }
 
+function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(event)) {
+    assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+  }
+}
+
+function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  for (const value of forbiddenValues) {
+    assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+  }
+}
+
 function assertNoSuccessfulLogInternalCopy(text: string) {
   assert.doesNotMatch(text, /log_food|protein_sources|usedConservativeAssumption|quantityUncertaintyReason|missing_quantity/);
 }
@@ -339,6 +354,7 @@ describe("Chat API", () => {
   let assetsDir: string;
   let dbPath: string;
   let services: AppServices | undefined;
+  let logLines: string[];
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -354,11 +370,14 @@ describe("Chat API", () => {
     const sqlite = new Database(dbPath);
     applyMigrations(sqlite);
     sqlite.close();
+    const logCapture = createLogCapture();
+    logLines = logCapture.logLines;
     app = await buildApp({
       dbPath,
       llmProvider: mockLLM,
       uploadsDir,
       assetsDir,
+      logger: { level: "info", stream: logCapture.stream },
       onServicesReady: (readyServices) => {
         services = readyServices;
       },
@@ -1543,6 +1562,98 @@ describe("Chat API", () => {
     assert.equal(res.status, 401);
   });
 
+  it("POST /api/chat uses cookie ownership when foreign raw selectors are supplied and logs metadata only", async () => {
+    assert.ok(services, "expected app services");
+    const foreignDeviceRes = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "muscle_gain" },
+    });
+    const foreignDeviceId = foreignDeviceRes.json().deviceId as string;
+    const foreignCookieHeader = toCookieHeader(foreignDeviceRes.headers["set-cookie"]);
+    const userMessage = "ownership selector lunch sentinel";
+    const loggedFoodName = "Cookie Owned Apple";
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_ownership_selector",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [{ food_name: loggedFoodName, calories: 95, protein: 0.5, carbs: 25, fat: 0.3 }],
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已幫你記錄蘋果。" });
+
+    const form = new FormData();
+    form.append("message", userMessage);
+    const res = await fetch(`${address}/api/chat?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { didLogMeal?: boolean; didMutateMeal?: boolean; turnId?: string };
+    assert.equal(body.didLogMeal, true);
+    assert.equal(body.didMutateMeal, true);
+    assert.match(body.turnId ?? "", UUID_PATTERN);
+
+    const ownerHistory = await services.chatService.getHistory(deviceId, 10);
+    const foreignHistory = await services.chatService.getHistory(foreignDeviceId, 10);
+    assert.ok(ownerHistory.some((message) => message.role === "user" && message.content === userMessage));
+    assert.equal(foreignHistory.some((message) => message.content === userMessage), false);
+
+    const ownerMeals = await services.foodLoggingService.getMealsByDate(deviceId, new Date());
+    const foreignMeals = await services.foodLoggingService.getMealsByDate(foreignDeviceId, new Date());
+    assert.ok(ownerMeals.some((meal) => meal.foodName === loggedFoodName));
+    assert.equal(foreignMeals.some((meal) => meal.foodName === loggedFoodName), false);
+
+    const foreignSession = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: foreignCookieHeader },
+    });
+    assert.equal(foreignSession.statusCode, 200);
+
+    const events = observabilityEvents(logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.equal(typeof events[0]!.requestId, "string");
+    assert.equal(events[0]!.turnId, body.turnId);
+    assert.deepEqual(
+      {
+        event: events[0]!.event,
+        reason: events[0]!.reason,
+        route: events[0]!.route,
+        operation: events[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+      },
+    );
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId", "turnId"]);
+    assertLogEventsExclude(
+      [events[0]!],
+      [
+        deviceId,
+        foreignDeviceId,
+        "x-device-id",
+        "deviceId",
+        "guest_session",
+        "cookie",
+        userMessage,
+        loggedFoodName,
+        "image",
+        "snippet",
+      ],
+    );
+  });
+
   it("GET /api/chat/history returns messages", async () => {
     const form = new FormData();
     form.append("message", "你好");
@@ -2629,7 +2740,7 @@ describe("Chat API", () => {
       carbs: 25,
       fat: 0.3,
       items: [
-        { name: "蘋果", position: 1, calories: 95, protein: 0, carbs: 25, fat: 0.3 },
+        { name: "蘋果", position: 0, calories: 95, protein: 0, carbs: 25, fat: 0.3 },
       ],
     });
     assert.equal("currentRevisionId" in assistantMessage.loggedMeal, false);
@@ -2714,7 +2825,7 @@ describe("Chat API", () => {
     assert.equal(assistantMessage.loggedMeal.foodName, "雞腿便當");
     assert.equal(assistantMessage.loggedMeal.itemCount, 1);
     assert.deepEqual(assistantMessage.loggedMeal.items, [
-      { name: "雞腿便當", position: 1, calories: 620, protein: 24, carbs: 70, fat: 18 },
+      { name: "雞腿便當", position: 0, calories: 620, protein: 24, carbs: 70, fat: 18 },
     ]);
     assert.equal(Object.prototype.hasOwnProperty.call(assistantMessage.loggedMeal, "currentRevisionId"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(assistantMessage.loggedMeal, "inferredMealPeriod"), false);
@@ -2781,9 +2892,9 @@ describe("Chat API", () => {
     assert.equal(body.loggedMeal?.carbs, 70);
     assert.equal(body.loggedMeal?.fat, 13.5);
     assert.deepEqual(body.loggedMeal?.items, [
-      { name: "雞腿", position: 1, calories: 260, protein: 24, carbs: 0, fat: 12 },
-      { name: "白飯", position: 2, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
-      { name: "青菜", position: 3, calories: 40, protein: 0, carbs: 8, fat: 1 },
+      { name: "雞腿", position: 0, calories: 260, protein: 24, carbs: 0, fat: 12 },
+      { name: "白飯", position: 1, calories: 280, protein: 0, carbs: 62, fat: 0.5 },
+      { name: "青菜", position: 2, calories: 40, protein: 0, carbs: 8, fat: 1 },
     ]);
   });
 
@@ -3045,7 +3156,7 @@ describe("Chat API", () => {
     assert.equal(updateBody.loggedMeal?.fat, 10);
     assert.equal(updateBody.loggedMeal?.mealPeriod, "lunch");
     assert.deepEqual(updateBody.loggedMeal?.items, [
-      { name: "半碗牛肉麵", position: 1, calories: 360, protein: 20, carbs: 45, fat: 10 },
+      { name: "半碗牛肉麵", position: 0, calories: 360, protein: 20, carbs: 45, fat: 10 },
     ]);
   });
 
@@ -3181,13 +3292,6 @@ describe("Chat API", () => {
     const mealId = mealsBeforeJson.meals[0]?.id;
     assert.ok(mealId);
 
-    assert.ok(services, "expected app services");
-    services.summaryService.getDailySummary = async () => {
-      throw new Error("summary recomputation failed after delete");
-    };
-    services.foodLoggingService.getMealsByDate = async () => {
-      throw new Error("summary recovery failed after delete");
-    };
     mockLLM.queueChatResponse({
       toolCalls: [
         {
@@ -3208,20 +3312,54 @@ describe("Chat API", () => {
         },
       ],
     });
-    mockLLM.queueChatResponse({ content: "已刪除雞腿便當。" });
 
     const deleteForm = new FormData();
     deleteForm.append("message", "刪除雞腿便當");
-    const deleteRes = await fetch(`${address}/api/chat`, {
+    const setupRes = await fetch(`${address}/api/chat`, {
       method: "POST",
       headers: { cookie: sessionCookieHeader },
       body: deleteForm,
     });
 
-    assert.equal(deleteRes.status, 200);
-    const body = await deleteRes.json() as {
+    assert.equal(setupRes.status, 200);
+    const setupBody = await setupRes.json() as {
+      reply: string;
       didLogMeal: boolean;
       didMutateMeal?: boolean;
+      deletedMealId?: unknown;
+      summaryOutcome?: SummaryOutcome;
+    };
+    assert.equal(setupBody.didLogMeal, false);
+    assert.equal(setupBody.didMutateMeal, false);
+    assert.equal(setupBody.deletedMealId, undefined);
+    assert.equal(setupBody.summaryOutcome, undefined);
+    assert.match(setupBody.reply, /即將刪除：雞腿便當/);
+    const mealsAfterSetupRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const mealsAfterSetupJson = await mealsAfterSetupRes.json() as { meals: Array<{ id: string }> };
+    assert.equal(mealsAfterSetupJson.meals.some((meal) => meal.id === mealId), true);
+
+    assert.ok(services, "expected app services");
+    services.summaryService.getDailySummary = async () => {
+      throw new Error("summary recomputation failed after delete");
+    };
+    services.foodLoggingService.getMealsByDate = async () => {
+      throw new Error("summary recovery failed after delete");
+    };
+    const confirmForm = new FormData();
+    confirmForm.append("message", "好");
+    const confirmRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: confirmForm,
+    });
+
+    assert.equal(confirmRes.status, 200);
+    const body = await confirmRes.json() as {
+      didLogMeal: boolean;
+      didMutateMeal?: boolean;
+      deletedMealId?: string;
       affectedDate?: string;
       loggedMeal?: unknown;
       dailySummary?: unknown;
@@ -3229,6 +3367,7 @@ describe("Chat API", () => {
     };
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, true);
+    assert.equal(body.deletedMealId, mealId);
     assert.match(body.affectedDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(body.loggedMeal, undefined);
     assertUnavailableSummaryOutcome(body.summaryOutcome);

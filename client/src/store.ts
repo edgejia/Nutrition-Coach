@@ -17,6 +17,8 @@ import type {
   LoggedMealReceipt,
   PendingHomeChatDraft,
   PrimaryTab,
+  ProposalActionEventMetadata,
+  ProposalCardMetadata,
   ProvisionalBubble,
   SecondaryScreen,
   SecondaryScreenState,
@@ -64,6 +66,8 @@ type CommitProvisionalBubbleExtra = {
   dailySummary?: DailySummary;
   dailyTargets?: DailyTargets;
   deletedMealId?: string;
+  proposalCard?: ProposalCardMetadata;
+  proposalActionEvent?: ProposalActionEventMetadata;
   status?: Message["status"];
   turnId?: string;
 };
@@ -287,7 +291,8 @@ export const useStore = create<AppState>((set, get) => ({
       }));
       return true;
     } catch {
-      set({ guestSessionStatus: "recovery_required" });
+      localStorage.removeItem("deviceId");
+      set({ deviceId: null, guestSessionStatus: "recovery_required" });
       return false;
     }
   },
@@ -419,6 +424,8 @@ export const useStore = create<AppState>((set, get) => ({
         ...(extra.turnId ? { turnId: extra.turnId } : {}),
         didLogMeal: extra.didLogMeal,
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
+        ...(extra.proposalCard ? { proposalCard: extra.proposalCard } : {}),
+        ...(extra.proposalActionEvent ? { proposalActionEvent: extra.proposalActionEvent } : {}),
       };
 
       const messages = extra.deletedMealId
@@ -449,6 +456,8 @@ export const useStore = create<AppState>((set, get) => ({
         ...(extra.turnId ? { turnId: extra.turnId } : {}),
         didLogMeal: extra.didLogMeal ?? Boolean(extra.loggedMeal),
         ...(extra.loggedMeal ? { loggedMeal: extra.loggedMeal } : {}),
+        ...(extra.proposalCard ? { proposalCard: extra.proposalCard } : {}),
+        ...(extra.proposalActionEvent ? { proposalActionEvent: extra.proposalActionEvent } : {}),
       };
 
       const messages = extra.deletedMealId
