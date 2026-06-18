@@ -4,9 +4,11 @@ Nutrition Coach uses the GSD issue-first contribution flow.
 
 ## Branches
 
-- `feature/*` branches merge into `staging`.
-- `staging` is the integration and Railway testing branch.
-- `main` is production. Do not promote `staging` to `main` without explicit approval in the current thread.
+- `main` is the source release branch. Do not do active development on `main`.
+- GSD milestone work uses `gsd/{milestone}-{slug}` branches by default.
+- Source release flow is `gsd/* -> PR -> main`.
+- `staging` is a legacy Railway-era branch. Do not use it as a required promotion path unless the current thread explicitly asks for legacy staging work.
+- Production runtime refresh is separate from source release. The current runtime is a local production-mode server exposed through Cloudflare Tunnel and requires explicit approval before refresh, tunnel changes, or public-domain smoke.
 
 ## Issues First
 
@@ -38,13 +40,14 @@ GitHub does not automatically choose among multiple PR templates. Use the matchi
 Every PR must:
 
 - Link the approved issue with `Closes #NNN`, `Fixes #NNN`, or `Resolves #NNN`.
-- Target `staging` unless the current thread explicitly approves production promotion to `main`.
+- Target `main` from a GSD work branch unless the current thread explicitly asks for a different base.
 - Keep one concern per PR.
 - Avoid unrelated formatting churn or cleanup.
 - Describe verification, risk, and breaking-change impact.
 - Pass `yarn release:check` locally when practical.
 - Pass CI `Release Check`.
 - Receive review approval before merge.
+- State whether production runtime refresh is out of scope or explicitly approved.
 
 ## Labels
 
@@ -69,11 +72,10 @@ Repository-specific labels such as `priority:P0` through `priority:P3`, `securit
 
 ## CI
 
-PRs to `staging` and `main` run `.github/workflows/pr-check.yml`, which executes:
+PRs to `main` run `.github/workflows/pr-check.yml`, which executes:
 
 ```bash
-yarn release:check --base=origin/${{ github.base_ref }}
+yarn release:check --base=origin/${RELEASE_BASE_REF}
 ```
 
 Branch protection should require the `Release Check` status before merge when GitHub plan support allows it.
-

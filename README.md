@@ -194,9 +194,10 @@ Run migrations and start server：
 yarn db:migrate && yarn start
 ```
 
-部署環境中，單一 Fastify process 會同時提供 API 與 `dist/client`。請使用有持久化 volume 的 host 存放 SQLite 和 durable assets，並設定 `NODE_ENV=production`、`OPENAI_API_KEY`、`OPENAI_ORCHESTRATOR_MODEL`、`DB_PATH`、`TZ`、`GUEST_SESSION_SECRET`。Railway 設定範例可參考 [docs/deploy/railway-beta.md](docs/deploy/railway-beta.md)。
+部署環境中，單一 Fastify process 會同時提供 API 與 `dist/client`。請使用持久化 storage 存放 SQLite 和 durable assets，並設定 `NODE_ENV=production`、`OPENAI_API_KEY`、`OPENAI_ORCHESTRATOR_MODEL`、`DB_PATH`、`TZ`、`GUEST_SESSION_SECRET`。目前 production runtime 是本機 production-mode server 透過 Cloudflare Tunnel 對外提供，流程見 [docs/deploy/cloudflare-tunnel.md](docs/deploy/cloudflare-tunnel.md)。Railway baseline 已封存為歷史參考。
 
 ## 公開文件
 
-- [Railway deployment example](docs/deploy/railway-beta.md)
+- [Cloudflare Tunnel production runtime](docs/deploy/cloudflare-tunnel.md)
+- [Archived Railway deployment baseline](docs/deploy/railway-beta.md)
 - [Capability matrix](docs/capability-matrix.md)
