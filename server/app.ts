@@ -35,6 +35,7 @@ import { registerAssetRoutes } from "./routes/assets.js";
 import { registerSSERoutes } from "./routes/sse.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
 import { registerProposalActionRoutes } from "./routes/proposal-actions.js";
+import { registerProtectedRouteSupport } from "./routes/protected-route.js";
 import type { LLMProvider } from "./llm/types.js";
 import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
 import { config, isDeployedLikeRuntime, validateGuestSessionSecretForRuntime } from "./config.js";
@@ -211,6 +212,7 @@ export async function buildApp(opts: AppOptions) {
   // Keep the parser limit above the product limit so the chat route can return a controlled 400 at 5MB.
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
 
+  registerProtectedRouteSupport(app);
   registerDeviceRoutes(app, { deviceService, guestSessionService, targetGenerationService });
   registerChatRoutes(app, {
     orchestrator,
