@@ -91,14 +91,11 @@ function parseLinkedIssueNumbers(text) {
   const numbers = new Set();
   const body = text || "";
   const closingPattern =
-    /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?|references?)\s+(?:https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/)?#?(\d+)\b/gi;
-  const issueUrlPattern = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/(\d+)\b/gi;
+    /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/)?#?(\d+)\b/gi;
 
-  for (const pattern of [closingPattern, issueUrlPattern]) {
-    let match;
-    while ((match = pattern.exec(body)) !== null) {
-      numbers.add(Number(match[1]));
-    }
+  let match;
+  while ((match = closingPattern.exec(body)) !== null) {
+    numbers.add(Number(match[1]));
   }
 
   return [...numbers].sort((a, b) => a - b);
@@ -302,8 +299,8 @@ async function main() {
 
   for (const kind of kinds) {
     const required = requiredByKind[kind];
-    if (!allLabels.has(required)) {
-      errors.push(`${kind} PRs require the \`${required}\` label on the linked issue or PR.`);
+    if (!issueLabels.has(required)) {
+      errors.push(`${kind} PRs require the \`${required}\` label on a linked issue.`);
     }
   }
 
