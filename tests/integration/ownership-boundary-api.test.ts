@@ -49,6 +49,13 @@ const EXPECTED_MISSING_COOKIE_RAW_SELECTOR_ROUTES = [
   "sse",
 ] as const;
 
+const EXPECTED_REVOCATION_STEP_NAMES = [
+  "copied_token_valid_until_logout",
+  "logout_reset_revokes_copies",
+  "stale_resume_rejected_after_logout",
+  "valid_current_resume_after_rebootstrap",
+] as const;
+
 const EXPECTED_PROTECTED_ROUTE_META_KEYS = [
   "chatMessage",
   "chatStop",
@@ -579,6 +586,32 @@ async function assertGuestSessionHardeningRawSelectorArtifacts() {
   );
 }
 
+async function assertGuestSessionHardeningRevocationArtifacts() {
+  const steps = JSON.parse(
+    await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/steps.json"),
+  ) as Array<{ name?: unknown; ok?: unknown; actual?: unknown }>;
+  const summary = JSON.parse(
+    await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/summary.json"),
+  ) as { stepNames?: unknown; totalSteps?: unknown; passedSteps?: unknown };
+
+  const stepNames = steps.map((step) => step.name);
+  for (const stepName of EXPECTED_REVOCATION_STEP_NAMES) {
+    assert.ok(stepNames.includes(stepName), `guest-session-hardening steps must include ${stepName}`);
+    const step = steps.find((item) => item.name === stepName);
+    assert.equal(step?.ok, true, `${stepName} must be marked ok`);
+  }
+
+  const summaryStepNames = summary.stepNames;
+  assert.ok(Array.isArray(summaryStepNames), "guest-session-hardening summary must list step names");
+  assert.deepEqual(
+    EXPECTED_REVOCATION_STEP_NAMES.map((stepName) => summaryStepNames.includes(stepName)),
+    EXPECTED_REVOCATION_STEP_NAMES.map(() => true),
+    "guest-session-hardening summary must include every revocation step",
+  );
+  assert.equal(summary.totalSteps, 10);
+  assert.equal(summary.passedSteps, 10);
+}
+
 test("protected route modules no longer resolve guest sessions manually", async () => {
   await assertNoManualResolveGuestSession();
 });
@@ -593,6 +626,10 @@ test("client protected transports do not send raw ownership selectors", async ()
 
 test("guest-session-hardening artifacts prove representative raw selector fail-closed behavior", async () => {
   await assertGuestSessionHardeningRawSelectorArtifacts();
+});
+
+test("guest-session-hardening artifacts prove guest-session revocation behavior", async () => {
+  await assertGuestSessionHardeningRevocationArtifacts();
 });
 
 test("guest-session-hardening generated artifacts are metadata-only", async () => {
