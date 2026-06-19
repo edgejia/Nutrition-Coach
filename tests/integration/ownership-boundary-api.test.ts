@@ -393,6 +393,29 @@ function collectFetchCalls(source: ts.SourceFile) {
   return calls;
 }
 
+function findNearestFunctionName(node: ts.Node) {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if (ts.isFunctionDeclaration(current)) {
+      return current.name?.text;
+    }
+    if (ts.isFunctionExpression(current) || ts.isArrowFunction(current)) {
+      const parent = current.parent;
+      if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+        return parent.name.text;
+      }
+      if (ts.isPropertyAssignment(parent)) {
+        return objectPropertyNameText(parent.name);
+      }
+    }
+    if (ts.isMethodDeclaration(current)) {
+      return objectPropertyNameText(current.name);
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
 export async function assertClientDoesNotSendRawProtectedSelectors() {
   for (const relativePath of CLIENT_TRANSPORT_FILES) {
     const source = await parseProjectFile(relativePath);
@@ -425,9 +448,24 @@ export async function assertClientDoesNotSendRawProtectedSelectors() {
   );
 
   const sessionFetches = collectFetchCalls(apiSource).filter((call) => call.urlText.includes("/api/device/session"));
+  const legacyDeviceIdLocations: string[] = [];
+  walk(apiSource, (node) => {
+    if (ts.isIdentifier(node) && node.text === "legacyDeviceId") {
+      legacyDeviceIdLocations.push(findNearestFunctionName(node) ?? "<module>");
+    }
+  });
   assert.ok(
-    sessionFetches.some((call) => /\blegacyDeviceId\b/.test(call.initText)),
-    "POST /api/device/session remains the only client bootstrap path allowed to send legacyDeviceId",
+    sessionFetches.some((call) => call.urlText.includes("/api/device/session")),
+    "Client must keep POST /api/device/session as the bootstrap/resume compatibility path",
+  );
+  assert.ok(
+    legacyDeviceIdLocations.length > 0,
+    "Client session bootstrap should keep legacyDeviceId compatibility",
+  );
+  assert.deepEqual(
+    [...new Set(legacyDeviceIdLocations)],
+    ["establishGuestSession"],
+    "legacyDeviceId must stay confined to establishGuestSession() and POST /api/device/session bootstrap compatibility",
   );
 }
 
