@@ -7,6 +7,7 @@ interface GuestSessionClaims {
   deviceId: string;
   kind: GuestSessionKind;
   exp: number;
+  ver: number;
 }
 
 interface GuestSessionOptions {
@@ -32,17 +33,9 @@ export type GuestSessionVerificationResult =
   | {
       ok: true;
       deviceId: string;
+      version: number;
       expiresAt: string;
     }
-  | {
-      ok: false;
-      reason: GuestSessionFailureReason;
-    };
-
-export type GuestSessionResumeResult =
-  | ({
-      ok: true;
-    } & IssuedGuestSession)
   | {
       ok: false;
       reason: GuestSessionFailureReason;
@@ -86,10 +79,19 @@ function decodeClaims(token: string): GuestSessionClaims | null {
     ) {
       return null;
     }
+    const version = Object.hasOwn(decoded, "ver") ? decoded.ver : 0;
+    if (
+      typeof version !== "number"
+      || !Number.isSafeInteger(version)
+      || version < 0
+    ) {
+      return null;
+    }
     return {
       deviceId: decoded.deviceId,
       kind: decoded.kind,
       exp: decoded.exp,
+      ver: version,
     };
   } catch {
     return null;
@@ -124,12 +126,16 @@ function parseCookieHeader(cookieHeader: string | undefined) {
 export function createGuestSessionService(options: GuestSessionOptions) {
   const now = options.now ?? (() => new Date());
 
-  function issueToken(deviceId: string, kind: GuestSessionKind, ttlSeconds: number) {
+  function issueToken(deviceId: string, sessionVersion: number, kind: GuestSessionKind, ttlSeconds: number) {
+    if (!Number.isSafeInteger(sessionVersion) || sessionVersion < 0) {
+      throw new Error("Guest session version must be a non-negative safe integer");
+    }
     const expiresAt = new Date(now().getTime() + ttlSeconds * 1000);
     const claims: GuestSessionClaims = {
       deviceId,
       kind,
       exp: Math.floor(expiresAt.getTime() / 1000),
+      ver: sessionVersion,
     };
     const encodedClaims = base64urlEncodeJson(claims);
     const signature = createSignature(options.secret, encodedClaims);
@@ -172,6 +178,7 @@ export function createGuestSessionService(options: GuestSessionOptions) {
     return {
       ok: true,
       deviceId: claims.deviceId,
+      version: claims.ver,
       expiresAt: new Date(claims.exp * 1000).toISOString(),
     };
   }
@@ -185,9 +192,9 @@ export function createGuestSessionService(options: GuestSessionOptions) {
       secure: options.secure,
     },
 
-    issue(deviceId: string): IssuedGuestSession {
-      const active = issueToken(deviceId, "active", options.activeTtlSeconds);
-      const resume = issueToken(deviceId, "resume", options.resumeTtlSeconds);
+    issue(deviceId: string, sessionVersion: number): IssuedGuestSession {
+      const active = issueToken(deviceId, sessionVersion, "active", options.activeTtlSeconds);
+      const resume = issueToken(deviceId, sessionVersion, "resume", options.resumeTtlSeconds);
       return {
         deviceId,
         activeToken: active.token,
@@ -205,15 +212,8 @@ export function createGuestSessionService(options: GuestSessionOptions) {
       return verifyToken(token, "active");
     },
 
-    resumeSession(token: string | undefined): GuestSessionResumeResult {
-      const verifiedResume = verifyToken(token, "resume");
-      if (!verifiedResume.ok) {
-        return verifiedResume;
-      }
-      return {
-        ok: true,
-        ...this.issue(verifiedResume.deviceId),
-      };
+    verifyResumeSession(token: string | undefined) {
+      return verifyToken(token, "resume");
     },
 
     clearSessionCookies() {
