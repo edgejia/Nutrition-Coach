@@ -14,6 +14,8 @@ on:
 
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 jobs:
   release-check:
@@ -34,6 +36,12 @@ jobs:
         with:
           node-version: 22
           cache: yarn
+
+      - name: Run PR policy
+        if: github.event_name == 'pull_request'
+        run: yarn pr:policy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
