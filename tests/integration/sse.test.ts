@@ -257,7 +257,6 @@ describe("SSE API", () => {
     const logCookieHeader = toCookieHeader(deviceRes);
     const address = await logApp.listen({ port: 0 });
     const controller = new AbortController();
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
       const res = await fetch(`${address}/api/sse?deviceId=${encodeURIComponent(logDeviceId)}`, {
@@ -268,7 +267,6 @@ describe("SSE API", () => {
       assert.equal(res.status, 400);
       assert.deepEqual(await res.json(), { error: "Raw device selector is not allowed" });
       assert.equal(res.headers.get("content-type")?.includes("text/event-stream"), false);
-      reader = res.body?.getReader();
 
       const ownershipEvents = observabilityEvents(logLines, "ownership_bypass_blocked");
       assert.equal(ownershipEvents.length, 1);
@@ -293,7 +291,6 @@ describe("SSE API", () => {
       );
       assert.equal(sseStateEvents(logLines).some((event) => event.state === "opened"), false);
     } finally {
-      await reader?.cancel().catch(() => {});
       controller.abort();
       await logApp.close();
     }

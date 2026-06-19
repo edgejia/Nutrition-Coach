@@ -49,6 +49,7 @@ export type ProtectedRouteKey =
 
 type ProtectedRouteOptions = Omit<FastifyRouteOptions, "preHandler"> & {
   protectedMeta: ProtectedRouteMetadata;
+  onAuthFailure?: (request: FastifyRequest) => void;
   preHandler?: FastifyRouteOptions["preHandler"];
 };
 
@@ -122,13 +123,18 @@ export function getProtectedOwner(request: FastifyRequest) {
   return owner;
 }
 
-export function buildProtectedPreHandler(deps: ProtectedRouteDeps, meta: ProtectedRouteMetadata) {
+export function buildProtectedPreHandler(
+  deps: ProtectedRouteDeps,
+  meta: ProtectedRouteMetadata,
+  onAuthFailure?: (request: FastifyRequest) => void,
+) {
   return async function protectedPreHandler(request: FastifyRequest, reply: FastifyReply) {
     const session = await resolveGuestSession(request, deps);
     if (!session.ok) {
       if (session.clearCookies) {
         reply.header("set-cookie", deps.guestSessionService.clearSessionCookies());
       }
+      onAuthFailure?.(request);
       return reply.code(401).send({ error: session.error });
     }
 
@@ -170,9 +176,9 @@ export function registerProtectedRoute(
   deps: ProtectedRouteDeps,
   routeOptions: ProtectedRouteOptions,
 ) {
-  const { protectedMeta, preHandler, ...fastifyRouteOptions } = routeOptions;
+  const { protectedMeta, onAuthFailure, preHandler, ...fastifyRouteOptions } = routeOptions;
   app.route({
     ...fastifyRouteOptions,
-    preHandler: chainPreHandlers(buildProtectedPreHandler(deps, protectedMeta), preHandler),
+    preHandler: chainPreHandlers(buildProtectedPreHandler(deps, protectedMeta, onAuthFailure), preHandler),
   });
 }

@@ -5,8 +5,8 @@ import type { createSummaryService } from "../services/summary.js";
 import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import { currentAppDate } from "../lib/time.js";
-import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import { logSseConnectionState } from "../observability/events.js";
+import { getProtectedOwner, PROTECTED_ROUTE_META, registerProtectedRoute } from "./protected-route.js";
 
 interface Deps {
   publisher: RealtimePublisher;
@@ -18,17 +18,16 @@ interface Deps {
 export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
   const { publisher, summaryService, deviceService, guestSessionService } = deps;
 
-  app.get("/api/sse", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "GET",
+    url: "/api/sse",
+    protectedMeta: PROTECTED_ROUTE_META.sse,
+    onAuthFailure: (request) => {
       logSseConnectionState(request.log, { state: "rejected" });
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-
+    },
+    handler: async (request, reply) => {
+    const owner = getProtectedOwner(request);
+    const { deviceId } = owner;
     // Tell Fastify we're handling the response manually
     reply.hijack();
     const headers: OutgoingHttpHeaders = {
@@ -36,8 +35,8 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
       "cache-control": "no-cache",
       connection: "keep-alive",
     };
-    if (session.setCookies) {
-      headers["set-cookie"] = [...session.setCookies];
+    if (owner.setCookies) {
+      headers["set-cookie"] = [...owner.setCookies];
     }
     reply.raw.writeHead(200, headers);
 
@@ -85,5 +84,6 @@ export function registerSSERoutes(app: FastifyInstance, deps: Deps) {
         reply.raw.write(": keepalive\n\n");
       }
     }, 30000);
+    },
   });
 }
