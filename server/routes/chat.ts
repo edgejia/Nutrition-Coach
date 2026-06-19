@@ -37,6 +37,7 @@ import type { SummaryOutcome } from "../services/summary-outcome.js";
 import {
   logChatRouteFallback,
   logChatTurnCompleted,
+  logOwnershipBypassBlocked,
   sanitizeRouteCatchError,
   type RouteCatchSite,
   type RouteFallbackReason,
@@ -632,6 +633,16 @@ async function parseMultipartRequest(
     return { error, code };
   }
 
+  async function rejectRawDeviceIdSelector() {
+    logOwnershipBypassBlocked(request.log, {
+      reason: "raw_device_id_param",
+      route: PROTECTED_ROUTE_META.chatMessage.route,
+      operation: PROTECTED_ROUTE_META.chatMessage.operation,
+      requestId: request.id,
+    });
+    return reject("Raw device selector is not allowed", 400);
+  }
+
   const contentType = request.headers["content-type"] ?? "";
   if (!contentType.includes("multipart/form-data")) {
     return { error: "Content-Type must be multipart/form-data", code: 400 };
@@ -641,6 +652,8 @@ async function parseMultipartRequest(
   for await (const part of parts) {
     if (part.type === "field" && part.fieldname === "message") {
       message = part.value as string;
+    } else if (part.type === "field" && part.fieldname === "deviceId") {
+      return rejectRawDeviceIdSelector();
     } else if (part.type === "field" && part.fieldname === "proposalContext") {
       if (proposalContextSeen) {
         return reject("Only one proposalContext field is allowed", 400);
