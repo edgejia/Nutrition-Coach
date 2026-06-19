@@ -25,6 +25,35 @@ function toCookieHeader(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
   return getSetCookieHeaders(res).map((value) => value.split(";", 1)[0]).join("; ");
 }
 
+function cookieParts(cookieHeader: string) {
+  return cookieHeader.split("; ").filter(Boolean);
+}
+
+function sessionCookieOnly(cookieHeader: string, name: "guest_session" | "guest_session_resume") {
+  return cookieParts(cookieHeader).filter((part) => part.startsWith(`${name}=`)).join("; ");
+}
+
+function sessionCookiePair(setCookieHeaders: readonly string[]) {
+  return setCookieHeaders.map((value) => value.split(";", 1)[0]).sort();
+}
+
+function assertClearSessionCookiesOnly(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
+  const setCookieHeaders = getSetCookieHeaders(res);
+  assert.deepEqual(sessionCookiePair(setCookieHeaders), ["guest_session=", "guest_session_resume="]);
+  assert.ok(setCookieHeaders.every((value) => /;\s*Max-Age=0(?:;|$)/.test(value)));
+}
+
+function assertRefreshedSessionCookies(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
+  const setCookieHeaders = getSetCookieHeaders(res);
+  assert.equal(setCookieHeaders.length, 2);
+  for (const name of ["guest_session", "guest_session_resume"] as const) {
+    const header = setCookieHeaders.find((value) => value.startsWith(`${name}=`));
+    assert.ok(header);
+    assert.notEqual(header.split(";", 1)[0], `${name}=`);
+    assert.ok(!/;\s*Max-Age=0(?:;|$)/.test(header));
+  }
+}
+
 function createLogCapture() {
   const logLines: string[] = [];
   const logStream = new Writable({
@@ -651,10 +680,7 @@ describe("Device API", () => {
 
   it("POST /api/device/session issues refreshed cookies only for current-version resume cookies", async () => {
     const create = await createGuestDevice();
-    const resumeOnlyCookie = create.cookieHeader
-      .split("; ")
-      .filter((cookie) => cookie.startsWith("guest_session_resume="))
-      .join("; ");
+    const resumeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session_resume");
 
     const res = await app.inject({
       method: "POST",
@@ -669,6 +695,173 @@ describe("Device API", () => {
     assert.equal(setCookieHeaders.length, 2);
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session_resume=")));
+  });
+
+  it("copied-token resume-only session establishes before active-authority logout", async () => {
+    const create = await createGuestDevice();
+    const resumeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session_resume");
+
+    const copiedResume = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: resumeOnlyCookie },
+      payload: {},
+    });
+
+    assert.equal(copiedResume.statusCode, 200);
+    assert.deepEqual(copiedResume.json(), {
+      deviceId: create.deviceId,
+      goal: "fat_loss",
+      dailyTargets: create.dailyTargets,
+      establishedBy: "resume",
+    });
+    assertRefreshedSessionCookies(copiedResume);
+  });
+
+  it("stale-token resume-only session fails after active-authority logout without refreshed session cookies", async () => {
+    const create = await createGuestDevice();
+    const activeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session");
+    const resumeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session_resume");
+
+    const logout = await app.inject({
+      method: "DELETE",
+      url: "/api/device/session",
+      headers: { cookie: activeOnlyCookie },
+    });
+    assert.equal(logout.statusCode, 204);
+    assertClearSessionCookiesOnly(logout);
+
+    const staleResume = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: resumeOnlyCookie },
+      payload: {},
+    });
+
+    assert.equal(staleResume.statusCode, 401);
+    assert.deepEqual(staleResume.json(), { error: "Invalid guest session" });
+    assertClearSessionCookiesOnly(staleResume);
+  });
+
+  it("stale-token active session and protected route fail after logout without refreshed session cookies", async () => {
+    const create = await createGuestDevice();
+    const activeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session");
+
+    const logout = await app.inject({
+      method: "DELETE",
+      url: "/api/device/session",
+      headers: { cookie: activeOnlyCookie },
+    });
+    assert.equal(logout.statusCode, 204);
+    assertClearSessionCookiesOnly(logout);
+
+    const staleActive = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: activeOnlyCookie },
+      payload: {},
+    });
+    assert.equal(staleActive.statusCode, 401);
+    assert.deepEqual(staleActive.json(), { error: "Invalid guest session" });
+    assertClearSessionCookiesOnly(staleActive);
+
+    const protectedRoute = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: create.cookieHeader },
+      payload: { protein: 151 },
+    });
+    assert.equal(protectedRoute.statusCode, 401);
+    assert.notEqual(protectedRoute.statusCode, 500);
+    assert.deepEqual(protectedRoute.json(), { error: "Invalid guest session" });
+    assertClearSessionCookiesOnly(protectedRoute);
+  });
+
+  it("resume-authority logout bumps session version and invalidates the original active token", async () => {
+    const create = await createGuestDevice();
+    const activeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session");
+    const resumeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session_resume");
+
+    const logout = await app.inject({
+      method: "DELETE",
+      url: "/api/device/session",
+      headers: { cookie: resumeOnlyCookie },
+    });
+    assert.equal(logout.statusCode, 204);
+    assertClearSessionCookiesOnly(logout);
+
+    const staleActive = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: activeOnlyCookie },
+      payload: {},
+    });
+    assert.equal(staleActive.statusCode, 401);
+    assert.deepEqual(staleActive.json(), { error: "Invalid guest session" });
+    assertClearSessionCookiesOnly(staleActive);
+  });
+
+  it("no-valid-token logout clears only and leaves valid-token session current", async () => {
+    const create = await createGuestDevice();
+    const activeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session");
+
+    const missing = await app.inject({
+      method: "DELETE",
+      url: "/api/device/session",
+    });
+    assert.equal(missing.statusCode, 204);
+    assertClearSessionCookiesOnly(missing);
+
+    const invalid = await app.inject({
+      method: "DELETE",
+      url: "/api/device/session",
+      headers: { cookie: "guest_session=invalid; guest_session_resume=invalid" },
+    });
+    assert.equal(invalid.statusCode, 204);
+    assertClearSessionCookiesOnly(invalid);
+
+    const stillCurrent = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: activeOnlyCookie },
+      payload: {},
+    });
+    assert.equal(stillCurrent.statusCode, 200);
+    assert.equal(stillCurrent.json().establishedBy, "active");
+    assert.deepEqual(getSetCookieHeaders(stillCurrent), []);
+  });
+
+  it("valid-token resume sliding does not bump session version before explicit logout", async () => {
+    const create = await createGuestDevice();
+    const activeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session");
+    const resumeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session_resume");
+
+    const resumed = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: resumeOnlyCookie },
+      payload: {},
+    });
+    assert.equal(resumed.statusCode, 200);
+    assert.equal(resumed.json().establishedBy, "resume");
+    assertRefreshedSessionCookies(resumed);
+
+    const originalActive = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: activeOnlyCookie },
+      payload: { protein: 152 },
+    });
+    assert.equal(originalActive.statusCode, 200);
+    assert.deepEqual(getSetCookieHeaders(originalActive), []);
+
+    const logout = await app.inject({
+      method: "DELETE",
+      url: "/api/device/session",
+      headers: { cookie: activeOnlyCookie },
+    });
+    assert.equal(logout.statusCode, 204);
+    assertClearSessionCookiesOnly(logout);
   });
 
   it("POST /api/device/session accepts only explicit legacyDeviceId as legacy bootstrap authority", async () => {
