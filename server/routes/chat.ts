@@ -31,14 +31,12 @@ import {
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { normalizeMealPeriod } from "../lib/meal-period.js";
-import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { SummaryOutcome } from "../services/summary-outcome.js";
 import {
   logChatRouteFallback,
   logChatTurnCompleted,
-  logOwnershipBypassBlocked,
   sanitizeRouteCatchError,
   type RouteCatchSite,
   type RouteFallbackReason,
@@ -63,6 +61,11 @@ import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type { createMealNumericProposalService } from "../services/meal-numeric-proposals.js";
 import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
+import {
+  getProtectedOwner,
+  PROTECTED_ROUTE_META,
+  registerProtectedRoute,
+} from "./protected-route.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -105,14 +108,6 @@ const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasRawDeviceIdSelector(request: FastifyRequest) {
-  return (
-    request.headers["x-device-id"] !== undefined
-    || (isPlainRecord(request.query) && "deviceId" in request.query)
-    || (isPlainRecord(request.body) && "deviceId" in request.body)
-  );
 }
 
 async function validateImageBytes(buffer: Buffer, claimedMimeType: string): Promise<boolean> {
@@ -1631,18 +1626,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     llmTraceRecorderFactory,
   } = deps;
 
-  app.post("/api/chat/stop", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
-
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "POST",
+    url: "/api/chat/stop",
+    protectedMeta: PROTECTED_ROUTE_META.chatStop,
+    handler: async (request, reply) => {
+    const { deviceId } = getProtectedOwner(request);
     const body = request.body as { turnId?: unknown } | undefined;
     const turnId = body?.turnId;
     if (typeof turnId !== "string" || !turnId.trim()) {
@@ -1650,16 +1639,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     }
     const trimmedTurnId = turnId.trim();
 
-    if (hasRawDeviceIdSelector(request)) {
-      logOwnershipBypassBlocked(request.log, {
-        reason: "raw_device_id_param",
-        route: "api_chat_stop",
-        operation: "chat_stop",
-        requestId: request.id,
-      });
-    }
-
-    const activeTurn = activeChatTurns.get(activeChatTurnKey(session.deviceId, trimmedTurnId));
+    const activeTurn = activeChatTurns.get(activeChatTurnKey(deviceId, trimmedTurnId));
     if (!activeTurn) {
       return reply.code(404).send({ error: "Active turn not found" });
     }
@@ -1670,21 +1650,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     }
 
     return { stopped: true, turnId: trimmedTurnId };
+    },
   });
 
-  app.post("/api/chat", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
-
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "POST",
+    url: "/api/chat",
+    protectedMeta: PROTECTED_ROUTE_META.chatMessage,
+    handler: async (request, reply) => {
+    const { deviceId } = getProtectedOwner(request);
     const resolvedUploadsDir = injectedUploadsDir ?? config.uploadsStagingDir;
     const parseResult = await parseMultipartRequest(request, resolvedUploadsDir);
 
@@ -1697,16 +1671,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const chatTurnStartedAt = Date.now();
     const hadImage = Boolean(image);
     const { turnId, turnLog, orchLog } = createChatTurnContext(request);
-
-    if (hasRawDeviceIdSelector(request)) {
-      logOwnershipBypassBlocked(request.log, {
-        reason: "raw_device_id_param",
-        route: "api_chat",
-        operation: "chat_message",
-        requestId: request.id,
-        turnId,
-      });
-    }
 
     // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
     const acceptHeader = request.headers["accept"] ?? "";
@@ -2138,21 +2102,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     });
 
     return reply;
+    },
   });
 
-  app.get("/api/chat/history", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
-
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "GET",
+    url: "/api/chat/history",
+    protectedMeta: PROTECTED_ROUTE_META.chatHistory,
+    handler: async (request, reply) => {
+    const { deviceId } = getProtectedOwner(request);
     const { limit } = request.query as { limit?: string };
     const parsedLimit = limit === undefined ? 50 : Number(limit);
     if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
@@ -2173,5 +2131,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         };
       }),
     };
+    },
   });
 }
