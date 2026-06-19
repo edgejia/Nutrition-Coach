@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import type { AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
@@ -117,13 +118,87 @@ describe("History trends API", () => {
   let uploadsDir: string;
   let assetsDir: string;
   let services: AppServices | undefined;
+  let logCapture: ReturnType<typeof createLogCapture>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
     return values.map((value) => value.split(";", 1)[0]).join("; ");
   }
 
+  function createLogCapture() {
+    const logLines: string[] = [];
+    const stream = new Writable({
+      write(chunk, _, cb) {
+        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+        cb();
+      },
+    });
+
+    return { logLines, stream };
+  }
+
+  function parseJsonLogLines(logLines: string[]) {
+    return logLines.flatMap((line) => {
+      try {
+        return [JSON.parse(line) as Record<string, unknown>];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  function ownershipBypassEvents() {
+    return parseJsonLogLines(logCapture.logLines).filter((record) => record.event === "ownership_bypass_blocked");
+  }
+
+  function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+    const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+    const allowed = new Set(allowedKeys);
+    for (const key of Object.keys(event)) {
+      assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+    }
+  }
+
+  function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+    const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+    for (const value of forbiddenValues) {
+      assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+    }
+  }
+
+  function assertRawSelectorResponse(input: {
+    beforeEventCount: number;
+    response: { statusCode: number; json: () => unknown; body: string };
+    forbiddenValues: readonly string[];
+  }) {
+    assert.equal(input.response.statusCode, 400);
+    assert.deepEqual(input.response.json(), { error: "Raw device selector is not allowed" });
+    assertLogEventsExclude([input.response.json() as Record<string, unknown>], input.forbiddenValues);
+
+    const events = ownershipBypassEvents();
+    assert.equal(events.length, input.beforeEventCount + 1);
+    const event = events.at(-1)!;
+    assert.equal(typeof event.requestId, "string");
+    assert.deepEqual(
+      {
+        event: event.event,
+        reason: event.reason,
+        route: event.route,
+        operation: event.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_history_trends",
+        operation: "history_trends",
+      },
+    );
+    assertLogEventApplicationKeys(event, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude([event], input.forbiddenValues);
+  }
+
   beforeEach(async () => {
+    logCapture = createLogCapture();
     tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-history-trends-api-"));
     uploadsDir = path.join(tempRoot, "uploads");
     assetsDir = path.join(tempRoot, "assets");
@@ -133,6 +208,7 @@ describe("History trends API", () => {
       llmProvider: new MockLLMProvider(),
       uploadsDir,
       assetsDir,
+      logger: { level: "info", stream: logCapture.stream },
       onServicesReady: (readyServices) => {
         services = readyServices;
       },
@@ -199,8 +275,8 @@ describe("History trends API", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: `/api/history/trends?from=2026-03-24&to=2026-03-26&deviceId=${foreignDeviceId}`,
-      headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+      url: "/api/history/trends?from=2026-03-24&to=2026-03-26",
+      headers: { cookie: sessionCookieHeader },
     });
 
     assert.equal(res.statusCode, 200);
@@ -234,6 +310,48 @@ describe("History trends API", () => {
       2,
       "distinct meal count should count the multi-item meal as one meal, not joined item rows",
     );
+  });
+
+  it("GET /api/history/trends rejects valid-cookie raw selectors before query validation and logs metadata only", async () => {
+    const cases = [
+      {
+        name: "header selector",
+        url: "/api/history/trends?from=2026-03-24&to=2026-03-26",
+        headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+      },
+      {
+        name: "query selector",
+        url: `/api/history/trends?from=2026-03-24&to=2026-03-26&deviceId=${encodeURIComponent(foreignDeviceId)}`,
+        headers: { cookie: sessionCookieHeader },
+      },
+      {
+        name: "query selector before invalid date",
+        url: `/api/history/trends?from=2026-03-26&to=2026-03-24&deviceId=${encodeURIComponent(foreignDeviceId)}`,
+        headers: { cookie: sessionCookieHeader },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const beforeEventCount = ownershipBypassEvents().length;
+      const res = await app.inject({
+        method: "GET",
+        url: testCase.url,
+        headers: testCase.headers,
+      });
+
+      assertRawSelectorResponse({
+        beforeEventCount,
+        response: res,
+        forbiddenValues: [
+          deviceId,
+          foreignDeviceId,
+          "x-device-id",
+          "deviceId",
+          "guest_session",
+          "cookie",
+        ],
+      });
+    }
   });
 
   it("GET /api/history/trends returns INVALID_QUERY for missing or malformed date ranges", async () => {
@@ -415,8 +533,8 @@ describe("History trends API", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: `/api/history/trends?from=2026-03-25&to=2026-03-25&deviceId=${foreignDeviceId}`,
-      headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+      url: "/api/history/trends?from=2026-03-25&to=2026-03-25",
+      headers: { cookie: sessionCookieHeader },
     });
 
     assert.equal(res.statusCode, 200);
