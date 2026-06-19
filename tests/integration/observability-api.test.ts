@@ -240,7 +240,14 @@ describe("Observability API", () => {
     assert.equal(eventLogs[0]?.intent, "quick_log");
     assert.equal(eventLogs[0]?.promptKey, "describe_meal");
 
-    const serialized = JSON.stringify(eventLogs[0]);
+    const { level, time, pid, hostname, reqId, msg, ...eventMetadata } = eventLogs[0] ?? {};
+    assert.deepEqual(eventMetadata, {
+      event: "home_cta_option_sent",
+      intent: "quick_log",
+      promptKey: "describe_meal",
+    });
+
+    const serialized = JSON.stringify(eventMetadata);
     assert.doesNotMatch(serialized, /"prompt"/);
     assert.doesNotMatch(serialized, /assistant reply text/);
     assert.doesNotMatch(serialized, /imagePath/);
