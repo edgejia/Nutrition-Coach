@@ -360,7 +360,7 @@ describe("proposal action API", () => {
     assert.equal(extraField.statusCode, 400);
   });
 
-  it("approves using cookie ownership when foreign raw selectors are supplied and logs metadata only", async () => {
+  it("rejects raw ownership selectors without mutating owner or foreign proposal state", async () => {
     const foreignDevice = await app.inject({
       method: "POST",
       url: "/api/device",
@@ -368,6 +368,7 @@ describe("proposal action API", () => {
     });
     const foreignDeviceId = foreignDevice.json().deviceId as string;
     const foreignCookieHeader = toCookieHeader(foreignDevice.headers["set-cookie"]);
+    const originalOwnerTargets = await readTargets();
     const originalForeignTargets = await readTargets(foreignCookieHeader);
     const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
     const { proposalId } = await createGoalCard(targets);
@@ -379,9 +380,11 @@ describe("proposal action API", () => {
       payload: { proposalId, kind: "goal", action: "approve" },
     });
 
-    assert.equal(response.statusCode, 200);
-    assert.deepEqual(await readTargets(), targets);
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.json(), { error: "Raw device selector is not allowed" });
+    assert.deepEqual(await readTargets(), originalOwnerTargets);
     assert.deepEqual(await readTargets(foreignCookieHeader), originalForeignTargets);
+    assert.equal(await historyHasActionEvent(proposalId), false);
 
     const events = observabilityEvents(logCapture.logLines, "ownership_bypass_blocked");
     assert.equal(events.length, 1);
@@ -414,7 +417,7 @@ describe("proposal action API", () => {
       ],
     );
 
-    const extraField = await app.inject({
+    const bodySelector = await app.inject({
       method: "POST",
       url: "/api/proposals/actions",
       headers: { cookie: sessionCookieHeader },
@@ -425,8 +428,27 @@ describe("proposal action API", () => {
         deviceId,
       },
     });
-    assert.equal(extraField.statusCode, 400);
+    assert.equal(bodySelector.statusCode, 400);
+    assert.deepEqual(bodySelector.json(), { error: "Raw device selector is not allowed" });
+    assert.deepEqual(await readTargets(), originalOwnerTargets);
+    assert.equal(await historyHasActionEvent(proposalId), false);
     const allEvents = observabilityEvents(logCapture.logLines, "ownership_bypass_blocked");
+    assert.equal(allEvents.length, 2);
+    assert.deepEqual(
+      {
+        event: allEvents.at(-1)!.event,
+        reason: allEvents.at(-1)!.reason,
+        route: allEvents.at(-1)!.route,
+        operation: allEvents.at(-1)!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_proposals_actions",
+        operation: "proposal_action",
+      },
+    );
+    assertLogEventApplicationKeys(allEvents.at(-1)!, ["event", "reason", "route", "operation", "requestId"]);
     assertLogEventsExclude([allEvents.at(-1)!], [
       deviceId,
       "deviceId",
