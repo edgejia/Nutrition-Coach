@@ -546,6 +546,62 @@ describe("Device API", () => {
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session_resume=")));
   });
 
+  it("POST /api/device/session accepts only explicit legacyDeviceId as legacy bootstrap authority", async () => {
+    const create = await createGuestDevice();
+
+    const allowedLegacy = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      payload: { legacyDeviceId: create.deviceId },
+    });
+    assert.equal(allowedLegacy.statusCode, 200);
+    assert.equal(allowedLegacy.json().establishedBy, "legacy_migration");
+    assert.equal(getSetCookieHeaders(allowedLegacy).length, 2);
+
+    const rawSelectorCases = [
+      {
+        name: "body deviceId",
+        request: {
+          method: "POST" as const,
+          url: "/api/device/session",
+          payload: { deviceId: create.deviceId },
+        },
+      },
+      {
+        name: "query deviceId",
+        request: {
+          method: "POST" as const,
+          url: `/api/device/session?deviceId=${encodeURIComponent(create.deviceId)}`,
+          payload: {},
+        },
+      },
+      {
+        name: "x-device-id header",
+        request: {
+          method: "POST" as const,
+          url: "/api/device/session",
+          headers: { "x-device-id": create.deviceId },
+          payload: {},
+        },
+      },
+    ];
+
+    for (const { name, request } of rawSelectorCases) {
+      const res = await app.inject(request);
+      assert.equal(res.statusCode, 401, name);
+      assert.deepEqual(res.json(), { error: "No guest session available" });
+      assert.deepEqual(getSetCookieHeaders(res), [], name);
+    }
+
+    const ambiguous = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      payload: { legacyDeviceId: create.deviceId, deviceId: create.deviceId },
+    });
+    assert.equal(ambiguous.statusCode, 400);
+    assert.deepEqual(getSetCookieHeaders(ambiguous), []);
+  });
+
   it("POST /api/device/session rejects raw legacy device ids in deployed-like runtime without cookies", () => {
     const result = runDeployedLikeLegacySessionProbe();
 
@@ -641,6 +697,83 @@ describe("Device API", () => {
     });
     assert.equal(res.statusCode, 401);
     assert.deepEqual(res.json(), { error: "Invalid guest session" });
+  });
+
+  it("device goals aliases reject raw ownership selectors with metadata-only events", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const loggedApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    try {
+      const create = await loggedApp.inject({
+        method: "POST",
+        url: "/api/device",
+        payload: { goal: "fat_loss" },
+      });
+      assert.equal(create.statusCode, 200);
+      const deviceId = (create.json() as { deviceId: string }).deviceId;
+      const cookieHeader = toCookieHeader(create);
+      const cookieMaterial = cookieHeader.split(";", 1)[0] ?? cookieHeader;
+      const requestBodies = [
+        { protein: 151, deviceId },
+        { protein: 152 },
+        { protein: 153 },
+      ];
+      const rawSelectorRequests = [
+        {
+          method: "PATCH" as const,
+          url: "/api/device/goals",
+          headers: { cookie: cookieHeader },
+          payload: requestBodies[0],
+        },
+        {
+          method: "PUT" as const,
+          url: `/api/device/goals?deviceId=${encodeURIComponent(deviceId)}`,
+          headers: { cookie: cookieHeader },
+          payload: requestBodies[1],
+        },
+        {
+          method: "PUT" as const,
+          url: "/api/device/goals",
+          headers: { cookie: cookieHeader, "x-device-id": deviceId },
+          payload: requestBodies[2],
+        },
+      ];
+
+      for (const request of rawSelectorRequests) {
+        const res = await loggedApp.inject(request);
+        assert.equal(res.statusCode, 400);
+        assert.deepEqual(res.json(), { error: "Raw device selector is not allowed" });
+      }
+
+      const events = findLogEvents(logLines, "ownership_bypass_blocked");
+      assert.equal(events.length, rawSelectorRequests.length);
+      for (const event of events) {
+        assert.deepEqual(pickEventMetadata(event, ["event", "reason", "route", "operation"]), {
+          event: "ownership_bypass_blocked",
+          reason: "raw_device_id_param",
+          route: "api_device_goals",
+          operation: "device_goals_update",
+        });
+        assert.equal(typeof event.requestId, "string");
+        assertLogEventApplicationKeys(event, ["event", "reason", "route", "operation", "requestId"]);
+      }
+      assertLogEventsExclude(events, [
+        deviceId,
+        "deviceId",
+        "x-device-id",
+        "guest_session",
+        "guest_session_resume",
+        "cookie",
+        cookieMaterial,
+        ...requestBodies.map((body) => JSON.stringify(body)),
+      ]);
+    } finally {
+      await loggedApp.close();
+    }
   });
 
   it("PUT /api/device/goals returns 400 for null body", async () => {
