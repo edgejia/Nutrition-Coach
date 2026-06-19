@@ -35,6 +35,20 @@ const GENERATED_ARTIFACT_FILES = [
   "tests/harness/artifacts/guest-session-hardening/latest/summary.json",
 ] as const;
 
+const EXPECTED_REPRESENTATIVE_RAW_SELECTOR_ROUTES = [
+  "chat_history",
+  "asset_read",
+  "sse",
+  "history_meals",
+  "device_goals",
+] as const;
+
+const EXPECTED_MISSING_COOKIE_RAW_SELECTOR_ROUTES = [
+  "chat_history",
+  "asset_read",
+  "sse",
+] as const;
+
 const EXPECTED_PROTECTED_ROUTE_META_KEYS = [
   "chatMessage",
   "chatStop",
@@ -524,6 +538,47 @@ export async function assertGeneratedArtifactsAreMetadataOnly() {
   assert.deepEqual(failures, [], "Generated guest-session-hardening artifacts must remain metadata-only");
 }
 
+async function assertGuestSessionHardeningRawSelectorArtifacts() {
+  const snapshots = JSON.parse(
+    await readProjectFile("tests/harness/artifacts/guest-session-hardening/latest/snapshots.json"),
+  ) as {
+    raw_selector_fail_closed?: {
+      routeCoverageScope?: unknown;
+      exhaustiveCoverageOwner?: unknown;
+      validCookieRawSelectorsRejected?: unknown;
+      validCookieRawSelectorStatuses?: unknown;
+      missingCookieRawSelectorStatuses?: unknown;
+      validCookieForeignSelectors?: unknown;
+    };
+  };
+  const rawSelector = snapshots.raw_selector_fail_closed;
+  assert.ok(rawSelector, "guest-session-hardening snapshots must include raw_selector_fail_closed");
+  assert.equal(rawSelector.routeCoverageScope, "representative_end_to_end");
+  assert.equal(rawSelector.exhaustiveCoverageOwner, "route_local_integration_tests_95_02_through_95_05");
+  assert.equal(rawSelector.validCookieRawSelectorsRejected, true);
+  assert.equal(rawSelector.validCookieForeignSelectors, undefined, "old ignored-success foreign selector artifact must be removed");
+
+  assert.ok(Array.isArray(rawSelector.validCookieRawSelectorStatuses));
+  assert.deepEqual(
+    rawSelector.validCookieRawSelectorStatuses.map((item) => item.route),
+    [...EXPECTED_REPRESENTATIVE_RAW_SELECTOR_ROUTES],
+  );
+  assert.deepEqual(
+    rawSelector.validCookieRawSelectorStatuses.map((item) => item.status),
+    EXPECTED_REPRESENTATIVE_RAW_SELECTOR_ROUTES.map(() => 400),
+  );
+
+  assert.ok(Array.isArray(rawSelector.missingCookieRawSelectorStatuses));
+  assert.deepEqual(
+    rawSelector.missingCookieRawSelectorStatuses.map((item) => item.route),
+    [...EXPECTED_MISSING_COOKIE_RAW_SELECTOR_ROUTES],
+  );
+  assert.deepEqual(
+    rawSelector.missingCookieRawSelectorStatuses.map((item) => item.status),
+    EXPECTED_MISSING_COOKIE_RAW_SELECTOR_ROUTES.map(() => 401),
+  );
+}
+
 test("protected route modules no longer resolve guest sessions manually", async () => {
   await assertNoManualResolveGuestSession();
 });
@@ -534,4 +589,12 @@ test("protected route inventory and public exceptions are explicit", async () =>
 
 test("client protected transports do not send raw ownership selectors", async () => {
   await assertClientDoesNotSendRawProtectedSelectors();
+});
+
+test("guest-session-hardening artifacts prove representative raw selector fail-closed behavior", async () => {
+  await assertGuestSessionHardeningRawSelectorArtifacts();
+});
+
+test("guest-session-hardening generated artifacts are metadata-only", async () => {
+  await assertGeneratedArtifactsAreMetadataOnly();
 });
