@@ -1,0 +1,1 @@
+ALTER TABLE `devices` ADD `session_version` integer DEFAULT 0 NOT NULL;
