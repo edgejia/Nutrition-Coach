@@ -3,7 +3,6 @@ import type { createDeviceService, Goal, IntakeFields } from "../services/device
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
 import { config, isDeployedLikeRuntime } from "../config.js";
-import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import {
   logDeviceGoalsValidationFailed,
   logDeviceGoalsUpdatedRest,
@@ -12,6 +11,7 @@ import {
   logOnboardingValidationFailed,
   logOwnershipBypassBlocked,
 } from "../observability/events.js";
+import { getProtectedOwner, PROTECTED_ROUTE_META, registerProtectedRoute } from "./protected-route.js";
 
 interface Deps {
   deviceService: ReturnType<typeof createDeviceService>;
@@ -63,6 +63,14 @@ interface IntakeValidationIssue {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasRawDeviceIdSelector(request: FastifyRequest, body: Record<string, unknown>) {
+  return (
+    "deviceId" in body
+    || request.headers["x-device-id"] !== undefined
+    || (isRecord(request.query) && "deviceId" in request.query)
+  );
 }
 
 function isGoal(value: unknown): value is Goal {
@@ -442,6 +450,9 @@ export function registerDeviceRoutes(
     if ("legacyDeviceId" in body && typeof body.legacyDeviceId !== "string") {
       return reply.code(400).send({ error: "legacyDeviceId must be a string." });
     }
+    if ("legacyDeviceId" in body && hasRawDeviceIdSelector(request, body)) {
+      return reply.code(400).send({ error: "legacyDeviceId cannot be combined with raw device selectors." });
+    }
 
     const legacyDeviceId = typeof body.legacyDeviceId === "string" ? body.legacyDeviceId.trim() : "";
     if (!legacyDeviceId) {
@@ -473,17 +484,7 @@ export function registerDeviceRoutes(
   });
 
   const updateGoalsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        clearGuestSessionCookies(reply, guestSessionService);
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
+    const { deviceId } = getProtectedOwner(request);
 
     const body = request.body;
     if (!isRecord(body)) {
@@ -513,6 +514,16 @@ export function registerDeviceRoutes(
   };
 
   // PATCH is the canonical partial-update entrypoint; PUT is a compatibility alias. Both routes intentionally share identical behavior.
-  app.patch("/api/device/goals", updateGoalsHandler);
-  app.put("/api/device/goals", updateGoalsHandler);
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "PATCH",
+    url: "/api/device/goals",
+    protectedMeta: PROTECTED_ROUTE_META.deviceGoalsPatch,
+    handler: updateGoalsHandler,
+  });
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "PUT",
+    url: "/api/device/goals",
+    protectedMeta: PROTECTED_ROUTE_META.deviceGoalsPut,
+    handler: updateGoalsHandler,
+  });
 }
