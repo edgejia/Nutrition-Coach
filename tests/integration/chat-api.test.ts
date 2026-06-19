@@ -1278,6 +1278,132 @@ describe("Chat API", () => {
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
+  it("POST /api/chat multipart rejects header/query raw selectors before upload staging", async () => {
+    const foreignDeviceRes = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "muscle_gain" },
+    });
+    const foreignDeviceId = foreignDeviceRes.json().deviceId as string;
+    const beforeChatCalls = mockLLM.chatCalls.length;
+
+    const form = new FormData();
+    form.append("message", "header selector should reject");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "header-selector.png");
+
+    const res = await fetch(`${address}/api/chat?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Raw device selector is not allowed" });
+    assert.deepEqual(await readdir(uploadsDir).catch(() => []), []);
+    assert.equal(mockLLM.chatCalls.length, beforeChatCalls);
+
+    const events = observabilityEvents(logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.deepEqual(
+      {
+        event: events[0]!.event,
+        reason: events[0]!.reason,
+        route: events[0]!.route,
+        operation: events[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+      },
+    );
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude(
+      [events[0]!],
+      [deviceId, foreignDeviceId, "x-device-id", "deviceId", "guest_session", "cookie", "header-selector.png"],
+    );
+  });
+
+  it("POST /api/chat multipart body deviceId rejects after staging and cleans side effects", async () => {
+    assert.ok(services, "expected app services");
+    const beforeChatCalls = mockLLM.chatCalls.length;
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+
+    try {
+      const form = new FormData();
+      form.append("message", "body selector should reject");
+      form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "body-selector.png");
+      form.append("deviceId", deviceId);
+
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), { error: "Raw device selector is not allowed" });
+      assert.deepEqual(await readdir(uploadsDir).catch(() => []), []);
+      assert.equal(mockLLM.chatCalls.length, beforeChatCalls);
+      assert.deepEqual(publishedPayloads, []);
+
+      const history = await services.chatService.getHistory(deviceId, 10);
+      assert.equal(history.some((message) => message.content === "body selector should reject"), false);
+      assert.equal(history.some((message) => message.role === "assistant"), false);
+
+      const sqlite = new Database(dbPath, { readonly: true });
+      try {
+        const chatRows = sqlite.prepare("SELECT COUNT(*) AS count FROM chat_messages").get() as { count: number };
+        const assetRows = sqlite.prepare("SELECT COUNT(*) AS count FROM assets").get() as { count: number };
+        const assetReferenceRows = sqlite.prepare("SELECT COUNT(*) AS count FROM asset_references").get() as { count: number };
+        assert.equal(chatRows.count, 0);
+        assert.equal(assetRows.count, 0);
+        assert.equal(assetReferenceRows.count, 0);
+      } finally {
+        sqlite.close();
+      }
+
+      const events = observabilityEvents(logLines, "ownership_bypass_blocked");
+      assert.equal(events.length, 1);
+      assert.deepEqual(
+        {
+          event: events[0]!.event,
+          reason: events[0]!.reason,
+          route: events[0]!.route,
+          operation: events[0]!.operation,
+        },
+        {
+          event: "ownership_bypass_blocked",
+          reason: "raw_device_id_param",
+          route: "api_chat",
+          operation: "chat_message",
+        },
+      );
+      assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+      assertLogEventsExclude(
+        [events[0]!],
+        [
+          deviceId,
+          "x-device-id",
+          "deviceId",
+          "guest_session",
+          "cookie",
+          "body selector should reject",
+          "body-selector.png",
+          "data:image",
+        ],
+      );
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
   it("POST /api/chat SSE backfills the user image message when failure happens before orchestrator persistence", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
     const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);
