@@ -18,8 +18,9 @@ body:
       label: Runtime
       options:
         - Local development
-        - Staging/Railway beta
-        - Production
+        - Cloudflare Tunnel public-domain
+        - Production-equivalent local runtime
+        - Main source branch
         - Test suite
         - Harness
         - Other
@@ -114,4 +115,3 @@ body:
           required: true
     validations:
       required: true
-

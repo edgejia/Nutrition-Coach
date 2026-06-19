@@ -103,8 +103,9 @@ body:
       label: Applicable runtimes
       options:
         - label: Local development
-        - label: Staging/Railway beta
-        - label: Production
+        - label: Cloudflare Tunnel public-domain
+        - label: Production-equivalent local runtime
+        - label: Main source branch
         - label: Browser/mobile viewport
         - label: Server/API
         - label: LLM provider path
@@ -137,4 +138,3 @@ body:
       placeholder: We considered...
     validations:
       required: true
-

@@ -1,4 +1,6 @@
-# Railway Beta Baseline
+# Railway Beta Baseline (Archived)
+
+This Railway baseline is retained as historical deployment context. Railway is not the current production runtime path for this repo. Use [cloudflare-tunnel.md](cloudflare-tunnel.md) for current local production-mode runtime and public-domain smoke checks.
 
 This repo targets one persistent web service with one public domain and one mounted volume.
 

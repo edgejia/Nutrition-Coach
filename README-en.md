@@ -185,9 +185,10 @@ Run migrations and start the server:
 yarn db:migrate && yarn start
 ```
 
-In a deployed environment, one Fastify process serves both the API and `dist/client`. Use a host with a persistent volume for SQLite and durable assets, and set `NODE_ENV=production`, `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `DB_PATH`, `TZ`, and `GUEST_SESSION_SECRET`. See [docs/deploy/railway-beta.md](docs/deploy/railway-beta.md) for a Railway deployment example.
+In a deployed environment, one Fastify process serves both the API and `dist/client`. Use persistent storage for SQLite and durable assets, and set `NODE_ENV=production`, `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `DB_PATH`, `TZ`, and `GUEST_SESSION_SECRET`. The current production runtime is a local production-mode server exposed through Cloudflare Tunnel; see [docs/deploy/cloudflare-tunnel.md](docs/deploy/cloudflare-tunnel.md). The Railway baseline is archived as historical context.
 
 ## Public Docs
 
-- [Railway deployment example](docs/deploy/railway-beta.md)
+- [Cloudflare Tunnel production runtime](docs/deploy/cloudflare-tunnel.md)
+- [Archived Railway deployment baseline](docs/deploy/railway-beta.md)
 - [Capability matrix](docs/capability-matrix.md)

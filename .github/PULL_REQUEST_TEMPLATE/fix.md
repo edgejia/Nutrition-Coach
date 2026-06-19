@@ -34,10 +34,17 @@ Fixes #
 - [ ] Windows
 - [ ] Not platform-specific
 
+## Release stage
+
+- [ ] Local only / GSD verified
+- [ ] Source PR to `main`
+- [ ] Cloudflare Tunnel public-domain smoke
+- [ ] Production runtime refreshed
+
 ## Runtimes tested
 
 - [ ] Local development
-- [ ] Staging/Railway beta
+- [ ] Cloudflare Tunnel public-domain
 - [ ] Production-equivalent config
 - [ ] Browser/mobile viewport
 - [ ] Server/API
@@ -55,6 +62,7 @@ Fixes #
 - [ ] `yarn release:check`
 - [ ] CI `Release Check` passes.
 - [ ] Review approval recorded before merge.
+- [ ] Production runtime refresh is not included, or was explicitly approved in this PR/thread.
 
 ## Breaking changes
 
@@ -63,4 +71,3 @@ Fixes #
 ## Changelog / release note
 
 - [ ] `CHANGELOG.md` updated, or the `no-changelog` label explains why not.
-
