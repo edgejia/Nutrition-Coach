@@ -1,5 +1,5 @@
 // server/services/device.ts
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { devices } from "../db/schema.js";
 import type { AppDatabase } from "../db/client.js";
 
@@ -77,6 +77,13 @@ export function createDeviceService(db: AppDatabase) {
     async getDevice(deviceId: string) {
       const rows = await db.select().from(devices).where(eq(devices.id, deviceId));
       return rows[0];
+    },
+
+    async bumpSessionVersion(deviceId: string) {
+      await db
+        .update(devices)
+        .set({ sessionVersion: sql`${devices.sessionVersion} + 1` })
+        .where(eq(devices.id, deviceId));
     },
 
     async updateGoals(deviceId: string, goals: Partial<DailyTargets>): Promise<DailyTargets> {

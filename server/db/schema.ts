@@ -20,6 +20,7 @@ export const devices = sqliteTable("devices", {
   dailyProtein: integer("daily_protein").notNull(),
   dailyCarbs: integer("daily_carbs").notNull(),
   dailyFat: integer("daily_fat").notNull(),
+  sessionVersion: integer("session_version").notNull().default(0),
   createdAt: text("created_at").notNull(),
 });
 

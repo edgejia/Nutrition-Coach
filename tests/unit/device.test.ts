@@ -125,10 +125,32 @@ describe("DeviceService", () => {
     const device = await service.getDevice(deviceId);
     assert.ok(device);
     assert.equal(device.goal, "fat_loss");
+    assert.equal(device.sessionVersion, 0);
   });
 
   it("returns undefined for unknown device", async () => {
     const device = await service.getDevice("nonexistent");
+    assert.equal(device, undefined);
+  });
+
+  it("increments a device session version monotonically", async () => {
+    const { deviceId } = await service.createDevice("fat_loss");
+
+    await service.bumpSessionVersion(deviceId);
+    let device = await service.getDevice(deviceId);
+    assert.ok(device);
+    assert.equal(device.sessionVersion, 1);
+
+    await service.bumpSessionVersion(deviceId);
+    device = await service.getDevice(deviceId);
+    assert.ok(device);
+    assert.equal(device.sessionVersion, 2);
+  });
+
+  it("does not create a row when bumping an unknown device session version", async () => {
+    await service.bumpSessionVersion("missing-device");
+
+    const device = await service.getDevice("missing-device");
     assert.equal(device, undefined);
   });
 
