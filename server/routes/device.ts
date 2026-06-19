@@ -169,6 +169,31 @@ function buildDeviceSessionResponse(device: Awaited<ReturnType<ReturnType<typeof
   };
 }
 
+async function findCurrentSessionDeviceForLogout(
+  request: FastifyRequest,
+  { deviceService, guestSessionService }: Pick<Deps, "deviceService" | "guestSessionService">,
+) {
+  const { activeToken, resumeToken } = guestSessionService.readTokens(request.headers.cookie);
+
+  const activeSession = guestSessionService.verifyActiveSession(activeToken);
+  if (activeSession.ok) {
+    const device = await deviceService.getDevice(activeSession.deviceId);
+    if (device && activeSession.version === device.sessionVersion) {
+      return device;
+    }
+  }
+
+  const resumedSession = guestSessionService.verifyResumeSession(resumeToken);
+  if (resumedSession.ok) {
+    const device = await deviceService.getDevice(resumedSession.deviceId);
+    if (device && resumedSession.version === device.sessionVersion) {
+      return device;
+    }
+  }
+
+  return null;
+}
+
 function buildGoalValidationIssue(): IntakeValidationIssue {
   return createValidationIssue("goal", "INVALID_GOAL", 1, "請選擇減脂、增肌或維持目標");
 }
@@ -490,7 +515,11 @@ export function registerDeviceRoutes(
     return { ...device, establishedBy: "legacy_migration" as const };
   });
 
-  app.delete("/api/device/session", async (_request, reply) => {
+  app.delete("/api/device/session", async (request, reply) => {
+    const device = await findCurrentSessionDeviceForLogout(request, { deviceService, guestSessionService });
+    if (device) {
+      await deviceService.bumpSessionVersion(device.id);
+    }
     clearGuestSessionCookies(reply, guestSessionService);
     return reply.code(204).send();
   });
