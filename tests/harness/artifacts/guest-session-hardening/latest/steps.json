@@ -158,18 +158,61 @@
     "name": "raw_selector_fail_closed",
     "ok": true,
     "actual": {
-      "validCookieForeignSelectors": {
-        "historyStatus": 200,
-        "ownerHistoryVisible": true,
-        "foreignHistoryVisible": false,
-        "ownerAssetStatus": 200,
-        "foreignAssetStatus": 404
-      },
-      "missingCookieRawSelectors": {
-        "historyStatus": 401,
-        "assetStatus": 401,
-        "sseStatus": 401
-      },
+      "routeCoverageScope": "representative_end_to_end",
+      "exhaustiveCoverageOwner": "route_local_integration_tests_95_02_through_95_05",
+      "representativeRoutes": [
+        "chat_history",
+        "asset_read",
+        "sse",
+        "history_meals",
+        "device_goals"
+      ],
+      "validCookieRawSelectorStatuses": [
+        {
+          "route": "chat_history",
+          "status": 400,
+          "rejected": true
+        },
+        {
+          "route": "asset_read",
+          "status": 400,
+          "rejected": true
+        },
+        {
+          "route": "sse",
+          "status": 400,
+          "rejected": true
+        },
+        {
+          "route": "history_meals",
+          "status": 400,
+          "rejected": true
+        },
+        {
+          "route": "device_goals",
+          "status": 400,
+          "rejected": true
+        }
+      ],
+      "missingCookieRawSelectorStatuses": [
+        {
+          "route": "chat_history",
+          "status": 401,
+          "rejectedByAuth": true
+        },
+        {
+          "route": "asset_read",
+          "status": 401,
+          "rejectedByAuth": true
+        },
+        {
+          "route": "sse",
+          "status": 401,
+          "rejectedByAuth": true
+        }
+      ],
+      "validCookieRawSelectorsRejected": true,
+      "missingCookieRawSelectorsAuthFailed": true,
       "stepResult": {
         "cookieOwnerAuthoritative": true,
         "rawSelectorsAuthorizeMissingCookie": false

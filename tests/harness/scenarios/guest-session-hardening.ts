@@ -695,105 +695,123 @@ const scenario: VerificationScenario = {
       }
 
       try {
-        const foreignDeviceRes = await fixture.app.inject({
-          method: "POST",
-          url: "/api/device",
-          payload: { goal: "muscle_gain" },
-        });
-        if (foreignDeviceRes.statusCode !== 200 && foreignDeviceRes.statusCode !== 201) {
-          throw new Error(`Expected foreign device seed status 200/201, got ${foreignDeviceRes.statusCode}`);
-        }
-        const foreignDeviceId = (foreignDeviceRes.json() as { deviceId: string }).deviceId;
-        const ownerMessage = await fixture.services.chatService.saveMessage(fixture.deviceId, "assistant", "owner selector baseline");
-        const foreignMessage = await fixture.services.chatService.saveMessage(foreignDeviceId, "assistant", "foreign selector baseline");
-
         const ownerAssetPath = path.join(tempRoot, "raw-selector-owner.png");
-        const foreignAssetPath = path.join(tempRoot, "raw-selector-foreign.png");
         await writeFile(ownerAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01]));
-        await writeFile(foreignAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x02]));
         const ownerAsset = await fixture.services.assetService.createAsset(fixture.deviceId, {
           stagedPath: ownerAssetPath,
           mimeType: "image/png",
           originalFilename: "raw-selector-owner.png",
         });
-        const foreignAsset = await fixture.services.assetService.createAsset(foreignDeviceId, {
-          stagedPath: foreignAssetPath,
-          mimeType: "image/png",
-          originalFilename: "raw-selector-foreign.png",
-        });
 
         const validSelectorHeaders = {
           cookie: migratedCookieHeader,
-          "x-device-id": foreignDeviceId,
+          "x-device-id": fixture.deviceId,
         };
         const invalidSelectorHeaders = {
           "x-device-id": fixture.deviceId,
         };
 
-        const validHistoryRes = await fetch(
-          `${fixture.address}/api/chat/history?limit=10&deviceId=${encodeURIComponent(foreignDeviceId)}`,
-          { headers: validSelectorHeaders },
-        );
-        const validHistoryBody = await validHistoryRes.json() as { messages: Array<{ id: string }> };
-        const ownerAssetWithForeignSelectorRes = await fetch(
-          `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(foreignDeviceId)}`,
-          { headers: validSelectorHeaders },
-        );
-        const foreignAssetWithOwnerCookieRes = await fetch(
-          `${fixture.address}/api/assets/${foreignAsset.id}?deviceId=${encodeURIComponent(foreignDeviceId)}`,
-          { headers: validSelectorHeaders },
-        );
-        const missingCookieHistoryRes = await fetch(
-          `${fixture.address}/api/chat/history?limit=5&deviceId=${encodeURIComponent(fixture.deviceId)}`,
-          { headers: invalidSelectorHeaders },
-        );
-        const missingCookieAssetRes = await fetch(
-          `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(fixture.deviceId)}`,
-          { headers: invalidSelectorHeaders },
-        );
-        const missingCookieSseRes = await fetch(
-          `${fixture.address}/api/sse?deviceId=${encodeURIComponent(fixture.deviceId)}`,
-          { headers: invalidSelectorHeaders },
-        );
+        const validCookieRawSelectorRequests = [
+          {
+            route: "chat_history",
+            response: await fetch(
+              `${fixture.address}/api/chat/history?limit=10&deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: validSelectorHeaders },
+            ),
+          },
+          {
+            route: "asset_read",
+            response: await fetch(
+              `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: validSelectorHeaders },
+            ),
+          },
+          {
+            route: "sse",
+            response: await fetch(
+              `${fixture.address}/api/sse?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: validSelectorHeaders },
+            ),
+          },
+          {
+            route: "history_meals",
+            response: await fetch(
+              `${fixture.address}/api/history/meals?from=2026-03-01&to=2026-03-31&deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: validSelectorHeaders },
+            ),
+          },
+          {
+            route: "device_goals",
+            response: await fetch(`${fixture.address}/api/device/goals`, {
+              method: "PUT",
+              headers: {
+                ...validSelectorHeaders,
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({ calories: 1700, deviceId: fixture.deviceId }),
+            }),
+          },
+        ];
 
-        if (validHistoryRes.status !== 200) {
-          throw new Error(`Expected valid cookie history with raw selectors to return 200, got ${validHistoryRes.status}`);
+        const missingCookieRawSelectorRequests = [
+          {
+            route: "chat_history",
+            response: await fetch(
+              `${fixture.address}/api/chat/history?limit=5&deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: invalidSelectorHeaders },
+            ),
+          },
+          {
+            route: "asset_read",
+            response: await fetch(
+              `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: invalidSelectorHeaders },
+            ),
+          },
+          {
+            route: "sse",
+            response: await fetch(
+              `${fixture.address}/api/sse?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: invalidSelectorHeaders },
+            ),
+          },
+        ];
+
+        const validCookieRawSelectorStatuses = validCookieRawSelectorRequests.map(({ route, response }) => ({
+          route,
+          status: response.status,
+          rejected: response.status === 400,
+        }));
+        const missingCookieRawSelectorStatuses = missingCookieRawSelectorRequests.map(({ route, response }) => ({
+          route,
+          status: response.status,
+          rejectedByAuth: response.status === 401,
+        }));
+
+        const unexpectedValidCookieStatuses = validCookieRawSelectorStatuses.filter((item) => item.status !== 400);
+        const unexpectedMissingCookieStatuses = missingCookieRawSelectorStatuses.filter((item) => item.status !== 401);
+
+        if (unexpectedValidCookieStatuses.length > 0) {
+          throw new Error(
+            `Expected valid-cookie raw selectors to return 400: ${unexpectedValidCookieStatuses.map((item) => `${item.route}:${item.status}`).join(", ")}`,
+          );
         }
-        if (!validHistoryBody.messages.some((message) => message.id === ownerMessage.id)) {
-          throw new Error("Expected cookie-owner history to remain visible with foreign raw selectors");
-        }
-        if (validHistoryBody.messages.some((message) => message.id === foreignMessage.id)) {
-          throw new Error("Foreign history became visible through raw selectors");
-        }
-        if (ownerAssetWithForeignSelectorRes.status !== 200) {
-          throw new Error(`Expected cookie-owner asset with foreign raw selectors to return 200, got ${ownerAssetWithForeignSelectorRes.status}`);
-        }
-        if (foreignAssetWithOwnerCookieRes.status !== 404) {
-          throw new Error(`Expected foreign asset with cookie owner plus raw selectors to return 404, got ${foreignAssetWithOwnerCookieRes.status}`);
-        }
-        if (missingCookieHistoryRes.status !== 401) {
-          throw new Error(`Expected missing-cookie history with raw selectors to return 401, got ${missingCookieHistoryRes.status}`);
-        }
-        if (missingCookieAssetRes.status !== 401) {
-          throw new Error(`Expected missing-cookie asset with raw selectors to return 401, got ${missingCookieAssetRes.status}`);
-        }
-        if (missingCookieSseRes.status !== 401) {
-          throw new Error(`Expected missing-cookie SSE with raw selectors to return 401, got ${missingCookieSseRes.status}`);
+        if (unexpectedMissingCookieStatuses.length > 0) {
+          throw new Error(
+            `Expected missing-cookie raw selectors to return 401: ${unexpectedMissingCookieStatuses.map((item) => `${item.route}:${item.status}`).join(", ")}`,
+          );
         }
 
         artifacts.raw_selector_fail_closed = {
-          validCookieForeignSelectors: {
-            historyStatus: validHistoryRes.status,
-            ownerHistoryVisible: validHistoryBody.messages.some((message) => message.id === ownerMessage.id),
-            foreignHistoryVisible: validHistoryBody.messages.some((message) => message.id === foreignMessage.id),
-            ownerAssetStatus: ownerAssetWithForeignSelectorRes.status,
-            foreignAssetStatus: foreignAssetWithOwnerCookieRes.status,
-          },
-          missingCookieRawSelectors: {
-            historyStatus: missingCookieHistoryRes.status,
-            assetStatus: missingCookieAssetRes.status,
-            sseStatus: missingCookieSseRes.status,
-          },
+          routeCoverageScope: "representative_end_to_end",
+          exhaustiveCoverageOwner: "route_local_integration_tests_95_02_through_95_05",
+          // Representative routes prove the shared boundary end-to-end; Plans
+          // 95-02 through 95-05 own exhaustive per-route integration matrices.
+          representativeRoutes: validCookieRawSelectorStatuses.map((item) => item.route),
+          validCookieRawSelectorStatuses,
+          missingCookieRawSelectorStatuses,
+          validCookieRawSelectorsRejected: validCookieRawSelectorStatuses.every((item) => item.rejected),
+          missingCookieRawSelectorsAuthFailed: missingCookieRawSelectorStatuses.every((item) => item.rejectedByAuth),
           stepResult: {
             cookieOwnerAuthoritative: true,
             rawSelectorsAuthorizeMissingCookie: false,
@@ -805,7 +823,6 @@ const scenario: VerificationScenario = {
         steps.push(fail("raw_selector_fail_closed", message, artifacts.raw_selector_fail_closed));
         return failResult("guest-session-hardening", steps, "raw_selector_fail_closed", artifacts);
       }
-
       try {
         const invalidCookieHeader = cookieHeaderFromJar(
           new Map([...parseCookieHeader(migratedCookieHeader).keys()].map((name) => [name, "invalid"])),
