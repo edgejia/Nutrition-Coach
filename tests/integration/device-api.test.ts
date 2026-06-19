@@ -7,10 +7,11 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import Database from "better-sqlite3";
 import { buildApp } from "../../server/app.js";
+import type { AppServices } from "../../server/app.js";
 import { applyMigrations } from "../../server/db/migrate.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
-import { getGoalDefaults, type Goal } from "../../server/services/device.js";
+import { createDeviceService, getGoalDefaults, type Goal } from "../../server/services/device.js";
 
 function getSetCookieHeaders(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
   const rawHeader = res.headers["set-cookie"];
@@ -225,13 +226,22 @@ function runDeployedLikeLegacySessionProbe() {
 
 describe("Device API", () => {
   let app: FastifyInstance;
+  let services: AppServices | undefined;
 
   beforeEach(async () => {
-    app = await buildApp({ dbPath: ":memory:", llmProvider: new MockLLMProvider() });
+    services = undefined;
+    app = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      onServicesReady(readyServices) {
+        services = readyServices;
+      },
+    });
   });
 
   afterEach(async () => {
     await app.close();
+    services = undefined;
   });
 
   async function createGuestDevice(goal: Goal = "fat_loss") {
@@ -246,6 +256,11 @@ describe("Device API", () => {
       cookieHeader: toCookieHeader(res),
       ...(res.json() as { deviceId: string; dailyTargets: { calories: number; protein: number; carbs: number; fat: number } }),
     };
+  }
+
+  async function bumpDeviceSessionVersion(deviceId: string) {
+    assert.ok(services, "expected onServicesReady to capture services");
+    await createDeviceService(services.db).bumpSessionVersion(deviceId);
   }
 
   it("POST /api/device creates a device", async () => {
@@ -586,6 +601,70 @@ describe("Device API", () => {
       dailyTargets,
       establishedBy: "legacy_migration",
     });
+    const setCookieHeaders = getSetCookieHeaders(res);
+    assert.equal(setCookieHeaders.length, 2);
+    assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));
+    assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session_resume=")));
+  });
+
+  it("POST /api/device/session rejects stale active cookies after the device session version changes", async () => {
+    const create = await createGuestDevice();
+    await bumpDeviceSessionVersion(create.deviceId);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: create.cookieHeader },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.json(), { error: "Invalid guest session" });
+    assert.deepEqual(
+      getSetCookieHeaders(res).map((value) => value.split(";", 1)[0]).sort(),
+      ["guest_session=", "guest_session_resume="],
+    );
+  });
+
+  it("POST /api/device/session rejects stale resume cookies without issuing replacements", async () => {
+    const create = await createGuestDevice();
+    const resumeOnlyCookie = create.cookieHeader
+      .split("; ")
+      .filter((cookie) => cookie.startsWith("guest_session_resume="))
+      .join("; ");
+    await bumpDeviceSessionVersion(create.deviceId);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: resumeOnlyCookie },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(res.json(), { error: "Invalid guest session" });
+    assert.deepEqual(
+      getSetCookieHeaders(res).map((value) => value.split(";", 1)[0]).sort(),
+      ["guest_session=", "guest_session_resume="],
+    );
+  });
+
+  it("POST /api/device/session issues refreshed cookies only for current-version resume cookies", async () => {
+    const create = await createGuestDevice();
+    const resumeOnlyCookie = create.cookieHeader
+      .split("; ")
+      .filter((cookie) => cookie.startsWith("guest_session_resume="))
+      .join("; ");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: resumeOnlyCookie },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().establishedBy, "resume");
     const setCookieHeaders = getSetCookieHeaders(res);
     assert.equal(setCookieHeaders.length, 2);
     assert.ok(setCookieHeaders.some((value) => value.startsWith("guest_session=")));

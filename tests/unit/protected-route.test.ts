@@ -11,12 +11,16 @@ import {
   type ProtectedRouteDeps,
 } from "../../server/routes/protected-route.js";
 
+type VersionedSessionStub = { ok: true; deviceId: string; version: number } | { ok: false };
+
 function createDeps(overrides: {
   device?: unknown;
-  activeSession?: { ok: true; deviceId: string } | { ok: false };
-  resumedSession?: { ok: true; deviceId: string; cookies: readonly string[] } | { ok: false };
+  activeSession?: VersionedSessionStub;
+  resumedSession?: VersionedSessionStub;
+  issuedCookies?: readonly string[];
+  onIssue?: (deviceId: string, sessionVersion: number) => void;
 } = {}): ProtectedRouteDeps {
-  const device = overrides.device ?? { id: "device-owned", goal: "maintain" };
+  const device = overrides.device ?? { id: "device-owned", goal: "maintain", sessionVersion: 0 };
   return {
     deviceService: {
       async getDevice(deviceId: string) {
@@ -30,10 +34,21 @@ function createDeps(overrides: {
           : { activeToken: undefined, resumeToken: undefined };
       },
       verifyActiveSession() {
-        return overrides.activeSession ?? { ok: true, deviceId: "device-owned" };
+        return overrides.activeSession ?? { ok: true, deviceId: "device-owned", version: 0 };
       },
-      resumeSession() {
+      verifyResumeSession() {
         return overrides.resumedSession ?? { ok: false };
+      },
+      issue(deviceId: string, sessionVersion: number) {
+        overrides.onIssue?.(deviceId, sessionVersion);
+        return {
+          deviceId,
+          activeToken: "fresh-active-token",
+          resumeToken: "fresh-resume-token",
+          activeExpiresAt: "2026-04-21T01:00:00.000Z",
+          resumeExpiresAt: "2026-04-21T02:00:00.000Z",
+          cookies: overrides.issuedCookies ?? ["guest_session=fresh", "guest_session_resume=fresh"],
+        };
       },
       clearSessionCookies() {
         return ["guest_session=; Max-Age=0", "guest_session_resume=; Max-Age=0"];
@@ -78,7 +93,7 @@ describe("protected route boundary helper", () => {
       resumedSession: {
         ok: true,
         deviceId: "device-owned",
-        cookies: ["guest_session=fresh", "guest_session_resume=fresh"],
+        version: 0,
       },
     });
     registerProtectedRouteSupport(app);
@@ -225,7 +240,7 @@ describe("protected route boundary helper", () => {
       resumedSession: {
         ok: true,
         deviceId: "device-owned",
-        cookies: ["guest_session=fresh", "guest_session_resume=fresh"],
+        version: 0,
       },
     }), {
       method: "GET",
@@ -245,6 +260,92 @@ describe("protected route boundary helper", () => {
     assert.equal(response.statusCode, 400);
     assert.deepEqual(response.json(), { error: "Raw device selector is not allowed" });
     assert.equal(response.headers["set-cookie"], undefined);
+  });
+
+  it("rejects stale active tokens with cookie clearing before the handler runs", async () => {
+    const app = Fastify({ logger: false });
+    registerProtectedRouteSupport(app);
+    registerProtectedRoute(app, createDeps({
+      device: { id: "device-owned", goal: "maintain", sessionVersion: 2 },
+      activeSession: { ok: true, deviceId: "device-owned", version: 1 },
+    }), {
+      method: "GET",
+      url: "/stale-active",
+      protectedMeta: { route: "api_meals", operation: "meals_list" },
+      handler() {
+        return { ok: true };
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/stale-active",
+      headers: { cookie: "guest_session=active-token" },
+    });
+
+    assert.equal(response.statusCode, 401);
+    assert.deepEqual(response.json(), { error: "Invalid guest session" });
+    assert.deepEqual(response.headers["set-cookie"], ["guest_session=; Max-Age=0", "guest_session_resume=; Max-Age=0"]);
+  });
+
+  it("rejects stale resume tokens without issuing refreshed cookies", async () => {
+    const app = Fastify({ logger: false });
+    const issueCalls: Array<{ deviceId: string; sessionVersion: number }> = [];
+    registerProtectedRouteSupport(app);
+    registerProtectedRoute(app, createDeps({
+      device: { id: "device-owned", goal: "maintain", sessionVersion: 2 },
+      activeSession: { ok: false },
+      resumedSession: { ok: true, deviceId: "device-owned", version: 1 },
+      onIssue: (deviceId, sessionVersion) => issueCalls.push({ deviceId, sessionVersion }),
+    }), {
+      method: "GET",
+      url: "/stale-resume",
+      protectedMeta: { route: "api_meals", operation: "meals_list" },
+      handler() {
+        return { ok: true };
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/stale-resume",
+      headers: { cookie: "guest_session_resume=resume-token" },
+    });
+
+    assert.equal(response.statusCode, 401);
+    assert.deepEqual(response.json(), { error: "Invalid guest session" });
+    assert.deepEqual(response.headers["set-cookie"], ["guest_session=; Max-Age=0", "guest_session_resume=; Max-Age=0"]);
+    assert.deepEqual(issueCalls, []);
+  });
+
+  it("issues refreshed resume cookies only after the token version matches the device row", async () => {
+    const app = Fastify({ logger: false });
+    const issueCalls: Array<{ deviceId: string; sessionVersion: number }> = [];
+    registerProtectedRouteSupport(app);
+    registerProtectedRoute(app, createDeps({
+      device: { id: "device-owned", goal: "maintain", sessionVersion: 2 },
+      activeSession: { ok: false },
+      resumedSession: { ok: true, deviceId: "device-owned", version: 2 },
+      onIssue: (deviceId, sessionVersion) => issueCalls.push({ deviceId, sessionVersion }),
+    }), {
+      method: "GET",
+      url: "/current-resume",
+      protectedMeta: { route: "api_meals", operation: "meals_list" },
+      handler(request) {
+        return { setCookies: getProtectedOwner(request).setCookies };
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/current-resume",
+      headers: { cookie: "guest_session_resume=resume-token" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { setCookies: ["guest_session=fresh", "guest_session_resume=fresh"] });
+    assert.deepEqual(response.headers["set-cookie"], ["guest_session=fresh", "guest_session_resume=fresh"]);
+    assert.deepEqual(issueCalls, [{ deviceId: "device-owned", sessionVersion: 2 }]);
   });
 
   it("rejects unsupported multipart bodies at the boundary unless the route parser owns them", async () => {
