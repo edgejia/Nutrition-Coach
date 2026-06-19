@@ -140,8 +140,9 @@ function setGuestSessionCookies(
   reply: FastifyReply,
   guestSessionService: ReturnType<typeof createGuestSessionService>,
   deviceId: string,
+  sessionVersion: number,
 ) {
-  reply.header("set-cookie", guestSessionService.issue(deviceId).cookies);
+  reply.header("set-cookie", guestSessionService.issue(deviceId, sessionVersion).cookies);
 }
 
 function clearGuestSessionCookies(
@@ -393,7 +394,7 @@ export function registerDeviceRoutes(
 
       const result = await deviceService.createDevice(body.goal);
       logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: false });
-      setGuestSessionCookies(reply, guestSessionService, result.deviceId);
+      setGuestSessionCookies(reply, guestSessionService, result.deviceId, 0);
       return { ...result, coachExplanation: null, usedFallback: false };
     }
 
@@ -414,7 +415,7 @@ export function registerDeviceRoutes(
       coachExplanation,
     );
     logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: usedFallback });
-    setGuestSessionCookies(reply, guestSessionService, result.deviceId);
+    setGuestSessionCookies(reply, guestSessionService, result.deviceId, 0);
     return { ...result, coachExplanation, usedFallback };
   });
 
@@ -428,7 +429,12 @@ export function registerDeviceRoutes(
 
     const activeSession = guestSessionService.verifyActiveSession(activeToken);
     if (activeSession.ok) {
-      const device = buildDeviceSessionResponse(await deviceService.getDevice(activeSession.deviceId));
+      const deviceRow = await deviceService.getDevice(activeSession.deviceId);
+      if (!deviceRow || activeSession.version !== deviceRow.sessionVersion) {
+        clearGuestSessionCookies(reply, guestSessionService);
+        return reply.code(401).send({ error: "Invalid guest session" });
+      }
+      const device = buildDeviceSessionResponse(deviceRow);
       if (!device) {
         clearGuestSessionCookies(reply, guestSessionService);
         return reply.code(401).send({ error: "Invalid guest session" });
@@ -436,14 +442,19 @@ export function registerDeviceRoutes(
       return { ...device, establishedBy: "active" as const };
     }
 
-    const resumedSession = guestSessionService.resumeSession(resumeToken);
+    const resumedSession = guestSessionService.verifyResumeSession(resumeToken);
     if (resumedSession.ok) {
-      const device = buildDeviceSessionResponse(await deviceService.getDevice(resumedSession.deviceId));
+      const deviceRow = await deviceService.getDevice(resumedSession.deviceId);
+      if (!deviceRow || resumedSession.version !== deviceRow.sessionVersion) {
+        clearGuestSessionCookies(reply, guestSessionService);
+        return reply.code(401).send({ error: "Invalid guest session" });
+      }
+      const device = buildDeviceSessionResponse(deviceRow);
       if (!device) {
         clearGuestSessionCookies(reply, guestSessionService);
         return reply.code(401).send({ error: "Invalid guest session" });
       }
-      reply.header("set-cookie", resumedSession.cookies);
+      reply.header("set-cookie", guestSessionService.issue(resumedSession.deviceId, deviceRow.sessionVersion).cookies);
       return { ...device, establishedBy: "resume" as const };
     }
 
@@ -469,12 +480,13 @@ export function registerDeviceRoutes(
       return reply.code(401).send({ error: "No guest session available" });
     }
 
-    const device = buildDeviceSessionResponse(await deviceService.getDevice(legacyDeviceId));
-    if (!device) {
+    const deviceRow = await deviceService.getDevice(legacyDeviceId);
+    const device = buildDeviceSessionResponse(deviceRow);
+    if (!deviceRow || !device) {
       return reply.code(401).send({ error: "Invalid device ID" });
     }
 
-    setGuestSessionCookies(reply, guestSessionService, device.deviceId);
+    setGuestSessionCookies(reply, guestSessionService, device.deviceId, deviceRow.sessionVersion);
     return { ...device, establishedBy: "legacy_migration" as const };
   });
 
