@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import type { AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
@@ -98,18 +99,93 @@ function assertPublicDaySnapshotDto(value: unknown) {
 describe("Day snapshot API", () => {
   let app: FastifyInstance;
   let deviceId: string;
+  let otherDeviceId: string;
   let sessionCookieHeader: string;
   let tempRoot: string;
   let uploadsDir: string;
   let assetsDir: string;
   let services: AppServices | undefined;
+  let logCapture: ReturnType<typeof createLogCapture>;
 
   function toCookieHeader(rawHeader: string | string[] | undefined) {
     const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
     return values.map((value) => value.split(";", 1)[0]).join("; ");
   }
 
+  function createLogCapture() {
+    const logLines: string[] = [];
+    const stream = new Writable({
+      write(chunk, _, cb) {
+        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+        cb();
+      },
+    });
+
+    return { logLines, stream };
+  }
+
+  function parseJsonLogLines(logLines: string[]) {
+    return logLines.flatMap((line) => {
+      try {
+        return [JSON.parse(line) as Record<string, unknown>];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  function ownershipBypassEvents() {
+    return parseJsonLogLines(logCapture.logLines).filter((record) => record.event === "ownership_bypass_blocked");
+  }
+
+  function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+    const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+    const allowed = new Set(allowedKeys);
+    for (const key of Object.keys(event)) {
+      assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+    }
+  }
+
+  function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+    const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+    for (const value of forbiddenValues) {
+      assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+    }
+  }
+
+  function assertRawSelectorResponse(input: {
+    beforeEventCount: number;
+    response: { statusCode: number; json: () => unknown };
+    forbiddenValues: readonly string[];
+  }) {
+    assert.equal(input.response.statusCode, 400);
+    assert.deepEqual(input.response.json(), { error: "Raw device selector is not allowed" });
+    assertLogEventsExclude([input.response.json() as Record<string, unknown>], input.forbiddenValues);
+
+    const events = ownershipBypassEvents();
+    assert.equal(events.length, input.beforeEventCount + 1);
+    const event = events.at(-1)!;
+    assert.equal(typeof event.requestId, "string");
+    assert.deepEqual(
+      {
+        event: event.event,
+        reason: event.reason,
+        route: event.route,
+        operation: event.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_day_snapshot",
+        operation: "day_snapshot_read",
+      },
+    );
+    assertLogEventApplicationKeys(event, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude([event], input.forbiddenValues);
+  }
+
   beforeEach(async () => {
+    logCapture = createLogCapture();
     tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-day-snapshot-api-"));
     uploadsDir = path.join(tempRoot, "uploads");
     assetsDir = path.join(tempRoot, "assets");
@@ -119,6 +195,7 @@ describe("Day snapshot API", () => {
       llmProvider: new MockLLMProvider(),
       uploadsDir,
       assetsDir,
+      logger: { level: "info", stream: logCapture.stream },
       onServicesReady: (readyServices) => {
         services = readyServices;
       },
@@ -126,6 +203,8 @@ describe("Day snapshot API", () => {
     const deviceRes = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
     deviceId = deviceRes.json().deviceId;
     sessionCookieHeader = toCookieHeader(deviceRes.headers["set-cookie"]);
+    const otherDeviceRes = await app.inject({ method: "POST", url: "/api/device", payload: { goal: "muscle_gain" } });
+    otherDeviceId = otherDeviceRes.json().deviceId;
   });
 
   afterEach(async () => {
@@ -292,6 +371,35 @@ describe("Day snapshot API", () => {
     });
     assert.equal(malformedDate.statusCode, 400);
     assert.deepEqual(malformedDate.json(), { error: "Invalid date query" });
+  });
+
+  it("GET /api/day-snapshot rejects valid-cookie raw selectors and logs metadata only", async () => {
+    for (const selector of ["header", "query"] as const) {
+      const beforeEventCount = ownershipBypassEvents().length;
+      const res = await app.inject({
+        method: "GET",
+        url: selector === "query"
+          ? `/api/day-snapshot?date=2026-03-25&deviceId=${encodeURIComponent(otherDeviceId)}`
+          : "/api/day-snapshot?date=2026-03-25",
+        headers: {
+          cookie: sessionCookieHeader,
+          ...(selector === "header" ? { "x-device-id": otherDeviceId } : {}),
+        },
+      });
+
+      assertRawSelectorResponse({
+        beforeEventCount,
+        response: res,
+        forbiddenValues: [
+          deviceId,
+          otherDeviceId,
+          "x-device-id",
+          "deviceId",
+          "guest_session",
+          "cookie",
+        ],
+      });
+    }
   });
 
   it("GET /api/day-snapshot requires a valid guest session", async () => {

@@ -16,6 +16,7 @@ import { validPngBytes } from "../fixtures/image-bytes.js";
 describe("Meals API", () => {
   let app: FastifyInstance;
   let mockLLM: MockLLMProvider;
+  let logCapture: ReturnType<typeof createLogCapture>;
   let address: string;
   let deviceId: string;
   let otherDeviceId: string;
@@ -31,8 +32,83 @@ describe("Meals API", () => {
     return values.map((value) => value.split(";", 1)[0]).join("; ");
   }
 
+  function createLogCapture() {
+    const logLines: string[] = [];
+    const stream = new Writable({
+      write(chunk, _, cb) {
+        chunk.toString().split("\n").filter(Boolean).forEach((line: string) => logLines.push(line));
+        cb();
+      },
+    });
+
+    return { logLines, stream };
+  }
+
+  function parseJsonLogLines(logLines: string[]) {
+    return logLines.flatMap((line) => {
+      try {
+        return [JSON.parse(line) as Record<string, unknown>];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  function ownershipBypassEvents() {
+    return parseJsonLogLines(logCapture.logLines).filter((record) => record.event === "ownership_bypass_blocked");
+  }
+
+  function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+    const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+    const allowed = new Set(allowedKeys);
+    for (const key of Object.keys(event)) {
+      assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+    }
+  }
+
+  function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+    const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+    for (const value of forbiddenValues) {
+      assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+    }
+  }
+
+  function assertRawSelectorResponse(input: {
+    beforeEventCount: number;
+    response: { statusCode: number; json: () => unknown; body: string };
+    route: string;
+    operation: string;
+    forbiddenValues: readonly string[];
+  }) {
+    assert.equal(input.response.statusCode, 400);
+    assert.deepEqual(input.response.json(), { error: "Raw device selector is not allowed" });
+    assertLogEventsExclude([input.response.json() as Record<string, unknown>], input.forbiddenValues);
+
+    const events = ownershipBypassEvents();
+    assert.equal(events.length, input.beforeEventCount + 1);
+    const event = events.at(-1)!;
+    assert.equal(typeof event.requestId, "string");
+    assert.deepEqual(
+      {
+        event: event.event,
+        reason: event.reason,
+        route: event.route,
+        operation: event.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: input.route,
+        operation: input.operation,
+      },
+    );
+    assertLogEventApplicationKeys(event, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude([event], input.forbiddenValues);
+  }
+
   beforeEach(async () => {
     mockLLM = new MockLLMProvider();
+    logCapture = createLogCapture();
     tempRoot = await mkdtemp(path.join(tmpdir(), "nutrition-meals-api-"));
     uploadsDir = path.join(tempRoot, "uploads");
     assetsDir = path.join(tempRoot, "assets");
@@ -41,6 +117,7 @@ describe("Meals API", () => {
       llmProvider: mockLLM,
       uploadsDir,
       assetsDir,
+      logger: { level: "info", stream: logCapture.stream },
       onServicesReady: (readyServices) => {
         services = readyServices;
       },
@@ -246,6 +323,35 @@ describe("Meals API", () => {
     const body = res.json();
     assert.deepEqual(body.meals.map((meal: { foodName: string }) => meal.foodName), ["早餐", "晚餐"]);
     assert.ok(body.meals.every((meal: { mealRevisionId?: unknown }) => typeof meal.mealRevisionId === "string"));
+  });
+
+  it("GET /api/meals rejects valid-cookie raw selectors and logs metadata only", async () => {
+    for (const selector of ["header", "query"] as const) {
+      const beforeEventCount = ownershipBypassEvents().length;
+      const res = await app.inject({
+        method: "GET",
+        url: selector === "query" ? `/api/meals?deviceId=${encodeURIComponent(otherDeviceId)}` : "/api/meals",
+        headers: {
+          cookie: deviceCookieHeader,
+          ...(selector === "header" ? { "x-device-id": otherDeviceId } : {}),
+        },
+      });
+
+      assertRawSelectorResponse({
+        beforeEventCount,
+        response: res,
+        route: "api_meals",
+        operation: "meals_list",
+        forbiddenValues: [
+          deviceId,
+          otherDeviceId,
+          "x-device-id",
+          "deviceId",
+          "guest_session",
+          "cookie",
+        ],
+      });
+    }
   });
 
   it("GET /api/meals preserves grouped itemCount and exposes media-free item details", async () => {
@@ -1570,12 +1676,141 @@ describe("Meals API", () => {
     });
     assert.equal(updateRes.statusCode, 401);
 
+    const listRes = await app.inject({
+      method: "GET",
+      url: "/api/meals",
+    });
+    assert.equal(listRes.statusCode, 401);
+
     const deleteRes = await app.inject({
       method: "DELETE",
       url: `/api/meals/${meal.id}`,
       payload: { expectedMealRevisionId: meal.mealRevisionId },
     });
     assert.equal(deleteRes.statusCode, 401);
+  });
+
+  it("PATCH /api/meals/:id rejects valid-cookie raw selectors and logs metadata only", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
+    });
+    const basePayload = {
+      foodName: "雞胸肉沙拉半份",
+      calories: 260,
+      protein: 20,
+      carbs: 8,
+      fat: 12,
+      imageAssetId: null,
+      expectedMealRevisionId: meal.mealRevisionId,
+    };
+
+    const cases = [
+      {
+        name: "header",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader, "x-device-id": otherDeviceId },
+        payload: basePayload,
+      },
+      {
+        name: "query",
+        url: `/api/meals/${meal.id}?deviceId=${encodeURIComponent(otherDeviceId)}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: basePayload,
+      },
+      {
+        name: "body",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: { ...basePayload, deviceId: otherDeviceId },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const beforeEventCount = ownershipBypassEvents().length;
+      const res = await app.inject({
+        method: "PATCH",
+        url: testCase.url,
+        headers: testCase.headers,
+        payload: testCase.payload,
+      });
+
+      assertRawSelectorResponse({
+        beforeEventCount,
+        response: res,
+        route: "api_meal",
+        operation: "meal_update",
+        forbiddenValues: [
+          deviceId,
+          otherDeviceId,
+          "x-device-id",
+          "deviceId",
+          "guest_session",
+          "cookie",
+          JSON.stringify(testCase.payload),
+        ],
+      });
+    }
+  });
+
+  it("DELETE /api/meals/:id rejects valid-cookie raw selectors and logs metadata only", async () => {
+    assert.ok(services, "expected onServicesReady to capture app services");
+
+    const meal = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸肉沙拉", calories: 420, protein: 32, carbs: 14, fat: 22 },
+      ],
+    });
+    const basePayload = { expectedMealRevisionId: meal.mealRevisionId };
+    const cases = [
+      {
+        name: "header",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader, "x-device-id": otherDeviceId },
+        payload: basePayload,
+      },
+      {
+        name: "query",
+        url: `/api/meals/${meal.id}?deviceId=${encodeURIComponent(otherDeviceId)}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: basePayload,
+      },
+      {
+        name: "body",
+        url: `/api/meals/${meal.id}`,
+        headers: { cookie: deviceCookieHeader },
+        payload: { ...basePayload, deviceId: otherDeviceId },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const beforeEventCount = ownershipBypassEvents().length;
+      const res = await app.inject({
+        method: "DELETE",
+        url: testCase.url,
+        headers: testCase.headers,
+        payload: testCase.payload,
+      });
+
+      assertRawSelectorResponse({
+        beforeEventCount,
+        response: res,
+        route: "api_meal",
+        operation: "meal_delete",
+        forbiddenValues: [
+          deviceId,
+          otherDeviceId,
+          "x-device-id",
+          "deviceId",
+          "guest_session",
+          "cookie",
+          JSON.stringify(testCase.payload),
+        ],
+      });
+    }
   });
 
   it("PATCH /api/meals/:id returns 409 MEAL_REQUIRES_GROUPED_UPDATE for grouped direct edits", async () => {
