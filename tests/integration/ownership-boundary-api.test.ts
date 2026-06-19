@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import ts from "typescript";
+import { createGuestSessionService } from "../../server/services/guest-session.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -494,6 +495,7 @@ const COOKIE_HEADER_PATTERN = /\b(?:set-cookie|cookie)\s*:/i;
 const COOKIE_ASSIGNMENT_PATTERN = /\b(?:guest[_-]?session|active[_-]?(?:token|session)|resume[_-]?(?:token|session)|__Host-[^=\s;]+|__Secure-[^=\s;]+)[^=\s;]*=[A-Za-z0-9._~+/=-]{12,}/i;
 const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/;
+const GUEST_SESSION_TOKEN_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,}\b/;
 const DATA_URI_PATTERN = /\bdata:image\/[a-z0-9.+-]+;base64,/i;
 const SESSION_MATERIAL_KEY_PATTERN = /(?:^|[_-])(?:activeToken|resumeToken|cookieHeader|setCookieHeaders|requestHeaders|requestBody|responseBody|prompt|imageData)(?:$|[_-])/i;
 const ALLOWED_METADATA_KEYS = new Set([
@@ -512,6 +514,7 @@ function inspectArtifactValue(value: unknown, pathSegments: readonly string[], f
       || COOKIE_ASSIGNMENT_PATTERN.test(value)
       || UUID_PATTERN.test(value)
       || JWT_PATTERN.test(value)
+      || GUEST_SESSION_TOKEN_PATTERN.test(value)
       || DATA_URI_PATTERN.test(value)
     ) {
       failures.push(`${pathText} contains raw session/device/image material`);
@@ -634,4 +637,21 @@ test("guest-session-hardening artifacts prove guest-session revocation behavior"
 
 test("guest-session-hardening generated artifacts are metadata-only", async () => {
   await assertGeneratedArtifactsAreMetadataOnly();
+});
+
+test("generated artifact privacy scanner rejects raw guest-session token values", () => {
+  const service = createGuestSessionService({
+    secret: "test-secret",
+    activeCookieName: "guest_session",
+    resumeCookieName: "guest_session_resume",
+    activeTtlSeconds: 3600,
+    resumeTtlSeconds: 7200,
+    secure: false,
+    now: () => new Date("2026-04-21T00:00:00.000Z"),
+  });
+  const failures: string[] = [];
+
+  inspectArtifactValue({ leaked: service.issue("device-1", 0).activeToken }, ["synthetic"], failures);
+
+  assert.deepEqual(failures, ["synthetic.leaked contains raw session/device/image material"]);
 });

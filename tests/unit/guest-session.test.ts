@@ -219,4 +219,17 @@ describe("GuestSessionService", () => {
       assert.deepEqual(service.verifyActiveSession(token), { ok: false, reason: "invalid" });
     }
   });
+
+  it("keeps malformed percent-encoded cookies on the invalid-token path", () => {
+    const service = createGuestSessionService(SERVICE_OPTIONS);
+
+    const tokens = service.readTokens("guest_session=%; guest_session_resume=%E0%A4%A");
+
+    assert.deepEqual(tokens, {
+      activeToken: "%",
+      resumeToken: "%E0%A4%A",
+    });
+    assert.deepEqual(service.verifyActiveSession(tokens.activeToken), { ok: false, reason: "invalid" });
+    assert.deepEqual(service.verifyResumeSession(tokens.resumeToken), { ok: false, reason: "invalid" });
+  });
 });

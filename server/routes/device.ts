@@ -483,6 +483,11 @@ export function registerDeviceRoutes(
       return { ...device, establishedBy: "resume" as const };
     }
 
+    if (activeToken || resumeToken) {
+      clearGuestSessionCookies(reply, guestSessionService);
+      return reply.code(401).send({ error: "Invalid guest session" });
+    }
+
     if ("legacyDeviceId" in body && typeof body.legacyDeviceId !== "string") {
       return reply.code(400).send({ error: "legacyDeviceId must be a string." });
     }

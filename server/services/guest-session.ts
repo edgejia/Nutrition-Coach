@@ -117,7 +117,13 @@ function parseCookieHeader(cookieHeader: string | undefined) {
 
     const name = trimmedPart.slice(0, separatorIndex);
     const value = trimmedPart.slice(separatorIndex + 1);
-    cookies.set(name, decodeURIComponent(value));
+    let decodedValue = value;
+    try {
+      decodedValue = decodeURIComponent(value);
+    } catch {
+      decodedValue = value;
+    }
+    cookies.set(name, decodedValue);
   }
 
   return cookies;

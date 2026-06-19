@@ -678,6 +678,31 @@ describe("Device API", () => {
     );
   });
 
+  it("malformed percent-encoded guest-session cookies fail closed without 500s", async () => {
+    const malformedCookieHeader = "guest_session=%; guest_session_resume=%E0%A4%A";
+    const protectedRoute = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: malformedCookieHeader },
+      payload: { protein: 151 },
+    });
+
+    assert.equal(protectedRoute.statusCode, 401);
+    assert.deepEqual(protectedRoute.json(), { error: "Invalid guest session" });
+    assertClearSessionCookiesOnly(protectedRoute);
+
+    const sessionRoute = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: malformedCookieHeader },
+      payload: {},
+    });
+
+    assert.equal(sessionRoute.statusCode, 401);
+    assert.deepEqual(sessionRoute.json(), { error: "Invalid guest session" });
+    assertClearSessionCookiesOnly(sessionRoute);
+  });
+
   it("POST /api/device/session issues refreshed cookies only for current-version resume cookies", async () => {
     const create = await createGuestDevice();
     const resumeOnlyCookie = sessionCookieOnly(create.cookieHeader, "guest_session_resume");
