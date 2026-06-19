@@ -656,6 +656,62 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat SSE rejects raw selectors before stream frames or active-turn side effects", async () => {
+    assert.ok(services, "expected app services");
+    mockLLM.queueChatStream(["should not stream"]);
+    const beforeChatCalls = mockLLM.chatCalls.length;
+
+    const form = new FormData();
+    form.append("message", "raw selector should reject");
+
+    const res = await fetch(`${address}/api/chat?deviceId=${encodeURIComponent(deviceId)}`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream", "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 400);
+    const text = await res.text();
+    assert.doesNotMatch(text, /event: chunk/);
+    assert.doesNotMatch(text, /event: done/);
+    assert.doesNotMatch(text, /event: start/);
+    assert.equal(mockLLM.chatCalls.length, beforeChatCalls);
+    assert.equal(traceRecorders.length, 0);
+
+    const history = await services.chatService.getHistory(deviceId, 10);
+    assert.equal(history.some((message) => message.content === "raw selector should reject"), false);
+    assert.equal(history.some((message) => message.role === "assistant"), false);
+
+    const stopRes = await fetch(`${address}/api/chat/stop`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "content-type": "application/json" },
+      body: JSON.stringify({ turnId: "00000000-0000-4000-8000-000000000000" }),
+    });
+    assert.equal(stopRes.status, 404);
+
+    const ownershipEvents = observabilityEvents(logLines, "ownership_bypass_blocked");
+    assert.equal(ownershipEvents.length, 1);
+    assert.deepEqual(
+      {
+        event: ownershipEvents[0]!.event,
+        reason: ownershipEvents[0]!.reason,
+        route: ownershipEvents[0]!.route,
+        operation: ownershipEvents[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+      },
+    );
+    assertLogEventApplicationKeys(ownershipEvents[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude(
+      [ownershipEvents[0]!],
+      [deviceId, "x-device-id", "deviceId", "guest_session", "cookie", "raw selector should reject", "should not stream"],
+    );
+  });
+
   it("POST /api/chat SSE emits start before any status, chunk, done, or stopped frame and reuses that turnId", async () => {
     mockLLM.queueChatStream(["直接", "回覆"]);
 
@@ -1432,8 +1488,8 @@ describe("chat-streaming", () => {
         },
         body: JSON.stringify({ turnId: foreignDeviceId }),
       });
-      assert.equal(forgedStopRes.status, 404);
-      assert.deepEqual(await forgedStopRes.json(), { error: "Active turn not found" });
+      assert.equal(forgedStopRes.status, 400);
+      assert.deepEqual(await forgedStopRes.json(), { error: "Raw device selector is not allowed" });
 
       const stopRes = await fetch(`${address}/api/chat/stop?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
         method: "POST",
@@ -1444,8 +1500,8 @@ describe("chat-streaming", () => {
         },
         body: JSON.stringify({ turnId: foreignTurnId }),
       });
-      assert.equal(stopRes.status, 404);
-      assert.deepEqual(await stopRes.json(), { error: "Active turn not found" });
+      assert.equal(stopRes.status, 400);
+      assert.deepEqual(await stopRes.json(), { error: "Raw device selector is not allowed" });
       assert.equal(mockLLM.lastSignal?.aborted, false);
 
       const completedText = firstText + await readStreamUntil(reader, "event: done");
