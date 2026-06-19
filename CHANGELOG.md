@@ -9,6 +9,8 @@
 - Mutation receipts 現在由 committed backend facts 驅動:沒有實際 mutation 的 turn 不會產生 log/update/delete/goal 成功文案,delete 也必須有 committed delete fact 才能說已刪除。
 - Multi-item meal receipt 的 public `position` 改為保留 persisted 0-based contract,讓 receipt 內每個 item 都能回到 strict edit payload。
 - Confirm-first proposal 在 non-precondition failure 後會保留為 retryable,重複確認已處理 proposal 則回 deterministic idempotent copy,不會 double mutate。
+- `README-en.md` 補齊 v2.5-v2.10 期間的結構化 LLM output、DTO guard、confirm-first proposal、Home/History/Meal Edit 與 coach advice 架構摘要。
+- PR 檢查新增 issue-first / changelog / local `.planning/**` policy gate,並在 GitHub Actions pull request path 執行。
 
 ### 驗證
 
