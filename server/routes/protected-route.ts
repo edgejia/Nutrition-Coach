@@ -11,6 +11,7 @@ import type { createGuestSessionService } from "../services/guest-session.js";
 type DeviceRecord = Awaited<ReturnType<ReturnType<typeof createDeviceService>["getDevice"]>>;
 type FastifyRouteOptions = Parameters<FastifyInstance["route"]>[0];
 type FastifyPreHandler = NonNullable<FastifyRouteOptions["preHandler"]>;
+type MultipartBodySelectorHandling = "reject_unsupported" | "route_parser";
 
 export interface ProtectedRouteMetadata {
   route: OwnershipBypassBlockedRoute;
@@ -49,6 +50,7 @@ export type ProtectedRouteKey =
 
 type ProtectedRouteOptions = Omit<FastifyRouteOptions, "preHandler"> & {
   protectedMeta: ProtectedRouteMetadata;
+  multipartBodySelectorHandling?: MultipartBodySelectorHandling;
   onAuthFailure?: (request: FastifyRequest) => void;
   preHandler?: FastifyRouteOptions["preHandler"];
 };
@@ -127,6 +129,7 @@ export function buildProtectedPreHandler(
   deps: ProtectedRouteDeps,
   meta: ProtectedRouteMetadata,
   onAuthFailure?: (request: FastifyRequest) => void,
+  options: { multipartBodySelectorHandling?: MultipartBodySelectorHandling } = {},
 ) {
   return async function protectedPreHandler(request: FastifyRequest, reply: FastifyReply) {
     const session = await resolveGuestSession(request, deps);
@@ -143,11 +146,10 @@ export function buildProtectedPreHandler(
       device: session.device,
       ...(session.setCookies ? { setCookies: session.setCookies } : {}),
     };
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
 
-    if (hasRawHeaderOrQueryDeviceIdSelector(request) || hasRawBodyDeviceIdSelector(request)) {
+    const hasUnsupportedMultipartBody = isMultipartRequest(request)
+      && (options.multipartBodySelectorHandling ?? "reject_unsupported") === "reject_unsupported";
+    if (hasRawHeaderOrQueryDeviceIdSelector(request) || hasRawBodyDeviceIdSelector(request) || hasUnsupportedMultipartBody) {
       logOwnershipBypassBlocked(request.log, {
         reason: "raw_device_id_param",
         route: meta.route,
@@ -155,6 +157,10 @@ export function buildProtectedPreHandler(
         requestId: request.id,
       });
       return reply.code(400).send({ error: "Raw device selector is not allowed" });
+    }
+
+    if (session.setCookies) {
+      reply.header("set-cookie", session.setCookies);
     }
   };
 }
@@ -176,9 +182,18 @@ export function registerProtectedRoute(
   deps: ProtectedRouteDeps,
   routeOptions: ProtectedRouteOptions,
 ) {
-  const { protectedMeta, onAuthFailure, preHandler, ...fastifyRouteOptions } = routeOptions;
+  const {
+    protectedMeta,
+    multipartBodySelectorHandling,
+    onAuthFailure,
+    preHandler,
+    ...fastifyRouteOptions
+  } = routeOptions;
   app.route({
     ...fastifyRouteOptions,
-    preHandler: chainPreHandlers(buildProtectedPreHandler(deps, protectedMeta, onAuthFailure), preHandler),
+    preHandler: chainPreHandlers(
+      buildProtectedPreHandler(deps, protectedMeta, onAuthFailure, { multipartBodySelectorHandling }),
+      preHandler,
+    ),
   });
 }

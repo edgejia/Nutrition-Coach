@@ -1670,6 +1670,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     method: "POST",
     url: "/api/chat",
     protectedMeta: PROTECTED_ROUTE_META.chatMessage,
+    multipartBodySelectorHandling: "route_parser",
     handler: async (request, reply) => {
     const { deviceId } = getProtectedOwner(request);
     const resolvedUploadsDir = injectedUploadsDir ?? config.uploadsStagingDir;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import Fastify, { type FastifyRequest } from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   buildProtectedPreHandler,
   getProtectedOwner,
@@ -215,6 +215,95 @@ describe("protected route boundary helper", () => {
     assert.equal(ownershipEvent?.msg, "Ownership bypass blocked");
     assert.equal(typeof ownershipEvent?.requestId, "string");
     assert.doesNotMatch(JSON.stringify(ownershipEvent), /raw-device|deviceId|guest_session|cookie|active-token/);
+  });
+
+  it("does not refresh resume cookies when raw selectors are rejected", async () => {
+    const app = Fastify({ logger: false });
+    registerProtectedRouteSupport(app);
+    registerProtectedRoute(app, createDeps({
+      activeSession: { ok: false },
+      resumedSession: {
+        ok: true,
+        deviceId: "device-owned",
+        cookies: ["guest_session=fresh", "guest_session_resume=fresh"],
+      },
+    }), {
+      method: "GET",
+      url: "/resume",
+      protectedMeta: { route: "api_meals", operation: "meals_list" },
+      handler() {
+        return { ok: true };
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/resume?deviceId=raw-device",
+      headers: { cookie: "guest_session_resume=resume-token" },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.json(), { error: "Raw device selector is not allowed" });
+    assert.equal(response.headers["set-cookie"], undefined);
+  });
+
+  it("rejects unsupported multipart bodies at the boundary unless the route parser owns them", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const createRequest = (id: string) => ({
+      headers: {
+        cookie: "guest_session=active-token",
+        "content-type": "multipart/form-data; boundary=abc",
+      },
+      query: {},
+      id,
+      log: {
+        info(payload: Record<string, unknown>, msg: string) {
+          events.push({ ...payload, msg });
+        },
+      },
+    } as unknown as FastifyRequest);
+    const createReply = () => {
+      const captured: { statusCode?: number; payload?: unknown; headers: Record<string, unknown> } = { headers: {} };
+      const reply = {
+        header(name: string, value: unknown) {
+          captured.headers[name] = value;
+          return this;
+        },
+        code(statusCode: number) {
+          captured.statusCode = statusCode;
+          return this;
+        },
+        send(payload: unknown) {
+          captured.payload = payload;
+          return payload;
+        },
+      } as FastifyReply;
+      return { captured, reply };
+    };
+
+    const rejectedReply = createReply();
+    await buildProtectedPreHandler(createDeps(), { route: "api_device_goals", operation: "device_goals_update" })(
+      createRequest("req-rejected"),
+      rejectedReply.reply,
+    );
+    assert.equal(rejectedReply.captured.statusCode, 400);
+    assert.deepEqual(rejectedReply.captured.payload, { error: "Raw device selector is not allowed" });
+
+    const ownershipEvent = events.find((line) => line.event === "ownership_bypass_blocked");
+    assert.equal(ownershipEvent?.route, "api_device_goals");
+    assert.equal(ownershipEvent?.operation, "device_goals_update");
+    assert.doesNotMatch(JSON.stringify(ownershipEvent), /raw-device|deviceId|guest_session|cookie|active-token/);
+
+    const parserOwnedRequest = createRequest("req-parser-owned");
+    const parserOwnedReply = createReply();
+    await buildProtectedPreHandler(
+      createDeps(),
+      { route: "api_chat", operation: "chat_message" },
+      undefined,
+      { multipartBodySelectorHandling: "route_parser" },
+    )(parserOwnedRequest, parserOwnedReply.reply);
+    assert.equal(parserOwnedReply.captured.statusCode, undefined);
+    assert.equal(getProtectedOwner(parserOwnedRequest).deviceId, "device-owned");
   });
 
   it("throws a sanitized invariant error when no protected owner is attached", async () => {

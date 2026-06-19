@@ -356,6 +356,52 @@ describe("Device API", () => {
     assert.deepEqual(res.json(), { error: "Guest session required" });
   });
 
+  it("PUT /api/device/goals rejects unsupported multipart selectors at the shared boundary", async () => {
+    const { logLines, logStream } = createLogCapture();
+    const loggedApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+
+    try {
+      const create = await loggedApp.inject({
+        method: "POST",
+        url: "/api/device",
+        payload: { goal: "fat_loss" },
+      });
+      const deviceId = create.json().deviceId as string;
+      const boundary = "goals-boundary";
+      const res = await loggedApp.inject({
+        method: "PUT",
+        url: "/api/device/goals",
+        headers: {
+          cookie: toCookieHeader(create),
+          "content-type": `multipart/form-data; boundary=${boundary}`,
+        },
+        payload: [
+          `--${boundary}`,
+          'Content-Disposition: form-data; name="deviceId"',
+          "",
+          deviceId,
+          `--${boundary}--`,
+          "",
+        ].join("\r\n"),
+      });
+
+      assert.equal(res.statusCode, 400);
+      assert.deepEqual(res.json(), { error: "Raw device selector is not allowed" });
+      const events = findLogEvents(logLines, "ownership_bypass_blocked");
+      assert.equal(events.length, 1);
+      assert.equal(events[0]?.reason, "raw_device_id_param");
+      assert.equal(events[0]?.route, "api_device_goals");
+      assert.equal(events[0]?.operation, "device_goals_update");
+      assertLogEventsExclude(events, [deviceId, "deviceId", "guest_session", "cookie"]);
+    } finally {
+      await loggedApp.close();
+    }
+  });
+
   it("POST /api/device creates a device with muscle_gain goal", async () => {
     const res = await app.inject({
       method: "POST",
