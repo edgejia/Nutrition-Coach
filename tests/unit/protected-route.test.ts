@@ -1,0 +1,254 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import Fastify, { type FastifyRequest } from "fastify";
+import {
+  buildProtectedPreHandler,
+  getProtectedOwner,
+  hasRawBodyDeviceIdSelector,
+  hasRawHeaderOrQueryDeviceIdSelector,
+  registerProtectedRoute,
+  registerProtectedRouteSupport,
+  type ProtectedRouteDeps,
+} from "../../server/routes/protected-route.js";
+
+function createDeps(overrides: {
+  device?: unknown;
+  activeSession?: { ok: true; deviceId: string } | { ok: false };
+  resumedSession?: { ok: true; deviceId: string; cookies: readonly string[] } | { ok: false };
+} = {}): ProtectedRouteDeps {
+  const device = overrides.device ?? { id: "device-owned", goal: "maintain" };
+  return {
+    deviceService: {
+      async getDevice(deviceId: string) {
+        return deviceId === "device-owned" ? device : undefined;
+      },
+    },
+    guestSessionService: {
+      readTokens(cookieHeader: string | undefined) {
+        return cookieHeader
+          ? { activeToken: "active-token", resumeToken: "resume-token" }
+          : { activeToken: undefined, resumeToken: undefined };
+      },
+      verifyActiveSession() {
+        return overrides.activeSession ?? { ok: true, deviceId: "device-owned" };
+      },
+      resumeSession() {
+        return overrides.resumedSession ?? { ok: false };
+      },
+      clearSessionCookies() {
+        return ["guest_session=; Max-Age=0", "guest_session_resume=; Max-Age=0"];
+      },
+    },
+  } as unknown as ProtectedRouteDeps;
+}
+
+describe("protected route boundary helper", () => {
+  it("detects raw header/query selectors and parsed non-multipart body selectors", () => {
+    assert.equal(hasRawHeaderOrQueryDeviceIdSelector({
+      headers: { "x-device-id": "raw-device" },
+      query: {},
+    } as FastifyRequest), true);
+    assert.equal(hasRawHeaderOrQueryDeviceIdSelector({
+      headers: {},
+      query: { deviceId: "raw-device" },
+    } as FastifyRequest), true);
+    assert.equal(hasRawHeaderOrQueryDeviceIdSelector({
+      headers: {},
+      query: { other: "value" },
+    } as FastifyRequest), false);
+
+    assert.equal(hasRawBodyDeviceIdSelector({
+      headers: { "content-type": "application/json" },
+      body: { deviceId: "raw-device" },
+    } as FastifyRequest), true);
+    assert.equal(hasRawBodyDeviceIdSelector({
+      headers: { "content-type": "multipart/form-data; boundary=abc" },
+      body: { deviceId: "raw-device" },
+    } as FastifyRequest), false);
+    assert.equal(hasRawBodyDeviceIdSelector({
+      headers: { "content-type": "application/json" },
+      body: ["deviceId"],
+    } as FastifyRequest), false);
+  });
+
+  it("attaches a resolved owner and refresh cookies before the handler runs", async () => {
+    const app = Fastify({ logger: false });
+    const deps = createDeps({
+      activeSession: { ok: false },
+      resumedSession: {
+        ok: true,
+        deviceId: "device-owned",
+        cookies: ["guest_session=fresh", "guest_session_resume=fresh"],
+      },
+    });
+    registerProtectedRouteSupport(app);
+    registerProtectedRoute(app, deps, {
+      method: "GET",
+      url: "/protected",
+      protectedMeta: { route: "api_meals", operation: "meals_list" },
+      handler(request) {
+        const owner = getProtectedOwner(request);
+        return {
+          deviceId: owner.deviceId,
+          hasDevice: Boolean(owner.device),
+          setCookies: owner.setCookies,
+        };
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/protected",
+      headers: { cookie: "guest_session_resume=resume-token" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      deviceId: "device-owned",
+      hasDevice: true,
+      setCookies: ["guest_session=fresh", "guest_session_resume=fresh"],
+    });
+    assert.deepEqual(response.headers["set-cookie"], ["guest_session=fresh", "guest_session_resume=fresh"]);
+  });
+
+  it("preserves route options and chains the route preHandler after the protected preHandler", async () => {
+    const app = Fastify({ logger: false });
+    const deps = createDeps();
+    const calls: string[] = [];
+    registerProtectedRouteSupport(app);
+    registerProtectedRoute(app, deps, {
+      method: "POST",
+      url: "/with-schema",
+      protectedMeta: { route: "api_proposals_actions", operation: "proposal_action" },
+      schema: {
+        body: {
+          type: "object",
+          required: ["value"],
+          additionalProperties: false,
+          properties: { value: { type: "string" } },
+        },
+      },
+      preHandler(request, _reply, done) {
+        calls.push(getProtectedOwner(request).deviceId);
+        done();
+      },
+      handler() {
+        return { ok: true };
+      },
+    });
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/with-schema",
+      headers: { cookie: "guest_session=active-token" },
+      payload: { value: "ok", extra: true },
+    });
+    assert.equal(invalid.statusCode, 400);
+    assert.deepEqual(calls, []);
+
+    const valid = await app.inject({
+      method: "POST",
+      url: "/with-schema",
+      headers: { cookie: "guest_session=active-token" },
+      payload: { value: "ok" },
+    });
+    assert.equal(valid.statusCode, 200);
+    assert.deepEqual(valid.json(), { ok: true });
+    assert.deepEqual(calls, ["device-owned"]);
+  });
+
+  it("keeps invalid cookies at 401 and rejects raw selectors with metadata-only 400 after valid cookies", async () => {
+    const invalidApp = Fastify({ logger: false });
+    registerProtectedRouteSupport(invalidApp);
+    registerProtectedRoute(invalidApp, createDeps({
+      activeSession: { ok: false },
+      resumedSession: { ok: false },
+    }), {
+      method: "GET",
+      url: "/invalid",
+      protectedMeta: { route: "api_meals", operation: "meals_list" },
+      handler() {
+        return { ok: true };
+      },
+    });
+
+    const invalid = await invalidApp.inject({
+      method: "GET",
+      url: "/invalid?deviceId=raw-device",
+      headers: { cookie: "guest_session=invalid" },
+    });
+    assert.equal(invalid.statusCode, 401);
+    assert.deepEqual(invalid.headers["set-cookie"], ["guest_session=; Max-Age=0", "guest_session_resume=; Max-Age=0"]);
+
+    const logLines: string[] = [];
+    const validApp = Fastify({
+      logger: {
+        level: "info",
+        stream: { write: (line: string) => logLines.push(line) },
+      },
+    });
+    registerProtectedRouteSupport(validApp);
+    registerProtectedRoute(validApp, createDeps(), {
+      method: "POST",
+      url: "/valid",
+      protectedMeta: { route: "api_meals", operation: "meals_list" },
+      handler() {
+        return { ok: true };
+      },
+    });
+
+    const valid = await validApp.inject({
+      method: "POST",
+      url: "/valid?deviceId=raw-device",
+      headers: { cookie: "guest_session=active-token" },
+      payload: { value: "ok" },
+    });
+    assert.equal(valid.statusCode, 400);
+
+    const ownershipEvent = logLines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((line) => line.event === "ownership_bypass_blocked");
+    assert.deepEqual(ownershipEvent, {
+      level: 30,
+      time: ownershipEvent?.time,
+      pid: ownershipEvent?.pid,
+      hostname: ownershipEvent?.hostname,
+      event: "ownership_bypass_blocked",
+      reason: "raw_device_id_param",
+      route: "api_meals",
+      operation: "meals_list",
+      requestId: ownershipEvent?.requestId,
+      msg: "Ownership bypass blocked",
+    });
+    assert.equal(typeof ownershipEvent?.requestId, "string");
+    assert.doesNotMatch(JSON.stringify(ownershipEvent), /raw-device|deviceId|guest_session|cookie|active-token/);
+  });
+
+  it("throws a sanitized invariant error when no protected owner is attached", async () => {
+    const app = Fastify({ logger: false });
+    app.get("/missing-owner", (request) => getProtectedOwner(request));
+
+    const response = await app.inject({ method: "GET", url: "/missing-owner" });
+
+    assert.equal(response.statusCode, 500);
+    assert.match(response.body, /Protected route owner was not resolved/);
+    assert.doesNotMatch(response.body, /device|cookie|token|body/i);
+  });
+
+  it("exposes buildProtectedPreHandler for direct Fastify lifecycle use", async () => {
+    const app = Fastify({ logger: false });
+    registerProtectedRouteSupport(app);
+    app.get("/direct", {
+      preHandler: buildProtectedPreHandler(createDeps(), { route: "api_sse", operation: "sse_subscribe" }),
+    }, (request) => ({ deviceId: getProtectedOwner(request).deviceId }));
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/direct",
+      headers: { cookie: "guest_session=active-token" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { deviceId: "device-owned" });
+  });
+});
