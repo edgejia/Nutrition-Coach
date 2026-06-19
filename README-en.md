@@ -26,10 +26,16 @@ Local development calls the OpenAI API for real meal analysis. Tests and some ha
 
 - Text and image meal logging: `server/orchestrator/*`, `server/routes/chat.ts`
 - LLM tool calling with structured mutation commits: `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `server/orchestrator/mutation-effects.ts`
+- Schema-backed structured LLM output and onboarding target fallback: `server/llm/types.ts`, `server/llm/openai.ts`, `server/services/target-generation.ts`
+- Authoritative DTO validation: `client/src/dto-guards.ts`, `client/src/api.ts`, `client/src/sse.ts`, `client/src/store.ts`
 - SSE streaming chat UX: `server/routes/chat.ts`, `client/src/sse.ts`, `client/src/components/ChatPanel.tsx`
-- Meal correction authority: explicit numbers or backend-owned proposals are required before calories/macros can change
+- Meal correction authority: explicit numbers or backend-owned proposals are required before calories/macros can change; "estimate reasonable values" requests use confirm-first estimate proposals
+- Confirm-first proposal UX: goal, meal numeric, estimate, and delete proposals expose approve / edit-via-new-message / reject affordances with deterministic lapse copy
+- Goal-aware coach advice and CTAs: Home coaching copy and next actions follow the user's goal and today's logged state
 - Explicit meal-period intent: words like lunch, dinner, or late-night snack are stored as structured facts instead of being overridden by clock-hour inference
+- Atomic chat receipts and structured history state: `server/services/chat.ts`, `server/services/chat-mutation-outcomes.ts`
 - Metadata-only chat failure localization: `server/llm/errors.ts`, `server/observability/events.ts`, `tests/harness/scenarios/provider-auth-failure-localization.ts`
+- Home / History / Meal Edit editing: Home meal rows, History snapshot rows, and grouped meal item add/edit/delete use revision-safe edit identity
 - Signed-cookie guest sessions without a full account system: `server/routes/device.ts`, `server/lib/guest-session-resolver.ts`
 - SQLite-backed full-stack app deployed as one Fastify service: `server/app.ts`, `server/db/*`, `drizzle/`
 - Deterministic harnesses for AI behavior, receipts, and boundary contracts: `tests/harness/`
@@ -40,9 +46,12 @@ Local development calls the OpenAI API for real meal analysis. Tests and some ha
 2. The user logs food in Chat using text, a photo, or both.
 3. The orchestrator estimates calories and macros, writes the meal record, and streams progress over SSE.
 4. Home updates today's calories, macros, and meal list.
-5. History shows read-only daily snapshots and trends.
-6. Users can edit or delete existing meals from the meal detail/edit screens.
-7. Chat corrections resolve the target meal and numeric evidence server-side; vague requests do not directly commit model-estimated values.
+5. History shows read-only daily snapshots and trends; week or date switching keeps stable layout and uses snapshot facts to unlock rows, detail, and edit flows.
+6. Users can edit or delete meals from Home, History, or existing meal detail/edit screens; grouped meals support item-level add, edit, and delete.
+7. Chat corrections resolve the target meal and numeric evidence server-side; "estimate reasonable values" requests create backend-saved confirm-first estimate proposals instead of directly committing model-estimated values.
+8. Chat delete requests show a backend-rendered delete preview proposal first; confirmation then writes through the revision-safe delete path.
+9. Pending proposals render structured approve / edit / reject UI; expired, superseded, or stale proposals show deterministic lapse copy.
+10. Home coach advice and CTAs choose the next action from the user's goal, today's meals, and remaining targets.
 
 ## Quick Start
 
