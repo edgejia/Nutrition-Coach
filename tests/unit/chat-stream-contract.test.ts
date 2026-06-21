@@ -313,6 +313,56 @@ describe("chat stream contract", () => {
     assert.equal(donePayload?.loggedMeal, undefined);
   });
 
+  it("sendMessageStream exposes terminal replyText on done only", async () => {
+    mockStreamFetch([
+      'event: done\ndata: {"didLogMeal":false,"replyText":"已完成記錄，但回覆生成失敗"}\n\n',
+    ]);
+
+    let donePayload: { didLogMeal: boolean; replyText?: string } | undefined;
+
+    await sendMessageStream("fallback", {
+      onStatus: () => undefined,
+      onToken: () => undefined,
+      onDone: (data) => {
+        donePayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.equal(donePayload?.didLogMeal, false);
+    assert.equal(donePayload?.replyText, "已完成記錄，但回覆生成失敗");
+  });
+
+  it("sendMessageStream keeps stopped terminal payloads separate from replyText replacement", async () => {
+    mockStreamFetch([
+      'event: stopped\ndata: {"stopped":true,"tokensStreamed":1,"replyText":"不應被停止事件使用"}\n\n',
+    ]);
+
+    let doneCalled = false;
+    let stoppedPayload: { stopped: true; tokensStreamed: number; replyText?: string } | undefined;
+
+    await sendMessageStream("stop please", {
+      onStatus: () => undefined,
+      onToken: () => undefined,
+      onDone: () => {
+        doneCalled = true;
+      },
+      onStopped: (data) => {
+        stoppedPayload = data;
+      },
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+
+    assert.equal(doneCalled, false);
+    assert.equal(stoppedPayload?.stopped, true);
+    assert.equal(stoppedPayload?.tokensStreamed, 1);
+    assert.equal(stoppedPayload?.replyText, undefined);
+  });
+
   it("commitProvisionalBubble preserves loggedMeal on final assistant message", () => {
     useStore.getState().setProvisionalBubble({
       id: "bubble-1",

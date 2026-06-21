@@ -1837,6 +1837,64 @@ describe("sendMessageStream", () => {
     assert.equal(affectedDate, "2026-03-25");
   });
 
+  it("dispatches terminal replyText from done events", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":false,"replyText":"已完成記錄，但回覆生成失敗"}\n\n',
+    ]);
+    let replyText: string | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        replyText = payload.replyText;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(replyText, "已完成記錄，但回覆生成失敗");
+  });
+
+  it("parses done replyText when the SSE frame is split across stream chunks", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":false,"rep',
+      'lyText":"後端權威回覆"}\n\n',
+    ]);
+    let replyText: string | undefined;
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        replyText = payload.replyText;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(replyText, "後端權威回覆");
+  });
+
+  it("omits malformed non-string replyText from done events", async () => {
+    storage.set("deviceId", "d-1");
+    mockStreamFetch(200, [
+      'event: done\ndata: {"didLogMeal":false,"replyText":{"text":"bad"}}\n\n',
+    ]);
+    let replyText: unknown = "not-reset";
+
+    await api.sendMessageStream("hello", {
+      onStatus: () => {},
+      onToken: () => {},
+      onDone: (payload) => {
+        replyText = payload.replyText;
+      },
+      onError: () => {},
+    });
+
+    assert.equal(replyText, undefined);
+  });
+
   it("dispatches valid deletedMealId from done and stopped events and omits malformed values", async () => {
     storage.set("deviceId", "d-1");
     mockStreamFetch(200, [
