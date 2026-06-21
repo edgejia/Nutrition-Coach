@@ -82,6 +82,10 @@ const STEP_NAMES = [
   "same_browser_resume",
   "tampered_access_fail_closed",
   "raw_selector_fail_closed",
+  "copied_token_valid_until_logout",
+  "logout_reset_revokes_copies",
+  "stale_resume_rejected_after_logout",
+  "valid_current_resume_after_rebootstrap",
   "blocking_rebuild_flow",
 ] as const;
 
@@ -131,6 +135,19 @@ function parseCookieHeader(cookieHeader: string | undefined) {
 
 function cookieHeaderFromJar(jar: Map<string, string>) {
   return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+function isClearCookieHeader(header: string) {
+  const parsed = parseCookiePair(header);
+  return parsed?.value === "" || /(?:^|;)\s*Max-Age=0(?:;|$)/i.test(header);
+}
+
+function issuedCookieCount(setCookieHeaders: readonly string[]) {
+  return setCookieHeaders.filter((header) => !isClearCookieHeader(header)).length;
+}
+
+function clearCookieCount(setCookieHeaders: readonly string[]) {
+  return setCookieHeaders.filter(isClearCookieHeader).length;
 }
 
 function applySetCookieHeaders(jar: Map<string, string>, setCookieHeaders: string[]) {
@@ -249,9 +266,31 @@ function summarizeSessionCall(call: BrowserSessionCall | undefined) {
     method: call.method,
     url: call.url,
     status: call.status,
-    issuedCookieCount: call.setCookieHeaders.length,
+    issuedCookieCount: issuedCookieCount(call.setCookieHeaders),
     ...(establishedBy ? { establishedBy } : {}),
   };
+}
+
+function summarizeClearSessionCall(call: BrowserSessionCall | undefined) {
+  if (!call) {
+    return null;
+  }
+
+  return {
+    method: call.method,
+    url: call.url,
+    status: call.status,
+    clearCookieCount: clearCookieCount(call.setCookieHeaders),
+  };
+}
+
+function resumeOnlyCookieHeaderFrom(cookieHeader: string) {
+  const jar = parseCookieHeader(cookieHeader);
+  const resumeCookieName = [...jar.keys()].find((name) => /resume/i.test(name));
+  if (!resumeCookieName) {
+    throw new Error("Missing resume cookie");
+  }
+  return `${resumeCookieName}=${jar.get(resumeCookieName)}`;
 }
 
 function cookieCount(cookieHeader: string) {
@@ -338,7 +377,8 @@ function createBrowserSession(
       setCookieHeaders,
     });
 
-    return new Response(res.body, {
+    const fetchResponseBody = res.statusCode === 204 || res.statusCode === 304 ? null : res.body;
+    return new Response(fetchResponseBody, {
       status: res.statusCode,
       headers: responseHeadersFromInject(res.headers),
     });
@@ -441,12 +481,7 @@ const scenario: VerificationScenario = {
 
         migratedSession = migrationBody;
         migratedCookieHeader = migrationEvidence.cookieHeader;
-        const migratedJar = parseCookieHeader(migratedCookieHeader);
-        const resumeCookieName = [...migratedJar.keys()].find((name) => /resume/i.test(name));
-        if (!resumeCookieName) {
-          throw new Error("Missing resume cookie after legacy migration");
-        }
-        resumeOnlyCookieHeader = `${resumeCookieName}=${migratedJar.get(resumeCookieName)}`;
+        resumeOnlyCookieHeader = resumeOnlyCookieHeaderFrom(migratedCookieHeader);
         artifacts.legacy_migration = {
           request: summarizeSessionCall(migrationCall),
           snapshot: sanitizeStoreSnapshot(migrationEvidence.snapshot),
@@ -695,105 +730,123 @@ const scenario: VerificationScenario = {
       }
 
       try {
-        const foreignDeviceRes = await fixture.app.inject({
-          method: "POST",
-          url: "/api/device",
-          payload: { goal: "muscle_gain" },
-        });
-        if (foreignDeviceRes.statusCode !== 200 && foreignDeviceRes.statusCode !== 201) {
-          throw new Error(`Expected foreign device seed status 200/201, got ${foreignDeviceRes.statusCode}`);
-        }
-        const foreignDeviceId = (foreignDeviceRes.json() as { deviceId: string }).deviceId;
-        const ownerMessage = await fixture.services.chatService.saveMessage(fixture.deviceId, "assistant", "owner selector baseline");
-        const foreignMessage = await fixture.services.chatService.saveMessage(foreignDeviceId, "assistant", "foreign selector baseline");
-
         const ownerAssetPath = path.join(tempRoot, "raw-selector-owner.png");
-        const foreignAssetPath = path.join(tempRoot, "raw-selector-foreign.png");
         await writeFile(ownerAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01]));
-        await writeFile(foreignAssetPath, Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x02]));
         const ownerAsset = await fixture.services.assetService.createAsset(fixture.deviceId, {
           stagedPath: ownerAssetPath,
           mimeType: "image/png",
           originalFilename: "raw-selector-owner.png",
         });
-        const foreignAsset = await fixture.services.assetService.createAsset(foreignDeviceId, {
-          stagedPath: foreignAssetPath,
-          mimeType: "image/png",
-          originalFilename: "raw-selector-foreign.png",
-        });
 
         const validSelectorHeaders = {
           cookie: migratedCookieHeader,
-          "x-device-id": foreignDeviceId,
+          "x-device-id": fixture.deviceId,
         };
         const invalidSelectorHeaders = {
           "x-device-id": fixture.deviceId,
         };
 
-        const validHistoryRes = await fetch(
-          `${fixture.address}/api/chat/history?limit=10&deviceId=${encodeURIComponent(foreignDeviceId)}`,
-          { headers: validSelectorHeaders },
-        );
-        const validHistoryBody = await validHistoryRes.json() as { messages: Array<{ id: string }> };
-        const ownerAssetWithForeignSelectorRes = await fetch(
-          `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(foreignDeviceId)}`,
-          { headers: validSelectorHeaders },
-        );
-        const foreignAssetWithOwnerCookieRes = await fetch(
-          `${fixture.address}/api/assets/${foreignAsset.id}?deviceId=${encodeURIComponent(foreignDeviceId)}`,
-          { headers: validSelectorHeaders },
-        );
-        const missingCookieHistoryRes = await fetch(
-          `${fixture.address}/api/chat/history?limit=5&deviceId=${encodeURIComponent(fixture.deviceId)}`,
-          { headers: invalidSelectorHeaders },
-        );
-        const missingCookieAssetRes = await fetch(
-          `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(fixture.deviceId)}`,
-          { headers: invalidSelectorHeaders },
-        );
-        const missingCookieSseRes = await fetch(
-          `${fixture.address}/api/sse?deviceId=${encodeURIComponent(fixture.deviceId)}`,
-          { headers: invalidSelectorHeaders },
-        );
+        const validCookieRawSelectorRequests = [
+          {
+            route: "chat_history",
+            response: await fetch(
+              `${fixture.address}/api/chat/history?limit=10&deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: validSelectorHeaders },
+            ),
+          },
+          {
+            route: "asset_read",
+            response: await fetch(
+              `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: validSelectorHeaders },
+            ),
+          },
+          {
+            route: "sse",
+            response: await fetch(
+              `${fixture.address}/api/sse?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: validSelectorHeaders },
+            ),
+          },
+          {
+            route: "history_meals",
+            response: await fetch(
+              `${fixture.address}/api/history/meals?from=2026-03-01&to=2026-03-31&deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: validSelectorHeaders },
+            ),
+          },
+          {
+            route: "device_goals",
+            response: await fetch(`${fixture.address}/api/device/goals`, {
+              method: "PUT",
+              headers: {
+                ...validSelectorHeaders,
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({ calories: 1700, deviceId: fixture.deviceId }),
+            }),
+          },
+        ];
 
-        if (validHistoryRes.status !== 200) {
-          throw new Error(`Expected valid cookie history with raw selectors to return 200, got ${validHistoryRes.status}`);
+        const missingCookieRawSelectorRequests = [
+          {
+            route: "chat_history",
+            response: await fetch(
+              `${fixture.address}/api/chat/history?limit=5&deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: invalidSelectorHeaders },
+            ),
+          },
+          {
+            route: "asset_read",
+            response: await fetch(
+              `${fixture.address}/api/assets/${ownerAsset.id}?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: invalidSelectorHeaders },
+            ),
+          },
+          {
+            route: "sse",
+            response: await fetch(
+              `${fixture.address}/api/sse?deviceId=${encodeURIComponent(fixture.deviceId)}`,
+              { headers: invalidSelectorHeaders },
+            ),
+          },
+        ];
+
+        const validCookieRawSelectorStatuses = validCookieRawSelectorRequests.map(({ route, response }) => ({
+          route,
+          status: response.status,
+          rejected: response.status === 400,
+        }));
+        const missingCookieRawSelectorStatuses = missingCookieRawSelectorRequests.map(({ route, response }) => ({
+          route,
+          status: response.status,
+          rejectedByAuth: response.status === 401,
+        }));
+
+        const unexpectedValidCookieStatuses = validCookieRawSelectorStatuses.filter((item) => item.status !== 400);
+        const unexpectedMissingCookieStatuses = missingCookieRawSelectorStatuses.filter((item) => item.status !== 401);
+
+        if (unexpectedValidCookieStatuses.length > 0) {
+          throw new Error(
+            `Expected valid-cookie raw selectors to return 400: ${unexpectedValidCookieStatuses.map((item) => `${item.route}:${item.status}`).join(", ")}`,
+          );
         }
-        if (!validHistoryBody.messages.some((message) => message.id === ownerMessage.id)) {
-          throw new Error("Expected cookie-owner history to remain visible with foreign raw selectors");
-        }
-        if (validHistoryBody.messages.some((message) => message.id === foreignMessage.id)) {
-          throw new Error("Foreign history became visible through raw selectors");
-        }
-        if (ownerAssetWithForeignSelectorRes.status !== 200) {
-          throw new Error(`Expected cookie-owner asset with foreign raw selectors to return 200, got ${ownerAssetWithForeignSelectorRes.status}`);
-        }
-        if (foreignAssetWithOwnerCookieRes.status !== 404) {
-          throw new Error(`Expected foreign asset with cookie owner plus raw selectors to return 404, got ${foreignAssetWithOwnerCookieRes.status}`);
-        }
-        if (missingCookieHistoryRes.status !== 401) {
-          throw new Error(`Expected missing-cookie history with raw selectors to return 401, got ${missingCookieHistoryRes.status}`);
-        }
-        if (missingCookieAssetRes.status !== 401) {
-          throw new Error(`Expected missing-cookie asset with raw selectors to return 401, got ${missingCookieAssetRes.status}`);
-        }
-        if (missingCookieSseRes.status !== 401) {
-          throw new Error(`Expected missing-cookie SSE with raw selectors to return 401, got ${missingCookieSseRes.status}`);
+        if (unexpectedMissingCookieStatuses.length > 0) {
+          throw new Error(
+            `Expected missing-cookie raw selectors to return 401: ${unexpectedMissingCookieStatuses.map((item) => `${item.route}:${item.status}`).join(", ")}`,
+          );
         }
 
         artifacts.raw_selector_fail_closed = {
-          validCookieForeignSelectors: {
-            historyStatus: validHistoryRes.status,
-            ownerHistoryVisible: validHistoryBody.messages.some((message) => message.id === ownerMessage.id),
-            foreignHistoryVisible: validHistoryBody.messages.some((message) => message.id === foreignMessage.id),
-            ownerAssetStatus: ownerAssetWithForeignSelectorRes.status,
-            foreignAssetStatus: foreignAssetWithOwnerCookieRes.status,
-          },
-          missingCookieRawSelectors: {
-            historyStatus: missingCookieHistoryRes.status,
-            assetStatus: missingCookieAssetRes.status,
-            sseStatus: missingCookieSseRes.status,
-          },
+          routeCoverageScope: "representative_end_to_end",
+          exhaustiveCoverageOwner: "route_local_integration_tests_95_02_through_95_05",
+          // Representative routes prove the shared boundary end-to-end; Plans
+          // 95-02 through 95-05 own exhaustive per-route integration matrices.
+          representativeRoutes: validCookieRawSelectorStatuses.map((item) => item.route),
+          validCookieRawSelectorStatuses,
+          missingCookieRawSelectorStatuses,
+          validCookieRawSelectorsRejected: validCookieRawSelectorStatuses.every((item) => item.rejected),
+          missingCookieRawSelectorsAuthFailed: missingCookieRawSelectorStatuses.every((item) => item.rejectedByAuth),
           stepResult: {
             cookieOwnerAuthoritative: true,
             rawSelectorsAuthorizeMissingCookie: false,
@@ -804,6 +857,250 @@ const scenario: VerificationScenario = {
         const message = error instanceof Error ? error.message : String(error);
         steps.push(fail("raw_selector_fail_closed", message, artifacts.raw_selector_fail_closed));
         return failResult("guest-session-hardening", steps, "raw_selector_fail_closed", artifacts);
+      }
+
+      let staleCopiedResumeOnlyCookieHeader = resumeOnlyCookieHeader;
+      let logoutAuthorityCookieHeader = migratedCookieHeader;
+
+      try {
+        staleCopiedResumeOnlyCookieHeader = resumeOnlyCookieHeaderFrom(migratedCookieHeader);
+        const copiedResumeEvidence = await runStoreFlow({
+          app: fixture.app,
+          storageSeed: { deviceId: fixture.deviceId },
+          initialCookieHeader: staleCopiedResumeOnlyCookieHeader,
+          tag: `guest-session-hardening-copy-valid-${Date.now()}`,
+          run: async (store, session, storage) => {
+            const ok = await store.getState().recoverGuestSession();
+            return {
+              ok,
+              snapshot: snapshotStoreState(store.getState()),
+              storage: Object.fromEntries(storage.entries()),
+              calls: session.calls,
+              cookieHeader: cookieHeaderFromJar(session.jar),
+            } satisfies StoreHarnessResult & { ok: boolean };
+          },
+        }) as StoreHarnessResult & { ok: boolean };
+
+        const copiedResumeCall = copiedResumeEvidence.calls[0];
+        const copiedResumeBody = copiedResumeCall ? JSON.parse(copiedResumeCall.responseBody) as GuestSessionBootstrapResult : null;
+        if (!copiedResumeEvidence.ok) {
+          throw new Error("Expected copied resume-only cookie to recover before logout");
+        }
+        if (!copiedResumeCall) {
+          throw new Error("Copied resume recovery did not make a request");
+        }
+        if (copiedResumeCall.status !== 200) {
+          throw new Error(`Expected copied resume status 200 before logout, got ${copiedResumeCall.status}`);
+        }
+        if (copiedResumeBody?.establishedBy !== "resume") {
+          throw new Error(`Expected copied resume establishment, got ${copiedResumeBody?.establishedBy ?? "missing"}`);
+        }
+        if (copiedResumeEvidence.snapshot.guestSessionStatus !== "ready") {
+          throw new Error(`Expected copied resume ready status, got ${copiedResumeEvidence.snapshot.guestSessionStatus}`);
+        }
+
+        logoutAuthorityCookieHeader = copiedResumeEvidence.cookieHeader;
+        artifacts.copied_token_valid_until_logout = {
+          request: summarizeSessionCall(copiedResumeCall),
+          browserCookieCount: cookieCount(copiedResumeEvidence.cookieHeader),
+          stepResult: {
+            recoveredBeforeLogout: copiedResumeEvidence.ok,
+            establishedBy: copiedResumeBody.establishedBy,
+          },
+        };
+        steps.push(pass("copied_token_valid_until_logout", artifacts.copied_token_valid_until_logout));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        steps.push(fail("copied_token_valid_until_logout", message, artifacts.copied_token_valid_until_logout));
+        return failResult("guest-session-hardening", steps, "copied_token_valid_until_logout", artifacts);
+      }
+
+      try {
+        const logoutEvidence = await runStoreFlow({
+          app: fixture.app,
+          storageSeed: { deviceId: fixture.deviceId },
+          initialCookieHeader: logoutAuthorityCookieHeader,
+          tag: `guest-session-hardening-logout-reset-${Date.now()}`,
+          run: async (_store, session) => {
+            await session.fetch("/api/device/session", { method: "DELETE" });
+            return {
+              calls: session.calls,
+              cookieHeader: cookieHeaderFromJar(session.jar),
+            };
+          },
+        }) as {
+          calls: BrowserSessionCall[];
+          cookieHeader: string;
+        };
+
+        const logoutCall = logoutEvidence.calls[0];
+        if (!logoutCall) {
+          throw new Error("Logout reset did not make a request");
+        }
+        if (logoutCall.status !== 204) {
+          throw new Error(`Expected logout reset status 204, got ${logoutCall.status}`);
+        }
+        if (clearCookieCount(logoutCall.setCookieHeaders) !== 2) {
+          throw new Error(`Expected two clear-cookie headers on logout reset, got ${clearCookieCount(logoutCall.setCookieHeaders)}`);
+        }
+        if (issuedCookieCount(logoutCall.setCookieHeaders) !== 0) {
+          throw new Error(`Expected logout reset to issue no refreshed cookies, got ${issuedCookieCount(logoutCall.setCookieHeaders)}`);
+        }
+        if (cookieCount(logoutEvidence.cookieHeader) !== 0) {
+          throw new Error("Expected logout reset browser jar to be empty");
+        }
+
+        artifacts.logout_reset_revokes_copies = {
+          request: summarizeClearSessionCall(logoutCall),
+          browserCookieCount: cookieCount(logoutEvidence.cookieHeader),
+          stepResult: {
+            bumpedByCurrentToken: true,
+            refreshedCookiesIssued: false,
+          },
+        };
+        steps.push(pass("logout_reset_revokes_copies", artifacts.logout_reset_revokes_copies));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        steps.push(fail("logout_reset_revokes_copies", message, artifacts.logout_reset_revokes_copies));
+        return failResult("guest-session-hardening", steps, "logout_reset_revokes_copies", artifacts);
+      }
+
+      try {
+        const staleResumeEvidence = await runStoreFlow({
+          app: fixture.app,
+          storageSeed: { deviceId: fixture.deviceId },
+          initialCookieHeader: staleCopiedResumeOnlyCookieHeader,
+          tag: `guest-session-hardening-stale-copy-${Date.now()}`,
+          run: async (store, session, storage) => {
+            const ok = await store.getState().recoverGuestSession();
+            return {
+              ok,
+              snapshot: snapshotStoreState(store.getState()),
+              storage: Object.fromEntries(storage.entries()),
+              calls: session.calls,
+              cookieHeader: cookieHeaderFromJar(session.jar),
+            } satisfies StoreHarnessResult & { ok: boolean };
+          },
+        }) as StoreHarnessResult & { ok: boolean };
+
+        const staleResumeCall = staleResumeEvidence.calls[0];
+        if (staleResumeEvidence.ok !== false) {
+          throw new Error("Expected stale copied resume-only cookie to fail after logout");
+        }
+        if (!staleResumeCall) {
+          throw new Error("Stale copied resume recovery did not make a request");
+        }
+        if (staleResumeCall.status !== 401) {
+          throw new Error(`Expected stale copied resume status 401 after logout, got ${staleResumeCall.status}`);
+        }
+        if (issuedCookieCount(staleResumeCall.setCookieHeaders) !== 0) {
+          throw new Error(`Expected stale copied resume to issue no refreshed cookies, got ${issuedCookieCount(staleResumeCall.setCookieHeaders)}`);
+        }
+        if (staleResumeEvidence.snapshot.guestSessionStatus !== "recovery_required") {
+          throw new Error(`Expected recovery_required after stale copied resume, got ${staleResumeEvidence.snapshot.guestSessionStatus}`);
+        }
+
+        artifacts.stale_resume_rejected_after_logout = {
+          request: summarizeSessionCall(staleResumeCall),
+          clearCookieCount: clearCookieCount(staleResumeCall.setCookieHeaders),
+          snapshot: sanitizeStoreSnapshot(staleResumeEvidence.snapshot),
+          stepResult: {
+            recoveredAfterLogout: staleResumeEvidence.ok,
+            refreshedCookiesIssued: false,
+          },
+        };
+        steps.push(pass("stale_resume_rejected_after_logout", artifacts.stale_resume_rejected_after_logout));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        steps.push(fail("stale_resume_rejected_after_logout", message, artifacts.stale_resume_rejected_after_logout));
+        return failResult("guest-session-hardening", steps, "stale_resume_rejected_after_logout", artifacts);
+      }
+
+      try {
+        const rebootstrapEvidence = await runStoreFlow({
+          app: fixture.app,
+          storageSeed: { deviceId: fixture.deviceId },
+          tag: `guest-session-hardening-current-rebootstrap-${Date.now()}`,
+          run: async (store, session, storage) => {
+            const ok = await store.getState().bootstrapGuestSession();
+            return {
+              ok,
+              snapshot: snapshotStoreState(store.getState()),
+              storage: Object.fromEntries(storage.entries()),
+              calls: session.calls,
+              cookieHeader: cookieHeaderFromJar(session.jar),
+            } satisfies StoreHarnessResult & { ok: boolean };
+          },
+        }) as StoreHarnessResult & { ok: boolean };
+
+        const rebootstrapCall = rebootstrapEvidence.calls[0];
+        const rebootstrapBody = rebootstrapCall ? JSON.parse(rebootstrapCall.responseBody) as GuestSessionBootstrapResult : null;
+        if (!rebootstrapEvidence.ok) {
+          throw new Error("Expected post-logout legacy rebootstrap to succeed");
+        }
+        if (!rebootstrapCall) {
+          throw new Error("Post-logout rebootstrap did not make a request");
+        }
+        if (rebootstrapCall.status !== 200) {
+          throw new Error(`Expected post-logout rebootstrap status 200, got ${rebootstrapCall.status}`);
+        }
+        if (rebootstrapBody?.establishedBy !== "legacy_migration") {
+          throw new Error(`Expected post-logout legacy_migration, got ${rebootstrapBody?.establishedBy ?? "missing"}`);
+        }
+
+        const freshResumeOnlyCookieHeader = resumeOnlyCookieHeaderFrom(rebootstrapEvidence.cookieHeader);
+        const currentResumeEvidence = await runStoreFlow({
+          app: fixture.app,
+          storageSeed: { deviceId: fixture.deviceId },
+          initialCookieHeader: freshResumeOnlyCookieHeader,
+          tag: `guest-session-hardening-current-resume-${Date.now()}`,
+          run: async (store, session, storage) => {
+            const ok = await store.getState().recoverGuestSession();
+            return {
+              ok,
+              snapshot: snapshotStoreState(store.getState()),
+              storage: Object.fromEntries(storage.entries()),
+              calls: session.calls,
+              cookieHeader: cookieHeaderFromJar(session.jar),
+            } satisfies StoreHarnessResult & { ok: boolean };
+          },
+        }) as StoreHarnessResult & { ok: boolean };
+
+        const currentResumeCall = currentResumeEvidence.calls[0];
+        const currentResumeBody = currentResumeCall ? JSON.parse(currentResumeCall.responseBody) as GuestSessionBootstrapResult : null;
+        if (!currentResumeEvidence.ok) {
+          throw new Error("Expected fresh current resume-only cookie to recover after rebootstrap");
+        }
+        if (!currentResumeCall) {
+          throw new Error("Fresh current resume recovery did not make a request");
+        }
+        if (currentResumeCall.status !== 200) {
+          throw new Error(`Expected fresh current resume status 200, got ${currentResumeCall.status}`);
+        }
+        if (currentResumeBody?.establishedBy !== "resume") {
+          throw new Error(`Expected fresh current resume establishment, got ${currentResumeBody?.establishedBy ?? "missing"}`);
+        }
+
+        migratedCookieHeader = currentResumeEvidence.cookieHeader;
+        resumeOnlyCookieHeader = freshResumeOnlyCookieHeader;
+        artifacts.valid_current_resume_after_rebootstrap = {
+          rebootstrapRequest: summarizeSessionCall(rebootstrapCall),
+          resumeRequest: summarizeSessionCall(currentResumeCall),
+          rebootstrapSnapshot: sanitizeStoreSnapshot(rebootstrapEvidence.snapshot),
+          resumeSnapshot: sanitizeStoreSnapshot(currentResumeEvidence.snapshot),
+          browserCookieCount: cookieCount(currentResumeEvidence.cookieHeader),
+          stepResult: {
+            rebootstrapReturned: rebootstrapEvidence.ok,
+            rebootstrapEstablishedBy: rebootstrapBody.establishedBy,
+            freshResumeReturned: currentResumeEvidence.ok,
+            freshResumeEstablishedBy: currentResumeBody.establishedBy,
+          },
+        };
+        steps.push(pass("valid_current_resume_after_rebootstrap", artifacts.valid_current_resume_after_rebootstrap));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        steps.push(fail("valid_current_resume_after_rebootstrap", message, artifacts.valid_current_resume_after_rebootstrap));
+        return failResult("guest-session-hardening", steps, "valid_current_resume_after_rebootstrap", artifacts);
       }
 
       try {

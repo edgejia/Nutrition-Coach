@@ -18,6 +18,7 @@ import {
   type RedactedObservabilityEventName,
 } from "../../server/observability/events.js";
 import type { ProviderErrorMetadata } from "../../server/llm/types.js";
+import { PROTECTED_ROUTE_META } from "../../server/routes/protected-route.js";
 
 const LOCKED_EVENT_NAMES: RedactedObservabilityEventName[] = [
   "onboarding_submit_started",
@@ -95,6 +96,29 @@ const FORBIDDEN_STRINGS = [
   "192.168.0.42",
   "forged_signature",
 ];
+
+const EXPECTED_PROTECTED_ROUTE_META = {
+  chatMessage: { route: "api_chat", operation: "chat_message" },
+  chatStop: { route: "api_chat_stop", operation: "chat_stop" },
+  chatHistory: { route: "api_chat_history", operation: "chat_history_list" },
+  mealsList: { route: "api_meals", operation: "meals_list" },
+  mealUpdate: { route: "api_meal", operation: "meal_update" },
+  mealDelete: { route: "api_meal", operation: "meal_delete" },
+  historyMeals: { route: "api_history_meals", operation: "history_meals_list" },
+  historySearch: { route: "api_history_search", operation: "history_search" },
+  historyTrends: { route: "api_history_trends", operation: "history_trends" },
+  historyDay: { route: "api_history_day", operation: "history_day_detail" },
+  assetRead: { route: "api_assets", operation: "asset_read" },
+  daySnapshot: { route: "api_day_snapshot", operation: "day_snapshot_read" },
+  proposalAction: { route: "api_proposals_actions", operation: "proposal_action" },
+  observabilityClientEvent: {
+    route: "api_observability_client_event",
+    operation: "client_event_record",
+  },
+  sse: { route: "api_sse", operation: "sse_subscribe" },
+  deviceGoalsPatch: { route: "api_device_goals", operation: "device_goals_update" },
+  deviceGoalsPut: { route: "api_device_goals", operation: "device_goals_update" },
+} as const;
 
 function assertLockedPayload(payload: { event: RedactedObservabilityEventName } & object) {
   assert.ok(LOCKED_EVENT_NAMES.includes(payload.event as RedactedObservabilityEventName));
@@ -231,6 +255,30 @@ describe("redacted observability event builders", () => {
     });
     assert.deepEqual(Object.keys(withTurnId), ["event", "reason", "route", "operation", "requestId", "turnId"]);
     assertLockedPayload(withTurnId);
+  });
+
+  it("allowlists every protected route metadata value without adding raw request fields", () => {
+    assert.deepEqual(PROTECTED_ROUTE_META, EXPECTED_PROTECTED_ROUTE_META);
+
+    for (const [index, metadata] of Object.values(PROTECTED_ROUTE_META).entries()) {
+      const requestId = `req-protected-${index}`;
+      const payload = buildOwnershipBypassBlockedEvent({
+        reason: "raw_device_id_param",
+        route: metadata.route,
+        operation: metadata.operation,
+        requestId,
+      });
+
+      assert.deepEqual(payload, {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: metadata.route,
+        operation: metadata.operation,
+        requestId,
+      });
+      assert.deepEqual(Object.keys(payload), ["event", "reason", "route", "operation", "requestId"]);
+      assertLockedPayload(payload);
+    }
   });
 
   it("builds mutation receipt guard trip events with metadata-only fields", () => {

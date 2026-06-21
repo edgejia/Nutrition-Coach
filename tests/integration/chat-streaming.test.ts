@@ -644,7 +644,11 @@ describe("chat-streaming", () => {
         completed: true,
       });
 
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: unknown;
+      };
+      assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "replyText"), false);
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
       const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
       assert.equal(completedEvents.length, 1);
@@ -654,6 +658,62 @@ describe("chat-streaming", () => {
     } finally {
       clearTimeout(timeout);
     }
+  });
+
+  it("POST /api/chat SSE rejects raw selectors before stream frames or active-turn side effects", async () => {
+    assert.ok(services, "expected app services");
+    mockLLM.queueChatStream(["should not stream"]);
+    const beforeChatCalls = mockLLM.chatCalls.length;
+
+    const form = new FormData();
+    form.append("message", "raw selector should reject");
+
+    const res = await fetch(`${address}/api/chat?deviceId=${encodeURIComponent(deviceId)}`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream", "x-device-id": deviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 400);
+    const text = await res.text();
+    assert.doesNotMatch(text, /event: chunk/);
+    assert.doesNotMatch(text, /event: done/);
+    assert.doesNotMatch(text, /event: start/);
+    assert.equal(mockLLM.chatCalls.length, beforeChatCalls);
+    assert.equal(traceRecorders.length, 0);
+
+    const history = await services.chatService.getHistory(deviceId, 10);
+    assert.equal(history.some((message) => message.content === "raw selector should reject"), false);
+    assert.equal(history.some((message) => message.role === "assistant"), false);
+
+    const stopRes = await fetch(`${address}/api/chat/stop`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "content-type": "application/json" },
+      body: JSON.stringify({ turnId: "00000000-0000-4000-8000-000000000000" }),
+    });
+    assert.equal(stopRes.status, 404);
+
+    const ownershipEvents = observabilityEvents(logLines, "ownership_bypass_blocked");
+    assert.equal(ownershipEvents.length, 1);
+    assert.deepEqual(
+      {
+        event: ownershipEvents[0]!.event,
+        reason: ownershipEvents[0]!.reason,
+        route: ownershipEvents[0]!.route,
+        operation: ownershipEvents[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+      },
+    );
+    assertLogEventApplicationKeys(ownershipEvents[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude(
+      [ownershipEvents[0]!],
+      [deviceId, "x-device-id", "deviceId", "guest_session", "cookie", "raw selector should reject", "should not stream"],
+    );
   });
 
   it("POST /api/chat SSE emits start before any status, chunk, done, or stopped frame and reuses that turnId", async () => {
@@ -772,7 +832,10 @@ describe("chat-streaming", () => {
       assert.ok(latencyMs !== undefined);
       assert.equal(typeof latencyMs, "number");
       assert.ok(latencyMs >= 0);
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.deepEqual(trace.timeline.at(-1), {
         type: "route_fallback",
         transport: "sse",
@@ -792,6 +855,7 @@ describe("chat-streaming", () => {
       const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMessages.length, 1);
       assert.match(assistantMessages[0]!.content, /這次無法完成請求/);
+      assert.equal(donePayload.replyText, assistantMessages[0]!.content);
     } finally {
       clearTimeout(timeout);
     }
@@ -1432,8 +1496,8 @@ describe("chat-streaming", () => {
         },
         body: JSON.stringify({ turnId: foreignDeviceId }),
       });
-      assert.equal(forgedStopRes.status, 404);
-      assert.deepEqual(await forgedStopRes.json(), { error: "Active turn not found" });
+      assert.equal(forgedStopRes.status, 400);
+      assert.deepEqual(await forgedStopRes.json(), { error: "Raw device selector is not allowed" });
 
       const stopRes = await fetch(`${address}/api/chat/stop?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
         method: "POST",
@@ -1444,8 +1508,8 @@ describe("chat-streaming", () => {
         },
         body: JSON.stringify({ turnId: foreignTurnId }),
       });
-      assert.equal(stopRes.status, 404);
-      assert.deepEqual(await stopRes.json(), { error: "Active turn not found" });
+      assert.equal(stopRes.status, 400);
+      assert.deepEqual(await stopRes.json(), { error: "Raw device selector is not allowed" });
       assert.equal(mockLLM.lastSignal?.aborted, false);
 
       const completedText = firstText + await readStreamUntil(reader, "event: done");
@@ -1618,7 +1682,10 @@ describe("chat-streaming", () => {
 
       assert.ok(res.body);
       const text = await readStreamUntil(res.body.getReader(), "event: done");
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.match(donePayload.turnId ?? "", UUID_PATTERN);
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
@@ -1640,6 +1707,14 @@ describe("chat-streaming", () => {
       assert.equal(routeFallbacks[0]!.reason, "llm_error");
       assert.deepEqual(routeFallbacks[0]!.providerMetadata, providerMetadataFixture);
       assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1);
+      assert.equal(donePayload.replyText, assistantMessages[0]!.content);
     } finally {
       clearTimeout(timeout);
     }
@@ -1666,7 +1741,10 @@ describe("chat-streaming", () => {
       const text = await readStreamUntil(res.body.getReader(), "event: done");
       const events = parseSSEEvents(text);
       assert.equal(events.filter((event) => event.event === "done").length, 1);
-      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.match(donePayload.turnId ?? "", UUID_PATTERN);
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
@@ -1690,6 +1768,13 @@ describe("chat-streaming", () => {
         && JSON.stringify(event.providerMetadata) === JSON.stringify(providerMetadataFixture)
       ));
       assert.equal(routeFallbacks.length, 1);
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1);
+      assert.equal(donePayload.replyText, assistantMessages[0]!.content);
       assert.equal(routeFallbacks[0]!.transport, "sse");
       assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
       assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
@@ -3361,6 +3446,56 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat with SSE accept header suppresses split nutrition counters before chunk emission", async () => {
+    mockLLM.queueChatStream([
+      "今天",
+      "(1",
+      "/3)",
+      "完成，",
+      "明天",
+      "（2",
+      "/4）",
+      "也完成",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "記錄午餐");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkPayloads = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string });
+      const doneEvents = events.filter((event) => event.event === "done");
+      const combinedChunkText = chunkPayloads.map((payload) => payload.token).join("");
+
+      assert.ok(chunkPayloads.length >= 4, "expected progressive visible chunks around removed counters");
+      for (const payload of chunkPayloads) {
+        assert.doesNotMatch(payload.token, /[（(]\s*\d+\s*\/\s*\d+\s*[）)]/);
+        assert.doesNotMatch(payload.token, /\(1|\/3\)|（2|\/4）/);
+      }
+      assert.equal(combinedChunkText, "今天完成，明天也完成");
+      assert.doesNotMatch(combinedChunkText, /[（(]\s*\d+\s*\/\s*\d+\s*[）)]/);
+      assert.doesNotMatch(text, /\(1|\/3\)|\(1\/3\)|（2|\/4）|（2\/4）/);
+      assert.equal(doneEvents.length, 1, "expected a single done event");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat with SSE accept header bridges non-stream reply into chunk and done events", async () => {
     // When the provider returns a plain { reply } instead of a streamGenerator,
     // the route must still emit event: chunk + event: done so sendMessageStream() works.
@@ -3442,7 +3577,11 @@ describe("chat-streaming", () => {
 
       const doneMatch = text.match(/event: done\s+data: (.+)/);
       assert.ok(doneMatch, "expected done event");
-      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal: boolean; turnId?: string };
+      const donePayload = JSON.parse(doneMatch[1]) as {
+        didLogMeal: boolean;
+        turnId?: string;
+        replyText?: string;
+      };
       assert.equal(donePayload.didLogMeal, false);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -3452,6 +3591,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "exactly one assistant reply expected");
       assert.match(assistantMsgs[0]!.content, /無法辨識這次的請求/);
+      assert.equal(donePayload.replyText, assistantMsgs[0]!.content);
 
       const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
       assert.deepEqual(trace.summary.finalReply, {
@@ -4059,8 +4199,12 @@ describe("chat-streaming", () => {
 
       assert.ok(res.body);
       const text = await readStreamUntil(res.body.getReader(), "event: done");
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.match(donePayload.turnId ?? "", UUID_PATTERN);
+      assert.equal(donePayload.replyText, "抱歉，這次無法完成請求，請稍後再試或補充描述。");
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
       const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
@@ -4127,8 +4271,12 @@ describe("chat-streaming", () => {
 
       assert.ok(res.body);
       const text = await readStreamUntil(res.body.getReader(), "event: done");
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.match(text, /event: done/);
+      assert.equal(donePayload.replyText, "抱歉，這次無法完成請求，請稍後再試或補充描述。");
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
       const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
@@ -4148,6 +4296,16 @@ describe("chat-streaming", () => {
       assert.equal(routeFallbacks[0]!.catchSite, "sse_persist");
       assert.equal(routeFallbacks[0]!.errorMessage, "SsePersistSafeFailure");
       assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      assert.equal(
+        historyJson.messages.filter((message) => message.role === "assistant").length,
+        0,
+        "sse_persist closed fallback is terminal-only when assistant persistence fails",
+      );
     } finally {
       services.chatService.getCompressedHistory = originalGetCompressedHistory;
       services.chatService.saveMessage = originalSaveMessage;
@@ -4770,6 +4928,22 @@ describe("chat-streaming", () => {
       const reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
       const events = parseSSEEvents(text);
+      const doneIndex = events.findIndex((event) => event.event === "done");
+      assert.ok(doneIndex >= 0, "stream failure after log_food must emit terminal done");
+      assert.equal(events.filter((event) => event.event === "done").length, 1);
+      assert.equal(
+        events.some((event, index) => index < doneIndex && event.event === "chunk" && event.data.includes("模型部分回覆")),
+        true,
+        "stream failure proof must observe a partial chunk before done",
+      );
+      assert.deepEqual(
+        events
+          .slice(doneIndex + 1)
+          .map((event) => event.event)
+          .filter((eventName) => eventName === "chunk" || eventName === "status"),
+        [],
+        "stream failure must not emit chunk/status after terminal done",
+      );
 
       const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
         turnId?: string;
@@ -4777,6 +4951,7 @@ describe("chat-streaming", () => {
         didMutateMeal?: boolean;
         dailySummary?: { date?: string };
         loggedMeal?: { mealId?: string; foodName?: string };
+        replyText?: string;
       };
       assert.match(donePayload.turnId ?? "", UUID_PATTERN);
       assert.equal(donePayload.didLogMeal, true, "stream failure after log_food must preserve didLogMeal");
@@ -4799,6 +4974,8 @@ describe("chat-streaming", () => {
       assert.match(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗/);
       assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
       assert.doesNotMatch(assistantMsgs[0]!.content, /模型部分回覆/);
+      assert.equal(donePayload.replyText, assistantMsgs[0]!.content);
+      assert.doesNotMatch(donePayload.replyText ?? "", /模型部分回覆/);
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
       const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");

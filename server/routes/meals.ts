@@ -11,7 +11,7 @@ import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createAssetService } from "../services/assets.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { formatLocalDate } from "../lib/time.js";
-import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import { getProtectedOwner, PROTECTED_ROUTE_META, registerProtectedRoute } from "./protected-route.js";
 import {
   buildSummaryOutcomeAfterMealCommit,
   dailySummaryFromOutcome,
@@ -252,207 +252,192 @@ function publishDailySummarySafe(input: {
 export function registerMealRoutes(app: FastifyInstance, deps: Deps) {
   const { foodLoggingService, summaryService, deviceService, guestSessionService, assetService, publisher } = deps;
 
-  app.get("/api/meals", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "GET",
+    url: "/api/meals",
+    protectedMeta: PROTECTED_ROUTE_META.mealsList,
+    handler: async (request) => {
+      const { deviceId } = getProtectedOwner(request);
+
+      if (request.headers["x-refresh-reason"] === "day_rollover") {
+        request.log.info({ event: "day_rollover" }, "Day rollover meals refresh");
       }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
 
-    if (request.headers["x-refresh-reason"] === "day_rollover") {
-      request.log.info({ event: "day_rollover" }, "Day rollover meals refresh");
-    }
-
-    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
-    return {
-      meals: meals.map((meal) => {
-        const imageAssetId = parseAssetRef(meal.imagePath);
-        return {
-          id: meal.id,
-          mealRevisionId: meal.mealRevisionId,
-          foodName: meal.foodName,
-          itemCount: meal.itemCount ?? 1,
-          calories: meal.calories,
-          protein: meal.protein,
-          carbs: meal.carbs,
-          fat: meal.fat,
-          imageAssetId,
-          imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
-          loggedAt: meal.loggedAt,
-          ...(meal.items ? { items: meal.items } : {}),
-          ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
-        };
-      }),
-    };
+      const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+      return {
+        meals: meals.map((meal) => {
+          const imageAssetId = parseAssetRef(meal.imagePath);
+          return {
+            id: meal.id,
+            mealRevisionId: meal.mealRevisionId,
+            foodName: meal.foodName,
+            itemCount: meal.itemCount ?? 1,
+            calories: meal.calories,
+            protein: meal.protein,
+            carbs: meal.carbs,
+            fat: meal.fat,
+            imageAssetId,
+            imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+            loggedAt: meal.loggedAt,
+            ...(meal.items ? { items: meal.items } : {}),
+            ...(meal.mealPeriod ? { mealPeriod: meal.mealPeriod } : {}),
+          };
+        }),
+      };
+    },
   });
 
-  app.patch("/api/meals/:id", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "PATCH",
+    url: "/api/meals/:id",
+    protectedMeta: PROTECTED_ROUTE_META.mealUpdate,
+    handler: async (request, reply) => {
+      const { deviceId } = getProtectedOwner(request);
+
+      const update = parseMealUpdateBody(request.body);
+      if (!update) {
+        return reply.code(400).send({ error: "Invalid meal update" });
       }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
 
-    const update = parseMealUpdateBody(request.body);
-    if (!update) {
-      return reply.code(400).send({ error: "Invalid meal update" });
-    }
+      const { id } = request.params as { id: string };
+      let affectedDateKey: string;
+      let updatedMeal: Awaited<ReturnType<typeof foodLoggingService.updateMeal>>;
+      try {
+        if (update.kind === "scalar") {
+          const mutationGuard = await foodLoggingService.getMealMutationGuard(
+            deviceId,
+            id,
+            update.expectedMealRevisionId,
+          );
+          if (mutationGuard.itemCount > 1) {
+            return reply.code(409).send({
+              error: "MEAL_REQUIRES_GROUPED_UPDATE",
+              message: "Grouped meals must be corrected through chat.",
+            });
+          }
 
-    const { id } = request.params as { id: string };
-    let affectedDateKey: string;
-    let updatedMeal: Awaited<ReturnType<typeof foodLoggingService.updateMeal>>;
-    try {
-      if (update.kind === "scalar") {
-        const mutationGuard = await foodLoggingService.getMealMutationGuard(
-          deviceId,
-          id,
-          update.expectedMealRevisionId,
-        );
-        if (mutationGuard.itemCount > 1) {
-          return reply.code(409).send({
-            error: "MEAL_REQUIRES_GROUPED_UPDATE",
-            message: "Grouped meals must be corrected through chat.",
+          if (update.imageAssetId) {
+            const ownedAsset = await assetService.getOwnedAsset(deviceId, update.imageAssetId);
+            if (!ownedAsset) {
+              return reply.code(400).send({ error: "Invalid meal image asset" });
+            }
+          }
+
+          updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
+            expectedMealRevisionId: update.expectedMealRevisionId,
+            imagePath: update.imageAssetId ? `asset:${update.imageAssetId}` : null,
+            items: [
+              {
+                foodName: update.foodName,
+                calories: update.calories,
+                protein: update.protein,
+                carbs: update.carbs,
+                fat: update.fat,
+              },
+            ],
+          });
+        } else {
+          updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
+            expectedMealRevisionId: update.expectedMealRevisionId,
+            items: update.items,
           });
         }
-
-        if (update.imageAssetId) {
-          const ownedAsset = await assetService.getOwnedAsset(deviceId, update.imageAssetId);
-          if (!ownedAsset) {
-            return reply.code(400).send({ error: "Invalid meal image asset" });
-          }
+        affectedDateKey = formatLocalDate(new Date(updatedMeal.loggedAt));
+      } catch (error) {
+        if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
+          return reply.code(404).send({ error: "Meal not found" });
         }
-
-        updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
-          expectedMealRevisionId: update.expectedMealRevisionId,
-          imagePath: update.imageAssetId ? `asset:${update.imageAssetId}` : null,
-          items: [
-            {
-              foodName: update.foodName,
-              calories: update.calories,
-              protein: update.protein,
-              carbs: update.carbs,
-              fat: update.fat,
-            },
-          ],
-        });
-      } else {
-        updatedMeal = await foodLoggingService.updateMeal(deviceId, id, {
-          expectedMealRevisionId: update.expectedMealRevisionId,
-          items: update.items,
-        });
+        if (error instanceof MealRevisionPreconditionError) {
+          return sendMealRevisionConflict(reply, error);
+        }
+        throw error;
       }
-      affectedDateKey = formatLocalDate(new Date(updatedMeal.loggedAt));
-    } catch (error) {
-      if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
-        return reply.code(404).send({ error: "Meal not found" });
-      }
-      if (error instanceof MealRevisionPreconditionError) {
-        return sendMealRevisionConflict(reply, error);
-      }
-      throw error;
-    }
 
-    const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
-      deviceId,
-      affectedDate: affectedDateKey,
-      summaryService,
-      foodLoggingService,
-    });
-    const dailySummary = dailySummaryFromOutcome(summaryOutcome);
-    publishDailySummarySafe({
-      publisher,
-      deviceId,
-      dailySummary,
-      summaryOutcome,
-      affectedDate: affectedDateKey,
-      log: request.log,
-    });
+      const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
+        deviceId,
+        affectedDate: affectedDateKey,
+        summaryService,
+        foodLoggingService,
+      });
+      const dailySummary = dailySummaryFromOutcome(summaryOutcome);
+      publishDailySummarySafe({
+        publisher,
+        deviceId,
+        dailySummary,
+        summaryOutcome,
+        affectedDate: affectedDateKey,
+        log: request.log,
+      });
 
-    const imageAssetId = parseAssetRef(updatedMeal.imagePath);
-    return {
-      affectedDate: affectedDateKey,
-      summaryOutcome,
-      ...(dailySummary ? { dailySummary } : {}),
-      meal: {
-        id: updatedMeal.id,
-        mealRevisionId: updatedMeal.mealRevisionId,
-        foodName: updatedMeal.foodName,
-        itemCount: updatedMeal.itemCount ?? 1,
-        calories: updatedMeal.calories,
-        protein: updatedMeal.protein,
-        carbs: updatedMeal.carbs,
-        fat: updatedMeal.fat,
-        imageAssetId,
-        imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
-        loggedAt: updatedMeal.loggedAt,
-        ...(updatedMeal.mealPeriod ? { mealPeriod: updatedMeal.mealPeriod } : {}),
-      },
-    };
+      const imageAssetId = parseAssetRef(updatedMeal.imagePath);
+      return {
+        affectedDate: affectedDateKey,
+        summaryOutcome,
+        ...(dailySummary ? { dailySummary } : {}),
+        meal: {
+          id: updatedMeal.id,
+          mealRevisionId: updatedMeal.mealRevisionId,
+          foodName: updatedMeal.foodName,
+          itemCount: updatedMeal.itemCount ?? 1,
+          calories: updatedMeal.calories,
+          protein: updatedMeal.protein,
+          carbs: updatedMeal.carbs,
+          fat: updatedMeal.fat,
+          imageAssetId,
+          imageUrl: imageAssetId ? buildAssetUrl(imageAssetId) : null,
+          loggedAt: updatedMeal.loggedAt,
+          ...(updatedMeal.mealPeriod ? { mealPeriod: updatedMeal.mealPeriod } : {}),
+        },
+      };
+    },
   });
 
-  app.delete("/api/meals/:id", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "DELETE",
+    url: "/api/meals/:id",
+    protectedMeta: PROTECTED_ROUTE_META.mealDelete,
+    handler: async (request, reply) => {
+      const { deviceId } = getProtectedOwner(request);
 
-    const { id } = request.params as { id: string };
-    const expectedMealRevisionId = parseExpectedMealRevisionId(request.body);
-    let affectedDateKey: string;
-    let deletedMealId: string;
-    try {
-      const deleted = await foodLoggingService.deleteMeal(deviceId, id, expectedMealRevisionId);
-      affectedDateKey = deleted.affectedDateKey;
-      deletedMealId = deleted.transactionId;
-    } catch (error) {
-      if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
-        return reply.code(404).send({ error: "Meal not found" });
+      const { id } = request.params as { id: string };
+      const expectedMealRevisionId = parseExpectedMealRevisionId(request.body);
+      let affectedDateKey: string;
+      let deletedMealId: string;
+      try {
+        const deleted = await foodLoggingService.deleteMeal(deviceId, id, expectedMealRevisionId);
+        affectedDateKey = deleted.affectedDateKey;
+        deletedMealId = deleted.transactionId;
+      } catch (error) {
+        if (error instanceof Error && error.message === "MEAL_NOT_FOUND") {
+          return reply.code(404).send({ error: "Meal not found" });
+        }
+        if (error instanceof MealRevisionPreconditionError) {
+          return sendMealRevisionConflict(reply, error);
+        }
+        throw error;
       }
-      if (error instanceof MealRevisionPreconditionError) {
-        return sendMealRevisionConflict(reply, error);
-      }
-      throw error;
-    }
 
-    const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
-      deviceId,
-      affectedDate: affectedDateKey,
-      summaryService,
-      foodLoggingService,
-    });
-    const dailySummary = dailySummaryFromOutcome(summaryOutcome);
-    publishDailySummarySafe({
-      publisher,
-      deviceId,
-      dailySummary,
-      summaryOutcome,
-      affectedDate: affectedDateKey,
-      log: request.log,
-    });
-    return {
-      affectedDate: affectedDateKey,
-      deletedMealId,
-      summaryOutcome,
-      ...(dailySummary ? { dailySummary } : {}),
-    };
+      const summaryOutcome = await buildSummaryOutcomeAfterMealCommit({
+        deviceId,
+        affectedDate: affectedDateKey,
+        summaryService,
+        foodLoggingService,
+      });
+      const dailySummary = dailySummaryFromOutcome(summaryOutcome);
+      publishDailySummarySafe({
+        publisher,
+        deviceId,
+        dailySummary,
+        summaryOutcome,
+        affectedDate: affectedDateKey,
+        log: request.log,
+      });
+      return {
+        affectedDate: affectedDateKey,
+        deletedMealId,
+        summaryOutcome,
+        ...(dailySummary ? { dailySummary } : {}),
+      };
+    },
   });
 }

@@ -12,6 +12,15 @@ async function readSource(relativePath: string) {
 }
 
 describe("Guest session recovery source contract", () => {
+  it("keeps resume verification issue-free until persisted version comparison can run", async () => {
+    const source = await readSource("../../server/services/guest-session.ts");
+
+    assert.match(source, /verifyResumeSession\(token: string \| undefined\)/);
+    assert.doesNotMatch(source, /resumeSession\(token: string \| undefined\): GuestSessionResumeResult/);
+    assert.doesNotMatch(source, /resumeSession[\s\S]*this\.issue/);
+    assert.match(source, /GuestSessionVerificationResult[\s\S]*version: number/);
+  });
+
   it("keeps the sport recovery gate copied from the demo recovery screen", async () => {
     const source = await readSource("../../client/src/components/GuestSessionRecoveryGate.tsx");
 

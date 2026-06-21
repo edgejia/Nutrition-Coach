@@ -3,7 +3,6 @@ import type { createDeviceService, Goal, IntakeFields } from "../services/device
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
 import { config, isDeployedLikeRuntime } from "../config.js";
-import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import {
   logDeviceGoalsValidationFailed,
   logDeviceGoalsUpdatedRest,
@@ -12,6 +11,7 @@ import {
   logOnboardingValidationFailed,
   logOwnershipBypassBlocked,
 } from "../observability/events.js";
+import { getProtectedOwner, PROTECTED_ROUTE_META, registerProtectedRoute } from "./protected-route.js";
 
 interface Deps {
   deviceService: ReturnType<typeof createDeviceService>;
@@ -63,6 +63,14 @@ interface IntakeValidationIssue {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasRawDeviceIdSelector(request: FastifyRequest, body: Record<string, unknown>) {
+  return (
+    "deviceId" in body
+    || request.headers["x-device-id"] !== undefined
+    || (isRecord(request.query) && "deviceId" in request.query)
+  );
 }
 
 function isGoal(value: unknown): value is Goal {
@@ -132,8 +140,9 @@ function setGuestSessionCookies(
   reply: FastifyReply,
   guestSessionService: ReturnType<typeof createGuestSessionService>,
   deviceId: string,
+  sessionVersion: number,
 ) {
-  reply.header("set-cookie", guestSessionService.issue(deviceId).cookies);
+  reply.header("set-cookie", guestSessionService.issue(deviceId, sessionVersion).cookies);
 }
 
 function clearGuestSessionCookies(
@@ -158,6 +167,31 @@ function buildDeviceSessionResponse(device: Awaited<ReturnType<ReturnType<typeof
       fat: device.dailyFat,
     },
   };
+}
+
+async function findCurrentSessionDeviceForLogout(
+  request: FastifyRequest,
+  { deviceService, guestSessionService }: Pick<Deps, "deviceService" | "guestSessionService">,
+) {
+  const { activeToken, resumeToken } = guestSessionService.readTokens(request.headers.cookie);
+
+  const activeSession = guestSessionService.verifyActiveSession(activeToken);
+  if (activeSession.ok) {
+    const device = await deviceService.getDevice(activeSession.deviceId);
+    if (device && activeSession.version === device.sessionVersion) {
+      return device;
+    }
+  }
+
+  const resumedSession = guestSessionService.verifyResumeSession(resumeToken);
+  if (resumedSession.ok) {
+    const device = await deviceService.getDevice(resumedSession.deviceId);
+    if (device && resumedSession.version === device.sessionVersion) {
+      return device;
+    }
+  }
+
+  return null;
 }
 
 function buildGoalValidationIssue(): IntakeValidationIssue {
@@ -385,7 +419,7 @@ export function registerDeviceRoutes(
 
       const result = await deviceService.createDevice(body.goal);
       logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: false });
-      setGuestSessionCookies(reply, guestSessionService, result.deviceId);
+      setGuestSessionCookies(reply, guestSessionService, result.deviceId, 0);
       return { ...result, coachExplanation: null, usedFallback: false };
     }
 
@@ -406,7 +440,7 @@ export function registerDeviceRoutes(
       coachExplanation,
     );
     logOnboardingSubmitSucceeded(request.log, { usedTargetFallback: usedFallback });
-    setGuestSessionCookies(reply, guestSessionService, result.deviceId);
+    setGuestSessionCookies(reply, guestSessionService, result.deviceId, 0);
     return { ...result, coachExplanation, usedFallback };
   });
 
@@ -420,7 +454,12 @@ export function registerDeviceRoutes(
 
     const activeSession = guestSessionService.verifyActiveSession(activeToken);
     if (activeSession.ok) {
-      const device = buildDeviceSessionResponse(await deviceService.getDevice(activeSession.deviceId));
+      const deviceRow = await deviceService.getDevice(activeSession.deviceId);
+      if (!deviceRow || activeSession.version !== deviceRow.sessionVersion) {
+        clearGuestSessionCookies(reply, guestSessionService);
+        return reply.code(401).send({ error: "Invalid guest session" });
+      }
+      const device = buildDeviceSessionResponse(deviceRow);
       if (!device) {
         clearGuestSessionCookies(reply, guestSessionService);
         return reply.code(401).send({ error: "Invalid guest session" });
@@ -428,19 +467,32 @@ export function registerDeviceRoutes(
       return { ...device, establishedBy: "active" as const };
     }
 
-    const resumedSession = guestSessionService.resumeSession(resumeToken);
+    const resumedSession = guestSessionService.verifyResumeSession(resumeToken);
     if (resumedSession.ok) {
-      const device = buildDeviceSessionResponse(await deviceService.getDevice(resumedSession.deviceId));
+      const deviceRow = await deviceService.getDevice(resumedSession.deviceId);
+      if (!deviceRow || resumedSession.version !== deviceRow.sessionVersion) {
+        clearGuestSessionCookies(reply, guestSessionService);
+        return reply.code(401).send({ error: "Invalid guest session" });
+      }
+      const device = buildDeviceSessionResponse(deviceRow);
       if (!device) {
         clearGuestSessionCookies(reply, guestSessionService);
         return reply.code(401).send({ error: "Invalid guest session" });
       }
-      reply.header("set-cookie", resumedSession.cookies);
+      reply.header("set-cookie", guestSessionService.issue(resumedSession.deviceId, deviceRow.sessionVersion).cookies);
       return { ...device, establishedBy: "resume" as const };
+    }
+
+    if (activeToken || resumeToken) {
+      clearGuestSessionCookies(reply, guestSessionService);
+      return reply.code(401).send({ error: "Invalid guest session" });
     }
 
     if ("legacyDeviceId" in body && typeof body.legacyDeviceId !== "string") {
       return reply.code(400).send({ error: "legacyDeviceId must be a string." });
+    }
+    if ("legacyDeviceId" in body && hasRawDeviceIdSelector(request, body)) {
+      return reply.code(400).send({ error: "legacyDeviceId cannot be combined with raw device selectors." });
     }
 
     const legacyDeviceId = typeof body.legacyDeviceId === "string" ? body.legacyDeviceId.trim() : "";
@@ -458,32 +510,27 @@ export function registerDeviceRoutes(
       return reply.code(401).send({ error: "No guest session available" });
     }
 
-    const device = buildDeviceSessionResponse(await deviceService.getDevice(legacyDeviceId));
-    if (!device) {
+    const deviceRow = await deviceService.getDevice(legacyDeviceId);
+    const device = buildDeviceSessionResponse(deviceRow);
+    if (!deviceRow || !device) {
       return reply.code(401).send({ error: "Invalid device ID" });
     }
 
-    setGuestSessionCookies(reply, guestSessionService, device.deviceId);
+    setGuestSessionCookies(reply, guestSessionService, device.deviceId, deviceRow.sessionVersion);
     return { ...device, establishedBy: "legacy_migration" as const };
   });
 
-  app.delete("/api/device/session", async (_request, reply) => {
+  app.delete("/api/device/session", async (request, reply) => {
+    const device = await findCurrentSessionDeviceForLogout(request, { deviceService, guestSessionService });
+    if (device) {
+      await deviceService.bumpSessionVersion(device.id);
+    }
     clearGuestSessionCookies(reply, guestSessionService);
     return reply.code(204).send();
   });
 
   const updateGoalsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        clearGuestSessionCookies(reply, guestSessionService);
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
+    const { deviceId } = getProtectedOwner(request);
 
     const body = request.body;
     if (!isRecord(body)) {
@@ -513,6 +560,16 @@ export function registerDeviceRoutes(
   };
 
   // PATCH is the canonical partial-update entrypoint; PUT is a compatibility alias. Both routes intentionally share identical behavior.
-  app.patch("/api/device/goals", updateGoalsHandler);
-  app.put("/api/device/goals", updateGoalsHandler);
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "PATCH",
+    url: "/api/device/goals",
+    protectedMeta: PROTECTED_ROUTE_META.deviceGoalsPatch,
+    handler: updateGoalsHandler,
+  });
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "PUT",
+    url: "/api/device/goals",
+    protectedMeta: PROTECTED_ROUTE_META.deviceGoalsPut,
+    handler: updateGoalsHandler,
+  });
 }

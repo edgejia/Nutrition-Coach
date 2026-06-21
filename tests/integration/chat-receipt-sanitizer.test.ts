@@ -147,4 +147,17 @@ describe("chat receipt sanitizer integration boundary", () => {
     assert.doesNotMatch(source, /guardNoMutationLoggingClaim/);
     assert.doesNotMatch(source, /guardNoMutationLoggingClaim\([^)]*didLogMeal[^)]*didMutateMeal/);
   });
+
+  it("keeps chat route counter sanitization delegated to the shared reply sanitizer", () => {
+    const source = sourceWithoutComments("server/routes/chat.ts");
+
+    assert.match(
+      source,
+      /import\s*\{\s*createStreamingSanitizer,\s*sanitizeReply\s*\}\s*from\s*"..\/lib\/reply-sanitizer\.js"/,
+    );
+    assert.doesNotMatch(source, /function\s+sanitizeReply\s*\(/);
+    assert.doesNotMatch(source, /function\s+createStreamingSanitizer\s*\(/);
+    assert.doesNotMatch(source, /\[（\(\]\\s\*\\d\+\\s\*\\\/\\s\*\\d\+\\s\*\[）\)\]/);
+    assert.doesNotMatch(source, /COUNTER_MARKER_PATTERN/);
+  });
 });

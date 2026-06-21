@@ -1278,6 +1278,132 @@ describe("Chat API", () => {
     assert.equal(mockLLM.chatCalls.length, 0);
   });
 
+  it("POST /api/chat multipart rejects header/query raw selectors before upload staging", async () => {
+    const foreignDeviceRes = await app.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "muscle_gain" },
+    });
+    const foreignDeviceId = foreignDeviceRes.json().deviceId as string;
+    const beforeChatCalls = mockLLM.chatCalls.length;
+
+    const form = new FormData();
+    form.append("message", "header selector should reject");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "header-selector.png");
+
+    const res = await fetch(`${address}/api/chat?deviceId=${encodeURIComponent(foreignDeviceId)}`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "x-device-id": foreignDeviceId },
+      body: form,
+    });
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Raw device selector is not allowed" });
+    assert.deepEqual(await readdir(uploadsDir).catch(() => []), []);
+    assert.equal(mockLLM.chatCalls.length, beforeChatCalls);
+
+    const events = observabilityEvents(logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.deepEqual(
+      {
+        event: events[0]!.event,
+        reason: events[0]!.reason,
+        route: events[0]!.route,
+        operation: events[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+      },
+    );
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude(
+      [events[0]!],
+      [deviceId, foreignDeviceId, "x-device-id", "deviceId", "guest_session", "cookie", "header-selector.png"],
+    );
+  });
+
+  it("POST /api/chat multipart body deviceId rejects after staging and cleans side effects", async () => {
+    assert.ok(services, "expected app services");
+    const beforeChatCalls = mockLLM.chatCalls.length;
+    const publishedPayloads: unknown[] = [];
+    const originalPublishDailySummary = services.publisher.publishDailySummary.bind(services.publisher);
+    services.publisher.publishDailySummary = (publishDeviceId, payload) => {
+      publishedPayloads.push({ publishDeviceId, payload });
+      return originalPublishDailySummary(publishDeviceId, payload);
+    };
+
+    try {
+      const form = new FormData();
+      form.append("message", "body selector should reject");
+      form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "body-selector.png");
+      form.append("deviceId", deviceId);
+
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader },
+        body: form,
+      });
+
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), { error: "Raw device selector is not allowed" });
+      assert.deepEqual(await readdir(uploadsDir).catch(() => []), []);
+      assert.equal(mockLLM.chatCalls.length, beforeChatCalls);
+      assert.deepEqual(publishedPayloads, []);
+
+      const history = await services.chatService.getHistory(deviceId, 10);
+      assert.equal(history.some((message) => message.content === "body selector should reject"), false);
+      assert.equal(history.some((message) => message.role === "assistant"), false);
+
+      const sqlite = new Database(dbPath, { readonly: true });
+      try {
+        const chatRows = sqlite.prepare("SELECT COUNT(*) AS count FROM chat_messages").get() as { count: number };
+        const assetRows = sqlite.prepare("SELECT COUNT(*) AS count FROM assets").get() as { count: number };
+        const assetReferenceRows = sqlite.prepare("SELECT COUNT(*) AS count FROM asset_references").get() as { count: number };
+        assert.equal(chatRows.count, 0);
+        assert.equal(assetRows.count, 0);
+        assert.equal(assetReferenceRows.count, 0);
+      } finally {
+        sqlite.close();
+      }
+
+      const events = observabilityEvents(logLines, "ownership_bypass_blocked");
+      assert.equal(events.length, 1);
+      assert.deepEqual(
+        {
+          event: events[0]!.event,
+          reason: events[0]!.reason,
+          route: events[0]!.route,
+          operation: events[0]!.operation,
+        },
+        {
+          event: "ownership_bypass_blocked",
+          reason: "raw_device_id_param",
+          route: "api_chat",
+          operation: "chat_message",
+        },
+      );
+      assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+      assertLogEventsExclude(
+        [events[0]!],
+        [
+          deviceId,
+          "x-device-id",
+          "deviceId",
+          "guest_session",
+          "cookie",
+          "body selector should reject",
+          "body-selector.png",
+          "data:image",
+        ],
+      );
+    } finally {
+      services.publisher.publishDailySummary = originalPublishDailySummary;
+    }
+  });
+
   it("POST /api/chat SSE backfills the user image message when failure happens before orchestrator persistence", async () => {
     assert.ok(services, "expected onServicesReady to capture app services");
     const originalGetCompressedHistory = services.chatService.getCompressedHistory.bind(services.chatService);
@@ -1562,7 +1688,7 @@ describe("Chat API", () => {
     assert.equal(res.status, 401);
   });
 
-  it("POST /api/chat uses cookie ownership when foreign raw selectors are supplied and logs metadata only", async () => {
+  it("POST /api/chat rejects valid-cookie raw selectors before JSON chat side effects", async () => {
     assert.ok(services, "expected app services");
     const foreignDeviceRes = await app.inject({
       method: "POST",
@@ -1570,9 +1696,9 @@ describe("Chat API", () => {
       payload: { goal: "muscle_gain" },
     });
     const foreignDeviceId = foreignDeviceRes.json().deviceId as string;
-    const foreignCookieHeader = toCookieHeader(foreignDeviceRes.headers["set-cookie"]);
     const userMessage = "ownership selector lunch sentinel";
     const loggedFoodName = "Cookie Owned Apple";
+    const beforeChatCalls = mockLLM.chatCalls.length;
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "call_ownership_selector",
@@ -1595,33 +1721,24 @@ describe("Chat API", () => {
       body: form,
     });
 
-    assert.equal(res.status, 200);
-    const body = await res.json() as { didLogMeal?: boolean; didMutateMeal?: boolean; turnId?: string };
-    assert.equal(body.didLogMeal, true);
-    assert.equal(body.didMutateMeal, true);
-    assert.match(body.turnId ?? "", UUID_PATTERN);
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Raw device selector is not allowed" });
+    assert.equal(mockLLM.chatCalls.length, beforeChatCalls);
 
     const ownerHistory = await services.chatService.getHistory(deviceId, 10);
     const foreignHistory = await services.chatService.getHistory(foreignDeviceId, 10);
-    assert.ok(ownerHistory.some((message) => message.role === "user" && message.content === userMessage));
+    assert.equal(ownerHistory.some((message) => message.content === userMessage), false);
     assert.equal(foreignHistory.some((message) => message.content === userMessage), false);
 
     const ownerMeals = await services.foodLoggingService.getMealsByDate(deviceId, new Date());
     const foreignMeals = await services.foodLoggingService.getMealsByDate(foreignDeviceId, new Date());
-    assert.ok(ownerMeals.some((meal) => meal.foodName === loggedFoodName));
+    assert.equal(ownerMeals.some((meal) => meal.foodName === loggedFoodName), false);
     assert.equal(foreignMeals.some((meal) => meal.foodName === loggedFoodName), false);
-
-    const foreignSession = await app.inject({
-      method: "POST",
-      url: "/api/device/session",
-      headers: { cookie: foreignCookieHeader },
-    });
-    assert.equal(foreignSession.statusCode, 200);
 
     const events = observabilityEvents(logLines, "ownership_bypass_blocked");
     assert.equal(events.length, 1);
     assert.equal(typeof events[0]!.requestId, "string");
-    assert.equal(events[0]!.turnId, body.turnId);
+    assert.equal("turnId" in events[0]!, false);
     assert.deepEqual(
       {
         event: events[0]!.event,
@@ -1636,7 +1753,7 @@ describe("Chat API", () => {
         operation: "chat_message",
       },
     );
-    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId", "turnId"]);
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
     assertLogEventsExclude(
       [events[0]!],
       [
@@ -1652,6 +1769,48 @@ describe("Chat API", () => {
         "snippet",
       ],
     );
+  });
+
+  it("POST /api/chat rejects JSON body deviceId and preserves missing-cookie 401 precedence", async () => {
+    assert.ok(services, "expected app services");
+    const beforeChatCalls = mockLLM.chatCalls.length;
+
+    const missingCookieRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "hello", deviceId }),
+    });
+    assert.equal(missingCookieRes.status, 401);
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "content-type": "application/json" },
+      body: JSON.stringify({ message: "hello", deviceId }),
+    });
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Raw device selector is not allowed" });
+    assert.equal(mockLLM.chatCalls.length, beforeChatCalls);
+    assert.deepEqual(await services.chatService.getHistory(deviceId, 10), []);
+
+    const events = observabilityEvents(logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.deepEqual(
+      {
+        event: events[0]!.event,
+        reason: events[0]!.reason,
+        route: events[0]!.route,
+        operation: events[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_chat",
+        operation: "chat_message",
+      },
+    );
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude([events[0]!], [deviceId, "deviceId", "guest_session", "cookie", "hello"]);
   });
 
   it("GET /api/chat/history returns messages", async () => {
@@ -1672,6 +1831,36 @@ describe("Chat API", () => {
     assert.ok(messages.length >= 2);
     assert.equal(messages[0].role, "user");
     assert.equal(messages[1].role, "assistant");
+  });
+
+  it("GET /api/chat/history rejects valid-cookie raw selectors with metadata-only events", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/chat/history?limit=50&deviceId=${encodeURIComponent(deviceId)}`,
+      headers: { cookie: sessionCookieHeader, "x-device-id": deviceId },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.json(), { error: "Raw device selector is not allowed" });
+
+    const events = observabilityEvents(logLines, "ownership_bypass_blocked");
+    assert.equal(events.length, 1);
+    assert.deepEqual(
+      {
+        event: events[0]!.event,
+        reason: events[0]!.reason,
+        route: events[0]!.route,
+        operation: events[0]!.operation,
+      },
+      {
+        event: "ownership_bypass_blocked",
+        reason: "raw_device_id_param",
+        route: "api_chat_history",
+        operation: "chat_history_list",
+      },
+    );
+    assertLogEventApplicationKeys(events[0]!, ["event", "reason", "route", "operation", "requestId"]);
+    assertLogEventsExclude([events[0]!], [deviceId, "x-device-id", "deviceId", "guest_session", "cookie"]);
   });
 
   it("POST /api/chat returns didLogMeal=true when mealCount increases", async () => {

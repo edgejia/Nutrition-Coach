@@ -70,6 +70,7 @@ type CommitProvisionalBubbleExtra = {
   proposalActionEvent?: ProposalActionEventMetadata;
   status?: Message["status"];
   turnId?: string;
+  replyText?: string;
 };
 
 function redactReceiptIdentityFromMessages(messages: Message[], mealId: string): Message[] {
@@ -418,7 +419,7 @@ export const useStore = create<AppState>((set, get) => ({
       const finalMessage: Message = {
         id: state.provisionalBubble.id,
         role: "assistant",
-        content: state.provisionalBubble.content,
+        content: extra.replyText ?? state.provisionalBubble.content,
         createdAt: new Date().toISOString(),
         ...(extra.status ? { status: extra.status } : {}),
         ...(extra.turnId ? { turnId: extra.turnId } : {}),

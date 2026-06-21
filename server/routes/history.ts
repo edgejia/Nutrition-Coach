@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { resolveGuestSession } from "../lib/guest-session-resolver.js";
 import type { createDeviceService } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import {
@@ -8,6 +7,7 @@ import {
   type HistoryQueryIssue,
   type createHistoryQueryService,
 } from "../services/history-query.js";
+import { getProtectedOwner, PROTECTED_ROUTE_META, registerProtectedRoute } from "./protected-route.js";
 
 interface Deps {
   historyQueryService: ReturnType<typeof createHistoryQueryService>;
@@ -142,192 +142,172 @@ function parseNutritionBounds(
 export function registerHistoryRoutes(app: FastifyInstance, deps: Deps) {
   const { historyQueryService, deviceService, guestSessionService } = deps;
 
-  app.get("/api/history/meals", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "GET",
+    url: "/api/history/meals",
+    protectedMeta: PROTECTED_ROUTE_META.historyMeals,
+    handler: async (request, reply) => {
+      const { deviceId } = getProtectedOwner(request);
+
+      const query = request.query as Record<string, unknown>;
+      const from = singleQueryValue(query.from);
+      if (!from) {
+        return reply.code(400).send(invalidQuery([{ field: "from", message: "from is required" }]));
       }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
 
-    const query = request.query as Record<string, unknown>;
-    const from = singleQueryValue(query.from);
-    if (!from) {
-      return reply.code(400).send(invalidQuery([{ field: "from", message: "from is required" }]));
-    }
-
-    const to = singleQueryValue(query.to);
-    if (!to) {
-      return reply.code(400).send(invalidQuery([{ field: "to", message: "to is required" }]));
-    }
-
-    const parsedLimit = parseLimit(query.limit);
-    if (!parsedLimit.ok) {
-      return reply.code(400).send(invalidQuery([parsedLimit.issue]));
-    }
-
-    const cursor = singleQueryValue(query.cursor);
-    if (typeof query.cursor !== "undefined" && typeof cursor === "undefined") {
-      return reply.code(400).send(invalidQuery([{ field: "cursor", message: "cursor is invalid" }]));
-    }
-
-    try {
-      return await historyQueryService.getMeals({
-        deviceId,
-        from,
-        to,
-        limit: parsedLimit.limit,
-        cursor,
-      });
-    } catch (error) {
-      if (error instanceof HistoryQueryValidationError) {
-        return reply.code(400).send(invalidQuery(error.issues));
+      const to = singleQueryValue(query.to);
+      if (!to) {
+        return reply.code(400).send(invalidQuery([{ field: "to", message: "to is required" }]));
       }
-      throw error;
-    }
+
+      const parsedLimit = parseLimit(query.limit);
+      if (!parsedLimit.ok) {
+        return reply.code(400).send(invalidQuery([parsedLimit.issue]));
+      }
+
+      const cursor = singleQueryValue(query.cursor);
+      if (typeof query.cursor !== "undefined" && typeof cursor === "undefined") {
+        return reply.code(400).send(invalidQuery([{ field: "cursor", message: "cursor is invalid" }]));
+      }
+
+      try {
+        return await historyQueryService.getMeals({
+          deviceId,
+          from,
+          to,
+          limit: parsedLimit.limit,
+          cursor,
+        });
+      } catch (error) {
+        if (error instanceof HistoryQueryValidationError) {
+          return reply.code(400).send(invalidQuery(error.issues));
+        }
+        throw error;
+      }
+    },
   });
 
-  app.get("/api/history/search", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "GET",
+    url: "/api/history/search",
+    protectedMeta: PROTECTED_ROUTE_META.historySearch,
+    handler: async (request, reply) => {
+      const { deviceId } = getProtectedOwner(request);
+
+      const query = request.query as Record<string, unknown>;
+      const qResult = queryStringValue(query, "q");
+      if (!qResult.ok) {
+        return reply.code(400).send(invalidQuery([qResult.issue]));
       }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
-
-    const query = request.query as Record<string, unknown>;
-    const qResult = queryStringValue(query, "q");
-    if (!qResult.ok) {
-      return reply.code(400).send(invalidQuery([qResult.issue]));
-    }
-    if (!qResult.value || qResult.value.trim().length === 0) {
-      return reply.code(400).send(invalidQuery([{ field: "q", message: "q is required" }]));
-    }
-
-    const fromResult = queryStringValue(query, "from");
-    if (!fromResult.ok) {
-      return reply.code(400).send(invalidQuery([fromResult.issue]));
-    }
-    if (!fromResult.value) {
-      return reply.code(400).send(invalidQuery([{ field: "from", message: "from is required" }]));
-    }
-
-    const toResult = queryStringValue(query, "to");
-    if (!toResult.ok) {
-      return reply.code(400).send(invalidQuery([toResult.issue]));
-    }
-    if (!toResult.value) {
-      return reply.code(400).send(invalidQuery([{ field: "to", message: "to is required" }]));
-    }
-
-    const parsedLimit = parseLimit(query.limit);
-    if (!parsedLimit.ok) {
-      return reply.code(400).send(invalidQuery([parsedLimit.issue]));
-    }
-
-    const cursorResult = queryStringValue(query, "cursor");
-    if (!cursorResult.ok) {
-      return reply.code(400).send(invalidQuery([{ field: "cursor", message: "cursor is invalid" }]));
-    }
-
-    const boundsResult = parseNutritionBounds(query);
-    if (!boundsResult.ok) {
-      return reply.code(400).send(invalidQuery([boundsResult.issue]));
-    }
-
-    try {
-      return await historyQueryService.searchMeals({
-        deviceId,
-        q: qResult.value,
-        from: fromResult.value,
-        to: toResult.value,
-        limit: parsedLimit.limit,
-        cursor: cursorResult.value,
-        nutritionBounds: boundsResult.bounds,
-      });
-    } catch (error) {
-      if (error instanceof HistoryQueryValidationError) {
-        return reply.code(400).send(invalidQuery(error.issues));
+      if (!qResult.value || qResult.value.trim().length === 0) {
+        return reply.code(400).send(invalidQuery([{ field: "q", message: "q is required" }]));
       }
-      throw error;
-    }
+
+      const fromResult = queryStringValue(query, "from");
+      if (!fromResult.ok) {
+        return reply.code(400).send(invalidQuery([fromResult.issue]));
+      }
+      if (!fromResult.value) {
+        return reply.code(400).send(invalidQuery([{ field: "from", message: "from is required" }]));
+      }
+
+      const toResult = queryStringValue(query, "to");
+      if (!toResult.ok) {
+        return reply.code(400).send(invalidQuery([toResult.issue]));
+      }
+      if (!toResult.value) {
+        return reply.code(400).send(invalidQuery([{ field: "to", message: "to is required" }]));
+      }
+
+      const parsedLimit = parseLimit(query.limit);
+      if (!parsedLimit.ok) {
+        return reply.code(400).send(invalidQuery([parsedLimit.issue]));
+      }
+
+      const cursorResult = queryStringValue(query, "cursor");
+      if (!cursorResult.ok) {
+        return reply.code(400).send(invalidQuery([{ field: "cursor", message: "cursor is invalid" }]));
+      }
+
+      const boundsResult = parseNutritionBounds(query);
+      if (!boundsResult.ok) {
+        return reply.code(400).send(invalidQuery([boundsResult.issue]));
+      }
+
+      try {
+        return await historyQueryService.searchMeals({
+          deviceId,
+          q: qResult.value,
+          from: fromResult.value,
+          to: toResult.value,
+          limit: parsedLimit.limit,
+          cursor: cursorResult.value,
+          nutritionBounds: boundsResult.bounds,
+        });
+      } catch (error) {
+        if (error instanceof HistoryQueryValidationError) {
+          return reply.code(400).send(invalidQuery(error.issues));
+        }
+        throw error;
+      }
+    },
   });
 
-  app.get("/api/history/trends", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "GET",
+    url: "/api/history/trends",
+    protectedMeta: PROTECTED_ROUTE_META.historyTrends,
+    handler: async (request, reply) => {
+      const { deviceId } = getProtectedOwner(request);
+
+      const query = request.query as Record<string, unknown>;
+      const fromResult = queryStringValue(query, "from");
+      if (!fromResult.ok) {
+        return reply.code(400).send(invalidQuery([fromResult.issue]));
       }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
-
-    const query = request.query as Record<string, unknown>;
-    const fromResult = queryStringValue(query, "from");
-    if (!fromResult.ok) {
-      return reply.code(400).send(invalidQuery([fromResult.issue]));
-    }
-    if (!fromResult.value) {
-      return reply.code(400).send(invalidQuery([{ field: "from", message: "from is required" }]));
-    }
-
-    const toResult = queryStringValue(query, "to");
-    if (!toResult.ok) {
-      return reply.code(400).send(invalidQuery([toResult.issue]));
-    }
-    if (!toResult.value) {
-      return reply.code(400).send(invalidQuery([{ field: "to", message: "to is required" }]));
-    }
-
-    try {
-      return await historyQueryService.getTrends({
-        deviceId,
-        from: fromResult.value,
-        to: toResult.value,
-      });
-    } catch (error) {
-      if (error instanceof HistoryQueryValidationError) {
-        return reply.code(400).send(invalidQuery(error.issues));
+      if (!fromResult.value) {
+        return reply.code(400).send(invalidQuery([{ field: "from", message: "from is required" }]));
       }
-      throw error;
-    }
+
+      const toResult = queryStringValue(query, "to");
+      if (!toResult.ok) {
+        return reply.code(400).send(invalidQuery([toResult.issue]));
+      }
+      if (!toResult.value) {
+        return reply.code(400).send(invalidQuery([{ field: "to", message: "to is required" }]));
+      }
+
+      try {
+        return await historyQueryService.getTrends({
+          deviceId,
+          from: fromResult.value,
+          to: toResult.value,
+        });
+      } catch (error) {
+        if (error instanceof HistoryQueryValidationError) {
+          return reply.code(400).send(invalidQuery(error.issues));
+        }
+        throw error;
+      }
+    },
   });
 
-  app.get("/api/history/days/:date", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "GET",
+    url: "/api/history/days/:date",
+    protectedMeta: PROTECTED_ROUTE_META.historyDay,
+    handler: async (request, reply) => {
+      const { deviceId } = getProtectedOwner(request);
 
-    const { date } = request.params as { date: string };
-    try {
-      return await historyQueryService.getDaySnapshot({ deviceId, date });
-    } catch (error) {
-      if (error instanceof HistoryQueryValidationError) {
-        return reply.code(400).send(invalidQuery(error.issues));
+      const { date } = request.params as { date: string };
+      try {
+        return await historyQueryService.getDaySnapshot({ deviceId, date });
+      } catch (error) {
+        if (error instanceof HistoryQueryValidationError) {
+          return reply.code(400).send(invalidQuery(error.issues));
+        }
+        throw error;
       }
-      throw error;
-    }
+    },
   });
 }

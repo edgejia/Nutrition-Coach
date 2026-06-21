@@ -38,23 +38,24 @@ export async function resolveGuestSession(
   const activeSession = guestSessionService.verifyActiveSession(activeToken);
   if (activeSession.ok) {
     const device = await deviceService.getDevice(activeSession.deviceId);
-    if (!device) {
+    if (!device || activeSession.version !== device.sessionVersion) {
       return { ok: false, error: "Invalid guest session", clearCookies: true };
     }
     return { ok: true, deviceId: activeSession.deviceId, device };
   }
 
-  const resumedSession = guestSessionService.resumeSession(resumeToken);
+  const resumedSession = guestSessionService.verifyResumeSession(resumeToken);
   if (resumedSession.ok) {
     const device = await deviceService.getDevice(resumedSession.deviceId);
-    if (!device) {
+    if (!device || resumedSession.version !== device.sessionVersion) {
       return { ok: false, error: "Invalid guest session", clearCookies: true };
     }
+    const issued = guestSessionService.issue(resumedSession.deviceId, device.sessionVersion);
     return {
       ok: true,
       deviceId: resumedSession.deviceId,
       device,
-      setCookies: resumedSession.cookies,
+      setCookies: issued.cookies,
     };
   }
 

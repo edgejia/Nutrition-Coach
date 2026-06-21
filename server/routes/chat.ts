@@ -31,7 +31,7 @@ import {
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { normalizeMealPeriod } from "../lib/meal-period.js";
-import { resolveGuestSession } from "../lib/guest-session-resolver.js";
+import { createStreamingSanitizer, sanitizeReply } from "../lib/reply-sanitizer.js";
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { SummaryOutcome } from "../services/summary-outcome.js";
@@ -63,6 +63,11 @@ import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type { createMealNumericProposalService } from "../services/meal-numeric-proposals.js";
 import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
+import {
+  getProtectedOwner,
+  PROTECTED_ROUTE_META,
+  registerProtectedRoute,
+} from "./protected-route.js";
 
 interface Deps {
   orchestrator: ReturnType<typeof createOrchestrator>;
@@ -91,28 +96,12 @@ const IMAGE_FORMAT_BY_MIME_TYPE = new Map([
   ["image/webp", "webp"],
 ]);
 const MAX_DECODED_IMAGE_PIXELS = 40_000_000;
-const SENSITIVE_IDENTIFIERS = [
-  "log_food",
-  "get_daily_summary",
-  "protein_sources",
-  "usedConservativeAssumption",
-  "quantityUncertaintyReason",
-  "missing_quantity",
-];
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasRawDeviceIdSelector(request: FastifyRequest) {
-  return (
-    request.headers["x-device-id"] !== undefined
-    || (isPlainRecord(request.query) && "deviceId" in request.query)
-    || (isPlainRecord(request.body) && "deviceId" in request.body)
-  );
 }
 
 async function validateImageBytes(buffer: Buffer, claimedMimeType: string): Promise<boolean> {
@@ -313,19 +302,6 @@ export function fanOutOrchestratorHooks(
   };
 }
 
-// Last-gate filter: strip internal tool identifiers even when the model ignores
-// the system prompt rule. Applied to every reply before DB write and client emit.
-function sanitizeReply(text: string): string {
-  return text
-    .replace(/log_food/g, "完成記錄")
-    .replace(/get_daily_summary/g, "查詢今日攝取")
-    .replace(/protein_sources/g, "蛋白質來源")
-    .replace(/usedConservativeAssumption/g, "保守假設")
-    .replace(/quantityUncertaintyReason/g, "份量不確定原因")
-    .replace(/missing_quantity/g, "缺少份量")
-    .replace(/[（(]\s*\d+\s*\/\s*\d+\s*[）)]/g, "");
-}
-
 function formatHistoricalDateLabel(dateKey: string, currentDate = currentAppDate()): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
   if (!match) {
@@ -497,41 +473,6 @@ async function finalizeAssistantReply(
   }
 }
 
-function createStreamingSanitizer() {
-  let tail = "";
-
-  return {
-    push(token: string): string {
-      tail += token;
-      const endsWithCompleteIdentifier = SENSITIVE_IDENTIFIERS.some((identifier) => tail.endsWith(identifier));
-      const overlapLength = endsWithCompleteIdentifier
-        ? 0
-        : SENSITIVE_IDENTIFIERS.reduce((maxOverlap, identifier) => {
-          for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
-            if (tail.endsWith(identifier.slice(0, prefixLength))) {
-              return Math.max(maxOverlap, prefixLength);
-            }
-          }
-
-          return maxOverlap;
-        }, 0);
-
-      if (tail.length <= overlapLength) {
-        return "";
-      }
-
-      const safePrefix = tail.slice(0, tail.length - overlapLength);
-      tail = tail.slice(tail.length - overlapLength);
-      return sanitizeReply(safePrefix);
-    },
-    flush(): string {
-      const finalChunk = sanitizeReply(tail);
-      tail = "";
-      return finalChunk;
-    },
-  };
-}
-
 function createNoMutationLoggingClaimStreamGuard() {
   const claimPattern = /已\s*(?:經\s*)?記錄|完成\s*記錄/;
   const maxHoldLength = 8;
@@ -637,6 +578,16 @@ async function parseMultipartRequest(
     return { error, code };
   }
 
+  async function rejectRawDeviceIdSelector() {
+    logOwnershipBypassBlocked(request.log, {
+      reason: "raw_device_id_param",
+      route: PROTECTED_ROUTE_META.chatMessage.route,
+      operation: PROTECTED_ROUTE_META.chatMessage.operation,
+      requestId: request.id,
+    });
+    return reject("Raw device selector is not allowed", 400);
+  }
+
   const contentType = request.headers["content-type"] ?? "";
   if (!contentType.includes("multipart/form-data")) {
     return { error: "Content-Type must be multipart/form-data", code: 400 };
@@ -646,6 +597,8 @@ async function parseMultipartRequest(
   for await (const part of parts) {
     if (part.type === "field" && part.fieldname === "message") {
       message = part.value as string;
+    } else if (part.type === "field" && part.fieldname === "deviceId") {
+      return rejectRawDeviceIdSelector();
     } else if (part.type === "field" && part.fieldname === "proposalContext") {
       if (proposalContextSeen) {
         return reject("Only one proposalContext field is allowed", 400);
@@ -1396,6 +1349,7 @@ async function handleOrchestratorSSE(
         turnId: stopControl.turnId,
         didLogMeal: streamDidLogMeal,
         didMutateMeal: streamDidMutateMeal,
+        ...(streamResult.finalReplySource === "fallback" ? { replyText: streamResult.fullReply } : {}),
         ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
         ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
@@ -1495,6 +1449,9 @@ async function handleOrchestratorSSE(
         turnId: stopControl.turnId,
         didLogMeal,
         didMutateMeal: streamDidMutateMeal,
+        ...(result.fallbackOutcomeContext || result.finalReplySource === "fallback"
+          ? { replyText: sanitizedFallback }
+          : {}),
         ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(dailySummary ? { dailySummary } : {}),
         ...(summaryOutcome ? { summaryOutcome } : {}),
@@ -1538,6 +1495,7 @@ async function handleOrchestratorSSE(
       streamDidMutateMeal ? "partial_success" : "llm_error",
     );
     let sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(error);
+    let terminalReplyText = "";
     recorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
     try {
       if (!userMessagePersisted) {
@@ -1561,6 +1519,7 @@ async function handleOrchestratorSSE(
         },
       );
       const sanitizedFallback = finalized.sanitized;
+      terminalReplyText = sanitizedFallback;
       streamReceiptPersistence = finalized.receiptPersistence;
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
     } catch (persistError) {
@@ -1574,6 +1533,7 @@ async function handleOrchestratorSSE(
         : streamDidMutateMeal
           ? PARTIAL_MUTATION_FALLBACK
           : UNIFIED_FALLBACK;
+      terminalReplyText = closedFallback;
       // If history persistence also fails, still close the stream with done.
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: closedFallback })}\n\n`);
     }
@@ -1582,6 +1542,7 @@ async function handleOrchestratorSSE(
       turnId: stopControl.turnId,
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
+      replyText: terminalReplyText,
       ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
       ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
@@ -1631,18 +1592,12 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     llmTraceRecorderFactory,
   } = deps;
 
-  app.post("/api/chat/stop", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
-
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "POST",
+    url: "/api/chat/stop",
+    protectedMeta: PROTECTED_ROUTE_META.chatStop,
+    handler: async (request, reply) => {
+    const { deviceId } = getProtectedOwner(request);
     const body = request.body as { turnId?: unknown } | undefined;
     const turnId = body?.turnId;
     if (typeof turnId !== "string" || !turnId.trim()) {
@@ -1650,16 +1605,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     }
     const trimmedTurnId = turnId.trim();
 
-    if (hasRawDeviceIdSelector(request)) {
-      logOwnershipBypassBlocked(request.log, {
-        reason: "raw_device_id_param",
-        route: "api_chat_stop",
-        operation: "chat_stop",
-        requestId: request.id,
-      });
-    }
-
-    const activeTurn = activeChatTurns.get(activeChatTurnKey(session.deviceId, trimmedTurnId));
+    const activeTurn = activeChatTurns.get(activeChatTurnKey(deviceId, trimmedTurnId));
     if (!activeTurn) {
       return reply.code(404).send({ error: "Active turn not found" });
     }
@@ -1670,21 +1616,16 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     }
 
     return { stopped: true, turnId: trimmedTurnId };
+    },
   });
 
-  app.post("/api/chat", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
-
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "POST",
+    url: "/api/chat",
+    protectedMeta: PROTECTED_ROUTE_META.chatMessage,
+    multipartBodySelectorHandling: "route_parser",
+    handler: async (request, reply) => {
+    const { deviceId } = getProtectedOwner(request);
     const resolvedUploadsDir = injectedUploadsDir ?? config.uploadsStagingDir;
     const parseResult = await parseMultipartRequest(request, resolvedUploadsDir);
 
@@ -1697,16 +1638,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     const chatTurnStartedAt = Date.now();
     const hadImage = Boolean(image);
     const { turnId, turnLog, orchLog } = createChatTurnContext(request);
-
-    if (hasRawDeviceIdSelector(request)) {
-      logOwnershipBypassBlocked(request.log, {
-        reason: "raw_device_id_param",
-        route: "api_chat",
-        operation: "chat_message",
-        requestId: request.id,
-        turnId,
-      });
-    }
 
     // Branch on SSE opt-in (T-03c-01: keep explicit JSON fallback for non-SSE callers)
     const acceptHeader = request.headers["accept"] ?? "";
@@ -2138,21 +2069,15 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
     });
 
     return reply;
+    },
   });
 
-  app.get("/api/chat/history", async (request, reply) => {
-    const session = await resolveGuestSession(request, { deviceService, guestSessionService });
-    if (!session.ok) {
-      if (session.clearCookies) {
-        reply.header("set-cookie", guestSessionService.clearSessionCookies());
-      }
-      return reply.code(401).send({ error: session.error });
-    }
-    const { deviceId } = session;
-    if (session.setCookies) {
-      reply.header("set-cookie", session.setCookies);
-    }
-
+  registerProtectedRoute(app, { deviceService, guestSessionService }, {
+    method: "GET",
+    url: "/api/chat/history",
+    protectedMeta: PROTECTED_ROUTE_META.chatHistory,
+    handler: async (request, reply) => {
+    const { deviceId } = getProtectedOwner(request);
     const { limit } = request.query as { limit?: string };
     const parsedLimit = limit === undefined ? 50 : Number(limit);
     if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
@@ -2173,5 +2098,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
         };
       }),
     };
+    },
   });
 }

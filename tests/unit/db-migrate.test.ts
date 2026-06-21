@@ -128,6 +128,40 @@ async function seedSchemaThrough0008(dbPath: string) {
   }
 }
 
+async function seedSchemaThrough0010(dbPath: string) {
+  const sqlite = new Database(dbPath);
+
+  try {
+    sqlite.pragma("journal_mode = WAL");
+    sqlite.pragma("foreign_keys = ON");
+    for (const fileName of [
+      "0000_brainy_rocket_racer.sql",
+      "0001_sleepy_vivisector.sql",
+      "0002_meal_transaction_v2_foundation.sql",
+      "0003_aspiring_masque.sql",
+      "0004_history_query_hot_path_indexes.sql",
+      "0005_chat_message_status.sql",
+      "0006_colossal_selene.sql",
+      "0007_violet_living_lightning.sql",
+      "0008_shiny_stellaris.sql",
+      "0009_blushing_william_stryker.sql",
+      "0010_fuzzy_black_tom.sql",
+    ]) {
+      sqlite.exec(await readMigrationSql(fileName));
+    }
+    sqlite.exec(`CREATE TABLE "__drizzle_migrations" (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at numeric
+    )`);
+    sqlite
+      .prepare('INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)')
+      .run("0010-test-hash", 1781447465739);
+  } finally {
+    sqlite.close();
+  }
+}
+
 function getCanonicalTableNames(sqlite: Database.Database) {
   return sqlite
     .prepare(
@@ -144,6 +178,22 @@ function getChatMessageStatusColumns(sqlite: Database.Database) {
   return sqlite.prepare("PRAGMA table_info(chat_messages)").all().filter((column) => {
     return typeof column === "object" && column !== null && "name" in column && column.name === "status";
   });
+}
+
+function getDeviceSessionVersionColumns(sqlite: Database.Database) {
+  return sqlite
+    .prepare("PRAGMA table_info(devices)")
+    .all()
+    .filter((column) => {
+      return typeof column === "object" && column !== null && "name" in column && column.name === "session_version";
+    }) as Array<{
+      cid: number;
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>;
 }
 
 function seedDevice(sqlite: Database.Database, deviceId = "device-1") {
@@ -466,6 +516,61 @@ describe("database migration contract", () => {
       }, /CHECK constraint failed/);
     } finally {
       sqlite.close();
+    }
+  });
+
+  it("adds devices.session_version as a non-null integer defaulting to 0", async () => {
+    const dbPath = await makeTempDbPath();
+
+    await runMigrations(dbPath);
+
+    const sqlite = new Database(dbPath);
+    try {
+      const [column] = getDeviceSessionVersionColumns(sqlite);
+      assert.deepEqual(column, {
+        cid: 19,
+        name: "session_version",
+        type: "INTEGER",
+        notnull: 1,
+        dflt_value: "0",
+        pk: 0,
+      });
+
+      seedDevice(sqlite);
+      assert.deepEqual(
+        sqlite.prepare("SELECT session_version FROM devices WHERE id = ?").get("device-1"),
+        { session_version: 0 },
+      );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("backfills existing devices with session_version 0", async () => {
+    const dbPath = await makeTempDbPath();
+    await seedSchemaThrough0010(dbPath);
+
+    const sqlite = new Database(dbPath);
+    try {
+      sqlite.pragma("foreign_keys = ON");
+      seedDevice(sqlite);
+      assert.deepEqual(getDeviceSessionVersionColumns(sqlite), []);
+    } finally {
+      sqlite.close();
+    }
+
+    await runMigrations(dbPath);
+
+    const migrated = new Database(dbPath);
+    try {
+      const [column] = getDeviceSessionVersionColumns(migrated);
+      assert.equal(column?.dflt_value, "0");
+      assert.deepEqual(
+        migrated.prepare("SELECT session_version FROM devices WHERE id = ?").get("device-1"),
+        { session_version: 0 },
+      );
+    } finally {
+      migrated.close();
     }
   });
 

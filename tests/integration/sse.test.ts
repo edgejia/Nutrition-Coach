@@ -24,6 +24,12 @@ function toCookieHeader(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
   return getSetCookieHeaders(res).map((value) => value.split(";", 1)[0]).join("; ");
 }
 
+function toNamedCookieHeader(res: Awaited<ReturnType<FastifyInstance["inject"]>>, name: string) {
+  const cookie = getSetCookieHeaders(res).find((value) => value.startsWith(`${name}=`));
+  assert.ok(cookie, `expected ${name} cookie`);
+  return cookie.split(";", 1)[0]!;
+}
+
 function parseSSEFrames(raw: string): SSEFrame[] {
   return raw
     .split("\n\n")
@@ -64,6 +70,25 @@ function parseLogLines(logLines: string[]) {
 
 function sseStateEvents(logLines: string[]) {
   return parseLogLines(logLines).filter((record) => record.event === "sse_connection_state");
+}
+
+function observabilityEvents(logLines: string[], eventName: string) {
+  return parseLogLines(logLines).filter((record) => record.event === eventName);
+}
+
+function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(event)) {
+    assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+  }
+}
+
+function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  for (const value of forbiddenValues) {
+    assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+  }
 }
 
 async function waitForSseState(logLines: string[], state: string, timeoutMs = 1000) {
@@ -216,6 +241,61 @@ describe("SSE API", () => {
     }
   });
 
+  it("GET /api/sse rejects valid-cookie raw selectors before hijack with metadata-only events", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const logDeviceId = deviceRes.json().deviceId as string;
+    const logCookieHeader = toCookieHeader(deviceRes);
+    const address = await logApp.listen({ port: 0 });
+    const controller = new AbortController();
+
+    try {
+      const res = await fetch(`${address}/api/sse?deviceId=${encodeURIComponent(logDeviceId)}`, {
+        headers: { cookie: logCookieHeader, "x-device-id": logDeviceId },
+        signal: controller.signal,
+      });
+
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), { error: "Raw device selector is not allowed" });
+      assert.equal(res.headers.get("content-type")?.includes("text/event-stream"), false);
+
+      const ownershipEvents = observabilityEvents(logLines, "ownership_bypass_blocked");
+      assert.equal(ownershipEvents.length, 1);
+      assert.deepEqual(
+        {
+          event: ownershipEvents[0]!.event,
+          reason: ownershipEvents[0]!.reason,
+          route: ownershipEvents[0]!.route,
+          operation: ownershipEvents[0]!.operation,
+        },
+        {
+          event: "ownership_bypass_blocked",
+          reason: "raw_device_id_param",
+          route: "api_sse",
+          operation: "sse_subscribe",
+        },
+      );
+      assertLogEventApplicationKeys(ownershipEvents[0]!, ["event", "reason", "route", "operation", "requestId"]);
+      assertLogEventsExclude(
+        [ownershipEvents[0]!],
+        [logDeviceId, "x-device-id", "deviceId", "guest_session", "guest_session_resume", "cookie"],
+      );
+      assert.equal(sseStateEvents(logLines).some((event) => event.state === "opened"), false);
+    } finally {
+      controller.abort();
+      await logApp.close();
+    }
+  });
+
   it("logs opened and closed SSE states while preserving the initial daily_summary frame", async () => {
     const { logLines, stream: logStream } = createLogCapture();
     const logApp = await buildApp({
@@ -293,6 +373,50 @@ describe("SSE API", () => {
       if (app.server.listening) {
         await app.close();
       }
+    }
+  });
+
+  it("GET /api/sse refreshes cookies from a resume cookie before manual writeHead", async () => {
+    const { logLines, stream: logStream } = createLogCapture();
+    const logApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: new MockLLMProvider(),
+      logger: { level: "info", stream: logStream },
+    });
+    const deviceRes = await logApp.inject({
+      method: "POST",
+      url: "/api/device",
+      payload: { goal: "fat_loss" },
+    });
+    const resumeCookieHeader = toNamedCookieHeader(deviceRes, "guest_session_resume");
+    const address = await logApp.listen({ port: 0 });
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
+    try {
+      const res = await fetch(`${address}/api/sse`, {
+        headers: { cookie: resumeCookieHeader },
+        signal: controller.signal,
+      });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("content-type"), "text/event-stream");
+      const setCookie = res.headers.get("set-cookie") ?? "";
+      assert.match(setCookie, /guest_session=/);
+      assert.match(setCookie, /guest_session_resume=/);
+
+      reader = res.body?.getReader();
+      assert.ok(reader);
+      const frame = await readSSEFrame(reader, "daily_summary");
+      assertInitialDailySummaryEnvelope(frame);
+      await waitForSseState(logLines, "opened");
+
+      await reader.cancel();
+      controller.abort();
+      await waitForSseState(logLines, "closed");
+    } finally {
+      await reader?.cancel().catch(() => {});
+      controller.abort();
+      await logApp.close();
     }
   });
 

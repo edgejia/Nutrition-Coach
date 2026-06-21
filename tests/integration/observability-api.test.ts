@@ -42,6 +42,21 @@ function createLogCapture() {
   };
 }
 
+function assertLogEventApplicationKeys(event: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const pinoKeys = new Set(["level", "time", "pid", "hostname", "msg", "reqId"]);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(event)) {
+    assert.ok(pinoKeys.has(key) || allowed.has(key), `expected ${event.event} event to exclude metadata key ${key}`);
+  }
+}
+
+function assertLogEventsExclude(events: readonly Record<string, unknown>[], forbiddenValues: readonly string[]) {
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  for (const value of forbiddenValues) {
+    assert.ok(!serialized.includes(value), `expected logs to exclude ${value}`);
+  }
+}
+
 describe("Observability API", () => {
   let app: FastifyInstance;
   let logs: ReturnType<typeof createLogCapture>;
@@ -83,7 +98,6 @@ describe("Observability API", () => {
         event: "home_cta_intent_selected",
         intent: "quick_log",
         prompt: "推薦三個便利商店高蛋白選擇",
-        deviceId: create.deviceId,
       },
     });
 
@@ -108,6 +122,97 @@ describe("Observability API", () => {
     assert.doesNotMatch(serialized, /推薦三個便利商店高蛋白選擇/);
     assert.doesNotMatch(serialized, new RegExp(create.deviceId));
     assert.doesNotMatch(serialized, /deviceId/);
+  });
+
+  it("rejects raw ownership selectors before logging original client telemetry", async () => {
+    const create = await createGuestDevice();
+    const rawSelectorRequests = [
+      {
+        name: "query deviceId",
+        request: {
+          method: "POST" as const,
+          url: `/api/observability/client-event?deviceId=${encodeURIComponent(create.deviceId)}`,
+          headers: { cookie: create.cookieHeader },
+          payload: {
+            event: "home_cta_intent_selected",
+            intent: "quick_log",
+            prompt: "RAW_QUERY_PROMPT_SENTINEL",
+          },
+        },
+      },
+      {
+        name: "x-device-id header",
+        request: {
+          method: "POST" as const,
+          url: "/api/observability/client-event",
+          headers: { cookie: create.cookieHeader, "x-device-id": create.deviceId },
+          payload: {
+            event: "home_cta_option_sent",
+            intent: "quick_log",
+            promptKey: "describe_meal",
+            prompt: "RAW_HEADER_PROMPT_SENTINEL",
+          },
+        },
+      },
+      {
+        name: "body deviceId",
+        request: {
+          method: "POST" as const,
+          url: "/api/observability/client-event",
+          headers: { cookie: create.cookieHeader },
+          payload: {
+            event: "home_cta_intent_selected",
+            intent: "quick_log",
+            prompt: "RAW_BODY_PROMPT_SENTINEL",
+            deviceId: create.deviceId,
+          },
+        },
+      },
+    ];
+
+    for (const { name, request } of rawSelectorRequests) {
+      const res = await app.inject(request);
+      assert.equal(res.statusCode, 400, name);
+      assert.deepEqual(res.json(), { error: "Raw device selector is not allowed" });
+    }
+
+    const eventLogs = logs.eventLogs();
+    assert.equal(eventLogs.filter((line) => line.event === "home_cta_intent_selected").length, 0);
+    assert.equal(eventLogs.filter((line) => line.event === "home_cta_option_sent").length, 0);
+
+    const blockedEvents = eventLogs.filter((line) => line.event === "ownership_bypass_blocked");
+    assert.equal(blockedEvents.length, rawSelectorRequests.length);
+    for (const event of blockedEvents) {
+      assert.deepEqual(
+        {
+          event: event.event,
+          reason: event.reason,
+          route: event.route,
+          operation: event.operation,
+        },
+        {
+          event: "ownership_bypass_blocked",
+          reason: "raw_device_id_param",
+          route: "api_observability_client_event",
+          operation: "client_event_record",
+        },
+      );
+      assert.equal(typeof event.requestId, "string");
+      assertLogEventApplicationKeys(event, ["event", "reason", "route", "operation", "requestId"]);
+    }
+    assertLogEventsExclude(blockedEvents, [
+      create.deviceId,
+      "deviceId",
+      "x-device-id",
+      "guest_session",
+      "guest_session_resume",
+      "cookie",
+      "token",
+      "RAW_QUERY_PROMPT_SENTINEL",
+      "RAW_HEADER_PROMPT_SENTINEL",
+      "RAW_BODY_PROMPT_SENTINEL",
+      ...rawSelectorRequests.map(({ request }) => JSON.stringify(request.payload)),
+    ]);
   });
 
   it("logs authenticated Home CTA option events with intent and promptKey only", async () => {
@@ -135,7 +240,14 @@ describe("Observability API", () => {
     assert.equal(eventLogs[0]?.intent, "quick_log");
     assert.equal(eventLogs[0]?.promptKey, "describe_meal");
 
-    const serialized = JSON.stringify(eventLogs[0]);
+    const { level, time, pid, hostname, reqId, msg, ...eventMetadata } = eventLogs[0] ?? {};
+    assert.deepEqual(eventMetadata, {
+      event: "home_cta_option_sent",
+      intent: "quick_log",
+      promptKey: "describe_meal",
+    });
+
+    const serialized = JSON.stringify(eventMetadata);
     assert.doesNotMatch(serialized, /"prompt"/);
     assert.doesNotMatch(serialized, /assistant reply text/);
     assert.doesNotMatch(serialized, /imagePath/);

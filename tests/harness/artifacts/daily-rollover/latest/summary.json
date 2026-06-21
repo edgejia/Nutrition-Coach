@@ -1,0 +1,16 @@
+{
+  "scenarioName": "daily-rollover",
+  "ok": true,
+  "consoleSummary": "PASS daily-rollover 6/6",
+  "totalSteps": 6,
+  "passedSteps": 6,
+  "stepNames": [
+    "bootstrap",
+    "seed_midnight_meals",
+    "verify_before_midnight_summary",
+    "verify_after_midnight_summary",
+    "subscribe_summary",
+    "verify_artifacts"
+  ],
+  "writtenAt": "2026-06-21T09:41:44.026Z"
+}

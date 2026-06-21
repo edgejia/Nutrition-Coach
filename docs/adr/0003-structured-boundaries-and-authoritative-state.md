@@ -30,3 +30,5 @@ The app needs to keep chat-first logging easy while making persisted targets, cl
 ## Verification
 
 v2.5 Phase 69-73 verification covers provider structured output, onboarding target generation fallback, DTO guard behavior, route/service public DTO shape, atomic receipt persistence, structured compressed history, production guest-secret/CORS hardening, route fallback redaction, metadata-only evidence, `yarn tsc --noEmit`, and `yarn release:check`.
+
+v3.0.1 Phase 97 verification extends the same boundary to streaming terminals: server fallback/error `done.replyText` is authoritative, client parsing string-guards the field, Zustand replaces provisional partial text instead of appending it, and integration proof verifies persisted/terminal fallback text convergence without raw stream transcript artifacts.

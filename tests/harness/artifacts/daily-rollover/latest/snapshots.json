@@ -1,0 +1,54 @@
+{
+  "seededMealTimestamps": {
+    "beforeMidnight": "2026-03-25T15:59:00.000Z",
+    "afterMidnight": "2026-03-25T16:01:00.000Z"
+  },
+  "beforeMidnightSummary": {
+    "totalCalories": 100,
+    "totalProtein": 10,
+    "totalCarbs": 12,
+    "totalFat": 3,
+    "mealCount": 1,
+    "date": "2026-03-25"
+  },
+  "afterMidnightSummary": {
+    "totalCalories": 200,
+    "totalProtein": 20,
+    "totalCarbs": 24,
+    "totalFat": 6,
+    "mealCount": 1,
+    "date": "2026-03-26"
+  },
+  "initialSseSummary": {
+    "totalCalories": 0,
+    "totalProtein": 0,
+    "totalCarbs": 0,
+    "totalFat": 0,
+    "mealCount": 0,
+    "date": "2026-06-21"
+  },
+  "initialSseSummaryExpectedDate": "2026-06-21",
+  "mutationRouteSummary": {
+    "affectedDate": "2026-03-26",
+    "summary": {
+      "totalCalories": 210,
+      "totalProtein": 21,
+      "totalCarbs": 25,
+      "totalFat": 7,
+      "mealCount": 1,
+      "date": "2026-03-26"
+    }
+  },
+  "mutationSseSummary": {
+    "source": "meal_mutation",
+    "affectedDate": "2026-03-26",
+    "summary": {
+      "totalCalories": 210,
+      "totalProtein": 21,
+      "totalCarbs": 25,
+      "totalFat": 7,
+      "mealCount": 1,
+      "date": "2026-03-26"
+    }
+  }
+}
