@@ -375,4 +375,30 @@ describe("connectSSE", () => {
 
     assert.deepEqual(receivedTargets, [targets]);
   });
+
+  it("models browser readyState constants and closed state", () => {
+    const ReadyStateEventSource = FakeEventSource as typeof FakeEventSource & {
+      CONNECTING?: number;
+      OPEN?: number;
+      CLOSED?: number;
+    };
+
+    assert.equal(ReadyStateEventSource.CONNECTING, 0);
+    assert.equal(ReadyStateEventSource.OPEN, 1);
+    assert.equal(ReadyStateEventSource.CLOSED, 2);
+
+    sse.connectSSE("device-1", {
+      onSummary: () => undefined,
+      onGoalsUpdate: () => undefined,
+    });
+
+    const es = FakeEventSource.instances[0] as FakeEventSource & { readyState?: number };
+    assert.ok(es);
+    assert.equal(es.readyState, ReadyStateEventSource.OPEN);
+
+    es.close();
+
+    assert.equal(es.closed, true);
+    assert.equal(es.readyState, ReadyStateEventSource.CLOSED);
+  });
 });
