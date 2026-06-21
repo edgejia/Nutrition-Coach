@@ -1349,6 +1349,7 @@ async function handleOrchestratorSSE(
         turnId: stopControl.turnId,
         didLogMeal: streamDidLogMeal,
         didMutateMeal: streamDidMutateMeal,
+        ...(streamResult.finalReplySource === "fallback" ? { replyText: streamResult.fullReply } : {}),
         ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
         ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),
@@ -1448,6 +1449,9 @@ async function handleOrchestratorSSE(
         turnId: stopControl.turnId,
         didLogMeal,
         didMutateMeal: streamDidMutateMeal,
+        ...(result.fallbackOutcomeContext || result.finalReplySource === "fallback"
+          ? { replyText: sanitizedFallback }
+          : {}),
         ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
         ...(dailySummary ? { dailySummary } : {}),
         ...(summaryOutcome ? { summaryOutcome } : {}),
@@ -1491,6 +1495,7 @@ async function handleOrchestratorSSE(
       streamDidMutateMeal ? "partial_success" : "llm_error",
     );
     let sanitizedCatchError = providerFallback ? {} : sanitizeRouteCatchError(error);
+    let terminalReplyText = "";
     recorder?.recordFinalReply({ source: "fallback", shape: "fallback_text" });
     try {
       if (!userMessagePersisted) {
@@ -1514,6 +1519,7 @@ async function handleOrchestratorSSE(
         },
       );
       const sanitizedFallback = finalized.sanitized;
+      terminalReplyText = sanitizedFallback;
       streamReceiptPersistence = finalized.receiptPersistence;
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: sanitizedFallback })}\n\n`);
     } catch (persistError) {
@@ -1527,6 +1533,7 @@ async function handleOrchestratorSSE(
         : streamDidMutateMeal
           ? PARTIAL_MUTATION_FALLBACK
           : UNIFIED_FALLBACK;
+      terminalReplyText = closedFallback;
       // If history persistence also fails, still close the stream with done.
       stream.write(`event: chunk\ndata: ${JSON.stringify({ token: closedFallback })}\n\n`);
     }
@@ -1535,6 +1542,7 @@ async function handleOrchestratorSSE(
       turnId: stopControl.turnId,
       didLogMeal: streamDidLogMeal,
       didMutateMeal: streamDidMutateMeal,
+      replyText: terminalReplyText,
       ...(canProjectStreamReceipt && streamLoggedMealReceipt ? { loggedMeal: streamLoggedMealReceipt } : {}),
       ...(streamDailySummary ? { dailySummary: streamDailySummary } : {}),
       ...(streamSummaryOutcome ? { summaryOutcome: streamSummaryOutcome } : {}),

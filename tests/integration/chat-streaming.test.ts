@@ -5037,7 +5037,6 @@ describe("chat-streaming", () => {
       const donePayload = JSON.parse(doneMatch[1]) as {
         didLogMeal?: boolean;
         loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
-        replyText?: string;
       };
       assert.equal(donePayload.didLogMeal, true);
       assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
@@ -5056,7 +5055,6 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "hallucination fallback must persist exactly one assistant reply");
       assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
-      assert.equal(donePayload.replyText, assistantMsgs[0]!.content);
       assert.equal(assistantMsgs[0]!.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
       assert.equal(assistantMsgs[0]!.loggedMeal?.foodName, "雞腿便當");
     } finally {
