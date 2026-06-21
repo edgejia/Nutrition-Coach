@@ -7,6 +7,53 @@ import {
   isGoalsUpdatePayloadDto,
 } from "../../client/src/dto-guards.js";
 
+const storage = new Map<string, string>();
+globalThis.localStorage = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    storage.set(key, value);
+  },
+  removeItem: (key: string) => {
+    storage.delete(key);
+  },
+  clear: () => {
+    storage.clear();
+  },
+  get length() {
+    return storage.size;
+  },
+  key: (index: number) => [...storage.keys()][index] ?? null,
+} as Storage;
+
+const originalFetch = globalThis.fetch;
+const defaultTargets: DailyTargets = {
+  calories: 1800,
+  protein: 130,
+  carbs: 200,
+  fat: 60,
+};
+const recoveryFetchCalls: { url: string; init?: RequestInit }[] = [];
+let recoveryShouldSucceed = true;
+
+function installRecoveryFetchStub() {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    recoveryFetchCalls.push({ url, init });
+    if (url === "/api/device/session" && init?.method === "POST") {
+      if (!recoveryShouldSucceed) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 });
+      }
+      return Response.json({
+        deviceId: "device-recovered",
+        goal: "maintain",
+        dailyTargets: defaultTargets,
+        establishedBy: "resume",
+      });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+}
+
 // -----------------------------------------------------------------------------
 // FakeEventSource — minimal EventSource shim that captures `addEventListener`
 // registrations so tests can synthesize SSE events deterministically without
@@ -16,11 +63,15 @@ import {
 type FakeEventHandler = (event: MessageEvent<string>) => void;
 
 class FakeEventSource {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSED = 2;
   static instances: FakeEventSource[] = [];
   public url: string;
   public listeners = new Map<string, FakeEventHandler[]>();
-  public onerror: (() => void) | null = null;
+  public onerror: ((event?: Event) => void) | null = null;
   public closed = false;
+  public readyState = FakeEventSource.OPEN;
 
   constructor(url: string) {
     this.url = url;
@@ -43,6 +94,12 @@ class FakeEventSource {
 
   close() {
     this.closed = true;
+    this.readyState = FakeEventSource.CLOSED;
+  }
+
+  failWithReadyState(state: number) {
+    this.readyState = state;
+    this.onerror?.(new Event("error"));
   }
 
   // Test-only emitter mirroring the real EventSource dispatch behavior for a
@@ -63,15 +120,32 @@ class FakeEventSource {
 (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
 
 const sse = await import("../../client/src/sse.js");
+const { useStore } = await import("../../client/src/store.js");
 
 describe("connectSSE", () => {
   beforeEach(() => {
     FakeEventSource.instances = [];
+    storage.clear();
+    recoveryFetchCalls.length = 0;
+    recoveryShouldSucceed = true;
+    installRecoveryFetchStub();
+    storage.set("deviceId", "device-1");
+    storage.set("goal", "maintain");
+    storage.set("dailyTargets", JSON.stringify(defaultTargets));
+    useStore.setState({
+      deviceId: "device-1",
+      goal: "maintain",
+      activeScreen: "home",
+      guestSessionStatus: "ready",
+      guestSessionRecoveryAttempted: false,
+      dailyTargets: defaultTargets,
+    });
     sse.disconnectSSE();
   });
 
   afterEach(() => {
     sse.disconnectSSE();
+    globalThis.fetch = originalFetch;
   });
 
   const summaryForDate = (date: string): DailySummary => ({
@@ -377,28 +451,50 @@ describe("connectSSE", () => {
   });
 
   it("models browser readyState constants and closed state", () => {
-    const ReadyStateEventSource = FakeEventSource as typeof FakeEventSource & {
-      CONNECTING?: number;
-      OPEN?: number;
-      CLOSED?: number;
-    };
-
-    assert.equal(ReadyStateEventSource.CONNECTING, 0);
-    assert.equal(ReadyStateEventSource.OPEN, 1);
-    assert.equal(ReadyStateEventSource.CLOSED, 2);
+    assert.equal(FakeEventSource.CONNECTING, 0);
+    assert.equal(FakeEventSource.OPEN, 1);
+    assert.equal(FakeEventSource.CLOSED, 2);
 
     sse.connectSSE("device-1", {
       onSummary: () => undefined,
       onGoalsUpdate: () => undefined,
     });
 
-    const es = FakeEventSource.instances[0] as FakeEventSource & { readyState?: number };
+    const es = FakeEventSource.instances[0];
     assert.ok(es);
-    assert.equal(es.readyState, ReadyStateEventSource.OPEN);
+    assert.equal(es.readyState, FakeEventSource.OPEN);
 
     es.close();
 
     assert.equal(es.closed, true);
-    assert.equal(es.readyState, ReadyStateEventSource.CLOSED);
+    assert.equal(es.readyState, FakeEventSource.CLOSED);
+  });
+
+  it("controls guest-session recovery with a deterministic fetch stub", async () => {
+    const recovered = await useStore.getState().recoverGuestSession();
+
+    assert.equal(recovered, true);
+    assert.equal(recoveryFetchCalls.length, 1);
+    assert.equal(recoveryFetchCalls[0]?.url, "/api/device/session");
+    assert.equal(useStore.getState().deviceId, "device-recovered");
+    assert.equal(useStore.getState().guestSessionStatus, "ready");
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, true);
+  });
+
+  it("does not recover or resubscribe while EventSource is CONNECTING", () => {
+    sse.connectSSE("device-1", {
+      onSummary: () => undefined,
+      onGoalsUpdate: () => undefined,
+    });
+
+    const es = FakeEventSource.instances[0];
+    assert.ok(es);
+
+    es.failWithReadyState(FakeEventSource.CONNECTING);
+
+    assert.equal(recoveryFetchCalls.length, 0);
+    assert.equal(FakeEventSource.instances.length, 1);
+    assert.equal(useStore.getState().guestSessionStatus, "ready");
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, false);
   });
 });
