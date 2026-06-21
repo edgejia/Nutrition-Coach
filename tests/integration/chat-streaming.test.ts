@@ -644,7 +644,11 @@ describe("chat-streaming", () => {
         completed: true,
       });
 
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: unknown;
+      };
+      assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "replyText"), false);
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
       const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
       assert.equal(completedEvents.length, 1);
@@ -828,7 +832,10 @@ describe("chat-streaming", () => {
       assert.ok(latencyMs !== undefined);
       assert.equal(typeof latencyMs, "number");
       assert.ok(latencyMs >= 0);
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.deepEqual(trace.timeline.at(-1), {
         type: "route_fallback",
         transport: "sse",
@@ -848,6 +855,7 @@ describe("chat-streaming", () => {
       const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
       assert.equal(assistantMessages.length, 1);
       assert.match(assistantMessages[0]!.content, /這次無法完成請求/);
+      assert.equal(donePayload.replyText, assistantMessages[0]!.content);
     } finally {
       clearTimeout(timeout);
     }
@@ -1674,7 +1682,10 @@ describe("chat-streaming", () => {
 
       assert.ok(res.body);
       const text = await readStreamUntil(res.body.getReader(), "event: done");
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.match(donePayload.turnId ?? "", UUID_PATTERN);
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
@@ -1696,6 +1707,14 @@ describe("chat-streaming", () => {
       assert.equal(routeFallbacks[0]!.reason, "llm_error");
       assert.deepEqual(routeFallbacks[0]!.providerMetadata, providerMetadataFixture);
       assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1);
+      assert.equal(donePayload.replyText, assistantMessages[0]!.content);
     } finally {
       clearTimeout(timeout);
     }
@@ -1722,7 +1741,10 @@ describe("chat-streaming", () => {
       const text = await readStreamUntil(res.body.getReader(), "event: done");
       const events = parseSSEEvents(text);
       assert.equal(events.filter((event) => event.event === "done").length, 1);
-      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.match(donePayload.turnId ?? "", UUID_PATTERN);
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
@@ -1746,6 +1768,13 @@ describe("chat-streaming", () => {
         && JSON.stringify(event.providerMetadata) === JSON.stringify(providerMetadataFixture)
       ));
       assert.equal(routeFallbacks.length, 1);
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1);
+      assert.equal(donePayload.replyText, assistantMessages[0]!.content);
       assert.equal(routeFallbacks[0]!.transport, "sse");
       assert.equal(routeFallbacks[0]!.turnId, donePayload.turnId);
       assert.equal(routeFallbacks[0]!.fallbackSource, "orchestrator");
@@ -3548,7 +3577,11 @@ describe("chat-streaming", () => {
 
       const doneMatch = text.match(/event: done\s+data: (.+)/);
       assert.ok(doneMatch, "expected done event");
-      const donePayload = JSON.parse(doneMatch[1]) as { didLogMeal: boolean; turnId?: string };
+      const donePayload = JSON.parse(doneMatch[1]) as {
+        didLogMeal: boolean;
+        turnId?: string;
+        replyText?: string;
+      };
       assert.equal(donePayload.didLogMeal, false);
 
       const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
@@ -3558,6 +3591,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "exactly one assistant reply expected");
       assert.match(assistantMsgs[0]!.content, /無法辨識這次的請求/);
+      assert.equal(donePayload.replyText, assistantMsgs[0]!.content);
 
       const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
       assert.deepEqual(trace.summary.finalReply, {
@@ -4165,8 +4199,12 @@ describe("chat-streaming", () => {
 
       assert.ok(res.body);
       const text = await readStreamUntil(res.body.getReader(), "event: done");
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.match(donePayload.turnId ?? "", UUID_PATTERN);
+      assert.equal(donePayload.replyText, "抱歉，這次無法完成請求，請稍後再試或補充描述。");
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
       const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
@@ -4233,8 +4271,12 @@ describe("chat-streaming", () => {
 
       assert.ok(res.body);
       const text = await readStreamUntil(res.body.getReader(), "event: done");
-      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as { turnId?: string };
+      const donePayload = JSON.parse(parseSSEEvents(text).find((event) => event.event === "done")!.data) as {
+        turnId?: string;
+        replyText?: string;
+      };
       assert.match(text, /event: done/);
+      assert.equal(donePayload.replyText, "抱歉，這次無法完成請求，請稍後再試或補充描述。");
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
       const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
@@ -4254,6 +4296,16 @@ describe("chat-streaming", () => {
       assert.equal(routeFallbacks[0]!.catchSite, "sse_persist");
       assert.equal(routeFallbacks[0]!.errorMessage, "SsePersistSafeFailure");
       assert.equal(trace.timeline.some((event) => event.type === "route_completion"), false);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+      assert.equal(
+        historyJson.messages.filter((message) => message.role === "assistant").length,
+        0,
+        "sse_persist closed fallback is terminal-only when assistant persistence fails",
+      );
     } finally {
       services.chatService.getCompressedHistory = originalGetCompressedHistory;
       services.chatService.saveMessage = originalSaveMessage;
@@ -4876,6 +4928,22 @@ describe("chat-streaming", () => {
       const reader = res.body.getReader();
       const text = await readStreamUntil(reader, "event: done");
       const events = parseSSEEvents(text);
+      const doneIndex = events.findIndex((event) => event.event === "done");
+      assert.ok(doneIndex >= 0, "stream failure after log_food must emit terminal done");
+      assert.equal(events.filter((event) => event.event === "done").length, 1);
+      assert.equal(
+        events.some((event, index) => index < doneIndex && event.event === "chunk" && event.data.includes("模型部分回覆")),
+        true,
+        "stream failure proof must observe a partial chunk before done",
+      );
+      assert.deepEqual(
+        events
+          .slice(doneIndex + 1)
+          .map((event) => event.event)
+          .filter((eventName) => eventName === "chunk" || eventName === "status"),
+        [],
+        "stream failure must not emit chunk/status after terminal done",
+      );
 
       const donePayload = JSON.parse(events.find((event) => event.event === "done")!.data) as {
         turnId?: string;
@@ -4883,6 +4951,7 @@ describe("chat-streaming", () => {
         didMutateMeal?: boolean;
         dailySummary?: { date?: string };
         loggedMeal?: { mealId?: string; foodName?: string };
+        replyText?: string;
       };
       assert.match(donePayload.turnId ?? "", UUID_PATTERN);
       assert.equal(donePayload.didLogMeal, true, "stream failure after log_food must preserve didLogMeal");
@@ -4905,6 +4974,8 @@ describe("chat-streaming", () => {
       assert.match(assistantMsgs[0]!.content, /已完成記錄，但回覆生成失敗/);
       assert.match(assistantMsgs[0]!.content, /蛋白質先按雞腿作為主要來源估算/);
       assert.doesNotMatch(assistantMsgs[0]!.content, /模型部分回覆/);
+      assert.equal(donePayload.replyText, assistantMsgs[0]!.content);
+      assert.doesNotMatch(donePayload.replyText ?? "", /模型部分回覆/);
 
       const completedEvents = observabilityEvents(logLines, "chat_turn_completed");
       const fallbackEvents = observabilityEvents(logLines, "chat_route_fallback");
@@ -4966,6 +5037,7 @@ describe("chat-streaming", () => {
       const donePayload = JSON.parse(doneMatch[1]) as {
         didLogMeal?: boolean;
         loggedMeal?: { mealId?: string; foodName?: string; imageAssetId?: string | null };
+        replyText?: string;
       };
       assert.equal(donePayload.didLogMeal, true);
       assert.match(donePayload.loggedMeal?.mealId ?? "", /^[0-9a-f-]{36}$/);
@@ -4984,6 +5056,7 @@ describe("chat-streaming", () => {
       const assistantMsgs = historyJson.messages.filter((m) => m.role === "assistant");
       assert.equal(assistantMsgs.length, 1, "hallucination fallback must persist exactly one assistant reply");
       assert.match(assistantMsgs[0]!.content, /已記錄雞腿便當/);
+      assert.equal(donePayload.replyText, assistantMsgs[0]!.content);
       assert.equal(assistantMsgs[0]!.loggedMeal?.mealId, donePayload.loggedMeal?.mealId);
       assert.equal(assistantMsgs[0]!.loggedMeal?.foodName, "雞腿便當");
     } finally {
