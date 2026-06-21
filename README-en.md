@@ -141,7 +141,7 @@ yarn test:unit
 # Integration tests
 yarn test:integration
 
-# Full test suite
+# Unit + integration tests
 yarn test
 
 # Release gate
@@ -182,19 +182,19 @@ Deployment-only overrides:
 
 ## Deploying
 
-Build the client:
+Build and run the same-origin production-mode server:
 
 ```bash
-yarn install && yarn build
+yarn install --frozen-lockfile
+yarn release:check
+yarn build
+yarn db:migrate
+yarn start
 ```
 
-Run migrations and start the server:
+In a deployed environment, one Fastify process serves both the API and `dist/client`. Use persistent storage for SQLite and durable assets, and set `NODE_ENV=production`, `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `DB_PATH`, `TZ`, and `GUEST_SESSION_SECRET`.
 
-```bash
-yarn db:migrate && yarn start
-```
-
-In a deployed environment, one Fastify process serves both the API and `dist/client`. Use persistent storage for SQLite and durable assets, and set `NODE_ENV=production`, `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `DB_PATH`, `TZ`, and `GUEST_SESSION_SECRET`. The current production runtime is a local production-mode server exposed through Cloudflare Tunnel; see [docs/deploy/cloudflare-tunnel.md](docs/deploy/cloudflare-tunnel.md). The Railway baseline is archived as historical context.
+This repo does not define a permanent public demo URL. For public smoke checks, run the local production-mode server through Cloudflare Tunnel; see [docs/deploy/cloudflare-tunnel.md](docs/deploy/cloudflare-tunnel.md). The Railway baseline is archived as historical context.
 
 ## Public Docs
 

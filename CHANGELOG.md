@@ -1,5 +1,25 @@
 # 更新日誌
 
+## v3.0.1 - 2026-06-21
+
+### 變更
+
+- Protected browser/API routes now share one cookie-derived ownership boundary; raw `deviceId`, query, body, and `x-device-id` selectors fail closed before protected handlers can use them.
+- Guest-session cookies now carry a server-side session version, and logout/session reset bumps the device session epoch so copied or stale resume cookies can be invalidated before natural expiry.
+- Streaming reply sanitization now uses one shared policy for finalized replies and emitted SSE chunks, so split `(n/n)` counters cannot leak across adjacent stream chunks.
+- Browser `/api/sse` clients now recover only after permanent `EventSource.CLOSED` states through the existing guest-session recovery path; transient `CONNECTING` remains browser-managed.
+- Chat fallback/error stream terminals now emit authoritative `done.replyText`, and the client replaces provisional partial text instead of appending duplicate fallback copy.
+- `daily-rollover` harness proof now asserts the exact current Asia/Taipei SSE date instead of accepting any string.
+
+### 驗證
+
+- Phase 95-97 verification passed: Ownership Boundary PreHandler `22/22`, Guest Session Revocation `21/21`, and Streaming/SSE Terminal Proof `21/21`.
+- v3.0.1 milestone audit passed `11/11` scoped requirements with `3/3` phases, `5/5` integration checks, `5/5` E2E flows, and compliant Nyquist coverage.
+- Deterministic harness evidence passed for `guest-session-hardening` and `daily-rollover`; generated artifacts remain metadata-only.
+- Closeout pre-check passed with only transient `.planning/research/.cache` hygiene to clear during archive.
+- `yarn release:check` passed: TypeScript, `1,710` node tests, and frontend production build.
+- v3.0.1 closeout remains source/PR-ready only; no `main` merge, tag movement, Cloudflare Tunnel change, public smoke, or production runtime refresh was performed.
+
 ## v2.10 - 2026-06-18
 
 ### 變更
