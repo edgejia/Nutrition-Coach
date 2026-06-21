@@ -43,6 +43,30 @@ describe("SSE terminal proof", () => {
     assert.ok(proof.evidence.rawLength > 0);
   });
 
+  test("passes a partial stream followed by authoritative replyText done", async () => {
+    const fallbackText = "目前回覆不完整，請稍後再試一次。";
+    const collection = await readStreamThroughClose(
+      streamFromFrames([
+        'event: chunk\ndata: {"token":"模型部分回覆"}\n\n',
+        `event: done\ndata: ${JSON.stringify({ replyText: fallbackText })}\n\n`,
+      ]).getReader(),
+      { maxReads: 10, readTimeoutMs: 1000 },
+    );
+
+    const proof = assertSSETerminalProof(collection);
+    const doneEvent = collection.events.find((event) => event.event === "done");
+    const doneData = JSON.parse(doneEvent?.data ?? "{}") as { replyText?: unknown };
+
+    assert.equal(proof.ok, true);
+    assert.equal(proof.evidence.closed, true);
+    assert.equal(proof.evidence.firstDoneObserved, true);
+    assert.equal(proof.evidence.firstDoneIndex, 1);
+    assert.equal(proof.evidence.noPostDoneChunkOrStatus, true);
+    assert.equal(proof.evidence.nonEmptyChunkBeforeDone, true);
+    assert.deepEqual(proof.evidence.postDoneEventNames, []);
+    assert.equal(doneData.replyText, fallbackText);
+  });
+
   test("fails a post-done chunk terminal violation", async () => {
     const collection = await readStreamThroughClose(
       streamFromFrames([
