@@ -27,5 +27,28 @@
     "mealCount": 0,
     "date": "2026-06-21"
   },
-  "initialSseSummaryExpectedDate": "2026-06-21"
+  "initialSseSummaryExpectedDate": "2026-06-21",
+  "mutationRouteSummary": {
+    "affectedDate": "2026-03-26",
+    "summary": {
+      "totalCalories": 210,
+      "totalProtein": 21,
+      "totalCarbs": 25,
+      "totalFat": 7,
+      "mealCount": 1,
+      "date": "2026-03-26"
+    }
+  },
+  "mutationSseSummary": {
+    "source": "meal_mutation",
+    "affectedDate": "2026-03-26",
+    "summary": {
+      "totalCalories": 210,
+      "totalProtein": 21,
+      "totalCarbs": 25,
+      "totalFat": 7,
+      "mealCount": 1,
+      "date": "2026-03-26"
+    }
+  }
 }

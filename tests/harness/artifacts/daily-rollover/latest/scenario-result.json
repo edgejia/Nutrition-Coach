@@ -44,8 +44,24 @@
       "name": "subscribe_summary",
       "ok": true,
       "actual": {
-        "actualDate": "2026-06-21",
-        "expectedDate": "2026-06-21"
+        "initial": {
+          "source": "initial",
+          "affectedDate": "2026-06-21",
+          "actualDate": "2026-06-21",
+          "expectedDate": "2026-06-21"
+        },
+        "mutation": {
+          "source": "meal_mutation",
+          "affectedDate": "2026-03-26",
+          "summary": {
+            "totalCalories": 210,
+            "totalProtein": 21,
+            "totalCarbs": 25,
+            "totalFat": 7,
+            "mealCount": 1,
+            "date": "2026-03-26"
+          }
+        }
       }
     },
     {
@@ -57,7 +73,9 @@
           "beforeMidnightSummary",
           "afterMidnightSummary",
           "initialSseSummary",
-          "initialSseSummaryExpectedDate"
+          "initialSseSummaryExpectedDate",
+          "mutationRouteSummary",
+          "mutationSseSummary"
         ]
       }
     }
@@ -91,7 +109,30 @@
       "mealCount": 0,
       "date": "2026-06-21"
     },
-    "initialSseSummaryExpectedDate": "2026-06-21"
+    "initialSseSummaryExpectedDate": "2026-06-21",
+    "mutationRouteSummary": {
+      "affectedDate": "2026-03-26",
+      "summary": {
+        "totalCalories": 210,
+        "totalProtein": 21,
+        "totalCarbs": 25,
+        "totalFat": 7,
+        "mealCount": 1,
+        "date": "2026-03-26"
+      }
+    },
+    "mutationSseSummary": {
+      "source": "meal_mutation",
+      "affectedDate": "2026-03-26",
+      "summary": {
+        "totalCalories": 210,
+        "totalProtein": 21,
+        "totalCarbs": 25,
+        "totalFat": 7,
+        "mealCount": 1,
+        "date": "2026-03-26"
+      }
+    }
   },
   "consoleSummary": "PASS daily-rollover 6/6"
 }
