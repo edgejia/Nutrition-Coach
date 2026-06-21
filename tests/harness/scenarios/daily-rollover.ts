@@ -8,6 +8,7 @@
 import { createScenarioApp } from "../app-fixture.js";
 import { parseSSEEvents, readStreamUntilEvent } from "../sse.js";
 import type { VerificationScenario, ScenarioContext, ScenarioResult, ScenarioStepResult } from "../scenario-types.js";
+import { currentAppDate, formatLocalDate } from "../../../server/lib/time.js";
 
 interface DailySummaryEnvelope {
   summary?: { date?: unknown };
@@ -164,12 +165,19 @@ const dailyRolloverScenario: VerificationScenario = {
         }
 
         const initialSummary = parseDailySummaryDate(summaryEvent.data);
+        const expectedSseDate = formatLocalDate(currentAppDate());
         artifacts.initialSseSummary = initialSummary;
-        if (typeof initialSummary.date !== "string") {
-          steps.push(fail("subscribe_summary", "Initial SSE daily_summary did not include date", initialSummary));
+        artifacts.initialSseSummaryExpectedDate = expectedSseDate;
+        const dateEvidence = { actualDate: initialSummary.date, expectedDate: expectedSseDate };
+        if (initialSummary.date !== expectedSseDate) {
+          steps.push(fail(
+            "subscribe_summary",
+            "Initial SSE daily_summary date did not match the current Asia/Taipei local date",
+            dateEvidence,
+          ));
           return failResult(scenarioName, steps, "subscribe_summary", artifacts);
         }
-        steps.push(pass("subscribe_summary", { date: initialSummary.date }));
+        steps.push(pass("subscribe_summary", dateEvidence));
       } catch (err) {
         steps.push(fail("subscribe_summary", err instanceof Error ? err.message : String(err)));
         return failResult(scenarioName, steps, "subscribe_summary", artifacts);
@@ -181,6 +189,7 @@ const dailyRolloverScenario: VerificationScenario = {
           "beforeMidnightSummary",
           "afterMidnightSummary",
           "initialSseSummary",
+          "initialSseSummaryExpectedDate",
         ];
         const missing = requiredArtifactKeys.filter((key) => !(key in artifacts));
         if (missing.length > 0) {
