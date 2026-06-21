@@ -395,6 +395,45 @@ describe("chat stream contract", () => {
     assert.equal(message?.loggedMeal?.dateKey, "2026-03-25");
   });
 
+  it("commitProvisionalBubble replaces partial stream text with terminal replyText", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "bubble-replaced",
+      statusLabel: "",
+      content: "模型部分回覆",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      replyText: "已完成記錄，但回覆生成失敗",
+      status: "error",
+      turnId: "turn-replaced",
+    });
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message?.content, "已完成記錄，但回覆生成失敗");
+    assert.doesNotMatch(message?.content ?? "", /模型部分回覆/);
+    assert.equal(message?.status, "error");
+    assert.equal(message?.turnId, "turn-replaced");
+    assert.equal(useStore.getState().provisionalBubble, null);
+  });
+
+  it("commitProvisionalBubble preserves accumulated provisional content when replyText is absent", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "bubble-happy-path",
+      statusLabel: "",
+      content: "正常串流回覆",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+    });
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message?.content, "正常串流回覆");
+  });
+
   it("commitStoppedProvisionalBubble preserves partial text without appending stopped copy", () => {
     const todayKey = formatLocalDate(new Date());
     useStore.getState().setProvisionalBubble({
@@ -437,6 +476,25 @@ describe("chat stream contract", () => {
     assert.equal(message?.loggedMeal?.foodName, "雞腿便當");
     assert.equal(useStore.getState().dailySummary?.totalCalories, 720);
     assert.equal(useStore.getState().provisionalBubble, null);
+  });
+
+  it("commitStoppedProvisionalBubble ignores replyText and preserves partial stopped text", () => {
+    useStore.getState().setProvisionalBubble({
+      id: "bubble-stopped-reply-text",
+      statusLabel: "",
+      content: "已串流的停止內容",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitStoppedProvisionalBubble({
+      didLogMeal: false,
+      replyText: "不應覆蓋停止內容",
+    });
+
+    const message = useStore.getState().messages[0];
+    assert.equal(message?.status, "stopped");
+    assert.equal(message?.content, "已串流的停止內容");
+    assert.doesNotMatch(message?.content ?? "", /不應覆蓋/);
   });
 
   it("commitStoppedProvisionalBubble uses empty stopped copy when no text streamed", () => {
@@ -496,11 +554,13 @@ describe("chat stream contract", () => {
       assert.match(chatPanel, new RegExp(expected));
     }
 
-    assert.match(chatPanel, /onDone: \(\{[^}]*turnId[^}]*\}\) =>/);
+    assert.match(chatPanel, /onDone: \(\{[^}]*replyText[^}]*turnId[^}]*\}\) =>/);
     assert.match(chatPanel, /onStopped: \(\{[^}]*turnId[^}]*\}\) =>/);
-    assert.match(chatPanel, /const content = useStore\.getState\(\)\.provisionalBubble\?\.content \?\? ""/);
+    assert.match(chatPanel, /const provisionalContent = useStore\.getState\(\)\.provisionalBubble\?\.content \?\? ""/);
+    assert.match(chatPanel, /const content = replyText \?\? provisionalContent/);
     assert.match(chatPanel, /const isFallbackReply = isFallbackReplyContent\(content\)/);
     assert.match(chatPanel, /const fallbackTurnId = turnId \?\? activeTurnIdRef\.current/);
+    assert.match(chatPanel, /replyText,/);
     assert.match(chatPanel, /\.\.\.\(isFallbackReply \? \{ status: "error" as const \} : \{\}\)/);
     assert.match(chatPanel, /\.\.\.\(isFallbackReply && fallbackTurnId \? \{ turnId: fallbackTurnId \} : \{\}\)/);
     assert.match(chatPanel, /\.\.\.\(turnId \? \{ turnId \} : \{\}\)/);
