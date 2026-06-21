@@ -542,6 +542,7 @@ export function ChatPanel() {
             deletedMealId,
             proposalCard,
             proposalActionEvent,
+            replyText,
             turnId,
           }) => {
             if (useStore.getState().deviceId !== activeDeviceId) return;
@@ -557,7 +558,8 @@ export function ChatPanel() {
             if (didLogMeal || didMutateMeal) {
               void refreshTodayMeals();
             }
-            const content = useStore.getState().provisionalBubble?.content ?? "";
+            const provisionalContent = useStore.getState().provisionalBubble?.content ?? "";
+            const content = replyText ?? provisionalContent;
             const isFallbackReply = isFallbackReplyContent(content);
             const fallbackTurnId = turnId ?? activeTurnIdRef.current;
             commitProvisionalBubble({
@@ -567,6 +569,7 @@ export function ChatPanel() {
               deletedMealId,
               proposalCard,
               proposalActionEvent,
+              replyText,
               ...(isFallbackReply ? { status: "error" as const } : {}),
               ...(isFallbackReply && fallbackTurnId ? { turnId: fallbackTurnId } : {}),
             });
