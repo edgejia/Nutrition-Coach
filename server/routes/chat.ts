@@ -31,6 +31,7 @@ import {
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { normalizeMealPeriod } from "../lib/meal-period.js";
+import { createStreamingSanitizer, sanitizeReply } from "../lib/reply-sanitizer.js";
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { SummaryOutcome } from "../services/summary-outcome.js";
@@ -95,14 +96,6 @@ const IMAGE_FORMAT_BY_MIME_TYPE = new Map([
   ["image/webp", "webp"],
 ]);
 const MAX_DECODED_IMAGE_PIXELS = 40_000_000;
-const SENSITIVE_IDENTIFIERS = [
-  "log_food",
-  "get_daily_summary",
-  "protein_sources",
-  "usedConservativeAssumption",
-  "quantityUncertaintyReason",
-  "missing_quantity",
-];
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
@@ -309,19 +302,6 @@ export function fanOutOrchestratorHooks(
   };
 }
 
-// Last-gate filter: strip internal tool identifiers even when the model ignores
-// the system prompt rule. Applied to every reply before DB write and client emit.
-function sanitizeReply(text: string): string {
-  return text
-    .replace(/log_food/g, "完成記錄")
-    .replace(/get_daily_summary/g, "查詢今日攝取")
-    .replace(/protein_sources/g, "蛋白質來源")
-    .replace(/usedConservativeAssumption/g, "保守假設")
-    .replace(/quantityUncertaintyReason/g, "份量不確定原因")
-    .replace(/missing_quantity/g, "缺少份量")
-    .replace(/[（(]\s*\d+\s*\/\s*\d+\s*[）)]/g, "");
-}
-
 function formatHistoricalDateLabel(dateKey: string, currentDate = currentAppDate()): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
   if (!match) {
@@ -491,41 +471,6 @@ async function finalizeAssistantReply(
       receiptPersistence: "failed_closed",
     };
   }
-}
-
-function createStreamingSanitizer() {
-  let tail = "";
-
-  return {
-    push(token: string): string {
-      tail += token;
-      const endsWithCompleteIdentifier = SENSITIVE_IDENTIFIERS.some((identifier) => tail.endsWith(identifier));
-      const overlapLength = endsWithCompleteIdentifier
-        ? 0
-        : SENSITIVE_IDENTIFIERS.reduce((maxOverlap, identifier) => {
-          for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
-            if (tail.endsWith(identifier.slice(0, prefixLength))) {
-              return Math.max(maxOverlap, prefixLength);
-            }
-          }
-
-          return maxOverlap;
-        }, 0);
-
-      if (tail.length <= overlapLength) {
-        return "";
-      }
-
-      const safePrefix = tail.slice(0, tail.length - overlapLength);
-      tail = tail.slice(tail.length - overlapLength);
-      return sanitizeReply(safePrefix);
-    },
-    flush(): string {
-      const finalChunk = sanitizeReply(tail);
-      tail = "";
-      return finalChunk;
-    },
-  };
 }
 
 function createNoMutationLoggingClaimStreamGuard() {

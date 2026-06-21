@@ -78,7 +78,7 @@ describe("reply sanitizer", () => {
   it("flushes held tails through the finalized sanitizer without dropping ordinary text", () => {
     const counterSanitizer = createStreamingSanitizer();
     assert.equal(counterSanitizer.push("今天(1/3"), "今天");
-    assert.equal(counterSanitizer.flush(), "");
+    assert.equal(counterSanitizer.flush(), "(1/3");
 
     const ordinarySanitizer = createStreamingSanitizer();
     assert.equal(ordinarySanitizer.push("請看("), "請看");
