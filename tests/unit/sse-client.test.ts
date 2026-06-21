@@ -166,6 +166,10 @@ describe("connectSSE", () => {
     source,
   });
 
+  const waitForRecovery = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
   it("dispatches a valid daily_summary envelope to the envelope-aware callback", () => {
     const receivedEnvelopes: DailySummarySSEPayload[] = [];
     const receivedSummaries: DailySummary[] = [];
@@ -496,5 +500,82 @@ describe("connectSSE", () => {
     assert.equal(FakeEventSource.instances.length, 1);
     assert.equal(useStore.getState().guestSessionStatus, "ready");
     assert.equal(useStore.getState().guestSessionRecoveryAttempted, false);
+  });
+
+  it("recovers and resubscribes silently after EventSource is CLOSED", async () => {
+    const receivedTargets: DailyTargets[] = [];
+    sse.connectSSE("device-1", {
+      onSummary: () => undefined,
+      onGoalsUpdate: (targets) => receivedTargets.push(targets),
+    });
+
+    const failedSource = FakeEventSource.instances[0];
+    assert.ok(failedSource);
+
+    failedSource.failWithReadyState(FakeEventSource.CLOSED);
+    await waitForRecovery();
+
+    assert.equal(recoveryFetchCalls.length, 1);
+    assert.equal(useStore.getState().deviceId, "device-recovered");
+    assert.equal(useStore.getState().guestSessionStatus, "ready");
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, true);
+    assert.equal(FakeEventSource.instances.length, 2);
+
+    const replacementSource = FakeEventSource.instances[1];
+    assert.ok(replacementSource);
+    assert.equal(replacementSource.url, "/api/sse");
+
+    const targets: DailyTargets = { calories: 2000, protein: 140, carbs: 220, fat: 65 };
+    replacementSource.emit("goals_update", JSON.stringify({ targets }));
+
+    assert.deepEqual(receivedTargets, [targets]);
+  });
+
+  it("leaves recovery_required as the only failure path when CLOSED recovery fails", async () => {
+    recoveryShouldSucceed = false;
+    sse.connectSSE("device-1", {
+      onSummary: () => undefined,
+      onGoalsUpdate: () => undefined,
+    });
+
+    const failedSource = FakeEventSource.instances[0];
+    assert.ok(failedSource);
+
+    failedSource.failWithReadyState(FakeEventSource.CLOSED);
+    await waitForRecovery();
+
+    assert.equal(recoveryFetchCalls.length, 1);
+    assert.equal(FakeEventSource.instances.length, 1);
+    assert.equal(useStore.getState().guestSessionStatus, "recovery_required");
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, true);
+  });
+
+  it("uses the existing one-shot latch instead of looping on a second CLOSED", async () => {
+    sse.connectSSE("device-1", {
+      onSummary: () => undefined,
+      onGoalsUpdate: () => undefined,
+    });
+
+    const firstSource = FakeEventSource.instances[0];
+    assert.ok(firstSource);
+
+    firstSource.failWithReadyState(FakeEventSource.CLOSED);
+    await waitForRecovery();
+
+    assert.equal(recoveryFetchCalls.length, 1);
+    assert.equal(FakeEventSource.instances.length, 2);
+    assert.equal(useStore.getState().guestSessionStatus, "ready");
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, true);
+
+    const replacementSource = FakeEventSource.instances[1];
+    assert.ok(replacementSource);
+
+    replacementSource.failWithReadyState(FakeEventSource.CLOSED);
+    await waitForRecovery();
+
+    assert.equal(recoveryFetchCalls.length, 1);
+    assert.equal(FakeEventSource.instances.length, 2);
+    assert.equal(useStore.getState().guestSessionStatus, "recovery_required");
+    assert.equal(useStore.getState().guestSessionRecoveryAttempted, true);
   });
 });
