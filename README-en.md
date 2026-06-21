@@ -2,58 +2,77 @@
 
 [繁體中文](README.md)
 
-Nutrition Coach is an AI meal logging app: describe what you ate, optionally attach a photo, and get a structured nutrition log with live streaming feedback.
+Nutrition Coach is an AI meal logging app. Users can log meals with text or photos; the backend uses an LLM to help estimate calories and macros, stores structured meal records, and streams processing status, results, and suggestions that need confirmation.
 
-The repo is a full-stack TypeScript app:
+## Project Highlights
 
-- React + Vite mobile-first client
-- Fastify API server
-- SQLite persistence with Drizzle ORM
-- OpenAI-backed meal analysis and coaching
-- Server-Sent Events for streaming chat status, partial replies, and final receipts
-- Cookie-backed guest sessions, so the app works without account signup
-- Metadata-only failure localization for hard LLM/chat failures, including user-reportable fallback reference codes and redacted harness traces
+- Full-stack TypeScript app: React/Vite client, Fastify API, SQLite persistence.
+- LLM application engineering: provider boundary, mockable `LLMProvider`, tool contract validation, fallback behavior.
+- Stateful product flow: guest session, meal logging, history, correction, proposal approval.
+- Engineering workflow: Node test suite, deterministic harness scenarios, GitHub Actions PR gate, release check.
 
-## Requirements
+## Core Features
+
+- Log meals with text or photos and estimate calories, protein, carbs, and fat.
+- Track daily targets, today's progress, meal list, history, and trends.
+- Correct, delete, and revise meals through revision-safe update paths.
+- Use proposal cards before AI suggestions mutate user data.
+- Work without account signup through signed guest-session cookies.
+- Stream chat status and results with SSE-style responses.
+
+## Tech Stack
+
+| Area | Technology |
+|---|---|
+| Frontend | React 19, Vite, Zustand, TypeScript |
+| Backend | Fastify 5, TypeScript, Server-Sent Events |
+| Database | SQLite, better-sqlite3, Drizzle ORM, Drizzle migrations |
+| LLM | OpenAI SDK behind a local `LLMProvider` interface |
+| Testing | Node built-in test runner, real SQLite, mock/harness LLM providers |
+| CI | GitHub Actions PR check with `yarn pr:policy` and `yarn release:check` |
+| Runtime | Local production-mode Fastify server, optionally exposed through Cloudflare Tunnel |
+
+## Architecture
+
+```mermaid
+flowchart LR
+  user["User"]
+  client["React / Vite client"]
+  api["Fastify API<br/>HTTP + SSE"]
+  services["Domain services"]
+  orchestrator["LLM orchestrator<br/>tool contracts + proposals"]
+  provider["OpenAI provider"]
+  db["SQLite<br/>Drizzle migrations"]
+  assets["Image assets"]
+
+  user --> client
+  client --> api
+  api --> services
+  api --> orchestrator
+  orchestrator --> provider
+  services --> db
+  orchestrator --> db
+  api --> assets
+```
+
+Main boundaries:
+
+- `server/app.ts`: composes Fastify plugins, config, DB, services, realtime publisher, routes, and orchestrator dependencies.
+- `server/routes/*.ts`: owns HTTP/SSE transport, request validation, guest-session checks, upload handling, and response shaping.
+- `server/services/*.ts`: owns reusable domain logic and persistence logic.
+- `server/orchestrator/*`: owns prompt construction, tool calls, mutation receipts, proposal behavior, and fallbacks.
+- `server/llm/*`: owns the provider interface, OpenAI implementation, and mock providers.
+- `client/src/api.ts`, `client/src/sse.ts`, and `client/src/store.ts`: own client transport and state boundaries.
+
+More detail: [docs/architecture.md](docs/architecture.md)
+
+## Local Development
+
+Requirements:
 
 - Node.js 22+
 - Yarn
-- An OpenAI API key
-
-Local development calls the OpenAI API for real meal analysis. Tests and some harness flows use mock providers.
-
-## What You Can Reuse
-
-- Text and image meal logging: `server/orchestrator/*`, `server/routes/chat.ts`
-- LLM tool calling with structured mutation commits: `server/orchestrator/tools.ts`, `server/orchestrator/tool-contract.ts`, `server/orchestrator/mutation-effects.ts`
-- Schema-backed structured LLM output and onboarding target fallback: `server/llm/types.ts`, `server/llm/openai.ts`, `server/services/target-generation.ts`
-- Authoritative DTO validation: `client/src/dto-guards.ts`, `client/src/api.ts`, `client/src/sse.ts`, `client/src/store.ts`
-- SSE streaming chat UX: `server/routes/chat.ts`, `client/src/sse.ts`, `client/src/components/ChatPanel.tsx`
-- Meal correction authority: explicit numbers or backend-owned proposals are required before calories/macros can change; "estimate reasonable values" requests use confirm-first estimate proposals
-- Confirm-first proposal UX: goal, meal numeric, estimate, and delete proposals expose approve / edit-via-new-message / reject affordances with deterministic lapse copy
-- Goal-aware coach advice and CTAs: Home coaching copy and next actions follow the user's goal and today's logged state
-- Explicit meal-period intent: words like lunch, dinner, or late-night snack are stored as structured facts instead of being overridden by clock-hour inference
-- Atomic chat receipts and structured history state: `server/services/chat.ts`, `server/services/chat-mutation-outcomes.ts`
-- Metadata-only chat failure localization: `server/llm/errors.ts`, `server/observability/events.ts`, `tests/harness/scenarios/provider-auth-failure-localization.ts`
-- Home / History / Meal Edit editing: Home meal rows, History snapshot rows, and grouped meal item add/edit/delete use revision-safe edit identity
-- Signed-cookie guest sessions without a full account system: `server/routes/device.ts`, `server/lib/guest-session-resolver.ts`
-- SQLite-backed full-stack app deployed as one Fastify service: `server/app.ts`, `server/db/*`, `drizzle/`
-- Deterministic harnesses for AI behavior, receipts, and boundary contracts: `tests/harness/`
-
-## Product Flow
-
-1. A user completes lightweight onboarding and receives daily nutrition targets.
-2. The user logs food in Chat using text, a photo, or both.
-3. The orchestrator estimates calories and macros, writes the meal record, and streams progress over SSE.
-4. Home updates today's calories, macros, and meal list.
-5. History shows read-only daily snapshots and trends; week or date switching keeps stable layout and uses snapshot facts to unlock rows, detail, and edit flows.
-6. Users can edit or delete meals from Home, History, or existing meal detail/edit screens; grouped meals support item-level add, edit, and delete.
-7. Chat corrections resolve the target meal and numeric evidence server-side; "estimate reasonable values" requests create backend-saved confirm-first estimate proposals instead of directly committing model-estimated values.
-8. Chat delete requests show a backend-rendered delete preview proposal first; confirmation then writes through the revision-safe delete path.
-9. Pending proposals render structured approve / edit / reject UI; expired, superseded, or stale proposals show deterministic lapse copy.
-10. Home coach advice and CTAs choose the next action from the user's goal, today's meals, and remaining targets.
-
-## Quick Start
+- OpenAI API key
 
 Install dependencies:
 
@@ -61,7 +80,7 @@ Install dependencies:
 yarn install
 ```
 
-Create your local environment file:
+Create local environment:
 
 ```bash
 cp .env.example .env
@@ -77,78 +96,43 @@ DB_PATH=./data/nutrition.db
 TZ=Asia/Taipei
 ```
 
-Initialize the local SQLite schema:
+Initialize SQLite:
 
 ```bash
 yarn db:migrate
 ```
 
-`yarn db:migrate` reads `.env` when it exists, so a custom `DB_PATH` applies to migrations too.
-
-Run the app in two terminals:
+Start with two terminals:
 
 ```bash
-# Terminal 1: API server
+# Terminal 1: Fastify API server on http://localhost:3000
 yarn dev:server
 
-# Terminal 2: Vite client
+# Terminal 2: Vite client on http://localhost:5173
 yarn dev:client
 ```
 
-Open `http://localhost:5173`. The API runs on `http://localhost:3000`.
+Open `http://localhost:5173`.
 
-## How It Works
+## Testing And Verification
 
-```text
-client/src/
-  components/     React screens and product surfaces
-  store.ts        Zustand state boundary
-  api.ts          HTTP client helpers
-  sse.ts          SSE transport helpers
-
-server/
-  app.ts          Fastify composition root
-  routes/         HTTP and SSE transport boundaries
-  services/       Domain logic and SQLite-backed persistence
-  orchestrator/   LLM workflow, tool contracts, fallback behavior
-  llm/            OpenAI and mock LLM providers
-  realtime/       SSE fan-out
-  db/             Drizzle schema, client, and migrations
-
-tests/
-  unit/           Pure logic and contract tests
-  integration/    Routes, services, SSE, and orchestrator boundaries
-  harness/        Deterministic scenario verification and redacted artifacts
-```
-
-Key entry points:
-
-- `server/routes/chat.ts`: streaming chat boundary
-- `server/orchestrator/*`: model prompts, tool calls, fallback behavior, and receipt generation
-- `server/services/*`: persistence and domain logic
-- `client/src/store.ts`: client state boundary
-- `GET /api/sse`: uses cookie-backed guest sessions because browser `EventSource` cannot set custom headers
-
-## Commands
+Useful local checks:
 
 ```bash
-# TypeScript check
 yarn tsc --noEmit
-
-# Unit tests
 yarn test:unit
-
-# Integration tests
 yarn test:integration
-
-# Unit + integration tests
 yarn test
+yarn build
+```
 
-# Release gate
+Pre-release check:
+
+```bash
 yarn release:check
 ```
 
-Advanced deterministic AI and boundary harnesses live under `tests/harness/`. For example:
+Deterministic harness examples:
 
 ```bash
 yarn verify:harness -- behavior-matrix
@@ -156,33 +140,37 @@ yarn verify:harness -- guest-session-hardening
 yarn verify:harness -- provider-auth-failure-localization
 ```
 
+`yarn release:check` verifies the `TZ=Asia/Taipei` runtime contract, TypeScript, the Node test suite, and frontend build. Tests use mocked or harness LLM providers; CI does not call the live OpenAI API.
+
 ## Environment Variables
 
-Local development normally only needs these core variables:
+Common local variables:
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `OPENAI_API_KEY` | OpenAI API key | Required |
+| `OPENAI_API_KEY` | OpenAI key used by the backend provider | Required |
 | `OPENAI_ORCHESTRATOR_MODEL` | Model used by the chat orchestrator | `gpt-5.4-mini` |
-| `PORT` | Fastify port | `3000` |
+| `PORT` | Fastify server port | `3000` |
 | `DB_PATH` | SQLite database path | `./data/nutrition.db` |
-| `TZ` | Process timezone for daily nutrition boundaries | `Asia/Taipei` |
+| `TZ` | Process timezone for nutrition day boundaries | `Asia/Taipei` |
 
-Deployment-only overrides:
+Common production-like variables:
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `NODE_ENV` | Set to `production` to enable secure guest-session cookies | unset |
-| `GUEST_SESSION_SECRET` | App-owned random secret for signing guest-session cookies in shared/deployed environments | `dev-guest-session-secret-change-me` |
-| `ASSETS_DIR` | Durable image asset directory | `./data/assets` |
+| `NODE_ENV` | Enables production-like runtime behavior when set to `production` | unset |
+| `GUEST_SESSION_SECRET` | Guest-session cookie signing secret | local-dev default only |
+| `ASSETS_DIR` | Persistent image asset directory | `./data/assets` |
 | `UPLOADS_STAGING_DIR` | Request-local upload staging directory | `./data/uploads-staging` |
-| `CLIENT_DIST_DIR` | Frontend build directory served by Fastify | `./dist/client` |
+| `CLIENT_DIST_DIR` | Built frontend directory served by Fastify | `./dist/client` |
 
-`GUEST_SESSION_SECRET` is not an external provider credential. Generate a stable random value for deployment, for example with `openssl rand -hex 32`.
+When `NODE_ENV=production`, `GUEST_SESSION_SECRET` must be present, non-default, and at least 32 characters.
 
-## Deploying
+## Deployment
 
-Build and run the same-origin production-mode server:
+Production mode serves the API and built frontend files from the same Fastify server.
+
+Build and start the same-origin runtime:
 
 ```bash
 yarn install --frozen-lockfile
@@ -192,12 +180,16 @@ yarn db:migrate
 yarn start
 ```
 
-In a deployed environment, one Fastify process serves both the API and `dist/client`. Use persistent storage for SQLite and durable assets, and set `NODE_ENV=production`, `OPENAI_API_KEY`, `OPENAI_ORCHESTRATOR_MODEL`, `DB_PATH`, `TZ`, and `GUEST_SESSION_SECRET`.
+Cloudflare Tunnel procedure: [docs/deploy/cloudflare-tunnel.md](docs/deploy/cloudflare-tunnel.md)
 
-This repo does not define a permanent public demo URL. For public smoke checks, run the local production-mode server through Cloudflare Tunnel; see [docs/deploy/cloudflare-tunnel.md](docs/deploy/cloudflare-tunnel.md). The Railway baseline is archived as historical context.
+## Next Steps
 
-## Public Docs
+- Split CI into clearer typecheck, tests, build, migration checks, and release policy jobs.
+- Add manually triggered provider smoke checks with scoped secrets and sanitized artifacts.
+- Improve observability around LLM failure categories without logging raw prompts or provider payloads.
 
-- [Cloudflare Tunnel production runtime](docs/deploy/cloudflare-tunnel.md)
-- [Archived Railway deployment baseline](docs/deploy/railway-beta.md)
-- [Capability matrix](docs/capability-matrix.md)
+## Related Docs
+
+- [Architecture](docs/architecture.md)
+- [Cloudflare Tunnel procedure](docs/deploy/cloudflare-tunnel.md)
+- [ADR](docs/adr/)

@@ -2,11 +2,9 @@
 .worktrees/
 .codex/
 .claude/
-.superpowers/
 chatgpt/
 CLAUDE.md
 AGENTS.md
-MILESTONES.md
 
 # Dependencies, build output, and runtime data
 node_modules/
@@ -15,7 +13,6 @@ output/
 .venv-webwright/
 data/*
 !data/.gitkeep
-server/uploads/
 
 # Local GSD workflow state and generated planning evidence
 .planning/
@@ -27,11 +24,7 @@ tests/harness/artifacts/
 tests/harness/tmp/
 
 # Local research, personal notes, and project-level agent habits
-docs/research/
-docs/superpowers/
-docs/local/
-docs/notes/
-docs/personal/
+docs/research
 docs/README.md
 docs/codex.md
 docs/HANDOFF
