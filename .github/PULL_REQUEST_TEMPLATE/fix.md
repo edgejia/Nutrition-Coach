@@ -38,8 +38,7 @@ Fixes #
 
 - [ ] Local only / GSD verified
 - [ ] Source PR to `main`
-- [ ] Cloudflare Tunnel public-domain smoke
-- [ ] Production runtime refreshed
+- [ ] Cloudflare Tunnel public-domain smoke planned or completed as a separate evidence gate, if required
 
 ## Runtimes tested
 
@@ -62,7 +61,7 @@ Fixes #
 - [ ] `yarn release:check`
 - [ ] CI `Release Check` passes.
 - [ ] Review approval recorded before merge.
-- [ ] Production runtime refresh is not included, or was explicitly approved in this PR/thread.
+- [ ] This PR does not authorize production runtime refresh; post-merge refresh requires separate explicit approval.
 
 ## Breaking changes
 
