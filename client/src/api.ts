@@ -841,6 +841,7 @@ export interface StreamCallbacks {
     proposalCard?: ProposalCardMetadata;
     proposalActionEvent?: ProposalActionEventMetadata;
     turnId?: string;
+    replyText?: string;
   }) => void;
   onStopped?: (data: {
     stopped: true;
@@ -982,6 +983,7 @@ export async function sendMessageStream(
             ...(typeof parsed.deletedMealId === "string" ? { deletedMealId: parsed.deletedMealId } : {}),
             ...normalizeProposalTerminalPayload(parsed),
             ...(getValidTurnId(parsed.turnId) ? { turnId: getValidTurnId(parsed.turnId) } : {}),
+            ...(typeof parsed.replyText === "string" ? { replyText: parsed.replyText } : {}),
           });
         } else if (eventType === "stopped") {
           maybeEmitTurnStart(parsed.turnId);
