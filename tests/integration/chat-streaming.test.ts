@@ -3417,6 +3417,56 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat with SSE accept header suppresses split nutrition counters before chunk emission", async () => {
+    mockLLM.queueChatStream([
+      "今天",
+      "(1",
+      "/3)",
+      "完成，",
+      "明天",
+      "（2",
+      "/4）",
+      "也完成",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "記錄午餐");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.ok(res.body);
+      const reader = res.body.getReader();
+      const text = await readStreamUntil(reader, "event: done");
+      const events = parseSSEEvents(text);
+      const chunkPayloads = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => JSON.parse(event.data) as { token: string });
+      const doneEvents = events.filter((event) => event.event === "done");
+      const combinedChunkText = chunkPayloads.map((payload) => payload.token).join("");
+
+      assert.ok(chunkPayloads.length >= 4, "expected progressive visible chunks around removed counters");
+      for (const payload of chunkPayloads) {
+        assert.doesNotMatch(payload.token, /[（(]\s*\d+\s*\/\s*\d+\s*[）)]/);
+        assert.doesNotMatch(payload.token, /\(1|\/3\)|（2|\/4）/);
+      }
+      assert.equal(combinedChunkText, "今天完成，明天也完成");
+      assert.doesNotMatch(combinedChunkText, /[（(]\s*\d+\s*\/\s*\d+\s*[）)]/);
+      assert.doesNotMatch(text, /\(1|\/3\)|\(1\/3\)|（2|\/4）|（2\/4）/);
+      assert.equal(doneEvents.length, 1, "expected a single done event");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat with SSE accept header bridges non-stream reply into chunk and done events", async () => {
     // When the provider returns a plain { reply } instead of a streamGenerator,
     // the route must still emit event: chunk + event: done so sendMessageStream() works.
