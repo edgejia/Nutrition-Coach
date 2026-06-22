@@ -3,7 +3,7 @@ process.env.TZ = "Asia/Taipei";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DEFAULT_GUEST_SESSION_SECRET } from "../../server/config.js";
@@ -38,6 +38,9 @@ function baseEnv() {
   };
   delete env.GUEST_SESSION_SECRET;
   delete env.GUEST_SESSION_COOKIE_SECURE;
+  delete env.PORT;
+  delete env.GUEST_SESSION_TTL_SECONDS;
+  delete env.GUEST_SESSION_RESUME_TTL_SECONDS;
   return env;
 }
 
@@ -52,6 +55,21 @@ function assertWeakSecretBootFailure(result: ReturnType<typeof runBootProbe>, re
     assert.doesNotMatch(result.output, new RegExp(rejectedSecret));
   }
   assert.doesNotMatch(result.output, new RegExp(DEFAULT_GUEST_SESSION_SECRET));
+}
+
+function assertRuntimeConfigBootFailure(
+  result: ReturnType<typeof runBootProbe>,
+  envVarName: "PORT" | "GUEST_SESSION_TTL_SECONDS" | "GUEST_SESSION_RESUME_TTL_SECONDS",
+  expectedAcceptedShape: RegExp,
+  rawRejectedValue?: string,
+) {
+  assert.notEqual(result.status, 0, result.output);
+  assert.doesNotMatch(result.output, /BOOT_OK/);
+  assert.match(result.output, new RegExp(envVarName));
+  assert.match(result.output, expectedAcceptedShape);
+  if (rawRejectedValue) {
+    assert.equal(result.output.includes(rawRejectedValue), false, result.output);
+  }
 }
 
 describe("startup guest-session security guard", () => {
@@ -127,16 +145,57 @@ describe("startup guest-session security guard", () => {
       ...baseEnv(),
       GUEST_SESSION_TTL_SECONDS: "0",
     });
-    assert.notEqual(activeTtlResult.status, 0, activeTtlResult.output);
-    assert.doesNotMatch(activeTtlResult.output, /BOOT_OK/);
-    assert.match(activeTtlResult.output, /GUEST_SESSION_TTL_SECONDS/);
+    assertRuntimeConfigBootFailure(
+      activeTtlResult,
+      "GUEST_SESSION_TTL_SECONDS",
+      /positive safe integer number of seconds/,
+    );
 
     const resumeTtlResult = runBootProbe({
       ...baseEnv(),
       GUEST_SESSION_RESUME_TTL_SECONDS: "not-a-number",
     });
-    assert.notEqual(resumeTtlResult.status, 0, resumeTtlResult.output);
-    assert.doesNotMatch(resumeTtlResult.output, /BOOT_OK/);
-    assert.match(resumeTtlResult.output, /GUEST_SESSION_RESUME_TTL_SECONDS/);
+    assertRuntimeConfigBootFailure(
+      resumeTtlResult,
+      "GUEST_SESSION_RESUME_TTL_SECONDS",
+      /positive safe integer number of seconds/,
+    );
+  });
+
+  it("server entrypoint reads the listen port from app.runtimeConfig after buildApp", () => {
+    const source = readFileSync(path.join(process.cwd(), "server/index.ts"), "utf8");
+
+    assert.doesNotMatch(source, /const\s+port\s*=\s*config\.port/);
+    assert.match(source, /const\s+app\s*=\s*await\s+buildApp/);
+    assert.match(source, /const\s+\{\s*port\s*\}\s*=\s*app\.runtimeConfig/);
+    assert.match(source, /app\.listen\(\{\s*port,\s*host:\s*"0\.0\.0\.0"\s*\}\)/);
+  });
+
+  it("fails boot before completion when PORT config is invalid", () => {
+    const rawRejectedValue = "999999999999999999999999999999999999999999999999999999999999999999999[.*]$";
+    const result = runBootProbe({
+      ...baseEnv(),
+      PORT: rawRejectedValue,
+    });
+
+    assertRuntimeConfigBootFailure(result, "PORT", /integer from 1 to 65535/, rawRejectedValue);
+  });
+
+  it("does not echo raw rejected runtime numeric values in startup output", () => {
+    const rawActiveTtl = "111111111111111111111111111111111111111111111111111111111111111111111(+)";
+    const rawResumeTtl = "222222222222222222222222222222222222222222222222222222222222222222222[$]";
+
+    assertRuntimeConfigBootFailure(
+      runBootProbe({ ...baseEnv(), GUEST_SESSION_TTL_SECONDS: rawActiveTtl }),
+      "GUEST_SESSION_TTL_SECONDS",
+      /positive safe integer number of seconds/,
+      rawActiveTtl,
+    );
+    assertRuntimeConfigBootFailure(
+      runBootProbe({ ...baseEnv(), GUEST_SESSION_RESUME_TTL_SECONDS: rawResumeTtl }),
+      "GUEST_SESSION_RESUME_TTL_SECONDS",
+      /positive safe integer number of seconds/,
+      rawResumeTtl,
+    );
   });
 });
