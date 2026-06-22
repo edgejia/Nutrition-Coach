@@ -124,6 +124,7 @@ yarn test:unit
 yarn test:integration
 yarn test
 yarn build
+yarn native:check
 ```
 
 發布前檢查：
@@ -141,6 +142,8 @@ yarn verify:harness -- provider-auth-failure-localization
 ```
 
 `yarn release:check` 會驗證 `TZ=Asia/Taipei` runtime contract、TypeScript、Node test suite 與前端 build。測試使用 mocked 或 harness LLM providers；CI 不會呼叫 live OpenAI API。
+
+`yarn native:check` 是 Sharp 與 `better-sqlite3` 升級、以及 v3.1 source-release review 的專用 native dependency evidence；它不是 `yarn release:check` 的替代，也不授權 production runtime refresh、Cloudflare Tunnel 變更、public smoke、tag movement 或 `main` promotion。
 
 ## 環境變數
 

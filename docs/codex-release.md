@@ -22,6 +22,8 @@ Passing one gate does not approve or imply any later gate.
 - GSD phases and closeout produce PR-ready source state.
 - Before opening or updating a PR to `main`, run the appropriate local verification; for release readiness run `yarn release:check`.
 - When dependency advisories or dependency changes are in scope, dependency-policy/source-release review also requires advisory evidence from `yarn deps:audit` and the current policy in `docs/adr/0009-dependency-advisory-policy.md`; this is source-readiness evidence only and does not approve runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, or `main` promotion.
+- For `sharp` upgrades, `better-sqlite3` upgrades, and v3.1 source-release review, run `yarn native:check` and record the ADR 0009 native evidence decision. A failing `native:check` blocks native dependency upgrade acceptance and v3.1 source-release readiness until fixed or explicitly deferred in ADR 0009 and release notes.
+- Native evidence must remain a sanitized console summary only: no raw image bytes, DB row dumps, copied DB files, session material, secrets, prompts, provider payloads, or assistant text.
 - Open a GitHub PR to `main` with the right template, linked issue, changelog decision, and verification evidence.
 - CI must pass `yarn pr:policy` and `yarn release:check --base=origin/<base>`.
 - Review and merge approval are required before `main` changes. Agents must not merge, push directly to `main`, rebase `main`, or move tags without explicit approval in the current thread.

@@ -25,6 +25,8 @@ Read this only when GitHub issue state, PR policy, PR body, review threads, CI, 
 - `scripts/pr-policy-check.mjs` is the source of truth for linked issue, approval labels by PR kind, `.planning/**` exclusion, and changelog/no-changelog policy.
 - `scripts/release-check.mjs` is the source of truth for timezone, TypeScript, full Node test suite, and frontend build release checks.
 - Phase 100 documents `yarn deps:audit` as dependency advisory evidence for source-readiness review and ADR 0009 triage; CI `release:check` still consists of timezone, TypeScript, Node tests, and frontend build unless a future phase explicitly wires a new gate.
+- Phase 101 documents `yarn native:check` as native dependency/source-readiness evidence for `sharp` upgrades, `better-sqlite3` upgrades, and v3.1 source-release review. It remains separate from default PR CI and `release:check`; passing it does not approve production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, `main` promotion, or direct pushes.
+- Native evidence follows ADR 0009: sanitized console summaries only, with no raw image bytes, DB row dumps, copied DB files, session material, secrets, prompts, provider payloads, or assistant text.
 
 ## Agent Behavior
 

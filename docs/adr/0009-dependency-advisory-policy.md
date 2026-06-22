@@ -3,11 +3,11 @@
 **Status:** Accepted
 **Date:** 2026-06-22
 **Milestone:** v3.1 Runtime & LLM Dependency Trust Baseline
-**Requirement:** ADVS-01 / ADVS-02 / ADVS-03
+**Requirement:** ADVS-01 / ADVS-02 / ADVS-03 / NATV-03
 
 ## Context
 
-Nutrition Coach uses Yarn Classic and keeps release readiness, CI, production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, and `main` promotion as separate gates. Phase 100 adds `yarn deps:audit` as advisory evidence, but does not wire dependency advisories into `release:check`.
+Nutrition Coach uses Yarn Classic and keeps release readiness, CI, production runtime refresh, Cloudflare Tunnel changes, public smoke, tag movement, and `main` promotion as separate gates. Phase 100 adds `yarn deps:audit` as advisory evidence, and Phase 101 adds `yarn native:check` as native dependency compatibility evidence. Neither command is wired into `release:check` by default.
 
 The current runtime dependency audit reports high advisories for direct `drizzle-orm@0.39.3` and transitive `form-data@4.0.5` through `openai > @types/node-fetch > form-data`. This ADR is the canonical source record for dependency advisory triage policy and the current `drizzle-orm` / `form-data` release decisions.
 
@@ -26,6 +26,14 @@ The current runtime dependency audit reports high advisories for direct `drizzle
 Minimum reachability evidence is a source scan plus a path note: exact command, result, dependency path, runtime path or absence, and why the result proves non-reachability. Test-backed proof is required when a deferral depends on a compensating control, sanitizer, allowlist, or sensitive runtime behavior instead of pure API non-use.
 
 Direct package import scans are not enough for transitive SDK risk. For `form-data`, direct `form-data`, `new FormData`, and `.append(` app-code scanning is auxiliary evidence only. The primary evidence is the app's actual OpenAI SDK usage surface and the absence of OpenAI files/audio multipart upload calls.
+
+### Native Compatibility Evidence
+
+`yarn native:check` is the required native dependency compatibility command for the current Sharp and `better-sqlite3` runtime paths. It runs the focused native compatibility suite through `scripts/run-node-with-tz.mjs`, so the check inherits the `TZ=Asia/Taipei` runtime contract.
+
+Native evidence is required before accepting a `sharp` upgrade, before accepting a `better-sqlite3` upgrade, and before v3.1 source-release review. A failing `native:check` blocks native dependency upgrade acceptance and v3.1 source-release readiness until the failure is fixed or explicitly deferred in this ADR and the release notes.
+
+Native compatibility evidence is a sanitized console summary only. It may name package paths, fixture labels, check names, and pass/fail results. It must not emit raw image bytes, DB row dumps, copied DB files, session material, secrets, prompts, provider payloads, or assistant text.
 
 ### Ownership And Revisit
 
@@ -48,10 +56,10 @@ Deferrals must be revisited on:
 ## Upgrade Trigger Boundaries
 
 - `openai` upgrades require Phase 99 provider re-verification: provider tests plus `tests/types/openai-sdk-shape.ts` through `yarn tsc --noEmit`, then re-confirm ADR 0008 compatibility facets. No live-model smoke is required by default.
-- `sharp` and `better-sqlite3` upgrades require Phase 101 native compatibility gates before acceptance: Sharp decode/reject evidence and `better-sqlite3` load/migrate/reopen/persist evidence.
+- `sharp` and `better-sqlite3` upgrades require `yarn native:check` before acceptance: Sharp decode/reject evidence and `better-sqlite3` load/migrate/reopen/persist evidence.
 - Major or minor `drizzle-orm` upgrades require a dedicated ORM compatibility task: dynamic SQL source scan, file-backed migration run, persistence/service tests, and an updated release decision here.
 - Fastify upload/static stack changes, security-pinned transitive changes (`fast-uri`, `brace-expansion`), and current advisory packages such as `form-data` require lockfile dependency-path review, targeted affected-path tests, and then `yarn release:check`.
-- No package install, dependency upgrade, npm workflow, `package-lock.json`, CI workflow change, or `release:check` coupling is authorized by this ADR.
+- No package install, dependency upgrade, npm workflow, `package-lock.json`, CI workflow change, production runtime refresh, Cloudflare Tunnel change, public smoke, tag movement, `main` promotion, direct push, or `release:check` coupling is authorized by this ADR.
 
 ## Evidence Appendix
 
@@ -145,6 +153,21 @@ Result:
 
 These matches are auxiliary because browser/WHATWG `FormData` and test request construction do not prove reachability of the vulnerable transitive OpenAI SDK `form-data` package path.
 
+### Native Compatibility Gate
+
+Command:
+
+```bash
+yarn native:check
+```
+
+Result:
+
+- Runs `node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/native-compatibility.test.ts`.
+- Proves the Sharp native path accepts generated JPEG, PNG, and WebP bytes and rejects non-image or mismatched MIME claims.
+- Proves the `better-sqlite3` native path can migrate a file-backed DB, open it through `createDb`, write representative grouped meal data through app services, close, reopen, and read primitive persisted facts.
+- Console output is sanitized native evidence only; it does not include raw image bytes, DB row dumps, copied DB files, session material, secrets, prompts, provider payloads, or assistant text.
+
 ## Consequences
 
 - Developers can distinguish source-release blockers from recorded deferrals with explicit severity, runtime/dev scope, reachability, owner, revisit trigger, and follow-up requirements.
@@ -158,5 +181,7 @@ Use these source checks for this ADR:
 - `rg -n "severity|runtime|dev|reachability|release decision|owner|revisit|deferral" docs/adr/0009-dependency-advisory-policy.md`
 - `rg -n "drizzle-orm|form-data|GHSA-gpj5-g38j-94v9|GHSA-hmw2-7cc7-3qxx|release decision|follow-up" docs/adr/0009-dependency-advisory-policy.md`
 - `rg -n "server/llm/openai.ts|chat\\.completions\\.create|server/orchestrator/index.ts|image_url|tests/types/openai-sdk-shape.ts|files/audio|multipart upload|auxiliary" docs/adr/0009-dependency-advisory-policy.md`
+- `rg -n "native:check|sharp|better-sqlite3|sanitized console summary|raw image bytes|DB row dumps|copied DB files|session material|secrets|prompts|provider payloads|assistant text" docs/adr/0009-dependency-advisory-policy.md`
+- `yarn native:check`
 - `if rg -n "client\\.(files|audio)|\\.files\\.|\\.audio\\.|files\\.create|audio\\.transcriptions|audio\\.translations" server/llm server/orchestrator tests/types --glob '*.ts'; then exit 1; else exit 0; fi`
 - `yarn audit --groups dependencies --json >/tmp/nutrition-phase-100-audit.jsonl || test -s /tmp/nutrition-phase-100-audit.jsonl`
