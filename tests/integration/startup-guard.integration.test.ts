@@ -12,6 +12,7 @@ const probeScript = [
   'const { buildApp } = await import("./server/app.ts");',
   'const { MockLLMProvider } = await import("./server/llm/mock.ts");',
   'const app = await buildApp({ dbPath: process.env.TEST_DB_PATH ?? ":memory:", llmProvider: new MockLLMProvider() });',
+  'console.log(`RUNTIME_PORT:${app.runtimeConfig.port}`);',
   'console.log("BOOT_OK");',
   "await app.close();",
 ].join("\n");
@@ -106,5 +107,36 @@ describe("startup guest-session security guard", () => {
 
     assert.equal(result.status, 0, result.output);
     assert.match(result.output, /BOOT_OK/);
+  });
+
+  it("exposes the validated runtime port on successful buildApp boot", () => {
+    const result = runBootProbe({
+      ...baseEnv(),
+      PORT: "4567",
+      GUEST_SESSION_TTL_SECONDS: "43200",
+      GUEST_SESSION_RESUME_TTL_SECONDS: "2592000",
+    });
+
+    assert.equal(result.status, 0, result.output);
+    assert.match(result.output, /RUNTIME_PORT:4567/);
+    assert.match(result.output, /BOOT_OK/);
+  });
+
+  it("fails boot before completion when guest-session TTL config is invalid", () => {
+    const activeTtlResult = runBootProbe({
+      ...baseEnv(),
+      GUEST_SESSION_TTL_SECONDS: "0",
+    });
+    assert.notEqual(activeTtlResult.status, 0, activeTtlResult.output);
+    assert.doesNotMatch(activeTtlResult.output, /BOOT_OK/);
+    assert.match(activeTtlResult.output, /GUEST_SESSION_TTL_SECONDS/);
+
+    const resumeTtlResult = runBootProbe({
+      ...baseEnv(),
+      GUEST_SESSION_RESUME_TTL_SECONDS: "not-a-number",
+    });
+    assert.notEqual(resumeTtlResult.status, 0, resumeTtlResult.output);
+    assert.doesNotMatch(resumeTtlResult.output, /BOOT_OK/);
+    assert.match(resumeTtlResult.output, /GUEST_SESSION_RESUME_TTL_SECONDS/);
   });
 });
