@@ -272,6 +272,45 @@ describe("better-sqlite3 native compatibility", () => {
     assertValue("sqlite revision change type after reopen", persistedRevision.changeType, "create");
 
     assertValue("sqlite grouped item count after reopen", persistedItems.length, 3);
-    assert.fail("native sqlite grouped item order and totals proof not implemented");
+
+    const firstItem = assertPresent("sqlite grouped item 0 after reopen", persistedItems[0]);
+    const secondItem = assertPresent("sqlite grouped item 1 after reopen", persistedItems[1]);
+    const thirdItem = assertPresent("sqlite grouped item 2 after reopen", persistedItems[2]);
+
+    assertValue("sqlite grouped item 0 position after reopen", firstItem.position, 0);
+    assertValue("sqlite grouped item 0 food after reopen", firstItem.foodName, "雞腿便當");
+    assertValue("sqlite grouped item 0 calories after reopen", firstItem.calories, 720);
+    assertValue("sqlite grouped item 0 protein after reopen", firstItem.protein, 38);
+    assertValue("sqlite grouped item 0 carbs after reopen", firstItem.carbs, 82);
+    assertValue("sqlite grouped item 0 fat after reopen", firstItem.fat, 24);
+
+    assertValue("sqlite grouped item 1 position after reopen", secondItem.position, 1);
+    assertValue("sqlite grouped item 1 food after reopen", secondItem.foodName, "無糖豆漿");
+    assertValue("sqlite grouped item 1 calories after reopen", secondItem.calories, 180);
+    assertValue("sqlite grouped item 1 protein after reopen", secondItem.protein, 12);
+    assertValue("sqlite grouped item 1 carbs after reopen", secondItem.carbs, 14);
+    assertValue("sqlite grouped item 1 fat after reopen", secondItem.fat, 8);
+
+    assertValue("sqlite grouped item 2 position after reopen", thirdItem.position, 2);
+    assertValue("sqlite grouped item 2 food after reopen", thirdItem.foodName, "燙青菜");
+    assertValue("sqlite grouped item 2 calories after reopen", thirdItem.calories, 90);
+    assertValue("sqlite grouped item 2 protein after reopen", thirdItem.protein, 4);
+    assertValue("sqlite grouped item 2 carbs after reopen", thirdItem.carbs, 12);
+    assertValue("sqlite grouped item 2 fat after reopen", thirdItem.fat, 3);
+
+    const totals = persistedItems.reduce(
+      (sum, item) => ({
+        calories: sum.calories + item.calories,
+        protein: sum.protein + item.protein,
+        carbs: sum.carbs + item.carbs,
+        fat: sum.fat + item.fat,
+      }),
+      { calories: 0, protein: 0, carbs: 0, fat: 0 },
+    );
+
+    assertValue("sqlite grouped item calories total after reopen", totals.calories, 990);
+    assertValue("sqlite grouped item protein total after reopen", totals.protein, 54);
+    assertValue("sqlite grouped item carbs total after reopen", totals.carbs, 108);
+    assertValue("sqlite grouped item fat total after reopen", totals.fat, 35);
   });
 });
