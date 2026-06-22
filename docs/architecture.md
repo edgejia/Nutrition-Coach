@@ -15,7 +15,7 @@ React/Vite client
   -> SQLite through Drizzle
 ```
 
-Production-mode runtime 是單一 Fastify process。當 `CLIENT_DIST_DIR` 指向建置後的前端檔案時，Fastify 會用同一個 origin 提供 API 和 `dist/client`。本機開發通常是 Vite 跑在 `localhost:5173`，Fastify 跑在 `localhost:3000`。
+Production-mode runtime 是單一 Fastify process。當 `CLIENT_DIST_DIR` 指向建置後的前端檔案時，Fastify 會用同一個 origin 提供 API 和 `dist/client`。本機開發通常是 Vite 跑在 `localhost:5173`，Fastify 跑在 `localhost:3000`。Runtime boundary 和後續拓撲 prerequisites 以 [ADR 0007](adr/0007-runtime-boundary.md) 為準。
 
 ## 主要元件
 
