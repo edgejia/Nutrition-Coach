@@ -9,6 +9,7 @@
     "build": "vite build --config client/vite.config.ts",
     "release:check": "node scripts/run-node-with-tz.mjs --env-file=.env scripts/release-check.mjs",
     "deps:audit": "node scripts/dependency-audit.mjs",
+    "native:check": "node scripts/run-node-with-tz.mjs --import tsx --test tests/unit/native-compatibility.test.ts",
     "pr:policy": "node scripts/pr-policy-check.mjs",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "node --import tsx server/db/migrate.ts",
