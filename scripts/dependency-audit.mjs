@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
@@ -16,6 +17,21 @@ function escapeCell(value) {
 
 function normalizePath(path) {
   return String(path || "unknown").split(">").map((part) => part.trim()).filter(Boolean).join(" > ") || "unknown";
+}
+
+function topLevelPackage(dependencyPath) {
+  return dependencyPath.split(" > ")[0] || "unknown";
+}
+
+function resolveScope(resolution, dependencyPath, dependencyGroups) {
+  const topLevel = topLevelPackage(dependencyPath);
+  if (dependencyGroups?.dependencies?.has(topLevel)) {
+    return "runtime";
+  }
+  if (dependencyGroups?.devDependencies?.has(topLevel)) {
+    return "dev";
+  }
+  return resolution.dev ? "dev" : "runtime";
 }
 
 function firstFinding(advisory) {
@@ -59,7 +75,7 @@ export function buildYarnAuditArgs(argv = []) {
   return args.includes(ALL_FLAG) ? ["audit", "--json"] : ["audit", "--groups", "dependencies", "--json"];
 }
 
-export function parseYarnAuditJsonLines(stdout) {
+export function parseYarnAuditJsonLines(stdout, options = {}) {
   const lines = String(stdout || "").split(/\r?\n/).filter((line) => line.trim().length > 0);
   const records = [];
   const advisories = [];
@@ -90,7 +106,7 @@ export function parseYarnAuditJsonLines(stdout) {
         url: advisory.url || "",
         dependencyPath,
         dependencyType: dependencyPath.includes(" > ") ? "transitive" : "direct",
-        scope: resolution.dev ? "dev" : "runtime",
+        scope: resolveScope(resolution, dependencyPath, options.dependencyGroups),
         currentVersion: finding.version || "unknown",
         vulnerableRange: advisory.vulnerable_versions || "unknown",
         patchedRange: advisory.patched_versions || "unknown",
@@ -103,6 +119,18 @@ export function parseYarnAuditJsonLines(stdout) {
   });
 
   return { records, advisories, auditSummary, errors };
+}
+
+function readDependencyGroups() {
+  try {
+    const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+    return {
+      dependencies: new Set(Object.keys(manifest.dependencies || {})),
+      devDependencies: new Set(Object.keys(manifest.devDependencies || {})),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function summarizeAudit(parsed, options = {}) {
@@ -229,7 +257,7 @@ function runCli() {
   const result = spawnSync(YARN_BIN, args, { encoding: "utf8" });
 
   try {
-    const parsed = parseYarnAuditJsonLines(result.stdout || "");
+    const parsed = parseYarnAuditJsonLines(result.stdout || "", { dependencyGroups: readDependencyGroups() });
     const summary = summarizeAudit(parsed, {
       args,
       exitStatus: result.status ?? 1,

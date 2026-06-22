@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Taipei";
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 import {
   buildYarnAuditArgs,
@@ -111,6 +112,41 @@ describe("dependency audit parser", () => {
     assert.equal(summary.advisories[1].currentVersion, "4.0.3");
   });
 
+  test("classifies all-group dev-tooling paths from the top-level manifest group", () => {
+    const parsed = parseYarnAuditJsonLines(
+      JSON.stringify({
+        type: "auditAdvisory",
+        data: {
+          resolution: {
+            id: 1109999,
+            path: "vite>postcss",
+            dev: false,
+          },
+          advisory: {
+            id: 1109999,
+            module_name: "postcss",
+            title: "PostCSS advisory",
+            severity: "moderate",
+            github_advisory_id: "GHSA-qx2v-qp2m-jg93",
+            url: "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+            vulnerable_versions: "<8.5.10",
+            patched_versions: ">=8.5.10",
+            findings: [{ version: "8.5.8", paths: ["vite>postcss"] }],
+          },
+        },
+      }),
+      {
+        dependencyGroups: {
+          dependencies: new Set(["openai"]),
+          devDependencies: new Set(["vite"]),
+        },
+      },
+    );
+
+    assert.equal(parsed.advisories[0].dependencyPath, "vite > postcss");
+    assert.equal(parsed.advisories[0].scope, "dev");
+  });
+
   test("renders a summary, advisory table, and raw JSONL evidence instruction", () => {
     const parsed = parseYarnAuditJsonLines(completedAuditJsonl);
     const summary = summarizeAudit(parsed, { exitStatus: 8, args: buildYarnAuditArgs([]) });
@@ -176,5 +212,17 @@ describe("dependency audit parser", () => {
     assert.match(report, /Audit execution failed/);
     assert.match(report, /Yarn exited with status 1 and produced no JSON-lines output/);
     assert.doesNotMatch(report, /0 advisories|No advisories/i);
+  });
+
+  test("package scripts expose deps:audit without release-check coupling", () => {
+    const pkg = JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const releaseCheck = fs.readFileSync(new URL("../../scripts/release-check.mjs", import.meta.url), "utf8");
+
+    assert.equal(pkg.scripts["deps:audit"], "node scripts/dependency-audit.mjs");
+    assert.equal(pkg.scripts["release:check"], "node scripts/run-node-with-tz.mjs --env-file=.env scripts/release-check.mjs");
+    assert.doesNotMatch(pkg.scripts["release:check"], /deps:audit/);
+    assert.doesNotMatch(releaseCheck, /deps:audit/);
   });
 });
