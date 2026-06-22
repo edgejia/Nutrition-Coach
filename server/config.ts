@@ -120,7 +120,7 @@ export const config = {
   /** Long-lived resume cookie name used for same-browser recovery. */
   guestSessionResumeCookieName: process.env.GUEST_SESSION_RESUME_COOKIE_NAME ?? "guest_session_resume",
 
-  // Compatibility-only until buildApp() is rewired; validateRuntimeConfig() is the authoritative runtime numeric source.
+  // Compatibility-only for legacy imports; validateRuntimeConfig() is the authoritative runtime numeric source.
   /** TTL for the active guest-session cookie in seconds. */
   guestSessionTtlSeconds: Number(process.env.GUEST_SESSION_TTL_SECONDS ?? 60 * 60 * 12),
 
@@ -143,7 +143,7 @@ export const config = {
   /** Built client directory served by Fastify in the beta runtime. */
   clientDistDir: process.env.CLIENT_DIST_DIR ?? "./dist/client",
 
-  // Compatibility-only until buildApp() is rewired; validateRuntimeConfig() is the authoritative runtime numeric source.
+  // Compatibility-only for legacy imports; validateRuntimeConfig() is the authoritative runtime numeric source.
   /** HTTP server port. */
   port: Number(process.env.PORT ?? 3000),
 
