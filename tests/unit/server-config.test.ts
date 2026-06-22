@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_GUEST_SESSION_SECRET,
   isDeployedLikeRuntime,
+  validateRuntimeConfig,
   validateGuestSessionSecretForRuntime,
 } from "../../server/config.js";
 
@@ -125,5 +126,141 @@ describe("server config guest-session policy", () => {
     });
 
     assert.deepEqual({ ...process.env }, before);
+  });
+});
+
+describe("server config runtime numeric policy", () => {
+  it("returns defaults when numeric runtime values are missing", () => {
+    assert.deepEqual(
+      validateRuntimeConfig({
+        port: undefined,
+        guestSessionTtlSeconds: undefined,
+        guestSessionResumeTtlSeconds: undefined,
+      }),
+      {
+        port: 3000,
+        guestSessionTtlSeconds: 43200,
+        guestSessionResumeTtlSeconds: 2592000,
+      },
+    );
+  });
+
+  it("accepts valid integer strings for port and guest-session TTLs", () => {
+    assert.deepEqual(
+      validateRuntimeConfig({
+        port: "1",
+        guestSessionTtlSeconds: "1",
+        guestSessionResumeTtlSeconds: "9007199254740991",
+      }),
+      {
+        port: 1,
+        guestSessionTtlSeconds: 1,
+        guestSessionResumeTtlSeconds: 9007199254740991,
+      },
+    );
+
+    assert.deepEqual(
+      validateRuntimeConfig({
+        port: "65535",
+        guestSessionTtlSeconds: "43200",
+        guestSessionResumeTtlSeconds: "2592000",
+      }),
+      {
+        port: 65535,
+        guestSessionTtlSeconds: 43200,
+        guestSessionResumeTtlSeconds: 2592000,
+      },
+    );
+  });
+
+  it("rejects invalid PORT strings and boundaries", () => {
+    const rejectedPorts = [
+      "0",
+      "-1",
+      "65536",
+      "1.5",
+      "NaN",
+      "Infinity",
+      "not-a-number",
+      "",
+      "   ",
+      "9007199254740992",
+    ] as const;
+
+    for (const port of rejectedPorts) {
+      assert.throws(() =>
+        validateRuntimeConfig({
+          port,
+          guestSessionTtlSeconds: undefined,
+          guestSessionResumeTtlSeconds: undefined,
+        }),
+      );
+    }
+  });
+
+  it("rejects invalid active guest-session TTL strings and accepts large safe integers", () => {
+    const rejectedTtls = [
+      "0",
+      "-1",
+      "1.5",
+      "NaN",
+      "Infinity",
+      "not-a-number",
+      "",
+      "   ",
+      "9007199254740992",
+    ] as const;
+
+    for (const guestSessionTtlSeconds of rejectedTtls) {
+      assert.throws(() =>
+        validateRuntimeConfig({
+          port: undefined,
+          guestSessionTtlSeconds,
+          guestSessionResumeTtlSeconds: undefined,
+        }),
+      );
+    }
+
+    assert.equal(
+      validateRuntimeConfig({
+        port: undefined,
+        guestSessionTtlSeconds: "9007199254740991",
+        guestSessionResumeTtlSeconds: undefined,
+      }).guestSessionTtlSeconds,
+      9007199254740991,
+    );
+  });
+
+  it("rejects invalid resume guest-session TTL strings and accepts large safe integers", () => {
+    const rejectedTtls = [
+      "0",
+      "-1",
+      "1.5",
+      "NaN",
+      "Infinity",
+      "not-a-number",
+      "",
+      "   ",
+      "9007199254740992",
+    ] as const;
+
+    for (const guestSessionResumeTtlSeconds of rejectedTtls) {
+      assert.throws(() =>
+        validateRuntimeConfig({
+          port: undefined,
+          guestSessionTtlSeconds: undefined,
+          guestSessionResumeTtlSeconds,
+        }),
+      );
+    }
+
+    assert.equal(
+      validateRuntimeConfig({
+        port: undefined,
+        guestSessionTtlSeconds: undefined,
+        guestSessionResumeTtlSeconds: "9007199254740991",
+      }).guestSessionResumeTtlSeconds,
+      9007199254740991,
+    );
   });
 });
