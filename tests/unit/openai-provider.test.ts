@@ -268,7 +268,9 @@ describe("OpenAI Provider", () => {
       const indexSource = readFileSync("server/index.ts", "utf8");
       const productionConstructionAnchor = "new OpenAIProvider()";
       // ESM import bindings make direct constructor monkeypatching brittle; keep the injected-client fallback visible instead.
-      assert.match(providerSource, /client\s*\?\?\s*new\s+OpenAI\s*\(/);
+      const openAIConstructions = providerSource.match(/new\s+OpenAI\s*\(/g) ?? [];
+      assert.equal(openAIConstructions.length, 1);
+      assert.match(providerSource, /this\.client\s*=\s*client\s*\?\?\s*new\s+OpenAI\s*\(/);
       assert.equal(indexSource.includes(productionConstructionAnchor), true);
     } finally {
       globalThis.fetch = originalFetch;
