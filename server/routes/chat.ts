@@ -1,7 +1,6 @@
 import { PassThrough } from "node:stream";
 import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import sharp from "sharp";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
 import type { createOrchestrator, ProposalEditContext } from "../orchestrator/index.js";
 import {
@@ -31,6 +30,7 @@ import {
 import { config } from "../config.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { normalizeMealPeriod } from "../lib/meal-period.js";
+import { ALLOWED_IMAGE_MIME_TYPES, validateImageBytes } from "../lib/image-validation.js";
 import { createStreamingSanitizer, sanitizeReply } from "../lib/reply-sanitizer.js";
 import { isLLMProviderError } from "../llm/errors.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
@@ -89,13 +89,6 @@ interface Deps {
   llmTraceRecorderFactory?: () => LlmTraceRecorder | undefined;
 }
 
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
-const IMAGE_FORMAT_BY_MIME_TYPE = new Map([
-  ["image/jpeg", "jpeg"],
-  ["image/png", "png"],
-  ["image/webp", "webp"],
-]);
-const MAX_DECODED_IMAGE_PIXELS = 40_000_000;
 const UNIFIED_FALLBACK = "抱歉，這次無法完成請求，請稍後再試或補充描述。";
 const PARTIAL_SUCCESS_FALLBACK = "已完成記錄，但回覆生成失敗，請稍後確認今日攝取摘要。";
 const PARTIAL_MUTATION_FALLBACK = "已完成餐點調整，但回覆生成失敗，請稍後確認今日攝取摘要。";
@@ -104,22 +97,6 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-async function validateImageBytes(buffer: Buffer, claimedMimeType: string): Promise<boolean> {
-  const expectedFormat = IMAGE_FORMAT_BY_MIME_TYPE.get(claimedMimeType);
-  if (!expectedFormat) return false;
-  try {
-    const image = sharp(buffer, {
-      failOn: "error",
-      limitInputPixels: MAX_DECODED_IMAGE_PIXELS,
-    });
-    const metadata = await image.metadata();
-    if (metadata.format !== expectedFormat || !metadata.width || !metadata.height) return false;
-    await image.raw().toBuffer();
-    return true;
-  } catch {
-    return false;
-  }
-}
 const STOPPED_EMPTY_COPY = "已停止生成。";
 const CONCRETE_DATE_PATTERN = /\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b|\d{1,2}\/\d{1,2}(?!\/\d)|\d{1,2}月\d{1,2}日/;
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
@@ -610,7 +587,7 @@ async function parseMultipartRequest(
       }
       proposalContext = parsedContext.proposalContext;
     } else if (part.type === "file" && part.fieldname === "image") {
-      if (!ALLOWED_TYPES.includes(part.mimetype)) {
+      if (!ALLOWED_IMAGE_MIME_TYPES.includes(part.mimetype)) {
         return reject("Invalid image type. Allowed: jpeg, png, webp", 400);
       }
       if (image) {
