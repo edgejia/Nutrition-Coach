@@ -86,6 +86,7 @@ LLM output handling：
 - Structured target generation 會驗證 JSON parsing、required fields、domain bounds 和 macro/calorie consistency。
 - Provider failures、invalid JSON、schema validation failures 和 no-content responses 會轉成 typed failure outcomes。
 - Tests 使用 mock providers、harness providers 和 fixtures，不依賴 live OpenAI calls。
+- Current `OpenAIProvider` Chat Completions compatibility、non-live evidence anchors、和 deferred migration scope 以 [ADR 0008](adr/0008-openai-provider-compatibility-baseline.md) 為 canonical baseline。
 
 ## Data Model
 
