@@ -272,5 +272,6 @@ describe("better-sqlite3 native compatibility", () => {
     assertValue("sqlite revision change type after reopen", persistedRevision.changeType, "create");
 
     assertValue("sqlite grouped item count after reopen", persistedItems.length, 3);
+    assert.fail("native sqlite grouped item order and totals proof not implemented");
   });
 });
