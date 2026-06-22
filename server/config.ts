@@ -23,9 +23,9 @@ const GUEST_SESSION_SECRET_ERROR =
 
 const PORT_CONFIG_ERROR = "PORT must be an integer from 1 to 65535.";
 const GUEST_SESSION_TTL_CONFIG_ERROR =
-  "GUEST_SESSION_TTL_SECONDS must be a positive safe integer seconds value.";
+  "GUEST_SESSION_TTL_SECONDS must be a positive safe integer number of seconds.";
 const GUEST_SESSION_RESUME_TTL_CONFIG_ERROR =
-  "GUEST_SESSION_RESUME_TTL_SECONDS must be a positive safe integer seconds value.";
+  "GUEST_SESSION_RESUME_TTL_SECONDS must be a positive safe integer number of seconds.";
 
 const INTEGER_STRING_PATTERN = /^(0|[1-9]\d*)$/;
 
