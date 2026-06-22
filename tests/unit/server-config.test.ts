@@ -3,9 +3,30 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_GUEST_SESSION_SECRET,
   isDeployedLikeRuntime,
+  type RuntimeConfigInput,
   validateRuntimeConfig,
   validateGuestSessionSecretForRuntime,
 } from "../../server/config.js";
+
+function assertRuntimeConfigError(
+  input: RuntimeConfigInput,
+  expectedEnvName: string,
+  expectedShapeText: string,
+  rawRejectedValue?: string,
+) {
+  assert.throws(
+    () => validateRuntimeConfig(input),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.ok(error.message.includes(expectedEnvName), error.message);
+      assert.ok(error.message.includes(expectedShapeText), error.message);
+      if (rawRejectedValue !== undefined) {
+        assert.equal(error.message.includes(rawRejectedValue), false, error.message);
+      }
+      return true;
+    },
+  );
+}
 
 describe("server config guest-session policy", () => {
   it("detects deployed-like runtime only from production node env or secure guest cookies", () => {
@@ -262,5 +283,56 @@ describe("server config runtime numeric policy", () => {
       }).guestSessionResumeTtlSeconds,
       9007199254740991,
     );
+  });
+
+  it("names the invalid env var and accepted numeric shape without echoing rejected values", () => {
+    const rawRejectedValue = "9007199254740992.*[secret-like-token]";
+
+    assertRuntimeConfigError(
+      {
+        port: rawRejectedValue,
+        guestSessionTtlSeconds: undefined,
+        guestSessionResumeTtlSeconds: undefined,
+      },
+      "PORT",
+      "integer from 1 to 65535",
+      rawRejectedValue,
+    );
+
+    assertRuntimeConfigError(
+      {
+        port: undefined,
+        guestSessionTtlSeconds: rawRejectedValue,
+        guestSessionResumeTtlSeconds: undefined,
+      },
+      "GUEST_SESSION_TTL_SECONDS",
+      "positive safe integer number of seconds",
+      rawRejectedValue,
+    );
+
+    assertRuntimeConfigError(
+      {
+        port: undefined,
+        guestSessionTtlSeconds: undefined,
+        guestSessionResumeTtlSeconds: rawRejectedValue,
+      },
+      "GUEST_SESSION_RESUME_TTL_SECONDS",
+      "positive safe integer number of seconds",
+      rawRejectedValue,
+    );
+  });
+
+  it("does not mutate process-wide environment while validating explicit runtime input", () => {
+    const before = { ...process.env };
+
+    assert.doesNotThrow(() => {
+      validateRuntimeConfig({
+        port: "3000",
+        guestSessionTtlSeconds: "43200",
+        guestSessionResumeTtlSeconds: "2592000",
+      });
+    });
+
+    assert.deepEqual({ ...process.env }, before);
   });
 });
