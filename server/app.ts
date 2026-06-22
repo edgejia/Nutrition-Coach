@@ -41,9 +41,9 @@ import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
 import {
   config,
   isDeployedLikeRuntime,
+  readRuntimeConfigFromEnv,
   type RuntimeConfig,
   validateGuestSessionSecretForRuntime,
-  validateRuntimeConfig,
 } from "./config.js";
 
 const LOCAL_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
@@ -132,11 +132,7 @@ export async function buildApp(opts: AppOptions) {
     guestSessionCookieSecure: config.guestSessionCookieSecure,
     nodeEnv: config.nodeEnv,
   });
-  const runtimeConfig = validateRuntimeConfig({
-    port: process.env.PORT,
-    guestSessionTtlSeconds: process.env.GUEST_SESSION_TTL_SECONDS,
-    guestSessionResumeTtlSeconds: process.env.GUEST_SESSION_RESUME_TTL_SECONDS,
-  });
+  const runtimeConfig = readRuntimeConfigFromEnv();
   app.decorate("runtimeConfig", runtimeConfig);
 
   const db = createDb(opts.dbPath ?? config.dbPath);

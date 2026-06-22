@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_GUEST_SESSION_SECRET,
   isDeployedLikeRuntime,
+  MAX_GUEST_SESSION_TTL_SECONDS,
+  readRuntimeConfigFromEnv,
   type RuntimeConfigInput,
   validateRuntimeConfig,
   validateGuestSessionSecretForRuntime,
@@ -171,12 +173,12 @@ describe("server config runtime numeric policy", () => {
       validateRuntimeConfig({
         port: "1",
         guestSessionTtlSeconds: "1",
-        guestSessionResumeTtlSeconds: "9007199254740991",
+        guestSessionResumeTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS),
       }),
       {
         port: 1,
         guestSessionTtlSeconds: 1,
-        guestSessionResumeTtlSeconds: 9007199254740991,
+        guestSessionResumeTtlSeconds: MAX_GUEST_SESSION_TTL_SECONDS,
       },
     );
 
@@ -219,7 +221,7 @@ describe("server config runtime numeric policy", () => {
     }
   });
 
-  it("rejects invalid active guest-session TTL strings and accepts large safe integers", () => {
+  it("rejects invalid active guest-session TTL strings and out-of-range safe integers", () => {
     const rejectedTtls = [
       "0",
       "-1",
@@ -229,6 +231,8 @@ describe("server config runtime numeric policy", () => {
       "not-a-number",
       "",
       "   ",
+      String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+      "9007199254740991",
       "9007199254740992",
     ] as const;
 
@@ -242,17 +246,16 @@ describe("server config runtime numeric policy", () => {
       );
     }
 
-    assert.equal(
+    assert.throws(() =>
       validateRuntimeConfig({
         port: undefined,
-        guestSessionTtlSeconds: "9007199254740991",
+        guestSessionTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
         guestSessionResumeTtlSeconds: undefined,
-      }).guestSessionTtlSeconds,
-      9007199254740991,
+      }),
     );
   });
 
-  it("rejects invalid resume guest-session TTL strings and accepts large safe integers", () => {
+  it("rejects invalid resume guest-session TTL strings and out-of-range safe integers", () => {
     const rejectedTtls = [
       "0",
       "-1",
@@ -262,6 +265,8 @@ describe("server config runtime numeric policy", () => {
       "not-a-number",
       "",
       "   ",
+      String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+      "9007199254740991",
       "9007199254740992",
     ] as const;
 
@@ -275,13 +280,12 @@ describe("server config runtime numeric policy", () => {
       );
     }
 
-    assert.equal(
+    assert.throws(() =>
       validateRuntimeConfig({
         port: undefined,
         guestSessionTtlSeconds: undefined,
-        guestSessionResumeTtlSeconds: "9007199254740991",
-      }).guestSessionResumeTtlSeconds,
-      9007199254740991,
+        guestSessionResumeTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+      }),
     );
   });
 
@@ -302,23 +306,38 @@ describe("server config runtime numeric policy", () => {
     assertRuntimeConfigError(
       {
         port: undefined,
-        guestSessionTtlSeconds: rawRejectedValue,
+        guestSessionTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
         guestSessionResumeTtlSeconds: undefined,
       },
       "GUEST_SESSION_TTL_SECONDS",
       "positive safe integer number of seconds",
-      rawRejectedValue,
+      String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
     );
 
     assertRuntimeConfigError(
       {
         port: undefined,
         guestSessionTtlSeconds: undefined,
-        guestSessionResumeTtlSeconds: rawRejectedValue,
+        guestSessionResumeTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
       },
       "GUEST_SESSION_RESUME_TTL_SECONDS",
       "positive safe integer number of seconds",
-      rawRejectedValue,
+      String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+    );
+  });
+
+  it("reads runtime numeric config from the supplied env object", () => {
+    assert.deepEqual(
+      readRuntimeConfigFromEnv({
+        PORT: "4567",
+        GUEST_SESSION_TTL_SECONDS: "43200",
+        GUEST_SESSION_RESUME_TTL_SECONDS: "2592000",
+      }),
+      {
+        port: 4567,
+        guestSessionTtlSeconds: 43200,
+        guestSessionResumeTtlSeconds: 2592000,
+      },
     );
   });
 

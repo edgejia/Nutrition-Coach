@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DEFAULT_GUEST_SESSION_SECRET } from "../../server/config.js";
+import { DEFAULT_GUEST_SESSION_SECRET, MAX_GUEST_SESSION_TTL_SECONDS } from "../../server/config.js";
 
 const probeScript = [
   'const { buildApp } = await import("./server/app.ts");',
@@ -162,6 +162,32 @@ describe("startup guest-session security guard", () => {
     );
   });
 
+  it("fails boot before completion when guest-session TTL config exceeds the supported cookie range", () => {
+    const rawActiveTtl = String(MAX_GUEST_SESSION_TTL_SECONDS + 1);
+    const activeTtlResult = runBootProbe({
+      ...baseEnv(),
+      GUEST_SESSION_TTL_SECONDS: rawActiveTtl,
+    });
+    assertRuntimeConfigBootFailure(
+      activeTtlResult,
+      "GUEST_SESSION_TTL_SECONDS",
+      /positive safe integer number of seconds/,
+      rawActiveTtl,
+    );
+
+    const rawResumeTtl = String(MAX_GUEST_SESSION_TTL_SECONDS + 1);
+    const resumeTtlResult = runBootProbe({
+      ...baseEnv(),
+      GUEST_SESSION_RESUME_TTL_SECONDS: rawResumeTtl,
+    });
+    assertRuntimeConfigBootFailure(
+      resumeTtlResult,
+      "GUEST_SESSION_RESUME_TTL_SECONDS",
+      /positive safe integer number of seconds/,
+      rawResumeTtl,
+    );
+  });
+
   it("server entrypoint reads the listen port from app.runtimeConfig after buildApp", () => {
     const source = readFileSync(path.join(process.cwd(), "server/index.ts"), "utf8");
 
@@ -169,6 +195,15 @@ describe("startup guest-session security guard", () => {
     assert.match(source, /const\s+app\s*=\s*await\s+buildApp/);
     assert.match(source, /const\s+\{\s*port\s*\}\s*=\s*app\.runtimeConfig/);
     assert.match(source, /app\.listen\(\{\s*port,\s*host:\s*"0\.0\.0\.0"\s*\}\)/);
+  });
+
+  it("buildApp delegates numeric runtime env reads to the config module", () => {
+    const source = readFileSync(path.join(process.cwd(), "server/app.ts"), "utf8");
+
+    assert.match(source, /readRuntimeConfigFromEnv\(\)/);
+    assert.doesNotMatch(source, /process\.env\.PORT/);
+    assert.doesNotMatch(source, /process\.env\.GUEST_SESSION_TTL_SECONDS/);
+    assert.doesNotMatch(source, /process\.env\.GUEST_SESSION_RESUME_TTL_SECONDS/);
   });
 
   it("fails boot before completion when PORT config is invalid", () => {

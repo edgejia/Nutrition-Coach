@@ -18,14 +18,16 @@ export interface RuntimeConfig {
   guestSessionResumeTtlSeconds: number;
 }
 
+export const MAX_GUEST_SESSION_TTL_SECONDS = 60 * 60 * 24 * 400;
+
 const GUEST_SESSION_SECRET_ERROR =
   "GUEST_SESSION_SECRET must be set in deployed-like runtime (NODE_ENV=production or GUEST_SESSION_COOKIE_SECURE=true) to a non-empty, non-default value at least 32 characters long.";
 
 const PORT_CONFIG_ERROR = "PORT must be an integer from 1 to 65535.";
 const GUEST_SESSION_TTL_CONFIG_ERROR =
-  "GUEST_SESSION_TTL_SECONDS must be a positive safe integer number of seconds.";
+  `GUEST_SESSION_TTL_SECONDS must be a positive safe integer number of seconds no greater than ${MAX_GUEST_SESSION_TTL_SECONDS}.`;
 const GUEST_SESSION_RESUME_TTL_CONFIG_ERROR =
-  "GUEST_SESSION_RESUME_TTL_SECONDS must be a positive safe integer number of seconds.";
+  `GUEST_SESSION_RESUME_TTL_SECONDS must be a positive safe integer number of seconds no greater than ${MAX_GUEST_SESSION_TTL_SECONDS}.`;
 
 const INTEGER_STRING_PATTERN = /^(0|[1-9]\d*)$/;
 
@@ -65,35 +67,50 @@ function parseIntegerEnvValue(rawValue: string | undefined, defaultValue: number
   return parsedValue;
 }
 
+function parseGuestSessionTtlEnvValue(
+  rawValue: string | undefined,
+  defaultValue: number,
+  errorMessage: string,
+) {
+  const parsedValue = parseIntegerEnvValue(rawValue, defaultValue, errorMessage);
+  if (parsedValue <= 0 || parsedValue > MAX_GUEST_SESSION_TTL_SECONDS) {
+    throw new Error(errorMessage);
+  }
+
+  return parsedValue;
+}
+
 export function validateRuntimeConfig(input: RuntimeConfigInput): RuntimeConfig {
   const port = parseIntegerEnvValue(input.port, 3000, PORT_CONFIG_ERROR);
   if (port < 1 || port > 65535) {
     throw new Error(PORT_CONFIG_ERROR);
   }
 
-  const guestSessionTtlSeconds = parseIntegerEnvValue(
+  const guestSessionTtlSeconds = parseGuestSessionTtlEnvValue(
     input.guestSessionTtlSeconds,
     60 * 60 * 12,
     GUEST_SESSION_TTL_CONFIG_ERROR,
   );
-  if (guestSessionTtlSeconds <= 0) {
-    throw new Error(GUEST_SESSION_TTL_CONFIG_ERROR);
-  }
 
-  const guestSessionResumeTtlSeconds = parseIntegerEnvValue(
+  const guestSessionResumeTtlSeconds = parseGuestSessionTtlEnvValue(
     input.guestSessionResumeTtlSeconds,
     60 * 60 * 24 * 30,
     GUEST_SESSION_RESUME_TTL_CONFIG_ERROR,
   );
-  if (guestSessionResumeTtlSeconds <= 0) {
-    throw new Error(GUEST_SESSION_RESUME_TTL_CONFIG_ERROR);
-  }
 
   return {
     port,
     guestSessionTtlSeconds,
     guestSessionResumeTtlSeconds,
   };
+}
+
+export function readRuntimeConfigFromEnv(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
+  return validateRuntimeConfig({
+    port: env.PORT,
+    guestSessionTtlSeconds: env.GUEST_SESSION_TTL_SECONDS,
+    guestSessionResumeTtlSeconds: env.GUEST_SESSION_RESUME_TTL_SECONDS,
+  });
 }
 
 /**
