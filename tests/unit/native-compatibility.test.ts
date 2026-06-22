@@ -68,3 +68,9 @@ describe("sharp native compatibility", () => {
     );
   });
 });
+
+describe("better-sqlite3 native compatibility", () => {
+  it("migrates, writes, closes, reopens, and reads grouped meal data", async () => {
+    assert.fail("native sqlite file-backed persistence proof not implemented");
+  });
+});
