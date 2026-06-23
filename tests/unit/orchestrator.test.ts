@@ -25,6 +25,7 @@ import type {
   LLMProvider,
 } from "../../server/llm/types.js";
 import { appendMutationReceiptStream, createOrchestrator, guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
+import { derivePlanningFacts, renderPlanningFacts } from "../../server/orchestrator/planning-reply-renderer.js";
 import {
   createEmptyCommittedMutationState,
   mutationOutcomeFactFromEffects,
@@ -400,6 +401,29 @@ describe("no-mutation success-claim guard", () => {
     }
     assert.equal(renderMutationReceipt(goalsEffects), "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 190 g\n• 脂肪 55 g");
     assert.equal(renderMutationReceipt(updateEffects), "已更新半份雞腿便當，360 kcal，蛋白質 20 g。");
+  });
+
+  it("does not let planning facts exempt false no-mutation log claims", () => {
+    const planningFacts = derivePlanningFacts(
+      {
+        totalCalories: 1000,
+        totalProtein: 72,
+        totalCarbs: 135,
+        totalFat: 28,
+        mealCount: 2,
+        date: today,
+      },
+      committedTargets,
+    );
+    const reply = `${renderPlanningFacts(planningFacts)}\n\n- 已記錄晚餐，500 kcal。`;
+    const guarded = guardNoMutationSuccessClaim(
+      reply,
+      projectCommittedMutationState(createEmptyCommittedMutationState()),
+      { planningFacts },
+    );
+
+    assert.notEqual(guarded, reply);
+    assert.doesNotMatch(guarded, /已記錄晚餐|500 kcal/);
   });
 });
 

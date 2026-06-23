@@ -118,6 +118,22 @@ describe("planning reply renderer contract", () => {
     assert.doesNotMatch(result.advice, /900-1100 kcal/);
   });
 
+  it("clamps ranges that are entirely above the remaining planning budget", () => {
+    const facts = derivePlanningFacts(overBudgetSummary, dailyTargets);
+    const result = guardPlanningAdvice(
+      "下一餐可以抓 100-200 kcal，蛋白質 35-45 g，脂肪 5-10 g。",
+      facts,
+    );
+
+    assert.equal(result.status, "clamped");
+    assert.match(result.advice, /0 kcal/);
+    assert.match(result.advice, /蛋白質 30 g/);
+    assert.match(result.advice, /脂肪 0 g/);
+    assert.doesNotMatch(result.advice, /100-200 kcal/);
+    assert.doesNotMatch(result.advice, /35-45 g/);
+    assert.doesNotMatch(result.advice, /5-10 g/);
+  });
+
   it("classifies contradicted current-state facts for repair and supports deterministic fallback", () => {
     const facts = derivePlanningFacts(loggedSummary, dailyTargets);
     const contradictions = [

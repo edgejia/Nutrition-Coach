@@ -126,6 +126,24 @@ function rangePattern(unitPattern: string): RegExp {
   return new RegExp(`(\\d+(?:\\.\\d+)?)\\s*-\\s*(\\d+(?:\\.\\d+)?)\\s*(${unitPattern})`, "gi");
 }
 
+function clampRangeToLimit(
+  low: number,
+  high: number,
+  limit: number,
+  unit: string,
+): string | undefined {
+  if (!Number.isFinite(high) || !Number.isFinite(limit) || high <= limit) {
+    return undefined;
+  }
+  if (limit <= 0) {
+    return `0 ${unit}`;
+  }
+  if (low <= limit) {
+    return `${formatNumber(low)}-${formatNumber(limit)} ${unit}`;
+  }
+  return `${formatNumber(limit)} ${unit}`;
+}
+
 function clampAdviceRanges(advice: string, facts: PlanningFacts): { advice: string; clamped: boolean } {
   let clamped = false;
   const normalized = normalizeRangeSeparator(advice);
@@ -144,9 +162,10 @@ function clampAdviceRanges(advice: string, facts: PlanningFacts): { advice: stri
   let next = normalized.replace(rangePattern("kcal|大卡|卡路里"), (match, lowRaw, highRaw, unit) => {
     const low = Number(lowRaw);
     const high = Number(highRaw);
-    if (Number.isFinite(high) && high > kcalLimit && low <= kcalLimit) {
+    const clampedRange = clampRangeToLimit(low, high, kcalLimit, unit);
+    if (clampedRange) {
       clamped = true;
-      return `${formatNumber(low)}-${formatNumber(kcalLimit)} ${unit}`;
+      return clampedRange;
     }
     return match;
   });
@@ -162,9 +181,10 @@ function clampAdviceRanges(advice: string, facts: PlanningFacts): { advice: stri
       const low = Number(lowRaw);
       const high = Number(highRaw);
       const limit = macroLimits[macroKey];
-      if (Number.isFinite(high) && high > limit && low <= limit) {
+      const clampedRange = clampRangeToLimit(low, high, limit, unit);
+      if (clampedRange) {
         clamped = true;
-        return `${formatNumber(low)}-${formatNumber(limit)} ${unit}`;
+        return clampedRange;
       }
       return match;
     },

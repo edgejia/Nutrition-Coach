@@ -571,10 +571,7 @@ export function guardNoMutationSuccessClaim(
   if (
     claimedKinds.every((kind) => kind === "log")
     && !mutationProjection.hasCommittedMutation
-    && (
-      isFactGroundedSummaryHistoryReply(reply, context.summaryHistoryFacts)
-      || isFactGroundedPlanningReply(reply, context.planningFacts)
-    )
+    && isFactGroundedSummaryHistoryReply(reply, context.summaryHistoryFacts)
   ) {
     return reply;
   }
@@ -734,18 +731,6 @@ function caloriesCloseEnough(claimed: number, actual: number): boolean {
   return Number.isFinite(claimed)
     && Number.isFinite(actual)
     && Math.abs(claimed - actual) <= SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL;
-}
-
-function isFactGroundedPlanningReply(reply: string, facts: PlanningFacts | undefined): boolean {
-  if (!facts) {
-    return false;
-  }
-  if (reply.includes(renderPlanningFacts(facts))) {
-    return true;
-  }
-  return reply.includes(`今日攝取 ${facts.mealCount} 餐`)
-    && reply.includes(`目標 ${formatCalories(facts.target.calories)} kcal`)
-    && reply.includes(`還剩 ${formatCalories(facts.remaining.calories)} kcal`);
 }
 
 function shouldNormalizePlainAdviceReply(input: {
