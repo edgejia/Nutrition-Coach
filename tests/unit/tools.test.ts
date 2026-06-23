@@ -1,5 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
 import { mealRevisionItems, mealRevisions, mealTransactions } from "../../server/db/schema.js";
@@ -18,6 +19,8 @@ import {
 import {
   executeTool,
   getToolDefinitions,
+  KNOWN_TOOL_POLICY_CLASSES,
+  planNextMealContract,
   redactToolArgsForHook,
   toolRegistry,
   FatalToolError,
@@ -26,6 +29,7 @@ import {
 import { runContract, type ToolExecuteResult } from "../../server/orchestrator/tool-contract.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import type { ToolCall } from "../../server/llm/types.js";
+import type { PlanningFacts } from "../../server/orchestrator/planning-reply-renderer.js";
 
 // Plan 10-02 Task 2: parity guarantees for log_food and get_daily_summary
 // after migration to the ToolContract registry. Failure-path tests assert at
@@ -59,6 +63,7 @@ function assertNoRawCandidateFields(candidate: Record<string, unknown>) {
 describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   let db: ReturnType<typeof createDb>;
   let deviceId: string;
+  let deviceService: ReturnType<typeof createDeviceService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let summaryService: ReturnType<typeof createSummaryService>;
 
@@ -83,10 +88,146 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
   beforeEach(async () => {
     db = createDb(":memory:");
-    const deviceService = createDeviceService(db);
+    deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     summaryService = createSummaryService(db);
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+  });
+
+  describe("Phase 102: plan_next_meal planning facts contract", () => {
+    const planNextMealCall: ToolCall = {
+      id: "call_plan_next_meal",
+      type: "function",
+      function: {
+        name: "plan_next_meal",
+        arguments: JSON.stringify({}),
+      },
+    };
+
+    it("registers plan_next_meal as a strict direct-execute tool", () => {
+      const definition = getToolDefinitions().find(
+        (toolDefinition) => toolDefinition.function.name === "plan_next_meal",
+      );
+
+      assert.ok(definition, "plan_next_meal definition must be public");
+      assert.equal(KNOWN_TOOL_POLICY_CLASSES.plan_next_meal, "direct-execute");
+      assert.equal(planNextMealContract.name, "plan_next_meal");
+      assert.equal(planNextMealContract.policyClass, "direct-execute");
+      assert.equal(planNextMealContract.zodSchema.safeParse({}).success, true);
+      assert.equal(planNextMealContract.zodSchema.safeParse({ date_text: "today" }).success, false);
+      assert.deepEqual(definition.function.parameters, {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      });
+    });
+
+    it("returns backend-derived planningFacts for authenticated-device meals and targets", async () => {
+      await foodLoggingService.logGroupedMeal(deviceId, {
+        items: [
+          { foodName: "雞胸飯", calories: 500, protein: 40, carbs: 55, fat: 12 },
+        ],
+      });
+      await deviceService.updateGoals(deviceId, {
+        calories: 1600,
+        protein: 130,
+        carbs: 180,
+        fat: 55,
+      });
+
+      const result = await executeTool(planNextMealCall, deviceId, {
+        foodLoggingService,
+        summaryService,
+        deviceService,
+      });
+
+      assert.equal(result.summary, "status: planning");
+      assert.equal(result.success, true);
+      assert.equal(result.executed, true);
+      assert.ok(result.planningFacts, "planningFacts must be projected from contract result");
+      assert.deepEqual(result.planningFacts, {
+        date: formatLocalDate(new Date()),
+        consumed: { calories: 500, protein: 40, carbs: 55, fat: 12 },
+        target: { calories: 1600, protein: 130, carbs: 180, fat: 55 },
+        remaining: { calories: 1100, protein: 90, carbs: 125, fat: 43 },
+        macroGap: { protein: 90, carbs: 125, fat: 43 },
+        mealCount: 1,
+        hasLoggedMeals: true,
+        isOverBudget: false,
+      } satisfies PlanningFacts);
+      assert.deepEqual(JSON.parse(result.result), result.planningFacts);
+      assert.equal(result.mealMutationKind, undefined);
+      assert.equal(result.loggedMeal, undefined);
+      assert.equal(result.proposalCard, undefined);
+      assert.equal(result.controlledReply, undefined);
+    });
+
+    it("handles no-meal and over-budget planning states without mutation fields", async () => {
+      const noMealResult = await executeTool(planNextMealCall, deviceId, {
+        foodLoggingService,
+        summaryService,
+        deviceService,
+      });
+
+      assert.ok(noMealResult.planningFacts);
+      assert.equal(noMealResult.planningFacts.hasLoggedMeals, false);
+      assert.equal(noMealResult.planningFacts.mealCount, 0);
+      assert.equal(noMealResult.planningFacts.remaining.calories, noMealResult.planningFacts.target.calories);
+      assert.equal(noMealResult.planningFacts.isOverBudget, false);
+      assert.equal(noMealResult.mealMutationKind, undefined);
+      assert.equal(noMealResult.loggedMeal, undefined);
+      assert.equal(noMealResult.proposalCard, undefined);
+
+      const overBudgetDeviceId = (await deviceService.createDevice("fat_loss", undefined, {
+        calories: 600,
+        protein: 80,
+        carbs: 70,
+        fat: 25,
+      })).deviceId;
+      await foodLoggingService.logGroupedMeal(overBudgetDeviceId, {
+        items: [
+          { foodName: "牛肉麵", calories: 760, protein: 35, carbs: 88, fat: 28 },
+        ],
+      });
+
+      const overBudgetResult = await executeTool(planNextMealCall, overBudgetDeviceId, {
+        foodLoggingService,
+        summaryService,
+        deviceService,
+      });
+
+      assert.ok(overBudgetResult.planningFacts);
+      assert.equal(overBudgetResult.planningFacts.isOverBudget, true);
+      assert.deepEqual(overBudgetResult.planningFacts.remaining, {
+        calories: 0,
+        protein: 45,
+        carbs: 0,
+        fat: 0,
+      });
+      assert.equal(overBudgetResult.mealMutationKind, undefined);
+      assert.equal(overBudgetResult.loggedMeal, undefined);
+      assert.equal(overBudgetResult.proposalCard, undefined);
+    });
+
+    it("keeps plan_next_meal logSummary metadata-only", () => {
+      const summary = planNextMealContract.logSummary({});
+      const serialized = JSON.stringify(summary);
+
+      assert.deepEqual(summary, { tool: "plan_next_meal" });
+      assert.doesNotMatch(serialized, /\b\d{2,}\b/);
+      assert.doesNotMatch(serialized, /kcal|protein|carbs|fat|calories|prompt|user/i);
+    });
+
+    it("maps device rows to DailyTargets locally in tools.ts without importing getDeviceTargets", async () => {
+      const source = await readFile(new URL("../../server/orchestrator/tools.ts", import.meta.url), "utf8");
+
+      assert.doesNotMatch(source, /from\s+["']\.\/index\.js["']/);
+      assert.doesNotMatch(source, /\bgetDeviceTargets\b/);
+      assert.match(source, /dailyCalories/);
+      assert.match(source, /dailyProtein/);
+      assert.match(source, /dailyCarbs/);
+      assert.match(source, /dailyFat/);
+    });
   });
 
   // Plan 83-03 (D-01): the single-item union half is gone. A top-level

@@ -28,6 +28,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
         "find_meals",
         "get_daily_summary",
         "log_food",
+        "plan_next_meal",
         "propose_goals",
         "propose_meal_estimate",
         "propose_meal_numeric_correction",
@@ -90,6 +91,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
       assert.deepEqual(KNOWN_TOOL_POLICY_CLASSES, {
         log_food: "execute-and-report",
         get_daily_summary: "direct-execute",
+        plan_next_meal: "direct-execute",
         find_meals: "clarify-first",
         propose_goals: "confirm-first",
         propose_meal_estimate: "confirm-first",
@@ -150,6 +152,10 @@ describe("Phase 10-02: orchestrator tool registry", () => {
       assertRules("get_daily_summary", [
         "get_daily_summary_historical_date_clarification",
       ]);
+      assertRules("plan_next_meal", [
+        "plan_next_meal_authoritative_current_facts",
+        "plan_next_meal_no_mutation",
+      ]);
       assertRules("find_meals", [
         "find_meals_target_clarification",
         "find_meals_pending_selection_helper_state",
@@ -188,6 +194,8 @@ describe("Phase 10-02: orchestrator tool registry", () => {
     it("Test 2f: concrete policy rule ids are scoped to their owning tool", () => {
       assertRuleOnlyOn("log_food_failed_recognition_no_save", "log_food");
       assertRuleOnlyOn("get_daily_summary_historical_date_clarification", "get_daily_summary");
+      assertRuleOnlyOn("plan_next_meal_authoritative_current_facts", "plan_next_meal");
+      assertRuleOnlyOn("plan_next_meal_no_mutation", "plan_next_meal");
       assertRuleOnlyOn("find_meals_target_clarification", "find_meals");
       assertRuleOnlyOn("update_meal_revision_precondition_guard", "update_meal");
       assertRuleOnlyOn("delete_meal_setup_only", "delete_meal");
