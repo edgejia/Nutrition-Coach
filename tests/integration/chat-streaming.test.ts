@@ -3546,6 +3546,89 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat planning SSE bridges validated plan_next_meal reply into chunk and done events", async () => {
+    assert.ok(services);
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "午餐", calories: 500, protein: 30, carbs: 60, fat: 15 },
+      ],
+    });
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_sse_plan_next_meal",
+        type: "function",
+        function: {
+          name: "plan_next_meal",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueRoundResponse({
+      content: [
+        "結論：晚餐抓 900-1100 kcal，補足蛋白質。",
+        "| 欄位 | 值 |",
+        "| --- | --- |",
+        "- 理由：剩餘熱量夠，但不要超過上限。",
+        "- 選項：雞胸飯加青菜。",
+        "- 下一步：先選主蛋白。",
+      ].join("\n"),
+    });
+
+    const form = new FormData();
+    form.append("message", "我下一餐可以怎麼吃？");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+      assert.ok(res.body);
+
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => (JSON.parse(event.data) as { token: string }).token)
+        .join("");
+      const doneEvent = events.find((event) => event.event === "done");
+      assert.ok(doneEvent, "planning stream must terminate with done");
+      const donePayload = JSON.parse(doneEvent.data) as {
+        didLogMeal: boolean;
+        didMutateMeal?: boolean;
+      };
+
+      assert.match(chunkText, /今日攝取 1 餐，共 500 kcal/);
+      assert.match(chunkText, /還剩 1000 kcal/);
+      assert.match(chunkText, /蛋白質 90 g/);
+      assert.match(chunkText, /900-1000 kcal/);
+      assert.doesNotMatch(chunkText, /900-1100 kcal/);
+      assert.doesNotMatch(chunkText, /我還沒有把這餐寫入紀錄/);
+      assert.doesNotMatch(chunkText, /\| --- \||\| 欄位 \| 值 \|/);
+      assert.equal(donePayload.didLogMeal, false);
+      assert.equal(donePayload.didMutateMeal, false);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1);
+      assert.equal(assistantMessages[0]?.content, chunkText);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   it("POST /api/chat hallucinationGuard truncates stream on 方式1/方式2 pattern and writes retry-prompt to history", async () => {
     mockLLM.queueChatStream([
       "我提供",
