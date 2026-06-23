@@ -1,5 +1,22 @@
 # 更新日誌
 
+## v3.1 - 2026-06-23
+
+### 變更
+
+- Source docs now define the supported production-equivalent runtime as one Fastify process, one SQLite database path, stable local asset directories, request-local upload staging, and process-local SSE fan-out; ADR 0007 records prerequisites before any multi-instance claim.
+- Runtime numeric config now validates `PORT`, `GUEST_SESSION_TTL_SECONDS`, and `GUEST_SESSION_RESUME_TTL_SECONDS` during `buildApp()` startup, exposes `app.runtimeConfig`, and rejects unsafe or out-of-range values before listen/session construction.
+- ADR 0008 records the current OpenAI Provider Chat Completions compatibility baseline, including SDK/model path, tool calling, image input, streaming, structured output, abort handling, and metadata-only error normalization.
+- `yarn deps:audit` adds Yarn-only dependency advisory evidence, while ADR 0009 records advisory triage, deferral, release-blocking rules, and current `drizzle-orm` / transitive `form-data` decisions.
+- `yarn native:check` adds deterministic Sharp and file-backed `better-sqlite3` native compatibility evidence, and docs clarify that native evidence is source-readiness only.
+
+### 驗證
+
+- Phase 98-101 verification passed: Runtime Boundary & Config Fail-Fast `9/9`, OpenAI Provider Compatibility `8/8`, Dependency Advisory Policy `12/12`, and Native Dependency Compatibility Gates `14/14`.
+- Nyquist validation is compliant for all four phases, with no missing validation artifacts.
+- Closeout source-readiness checks passed: `yarn deps:audit` found the expected two high runtime advisories recorded in ADR 0009, `yarn native:check` passed 6/6 tests, and `yarn release:check` passed TypeScript, 1,741 node tests, and the Vite production build.
+- v3.1 closeout remains PR/source-ready only; no `main` merge authorization beyond PR #84, tag movement, Cloudflare Tunnel change, public smoke, or production runtime refresh was performed by closeout.
+
 ## v3.0.1 - 2026-06-21
 
 ### 變更
