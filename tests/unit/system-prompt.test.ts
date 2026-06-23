@@ -18,6 +18,24 @@ function mealCorrectionSection(prompt: string): string {
   return match[0];
 }
 
+function planningRoutingSection(prompt: string): string {
+  const match = /飲食規劃工具路由：[\s\S]*?(?=\n\n教練規劃模式 coach_planning：)/.exec(prompt);
+  assert.ok(match, "planning routing section must be present");
+  return match[0];
+}
+
+function coachPlanningSection(prompt: string): string {
+  const match = /教練規劃模式 coach_planning：[\s\S]*?(?=\n\n精簡教練模式 coach_compact：)/.exec(prompt);
+  assert.ok(match, "coach planning section must be present");
+  return match[0];
+}
+
+function coachCompactSection(prompt: string): string {
+  const match = /精簡教練模式 coach_compact：[\s\S]*?(?=\n\n餐點拆分與記錄規則：)/.exec(prompt);
+  assert.ok(match, "coach compact section must be present");
+  return match[0];
+}
+
 const LEGACY_GOAL_UPDATE_SECTION = `目標更新規則：
 1. 只有當使用者提供每日目標的具體數字時，才可以更新卡路里、蛋白質、碳水或脂肪目標。
 2. 像「少吃一點」、「提高蛋白質」、「血糖控制」這類模糊目標變更意圖，不要直接更新；你要先根據目前每日目標與已提供的個人資料推薦一組具體數值，並詢問使用者是否要套用。
@@ -38,6 +56,9 @@ const LEGACY_MEAL_CORRECTION_SECTION = `歷史餐點修正規則：
 
 function normalizeSectionsForLegacySnapshot(prompt: string): string {
   return prompt
+    .replace(`${planningRoutingSection(prompt)}\n\n`, "")
+    .replace(`${coachPlanningSection(prompt)}\n\n`, "")
+    .replace(`${coachCompactSection(prompt)}\n\n`, "")
     .replace(goalUpdateSection(prompt), LEGACY_GOAL_UPDATE_SECTION)
     .replace(mealCorrectionSection(prompt), LEGACY_MEAL_CORRECTION_SECTION);
 }
@@ -53,6 +74,9 @@ describe("buildSystemPrompt", () => {
       mealItemization: "meal-itemization",
       proteinEstimation: "protein-estimation",
       logFoodReceipt: "log-food-receipt",
+      planningRouting: "planning-routing",
+      coachPlanning: "coach-planning",
+      coachCompact: "coach-compact",
       goalUpdates: "goal-updates",
       mealCorrections: "meal-corrections",
       historicalDates: "historical-dates",
@@ -96,6 +120,8 @@ describe("buildSystemPrompt", () => {
       outputLanguage: [
         SYSTEM_PROMPT_SECTION_IDS.responsibilities,
         SYSTEM_PROMPT_SECTION_IDS.logFoodReceipt,
+        SYSTEM_PROMPT_SECTION_IDS.coachPlanning,
+        SYSTEM_PROMPT_SECTION_IDS.coachCompact,
       ],
     } as const;
     const sectionIds = new Set(Object.values(SYSTEM_PROMPT_SECTION_IDS));
@@ -388,6 +414,79 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /protein_sources/);
     assert.match(prompt, /一句簡短繁體中文/);
     assert.match(prompt, /主要蛋白來源/);
+  });
+
+  it("adds only the Phase 102 coach planning section metadata with kebab-case IDs", () => {
+    assert.equal(SYSTEM_PROMPT_SECTION_IDS.planningRouting, "planning-routing");
+    assert.equal(SYSTEM_PROMPT_SECTION_IDS.coachPlanning, "coach-planning");
+    assert.equal(SYSTEM_PROMPT_SECTION_IDS.coachCompact, "coach-compact");
+
+    const sectionIds = Object.values(SYSTEM_PROMPT_SECTION_IDS);
+    const phase102Ids = sectionIds.filter((id) => id.includes("planning") || id.includes("compact"));
+
+    assert.deepEqual(phase102Ids, ["planning-routing", "coach-planning", "coach-compact"]);
+    assert.equal(new Set(sectionIds).size, sectionIds.length);
+    assert.ok(sectionIds.every((id) => /^[a-z]+(?:-[a-z]+)*$/.test(id)));
+  });
+
+  it("routes summary/history facts to get_daily_summary and next-meal planning to plan_next_meal", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+    const section = planningRoutingSection(prompt);
+
+    assert.match(section, /get_daily_summary/);
+    assert.match(section, /摘要|歷史|吃了什麼|攝取狀況/);
+    assert.match(section, /summary-only|只回摘要|摘要-only/);
+    assert.match(section, /plan_next_meal/);
+    assert.match(section, /下一餐|剩餘熱量|剩餘預算|macro gap|營養缺口|蛋白質補足/);
+    assert.match(section, /coach_planning/);
+    assert.match(section, /不要.*CTA promptKey|不需要.*promptKey|不依賴.*promptKey/s);
+  });
+
+  it("keeps successful log_food receipts deterministic and coach guidance out of receipt cards", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+    const receiptSection = /成功 log_food 回覆契約：[\s\S]*?(?=\n\n飲食規劃工具路由：)/.exec(prompt)?.[0] ?? "";
+    const planningSection = `${planningRoutingSection(prompt)}\n${coachPlanningSection(prompt)}\n${coachCompactSection(prompt)}`;
+
+    assert.match(receiptSection, /成功 log_food 回覆/);
+    assert.match(receiptSection, /純文字段落/);
+    assert.match(receiptSection, /最多 90/);
+    assert.match(planningSection, /成功 log_food.*既有.*deterministic|成功 log_food.*確定性收據|成功 log_food.*短 deterministic/s);
+    assert.match(planningSection, /不要.*coach note|不得.*coach note|不加.*教練補充/s);
+    assert.match(planningSection, /receipt card|收據卡/);
+    assert.match(planningSection, /後端.*事實|committed facts|persisted meal revision/s);
+    assert.match(planningSection, /coach.*normal assistant text|教練.*一般助理文字|一般聊天文字/s);
+    assert.match(planningSection, /不得.*改寫.*receipt card|不得.*收據卡.*欄位/s);
+  });
+
+  it("defines compact coach_planning and coach_compact output without markdown tables", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+    const coachSections = `${coachPlanningSection(prompt)}\n${coachCompactSection(prompt)}`;
+
+    assert.match(coachSections, /coach_planning/);
+    assert.match(coachSections, /coach_compact/);
+    assert.match(coachSections, /直接結論/);
+    assert.match(coachSections, /簡短理由|短理由/);
+    assert.match(coachSections, /實用選項/);
+    assert.match(coachSections, /一個下一步/);
+    assert.match(coachSections, /最多 5 個 bullet|最多 5 個項目|最多五個/);
+    assert.match(coachSections, /不得.*markdown table|不要.*markdown table|不得.*表格|不要.*表格/s);
+    assert.match(coachSections, /繁體中文/);
+    assert.match(coachSections, /醫師|專業人員|不得診斷/);
   });
 
   it("defines non-speculative grouped logging examples and allows items.length === 1", () => {
