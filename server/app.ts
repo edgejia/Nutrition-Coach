@@ -38,9 +38,21 @@ import { registerProposalActionRoutes } from "./routes/proposal-actions.js";
 import { registerProtectedRouteSupport } from "./routes/protected-route.js";
 import type { LLMProvider } from "./llm/types.js";
 import type { LlmTraceRecorder } from "./orchestrator/llm-trace.js";
-import { config, isDeployedLikeRuntime, validateGuestSessionSecretForRuntime } from "./config.js";
+import {
+  config,
+  isDeployedLikeRuntime,
+  readRuntimeConfigFromEnv,
+  type RuntimeConfig,
+  validateGuestSessionSecretForRuntime,
+} from "./config.js";
 
 const LOCAL_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+declare module "fastify" {
+  interface FastifyInstance {
+    runtimeConfig: RuntimeConfig;
+  }
+}
 
 export function getCorsRegistrationPolicy(input: {
   guestSessionCookieSecure: boolean;
@@ -120,6 +132,8 @@ export async function buildApp(opts: AppOptions) {
     guestSessionCookieSecure: config.guestSessionCookieSecure,
     nodeEnv: config.nodeEnv,
   });
+  const runtimeConfig = readRuntimeConfigFromEnv();
+  app.decorate("runtimeConfig", runtimeConfig);
 
   const db = createDb(opts.dbPath ?? config.dbPath);
   const deviceService = createDeviceService(db);
@@ -129,8 +143,8 @@ export async function buildApp(opts: AppOptions) {
     secret: config.guestSessionSecret,
     activeCookieName: config.guestSessionCookieName,
     resumeCookieName: config.guestSessionResumeCookieName,
-    activeTtlSeconds: config.guestSessionTtlSeconds,
-    resumeTtlSeconds: config.guestSessionResumeTtlSeconds,
+    activeTtlSeconds: runtimeConfig.guestSessionTtlSeconds,
+    resumeTtlSeconds: runtimeConfig.guestSessionResumeTtlSeconds,
     secure: config.guestSessionCookieSecure,
   });
   const summaryService = createSummaryService(db);

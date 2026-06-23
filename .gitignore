@@ -28,6 +28,7 @@ docs/research
 docs/README.md
 docs/codex.md
 docs/HANDOFF
+docs/issues
 
 # Secrets, databases, OS files, and browser/tool cache
 .env

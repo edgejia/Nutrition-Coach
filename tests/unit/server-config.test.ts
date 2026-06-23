@@ -3,8 +3,32 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_GUEST_SESSION_SECRET,
   isDeployedLikeRuntime,
+  MAX_GUEST_SESSION_TTL_SECONDS,
+  readRuntimeConfigFromEnv,
+  type RuntimeConfigInput,
+  validateRuntimeConfig,
   validateGuestSessionSecretForRuntime,
 } from "../../server/config.js";
+
+function assertRuntimeConfigError(
+  input: RuntimeConfigInput,
+  expectedEnvName: string,
+  expectedShapeText: string,
+  rawRejectedValue?: string,
+) {
+  assert.throws(
+    () => validateRuntimeConfig(input),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.ok(error.message.includes(expectedEnvName), error.message);
+      assert.ok(error.message.includes(expectedShapeText), error.message);
+      if (rawRejectedValue !== undefined) {
+        assert.equal(error.message.includes(rawRejectedValue), false, error.message);
+      }
+      return true;
+    },
+  );
+}
 
 describe("server config guest-session policy", () => {
   it("detects deployed-like runtime only from production node env or secure guest cookies", () => {
@@ -121,6 +145,210 @@ describe("server config guest-session policy", () => {
         guestSessionSecret: "safe-secret-value-with-punctuation!!!",
         guestSessionCookieSecure: true,
         nodeEnv: "test",
+      });
+    });
+
+    assert.deepEqual({ ...process.env }, before);
+  });
+});
+
+describe("server config runtime numeric policy", () => {
+  it("returns defaults when numeric runtime values are missing", () => {
+    assert.deepEqual(
+      validateRuntimeConfig({
+        port: undefined,
+        guestSessionTtlSeconds: undefined,
+        guestSessionResumeTtlSeconds: undefined,
+      }),
+      {
+        port: 3000,
+        guestSessionTtlSeconds: 43200,
+        guestSessionResumeTtlSeconds: 2592000,
+      },
+    );
+  });
+
+  it("accepts valid integer strings for port and guest-session TTLs", () => {
+    assert.deepEqual(
+      validateRuntimeConfig({
+        port: "1",
+        guestSessionTtlSeconds: "1",
+        guestSessionResumeTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS),
+      }),
+      {
+        port: 1,
+        guestSessionTtlSeconds: 1,
+        guestSessionResumeTtlSeconds: MAX_GUEST_SESSION_TTL_SECONDS,
+      },
+    );
+
+    assert.deepEqual(
+      validateRuntimeConfig({
+        port: "65535",
+        guestSessionTtlSeconds: "43200",
+        guestSessionResumeTtlSeconds: "2592000",
+      }),
+      {
+        port: 65535,
+        guestSessionTtlSeconds: 43200,
+        guestSessionResumeTtlSeconds: 2592000,
+      },
+    );
+  });
+
+  it("rejects invalid PORT strings and boundaries", () => {
+    const rejectedPorts = [
+      "0",
+      "-1",
+      "65536",
+      "1.5",
+      "NaN",
+      "Infinity",
+      "not-a-number",
+      "",
+      "   ",
+      "9007199254740992",
+    ] as const;
+
+    for (const port of rejectedPorts) {
+      assert.throws(() =>
+        validateRuntimeConfig({
+          port,
+          guestSessionTtlSeconds: undefined,
+          guestSessionResumeTtlSeconds: undefined,
+        }),
+      );
+    }
+  });
+
+  it("rejects invalid active guest-session TTL strings and out-of-range safe integers", () => {
+    const rejectedTtls = [
+      "0",
+      "-1",
+      "1.5",
+      "NaN",
+      "Infinity",
+      "not-a-number",
+      "",
+      "   ",
+      String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+      "9007199254740991",
+      "9007199254740992",
+    ] as const;
+
+    for (const guestSessionTtlSeconds of rejectedTtls) {
+      assert.throws(() =>
+        validateRuntimeConfig({
+          port: undefined,
+          guestSessionTtlSeconds,
+          guestSessionResumeTtlSeconds: undefined,
+        }),
+      );
+    }
+
+    assert.throws(() =>
+      validateRuntimeConfig({
+        port: undefined,
+        guestSessionTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+        guestSessionResumeTtlSeconds: undefined,
+      }),
+    );
+  });
+
+  it("rejects invalid resume guest-session TTL strings and out-of-range safe integers", () => {
+    const rejectedTtls = [
+      "0",
+      "-1",
+      "1.5",
+      "NaN",
+      "Infinity",
+      "not-a-number",
+      "",
+      "   ",
+      String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+      "9007199254740991",
+      "9007199254740992",
+    ] as const;
+
+    for (const guestSessionResumeTtlSeconds of rejectedTtls) {
+      assert.throws(() =>
+        validateRuntimeConfig({
+          port: undefined,
+          guestSessionTtlSeconds: undefined,
+          guestSessionResumeTtlSeconds,
+        }),
+      );
+    }
+
+    assert.throws(() =>
+      validateRuntimeConfig({
+        port: undefined,
+        guestSessionTtlSeconds: undefined,
+        guestSessionResumeTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+      }),
+    );
+  });
+
+  it("names the invalid env var and accepted numeric shape without echoing rejected values", () => {
+    const rawRejectedValue = "9007199254740992.*[secret-like-token]";
+
+    assertRuntimeConfigError(
+      {
+        port: rawRejectedValue,
+        guestSessionTtlSeconds: undefined,
+        guestSessionResumeTtlSeconds: undefined,
+      },
+      "PORT",
+      "integer from 1 to 65535",
+      rawRejectedValue,
+    );
+
+    assertRuntimeConfigError(
+      {
+        port: undefined,
+        guestSessionTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+        guestSessionResumeTtlSeconds: undefined,
+      },
+      "GUEST_SESSION_TTL_SECONDS",
+      "positive safe integer number of seconds",
+      String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+    );
+
+    assertRuntimeConfigError(
+      {
+        port: undefined,
+        guestSessionTtlSeconds: undefined,
+        guestSessionResumeTtlSeconds: String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+      },
+      "GUEST_SESSION_RESUME_TTL_SECONDS",
+      "positive safe integer number of seconds",
+      String(MAX_GUEST_SESSION_TTL_SECONDS + 1),
+    );
+  });
+
+  it("reads runtime numeric config from the supplied env object", () => {
+    assert.deepEqual(
+      readRuntimeConfigFromEnv({
+        PORT: "4567",
+        GUEST_SESSION_TTL_SECONDS: "43200",
+        GUEST_SESSION_RESUME_TTL_SECONDS: "2592000",
+      }),
+      {
+        port: 4567,
+        guestSessionTtlSeconds: 43200,
+        guestSessionResumeTtlSeconds: 2592000,
+      },
+    );
+  });
+
+  it("does not mutate process-wide environment while validating explicit runtime input", () => {
+    const before = { ...process.env };
+
+    assert.doesNotThrow(() => {
+      validateRuntimeConfig({
+        port: "3000",
+        guestSessionTtlSeconds: "43200",
+        guestSessionResumeTtlSeconds: "2592000",
       });
     });
 

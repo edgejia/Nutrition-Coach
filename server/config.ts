@@ -6,8 +6,30 @@ export interface GuestSessionRuntimeConfig {
   nodeEnv: string | undefined;
 }
 
+export interface RuntimeConfigInput {
+  port: string | undefined;
+  guestSessionTtlSeconds: string | undefined;
+  guestSessionResumeTtlSeconds: string | undefined;
+}
+
+export interface RuntimeConfig {
+  port: number;
+  guestSessionTtlSeconds: number;
+  guestSessionResumeTtlSeconds: number;
+}
+
+export const MAX_GUEST_SESSION_TTL_SECONDS = 60 * 60 * 24 * 400;
+
 const GUEST_SESSION_SECRET_ERROR =
   "GUEST_SESSION_SECRET must be set in deployed-like runtime (NODE_ENV=production or GUEST_SESSION_COOKIE_SECURE=true) to a non-empty, non-default value at least 32 characters long.";
+
+const PORT_CONFIG_ERROR = "PORT must be an integer from 1 to 65535.";
+const GUEST_SESSION_TTL_CONFIG_ERROR =
+  `GUEST_SESSION_TTL_SECONDS must be a positive safe integer number of seconds no greater than ${MAX_GUEST_SESSION_TTL_SECONDS}.`;
+const GUEST_SESSION_RESUME_TTL_CONFIG_ERROR =
+  `GUEST_SESSION_RESUME_TTL_SECONDS must be a positive safe integer number of seconds no greater than ${MAX_GUEST_SESSION_TTL_SECONDS}.`;
+
+const INTEGER_STRING_PATTERN = /^(0|[1-9]\d*)$/;
 
 export function isDeployedLikeRuntime(input: Pick<GuestSessionRuntimeConfig, "guestSessionCookieSecure" | "nodeEnv">) {
   return input.nodeEnv === "production" || input.guestSessionCookieSecure === true;
@@ -26,6 +48,69 @@ export function validateGuestSessionSecretForRuntime(input: GuestSessionRuntimeC
   ) {
     throw new Error(GUEST_SESSION_SECRET_ERROR);
   }
+}
+
+function parseIntegerEnvValue(rawValue: string | undefined, defaultValue: number, errorMessage: string) {
+  if (rawValue === undefined) {
+    return defaultValue;
+  }
+
+  if (!INTEGER_STRING_PATTERN.test(rawValue)) {
+    throw new Error(errorMessage);
+  }
+
+  const parsedValue = Number(rawValue);
+  if (!Number.isSafeInteger(parsedValue)) {
+    throw new Error(errorMessage);
+  }
+
+  return parsedValue;
+}
+
+function parseGuestSessionTtlEnvValue(
+  rawValue: string | undefined,
+  defaultValue: number,
+  errorMessage: string,
+) {
+  const parsedValue = parseIntegerEnvValue(rawValue, defaultValue, errorMessage);
+  if (parsedValue <= 0 || parsedValue > MAX_GUEST_SESSION_TTL_SECONDS) {
+    throw new Error(errorMessage);
+  }
+
+  return parsedValue;
+}
+
+export function validateRuntimeConfig(input: RuntimeConfigInput): RuntimeConfig {
+  const port = parseIntegerEnvValue(input.port, 3000, PORT_CONFIG_ERROR);
+  if (port < 1 || port > 65535) {
+    throw new Error(PORT_CONFIG_ERROR);
+  }
+
+  const guestSessionTtlSeconds = parseGuestSessionTtlEnvValue(
+    input.guestSessionTtlSeconds,
+    60 * 60 * 12,
+    GUEST_SESSION_TTL_CONFIG_ERROR,
+  );
+
+  const guestSessionResumeTtlSeconds = parseGuestSessionTtlEnvValue(
+    input.guestSessionResumeTtlSeconds,
+    60 * 60 * 24 * 30,
+    GUEST_SESSION_RESUME_TTL_CONFIG_ERROR,
+  );
+
+  return {
+    port,
+    guestSessionTtlSeconds,
+    guestSessionResumeTtlSeconds,
+  };
+}
+
+export function readRuntimeConfigFromEnv(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
+  return validateRuntimeConfig({
+    port: env.PORT,
+    guestSessionTtlSeconds: env.GUEST_SESSION_TTL_SECONDS,
+    guestSessionResumeTtlSeconds: env.GUEST_SESSION_RESUME_TTL_SECONDS,
+  });
 }
 
 /**
@@ -52,6 +137,7 @@ export const config = {
   /** Long-lived resume cookie name used for same-browser recovery. */
   guestSessionResumeCookieName: process.env.GUEST_SESSION_RESUME_COOKIE_NAME ?? "guest_session_resume",
 
+  // Compatibility-only for legacy imports; validateRuntimeConfig() is the authoritative runtime numeric source.
   /** TTL for the active guest-session cookie in seconds. */
   guestSessionTtlSeconds: Number(process.env.GUEST_SESSION_TTL_SECONDS ?? 60 * 60 * 12),
 
@@ -74,6 +160,7 @@ export const config = {
   /** Built client directory served by Fastify in the beta runtime. */
   clientDistDir: process.env.CLIENT_DIST_DIR ?? "./dist/client",
 
+  // Compatibility-only for legacy imports; validateRuntimeConfig() is the authoritative runtime numeric source.
   /** HTTP server port. */
   port: Number(process.env.PORT ?? 3000),
 

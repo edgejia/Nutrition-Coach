@@ -15,7 +15,7 @@ React/Vite client
   -> SQLite through Drizzle
 ```
 
-Production-mode runtime 是單一 Fastify process。當 `CLIENT_DIST_DIR` 指向建置後的前端檔案時，Fastify 會用同一個 origin 提供 API 和 `dist/client`。本機開發通常是 Vite 跑在 `localhost:5173`，Fastify 跑在 `localhost:3000`。
+Production-mode runtime 是單一 Fastify process。當 `CLIENT_DIST_DIR` 指向建置後的前端檔案時，Fastify 會用同一個 origin 提供 API 和 `dist/client`。本機開發通常是 Vite 跑在 `localhost:5173`，Fastify 跑在 `localhost:3000`。Runtime boundary 和後續拓撲 prerequisites 以 [ADR 0007](adr/0007-runtime-boundary.md) 為準。
 
 ## 主要元件
 
@@ -86,6 +86,7 @@ LLM output handling：
 - Structured target generation 會驗證 JSON parsing、required fields、domain bounds 和 macro/calorie consistency。
 - Provider failures、invalid JSON、schema validation failures 和 no-content responses 會轉成 typed failure outcomes。
 - Tests 使用 mock providers、harness providers 和 fixtures，不依賴 live OpenAI calls。
+- Current `OpenAIProvider` Chat Completions compatibility、non-live evidence anchors、和 deferred migration scope 以 [ADR 0008](adr/0008-openai-provider-compatibility-baseline.md) 為 canonical baseline。
 
 ## Data Model
 

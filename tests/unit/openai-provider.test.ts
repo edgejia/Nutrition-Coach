@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import OpenAI from "openai";
 import { LLMProviderError, isLLMProviderError } from "../../server/llm/errors.js";
 import { OpenAIProvider } from "../../server/llm/openai.js";
@@ -174,6 +175,113 @@ function createGenerateObjectRequest(
 }
 
 describe("OpenAI Provider", () => {
+  it("uses injected OpenAI-compatible clients without live client construction or network", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    const requests: unknown[] = [];
+
+    const fakeClient = {
+      chat: {
+        completions: {
+          create: async (request: unknown) => {
+            requests.push(request);
+
+            if (typeof request === "object" && request !== null && (request as { stream?: unknown }).stream === true) {
+              return createStream([
+                { choices: [{ delta: { role: "assistant" }, finish_reason: null, index: 0 }] },
+                { choices: [{ delta: { content: "本" }, finish_reason: null, index: 0 }] },
+                { choices: [{ delta: { content: "地" }, finish_reason: "stop", index: 0 }] },
+              ]);
+            }
+
+            if (typeof request === "object" && request !== null && "response_format" in request) {
+              return {
+                choices: [{
+                  message: {
+                    content: JSON.stringify({ label: "早餐", calories: 450 }),
+                  },
+                }],
+              };
+            }
+
+            return {
+              choices: [{
+                message: {
+                  content: "已記錄",
+                },
+              }],
+            };
+          },
+        },
+      },
+    } as unknown as OpenAI;
+
+    process.env.OPENAI_API_KEY = "your-api-key-here";
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      throw new Error("network access is forbidden in OpenAIProvider injected-client tests");
+    }) as typeof fetch;
+
+    try {
+      const provider = new OpenAIProvider(fakeClient);
+
+      const chatResult = await provider.chat([{ role: "user", content: "local chat" }], []);
+      assert.deepEqual(chatResult, { content: "已記錄", toolCalls: undefined });
+
+      const objectResult = await provider.generateObject(
+        [{ role: "user", content: "local object" }],
+        createGenerateObjectRequest({
+          schemaHint: {
+            name: "meal_object",
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                label: { type: "string" },
+                calories: { type: "number" },
+              },
+              required: ["label", "calories"],
+            },
+          },
+        }),
+      );
+      assert.equal(objectResult.ok, true);
+      if (!objectResult.ok) {
+        assert.fail("Expected structured object success");
+      }
+      assert.deepEqual(objectResult.value, { label: "早餐", calories: 450 });
+
+      const roundResult = await provider.chatRound?.([{ role: "user", content: "local stream" }], []);
+      assert.ok(roundResult);
+      assert.equal(roundResult.kind, "stream");
+      const streamedTokens: string[] = [];
+      for await (const token of roundResult.streamGenerator) {
+        streamedTokens.push(token);
+      }
+      assert.deepEqual(streamedTokens, ["本", "地"]);
+
+      assert.equal(fetchCalls, 0);
+      assert.equal(requests.length, 3);
+
+      const providerSource = readFileSync("server/llm/openai.ts", "utf8");
+      const indexSource = readFileSync("server/index.ts", "utf8");
+      const productionConstructionAnchor = "new OpenAIProvider()";
+      // ESM import bindings make direct constructor monkeypatching brittle; keep the injected-client fallback visible instead.
+      const openAIConstructions = providerSource.match(/new\s+OpenAI\s*\(/g) ?? [];
+      assert.equal(openAIConstructions.length, 1);
+      assert.match(providerSource, /this\.client\s*=\s*client\s*\?\?\s*new\s+OpenAI\s*\(/);
+      assert.equal(indexSource.includes(productionConstructionAnchor), true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+    }
+  });
+
   it("defines metadata-only LLMProviderError contracts with fixed serialization", () => {
     assert.deepEqual(providerOperations, [
       "chat",

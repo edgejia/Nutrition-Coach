@@ -4,6 +4,8 @@
 
 Accepted for v2.5 closeout.
 
+Current dependency advisory policy and current advisory triage records live in ADR 0009. This ADR remains the accepted historical v2.5 post-closeout dependency security baseline.
+
 ## Context
 
 The v2.5 post-closeout dependency review found production dependency advisories after the milestone archive was complete. Patch-level fixes were available for the Fastify runtime path and transitive URL/glob parsing packages. Drizzle's patched version requires a major upgrade from `0.39.x` to `0.45.x`.
