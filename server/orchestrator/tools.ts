@@ -90,6 +90,10 @@ import {
   type TrustedProteinSource,
 } from "./protein-trust.js";
 import type { DeletedMealSnapshot } from "./mutation-effects.js";
+import {
+  derivePlanningFacts,
+  type PlanningFacts,
+} from "./planning-reply-renderer.js";
 
 // ---------------------------------------------------------------------------
 // Public types preserved for the orchestrator (Phase 8/9 callers).
@@ -159,6 +163,7 @@ export interface ToolExecutionResult {
       calories: number;
     }>;
   };
+  planningFacts?: PlanningFacts;
   affectedDate?: string;
   mealMutationKind?: "log" | "update" | "delete";
   deletedMeal?: DeletedMealSnapshot;
@@ -437,6 +442,13 @@ interface GetDailySummaryArgs {
   date_text?: string;
 }
 
+export type PlanNextMealArgs = z.infer<typeof planNextMealSchema>;
+
+export interface PlanNextMealResult {
+  status: "planning";
+  planningFacts: PlanningFacts;
+}
+
 type GetDailySummaryResult =
   | {
       status: "summary";
@@ -559,6 +571,8 @@ const getDailySummarySchema = z
     date_text: historicalDateTextSchema,
   })
   .strict();
+
+export const planNextMealSchema = z.object({}).strict();
 
 const targetFieldSchemas = {
   calories: z.number().min(500).max(8000),
@@ -1425,6 +1439,19 @@ function makeMealTargetControlledResult(reply: string): MealTargetControlledResu
   };
 }
 
+type DeviceRow = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof createDeviceService>["getDevice"]>>
+>;
+
+function deviceRowToDailyTargets(device: DeviceRow): DailyTargets {
+  return {
+    calories: device.dailyCalories,
+    protein: device.dailyProtein,
+    carbs: device.dailyCarbs,
+    fat: device.dailyFat,
+  };
+}
+
 function classificationMatchesOperator(
   classification: MealNumericAdjustmentClassification,
   args: ProposeMealNumericCorrectionArgs,
@@ -1834,6 +1861,59 @@ const getDailySummaryContract: ToolContract<
         dailySummary: summary,
         meals: mealFacts,
       }),
+    };
+  },
+};
+
+export const planNextMealContract: ToolContract<
+  PlanNextMealArgs,
+  PlanNextMealResult
+> = {
+  name: "plan_next_meal",
+  policyClass: "direct-execute",
+  policyRules: [
+    {
+      id: "plan_next_meal_authoritative_current_facts",
+      decision: "allowed",
+      description: "Computes current planning facts from authenticated-device summary and target services.",
+    },
+    {
+      id: "plan_next_meal_no_mutation",
+      decision: "allowed",
+      description: "Returns planning facts only and does not mutate meals, goals, proposals, receipts, or cards.",
+    },
+  ],
+  description: "依今日目標與已記錄攝取，取得下一餐規劃所需的後端權威事實。沒有參數；不可用於記錄或修改餐點。",
+  parameters: {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+  zodSchema: planNextMealSchema,
+  logSummary: () => ({ tool: "plan_next_meal" }),
+  execute: async (_args, context) => {
+    const deps = context.deps?.toolDeps as ToolDeps | undefined;
+    const deviceId = context.deps?.deviceId as string | undefined;
+    if (!deps?.summaryService || !deps.deviceService || !deviceId) {
+      throw new Error("plan_next_meal contract missing summaryService/deviceService/deviceId in context");
+    }
+
+    const [summary, device] = await Promise.all([
+      deps.summaryService.getDailySummary(deviceId, currentAppDate()),
+      deps.deviceService.getDevice(deviceId),
+    ]);
+    if (!device) {
+      throw new Error("plan_next_meal contract could not load device targets");
+    }
+
+    const planningFacts = derivePlanningFacts(summary, deviceRowToDailyTargets(device));
+    return {
+      ok: true,
+      result: {
+        status: "planning",
+        planningFacts,
+      },
+      toolMessage: JSON.stringify(planningFacts),
     };
   },
 };
@@ -2654,6 +2734,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
 export const KNOWN_TOOL_NAMES = [
   "log_food",
   "get_daily_summary",
+  "plan_next_meal",
   "find_meals",
   "propose_goals",
   "update_goals",
@@ -2668,6 +2749,7 @@ export type KnownToolName = (typeof KNOWN_TOOL_NAMES)[number];
 export const KNOWN_TOOL_POLICY_CLASSES = {
   log_food: "execute-and-report",
   get_daily_summary: "direct-execute",
+  plan_next_meal: "direct-execute",
   find_meals: "clarify-first",
   propose_goals: "confirm-first",
   update_goals: "direct-execute",
@@ -2683,6 +2765,7 @@ export const toolRegistry: Map<string, ToolContract<any, any>> = new Map([
   [updateMealContract.name, updateMealContract as ToolContract<any, any>],
   [deleteMealContract.name, deleteMealContract as ToolContract<any, any>],
   [getDailySummaryContract.name, getDailySummaryContract as ToolContract<any, any>],
+  [planNextMealContract.name, planNextMealContract as ToolContract<any, any>],
   [proposeMealEstimateContract.name, proposeMealEstimateContract as ToolContract<any, any>],
   [proposeMealNumericCorrectionContract.name, proposeMealNumericCorrectionContract as ToolContract<any, any>],
   [proposeGoalsContract.name, proposeGoalsContract as ToolContract<any, any>],
@@ -2756,6 +2839,9 @@ export function redactToolArgsForHook(toolName: string, rawArgs: string): string
     }
     if (toolName === "get_daily_summary") {
       return "<get_daily_summary args>";
+    }
+    if (toolName === "plan_next_meal") {
+      return "<plan_next_meal args>";
     }
     if (toolName === "find_meals") {
       return `action: ${summary.action ?? "unknown"}`;
@@ -3335,6 +3421,17 @@ export async function executeTool(
         meals: summary.meals,
       },
       affectedDate: summary.affectedDate,
+    });
+  }
+
+  if (toolCall.function.name === "plan_next_meal") {
+    const contractResult = outcome.contractResult as PlanNextMealResult;
+    return attachPolicyFact({
+      result: outcome.result,
+      summary: "status: planning",
+      success: true,
+      executed: true,
+      planningFacts: contractResult.planningFacts,
     });
   }
 
