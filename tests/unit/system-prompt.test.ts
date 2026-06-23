@@ -31,7 +31,7 @@ function coachPlanningSection(prompt: string): string {
 }
 
 function coachCompactSection(prompt: string): string {
-  const match = /精簡教練模式 coach_compact：[\s\S]*?(?=\n\n餐點拆分與記錄規則：)/.exec(prompt);
+  const match = /精簡教練模式 coach_compact：[\s\S]*?(?=\n\n目標更新規則：)/.exec(prompt);
   assert.ok(match, "coach compact section must be present");
   return match[0];
 }
