@@ -1,10 +1,16 @@
 const SENSITIVE_IDENTIFIERS = [
   "log_food",
   "get_daily_summary",
+  "plan_next_meal",
   "protein_sources",
   "usedConservativeAssumption",
   "quantityUncertaintyReason",
   "missing_quantity",
+  "planningFacts",
+  "remainingCalories",
+  "macroGap",
+  "coach_planning",
+  "coach_compact",
 ] as const;
 
 export const COUNTER_MARKER_PATTERN = /[（(]\s*\d+\s*\/\s*\d+\s*[）)]/g;
@@ -40,10 +46,16 @@ export function sanitizeReply(text: string): string {
   return text
     .replace(/log_food/g, "完成記錄")
     .replace(/get_daily_summary/g, "查詢今日攝取")
+    .replace(/plan_next_meal/g, "規劃下一餐")
     .replace(/protein_sources/g, "蛋白質來源")
     .replace(/usedConservativeAssumption/g, "保守假設")
     .replace(/quantityUncertaintyReason/g, "份量不確定原因")
     .replace(/missing_quantity/g, "缺少份量")
+    .replace(/planningFacts/g, "規劃依據")
+    .replace(/remainingCalories/g, "剩餘熱量")
+    .replace(/macroGap/g, "營養缺口")
+    .replace(/coach_planning/g, "下一餐建議")
+    .replace(/coach_compact/g, "營養建議")
     .replace(COUNTER_MARKER_PATTERN, "");
 }
 

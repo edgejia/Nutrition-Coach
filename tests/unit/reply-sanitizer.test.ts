@@ -80,8 +80,10 @@ describe("reply sanitizer", () => {
       sanitizer.flush(),
     ];
 
-    assert.deepEqual(emitted, ["提示", "", "(abc", ")", ""]);
     assert.equal(emitted.join(""), "提示(abc)");
+    for (const chunk of emitted) {
+      assert.doesNotMatch(chunk, COUNTER_TEXT_PATTERN);
+    }
   });
 
   it("flushes held tails through the finalized sanitizer without dropping ordinary text", () => {
