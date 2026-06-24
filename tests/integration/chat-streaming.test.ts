@@ -1140,6 +1140,69 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat SSE photo analysis questions with images finish without meal writes", async () => {
+    assert.ok(services, "expected app services");
+
+    mockLLM.queueRoundResponse({
+      content: "這張照片看起來像雞胸餐盒；我先提供熱量與營養素估算，不會把它寫入餐點紀錄。",
+    });
+
+    const boundary = "----nutrition-photo-analysis-no-write";
+    const payload = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\n`
+        + `Content-Disposition: form-data; name="message"\r\n\r\n`
+        + `這張照片幫我分析菜色和熱量，先不要記錄\r\n`
+        + `--${boundary}\r\n`
+        + `Content-Disposition: form-data; name="image"; filename="analysis.png"\r\n`
+        + `Content-Type: image/png\r\n\r\n`,
+      ),
+      Buffer.from(validPngBytes()),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      headers: {
+        cookie: sessionCookieHeader,
+        Accept: "text/event-stream",
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const events = parseSSEEvents(res.payload);
+    const chunkText = events
+      .filter((event) => event.event === "chunk")
+      .map((event) => (JSON.parse(event.data) as { token?: string }).token ?? "")
+      .join("");
+    const doneEvents = events.filter((event) => event.event === "done");
+    assert.equal(doneEvents.length, 1);
+    assert.equal(events.at(-1)?.event, "done");
+    assert.doesNotMatch(chunkText, /已記錄|完成記錄/);
+
+    const donePayload = JSON.parse(doneEvents[0]!.data) as {
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+      dailySummary?: unknown;
+      summaryOutcome?: unknown;
+      replyText?: string;
+    };
+    assert.equal(donePayload.didLogMeal, false);
+    assert.equal(donePayload.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "loggedMeal"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "dailySummary"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "summaryOutcome"), false);
+    assert.doesNotMatch(donePayload.replyText ?? "", /已記錄|完成記錄/);
+
+    const meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.deepEqual(meals, []);
+    const summary = await services.summaryService.getDailySummary(deviceId, new Date());
+    assert.equal(summary.mealCount, 0);
+  });
+
   it("POST /api/chat SSE done omits receipt identity when assistant receipt persistence fails after log_food", async () => {
     assert.ok(services, "expected app services");
     installAtomicReceiptPersistenceFailure(services.chatService);

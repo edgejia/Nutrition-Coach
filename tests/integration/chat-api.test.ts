@@ -128,6 +128,7 @@ function assertMealMutationSummaryEnvelope(payload: unknown, affectedDate: strin
 
 const TERMINAL_CLARIFICATION_SUCCESS_COPY = /已記錄|完成記錄|已更新|已刪除|成功/;
 const FAILED_RECOGNITION_NO_SAVE_REPLY = "我沒有把這張照片存成餐點紀錄。請先補充餐點內容和份量，我再幫你估算。";
+const TEXT_NON_FOOD_NO_SAVE_REPLY = "我沒有把這段內容存成餐點紀錄。這個版本目前只支援飲食與餐點紀錄；如果你要記餐，請直接告訴我吃了什麼和份量。";
 
 function assertNoTerminalClarificationSideEffects(body: {
   reply?: string;
@@ -1240,6 +1241,198 @@ describe("Chat API", () => {
         `${imageCase.name} failed-recognition no-save must not consume a recovery model call`,
       );
     }
+  });
+
+  it("POST /api/chat JSON returns text_non_food_no_save for exercise all-zero log_food attempts", async () => {
+    assert.ok(services, "expected app services");
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "text_non_food_no_save_exercise_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              {
+                food_name: "重量訓練",
+                calories: 0,
+                protein: 0,
+                carbs: 0,
+                fat: 0,
+              },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const form = new FormData();
+    form.append("message", "80公斤 5下5組");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+      dailySummary?: unknown;
+      summaryOutcome?: unknown;
+    };
+    assert.equal(body.reply, TEXT_NON_FOOD_NO_SAVE_REPLY);
+    assert.notEqual(body.reply, FAILED_RECOGNITION_NO_SAVE_REPLY);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "loggedMeal"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+
+    const mealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(mealsRes.status, 200);
+    const mealsBody = await mealsRes.json() as { meals: unknown[] };
+    assert.deepEqual(mealsBody.meals, []);
+
+    const summary = await services.summaryService.getDailySummary(deviceId, new Date());
+    assert.equal(summary.mealCount, 0);
+    assert.equal(summary.totalCalories, 0);
+  });
+
+  it("POST /api/chat JSON photo analysis questions with images do not write meals", async () => {
+    assert.ok(services, "expected app services");
+
+    mockLLM.queueChatResponse({
+      content: "這張照片看起來像雞胸餐盒；如果你還沒要記錄，我可以先估熱量與營養素給你參考。",
+    });
+
+    const form = new FormData();
+    form.append("message", "這張照片幫我分析熱量和營養素，先不要記錄");
+    form.append("image", new Blob([validPngBytes()], { type: "image/png" }), "analysis.png");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+      dailySummary?: unknown;
+      summaryOutcome?: unknown;
+    };
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.match(body.reply ?? "", /分析|估/);
+    assert.doesNotMatch(body.reply ?? "", /已記錄|完成記錄|存成餐點紀錄/);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "loggedMeal"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+
+    const mealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(mealsRes.status, 200);
+    const mealsBody = await mealsRes.json() as { meals: unknown[] };
+    assert.deepEqual(mealsBody.meals, []);
+
+    const summary = await services.summaryService.getDailySummary(deviceId, new Date());
+    assert.equal(summary.mealCount, 0);
+  });
+
+  it("POST /api/chat JSON image-only and explicit record photo fast-log still write meals", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "image_only_fast_log_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "鮭魚飯", calories: 520, protein: 28, carbs: 58, fat: 16 },
+            ],
+            protein_sources: [
+              { name: "鮭魚", protein: 24, is_primary: true, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const imageOnlyForm = new FormData();
+    imageOnlyForm.append("message", "");
+    imageOnlyForm.append("image", new Blob([validPngBytes()], { type: "image/png" }), "image-only.png");
+    const imageOnlyRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: imageOnlyForm,
+    });
+    assert.equal(imageOnlyRes.status, 200);
+    const imageOnlyBody = await imageOnlyRes.json() as {
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: { foodName?: string };
+      dailySummary?: { mealCount?: number };
+    };
+    assert.equal(imageOnlyBody.didLogMeal, true);
+    assert.equal(imageOnlyBody.didMutateMeal, true);
+    assert.equal(imageOnlyBody.loggedMeal?.foodName, "鮭魚飯");
+    assert.equal(imageOnlyBody.dailySummary?.mealCount, 1);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "explicit_record_photo_fast_log_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿便當", calories: 620, protein: 30, carbs: 70, fat: 18 },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "青菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const recordForm = new FormData();
+    recordForm.append("message", "幫我記錄這張照片");
+    recordForm.append("image", new Blob([validPngBytes()], { type: "image/png" }), "record-this.png");
+    const recordRes = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: recordForm,
+    });
+    assert.equal(recordRes.status, 200);
+    const recordBody = await recordRes.json() as {
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: { foodName?: string };
+      dailySummary?: { mealCount?: number };
+    };
+    assert.equal(recordBody.didLogMeal, true);
+    assert.equal(recordBody.didMutateMeal, true);
+    assert.equal(recordBody.loggedMeal?.foodName, "雞腿便當");
+    assert.equal(recordBody.dailySummary?.mealCount, 2);
+
+    const mealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(mealsRes.status, 200);
+    const mealsBody = await mealsRes.json() as { meals: Array<{ foodName?: string }> };
+    assert.deepEqual(mealsBody.meals.map((meal) => meal.foodName).sort(), ["雞腿便當", "鮭魚飯"]);
   });
 
   it("POST /api/chat cleans staged uploads when a later image part is rejected", async () => {
