@@ -100,6 +100,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export const FAILED_RECOGNITION_NO_SAVE_REPLY = "我沒有把這張照片存成餐點紀錄。請先補充餐點內容和份量，我再幫你估算。";
+export const TEXT_NON_FOOD_NO_SAVE_REPLY = "我沒有把這段內容存成餐點紀錄。這個版本目前只支援飲食與餐點紀錄；如果你要記餐，請直接告訴我吃了什麼和份量。";
 
 export interface ToolDeps {
   foodLoggingService: ReturnType<typeof createFoodLoggingService>;
@@ -146,7 +147,8 @@ export interface ToolExecutionResult {
       | "meal_numeric_clarification"
       | "meal_numeric_proposal"
       | "meal_delete_proposal"
-      | "failed_recognition_no_save";
+      | "failed_recognition_no_save"
+      | "text_non_food_no_save";
     text: string;
   };
   proposalCard?: PendingProposalCardInput;
@@ -372,7 +374,15 @@ interface FailedRecognitionNoSaveResult {
   status: "failed_recognition_no_save";
 }
 
-type LogFoodResult = LogFoodSuccessResult | HistoricalToolClarification | FailedRecognitionNoSaveResult;
+interface TextNonFoodNoSaveResult {
+  status: "text_non_food_no_save";
+}
+
+type LogFoodResult =
+  | LogFoodSuccessResult
+  | HistoricalToolClarification
+  | FailedRecognitionNoSaveResult
+  | TextNonFoodNoSaveResult;
 
 interface UpdateMealResult {
   dailySummary?: DailySummary;
@@ -1114,6 +1124,29 @@ function isFailedRecognitionLogFood(args: NormalizedLogFoodArgs): boolean {
   return isImpossibleMealAggregate(aggregateMealNutrition(args.items));
 }
 
+const TEXT_NON_FOOD_LABEL_PATTERN =
+  /(?:運動|健身|重訓|重量訓練|深蹲|硬舉|臥推|伏地挺身|跑步|慢跑|游泳|單車|騎車|步行|走路|訓練|workout|exercise|squat|deadlift|bench|run|running|cycling)/i;
+
+const TEXT_NON_FOOD_QUANTITY_PATTERN =
+  /(?:\d+(?:\.\d+)?\s*(?:kg|公斤|公升|下|組|reps?|sets?)|\b\d+\s*[xX]\s*\d+\b)/i;
+
+function isTextNonFoodNoSaveLogFood(
+  args: NormalizedLogFoodArgs,
+  sourceText: string,
+  hadImage: boolean,
+): boolean {
+  if (hadImage || !isImpossibleMealAggregate(aggregateMealNutrition(args.items))) {
+    return false;
+  }
+
+  const labels = getLogFoodNames(args).join(" ");
+  return TEXT_NON_FOOD_LABEL_PATTERN.test(labels)
+    || (
+      TEXT_NON_FOOD_LABEL_PATTERN.test(sourceText)
+      && TEXT_NON_FOOD_QUANTITY_PATTERN.test(sourceText)
+    );
+}
+
 function resolveProteinSourceInputs(
   args: LogFoodArgs,
   sourceText?: string,
@@ -1514,6 +1547,11 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       description: "Failed image recognition returns a renderer-owned no-save reply without meal or summary mutation.",
     },
     {
+      id: "log_food_text_non_food_no_save",
+      decision: "blocked",
+      description: "Text or unsupported non-food all-zero attempts return a renderer-owned no-save reply without meal or summary mutation.",
+    },
+    {
       id: "log_food_historical_date_clarification",
       decision: "blocked",
       description: "Historical date ambiguity returns one controlled clarification without meal or summary mutation.",
@@ -1632,6 +1670,13 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
 
     const mealPeriod = extractExplicitMealPeriodFromSourceText(context.currentUserMessage);
     const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
+    if (isTextNonFoodNoSaveLogFood(normalized, context.currentUserMessage, Boolean(deps.imagePath))) {
+      return {
+        ok: true,
+        result: { status: "text_non_food_no_save" as const },
+        toolMessage: JSON.stringify({ status: "text_non_food_no_save" }),
+      };
+    }
     if (isFailedRecognitionLogFood(normalized)) {
       return {
         ok: true,
@@ -3233,6 +3278,20 @@ export async function executeTool(
           source: "renderer",
           reason: "failed_recognition_no_save",
           text: FAILED_RECOGNITION_NO_SAVE_REPLY,
+        },
+      });
+    }
+    if (contractResult.status === "text_non_food_no_save") {
+      return attachPolicyFact({
+        result: TEXT_NON_FOOD_NO_SAVE_REPLY,
+        summary: "failureReason: text_non_food_no_save",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        controlledReply: {
+          source: "renderer",
+          reason: "text_non_food_no_save",
+          text: TEXT_NON_FOOD_NO_SAVE_REPLY,
         },
       });
     }
