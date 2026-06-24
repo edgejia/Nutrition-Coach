@@ -1304,6 +1304,68 @@ describe("Chat API", () => {
     assert.equal(summary.totalCalories, 0);
   });
 
+  it("POST /api/chat JSON returns text_non_food_no_save for positive-calorie exercise log_food attempts", async () => {
+    assert.ok(services, "expected app services");
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "text_non_food_no_save_positive_exercise_json",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              {
+                food_name: "跑步",
+                calories: 300,
+                protein: 0,
+                carbs: 0,
+                fat: 0,
+              },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const form = new FormData();
+    form.append("message", "跑步30分鐘");
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      reply?: string;
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+      dailySummary?: unknown;
+      summaryOutcome?: unknown;
+      proposalCard?: unknown;
+    };
+    assert.equal(body.reply, TEXT_NON_FOOD_NO_SAVE_REPLY);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "loggedMeal"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "summaryOutcome"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "proposalCard"), false);
+
+    const mealsRes = await fetch(`${address}/api/meals`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(mealsRes.status, 200);
+    const mealsBody = await mealsRes.json() as { meals: unknown[] };
+    assert.deepEqual(mealsBody.meals, []);
+
+    const summary = await services.summaryService.getDailySummary(deviceId, new Date());
+    assert.equal(summary.mealCount, 0);
+    assert.equal(summary.totalCalories, 0);
+  });
+
   it("POST /api/chat JSON photo analysis questions with images do not write meals", async () => {
     assert.ok(services, "expected app services");
 

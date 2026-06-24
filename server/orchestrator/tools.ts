@@ -1148,14 +1148,14 @@ const TEXT_NON_FOOD_LABEL_PATTERN =
   /(?:運動|健身|重訓|重量訓練|深蹲|硬舉|臥推|伏地挺身|跑步|慢跑|游泳|單車|騎車|步行|走路|訓練|workout|exercise|squat|deadlift|bench|run|running|cycling)/i;
 
 const TEXT_NON_FOOD_QUANTITY_PATTERN =
-  /(?:\d+(?:\.\d+)?\s*(?:kg|公斤|公升|下|組|reps?|sets?)|\b\d+\s*[xX]\s*\d+\b)/i;
+  /(?:\d+(?:\.\d+)?\s*(?:kg|公斤|公升|下|組|分鐘|分|min(?:ute)?s?|reps?|sets?)|\b\d+\s*[xX]\s*\d+\b)/i;
 
 function isTextNonFoodNoSaveLogFood(
   args: NormalizedLogFoodArgs,
   sourceText: string,
   hadImage: boolean,
 ): boolean {
-  if (hadImage || !isImpossibleMealAggregate(aggregateMealNutrition(args.items))) {
+  if (hadImage) {
     return false;
   }
 
@@ -1171,7 +1171,7 @@ const RECENT_CORRECTION_NEW_MEAL_PATTERN =
   /(?:新的一餐|另外一餐|再記一餐|照常記錄)/;
 
 const RECENT_CORRECTION_SIGNAL_PATTERN =
-  /(?:其實|不是|更正|改成|目測|不要新增第二餐|不要新增|別新增|剛剛|剛才)/;
+  /(?:其實|不是|更正|改成|目測|不要新增第二餐|不要新增|別新增)/;
 
 const RECENT_CORRECTION_PORTION_REPLACEMENT_PATTERN =
   /(?:\d+(?:\.\d+)?\s*(?:g|克|公克).{0,16}(?:不是|改成|只有|約|目測)|(?:不是|改成|只有|約|目測).{0,16}\d+(?:\.\d+)?\s*(?:g|克|公克))/;
@@ -1713,6 +1713,20 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
 
     const mealPeriod = extractExplicitMealPeriodFromSourceText(context.currentUserMessage);
     const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
+    if (isTextNonFoodNoSaveLogFood(normalized, context.currentUserMessage, Boolean(deps.imagePath))) {
+      return {
+        ok: true,
+        result: { status: "text_non_food_no_save" as const },
+        toolMessage: JSON.stringify({ status: "text_non_food_no_save" }),
+      };
+    }
+    if (isFailedRecognitionLogFood(normalized)) {
+      return {
+        ok: true,
+        result: { status: "failed_recognition_no_save" as const },
+        toolMessage: JSON.stringify({ status: "failed_recognition_no_save" }),
+      };
+    }
     if (
       deps.recentMealLogStateService &&
       deps.mealCorrectionService &&
@@ -1791,20 +1805,6 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
           throw error;
         }
       }
-    }
-    if (isTextNonFoodNoSaveLogFood(normalized, context.currentUserMessage, Boolean(deps.imagePath))) {
-      return {
-        ok: true,
-        result: { status: "text_non_food_no_save" as const },
-        toolMessage: JSON.stringify({ status: "text_non_food_no_save" }),
-      };
-    }
-    if (isFailedRecognitionLogFood(normalized)) {
-      return {
-        ok: true,
-        result: { status: "failed_recognition_no_save" as const },
-        toolMessage: JSON.stringify({ status: "failed_recognition_no_save" }),
-      };
     }
     const { proteinSources, usedExplicitProteinSources } = resolveProteinSourceInputs(
       normalized,

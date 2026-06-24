@@ -1323,6 +1323,75 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.controlledReply?.reason, "text_non_food_no_save");
   });
 
+  it("returns text_non_food_no_save before recent correction proposal for positive exercise attempts", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      ],
+    });
+    const mealNumericProposalService = createMealNumericProposalService(db);
+    let logCalls = 0;
+    const wrappedFoodLoggingService = {
+      ...foodLoggingService,
+      async logGroupedMeal(...args: Parameters<typeof foodLoggingService.logGroupedMeal>) {
+        logCalls += 1;
+        return foodLoggingService.logGroupedMeal(...args);
+      },
+    } as typeof foodLoggingService;
+
+    const result = await executeTool({
+      id: "call_recent_positive_exercise_no_save",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "跑步",
+              calories: 300,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService: wrappedFoodLoggingService,
+      summaryService,
+      mealCorrectionService: createMealCorrectionService(db),
+      mealNumericProposalService,
+      recentMealLogStateService: {
+        async putLatest() {},
+        async getLatest() {
+          return {
+            mealId: created.id,
+            mealRevisionId: created.mealRevisionId,
+            dateKey: "2026-03-25",
+            foodName: "雞腿",
+            itemNames: ["雞腿"],
+            loggedAt: created.loggedAt,
+          };
+        },
+        async clear() {},
+      },
+    } as ToolDeps, {
+      currentUserMessage: "剛剛跑步30分鐘",
+    });
+
+    assert.equal(logCalls, 0);
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.result, TEXT_NON_FOOD_NO_SAVE_REPLY);
+    assert.equal(result.controlledReply?.reason, "text_non_food_no_save");
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0]?.id, created.id);
+  });
+
   it("creates recent_correction_reestimate_proposal instead of a second log_food meal", async () => {
     const created = await foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-03-25T04:30:00.000Z",
@@ -1478,6 +1547,59 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.ok(result.loggedMeal);
     assert.equal(result.loggedMeal.foodName, "香蕉");
     assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
+  it("does not treat recency-only new meal text as a correction proposal", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      ],
+    });
+    const mealNumericProposalService = createMealNumericProposalService(db);
+
+    const result = await executeTool({
+      id: "call_recent_word_new_meal_bypass",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            { food_name: "香蕉", calories: 100, protein: 1, carbs: 23, fat: 0 },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: createMealCorrectionService(db),
+      mealNumericProposalService,
+      recentMealLogStateService: {
+        async putLatest() {},
+        async getLatest() {
+          return {
+            mealId: created.id,
+            mealRevisionId: created.mealRevisionId,
+            dateKey: "2026-03-25",
+            foodName: "雞腿",
+            itemNames: ["雞腿"],
+            loggedAt: created.loggedAt,
+          };
+        },
+        async clear() {},
+      },
+    } as ToolDeps, {
+      currentUserMessage: "剛剛又吃香蕉",
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "香蕉");
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0]?.foodName, "香蕉");
   });
 
   it("allows plausible image log_food with one zero macro to persist", async () => {

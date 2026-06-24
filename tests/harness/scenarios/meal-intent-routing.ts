@@ -8,6 +8,7 @@ const STEP_NAMES = [
   "bootstrap",
   "correction_duplicate_guard",
   "text_non_food_no_save",
+  "recent_non_food_no_save",
   "photo_analysis_no_write",
   "photo_fast_log_inverse",
   "verify_artifacts",
@@ -388,6 +389,54 @@ const scenario: VerificationScenario = {
         steps.push(pass("text_non_food_no_save", { mealCount: after.length }));
       } catch (error) {
         return failScenario("text_non_food_no_save", error);
+      }
+
+      try {
+        provider.queueRoundResponse({
+          toolCalls: [{
+            id: "recent_non_food_no_save_harness",
+            type: "function",
+            function: {
+              name: "log_food",
+              arguments: JSON.stringify({
+                items: [
+                  { food_name: "跑步", calories: 300, protein: 0, carbs: 0, fat: 0 },
+                ],
+              }),
+            },
+          }],
+        });
+        const before = await getMeals(fixture.address, fixture.cookieHeader);
+        const response = await postChatJson({
+          address: fixture.address,
+          cookieHeader: fixture.cookieHeader,
+          message: "剛剛跑步30分鐘",
+        });
+        assertNoMealWrite(response, "recent non-food no-save");
+        if (response.reply !== TEXT_NON_FOOD_NO_SAVE_REPLY) {
+          throw new Error("expected recent non-food text no-save copy");
+        }
+        if (response.proposalCard !== undefined) {
+          throw new Error("recent non-food no-save must not return a proposal card");
+        }
+        const after = await getMeals(fixture.address, fixture.cookieHeader);
+        if (after.length !== before.length) {
+          throw new Error("recent non-food no-save changed meal count");
+        }
+        artifacts.recent_non_food_no_save = {
+          responsePayload: {
+            didLogMeal: response.didLogMeal,
+            didMutateMeal: response.didMutateMeal,
+            copyKind: "text_non_food_no_save",
+            hasProposalCard: response.proposalCard !== undefined,
+          },
+          mealsSnapshot: after,
+          historySnapshot: await getHistory(fixture.address, fixture.cookieHeader),
+        };
+        (artifacts.evidence as unknown[]).push({ step: "recent_non_food_no_save", ok: true });
+        steps.push(pass("recent_non_food_no_save", { mealCount: after.length }));
+      } catch (error) {
+        return failScenario("recent_non_food_no_save", error);
       }
 
       try {
