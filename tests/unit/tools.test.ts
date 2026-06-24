@@ -1323,6 +1323,159 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(result.controlledReply?.reason, "text_non_food_no_save");
   });
 
+  it("creates recent_correction_reestimate_proposal instead of a second log_food meal", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const mealNumericProposalService = createMealNumericProposalService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: created.id,
+        expectedMealRevisionId: created.mealRevisionId,
+        snapshot: {
+          mealId: created.id,
+          expectedMealRevisionId: created.mealRevisionId,
+          mealLabel: "雞腿、白飯",
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          dateKey: "2026-03-25",
+          loggedAt: created.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    let logCalls = 0;
+    const wrappedFoodLoggingService = {
+      ...foodLoggingService,
+      async logGroupedMeal(...args: Parameters<typeof foodLoggingService.logGroupedMeal>) {
+        logCalls += 1;
+        return foodLoggingService.logGroupedMeal(...args);
+      },
+    } as typeof foodLoggingService;
+
+    const result = await executeTool({
+      id: "call_recent_correction_reestimate",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+            { food_name: "白飯", calories: 220, protein: 6, carbs: 50, fat: 0.5 },
+          ],
+          protein_sources: [
+            { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+            { name: "白飯", protein: 6, is_primary: false, certainty: "clear" },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService: wrappedFoodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      mealNumericProposalService,
+      mealDeleteProposalService,
+      recentMealLogStateService: {
+        async getLatest() {
+          return {
+            mealId: created.id,
+            mealRevisionId: created.mealRevisionId,
+            dateKey: "2026-03-25",
+            foodName: "雞腿、白飯",
+            itemNames: ["雞腿", "白飯"],
+            loggedAt: created.loggedAt,
+          };
+        },
+      },
+    } as ToolDeps, {
+      currentUserMessage: "剛剛白飯其實只有100g，不是150g。請更正剛剛那一餐，不要新增第二餐",
+    });
+    const proposal = await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+
+    assert.equal(logCalls, 0);
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, created.id);
+    assert.equal(proposal.expectedMealRevisionId, created.mealRevisionId);
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.equal(proposal.updateInput?.calories, 480);
+    assert.equal(proposal.updateInput?.protein, 30);
+    assert.equal(result.success, true);
+    assert.equal(result.executed, true);
+    assert.equal(result.summary, "status: proposal");
+    assert.ok(result.proposalCard);
+    assert.equal(result.proposalCard.proposalKind, "meal_estimate");
+    assert.match(result.result, /其實是新的一餐 -> 照常記錄/);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_numeric_proposal",
+      text: result.result,
+    });
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    assert.equal(meals.length, 1);
+  });
+
+  it("does not trigger recent_correction_reestimate_proposal for explicit genuine-new-meal text", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      ],
+    });
+    const mealNumericProposalService = createMealNumericProposalService(db);
+
+    const result = await executeTool({
+      id: "call_recent_new_meal_bypass",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            { food_name: "香蕉", calories: 100, protein: 1, carbs: 23, fat: 0 },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: createMealCorrectionService(db),
+      mealNumericProposalService,
+      recentMealLogStateService: {
+        async getLatest() {
+          return {
+            mealId: created.id,
+            mealRevisionId: created.mealRevisionId,
+            dateKey: "2026-03-25",
+            foodName: "雞腿",
+            itemNames: ["雞腿"],
+            loggedAt: created.loggedAt,
+          };
+        },
+      },
+    } as ToolDeps, {
+      currentUserMessage: "其實是新的一餐，照常記錄",
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "香蕉");
+    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
   it("allows plausible image log_food with one zero macro to persist", async () => {
     const result = await executeTool({
       id: "call_zero_fat_valid_image",

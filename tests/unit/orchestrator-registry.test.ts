@@ -147,6 +147,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
       assertRules("log_food", [
         "log_food_failed_recognition_no_save",
         "log_food_historical_date_clarification",
+        "log_food_recent_correction_reestimate_proposal",
         "log_food_text_non_food_no_save",
         "log_food_trusted_protein_basis_guard",
       ]);
@@ -194,6 +195,7 @@ describe("Phase 10-02: orchestrator tool registry", () => {
 
     it("Test 2f: concrete policy rule ids are scoped to their owning tool", () => {
       assertRuleOnlyOn("log_food_failed_recognition_no_save", "log_food");
+      assertRuleOnlyOn("log_food_recent_correction_reestimate_proposal", "log_food");
       assertRuleOnlyOn("log_food_text_non_food_no_save", "log_food");
       assertRuleOnlyOn("get_daily_summary_historical_date_clarification", "get_daily_summary");
       assertRuleOnlyOn("plan_next_meal_authoritative_current_facts", "plan_next_meal");

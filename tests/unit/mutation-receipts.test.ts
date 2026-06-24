@@ -21,6 +21,7 @@ import {
   renderMealNumericCancelCopy,
   renderMealNumericClarificationCopy,
   renderMealNumericProposalCopy,
+  renderRecentCorrectionEstimateProposalCopy,
   renderCorrectionTargetClarificationCopy,
   renderCorrectionTargetNoMealsForDateCopy,
   renderCorrectionTargetSameDateRecoveryCopy,
@@ -418,6 +419,22 @@ describe("meal numeric proposal and rejection renderers", () => {
     assert.match(text, /^這次沒有更新餐點紀錄。/);
     assert.match(text, /也可以請我幫你估合理/);
     assert.doesNotMatch(text, /已更新|已套用|model_estimate|propose_meal_estimate/);
+    assertNoMealNumericInternalTerms(text);
+  });
+
+  it("renders recent correction estimate proposal copy with genuine-new-meal escape hatch", () => {
+    const text = renderRecentCorrectionEstimateProposalCopy({
+      mealLabel: "雞腿、白飯",
+      affectedFields: [
+        { field: "calories", before: 540, after: 480 },
+        { field: "protein", before: 28, after: 30 },
+      ],
+    });
+
+    assert.match(text, /先幫你重估/);
+    assert.match(text, /請先確認/);
+    assert.match(text, /其實是新的一餐 -> 照常記錄/);
+    assert.doesNotMatch(text, /已更新|已記錄|model_estimate|propose_meal_estimate/);
     assertNoMealNumericInternalTerms(text);
   });
 
