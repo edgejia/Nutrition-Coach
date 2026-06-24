@@ -12,7 +12,11 @@ import { createProposalActionService } from "../../server/services/proposal-acti
 import { createProposalCardService } from "../../server/services/proposal-cards.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
-import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
+import {
+  DEFAULT_SESSION_ID,
+  createRecentMealLogStateService,
+  type RecentMealLogPayload,
+} from "../../server/services/turn-state.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import type {
@@ -773,6 +777,12 @@ describe("Orchestrator - didLogMeal", () => {
   let mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
   let proposalCardService: ReturnType<typeof createProposalCardService>;
   let proposalActionService: ReturnType<typeof createProposalActionService>;
+  let recentMealLogStateService: ReturnType<typeof createRecentMealLogStateService>;
+  let recentMealLogWrites: Array<{
+    deviceId: string;
+    sessionId: string;
+    payload: RecentMealLogPayload;
+  }>;
   let publisher: RealtimePublisher;
   let summaryService: ReturnType<typeof createSummaryService>;
   let chatService: ReturnType<typeof createChatService>;
@@ -783,6 +793,15 @@ describe("Orchestrator - didLogMeal", () => {
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
+    const baseRecentMealLogStateService = createRecentMealLogStateService(db);
+    recentMealLogWrites = [];
+    recentMealLogStateService = {
+      ...baseRecentMealLogStateService,
+      async putLatest(input) {
+        recentMealLogWrites.push(input);
+        await baseRecentMealLogStateService.putLatest(input);
+      },
+    };
     summaryService = createSummaryService(db);
     chatService = createChatService(db);
     proposalCardService = createProposalCardService(db);
@@ -908,6 +927,7 @@ describe("Orchestrator - didLogMeal", () => {
       mealDeleteProposalService,
       mealNumericProposalService,
       proposalActionService,
+      recentMealLogStateService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -976,6 +996,108 @@ describe("Orchestrator - didLogMeal", () => {
 
     const history = await chatService.getHistory(deviceId, 10);
     assert.equal(history.filter((message) => message.role === "assistant").length, 0);
+  });
+
+  it("writes a recent meal marker after a successful log_food commit", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_recent_marker",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              {
+                food_name: "雞腿",
+                calories: 260,
+                protein: 24,
+                carbs: 0,
+                fat: 12,
+              },
+              {
+                food_name: "白飯",
+                calories: 280,
+                protein: 4,
+                carbs: 62,
+                fat: 0.6,
+              },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "我吃了雞腿和白飯");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, true);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.dailySummary?.mealCount, 1);
+    assert.equal(result.loggedMeal?.foodName, "雞腿、白飯");
+    assert.equal(result.loggedMeal?.items?.length, 2);
+    assert.deepEqual(recentMealLogWrites, [
+      {
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        payload: {
+          mealId: result.loggedMeal?.mealId ?? "",
+          mealRevisionId: result.loggedMeal?.mealRevisionId ?? "",
+          dateKey: result.loggedMeal?.dateKey ?? "",
+          foodName: "雞腿、白飯",
+          itemNames: ["雞腿", "白飯"],
+          loggedAt: result.loggedMeal?.loggedAt ?? "",
+        },
+      },
+    ]);
+    assert.notEqual(recentMealLogWrites[0]?.payload.mealId, "");
+    assert.notEqual(recentMealLogWrites[0]?.payload.mealRevisionId, "");
+    assert.notEqual(recentMealLogWrites[0]?.payload.loggedAt, "");
+    assert.equal(
+      JSON.stringify(recentMealLogWrites[0]?.payload).includes("我吃了雞腿和白飯"),
+      false,
+    );
+    assert.deepEqual(
+      await recentMealLogStateService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+      recentMealLogWrites[0]?.payload,
+    );
+  });
+
+  it("does not write a recent meal marker when log_food is blocked before persistence", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_recent_marker_no_save",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              {
+                food_name: "無法辨識的餐點",
+                calories: 0,
+                protein: 0,
+                carbs: 0,
+                fat: 0,
+              },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "(圖片)", "base64-image");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.deepEqual(recentMealLogWrites, []);
+    assert.equal(
+      await recentMealLogStateService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+      undefined,
+    );
   });
 
   it("handleMessage returns { reply, didLogMeal: false } when log_food is not called", async () => {
