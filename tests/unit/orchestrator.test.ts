@@ -1100,6 +1100,90 @@ describe("Orchestrator - didLogMeal", () => {
     );
   });
 
+  it("routes recent correction log_food through controlled proposal without a second meal", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    await recentMealLogStateService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      payload: {
+        mealId: created.id,
+        mealRevisionId: created.mealRevisionId,
+        dateKey: "2026-03-25",
+        foodName: "雞腿、白飯",
+        itemNames: ["雞腿", "白飯"],
+        loggedAt: created.loggedAt,
+      },
+    });
+    const toolResults: unknown[] = [];
+    const toolReceived: string[] = [];
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_recent_correction_orchestrator",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 220, protein: 6, carbs: 50, fat: 0.5 },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 6, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "剛剛白飯其實只有100g，不是150g。請更正剛剛那一餐，不要新增第二餐",
+      undefined,
+      undefined,
+      {
+        hooks: {
+          onToolReceived(_tool, argsRedacted) {
+            toolReceived.push(argsRedacted);
+          },
+          onToolResult(payload) {
+            toolResults.push(payload);
+          },
+        },
+      },
+    );
+    if (!("reply" in result)) throw new Error("expected reply result");
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    const proposal = await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
+
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.ok(result.proposalCard);
+    assert.equal(result.proposalCard.proposalKind, "meal_estimate");
+    assert.match(result.reply, /其實是新的一餐 -> 照常記錄/);
+    assert.equal(meals.length, 1);
+    assert.ok(proposal);
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(toolResults.length, 1);
+    assert.deepEqual(toolResults[0], {
+      tool: "log_food",
+      success: true,
+      executed: true,
+      summary: "status: proposal",
+    });
+    assert.equal(JSON.stringify(toolResults).includes("剛剛白飯"), false);
+    assert.equal(JSON.stringify(toolResults).includes("100g"), false);
+    assert.equal(JSON.stringify(toolResults).includes("asset:"), false);
+    assert.equal(toolReceived.length, 1);
+  });
+
   it("handleMessage returns { reply, didLogMeal: false } when log_food is not called", async () => {
     mockLLM.queueChatResponse({ content: "今天天氣真好！" });
 
