@@ -1386,6 +1386,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       mealNumericProposalService,
       mealDeleteProposalService,
       recentMealLogStateService: {
+        async putLatest() {},
         async getLatest() {
           return {
             mealId: created.id,
@@ -1396,6 +1397,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
             loggedAt: created.loggedAt,
           };
         },
+        async clear() {},
       },
     } as ToolDeps, {
       currentUserMessage: "剛剛白飯其實只有100g，不是150g。請更正剛剛那一餐，不要新增第二餐",
@@ -1455,6 +1457,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
       mealCorrectionService: createMealCorrectionService(db),
       mealNumericProposalService,
       recentMealLogStateService: {
+        async putLatest() {},
         async getLatest() {
           return {
             mealId: created.id,
@@ -1465,6 +1468,7 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
             loggedAt: created.loggedAt,
           };
         },
+        async clear() {},
       },
     } as ToolDeps, {
       currentUserMessage: "其實是新的一餐，照常記錄",

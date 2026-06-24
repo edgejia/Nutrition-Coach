@@ -196,6 +196,13 @@ export interface MealNumericProposalCopyInput {
   otherProposalKindActive?: boolean;
 }
 
+export interface RecentCorrectionEstimateProposalCopyInput {
+  mealLabel?: string;
+  items?: Array<{ foodName: string }>;
+  affectedFields: MealNumericAffectedField[];
+  otherProposalKindActive?: boolean;
+}
+
 export interface MealNumericFieldAwareCopyInput {
   field?: MealNumericField;
 }
@@ -507,6 +514,24 @@ export function renderMealNumericProposalCopy(input: MealNumericProposalCopyInpu
     heading,
     ...fieldLines,
     "如果要套用，請回覆「好」；如果要調整，請直接給新的目標數字。",
+    ...(otherProposalLine ? [otherProposalLine] : []),
+  ].join("\n");
+}
+
+export function renderRecentCorrectionEstimateProposalCopy(
+  input: RecentCorrectionEstimateProposalCopyInput,
+): string {
+  const mealLabel = formatMealProposalLabel(input);
+  const fieldLines = input.affectedFields.map((field) => `• ${formatAffectedMealNumericField(field)}`);
+  const otherProposalLine = input.otherProposalKindActive
+    ? "你也有另一組目標提案；若要套用餐點修正，請明確回覆「套用餐點修正」。"
+    : undefined;
+
+  return [
+    `我先幫你重估${mealLabel}，請先確認後再套用：`,
+    ...fieldLines,
+    "如果要套用，請回覆「好」；如果要調整，請直接給新的目標數字。",
+    "如果這其實是新的一餐 -> 照常記錄，請直接這樣回覆。",
     ...(otherProposalLine ? [otherProposalLine] : []),
   ].join("\n");
 }

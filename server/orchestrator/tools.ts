@@ -26,7 +26,10 @@ import {
   type createGoalProposalService,
   type GoalProposalPayload,
 } from "../services/goal-proposals.js";
-import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
+import {
+  DEFAULT_SESSION_ID,
+  type createRecentMealLogStateService,
+} from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { buildAssetUrl, parseAssetRef } from "../services/assets.js";
@@ -77,6 +80,7 @@ import {
   renderMealNumericClarificationCopy,
   renderMealNumericNoChangeCopy,
   renderMealNumericProposalCopy,
+  renderRecentCorrectionEstimateProposalCopy,
   renderProposalCardIntro,
   renderProposalExpiredCopy,
 } from "./mutation-receipts.js";
@@ -108,6 +112,7 @@ export interface ToolDeps {
   mealCorrectionService?: ReturnType<typeof createMealCorrectionService>;
   mealDeleteProposalService?: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
+  recentMealLogStateService?: ReturnType<typeof createRecentMealLogStateService>;
   deviceService?: ReturnType<typeof createDeviceService>;
   goalProposalService?: ReturnType<typeof createGoalProposalService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
@@ -378,11 +383,26 @@ interface TextNonFoodNoSaveResult {
   status: "text_non_food_no_save";
 }
 
+interface RecentCorrectionEstimateProposalResult {
+  status: "recent_correction_reestimate_proposal";
+  reason: "meal_numeric_proposal";
+  reply: string;
+  proposalCard: PendingProposalCardInput;
+}
+
+interface RecentCorrectionEstimateNoChangeResult {
+  status: "recent_correction_reestimate_no_change";
+  reason: "meal_numeric_clarification";
+  reply: string;
+}
+
 type LogFoodResult =
   | LogFoodSuccessResult
   | HistoricalToolClarification
   | FailedRecognitionNoSaveResult
-  | TextNonFoodNoSaveResult;
+  | TextNonFoodNoSaveResult
+  | RecentCorrectionEstimateProposalResult
+  | RecentCorrectionEstimateNoChangeResult;
 
 interface UpdateMealResult {
   dailySummary?: DailySummary;
@@ -1147,6 +1167,24 @@ function isTextNonFoodNoSaveLogFood(
     );
 }
 
+const RECENT_CORRECTION_NEW_MEAL_PATTERN =
+  /(?:新的一餐|另外一餐|再記一餐|照常記錄)/;
+
+const RECENT_CORRECTION_SIGNAL_PATTERN =
+  /(?:其實|不是|更正|改成|目測|不要新增第二餐|不要新增|別新增|剛剛|剛才)/;
+
+const RECENT_CORRECTION_PORTION_REPLACEMENT_PATTERN =
+  /(?:\d+(?:\.\d+)?\s*(?:g|克|公克).{0,16}(?:不是|改成|只有|約|目測)|(?:不是|改成|只有|約|目測).{0,16}\d+(?:\.\d+)?\s*(?:g|克|公克))/;
+
+function isCorrectionLikeRecentMealFollowUp(sourceText: string): boolean {
+  const text = sourceText.trim();
+  if (!text || RECENT_CORRECTION_NEW_MEAL_PATTERN.test(text)) {
+    return false;
+  }
+  return RECENT_CORRECTION_SIGNAL_PATTERN.test(text)
+    || RECENT_CORRECTION_PORTION_REPLACEMENT_PATTERN.test(text);
+}
+
 function resolveProteinSourceInputs(
   args: LogFoodArgs,
   sourceText?: string,
@@ -1552,6 +1590,11 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
       description: "Text or unsupported non-food all-zero attempts return a renderer-owned no-save reply without meal or summary mutation.",
     },
     {
+      id: "log_food_recent_correction_reestimate_proposal",
+      decision: "blocked",
+      description: "Correction-like recent follow-ups create a confirm-first meal estimate proposal instead of persisting a duplicate meal.",
+    },
+    {
       id: "log_food_historical_date_clarification",
       decision: "blocked",
       description: "Historical date ambiguity returns one controlled clarification without meal or summary mutation.",
@@ -1670,6 +1713,85 @@ const logFoodContract: ToolContract<LogFoodArgs, LogFoodResult> = {
 
     const mealPeriod = extractExplicitMealPeriodFromSourceText(context.currentUserMessage);
     const normalized = normalizeLogFoodArgs(args, context.currentUserMessage);
+    if (
+      deps.recentMealLogStateService &&
+      deps.mealCorrectionService &&
+      deps.mealNumericProposalService &&
+      isCorrectionLikeRecentMealFollowUp(context.currentUserMessage)
+    ) {
+      const recentMeal = await deps.recentMealLogStateService.getLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+      });
+      if (recentMeal) {
+        try {
+          const currentFacts = await deps.mealCorrectionService.loadCurrentMealFacts(
+            deviceId,
+            recentMeal.mealId,
+            recentMeal.mealRevisionId,
+          );
+          const estimatedTotals = aggregateMealNutrition(normalized.items);
+          const affectedFields = buildEstimateAffectedFields(
+            MEAL_NUMERIC_FIELDS,
+            estimatedTotals,
+            currentFacts.totals,
+          );
+          if (affectedFields.length === 0) {
+            const reply = renderMealNumericNoChangeCopy();
+            return {
+              ok: true,
+              result: {
+                status: "recent_correction_reestimate_no_change" as const,
+                reason: "meal_numeric_clarification" as const,
+                reply,
+              },
+              toolMessage: reply,
+            };
+          }
+          const proposal = await deps.mealNumericProposalService.putLatest({
+            deviceId,
+            sessionId: DEFAULT_SESSION_ID,
+            input: {
+              mealId: currentFacts.mealId,
+              expectedMealRevisionId: currentFacts.currentMealRevisionId,
+              updateInput: buildUpdateInputFromAffectedFields(affectedFields),
+              affectedFields,
+              sourceOperator: "model_estimate",
+              provenance: "model_estimate",
+            },
+          });
+          await deps.mealDeleteProposalService?.clear({ deviceId, sessionId: DEFAULT_SESSION_ID });
+          const otherProposalKindActive = deps.goalProposalService
+            ? Boolean(await deps.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))
+            : false;
+          const reply = renderRecentCorrectionEstimateProposalCopy({
+            mealLabel: currentFacts.mealLabel,
+            affectedFields: proposal.affectedFields,
+            otherProposalKindActive,
+          });
+          return {
+            ok: true,
+            result: {
+              status: "recent_correction_reestimate_proposal" as const,
+              reason: "meal_numeric_proposal" as const,
+              reply,
+              proposalCard: buildMealNumericProposalCard({
+                proposalId: proposal.proposalId,
+                proposalKind: "meal_estimate",
+                affectedFields: proposal.affectedFields,
+                expiresAt: proposal.expiresAt,
+              }),
+            },
+            toolMessage: reply,
+          };
+        } catch (error) {
+          if (error instanceof MealRevisionPreconditionError) {
+            throw revisionPreconditionFatalError(error);
+          }
+          throw error;
+        }
+      }
+    }
     if (isTextNonFoodNoSaveLogFood(normalized, context.currentUserMessage, Boolean(deps.imagePath))) {
       return {
         ok: true,
@@ -3292,6 +3414,34 @@ export async function executeTool(
           source: "renderer",
           reason: "text_non_food_no_save",
           text: TEXT_NON_FOOD_NO_SAVE_REPLY,
+        },
+      });
+    }
+    if (contractResult.status === "recent_correction_reestimate_proposal") {
+      return attachPolicyFact({
+        result: contractResult.reply,
+        summary: "status: proposal",
+        success: true,
+        executed: true,
+        proposalCard: contractResult.proposalCard,
+        controlledReply: {
+          source: "renderer",
+          reason: contractResult.reason,
+          text: contractResult.reply,
+        },
+      });
+    }
+    if (contractResult.status === "recent_correction_reestimate_no_change") {
+      return attachPolicyFact({
+        result: contractResult.reply,
+        summary: "failureReason: guard",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        controlledReply: {
+          source: "renderer",
+          reason: contractResult.reason,
+          text: contractResult.reply,
         },
       });
     }
