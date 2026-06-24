@@ -25,7 +25,7 @@ import type {
   ProposalKind,
 } from "../services/proposal-cards.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
-import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
+import { DEFAULT_SESSION_ID, type createRecentMealLogStateService } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -93,6 +93,7 @@ interface OrchestratorDeps {
   mealDeleteProposalService?: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
   proposalActionService?: ReturnType<typeof createProposalActionService>;
+  recentMealLogStateService?: ReturnType<typeof createRecentMealLogStateService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
 
@@ -1720,6 +1721,18 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 if (!toolLoggedMeal) {
                   throw new Error("log_food succeeded without loggedMeal");
                 }
+                await deps.recentMealLogStateService?.putLatest({
+                  deviceId,
+                  sessionId: DEFAULT_SESSION_ID,
+                  payload: {
+                    mealId: toolLoggedMeal.mealId,
+                    mealRevisionId: toolLoggedMeal.mealRevisionId,
+                    dateKey: toolLoggedMeal.dateKey,
+                    foodName: toolLoggedMeal.foodName,
+                    itemNames: toolLoggedMeal.items?.map((item) => item.name) ?? [toolLoggedMeal.foodName],
+                    loggedAt: toolLoggedMeal.loggedAt,
+                  },
+                });
                 mutationEffects = {
                   kind: "log",
                   affectedDate: affectedDate ?? toolLoggedMeal.dateKey,
