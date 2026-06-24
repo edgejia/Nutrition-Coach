@@ -1172,12 +1172,13 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(proposal.provenance, "model_estimate");
     assert.equal(proposal.sourceOperator, "model_estimate");
     assert.equal(toolResults.length, 1);
-    assert.deepEqual(toolResults[0], {
-      tool: "log_food",
-      success: true,
-      executed: true,
-      summary: "status: proposal",
-    });
+    const toolPayload = toolResults[0] as Record<string, unknown>;
+    assert.equal(toolPayload.tool, "log_food");
+    assert.equal(toolPayload.success, true);
+    assert.equal(toolPayload.executed, true);
+    assert.equal(toolPayload.summary, "status: proposal");
+    assert.equal(toolPayload.policyClass, "execute-and-report");
+    assert.equal(toolPayload.ruleId, "base_policy_allowed");
     assert.equal(JSON.stringify(toolResults).includes("剛剛白飯"), false);
     assert.equal(JSON.stringify(toolResults).includes("100g"), false);
     assert.equal(JSON.stringify(toolResults).includes("asset:"), false);

@@ -1648,6 +1648,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 goalProposalService: deps.goalProposalService,
                 mealDeleteProposalService: deps.mealDeleteProposalService,
                 mealNumericProposalService: deps.mealNumericProposalService,
+                recentMealLogStateService: deps.recentMealLogStateService,
                 publisher: deps.publisher,
                 imagePath,
                 toolSessionState,
