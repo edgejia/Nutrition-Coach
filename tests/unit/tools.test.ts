@@ -24,6 +24,7 @@ import {
   redactToolArgsForHook,
   toolRegistry,
   FatalToolError,
+  TEXT_NON_FOOD_NO_SAVE_REPLY,
   type ToolDeps,
 } from "../../server/orchestrator/tools.js";
 import { runContract, type ToolExecuteResult } from "../../server/orchestrator/tool-contract.js";
@@ -1247,6 +1248,79 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 0);
+  });
+
+  it("returns text_non_food_no_save for text-only exercise/non-food all-zero log_food attempts", async () => {
+    const result = await executeTool({
+      id: "call_text_non_food_exercise",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "重量訓練",
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+    }, {
+      currentUserMessage: "80公斤 5下5組",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.result, TEXT_NON_FOOD_NO_SAVE_REPLY);
+    assert.equal(result.summary, "failureReason: text_non_food_no_save");
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "text_non_food_no_save",
+      text: TEXT_NON_FOOD_NO_SAVE_REPLY,
+    });
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.loggedMeal, undefined);
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 0);
+  });
+
+  it("keeps text_non_food_no_save distinct from failed-recognition photo copy", async () => {
+    const result = await executeTool({
+      id: "call_text_non_food_misc",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "運動紀錄",
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+    }, {
+      currentUserMessage: "今天深蹲 80kg 5x5",
+    });
+
+    assert.equal(result.result, TEXT_NON_FOOD_NO_SAVE_REPLY);
+    assert.notEqual(result.result, FAILED_RECOGNITION_NO_SAVE_REPLY);
+    assert.equal(result.controlledReply?.reason, "text_non_food_no_save");
   });
 
   it("allows plausible image log_food with one zero macro to persist", async () => {
