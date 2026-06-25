@@ -106,6 +106,10 @@ textarea {
   50%, 100% { opacity: .24; }
 }
 
+@keyframes sp-spin {
+  to { transform: rotate(360deg); }
+}
+
 .app-viewport {
   position: fixed;
   top: var(--app-visual-viewport-top, 0px);
@@ -540,6 +544,46 @@ textarea {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.25;
+}
+
+.sp-pull-refresh {
+  position: relative;
+  min-height: 0;
+}
+
+.sp-pull-refresh-content {
+  min-height: 0;
+}
+
+.sp-pull-refresh-indicator {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 4;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid var(--sp-line-strong);
+  border-radius: var(--sp-r-pill);
+  background: var(--sp-surface-2);
+  color: var(--sp-lime);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% + (var(--sp-pull-refresh-progress, 0) * 48px)));
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.sp-pull-refresh--pulling .sp-pull-refresh-indicator {
+  opacity: 1;
+}
+
+.sp-pull-refresh--refreshing .sp-pull-refresh-indicator {
+  opacity: 1;
+}
+
+.sp-pull-refresh--refreshing .sp-pull-refresh-indicator svg {
+  animation: sp-spin 900ms linear infinite;
 }
 
 .sp-bar-track {

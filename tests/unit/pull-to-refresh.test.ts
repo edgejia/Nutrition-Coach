@@ -7,7 +7,7 @@ type FakeListener = (event: FakeTouchEvent) => void;
 class FakeEventTarget {
   readonly listeners = new Map<string, Set<FakeListener>>();
 
-  addEventListener(type: string, listener: FakeListener) {
+  addEventListener(type: string, listener: FakeListener, _options?: AddEventListenerOptions) {
     const listeners = this.listeners.get(type) ?? new Set<FakeListener>();
     listeners.add(listener);
     this.listeners.set(type, listeners);
@@ -72,7 +72,7 @@ class FakeElement {
 }
 
 interface FakeTouchEvent {
-  target: FakeElement;
+  target: EventTarget | null;
   touches: Array<{ clientX: number; clientY: number }>;
   changedTouches: Array<{ clientX: number; clientY: number }>;
   defaultPrevented: boolean;
@@ -81,7 +81,7 @@ interface FakeTouchEvent {
 
 function touchEvent(target: FakeElement, x: number, y: number, active = true): FakeTouchEvent {
   return {
-    target,
+    target: target as unknown as EventTarget,
     touches: active ? [{ clientX: x, clientY: y }] : [],
     changedTouches: [{ clientX: x, clientY: y }],
     defaultPrevented: false,
