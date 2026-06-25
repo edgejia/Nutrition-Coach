@@ -16,7 +16,7 @@ import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, HistoryTrendResponse, MealEntry } from "../types.js";
 import { formatMealRowTime, getDisplayMealLabel, getMealMacroSummary } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
+import { SportChevronLeftIcon, SportChevronRightIcon, SportRefreshIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
 function addLocalDays(dateKey: string, deltaDays: number): string {
@@ -399,6 +399,7 @@ export function HistoryScreen() {
   const [dayError, setDayError] = useState<string | null>(null);
   const [loadingTrends, setLoadingTrends] = useState(false);
   const [loadingDay, setLoadingDay] = useState(false);
+  const [refreshingHistory, setRefreshingHistory] = useState(false);
   const [delayedInlineDayPending, setDelayedInlineDayPending] = useState(false);
   const inlineDayPendingTimerRef = useRef<number | null>(null);
 
@@ -510,6 +511,22 @@ export function HistoryScreen() {
     [recoverGuestSession, selectedDateKey],
   );
 
+  const handleManualHistoryRefresh = useCallback(async () => {
+    const cancelledRef = { current: false };
+    setRefreshingHistory(true);
+
+    try {
+      await Promise.all([
+        loadTrends(cancelledRef),
+        loadSelectedDay(cancelledRef),
+      ]);
+    } finally {
+      if (!cancelledRef.current) {
+        setRefreshingHistory(false);
+      }
+    }
+  }, [loadSelectedDay, loadTrends]);
+
   useEffect(() => {
     const cancelledRef = { current: false };
     void loadTrends(cancelledRef);
@@ -618,6 +635,19 @@ export function HistoryScreen() {
         </header>
 
         <main className="screen-scroll-safe sp-history-scroll">
+          <div className="sp-history-refresh-row">
+            <SportIconButton
+              aria-label="重新整理歷史資料"
+              aria-busy={refreshingHistory ? "true" : undefined}
+              className={`sp-refresh-button ${refreshingHistory ? "sp-refresh-button--loading" : ""}`}
+              onClick={handleManualHistoryRefresh}
+              disabled={refreshingHistory}
+              title="重新整理歷史資料"
+            >
+              <SportRefreshIcon size={18} />
+            </SportIconButton>
+          </div>
+
           {trendError ? (
             <SportCard className="sp-history-state-card sp-history-state-error" variant="flat">
               {trendError}
