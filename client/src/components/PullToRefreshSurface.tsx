@@ -243,17 +243,24 @@ export function PullToRefreshSurface({
   children,
   className,
   onRefresh,
+  refreshing = false,
+  ariaLabel = "下拉重新整理",
   thresholdPx,
   maxPullPx,
 }: {
   children: ReactNode;
   className?: string;
   onRefresh: () => void | Promise<void>;
+  refreshing?: boolean;
+  ariaLabel?: string;
   thresholdPx?: number;
   maxPullPx?: number;
 }) {
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<PullRefreshState>(idleState);
+  const displayState = refreshing
+    ? { phase: "refreshing" as const, pullDistance: thresholdPx ?? DEFAULT_THRESHOLD_PX, progress: 1 }
+    : state;
 
   useEffect(() => {
     const eventTarget = surfaceRef.current;
@@ -261,27 +268,30 @@ export function PullToRefreshSurface({
 
     return createPullToRefreshController({
       eventTarget,
-      onRefresh,
+      onRefresh: () => {
+        if (refreshing) return undefined;
+        return onRefresh();
+      },
       thresholdPx,
       maxPullPx,
       onStateChange: setState,
     });
-  }, [maxPullPx, onRefresh, thresholdPx]);
+  }, [maxPullPx, onRefresh, refreshing, thresholdPx]);
 
   return (
     <div
       ref={surfaceRef}
       className={cx(
         "sp-pull-refresh",
-        (state.phase === "pulling" || state.phase === "ready") && "sp-pull-refresh--pulling",
-        state.phase === "ready" && "sp-pull-refresh--ready",
-        state.phase === "refreshing" && "sp-pull-refresh--refreshing",
+        (displayState.phase === "pulling" || displayState.phase === "ready") && "sp-pull-refresh--pulling",
+        displayState.phase === "ready" && "sp-pull-refresh--ready",
+        displayState.phase === "refreshing" && "sp-pull-refresh--refreshing",
         className,
       )}
-      style={{ "--sp-pull-refresh-progress": state.progress } as CSSProperties}
+      style={{ "--sp-pull-refresh-progress": displayState.progress } as CSSProperties}
     >
       <div
-        aria-label={state.phase === "refreshing" ? "重新整理中" : "下拉重新整理"}
+        aria-label={displayState.phase === "refreshing" ? "重新整理中" : ariaLabel}
         aria-live="polite"
         className="sp-pull-refresh-indicator"
         role="status"

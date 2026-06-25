@@ -95,10 +95,10 @@ describe("Home manual refresh source contract", () => {
     assert.match(sources.homeScreen, /import \{ SportFlameIcon, SportSettingsIcon \}/);
     assert.doesNotMatch(sources.homeScreen, /SportRefreshIcon/);
     assert.match(sources.homeScreen, /export interface HomeScreenProps/);
-    assert.match(sources.homeScreen, /interface HomeHeaderProps/);
     assert.match(sources.homeScreen, /onRefreshToday: \(\) => void \| Promise<void>/);
     assert.match(sources.homeScreen, /refreshingToday: boolean/);
     assert.match(sources.homeScreen, /refreshTodayError: string \| null/);
+    assert.doesNotMatch(sources.homeScreen, /interface HomeHeaderProps/);
     assert.equal(countMatches(headerBody, /<SportIconButton\b/g), 1);
     assert.equal(countMatches(headerBody, /<SportRefreshIcon\b/g), 0);
     assert.equal(countMatches(headerBody, /aria-label="重新整理今日資料"/g), 0);

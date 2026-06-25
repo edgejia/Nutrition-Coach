@@ -7,7 +7,8 @@ import { formatLocalDate } from "../lib/time.js";
 import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportFlameIcon, SportRefreshIcon, SportSettingsIcon } from "./SportIcons.js";
+import { PullToRefreshSurface } from "./PullToRefreshSurface.js";
+import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportProgressBar, SportRing, SportScreen } from "./SportPrimitives.js";
 import type {
   ActiveScreen,
@@ -265,13 +266,7 @@ export interface HomeScreenProps {
   refreshTodayError: string | null;
 }
 
-interface HomeHeaderProps {
-  onRefreshToday: () => void | Promise<void>;
-  refreshingToday: boolean;
-  refreshTodayError: string | null;
-}
-
-function HomeHeader({ onRefreshToday, refreshingToday }: HomeHeaderProps) {
+function HomeHeader() {
   const openSecondaryScreen = useStore((s) => s.openSecondaryScreen);
   const sending = useStore((s) => s.sending);
   const dailySummary = useStore((s) => s.dailySummary);
@@ -299,16 +294,6 @@ function HomeHeader({ onRefreshToday, refreshingToday }: HomeHeaderProps) {
         </div>
       </div>
       <div className="home-sport-header-actions">
-        <SportIconButton
-          className={`sp-refresh-button ${refreshingToday ? "sp-refresh-button--loading" : ""}`}
-          onClick={onRefreshToday}
-          disabled={refreshingToday}
-          aria-busy={refreshingToday ? "true" : undefined}
-          aria-label="重新整理今日資料"
-          title="重新整理今日資料"
-        >
-          <SportRefreshIcon size={19} />
-        </SportIconButton>
         <SportIconButton
           onClick={() => {
             if (!sending) openSecondaryScreen("settings", "home");
@@ -530,21 +515,24 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError 
   return (
     <div className="screen-shell sk-screen">
       <SportScreen className="home-sport-screen">
-        <HomeHeader
-          onRefreshToday={onRefreshToday}
-          refreshingToday={refreshingToday}
-          refreshTodayError={refreshTodayError}
-        />
+        <HomeHeader />
         {refreshTodayError ? (
           <p className="home-sport-refresh-error" role="status">
             {refreshTodayError}
           </p>
         ) : null}
-        <main className="screen-scroll home-sport-scroll">
-          <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
-          <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
-          <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
-        </main>
+        <PullToRefreshSurface
+          className="home-sport-pull-refresh"
+          onRefresh={onRefreshToday}
+          refreshing={refreshingToday}
+          ariaLabel="下拉重新整理今日資料"
+        >
+          <main className="screen-scroll home-sport-scroll">
+            <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
+            <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
+            <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
+          </main>
+        </PullToRefreshSurface>
       </SportScreen>
     </div>
   );
