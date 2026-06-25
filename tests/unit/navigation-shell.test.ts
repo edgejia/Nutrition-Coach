@@ -85,7 +85,7 @@ describe("navigation shell source contract", () => {
   });
 
   it("hides BottomTabBar only when Chat is active", () => {
-    assert.match(sources.mainLayout, /activeScreen === "home" && <HomeScreen \/>/);
+    assert.match(sources.mainLayout, /activeScreen === "home" && \(\s*<HomeScreen/);
     assert.match(sources.mainLayout, /activeScreen === "chat" && <ChatPanel \/>/);
     assert.match(sources.mainLayout, /activeScreen === "history" && <HistoryScreen \/>/);
     assert.match(sources.mainLayout, /activeScreen !== "chat" && <BottomTabBar \/>/);

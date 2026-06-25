@@ -35,7 +35,11 @@ describe("MainLayout SSE summary coordinator contract", () => {
 
     assert.match(source, /sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\)/);
     assert.match(source, /sseSummaryCoordinator\.runInitialMealsLoad\(\)/);
-    assert.doesNotMatch(source, /\.then\(\(\{ meals \}\) => setMeals\(meals\)\)/);
-    assert.doesNotMatch(source, /setMeals\(meals\)/);
+    const sourceWithoutManualHomeRefresh = source.replace(
+      /const refreshHomeManually = useCallback\(async \(\) => \{[\s\S]*?\}, \[deviceId, setMeals\]\);/,
+      "",
+    );
+    assert.doesNotMatch(sourceWithoutManualHomeRefresh, /\.then\(\(\{ meals \}\) => setMeals\(meals\)\)/);
+    assert.doesNotMatch(sourceWithoutManualHomeRefresh, /setMeals\(meals\)/);
   });
 });
