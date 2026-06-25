@@ -56,6 +56,7 @@ export function createSSESummaryCoordinator<Meal>(
       }
       sameDayCommitSeen = true;
       deps.setDailySummary(payload.summary);
+      deps.recordMealMutation(payload.affectedDate);
     } catch (error) {
       handleLoadError(error);
     }

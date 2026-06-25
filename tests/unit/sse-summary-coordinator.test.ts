@@ -99,6 +99,7 @@ describe("SSE summary coordinator", () => {
     assert.deepEqual(commits, [
       { type: "meals", rows },
       { type: "summary", summary: payload.summary },
+      { type: "historical", affectedDate: "2026-05-18" },
     ]);
   });
 
@@ -143,6 +144,7 @@ describe("SSE summary coordinator", () => {
     assert.deepEqual(commits, [
       { type: "meals", rows: newerRows },
       { type: "summary", summary: newerPayload.summary },
+      { type: "historical", affectedDate: "2026-05-18" },
     ]);
   });
 
@@ -163,6 +165,7 @@ describe("SSE summary coordinator", () => {
     assert.deepEqual(commits, [
       { type: "meals", rows: mutationRows },
       { type: "summary", summary: mutationPayload.summary },
+      { type: "historical", affectedDate: "2026-05-18" },
     ]);
   });
 

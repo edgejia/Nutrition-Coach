@@ -59,8 +59,17 @@ describe("History manual refresh source contract", () => {
     const body = functionBody(sources.historyScreen, "HistoryScreen");
 
     assert.match(body, /const \[refreshingHistory,\s*setRefreshingHistory\] = useState\(false\)/);
+    assert.match(
+      body,
+      /const manualRefreshCancelRef = useRef<\{ current: boolean \} \| null>\(null\)/,
+    );
     assert.match(body, /const handleManualHistoryRefresh = useCallback\(async \(\) => \{/);
+    assert.match(
+      body,
+      /if \(manualRefreshCancelRef\.current\) \{[\s\S]*manualRefreshCancelRef\.current\.current = true;/,
+    );
     assert.match(body, /const cancelledRef = \{ current: false \}/);
+    assert.match(body, /manualRefreshCancelRef\.current = cancelledRef/);
     assert.match(body, /setRefreshingHistory\(true\)/);
     assert.match(
       body,
@@ -68,7 +77,11 @@ describe("History manual refresh source contract", () => {
     );
     assert.match(
       body,
-      /finally\s*\{[\s\S]*if \(!cancelledRef\.current\) \{[\s\S]*setRefreshingHistory\(false\)/,
+      /finally\s*\{[\s\S]*if \(!cancelledRef\.current\) \{[\s\S]*setRefreshingHistory\(false\);[\s\S]*manualRefreshCancelRef\.current = null;/,
+    );
+    assert.match(
+      body,
+      /useEffect\(\(\) => \{[\s\S]*manualRefreshCancelRef\.current\.current = true;[\s\S]*manualRefreshCancelRef\.current = null;[\s\S]*setRefreshingHistory\(false\);[\s\S]*\}, \[selectedDateKey, weekStartKey\]\)/,
     );
   });
 

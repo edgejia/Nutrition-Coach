@@ -402,6 +402,7 @@ export function HistoryScreen() {
   const [refreshingHistory, setRefreshingHistory] = useState(false);
   const [delayedInlineDayPending, setDelayedInlineDayPending] = useState(false);
   const inlineDayPendingTimerRef = useRef<number | null>(null);
+  const manualRefreshCancelRef = useRef<{ current: boolean } | null>(null);
 
   const weekEndKey = addLocalDays(weekStartKey, 6);
   const targetCalories = dailyTargets?.calories ?? null;
@@ -512,7 +513,11 @@ export function HistoryScreen() {
   );
 
   const handleManualHistoryRefresh = useCallback(async () => {
+    if (manualRefreshCancelRef.current) {
+      manualRefreshCancelRef.current.current = true;
+    }
     const cancelledRef = { current: false };
+    manualRefreshCancelRef.current = cancelledRef;
     setRefreshingHistory(true);
 
     try {
@@ -523,9 +528,20 @@ export function HistoryScreen() {
     } finally {
       if (!cancelledRef.current) {
         setRefreshingHistory(false);
+        manualRefreshCancelRef.current = null;
       }
     }
   }, [loadSelectedDay, loadTrends]);
+
+  useEffect(() => {
+    if (!manualRefreshCancelRef.current) {
+      return;
+    }
+
+    manualRefreshCancelRef.current.current = true;
+    manualRefreshCancelRef.current = null;
+    setRefreshingHistory(false);
+  }, [selectedDateKey, weekStartKey]);
 
   useEffect(() => {
     const cancelledRef = { current: false };
