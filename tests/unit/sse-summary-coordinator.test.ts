@@ -178,7 +178,7 @@ describe("SSE summary coordinator", () => {
 
   it("commits initial summary using the fixed Asia/Taipei app date key", async () => {
     const appToday = formatLocalDate(new Date("2026-05-17T16:30:00.000Z"));
-    const getMealsCalls: Array<{ refreshReason?: "day_rollover" | "meal_mutation" }> = [];
+    const getMealsCalls: Array<{ refreshReason?: MealRowRefreshReason }> = [];
     const commits: Array<{ type: "summary"; summary: DailySummary } | { type: "historical"; affectedDate: string }> = [];
     const coordinator = createSSESummaryCoordinator<Meal>({
       getMeals: (options) => {

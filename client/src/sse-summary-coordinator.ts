@@ -1,6 +1,6 @@
 import type { DailySummarySSEPayload } from "./types.js";
 
-export type MealRowRefreshReason = "day_rollover" | "meal_mutation";
+export type MealRowRefreshReason = "day_rollover" | "meal_mutation" | "manual_refresh";
 
 export interface SSESummaryCoordinatorDeps<Meal> {
   getMeals: (options?: { refreshReason?: MealRowRefreshReason }) => Promise<{ meals: Meal[] }>;

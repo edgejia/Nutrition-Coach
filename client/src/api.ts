@@ -1036,7 +1036,9 @@ export async function stopChatTurn(options: { turnId: string }): Promise<{ stopp
   return res.json() as Promise<{ stopped: boolean; turnId: string }>;
 }
 
-export async function getMeals(options?: { refreshReason?: "day_rollover" | "meal_mutation" }): Promise<{ meals: MealEntry[] }> {
+export async function getMeals(options?: {
+  refreshReason?: "day_rollover" | "meal_mutation" | "manual_refresh";
+}): Promise<{ meals: MealEntry[] }> {
   const headers: Record<string, string> = {};
   if (options?.refreshReason) {
     headers["X-Refresh-Reason"] = options.refreshReason;
