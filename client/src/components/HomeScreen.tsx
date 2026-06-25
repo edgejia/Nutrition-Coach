@@ -319,6 +319,43 @@ function HomeHeader() {
   );
 }
 
+function MacroCard({
+  macro,
+  refreshCueToken,
+}: {
+  macro: ReturnType<typeof getHomeMacroDisplays>[number];
+  refreshCueToken: number;
+}) {
+  // Reuse the hero's count-up mechanism so each macro number replays on every refresh, even when the
+  // value is unchanged (replayKey: refreshCueToken). The hook is called once per card at the top of
+  // MacroCard so it stays at a stable position (never inside `.map`).
+  const animatedCurrent = useCountUpNumber(macro.current, {
+    durationMs: 450,
+    animate: false,
+    replayKey: refreshCueToken,
+  });
+  const animatedPercent = useCountUpNumber(macro.percent, {
+    durationMs: 450,
+    animate: false,
+    replayKey: refreshCueToken,
+  });
+
+  return (
+    <SportCard className="home-sport-macro-card" variant="flat">
+      <div>
+        <div className="home-sport-macro-label">{macro.label}</div>
+        <div className="home-sport-macro-metric">{macro.metric}</div>
+      </div>
+      <div className="home-sport-macro-value">
+        <span>{animatedCurrent}</span>
+        <small>/{macro.target}</small>
+      </div>
+      <SportProgressBar value={macro.progress} variant={macro.variant} replayKey={refreshCueToken} />
+      <div className="home-sport-macro-percent">{animatedPercent}%</div>
+    </SportCard>
+  );
+}
+
 function CalorieHero({
   dailySummary,
   dailyTargets,
@@ -343,6 +380,8 @@ function CalorieHero({
     animate: shouldAnimateConsumedChange,
     replayKey: refreshCueToken,
   });
+  // Derive the ring from the animated percent so the arc replays together with the kcal number.
+  const animatedRingValue = display.target > 0 ? Math.min(1, animatedPercent / 100) : display.ringValue;
 
   useEffect(() => {
     previousConsumedRef.current = display.consumed;
@@ -380,7 +419,7 @@ function CalorieHero({
           </div>
           <SportRing
             className="home-sport-ring"
-            value={display.ringValue}
+            value={animatedRingValue}
             accentTick
             label={
               <span className="home-sport-ring-label">
@@ -393,20 +432,9 @@ function CalorieHero({
           />
         </div>
       </SportCard>
-      <div key={`home-macros-${refreshCueToken}`} className={`home-sport-macro-grid${refreshCueClass}`}>
+      <div className={`home-sport-macro-grid${refreshCueClass}`}>
         {macros.map((macro) => (
-          <SportCard key={macro.id} className="home-sport-macro-card" variant="flat">
-            <div>
-              <div className="home-sport-macro-label">{macro.label}</div>
-              <div className="home-sport-macro-metric">{macro.metric}</div>
-            </div>
-            <div className="home-sport-macro-value">
-              <span>{macro.current}</span>
-              <small>/{macro.target}</small>
-            </div>
-            <SportProgressBar value={macro.progress} variant={macro.variant} />
-            <div className="home-sport-macro-percent">{macro.percent}%</div>
-          </SportCard>
+          <MacroCard key={macro.id} macro={macro} refreshCueToken={refreshCueToken} />
         ))}
       </div>
     </>

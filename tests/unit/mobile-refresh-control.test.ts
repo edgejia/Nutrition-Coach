@@ -148,7 +148,10 @@ describe("Home manual refresh source contract", () => {
     assert.match(body, /replayKey: refreshCueToken/);
     assert.match(body, /const refreshCueClass = refreshCueToken > 0 \? " home-sport-refresh-cue" : ""/);
     assert.match(body, /key=\{`home-hero-\$\{refreshCueToken\}`\}/);
-    assert.match(body, /key=\{`home-macros-\$\{refreshCueToken\}`\}/);
+    // Plan 104-13 (Gap B): the macro grid no longer remounts on refresh via a
+    // key={`home-macros-${refreshCueToken}`}; a remount would reset MacroCard hook state and skip the
+    // count-up. The macro replay now runs in place through MacroCard + replayKey={refreshCueToken}.
+    assert.match(body, /<MacroCard key=\{macro\.id\} macro=\{macro\} refreshCueToken=\{refreshCueToken\} \/>/);
   });
 
   it("keeps Settings governed by sending and error copy independent from button loading state", () => {
