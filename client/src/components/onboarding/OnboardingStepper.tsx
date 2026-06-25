@@ -186,7 +186,13 @@ function SpNumberWheel({
   const current = Number(value || 0);
   const activeValue = clampNumericValue(current, min, max);
   const clamp = (n: number) => String(clampNumericValue(n, min, max));
+  const activeDragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => {
+    activeDragCleanupRef.current?.();
+    activeDragCleanupRef.current = null;
+  }, []);
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    activeDragCleanupRef.current?.();
     const startX = event.clientX;
     const startValue = activeValue;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -199,9 +205,15 @@ function SpNumberWheel({
     const stop = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("blur", stop);
+      activeDragCleanupRef.current = null;
     };
+    activeDragCleanupRef.current = stop;
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", stop, { once: true });
+    window.addEventListener("blur", stop, { once: true });
   };
   const visibleCount = minimal ? 3 : 5;
   const items = buildVisibleWheelValues(current, min, max, step, visibleCount);

@@ -369,6 +369,15 @@ describe("onboarding stepper UI", () => {
     assert.match(onboardingStepperSource, /currentValue=\{current\}/);
     assert.match(onboardingStepperSource, /aria-valuenow=\{activeValue\}/);
     assert.match(onboardingStepperSource, /if \(item\.value === currentValue\) return;/);
+    assert.match(onboardingStepperSource, /activeDragCleanupRef\.current\?\.\(\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("pointermove", move\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("pointerup", stop, \{ once: true \}\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("pointercancel", stop, \{ once: true \}\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("blur", stop, \{ once: true \}\)/);
+    assert.match(onboardingStepperSource, /window\.removeEventListener\("pointermove", move\)/);
+    assert.match(onboardingStepperSource, /window\.removeEventListener\("pointerup", stop\)/);
+    assert.match(onboardingStepperSource, /window\.removeEventListener\("pointercancel", stop\)/);
+    assert.match(onboardingStepperSource, /window\.removeEventListener\("blur", stop\)/);
     assert.match(onboardingStepperSource, /age: clampNumericValue\(bodyData\.age, ONBOARDING_NUMERIC_BOUNDS\.age\.min, ONBOARDING_NUMERIC_BOUNDS\.age\.max, 28\)/);
     assert.match(onboardingStepperSource, /heightCm: clampNumericValue\(\s*bodyData\.heightCm,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.max,\s*175,\s*\)/);
     assert.match(onboardingStepperSource, /weightKg: clampNumericValue\(\s*bodyData\.weightKg,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.max,\s*70,\s*\)/);
