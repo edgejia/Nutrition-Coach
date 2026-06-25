@@ -116,7 +116,7 @@ describe("History manual refresh source contract", () => {
     assert.equal(countMatches(sources.historyScreen, /aria-label="重新整理歷史資料"/g), 0);
     assert.equal(countMatches(sources.historyScreen, /title="重新整理歷史資料"/g), 0);
     assert.equal(countMatches(sources.historyScreen, /sp-history-refresh-row/g), 0);
-    assert.equal(countMatches(sources.historyScreen, /<SportIconButton[\s\S]*handleManualHistoryRefresh/g), 0);
+    assert.equal(countMatches(sources.historyScreen, /onClick=\{handleManualHistoryRefresh\}/g), 0);
   });
 
   it("keeps History loader errors as the existing error-card path", () => {

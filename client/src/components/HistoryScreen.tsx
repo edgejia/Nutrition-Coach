@@ -16,7 +16,8 @@ import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, HistoryTrendResponse, MealEntry } from "../types.js";
 import { formatMealRowTime, getDisplayMealLabel, getMealMacroSummary } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportChevronLeftIcon, SportChevronRightIcon, SportRefreshIcon } from "./SportIcons.js";
+import { PullToRefreshSurface } from "./PullToRefreshSurface.js";
+import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
 function addLocalDays(dateKey: string, deltaDays: number): string {
@@ -650,56 +651,49 @@ export function HistoryScreen() {
           </SportIconButton>
         </header>
 
-        <main className="screen-scroll-safe sp-history-scroll">
-          <div className="sp-history-refresh-row">
-            <SportIconButton
-              aria-label="重新整理歷史資料"
-              aria-busy={refreshingHistory ? "true" : undefined}
-              className={`sp-refresh-button ${refreshingHistory ? "sp-refresh-button--loading" : ""}`}
-              onClick={handleManualHistoryRefresh}
-              disabled={refreshingHistory}
-              title="重新整理歷史資料"
-            >
-              <SportRefreshIcon size={18} />
-            </SportIconButton>
-          </div>
+        <PullToRefreshSurface
+          onRefresh={handleManualHistoryRefresh}
+          refreshing={refreshingHistory}
+          ariaLabel="下拉重新整理歷史資料"
+        >
+          <main className="screen-scroll-safe sp-history-scroll">
+            {trendError ? (
+              <SportCard className="sp-history-state-card sp-history-state-error" variant="flat">
+                {trendError}
+              </SportCard>
+            ) : null}
 
-          {trendError ? (
-            <SportCard className="sp-history-state-card sp-history-state-error" variant="flat">
-              {trendError}
-            </SportCard>
-          ) : null}
-
-          <div className={isWeekPending ? "sp-history-weekly sp-history-pending" : "sp-history-weekly"}>
-            <HistoryWeekStrip
-              days={weekDays}
+            <div className={isWeekPending ? "sp-history-weekly sp-history-pending" : "sp-history-weekly"}>
+              <HistoryWeekStrip
+                days={weekDays}
+                targetCalories={targetCalories}
+                onSelect={(dateKey) => {
+                  setSelectedDateKey(dateKey);
+                }}
+              />
+              <HistoryStatGrid stats={weekStats} />
+            </div>
+            <SelectedDayHero
+              selectedDateKey={selectedDateKey}
+              selectedDay={selectedWeekDay}
+              snapshot={selectedSnapshot}
               targetCalories={targetCalories}
-              onSelect={(dateKey) => {
-                setSelectedDateKey(dateKey);
-              }}
+              pending={isSelectedDayPending}
+              cacheMiss={isSelectedDayCacheMiss}
             />
-            <HistoryStatGrid stats={weekStats} />
-          </div>
-          <SelectedDayHero
-            selectedDateKey={selectedDateKey}
-            selectedDay={selectedWeekDay}
-            snapshot={selectedSnapshot}
-            targetCalories={targetCalories}
-            pending={isSelectedDayPending}
-            cacheMiss={isSelectedDayCacheMiss}
-          />
-          <TimelinePanel
-            selectedDateKey={selectedDateKey}
-            todayKey={todayKey}
-            snapshot={selectedSnapshot}
-            dayError={dayError}
-            pending={isSelectedDayPending || showInlineDayPending}
-            confirmedEmptyDay={confirmedEmptyDay}
-            showInlineDayPending={showInlineDayPending}
-            openDayDetail={openDayDetail}
-            openConfirmedEmptyDayDetail={openConfirmedEmptyDayDetail}
-          />
-        </main>
+            <TimelinePanel
+              selectedDateKey={selectedDateKey}
+              todayKey={todayKey}
+              snapshot={selectedSnapshot}
+              dayError={dayError}
+              pending={isSelectedDayPending || showInlineDayPending}
+              confirmedEmptyDay={confirmedEmptyDay}
+              showInlineDayPending={showInlineDayPending}
+              openDayDetail={openDayDetail}
+              openConfirmedEmptyDayDetail={openConfirmedEmptyDayDetail}
+            />
+          </main>
+        </PullToRefreshSurface>
       </SportScreen>
     </div>
   );
