@@ -19,7 +19,9 @@ function functionBody(source: string, functionName: string) {
   const startToken = `function ${functionName}`;
   const startIndex = source.indexOf(startToken);
   assert.notEqual(startIndex, -1, `${functionName} should exist`);
-  const bodyStart = source.indexOf("{", startIndex);
+  const paramsEnd = source.indexOf(")", startIndex);
+  assert.notEqual(paramsEnd, -1, `${functionName} should close its parameter list`);
+  const bodyStart = source.indexOf("{", paramsEnd);
   assert.notEqual(bodyStart, -1, `${functionName} should have a body`);
 
   let depth = 0;
@@ -117,13 +119,13 @@ describe("Home manual refresh source contract", () => {
     );
     assert.match(
       headerBody,
-      /aria-label="設定"[\s\S]*disabled=\{sending\}/,
+      /<SportIconButton[\s\S]*disabled=\{sending\}[\s\S]*aria-label="設定"/,
       "Settings control should remain governed by sending, not refresh loading",
     );
     assert.match(
       sources.homeScreen,
       /\{refreshTodayError \? \(\s*<p className="home-sport-refresh-error" role="status">\s*\{refreshTodayError\}\s*<\/p>\s*\) : null\}/,
     );
-    assert.match(sources.homeScreen, /資料暫時無法更新，請稍後再試。/);
+    assert.match(sources.mainLayout, /資料暫時無法更新，請稍後再試。/);
   });
 });

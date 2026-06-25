@@ -771,6 +771,13 @@ textarea {
   padding: 24px 18px 8px;
 }
 
+.home-sport-header-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 .home-sport-title-row {
   display: flex;
   min-width: 0;

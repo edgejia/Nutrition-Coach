@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { useStore } from "../store.js";
 import { getMeals } from "../api.js";
 import { connectSSE, disconnectSSE } from "../sse.js";
@@ -125,6 +125,8 @@ export function MainLayout() {
   const activeScreen = useStore((s) => s.activeScreen);
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const closeSecondaryScreen = useStore((s) => s.closeSecondaryScreen);
+  const [refreshingHomeToday, setRefreshingHomeToday] = useState(false);
+  const [homeRefreshError, setHomeRefreshError] = useState<string | null>(null);
 
   const sseSummaryCoordinator = useMemo(
     () =>
@@ -153,6 +155,20 @@ export function MainLayout() {
     await sseSummaryCoordinator.runInitialMealsLoad({ refreshReason: "day_rollover" });
   }, [deviceId, setDailyTargets, sseSummaryCoordinator]);
 
+  const refreshHomeManually = useCallback(async () => {
+    if (!deviceId) return;
+    setHomeRefreshError(null);
+    setRefreshingHomeToday(true);
+    try {
+      const { meals } = await getMeals({ refreshReason: "manual_refresh" });
+      setMeals(meals);
+    } catch {
+      setHomeRefreshError("資料暫時無法更新，請稍後再試。");
+    } finally {
+      setRefreshingHomeToday(false);
+    }
+  }, [deviceId, setMeals]);
+
   useEffect(() => {
     if (!deviceId) return;
     void sseSummaryCoordinator.runInitialMealsLoad();
@@ -179,7 +195,13 @@ export function MainLayout() {
 
   return (
     <SportAppShell>
-      {activeScreen === "home" && <HomeScreen />}
+      {activeScreen === "home" && (
+        <HomeScreen
+          onRefreshToday={refreshHomeManually}
+          refreshingToday={refreshingHomeToday}
+          refreshTodayError={homeRefreshError}
+        />
+      )}
       {activeScreen === "chat" && <ChatPanel />}
       {activeScreen === "history" && <HistoryScreen />}
       {activeScreen !== "chat" && <BottomTabBar />}

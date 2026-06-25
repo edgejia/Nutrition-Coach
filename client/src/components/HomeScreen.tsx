@@ -7,7 +7,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
-import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
+import { SportFlameIcon, SportRefreshIcon, SportSettingsIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportProgressBar, SportRing, SportScreen } from "./SportPrimitives.js";
 import type {
   ActiveScreen,
@@ -259,7 +259,19 @@ export function sendHomeCtaTaskOption(
   stageHomeTaskOptionPrompt(option.prompt, setPendingHomeChatDraft, setActiveScreen, createId);
 }
 
-function HomeHeader() {
+export interface HomeScreenProps {
+  onRefreshToday: () => void | Promise<void>;
+  refreshingToday: boolean;
+  refreshTodayError: string | null;
+}
+
+interface HomeHeaderProps {
+  onRefreshToday: () => void | Promise<void>;
+  refreshingToday: boolean;
+  refreshTodayError: string | null;
+}
+
+function HomeHeader({ onRefreshToday, refreshingToday }: HomeHeaderProps) {
   const openSecondaryScreen = useStore((s) => s.openSecondaryScreen);
   const sending = useStore((s) => s.sending);
   const dailySummary = useStore((s) => s.dailySummary);
@@ -286,15 +298,27 @@ function HomeHeader() {
           {dateStr} · {statusText}
         </div>
       </div>
-      <SportIconButton
-        onClick={() => {
-          if (!sending) openSecondaryScreen("settings", "home");
-        }}
-        disabled={sending}
-        aria-label="設定"
-      >
-        <SportSettingsIcon size={19} />
-      </SportIconButton>
+      <div className="home-sport-header-actions">
+        <SportIconButton
+          className={`sp-refresh-button ${refreshingToday ? "sp-refresh-button--loading" : ""}`}
+          onClick={onRefreshToday}
+          disabled={refreshingToday}
+          aria-busy={refreshingToday ? "true" : undefined}
+          aria-label="重新整理今日資料"
+          title="重新整理今日資料"
+        >
+          <SportRefreshIcon size={19} />
+        </SportIconButton>
+        <SportIconButton
+          onClick={() => {
+            if (!sending) openSecondaryScreen("settings", "home");
+          }}
+          disabled={sending}
+          aria-label="設定"
+        >
+          <SportSettingsIcon size={19} />
+        </SportIconButton>
+      </div>
     </header>
   );
 }
@@ -474,7 +498,7 @@ function MealRows({
   );
 }
 
-export function HomeScreen() {
+export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError }: HomeScreenProps) {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const goal = useStore((s) => s.goal);
@@ -506,7 +530,16 @@ export function HomeScreen() {
   return (
     <div className="screen-shell sk-screen">
       <SportScreen className="home-sport-screen">
-        <HomeHeader />
+        <HomeHeader
+          onRefreshToday={onRefreshToday}
+          refreshingToday={refreshingToday}
+          refreshTodayError={refreshTodayError}
+        />
+        {refreshTodayError ? (
+          <p className="home-sport-refresh-error" role="status">
+            {refreshTodayError}
+          </p>
+        ) : null}
         <main className="screen-scroll home-sport-scroll">
           <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
           <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
