@@ -50,6 +50,7 @@ const sources = {
   browserBackSentinel: await readSource("../../client/src/useBrowserBackSentinel.ts"),
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
+  pullToRefreshSurface: await readSource("../../client/src/components/PullToRefreshSurface.tsx"),
   chatPanel: await readSource("../../client/src/components/ChatPanel.tsx"),
   chatInput: await readSource("../../client/src/components/ChatInput.tsx"),
   sportIcons: await readSource("../../client/src/components/SportIcons.tsx"),
@@ -168,10 +169,26 @@ describe("mobile shell source contract", () => {
     );
   });
 
-  it("defines fixed-shell-safe refresh primitives without page reload fallback", () => {
+  it("defines fixed-shell-safe pull refresh primitives without authenticated page reload fallback", () => {
     assert.match(sources.sportIcons, /export function SportRefreshIcon/);
     assert.match(sources.sportIcons, /<SportIconBase \{\.\.\.props\}>[\s\S]*<path d=/);
     assert.doesNotMatch(sources.sportIcons, /from "lucide-react"|from "@lucide\/react"/);
+
+    assert.match(sources.pullToRefreshSurface, /export function createPullToRefreshController/);
+    assert.match(sources.pullToRefreshSurface, /export function PullToRefreshSurface/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh-indicator/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--pulling/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--refreshing/);
+    assert.match(sources.pullToRefreshSurface, /SportRefreshIcon/);
+    assert.doesNotMatch(sources.pullToRefreshSurface, /location\.reload\(/);
+
+    assert.match(cssBlock(".sp-pull-refresh"), /position:\s*relative/);
+    assert.match(cssBlock(".sp-pull-refresh"), /min-height:\s*0/);
+    assert.match(cssBlock(".sp-pull-refresh-indicator"), /height:\s*48px/);
+    assert.match(cssBlock(".sp-pull-refresh-indicator"), /pointer-events:\s*none/);
+    assert.match(cssBlock(".sp-pull-refresh--pulling .sp-pull-refresh-indicator"), /opacity:\s*1/);
+    assert.match(cssBlock(".sp-pull-refresh--refreshing .sp-pull-refresh-indicator"), /opacity:\s*1/);
 
     assert.match(cssBlock(".sp-refresh-button"), /min-width:\s*44px/);
     assert.match(cssBlock(".sp-refresh-button"), /min-height:\s*44px/);
@@ -180,7 +197,7 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".sp-history-refresh-row"), /display:\s*flex/);
     assert.match(cssBlock(".sp-history-refresh-row"), /justify-content:\s*flex-end/);
 
-    for (const source of [sources.sportIcons, sources.appCss]) {
+    for (const source of [sources.sportIcons, sources.appCss, sources.pullToRefreshSurface]) {
       assert.doesNotMatch(source, /location\.reload\(/);
     }
   });
