@@ -164,12 +164,17 @@ export function MainLayout() {
     try {
       const { meals } = await getMeals({ refreshReason: "manual_refresh" });
       setMeals(meals);
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === "UNAUTHORIZED") {
+        void recoverGuestSession();
+        setHomeRefreshError("正在重新建立訪客狀態...");
+        return;
+      }
       setHomeRefreshError("資料暫時無法更新，請稍後再試。");
     } finally {
       setRefreshingHomeToday(false);
     }
-  }, [deviceId, setMeals]);
+  }, [deviceId, recoverGuestSession, setMeals]);
 
   useEffect(() => {
     if (!deviceId) return;
