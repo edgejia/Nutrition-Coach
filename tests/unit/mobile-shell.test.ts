@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
@@ -21,8 +22,32 @@ async function readSource(relativePath: string) {
   return readFile(sourcePath(relativePath), "utf8");
 }
 
+async function readClientSourceFiles(relativeDir = "../../client/src"): Promise<Array<{ path: string; source: string }>> {
+  const absoluteDir = sourcePath(relativeDir);
+  const entries = await readdir(absoluteDir, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const relativePath = `${relativeDir}/${entry.name}`;
+      const absolutePath = join(absoluteDir, entry.name);
+
+      if (entry.isDirectory()) {
+        return readClientSourceFiles(relativePath);
+      }
+      if (!entry.isFile() || !/\.(?:ts|tsx)$/.test(entry.name)) {
+        return [];
+      }
+
+      return [{ path: absolutePath, source: await readFile(absolutePath, "utf8") }];
+    }),
+  );
+
+  return files.flat();
+}
+
 const sources = {
+  app: await readSource("../../client/src/App.tsx"),
   appCss: await readSource("../../client/src/app.css"),
+  browserBackSentinel: await readSource("../../client/src/useBrowserBackSentinel.ts"),
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
   chatPanel: await readSource("../../client/src/components/ChatPanel.tsx"),
@@ -171,6 +196,40 @@ describe("mobile shell source contract", () => {
     assert.doesNotMatch(sources.mainLayout, /document\.body\.style\.overflow/);
     assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\)/);
     assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\)/);
+  });
+
+  it("wires the browser-back sentinel only inside the authenticated MainLayout shell", () => {
+    assert.match(sources.mainLayout, /import \{ useBrowserBackSentinel \} from "\.\.\/useBrowserBackSentinel\.js";/);
+    assert.match(sources.mainLayout, /const goBack = useStore\(\(s\) => s\.goBack\);/);
+    assert.match(sources.mainLayout, /useBrowserBackSentinel\(goBack\);/);
+    assert.includes(
+      sources.browserBackSentinel,
+      "goBack: () => boolean",
+      "browser-back hook should accept only the store navigation reducer",
+    );
+
+    assert.doesNotMatch(sources.app, /useBrowserBackSentinel/);
+    assert.doesNotMatch(sources.app, /goBack = useStore\(\(s\) => s\.goBack\)/);
+  });
+
+  it("keeps browser-back interception independent from refresh, SSE, sending, and proposal state", () => {
+    const sentinelLine = sources.mainLayout
+      .split("\n")
+      .find((line) => line.includes("useBrowserBackSentinel"));
+    assert.ok(sentinelLine, "MainLayout should call useBrowserBackSentinel");
+    assert.doesNotMatch(
+      sentinelLine,
+      /refresh|sse|SSE|sending|proposal|refreshingHomeToday|homeRefreshError/i,
+      "browser-back hook should receive only goBack, not loading or proposal state",
+    );
+
+    for (const stateToken of ["refreshingHomeToday", "homeRefreshError", "sseSummaryCoordinator", "sending", "proposal"]) {
+      assert.doesNotMatch(
+        sources.mainLayout,
+        new RegExp(`if \\([^)]*${stateToken}[^)]*\\)[\\s\\S]{0,160}useBrowserBackSentinel`),
+        `browser-back hook must not be gated by ${stateToken}`,
+      );
+    }
   });
 
   it("does not introduce sport demo device-frame chrome", () => {
@@ -537,6 +596,14 @@ describe("mobile shell source contract", () => {
 
     for (const source of componentSources) {
       assert.doesNotMatch(source, blockedScopePattern);
+    }
+  });
+
+  it("does not use full page reload for any client refresh path", async () => {
+    const clientSources = await readClientSourceFiles();
+
+    for (const { path, source } of clientSources) {
+      assert.doesNotMatch(source, /location\.reload\(/, `${path} should not call location.reload()`);
     }
   });
 
