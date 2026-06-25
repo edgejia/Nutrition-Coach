@@ -64,8 +64,14 @@ describe("Home manual refresh source contract", () => {
     assert.match(body, /setHomeRefreshError\(null\)/);
     assert.match(body, /setRefreshingHomeToday\(true\)/);
     assert.match(body, /try\s*\{[\s\S]*getMeals\(\{ refreshReason: "manual_refresh" \}\)[\s\S]*setMeals\(meals\)/);
-    assert.match(body, /catch\s*\{[\s\S]*setHomeRefreshError\("資料暫時無法更新，請稍後再試。"\)/);
+    assert.match(body, /catch \(error\)\s*\{/);
+    assert.match(
+      body,
+      /if \(error instanceof Error && error\.message === "UNAUTHORIZED"\)\s*\{[\s\S]*void recoverGuestSession\(\);[\s\S]*setHomeRefreshError\("正在重新建立訪客狀態\.\.\."\);[\s\S]*return;[\s\S]*\}/,
+    );
+    assert.match(body, /setHomeRefreshError\("資料暫時無法更新，請稍後再試。"\)/);
     assert.match(body, /finally\s*\{[\s\S]*setRefreshingHomeToday\(false\)/);
+    assert.match(body, /\}, \[deviceId, recoverGuestSession, setMeals\]\);/);
     assert.doesNotMatch(body, /runInitialMealsLoad\(\{ refreshReason: "manual_refresh" \}\)/);
   });
 
