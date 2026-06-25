@@ -225,21 +225,26 @@ export function createPullToRefreshController({
 
     try {
       const result = onRefresh();
-      const settle = () => {
+      const settleSuccess = () => {
         refreshing = false;
         emitDiagnostic({ event: "refresh_settle", surfaceId, eventTargetKind, phase: "complete" });
         emitState({ phase: "complete", pullDistance: 0, progress: 0 });
       };
+      const settleFailure = () => {
+        refreshing = false;
+        emitDiagnostic({ event: "refresh_settle", surfaceId, eventTargetKind, phase: "idle" });
+        emitState(idleState);
+      };
 
       if (isPromiseLike(result)) {
-        void result.then(settle, settle);
+        void result.then(settleSuccess, settleFailure);
         return;
       }
-      settle();
+      settleSuccess();
     } catch {
       refreshing = false;
-      emitDiagnostic({ event: "refresh_settle", surfaceId, eventTargetKind, phase: "complete" });
-      emitState({ phase: "complete", pullDistance: 0, progress: 0 });
+      emitDiagnostic({ event: "refresh_settle", surfaceId, eventTargetKind, phase: "idle" });
+      emitState(idleState);
     }
   }
 

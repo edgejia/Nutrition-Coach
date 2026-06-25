@@ -301,7 +301,7 @@ describe("createPullToRefreshController", () => {
     cleanup();
   });
 
-  it("emits settle and returns to complete after rejected refresh promises", async () => {
+  it("emits settle and returns to idle after rejected refresh promises", async () => {
     const eventTarget = new FakeEventTarget();
     const surface = new FakeElement("main", ["screen-scroll"]);
     const states: string[] = [];
@@ -320,7 +320,8 @@ describe("createPullToRefreshController", () => {
     await Promise.resolve();
 
     assert.ok(events.some((event) => event.event === "refresh_settle"));
-    assert.equal(states.at(-1), "complete");
+    assert.equal([...events].reverse().find((event) => event.event === "refresh_settle")?.phase, "idle");
+    assert.equal(states.at(-1), "idle");
     cleanup();
   });
 

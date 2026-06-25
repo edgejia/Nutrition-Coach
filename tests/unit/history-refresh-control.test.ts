@@ -73,8 +73,9 @@ describe("History manual refresh source contract", () => {
     assert.match(body, /setRefreshingHistory\(true\)/);
     assert.match(
       body,
-      /await Promise\.all\(\[\s*loadTrends\(cancelledRef\),\s*loadSelectedDay\(cancelledRef\),\s*\]\)/,
+      /const results = await Promise\.all\(\[\s*loadTrends\(cancelledRef\),\s*loadSelectedDay\(cancelledRef\),\s*\]\)/,
     );
+    assert.match(body, /if \(results\.some\(\(ok\) => ok === false\)\) \{[\s\S]*throw new Error\("HISTORY_REFRESH_FAILED"\);[\s\S]*\}/);
     assert.match(
       body,
       /finally\s*\{[\s\S]*if \(!cancelledRef\.current\) \{[\s\S]*setRefreshingHistory\(false\);[\s\S]*manualRefreshCancelRef\.current = null;/,

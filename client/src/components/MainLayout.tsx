@@ -170,9 +170,10 @@ export function MainLayout() {
       if (error instanceof Error && error.message === "UNAUTHORIZED") {
         void recoverGuestSession();
         setHomeRefreshError("正在重新建立訪客狀態...");
-        return;
+        throw error;
       }
       setHomeRefreshError("資料暫時無法更新，請稍後再試。");
+      throw error;
     } finally {
       setRefreshingHomeToday(false);
     }

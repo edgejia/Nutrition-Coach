@@ -69,9 +69,10 @@ describe("Home manual refresh source contract", () => {
     assert.match(body, /catch \(error\)\s*\{/);
     assert.match(
       body,
-      /if \(error instanceof Error && error\.message === "UNAUTHORIZED"\)\s*\{[\s\S]*void recoverGuestSession\(\);[\s\S]*setHomeRefreshError\("正在重新建立訪客狀態\.\.\."\);[\s\S]*return;[\s\S]*\}/,
+      /if \(error instanceof Error && error\.message === "UNAUTHORIZED"\)\s*\{[\s\S]*void recoverGuestSession\(\);[\s\S]*setHomeRefreshError\("正在重新建立訪客狀態\.\.\."\);[\s\S]*throw error;[\s\S]*\}/,
     );
     assert.match(body, /setHomeRefreshError\("資料暫時無法更新，請稍後再試。"\)/);
+    assert.match(body, /setHomeRefreshError\("資料暫時無法更新，請稍後再試。"\);[\s\S]*throw error;/);
     assert.match(body, /finally\s*\{[\s\S]*setRefreshingHomeToday\(false\)/);
     assert.match(body, /\}, \[deviceId, recoverGuestSession, setMeals\]\);/);
     assert.doesNotMatch(body, /runInitialMealsLoad\(\{ refreshReason: "manual_refresh" \}\)/);
@@ -182,8 +183,9 @@ describe("Home manual refresh source contract", () => {
       ["Refresh callback", "onRefresh={refreshOnboardingShell}"],
       ["Onboarding surface id", 'surfaceId="onboarding"'],
       ["Onboarding pull label", 'ariaLabel="下拉重新整理初始設定"'],
-      ["Scroll target", '<main className="screen-scroll sp-onboarding-scroll">'],
+      ["Scroll target", '<div className="screen-scroll sp-onboarding-scroll">'],
       ["Stepper", "<OnboardingStepper />"],
     ]);
+    assert.doesNotMatch(body, /<main className="screen-scroll sp-onboarding-scroll">/);
   });
 });

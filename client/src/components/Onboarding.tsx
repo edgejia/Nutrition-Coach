@@ -22,9 +22,9 @@ export function Onboarding() {
       completionLabel="初始設定已重新整理"
       ariaLabel="下拉重新整理初始設定"
     >
-      <main className="screen-scroll sp-onboarding-scroll">
+      <div className="screen-scroll sp-onboarding-scroll">
         <OnboardingStepper />
-      </main>
+      </div>
     </PullToRefreshSurface>
   );
 }

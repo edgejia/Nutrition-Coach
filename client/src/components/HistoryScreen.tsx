@@ -464,12 +464,14 @@ export function HistoryScreen() {
               return next;
             });
           }
+          return true;
         })
         .catch((error: unknown) => {
           if (error instanceof Error && error.message === "UNAUTHORIZED") {
             void recoverGuestSession();
           }
           if (!cancelledRef?.current) setTrendError(historyErrorMessage(error));
+          return false;
         })
         .finally(() => {
           if (!cancelledRef?.current) setLoadingTrends(false);
@@ -492,6 +494,7 @@ export function HistoryScreen() {
               return next;
             });
           }
+          return true;
         })
         .catch((error: unknown) => {
           if (error instanceof Error && error.message === "UNAUTHORIZED") {
@@ -505,6 +508,7 @@ export function HistoryScreen() {
             });
             setDayError(historyErrorMessage(error));
           }
+          return false;
         })
         .finally(() => {
           if (!cancelledRef?.current) setLoadingDay(false);
@@ -522,10 +526,13 @@ export function HistoryScreen() {
     setRefreshingHistory(true);
 
     try {
-      await Promise.all([
+      const results = await Promise.all([
         loadTrends(cancelledRef),
         loadSelectedDay(cancelledRef),
       ]);
+      if (results.some((ok) => ok === false)) {
+        throw new Error("HISTORY_REFRESH_FAILED");
+      }
     } finally {
       if (!cancelledRef.current) {
         setRefreshingHistory(false);
