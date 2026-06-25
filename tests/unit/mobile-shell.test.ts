@@ -192,6 +192,14 @@ describe("mobile shell source contract", () => {
 
     assert.match(cssBlock(".sp-pull-refresh"), /position:\s*relative/);
     assert.match(cssBlock(".sp-pull-refresh"), /min-height:\s*0/);
+    assert.match(cssBlock(".sp-pull-refresh"), /flex:\s*1 1 auto/);
+    assert.match(cssBlock(".sp-pull-refresh"), /display:\s*flex/);
+    assert.match(cssBlock(".sp-pull-refresh"), /flex-direction:\s*column/);
+    assert.match(cssBlock(".sp-pull-refresh"), /overflow:\s*clip/);
+    assert.match(cssBlock(".sp-pull-refresh-content"), /min-height:\s*0/);
+    assert.match(cssBlock(".sp-pull-refresh-content"), /flex:\s*1 1 auto/);
+    assert.match(cssBlock(".sp-pull-refresh-content"), /display:\s*flex/);
+    assert.match(cssBlock(".sp-pull-refresh-content"), /flex-direction:\s*column/);
     assert.match(cssBlock(".sp-pull-refresh-indicator"), /height:\s*48px/);
     assert.match(cssBlock(".sp-pull-refresh-indicator"), /pointer-events:\s*none/);
     assert.match(cssBlock(".sp-pull-refresh--pulling .sp-pull-refresh-indicator"), /opacity:\s*1/);

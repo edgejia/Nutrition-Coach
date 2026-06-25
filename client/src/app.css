@@ -549,10 +549,17 @@ textarea {
 .sp-pull-refresh {
   position: relative;
   min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: clip;
 }
 
 .sp-pull-refresh-content {
   min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .sp-pull-refresh-indicator {

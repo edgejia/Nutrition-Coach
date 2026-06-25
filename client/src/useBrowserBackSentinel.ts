@@ -14,6 +14,7 @@ export interface BrowserBackWindowTarget {
 export interface BrowserBackHistoryTarget {
   readonly state: unknown;
   pushState(state: unknown, title: string, url?: string | URL | null): void;
+  back(): void;
 }
 
 export interface BrowserBackControllerOptions {
@@ -47,7 +48,9 @@ export function createBrowserBackSentinelController(options: BrowserBackControll
     }
     if (goBack()) {
       armSentinel({ force: true });
+      return;
     }
+    historyTarget.back();
   }
 
   armSentinel();

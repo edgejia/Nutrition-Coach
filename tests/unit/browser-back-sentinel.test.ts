@@ -9,11 +9,17 @@ import {
 
 class FakeHistory implements BrowserBackHistoryTarget {
   public state: unknown = null;
+  public backCalls = 0;
   public pushCalls: Array<{ state: unknown; title: string; url?: string | URL | null }> = [];
 
   pushState(state: unknown, title: string, url?: string | URL | null) {
     this.state = state;
     this.pushCalls.push({ state, title, url });
+  }
+
+  back() {
+    this.backCalls += 1;
+    this.state = null;
   }
 }
 
@@ -89,7 +95,7 @@ describe("createBrowserBackSentinelController", () => {
     });
   });
 
-  it("does not re-arm when goBack returns false so root browser exit can proceed", () => {
+  it("delegates to browser history when goBack returns false so root browser exit proceeds on the first press", () => {
     setupController();
     goBackResult = false;
 
@@ -97,6 +103,8 @@ describe("createBrowserBackSentinelController", () => {
 
     assert.equal(goBackCalls, 1);
     assert.equal(historyTarget.pushCalls.length, 1);
+    assert.equal(historyTarget.backCalls, 1);
+    assert.equal(historyTarget.state, null);
   });
 
   it("remounts idempotently without pushing a duplicate sentinel when already armed", () => {
