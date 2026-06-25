@@ -189,7 +189,7 @@ describe("mobile shell source contract", () => {
     assert.doesNotMatch(sources.homeScreen, /\bscreen-scroll-with-input\b/);
     assertIncludesInOrder(sources.homeScreen, [
       ["Home screen shell", '<div className="screen-shell sk-screen">'],
-      ["Home header", "<HomeHeader />"],
+      ["Home header", "<HomeHeader"],
       ["Home content scroller", '<main className="screen-scroll'],
     ]);
   });
