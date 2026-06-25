@@ -458,6 +458,131 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().secondaryScreen, null, "NAV-02 Chat Meal Edit closes to null");
   });
 
+  it("goBack closes settings secondary screen before leaving primary navigation", () => {
+    useStore.getState().setActiveScreen("history");
+    useStore.getState().openSecondaryScreen("settings", "history");
+
+    const handled = useStore.getState().goBack();
+
+    assert.equal(handled, true);
+    assert.equal(useStore.getState().activeScreen, "history");
+    assert.equal(useStore.getState().secondaryScreen, null);
+  });
+
+  it("goBack closes day detail secondary screen before leaving primary navigation", () => {
+    useStore.getState().setActiveScreen("history");
+    useStore.getState().openDayDetail({ dateKey: "2026-05-06", label: "history-snapshot" }, "history");
+
+    const handled = useStore.getState().goBack();
+
+    assert.equal(handled, true);
+    assert.equal(useStore.getState().activeScreen, "history");
+    assert.equal(useStore.getState().secondaryScreen, null);
+  });
+
+  it("goBack restores Day Detail when Meal Edit was launched with returnToDayDetail", () => {
+    const returnToDayDetail = {
+      dateKey: "2026-05-06",
+      targetMealId: "meal-focused",
+      label: "history-snapshot" as const,
+    };
+    const payload = {
+      mealId: "meal-focused",
+      dateKey: "2026-05-06",
+      foodName: "雞腿便當",
+      mealRevisionId: "meal-focused:r1",
+      calories: 640,
+      protein: 36,
+      carbs: 72,
+      fat: 18,
+      itemCount: 1,
+    };
+
+    useStore.getState().setActiveScreen("history");
+    useStore.getState().openMealEdit(payload, "history", { returnToDayDetail });
+
+    const handled = useStore.getState().goBack();
+
+    assert.equal(handled, true);
+    assert.equal(useStore.getState().activeScreen, "history");
+    assert.deepEqual(useStore.getState().secondaryScreen, {
+      screen: "dayDetail",
+      origin: "history",
+      payload: returnToDayDetail,
+    });
+  });
+
+  it("goBack returns chat and history primary screens to home", () => {
+    useStore.getState().setActiveScreen("chat");
+    assert.equal(useStore.getState().goBack(), true);
+    assert.equal(useStore.getState().activeScreen, "home");
+
+    useStore.getState().setActiveScreen("history");
+    assert.equal(useStore.getState().goBack(), true);
+    assert.equal(useStore.getState().activeScreen, "home");
+  });
+
+  it("goBack returns false at home root without mutating state", () => {
+    useStore.getState().setDevice("d-1", "fat_loss", { calories: 1500, protein: 120, carbs: 150, fat: 50 });
+    const before = useStore.getState();
+
+    const handled = useStore.getState().goBack();
+
+    assert.equal(handled, false);
+    assert.equal(useStore.getState().activeScreen, "home");
+    assert.equal(useStore.getState().secondaryScreen, null);
+    assert.equal(useStore.getState().sending, before.sending);
+    assert.deepEqual(useStore.getState().messages, before.messages);
+  });
+
+  it("goBack returns false during onboarding and leaves the pre-shell gate untouched", () => {
+    useStore.getState().clearDevice();
+
+    const handled = useStore.getState().goBack();
+
+    assert.equal(handled, false);
+    assert.equal(useStore.getState().activeScreen, "onboarding");
+    assert.equal(useStore.getState().secondaryScreen, null);
+  });
+
+  it("goBack unwinds one navigation layer while preserving sending and proposal-card message state", () => {
+    const proposalCard = {
+      proposalId: "proposal-1",
+      proposalKind: "meal_estimate" as const,
+      proposalLane: "meal_mutation" as const,
+      status: "active" as const,
+      isActionable: true,
+      title: "調整熱量估算",
+      details: { rows: [{ label: "熱量", before: "500", after: "650" }] },
+      actions: {
+        approveLabel: "套用",
+        editLabel: "我再說明",
+        rejectLabel: "不用",
+      },
+      expiresAt: "2026-05-06T12:00:00.000Z",
+      lapseCopy: null,
+      supersededByKind: null,
+    };
+    const messages = [
+      {
+        id: "assistant-proposal",
+        role: "assistant" as const,
+        content: "要套用這個估算嗎？",
+        createdAt: "2026-05-06T11:00:00.000Z",
+        proposalCard,
+      },
+    ];
+    useStore.setState({ activeScreen: "chat", sending: true, messages });
+
+    const handled = useStore.getState().goBack();
+
+    assert.equal(handled, true);
+    assert.equal(useStore.getState().activeScreen, "home");
+    assert.equal(useStore.getState().sending, true);
+    assert.deepEqual(useStore.getState().messages, messages);
+    assert.deepEqual(useStore.getState().messages[0]?.proposalCard, proposalCard);
+  });
+
   it("recordMealMutation tracks affected date with a monotonic nonce", () => {
     useStore.getState().recordMealMutation("2026-04-30");
     const first = useStore.getState().lastMealMutation;
