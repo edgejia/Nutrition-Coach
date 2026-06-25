@@ -202,9 +202,8 @@ describe("mobile shell source contract", () => {
     assert.match(sources.mainLayout, /import \{ useBrowserBackSentinel \} from "\.\.\/useBrowserBackSentinel\.js";/);
     assert.match(sources.mainLayout, /const goBack = useStore\(\(s\) => s\.goBack\);/);
     assert.match(sources.mainLayout, /useBrowserBackSentinel\(goBack\);/);
-    assert.includes(
-      sources.browserBackSentinel,
-      "goBack: () => boolean",
+    assert.ok(
+      sources.browserBackSentinel.includes("goBack: () => boolean"),
       "browser-back hook should accept only the store navigation reducer",
     );
 

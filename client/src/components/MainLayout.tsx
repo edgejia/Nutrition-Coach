@@ -4,6 +4,7 @@ import { getMeals } from "../api.js";
 import { connectSSE, disconnectSSE } from "../sse.js";
 import { createSSESummaryCoordinator } from "../sse-summary-coordinator.js";
 import { formatLocalDate } from "../lib/time.js";
+import { useBrowserBackSentinel } from "../useBrowserBackSentinel.js";
 import { useDailyRollover } from "../useDailyRollover.js";
 import { BottomTabBar } from "./BottomTabBar.js";
 import { HomeScreen } from "./HomeScreen.js";
@@ -125,6 +126,7 @@ export function MainLayout() {
   const activeScreen = useStore((s) => s.activeScreen);
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const closeSecondaryScreen = useStore((s) => s.closeSecondaryScreen);
+  const goBack = useStore((s) => s.goBack);
   const [refreshingHomeToday, setRefreshingHomeToday] = useState(false);
   const [homeRefreshError, setHomeRefreshError] = useState<string | null>(null);
 
@@ -192,6 +194,7 @@ export function MainLayout() {
   }, [deviceId, refreshForRollover, setRolloverRefreshHandler]);
 
   useDailyRollover(refreshForRollover);
+  useBrowserBackSentinel(goBack);
 
   return (
     <SportAppShell>
