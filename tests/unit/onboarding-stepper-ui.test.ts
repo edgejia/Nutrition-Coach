@@ -31,6 +31,10 @@ const onboardingStepperSource = await readFile(
   fileURLToPath(new URL("../../client/src/components/onboarding/OnboardingStepper.tsx", import.meta.url)),
   "utf8",
 );
+const onboardingSource = await readFile(
+  fileURLToPath(new URL("../../client/src/components/Onboarding.tsx", import.meta.url)),
+  "utf8",
+);
 
 function renderStepSix(props: {
   loading?: boolean;
@@ -114,6 +118,14 @@ function assertUnique(values: readonly number[]) {
 }
 
 describe("onboarding stepper UI", () => {
+  it("wraps onboarding in a pre-shell pull refresh surface that reloads only from Onboarding", () => {
+    assert.match(onboardingSource, /import \{ PullToRefreshSurface \} from "\.\/PullToRefreshSurface\.js";/);
+    assert.match(onboardingSource, /function refreshOnboardingShell\(\)/);
+    assert.match(onboardingSource, /window\.location\.reload\(\)/);
+    assert.match(onboardingSource, /<PullToRefreshSurface[\s\S]*onRefresh=\{refreshOnboardingShell\}[\s\S]*ariaLabel="下拉重新整理初始設定"[\s\S]*<OnboardingStepper \/>[\s\S]*<\/PullToRefreshSurface>/);
+    assert.doesNotMatch(onboardingSource, /useBrowserBackSentinel|goBack/);
+  });
+
   it("renders Step 2 quick-note selected state from selectedNotes without changing visible text", () => {
     assert.equal(typeof SpStepGoalClarification, "function");
 

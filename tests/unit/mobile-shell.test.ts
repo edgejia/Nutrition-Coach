@@ -50,6 +50,7 @@ const sources = {
   browserBackSentinel: await readSource("../../client/src/useBrowserBackSentinel.ts"),
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
+  onboarding: await readSource("../../client/src/components/Onboarding.tsx"),
   pullToRefreshSurface: await readSource("../../client/src/components/PullToRefreshSurface.tsx"),
   chatPanel: await readSource("../../client/src/components/ChatPanel.tsx"),
   chatInput: await readSource("../../client/src/components/ChatInput.tsx"),
@@ -181,7 +182,13 @@ describe("mobile shell source contract", () => {
     assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--pulling/);
     assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--refreshing/);
     assert.match(sources.pullToRefreshSurface, /SportRefreshIcon/);
+    assert.match(sources.pullToRefreshSurface, /ariaLabel/);
+    assert.match(sources.pullToRefreshSurface, /refreshing = false/);
     assert.doesNotMatch(sources.pullToRefreshSurface, /location\.reload\(/);
+
+    assert.match(sources.onboarding, /PullToRefreshSurface/);
+    assert.match(sources.onboarding, /window\.location\.reload\(\)/);
+    assert.match(sources.onboarding, /<OnboardingStepper \/>/);
 
     assert.match(cssBlock(".sp-pull-refresh"), /position:\s*relative/);
     assert.match(cssBlock(".sp-pull-refresh"), /min-height:\s*0/);
@@ -190,12 +197,7 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".sp-pull-refresh--pulling .sp-pull-refresh-indicator"), /opacity:\s*1/);
     assert.match(cssBlock(".sp-pull-refresh--refreshing .sp-pull-refresh-indicator"), /opacity:\s*1/);
 
-    assert.match(cssBlock(".sp-refresh-button"), /min-width:\s*44px/);
-    assert.match(cssBlock(".sp-refresh-button"), /min-height:\s*44px/);
-    assert.match(cssBlock(".sp-refresh-button--loading"), /opacity:\s*\.55/);
     assert.match(cssBlock(".home-sport-refresh-error"), /font-size:\s*12px/);
-    assert.match(cssBlock(".sp-history-refresh-row"), /display:\s*flex/);
-    assert.match(cssBlock(".sp-history-refresh-row"), /justify-content:\s*flex-end/);
 
     for (const source of [sources.sportIcons, sources.appCss, sources.pullToRefreshSurface]) {
       assert.doesNotMatch(source, /location\.reload\(/);
@@ -619,6 +621,10 @@ describe("mobile shell source contract", () => {
     const clientSources = await readClientSourceFiles();
 
     for (const { path, source } of clientSources) {
+      if (path.endsWith("/client/src/components/Onboarding.tsx")) {
+        assert.match(source, /window\.location\.reload\(\)/, "Onboarding pre-shell may reload from pull refresh");
+        continue;
+      }
       assert.doesNotMatch(source, /location\.reload\(/, `${path} should not call location.reload()`);
     }
   });

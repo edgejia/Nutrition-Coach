@@ -85,26 +85,38 @@ describe("History manual refresh source contract", () => {
     );
   });
 
-  it("renders exactly one History refresh control as the first scroll row", () => {
+  it("renders History refresh through the shared pull surface without an explicit row button", () => {
     assert.match(
       sources.historyScreen,
-      /import \{ SportChevronLeftIcon, SportChevronRightIcon, SportRefreshIcon \}/,
+      /import \{ PullToRefreshSurface \} from "\.\/PullToRefreshSurface\.js";/,
     );
+    assert.match(
+      sources.historyScreen,
+      /import \{ SportChevronLeftIcon, SportChevronRightIcon \} from "\.\/SportIcons\.js";/,
+    );
+    assert.doesNotMatch(sources.historyScreen, /SportRefreshIcon/);
 
     const scrollIndex = sources.historyScreen.indexOf('<main className="screen-scroll-safe sp-history-scroll">');
     assert.notEqual(scrollIndex, -1, "History scroll container should exist");
-    const scrollSource = sources.historyScreen.slice(scrollIndex);
+    const pullSurfaceIndex = sources.historyScreen.indexOf("<PullToRefreshSurface");
+    assert.notEqual(pullSurfaceIndex, -1, "History pull refresh surface should exist");
+    assert.ok(pullSurfaceIndex < scrollIndex, "History pull surface should wrap the scroll container");
+    const scrollSource = sources.historyScreen.slice(pullSurfaceIndex);
 
     assertIncludesInOrder(scrollSource, [
+      ["Pull refresh surface", "<PullToRefreshSurface"],
+      ["Refresh callback", "onRefresh={handleManualHistoryRefresh}"],
+      ["Refresh in-flight state", "refreshing={refreshingHistory}"],
+      ["History pull label", 'ariaLabel="下拉重新整理歷史資料"'],
       ["History scroll container", '<main className="screen-scroll-safe sp-history-scroll">'],
-      ["Refresh row", '<div className="sp-history-refresh-row">'],
       ["Trend error card", "trendError ? ("],
       ["Weekly content", "sp-history-weekly"],
     ]);
 
-    assert.equal(countMatches(scrollSource, /aria-label="重新整理歷史資料"/g), 1);
-    assert.equal(countMatches(scrollSource, /title="重新整理歷史資料"/g), 1);
-    assert.equal(countMatches(scrollSource, /<SportRefreshIcon\b/g), 1);
+    assert.equal(countMatches(sources.historyScreen, /aria-label="重新整理歷史資料"/g), 0);
+    assert.equal(countMatches(sources.historyScreen, /title="重新整理歷史資料"/g), 0);
+    assert.equal(countMatches(sources.historyScreen, /sp-history-refresh-row/g), 0);
+    assert.equal(countMatches(sources.historyScreen, /<SportIconButton[\s\S]*handleManualHistoryRefresh/g), 0);
   });
 
   it("keeps History loader errors as the existing error-card path", () => {
@@ -130,11 +142,10 @@ describe("History manual refresh source contract", () => {
   it("limits in-flight state to the History refresh control and leaves navigation untouched", () => {
     const body = functionBody(sources.historyScreen, "HistoryScreen");
 
-    assert.match(
-      body,
-      /<SportIconButton[\s\S]*className=\{`sp-refresh-button \$\{refreshingHistory \? "sp-refresh-button--loading" : ""\}`\}[\s\S]*onClick=\{handleManualHistoryRefresh\}[\s\S]*disabled=\{refreshingHistory\}/,
-    );
-    assert.match(body, /aria-busy=\{refreshingHistory \? "true" : undefined\}/);
+    assert.match(body, /refreshing=\{refreshingHistory\}/);
+    assert.match(body, /onRefresh=\{handleManualHistoryRefresh\}/);
+    assert.doesNotMatch(body, /sp-refresh-button/);
+    assert.doesNotMatch(body, /aria-busy=\{refreshingHistory \? "true" : undefined\}/);
     assert.match(body, /<div className=\{isWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}>/);
     assert.match(body, /<SelectedDayHero[\s\S]*pending=\{isSelectedDayPending\}/);
     assert.match(body, /<TimelinePanel[\s\S]*pending=\{isSelectedDayPending \|\| showInlineDayPending\}/);
