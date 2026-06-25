@@ -1,3 +1,15 @@
+// WOULD-HAVE-CAUGHT (Round 6, Gap A):
+// The original FakeHistory below is a toy model: back() merely nulls history.state
+// and the suite ran scheduleRearm() synchronously between presses. That made the
+// "consecutive popstates" case pass even when the sentinel was re-armed only by the
+// deferred confirmRearm() (setTimeout 0), so the real Android press-to-press window
+// with NO poppable sentinel was invisible and the bug survived five rounds.
+// PositionalFakeHistory below reproduces a real back stack (cursor + entries; back()
+// moves the cursor, pushState truncates forward entries) so the SECOND consecutive
+// hardware Back is exercised the way Android exercises it. The consecutive-Back test
+// asserts a sentinel remains poppable BELOW the cursor between presses WITHOUT running
+// the scheduler, which fails against deferred-only re-arm and passes only with the
+// synchronous in-popstate re-push.
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 
@@ -7,6 +19,14 @@ import {
   type BrowserBackHistoryTarget,
   type BrowserBackWindowTarget,
 } from "../../client/src/useBrowserBackSentinel.js";
+
+function isSentinelState(state: unknown) {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    (state as { nutritionCoachBrowserBackSentinel?: unknown }).nutritionCoachBrowserBackSentinel === true
+  );
+}
 
 class FakeHistory implements BrowserBackHistoryTarget {
   public state: unknown = null;
@@ -33,6 +53,62 @@ class AndroidLikeFakeHistory extends FakeHistory {
       return;
     }
     super.pushState(state, title, url);
+  }
+}
+
+/**
+ * Position-based back-stack model that reproduces a real browser history stack.
+ *
+ * `entries` is the ordered back stack and `cursor` is the index of the current
+ * entry. `pushState` truncates any forward entries above the cursor, appends the
+ * new state, and advances the cursor (the real "navigating after a back" rule).
+ * `back()` decrements the cursor (never below 0) and lands on the entry it points
+ * at, exposing it as `state` — exactly what a hardware Back does. `state` is a live
+ * view of `entries[cursor]`.
+ *
+ * A poppable sentinel exists when the cursor currently sits ON a sentinel entry that
+ * is NOT at the bottom of the stack (cursor > 0). That is the device invariant: the
+ * NEXT hardware Back pops the sentinel and fires popstate while the app still holds
+ * navigation authority, instead of popping past the bottom and exiting the app.
+ * `sentinelBelowCursor()` / `canPopSentinel()` report that invariant.
+ */
+class PositionalFakeHistory implements BrowserBackHistoryTarget {
+  public entries: unknown[] = [null];
+  public cursor = 0;
+  public backCalls = 0;
+  public pushCalls: Array<{ state: unknown; title: string; url?: string | URL | null }> = [];
+
+  get state(): unknown {
+    return this.entries[this.cursor] ?? null;
+  }
+
+  pushState(state: unknown, title: string, url?: string | URL | null) {
+    // Truncate forward entries (everything above the current cursor) like a real stack.
+    this.entries = this.entries.slice(0, this.cursor + 1);
+    this.entries.push(state);
+    this.cursor = this.entries.length - 1;
+    this.pushCalls.push({ state, title, url });
+  }
+
+  back() {
+    this.backCalls += 1;
+    if (this.cursor > 0) {
+      this.cursor -= 1;
+    }
+  }
+
+  /**
+   * Does a poppable sentinel exist for the NEXT hardware Back? True when the cursor
+   * sits on a sentinel entry that is above the bottom of the stack, so the next Back
+   * pops the sentinel (firing popstate) rather than exiting the app.
+   */
+  sentinelBelowCursor(): boolean {
+    return this.cursor > 0 && isSentinelState(this.entries[this.cursor]);
+  }
+
+  /** Alias kept for readability at call sites: a NEXT Back would still land on a sentinel. */
+  canPopSentinel(): boolean {
+    return this.sentinelBelowCursor();
   }
 }
 
@@ -171,6 +247,85 @@ describe("createBrowserBackSentinelController", () => {
     assert.deepEqual(historyTarget.state, {
       nutritionCoachBrowserBackSentinel: true,
     });
+  });
+
+  it("keeps a poppable sentinel below the cursor between consecutive Android Back presses (positional model)", () => {
+    const positional = new PositionalFakeHistory();
+    const scheduled: Array<() => void> = [];
+    createBrowserBackSentinelController({
+      historyTarget: positional,
+      windowTarget,
+      sourceId: "positional-shell",
+      // Capture but DO NOT run the scheduler between presses — this reproduces the
+      // real Android press-to-press window where only the synchronous re-push can
+      // keep a sentinel poppable.
+      scheduleRearm: (callback) => {
+        scheduled.push(callback);
+      },
+      goBack: () => {
+        goBackCalls++;
+        return goBackResult;
+      },
+    });
+
+    // Setup armed one sentinel: [null, sentinel], cursor on the sentinel.
+    assert.equal(positional.canPopSentinel(), true);
+
+    for (let press = 0; press < 3; press += 1) {
+      // Hardware Back moves the cursor down onto the entry below the sentinel...
+      positional.back();
+      // ...then the browser fires popstate for that Back.
+      windowTarget.emitPopState({ routeName: `android-back-${press}` });
+
+      // SYNCHRONOUSLY, before any scheduled confirmRearm runs, a poppable sentinel
+      // must already exist for the NEXT consecutive Back. This fails against
+      // deferred-only re-arm because the stack would still sit at the bottom.
+      assert.equal(
+        positional.canPopSentinel(),
+        true,
+        `press ${press}: a poppable sentinel must exist before the next Back`,
+      );
+    }
+
+    // Each handled press called goBack exactly once.
+    assert.equal(goBackCalls, 3);
+    // confirmRearm() is coalesced (it won't re-schedule while a confirmation is
+    // already pending), so the deferred backstop was scheduled but never run; the
+    // poppable-sentinel contract above held purely on the synchronous re-push.
+    assert.ok(scheduled.length >= 1, "the deferred backstop was scheduled at least once");
+  });
+
+  it("re-pushes the sentinel inside the popstate turn before the scheduled confirmRearm runs", () => {
+    const positional = new PositionalFakeHistory();
+    const scheduled: Array<() => void> = [];
+    createBrowserBackSentinelController({
+      historyTarget: positional,
+      windowTarget,
+      sourceId: "positional-shell",
+      scheduleRearm: (callback) => {
+        scheduled.push(callback);
+      },
+      goBack: () => {
+        goBackCalls++;
+        return goBackResult;
+      },
+    });
+
+    // Setup push counts as the first push.
+    const pushesAfterSetup = positional.pushCalls.length;
+    assert.equal(pushesAfterSetup, 1);
+
+    positional.back();
+    windowTarget.emitPopState({ routeName: "sync-push-turn" });
+
+    // The push count grew WITHIN the popstate turn, before any scheduled callback ran.
+    assert.equal(positional.pushCalls.length, pushesAfterSetup + 1);
+    assert.equal(scheduled.length, 1, "the deferred backstop was scheduled but not yet run");
+
+    // Running the deferred backstop afterwards must not double-push: the sentinel is
+    // already present, so confirmRearm reports repaired:false and pushes nothing more.
+    scheduled.shift()?.();
+    assert.equal(positional.pushCalls.length, pushesAfterSetup + 1);
   });
 
   it("repairs Android-style ignored immediate re-arm during scheduled confirmation", () => {
