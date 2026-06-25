@@ -25,7 +25,7 @@ globalThis.localStorage = {
 } as Storage;
 
 const onboardingStepperModule = await import("../../client/src/components/onboarding/OnboardingStepper.js");
-const { OnboardingStepperPresentation, SpStepGoalClarification } = onboardingStepperModule;
+const { OnboardingStepperPresentation, SpStepGoalClarification, getPreviousOnboardingBrowserBackStep } = onboardingStepperModule;
 const { StepCoachHandoff } = await import("../../client/src/components/onboarding/StepCoachHandoff.js");
 const onboardingStepperSource = await readFile(
   fileURLToPath(new URL("../../client/src/components/onboarding/OnboardingStepper.tsx", import.meta.url)),
@@ -121,9 +121,40 @@ describe("onboarding stepper UI", () => {
   it("wraps onboarding in a pre-shell pull refresh surface that reloads only from Onboarding", () => {
     assert.match(onboardingSource, /import \{ PullToRefreshSurface \} from "\.\/PullToRefreshSurface\.js";/);
     assert.match(onboardingSource, /function refreshOnboardingShell\(\)/);
+    assert.match(onboardingSource, /document\.documentElement\.dataset\.onboardingRefreshFired = "true"/);
+    assert.match(onboardingSource, /nutrition-coach:onboarding-refresh-fired/);
     assert.match(onboardingSource, /window\.location\.reload\(\)/);
-    assert.match(onboardingSource, /<PullToRefreshSurface[\s\S]*onRefresh=\{refreshOnboardingShell\}[\s\S]*ariaLabel="下拉重新整理初始設定"[\s\S]*<OnboardingStepper \/>[\s\S]*<\/PullToRefreshSurface>/);
+    assert.match(onboardingSource, /<PullToRefreshSurface[\s\S]*onRefresh=\{refreshOnboardingShell\}[\s\S]*surfaceId="onboarding"[\s\S]*ariaLabel="下拉重新整理初始設定"[\s\S]*<OnboardingStepper \/>[\s\S]*<\/PullToRefreshSurface>/);
     assert.doesNotMatch(onboardingSource, /useBrowserBackSentinel|goBack/);
+  });
+
+  it("uses Android Back to move to the previous onboarding step after step one", () => {
+    assert.equal(getPreviousOnboardingBrowserBackStep(6), 5);
+    assert.equal(getPreviousOnboardingBrowserBackStep(5), 4);
+    assert.equal(getPreviousOnboardingBrowserBackStep(4), 3);
+    assert.equal(getPreviousOnboardingBrowserBackStep(3), 2);
+    assert.equal(getPreviousOnboardingBrowserBackStep(2), 1);
+    assert.equal(getPreviousOnboardingBrowserBackStep(1), null);
+    assert.match(
+      onboardingStepperSource,
+      /import \{ useBrowserBackSentinel \} from "\.\.\/\.\.\/useBrowserBackSentinel\.js";/,
+    );
+    assert.match(onboardingStepperSource, /export function getPreviousOnboardingBrowserBackStep\(currentStep: StepState\): OnboardingStep \| null \{/);
+    assert.match(onboardingStepperSource, /const handleBack = useCallback\(\(nextStep: OnboardingStep\) => \{/);
+    assert.match(onboardingStepperSource, /const stepRef = useRef<StepState>\(1\)/);
+    assert.match(onboardingStepperSource, /const setOnboardingStep = useCallback\(\(nextStep: StepState\) => \{/);
+    assert.match(onboardingStepperSource, /stepRef\.current = nextStep;[\s\S]*setStepState\(nextStep\)/);
+    assert.match(onboardingStepperSource, /const handleBrowserBack = useCallback\(\(\) => \{/);
+    assert.match(onboardingStepperSource, /const currentStep = stepRef\.current/);
+    assert.match(onboardingStepperSource, /const previousStep = getPreviousOnboardingBrowserBackStep\(currentStep\)/);
+    assert.match(onboardingStepperSource, /if \(previousStep === null\) return false;/);
+    assert.match(onboardingStepperSource, /handleBack\(previousStep\);/);
+    assert.match(onboardingStepperSource, /nutrition-coach:onboarding-back-diagnostic/);
+    assert.match(onboardingStepperSource, /return true;/);
+    assert.match(onboardingStepperSource, /useBrowserBackSentinel\(handleBrowserBack, \{/);
+    assert.match(onboardingStepperSource, /sourceId: "onboarding"/);
+    assert.match(onboardingStepperSource, /\}, \[handleBack\]\);/);
+    assert.doesNotMatch(onboardingStepperSource, /goBack = useStore|state\.goBack/);
   });
 
   it("renders Step 2 quick-note selected state from selectedNotes without changing visible text", () => {

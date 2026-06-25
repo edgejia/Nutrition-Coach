@@ -149,13 +149,18 @@ function prefersReducedMotion() {
   );
 }
 
-function useCountUpNumber(targetValue: number, options: { durationMs?: number; animate?: boolean } = {}) {
+function useCountUpNumber(targetValue: number, options: { durationMs?: number; animate?: boolean; replayKey?: number } = {}) {
   const previousValueRef = useRef<number | null>(null);
+  const previousReplayKeyRef = useRef<number | undefined>(options.replayKey);
   const frameRef = useRef<number | null>(null);
   const activeAnimationTargetRef = useRef<number | null>(null);
   const [displayValue, setDisplayValue] = useState(targetValue);
   const durationMs = options.durationMs ?? 450;
   const animate = options.animate === true;
+  const replayChanged =
+    options.replayKey !== undefined &&
+    previousReplayKeyRef.current !== undefined &&
+    previousReplayKeyRef.current !== options.replayKey;
 
   useEffect(() => {
     if (frameRef.current !== null) {
@@ -164,14 +169,18 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
     }
 
     const previousValue = previousValueRef.current;
-    if (animate !== true || prefersReducedMotion() === true || previousValue === null) {
+    if ((animate !== true && !replayChanged) || prefersReducedMotion() === true || previousValue === null) {
       activeAnimationTargetRef.current = null;
       previousValueRef.current = targetValue;
+      previousReplayKeyRef.current = options.replayKey;
       setDisplayValue(targetValue);
       return;
     }
 
-    const startValue = previousValue;
+    const replayOffset = Math.max(1, Math.round(Math.abs(targetValue) * 0.08));
+    const startValue = replayChanged && previousValue === targetValue
+      ? Math.max(0, targetValue - replayOffset)
+      : previousValue;
     let startTime: number | null = null;
     activeAnimationTargetRef.current = targetValue;
 
@@ -191,6 +200,7 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
       frameRef.current = null;
       activeAnimationTargetRef.current = null;
       previousValueRef.current = targetValue;
+      previousReplayKeyRef.current = options.replayKey;
       setDisplayValue(targetValue);
     };
 
@@ -205,7 +215,7 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
         activeAnimationTargetRef.current = null;
       }
     };
-  }, [durationMs, targetValue]);
+  }, [durationMs, options.replayKey, replayChanged, targetValue, animate]);
 
   return displayValue;
 }
@@ -264,6 +274,7 @@ export interface HomeScreenProps {
   onRefreshToday: () => void | Promise<void>;
   refreshingToday: boolean;
   refreshTodayError: string | null;
+  refreshCueToken: number;
 }
 
 function HomeHeader() {
@@ -311,25 +322,37 @@ function HomeHeader() {
 function CalorieHero({
   dailySummary,
   dailyTargets,
+  refreshCueToken,
 }: {
   dailySummary: DailySummary | null;
   dailyTargets: DailyTargets | null;
+  refreshCueToken: number;
 }) {
   const display = getHomeCalorieDisplay(dailySummary, dailyTargets);
   const macros = getHomeMacroDisplays(dailySummary, dailyTargets);
   const previousConsumedRef = useRef<number | null>(null);
   const shouldAnimateConsumedChange =
     previousConsumedRef.current !== null && previousConsumedRef.current !== display.consumed;
-  const animatedConsumed = useCountUpNumber(display.consumed, { durationMs: 450, animate: shouldAnimateConsumedChange });
-  const animatedPercent = useCountUpNumber(display.percent, { durationMs: 450, animate: shouldAnimateConsumedChange });
+  const animatedConsumed = useCountUpNumber(display.consumed, {
+    durationMs: 450,
+    animate: shouldAnimateConsumedChange,
+    replayKey: refreshCueToken,
+  });
+  const animatedPercent = useCountUpNumber(display.percent, {
+    durationMs: 450,
+    animate: shouldAnimateConsumedChange,
+    replayKey: refreshCueToken,
+  });
 
   useEffect(() => {
     previousConsumedRef.current = display.consumed;
   }, [display.consumed]);
 
+  const refreshCueClass = refreshCueToken > 0 ? " home-sport-refresh-cue" : "";
+
   return (
     <>
-      <SportCard className="home-sport-hero" variant="glow">
+      <SportCard key={`home-hero-${refreshCueToken}`} className={`home-sport-hero${refreshCueClass}`} variant="glow">
         <div className="home-sport-hero-main">
           <div className="home-sport-calorie-copy">
             <div className="sp-label" style={{ marginBottom: 8 }}>
@@ -370,7 +393,7 @@ function CalorieHero({
           />
         </div>
       </SportCard>
-      <div className="home-sport-macro-grid">
+      <div key={`home-macros-${refreshCueToken}`} className={`home-sport-macro-grid${refreshCueClass}`}>
         {macros.map((macro) => (
           <SportCard key={macro.id} className="home-sport-macro-card" variant="flat">
             <div>
@@ -483,7 +506,7 @@ function MealRows({
   );
 }
 
-export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError }: HomeScreenProps) {
+export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError, refreshCueToken }: HomeScreenProps) {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const goal = useStore((s) => s.goal);
@@ -525,10 +548,12 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError 
           className="home-sport-pull-refresh"
           onRefresh={onRefreshToday}
           refreshing={refreshingToday}
+          surfaceId="home"
+          completionLabel="今日資料已更新"
           ariaLabel="下拉重新整理今日資料"
         >
           <main className="screen-scroll home-sport-scroll">
-            <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
+            <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} refreshCueToken={refreshCueToken} />
             <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
             <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
           </main>

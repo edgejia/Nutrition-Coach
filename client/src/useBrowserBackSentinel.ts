@@ -17,10 +17,26 @@ export interface BrowserBackHistoryTarget {
   back(): void;
 }
 
+export interface BrowserBackDiagnosticEvent {
+  event:
+    | "popstate"
+    | "go_back_handled"
+    | "go_back_unhandled"
+    | "rearm_attempted"
+    | "rearm_confirmed"
+    | "browser_back_delegated";
+  sourceId: string;
+  handled?: boolean;
+  repaired?: boolean;
+}
+
 export interface BrowserBackControllerOptions {
   goBack: () => boolean;
   windowTarget: BrowserBackWindowTarget;
   historyTarget: BrowserBackHistoryTarget;
+  sourceId?: string;
+  onDiagnosticEvent?: (event: BrowserBackDiagnosticEvent) => void;
+  scheduleRearm?: (callback: () => void) => void;
 }
 
 function isBrowserBackSentinelState(state: unknown) {
@@ -32,8 +48,28 @@ function isBrowserBackSentinelState(state: unknown) {
 }
 
 export function createBrowserBackSentinelController(options: BrowserBackControllerOptions): () => void {
-  const { goBack, historyTarget, windowTarget } = options;
+  const {
+    goBack,
+    historyTarget,
+    windowTarget,
+    sourceId = "authenticated-shell",
+    onDiagnosticEvent,
+    scheduleRearm = (callback) => {
+      if (typeof queueMicrotask === "function") {
+        queueMicrotask(callback);
+        return;
+      }
+      globalThis.setTimeout(callback, 0);
+    },
+  } = options;
   let disposed = false;
+  let rearmConfirmationPending = false;
+
+  function emit(event: BrowserBackDiagnosticEvent) {
+    if (!disposed) {
+      onDiagnosticEvent?.(event);
+    }
+  }
 
   function armSentinel({ force = false }: { force?: boolean } = {}) {
     if (!force && isBrowserBackSentinelState(historyTarget.state)) {
@@ -42,14 +78,38 @@ export function createBrowserBackSentinelController(options: BrowserBackControll
     historyTarget.pushState(BROWSER_BACK_SENTINEL_STATE, "");
   }
 
+  function confirmRearm() {
+    if (rearmConfirmationPending || disposed) {
+      return;
+    }
+    rearmConfirmationPending = true;
+    scheduleRearm(() => {
+      rearmConfirmationPending = false;
+      if (disposed) {
+        return;
+      }
+      const repaired = !isBrowserBackSentinelState(historyTarget.state);
+      if (repaired) {
+        armSentinel({ force: true });
+      }
+      emit({ event: "rearm_confirmed", sourceId, repaired });
+    });
+  }
+
   function handlePopState(_event: PopStateEvent) {
     if (disposed) {
       return;
     }
+    emit({ event: "popstate", sourceId });
     if (goBack()) {
+      emit({ event: "go_back_handled", sourceId, handled: true });
       armSentinel({ force: true });
+      emit({ event: "rearm_attempted", sourceId });
+      confirmRearm();
       return;
     }
+    emit({ event: "go_back_unhandled", sourceId, handled: false });
+    emit({ event: "browser_back_delegated", sourceId, handled: false });
     historyTarget.back();
   }
 
@@ -62,12 +122,17 @@ export function createBrowserBackSentinelController(options: BrowserBackControll
   };
 }
 
-export function useBrowserBackSentinel(goBack: () => boolean) {
+export function useBrowserBackSentinel(
+  goBack: () => boolean,
+  options: Pick<BrowserBackControllerOptions, "sourceId" | "onDiagnosticEvent"> = {},
+) {
   useEffect(() => {
     return createBrowserBackSentinelController({
       goBack,
       historyTarget: window.history,
       windowTarget: window,
+      sourceId: options.sourceId,
+      onDiagnosticEvent: options.onDiagnosticEvent,
     });
-  }, [goBack]);
+  }, [goBack, options.onDiagnosticEvent, options.sourceId]);
 }

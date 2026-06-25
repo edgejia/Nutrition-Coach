@@ -110,6 +110,21 @@ textarea {
   to { transform: rotate(360deg); }
 }
 
+@keyframes home-refresh-confirm {
+  0% {
+    filter: brightness(1);
+    transform: translateY(0);
+  }
+  38% {
+    filter: brightness(1.16);
+    transform: translateY(-2px);
+  }
+  100% {
+    filter: brightness(1);
+    transform: translateY(0);
+  }
+}
+
 .app-viewport {
   position: fixed;
   top: var(--app-visual-viewport-top, 0px);
@@ -562,6 +577,14 @@ textarea {
   flex-direction: column;
 }
 
+.sp-pull-refresh .screen-scroll,
+.sp-pull-refresh .screen-scroll-safe,
+.sp-pull-refresh .screen-scroll-with-input,
+.sp-pull-refresh .sp-scroll {
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+}
+
 .sp-pull-refresh-indicator {
   position: absolute;
   top: 0;
@@ -591,6 +614,32 @@ textarea {
 
 .sp-pull-refresh--refreshing .sp-pull-refresh-indicator svg {
   animation: sp-spin 900ms linear infinite;
+}
+
+.sp-pull-refresh--complete .sp-pull-refresh-indicator {
+  width: auto;
+  min-width: 48px;
+  padding: 0 14px;
+  color: var(--sp-ink);
+  opacity: 1;
+  transform: translate(-50%, 10px);
+}
+
+.sp-pull-refresh--complete .sp-pull-refresh-indicator svg {
+  display: none;
+}
+
+.sp-pull-refresh-complete-label {
+  display: none;
+  color: inherit;
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.sp-pull-refresh--complete .sp-pull-refresh-complete-label {
+  display: inline;
 }
 
 .sp-bar-track {
@@ -872,6 +921,10 @@ textarea {
 
 .home-sport-hero {
   min-width: 0;
+}
+
+.home-sport-refresh-cue {
+  animation: home-refresh-confirm 520ms ease-out both;
 }
 
 .home-sport-hero-main {

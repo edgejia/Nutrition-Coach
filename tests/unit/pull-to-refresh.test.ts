@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { createPullToRefreshController } from "../../client/src/components/PullToRefreshSurface.js";
+import { fileURLToPath } from "node:url";
+import {
+  createPullToRefreshController,
+  resolvePullRefreshEventTarget,
+  type PullRefreshDiagnosticEvent,
+} from "../../client/src/components/PullToRefreshSurface.js";
 
 type FakeListener = (event: FakeTouchEvent) => void;
 
@@ -25,6 +31,17 @@ class FakeEventTarget {
 
   listenerCount(type: string) {
     return this.listeners.get(type)?.size ?? 0;
+  }
+}
+
+class FakeRootEventTarget extends FakeEventTarget {
+  constructor(private readonly scrollTarget: FakeEventTarget | null) {
+    super();
+  }
+
+  querySelector(selector: string) {
+    assert.match(selector, /screen-scroll/);
+    return this.scrollTarget;
   }
 }
 
@@ -97,7 +114,40 @@ function pullPastThreshold(target: FakeEventTarget, surface: FakeElement, distan
   target.emit("touchend", touchEvent(surface, 26, distance, false));
 }
 
+const pullSurfaceSource = await readFile(
+  fileURLToPath(new URL("../../client/src/components/PullToRefreshSurface.tsx", import.meta.url)),
+  "utf8",
+);
+
 describe("createPullToRefreshController", () => {
+  it("emits listener and accepted gesture diagnostics in order", () => {
+    const eventTarget = new FakeEventTarget();
+    const surface = new FakeElement("main", ["screen-scroll"]);
+    const events: PullRefreshDiagnosticEvent[] = [];
+
+    const cleanup = createPullToRefreshController({
+      eventTarget,
+      surfaceId: "home",
+      eventTargetKind: "scroll",
+      onDiagnosticEvent: (event) => events.push(event),
+      onRefresh: () => undefined,
+      getScrollTop: () => 0,
+    });
+
+    pullPastThreshold(eventTarget, surface);
+
+    assert.deepEqual(events.map((event) => event.event), [
+      "listener_attached",
+      "touch_start_accepted",
+      "threshold_ready",
+      "refresh_start",
+      "refresh_settle",
+    ]);
+    assert.equal(events[0]?.surfaceId, "home");
+    assert.equal(events[0]?.eventTargetKind, "scroll");
+    cleanup();
+  });
+
   it("calls onRefresh once when a top-of-scroll downward pull passes the threshold", () => {
     const eventTarget = new FakeEventTarget();
     const surface = new FakeElement("main", ["screen-scroll"]);
@@ -165,6 +215,32 @@ describe("createPullToRefreshController", () => {
     cleanupScrolled();
   });
 
+  it("emits exact ignored diagnostics for ineligible gestures", () => {
+    const eventTarget = new FakeEventTarget();
+    const surface = new FakeElement("main", ["screen-scroll"]);
+    const interactive = surface.appendChild(new FakeElement("button"));
+    const events: PullRefreshDiagnosticEvent[] = [];
+
+    const cleanup = createPullToRefreshController({
+      eventTarget,
+      surfaceId: "history",
+      onDiagnosticEvent: (event) => events.push(event),
+      onRefresh: () => undefined,
+      getScrollTop: (target) => (target === surface ? 12 : 0),
+    });
+
+    eventTarget.emit("touchstart", touchEvent(interactive, 0, 0));
+    eventTarget.emit("touchstart", touchEvent(surface, 0, 0));
+    eventTarget.emit("touchstart", touchEvent(Object.assign(new FakeElement("main", ["screen-scroll"]), { scrollTop: 0 }), 0, 0));
+    eventTarget.emit("touchmove", touchEvent(surface, 96, 24));
+    eventTarget.emit("touchend", touchEvent(surface, 96, 24, false));
+
+    assert.ok(events.some((event) => event.event === "touch_start_ignored" && event.reason === "interactive_target"));
+    assert.ok(events.some((event) => event.event === "touch_start_ignored" && event.reason === "not_at_top"));
+    assert.ok(events.some((event) => event.event === "touch_start_ignored" && event.reason === "horizontal_drag"));
+    cleanup();
+  });
+
   it("does not capture gestures that start from interactive targets", () => {
     const interactiveTargets = [
       new FakeElement("input"),
@@ -225,6 +301,44 @@ describe("createPullToRefreshController", () => {
     cleanup();
   });
 
+  it("emits settle and returns to complete after rejected refresh promises", async () => {
+    const eventTarget = new FakeEventTarget();
+    const surface = new FakeElement("main", ["screen-scroll"]);
+    const states: string[] = [];
+    const events: PullRefreshDiagnosticEvent[] = [];
+
+    const cleanup = createPullToRefreshController({
+      eventTarget,
+      surfaceId: "onboarding",
+      onDiagnosticEvent: (event) => events.push(event),
+      onStateChange: (state) => states.push(state.phase),
+      onRefresh: () => Promise.reject(new Error("network")),
+      getScrollTop: () => 0,
+    });
+
+    pullPastThreshold(eventTarget, surface);
+    await Promise.resolve();
+
+    assert.ok(events.some((event) => event.event === "refresh_settle"));
+    assert.equal(states.at(-1), "complete");
+    cleanup();
+  });
+
+  it("resolves the first eligible inner scroll target before falling back to the wrapper", () => {
+    const scrollTarget = new FakeEventTarget();
+    const rootWithScroll = new FakeRootEventTarget(scrollTarget);
+    const rootWithoutScroll = new FakeRootEventTarget(null);
+
+    assert.deepEqual(resolvePullRefreshEventTarget(rootWithScroll), {
+      eventTarget: scrollTarget,
+      eventTargetKind: "scroll",
+    });
+    assert.deepEqual(resolvePullRefreshEventTarget(rootWithoutScroll), {
+      eventTarget: rootWithoutScroll,
+      eventTargetKind: "wrapper",
+    });
+  });
+
   it("cleanup removes listeners and prevents later events from refreshing", () => {
     const eventTarget = new FakeEventTarget();
     const surface = new FakeElement("main", ["screen-scroll"]);
@@ -249,5 +363,20 @@ describe("createPullToRefreshController", () => {
     assert.equal(eventTarget.listenerCount("touchstart"), 0);
     assert.equal(eventTarget.listenerCount("touchmove"), 0);
     assert.equal(eventTarget.listenerCount("touchend"), 0);
+  });
+});
+
+describe("PullToRefreshSurface source contract", () => {
+  it("keeps the touch controller stable while external refreshing state toggles", () => {
+    assert.match(pullSurfaceSource, /const refreshingRef = useRef\(refreshing\)/);
+    assert.match(pullSurfaceSource, /refreshingRef\.current = refreshing/);
+    assert.match(pullSurfaceSource, /current\.phase === "refreshing" \? \{ phase: "complete", pullDistance: 0, progress: 0 \} : current/);
+    assert.match(pullSurfaceSource, /if \(refreshingRef\.current\) return undefined/);
+    assert.match(pullSurfaceSource, /\}, \[maxPullPx, onDiagnosticEvent, onRefresh, surfaceId, thresholdPx\]\);/);
+    assert.doesNotMatch(pullSurfaceSource, /\}, \[maxPullPx, onRefresh, refreshing, thresholdPx\]\);/);
+    assert.match(pullSurfaceSource, /data-pull-refresh-surface=\{surfaceId\}/);
+    assert.match(pullSurfaceSource, /data-pull-refresh-phase=\{displayState\.phase\}/);
+    assert.match(pullSurfaceSource, /data-pull-refresh-last-event=\{lastDiagnostic\?\.event\}/);
+    assert.match(pullSurfaceSource, /data-pull-refresh-last-ignore=\{lastIgnoreReason\}/);
   });
 });

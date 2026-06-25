@@ -51,6 +51,7 @@ function assertIncludesInOrder(source: string, labels: Array<[string, string]>) 
 const sources = {
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
+  onboarding: await readSource("../../client/src/components/Onboarding.tsx"),
 };
 
 describe("Home manual refresh source contract", () => {
@@ -59,11 +60,12 @@ describe("Home manual refresh source contract", () => {
 
     assert.match(body, /const \[refreshingHomeToday,\s*setRefreshingHomeToday\] = useState\(false\)/);
     assert.match(body, /const \[homeRefreshError,\s*setHomeRefreshError\] = useState<string \| null>\(null\)/);
+    assert.match(body, /const \[homeRefreshCueToken,\s*setHomeRefreshCueToken\] = useState\(0\)/);
     assert.match(body, /const refreshHomeManually = useCallback\(async \(\) => \{/);
     assert.match(body, /if \(!deviceId\) return/);
     assert.match(body, /setHomeRefreshError\(null\)/);
     assert.match(body, /setRefreshingHomeToday\(true\)/);
-    assert.match(body, /try\s*\{[\s\S]*getMeals\(\{ refreshReason: "manual_refresh" \}\)[\s\S]*setMeals\(meals\)/);
+    assert.match(body, /try\s*\{[\s\S]*getMeals\(\{ refreshReason: "manual_refresh" \}\)[\s\S]*setMeals\(meals\)[\s\S]*setHomeRefreshCueToken\(\(token\) => token \+ 1\)/);
     assert.match(body, /catch \(error\)\s*\{/);
     assert.match(
       body,
@@ -87,7 +89,7 @@ describe("Home manual refresh source contract", () => {
   it("passes refresh props only to the Home screen surface", () => {
     assert.match(
       sources.mainLayout,
-      /activeScreen === "home" && \(\s*<HomeScreen\s+onRefreshToday=\{refreshHomeManually\}\s+refreshingToday=\{refreshingHomeToday\}\s+refreshTodayError=\{homeRefreshError\}\s*\/>\s*\)/,
+      /activeScreen === "home" && \(\s*<HomeScreen\s+onRefreshToday=\{refreshHomeManually\}\s+refreshingToday=\{refreshingHomeToday\}\s+refreshTodayError=\{homeRefreshError\}\s+refreshCueToken=\{homeRefreshCueToken\}\s*\/>\s*\)/,
     );
     assert.doesNotMatch(sources.mainLayout, /<ChatPanel[\s\S]*onRefreshToday/);
     assert.doesNotMatch(sources.mainLayout, /<HistoryScreen[\s\S]*onRefreshToday/);
@@ -104,6 +106,7 @@ describe("Home manual refresh source contract", () => {
     assert.match(sources.homeScreen, /onRefreshToday: \(\) => void \| Promise<void>/);
     assert.match(sources.homeScreen, /refreshingToday: boolean/);
     assert.match(sources.homeScreen, /refreshTodayError: string \| null/);
+    assert.match(sources.homeScreen, /refreshCueToken: number/);
     assert.doesNotMatch(sources.homeScreen, /interface HomeHeaderProps/);
     assert.equal(countMatches(headerBody, /<SportIconButton\b/g), 1);
     assert.equal(countMatches(headerBody, /<SportRefreshIcon\b/g), 0);
@@ -120,12 +123,31 @@ describe("Home manual refresh source contract", () => {
     assertIncludesInOrder(screenBody, [
       ["Pull refresh surface", "<PullToRefreshSurface"],
       ["Refresh callback prop", "onRefresh={onRefreshToday}"],
+      ["Home surface id", 'surfaceId="home"'],
+      ["Home completion label", 'completionLabel="今日資料已更新"'],
       ["Home content scroller", '<main className="screen-scroll home-sport-scroll">'],
     ]);
     assert.match(screenBody, /ariaLabel="下拉重新整理今日資料"/);
+    assert.match(screenBody, /refreshCueToken=\{refreshCueToken\}/);
     assertIncludesInOrder(headerBody, [
       ["Settings control", 'aria-label="設定"'],
     ]);
+  });
+
+  it("replays a visible Home completion cue after successful manual refresh", () => {
+    const body = functionBody(sources.homeScreen, "CalorieHero");
+
+    assert.match(sources.homeScreen, /function useCountUpNumber\(targetValue: number, options: \{ durationMs\?: number; animate\?: boolean; replayKey\?: number \} = \{\}\)/);
+    assert.match(sources.homeScreen, /const previousReplayKeyRef = useRef<number \| undefined>\(options\.replayKey\)/);
+    assert.match(sources.homeScreen, /const replayChanged =[\s\S]*previousReplayKeyRef\.current !== options\.replayKey/);
+    assert.match(
+      sources.homeScreen,
+      /function CalorieHero\(\{\s*dailySummary,\s*dailyTargets,\s*refreshCueToken,\s*\}: \{/,
+    );
+    assert.match(body, /replayKey: refreshCueToken/);
+    assert.match(body, /const refreshCueClass = refreshCueToken > 0 \? " home-sport-refresh-cue" : ""/);
+    assert.match(body, /key=\{`home-hero-\$\{refreshCueToken\}`\}/);
+    assert.match(body, /key=\{`home-macros-\$\{refreshCueToken\}`\}/);
   });
 
   it("keeps Settings governed by sending and error copy independent from button loading state", () => {
@@ -142,5 +164,26 @@ describe("Home manual refresh source contract", () => {
       /\{refreshTodayError \? \(\s*<p className="home-sport-refresh-error" role="status">\s*\{refreshTodayError\}\s*<\/p>\s*\) : null\}/,
     );
     assert.match(sources.mainLayout, /資料暫時無法更新，請稍後再試。/);
+  });
+
+  it("wraps onboarding in a real scroll target for pre-shell pull refresh", () => {
+    const body = functionBody(sources.onboarding, "Onboarding");
+
+    assert.match(
+      sources.onboarding,
+      /import \{ PullToRefreshSurface \} from "\.\/PullToRefreshSurface\.js";/,
+    );
+    assert.match(
+      sources.onboarding,
+      /function refreshOnboardingShell\(\) \{[\s\S]*document\.documentElement\.dataset\.onboardingRefreshFired = "true";[\s\S]*nutrition-coach:onboarding-refresh-fired[\s\S]*window\.location\.reload\(\);[\s\S]*\}/,
+    );
+    assertIncludesInOrder(body, [
+      ["Pull refresh surface", "<PullToRefreshSurface"],
+      ["Refresh callback", "onRefresh={refreshOnboardingShell}"],
+      ["Onboarding surface id", 'surfaceId="onboarding"'],
+      ["Onboarding pull label", 'ariaLabel="下拉重新整理初始設定"'],
+      ["Scroll target", '<main className="screen-scroll sp-onboarding-scroll">'],
+      ["Stepper", "<OnboardingStepper />"],
+    ]);
   });
 });

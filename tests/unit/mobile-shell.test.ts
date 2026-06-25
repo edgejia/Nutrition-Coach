@@ -51,6 +51,7 @@ const sources = {
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
   onboarding: await readSource("../../client/src/components/Onboarding.tsx"),
+  onboardingStepper: await readSource("../../client/src/components/onboarding/OnboardingStepper.tsx"),
   pullToRefreshSurface: await readSource("../../client/src/components/PullToRefreshSurface.tsx"),
   chatPanel: await readSource("../../client/src/components/ChatPanel.tsx"),
   chatInput: await readSource("../../client/src/components/ChatInput.tsx"),
@@ -181,6 +182,9 @@ describe("mobile shell source contract", () => {
     assert.match(sources.pullToRefreshSurface, /sp-pull-refresh-indicator/);
     assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--pulling/);
     assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--refreshing/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--complete/);
+    assert.match(sources.pullToRefreshSurface, /data-pull-refresh-surface/);
+    assert.match(sources.pullToRefreshSurface, /data-pull-refresh-last-event/);
     assert.match(sources.pullToRefreshSurface, /SportRefreshIcon/);
     assert.match(sources.pullToRefreshSurface, /ariaLabel/);
     assert.match(sources.pullToRefreshSurface, /refreshing = false/);
@@ -204,6 +208,7 @@ describe("mobile shell source contract", () => {
     assert.match(cssBlock(".sp-pull-refresh-indicator"), /pointer-events:\s*none/);
     assert.match(cssBlock(".sp-pull-refresh--pulling .sp-pull-refresh-indicator"), /opacity:\s*1/);
     assert.match(cssBlock(".sp-pull-refresh--refreshing .sp-pull-refresh-indicator"), /opacity:\s*1/);
+    assert.match(cssBlock(".sp-pull-refresh--complete .sp-pull-refresh-indicator"), /opacity:\s*1/);
 
     assert.match(cssBlock(".home-sport-refresh-error"), /font-size:\s*12px/);
 
@@ -225,7 +230,7 @@ describe("mobile shell source contract", () => {
     assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\)/);
   });
 
-  it("wires the browser-back sentinel only inside the authenticated MainLayout shell", () => {
+  it("keeps app-level browser-back handling in MainLayout and onboarding step handling in the stepper", () => {
     assert.match(sources.mainLayout, /import \{ useBrowserBackSentinel \} from "\.\.\/useBrowserBackSentinel\.js";/);
     assert.match(sources.mainLayout, /const goBack = useStore\(\(s\) => s\.goBack\);/);
     assert.match(sources.mainLayout, /useBrowserBackSentinel\(goBack\);/);
@@ -236,6 +241,10 @@ describe("mobile shell source contract", () => {
 
     assert.doesNotMatch(sources.app, /useBrowserBackSentinel/);
     assert.doesNotMatch(sources.app, /goBack = useStore\(\(s\) => s\.goBack\)/);
+    assert.doesNotMatch(sources.onboarding, /useBrowserBackSentinel|goBack/);
+    assert.match(sources.onboardingStepper, /useBrowserBackSentinel\(handleBrowserBack, \{/);
+    assert.match(sources.onboardingStepper, /sourceId: "onboarding"/);
+    assert.doesNotMatch(sources.onboardingStepper, /goBack = useStore|state\.goBack/);
   });
 
   it("keeps browser-back interception independent from refresh, SSE, sending, and proposal state", () => {

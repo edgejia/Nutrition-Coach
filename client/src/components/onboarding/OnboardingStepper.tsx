@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../../store.js";
 import { submitIntake } from "../../api.js";
+import { useBrowserBackSentinel } from "../../useBrowserBackSentinel.js";
 import {
   applyGoalClarificationQuickNote,
   applyFieldEditRecovery,
@@ -13,11 +14,16 @@ import type { IntakeData, IntakeResult, IntakeValidationIssue, OnboardingField, 
 import type { GoalClarificationQuickNoteState } from "../../lib/onboarding-stepper-flow.js";
 
 type PartialIntake = Partial<IntakeData>;
-type StepState = OnboardingStep | 6;
+export type StepState = OnboardingStep | 6;
 type BodyForm = { sex: IntakeData["sex"]; age: string; heightCm: string; weightKg: string };
 type LifestyleForm = Pick<IntakeData, "activityLevel" | "trainingFrequency"> & Pick<Partial<IntakeData>, "allergies">;
 type AdvancedForm = { bodyFatPercent: string; tdee: string; advancedNotes: string };
 type StepIssue = Pick<IntakeValidationIssue, "message" | "field">;
+
+export function getPreviousOnboardingBrowserBackStep(currentStep: StepState): OnboardingStep | null {
+  if (currentStep === 1) return null;
+  return currentStep === 6 ? 5 : ((currentStep - 1) as OnboardingStep);
+}
 
 const ONBOARDING_NUMERIC_BOUNDS = {
   age: { min: 10, max: 120 },
@@ -1203,7 +1209,8 @@ export function OnboardingStepperPresentation({
 
 export function OnboardingStepper() {
   const setDevice = useStore((s) => s.setDevice);
-  const [step, setStep] = useState<StepState>(1);
+  const [step, setStepState] = useState<StepState>(1);
+  const stepRef = useRef<StepState>(1);
   const [data, setData] = useState<PartialIntake>({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<IntakeResult | null>(null);
@@ -1211,14 +1218,52 @@ export function OnboardingStepper() {
   const [transportError, setTransportError] = useState<string | null>(null);
 
   useEffect(() => {
+    stepRef.current = step;
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
 
-  function handleBack(nextStep: OnboardingStep) {
-    setStep(nextStep);
+  const setOnboardingStep = useCallback((nextStep: StepState) => {
+    stepRef.current = nextStep;
+    setStepState(nextStep);
+  }, []);
+
+  const handleBack = useCallback((nextStep: OnboardingStep) => {
+    setOnboardingStep(nextStep);
     setTransportError(null);
     setLoading(false);
-  }
+  }, [setOnboardingStep]);
+
+  const handleBrowserBack = useCallback(() => {
+    const currentStep = stepRef.current;
+    const previousStep = getPreviousOnboardingBrowserBackStep(currentStep);
+    if (previousStep === null) return false;
+    handleBack(previousStep);
+    if (typeof window.dispatchEvent === "function") {
+      window.dispatchEvent(new CustomEvent("nutrition-coach:onboarding-back-diagnostic", {
+        detail: {
+          event: "go_back_handled",
+          currentStep,
+          nextStep: previousStep,
+        },
+      }));
+    }
+    return true;
+  }, [handleBack]);
+
+  useBrowserBackSentinel(handleBrowserBack, {
+    sourceId: "onboarding",
+    onDiagnosticEvent: (event) => {
+      if (typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(new CustomEvent("nutrition-coach:onboarding-back-diagnostic", {
+          detail: {
+            event: event.event,
+            currentStep: stepRef.current,
+            nextStep: getPreviousOnboardingBrowserBackStep(stepRef.current),
+          },
+        }));
+      }
+    },
+  });
 
   function handleFieldEdit(field: OnboardingField) {
     setValidationIssues((current) => applyFieldEditRecovery(current, field));
@@ -1234,7 +1279,7 @@ export function OnboardingStepper() {
     setTransportError(null);
     setResult(null);
     setLoading(false);
-    setStep(outcome.issues.length > 0 ? stepNumber : outcome.nextStep);
+    setOnboardingStep(outcome.issues.length > 0 ? stepNumber : outcome.nextStep);
   }
 
   async function handleSubmit(finalData: Pick<Partial<IntakeData>, "bodyFatPercent" | "tdee" | "advancedNotes">) {
@@ -1250,20 +1295,20 @@ export function OnboardingStepper() {
 
     if (stepFiveOutcome.issues.length > 0) {
       setLoading(false);
-      setStep(5);
+      setOnboardingStep(5);
       return;
     }
 
     const completeIntake = merged as IntakeData;
     const submitOutcome = await runSubmitAttempt(completeIntake, submitIntake, () => {
-      setStep(6);
+      setOnboardingStep(6);
       setLoading(true);
       setTransportError(null);
       setValidationIssues([]);
       setResult(null);
     });
 
-    setStep(submitOutcome.nextStep);
+    setOnboardingStep(submitOutcome.nextStep);
     setValidationIssues(submitOutcome.issues);
     setTransportError(submitOutcome.transportError);
     setResult(submitOutcome.result);

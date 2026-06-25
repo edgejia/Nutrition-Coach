@@ -228,9 +228,11 @@ describe("Home dashboard display contracts", () => {
       assert.equal(countUpHelperMatches.length, 3);
       assert.match(homeSource, /function useCountUpNumber|const useCountUpNumber/);
       assert.match(homeSource, /activeAnimationTargetRef/);
-      assert.match(homeSource, /\}, \[durationMs, targetValue\]\)/);
-      assert.match(homeSource, /useCountUpNumber\([^)]*display\.consumed[^)]*shouldAnimateConsumedChange/);
-      assert.match(homeSource, /useCountUpNumber\([^)]*display\.percent[^)]*shouldAnimateConsumedChange/);
+      assert.match(homeSource, /previousReplayKeyRef/);
+      assert.match(homeSource, /\}, \[durationMs, options\.replayKey, replayChanged, targetValue, animate\]\)/);
+      assert.match(homeSource, /useCountUpNumber\(display\.consumed, \{[\s\S]*animate: shouldAnimateConsumedChange,[\s\S]*replayKey: refreshCueToken/);
+      assert.match(homeSource, /useCountUpNumber\(display\.percent, \{[\s\S]*animate: shouldAnimateConsumedChange,[\s\S]*replayKey: refreshCueToken/);
+      assert.doesNotMatch(homeSource, /useCountUpNumber\(macro/);
     } else {
       assert.match(homeSource, /requestAnimationFrame/);
       assert.match(homeSource, /cancelAnimationFrame/);

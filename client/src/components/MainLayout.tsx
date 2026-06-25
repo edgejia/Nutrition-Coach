@@ -129,6 +129,7 @@ export function MainLayout() {
   const goBack = useStore((s) => s.goBack);
   const [refreshingHomeToday, setRefreshingHomeToday] = useState(false);
   const [homeRefreshError, setHomeRefreshError] = useState<string | null>(null);
+  const [homeRefreshCueToken, setHomeRefreshCueToken] = useState(0);
 
   const sseSummaryCoordinator = useMemo(
     () =>
@@ -164,6 +165,7 @@ export function MainLayout() {
     try {
       const { meals } = await getMeals({ refreshReason: "manual_refresh" });
       setMeals(meals);
+      setHomeRefreshCueToken((token) => token + 1);
     } catch (error) {
       if (error instanceof Error && error.message === "UNAUTHORIZED") {
         void recoverGuestSession();
@@ -208,6 +210,7 @@ export function MainLayout() {
           onRefreshToday={refreshHomeManually}
           refreshingToday={refreshingHomeToday}
           refreshTodayError={homeRefreshError}
+          refreshCueToken={homeRefreshCueToken}
         />
       )}
       {activeScreen === "chat" && <ChatPanel />}

@@ -654,6 +654,8 @@ export function HistoryScreen() {
         <PullToRefreshSurface
           onRefresh={handleManualHistoryRefresh}
           refreshing={refreshingHistory}
+          surfaceId="history"
+          completionLabel="歷史資料已更新"
           ariaLabel="下拉重新整理歷史資料"
         >
           <main className="screen-scroll-safe sp-history-scroll">

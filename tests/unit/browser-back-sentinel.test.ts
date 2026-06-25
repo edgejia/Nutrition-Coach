@@ -3,6 +3,7 @@ import { beforeEach, describe, it } from "node:test";
 
 import {
   createBrowserBackSentinelController,
+  type BrowserBackDiagnosticEvent,
   type BrowserBackHistoryTarget,
   type BrowserBackWindowTarget,
 } from "../../client/src/useBrowserBackSentinel.js";
@@ -20,6 +21,18 @@ class FakeHistory implements BrowserBackHistoryTarget {
   back() {
     this.backCalls += 1;
     this.state = null;
+  }
+}
+
+class AndroidLikeFakeHistory extends FakeHistory {
+  public ignorePushState = false;
+
+  override pushState(state: unknown, title: string, url?: string | URL | null) {
+    if (this.ignorePushState) {
+      this.pushCalls.push({ state, title, url });
+      return;
+    }
+    super.pushState(state, title, url);
   }
 }
 
@@ -73,6 +86,25 @@ describe("createBrowserBackSentinelController", () => {
     });
   }
 
+  function setupControllerWithDiagnostics(options: {
+    history?: BrowserBackHistoryTarget;
+    scheduleRearm?: (callback: () => void) => void;
+  } = {}) {
+    const events: BrowserBackDiagnosticEvent[] = [];
+    const cleanup = createBrowserBackSentinelController({
+      historyTarget: options.history ?? historyTarget,
+      windowTarget,
+      sourceId: "test-shell",
+      onDiagnosticEvent: (event) => events.push(event),
+      scheduleRearm: options.scheduleRearm,
+      goBack: () => {
+        goBackCalls++;
+        return goBackResult;
+      },
+    });
+    return { cleanup, events };
+  }
+
   it("pushes exactly one sentinel entry and registers one popstate listener on setup", () => {
     setupController();
 
@@ -95,8 +127,79 @@ describe("createBrowserBackSentinelController", () => {
     });
   });
 
+  it("emits diagnostics for a handled popstate and confirmed re-arm", () => {
+    const scheduled: Array<() => void> = [];
+    const { events } = setupControllerWithDiagnostics({
+      scheduleRearm: (callback) => {
+        scheduled.push(callback);
+      },
+    });
+
+    windowTarget.emitPopState({ routeName: "untrusted-history-state" });
+    scheduled.shift()?.();
+
+    assert.deepEqual(events.map((event) => event.event), [
+      "popstate",
+      "go_back_handled",
+      "rearm_attempted",
+      "rearm_confirmed",
+    ]);
+    assert.deepEqual(events.map((event) => event.sourceId), [
+      "test-shell",
+      "test-shell",
+      "test-shell",
+      "test-shell",
+    ]);
+    assert.equal(events.at(-1)?.repaired, false);
+  });
+
+  it("handles consecutive popstates and re-arms after each handled Back", () => {
+    const scheduled: Array<() => void> = [];
+    setupControllerWithDiagnostics({
+      scheduleRearm: (callback) => {
+        scheduled.push(callback);
+      },
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      windowTarget.emitPopState({ routeName: `untrusted-${index}` });
+      scheduled.shift()?.();
+    }
+
+    assert.equal(goBackCalls, 5);
+    assert.equal(historyTarget.pushCalls.length, 6);
+    assert.deepEqual(historyTarget.state, {
+      nutritionCoachBrowserBackSentinel: true,
+    });
+  });
+
+  it("repairs Android-style ignored immediate re-arm during scheduled confirmation", () => {
+    const androidHistory = new AndroidLikeFakeHistory();
+    historyTarget = androidHistory;
+    const scheduled: Array<() => void> = [];
+    const { events } = setupControllerWithDiagnostics({
+      history: androidHistory,
+      scheduleRearm: (callback) => {
+        scheduled.push(callback);
+      },
+    });
+
+    androidHistory.state = null;
+    androidHistory.ignorePushState = true;
+    windowTarget.emitPopState({ nutritionCoachBrowserBackSentinel: true });
+    androidHistory.ignorePushState = false;
+    scheduled.shift()?.();
+
+    assert.equal(goBackCalls, 1);
+    assert.deepEqual(androidHistory.state, {
+      nutritionCoachBrowserBackSentinel: true,
+    });
+    assert.equal(events.at(-1)?.event, "rearm_confirmed");
+    assert.equal(events.at(-1)?.repaired, true);
+  });
+
   it("delegates to browser history when goBack returns false so root browser exit proceeds on the first press", () => {
-    setupController();
+    const { events } = setupControllerWithDiagnostics();
     goBackResult = false;
 
     windowTarget.emitPopState({ nutritionCoachBrowserBackSentinel: true });
@@ -105,6 +208,11 @@ describe("createBrowserBackSentinelController", () => {
     assert.equal(historyTarget.pushCalls.length, 1);
     assert.equal(historyTarget.backCalls, 1);
     assert.equal(historyTarget.state, null);
+    assert.deepEqual(events.map((event) => event.event), [
+      "popstate",
+      "go_back_unhandled",
+      "browser_back_delegated",
+    ]);
   });
 
   it("remounts idempotently without pushing a duplicate sentinel when already armed", () => {

@@ -107,6 +107,8 @@ describe("History manual refresh source contract", () => {
       ["Pull refresh surface", "<PullToRefreshSurface"],
       ["Refresh callback", "onRefresh={handleManualHistoryRefresh}"],
       ["Refresh in-flight state", "refreshing={refreshingHistory}"],
+      ["History surface id", 'surfaceId="history"'],
+      ["History completion label", 'completionLabel="歷史資料已更新"'],
       ["History pull label", 'ariaLabel="下拉重新整理歷史資料"'],
       ["History scroll container", '<main className="screen-scroll-safe sp-history-scroll">'],
       ["Trend error card", "trendError ? ("],
