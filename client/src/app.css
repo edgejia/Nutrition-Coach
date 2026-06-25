@@ -520,6 +520,28 @@ textarea {
   cursor: not-allowed;
 }
 
+.sp-refresh-button {
+  min-width: 44px;
+  min-height: 44px;
+  border-color: var(--sp-line-strong);
+  background: var(--sp-surface-2);
+  color: var(--sp-ink);
+}
+
+.sp-refresh-button--loading {
+  opacity: .55;
+  pointer-events: none;
+}
+
+.home-sport-refresh-error {
+  margin: 0;
+  color: var(--sp-amber);
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
 .sp-bar-track {
   position: relative;
   height: 6px;
@@ -4060,6 +4082,12 @@ textarea {
   flex-direction: column;
   gap: 16px;
   padding: 14px 18px calc(88px + env(safe-area-inset-bottom));
+}
+
+.sp-history-refresh-row {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 44px;
 }
 
 .sp-history-week-strip {

@@ -61,6 +61,17 @@ export function SportHistoryIcon(props: SportIconProps) {
   );
 }
 
+export function SportRefreshIcon(props: SportIconProps) {
+  return (
+    <SportIconBase {...props}>
+      <path d="M20 7.5A8 8 0 0 0 6.4 5.3L4 7.7" />
+      <path d="M4 4.5v3.2h3.2" />
+      <path d="M4 16.5a8 8 0 0 0 13.6 2.2L20 16.3" />
+      <path d="M20 19.5v-3.2h-3.2" />
+    </SportIconBase>
+  );
+}
+
 export function SportCameraIcon(props: SportIconProps) {
   return (
     <SportIconBase {...props}>
