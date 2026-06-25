@@ -87,36 +87,45 @@ describe("Home manual refresh source contract", () => {
     assert.doesNotMatch(sources.mainLayout, /<HistoryScreen[\s\S]*onRefreshToday/);
   });
 
-  it("renders exactly one Home header refresh control beside Settings", () => {
+  it("wraps the Home scroller in the pull refresh surface and removes the header refresh button", () => {
     const headerBody = functionBody(sources.homeScreen, "HomeHeader");
+    const screenBody = functionBody(sources.homeScreen, "HomeScreen");
 
-    assert.match(sources.homeScreen, /import \{ SportFlameIcon, SportRefreshIcon, SportSettingsIcon \}/);
+    assert.match(sources.homeScreen, /import \{ PullToRefreshSurface \} from "\.\/PullToRefreshSurface\.js";/);
+    assert.match(sources.homeScreen, /import \{ SportFlameIcon, SportSettingsIcon \}/);
+    assert.doesNotMatch(sources.homeScreen, /SportRefreshIcon/);
     assert.match(sources.homeScreen, /export interface HomeScreenProps/);
     assert.match(sources.homeScreen, /interface HomeHeaderProps/);
     assert.match(sources.homeScreen, /onRefreshToday: \(\) => void \| Promise<void>/);
     assert.match(sources.homeScreen, /refreshingToday: boolean/);
     assert.match(sources.homeScreen, /refreshTodayError: string \| null/);
-    assert.equal(countMatches(headerBody, /<SportRefreshIcon\b/g), 1);
-    assert.equal(countMatches(headerBody, /aria-label="重新整理今日資料"/g), 1);
-    assert.equal(countMatches(headerBody, /title="重新整理今日資料"/g), 1);
+    assert.equal(countMatches(headerBody, /<SportIconButton\b/g), 1);
+    assert.equal(countMatches(headerBody, /<SportRefreshIcon\b/g), 0);
+    assert.equal(countMatches(headerBody, /aria-label="重新整理今日資料"/g), 0);
+    assert.equal(countMatches(headerBody, /title="重新整理今日資料"/g), 0);
     assert.match(headerBody, /className="home-sport-header-actions"/);
+    assert.match(headerBody, /disabled=\{sending\}/);
+    assertIncludesInOrder(sources.homeScreen, [
+      ["Home header", "<HomeHeader />"],
+      ["Refresh status copy", "{refreshTodayError ? ("],
+      ["Pull refresh surface", "<PullToRefreshSurface"],
+      ["Home content scroller", '<main className="screen-scroll home-sport-scroll">'],
+    ]);
+    assertIncludesInOrder(screenBody, [
+      ["Pull refresh surface", "<PullToRefreshSurface"],
+      ["Refresh callback prop", "onRefresh={onRefreshToday}"],
+      ["Home content scroller", '<main className="screen-scroll home-sport-scroll">'],
+    ]);
+    assert.match(screenBody, /ariaLabel="下拉重新整理今日資料"/);
     assertIncludesInOrder(headerBody, [
-      ["Refresh control", 'aria-label="重新整理今日資料"'],
       ["Settings control", 'aria-label="設定"'],
     ]);
   });
 
-  it("keeps refresh loading and error state scoped to the refresh control", () => {
+  it("keeps Settings governed by sending and error copy independent from button loading state", () => {
     const headerBody = functionBody(sources.homeScreen, "HomeHeader");
 
-    assert.match(
-      headerBody,
-      /<SportIconButton[\s\S]*className=\{`sp-refresh-button \$\{refreshingToday \? "sp-refresh-button--loading" : ""\}`\}[\s\S]*onClick=\{onRefreshToday\}[\s\S]*disabled=\{refreshingToday\}/,
-    );
-    assert.match(
-      headerBody,
-      /aria-busy=\{refreshingToday \? "true" : undefined\}/,
-    );
+    assert.doesNotMatch(headerBody, /refreshingToday|onRefreshToday|aria-busy|sp-refresh-button/);
     assert.match(
       headerBody,
       /<SportIconButton[\s\S]*disabled=\{sending\}[\s\S]*aria-label="設定"/,
