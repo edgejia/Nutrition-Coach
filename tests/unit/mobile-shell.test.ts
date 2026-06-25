@@ -93,10 +93,14 @@ describe("mobile shell source contract", () => {
   it("keeps shell helpers wired to viewport, fixed-bar, and scrolling declarations", () => {
     assert.match(cssBlock("html"), /height:\s*100%/);
     assert.match(cssBlock("html"), /overflow:\s*hidden/);
+    assert.match(cssBlock("html"), /overscroll-behavior:\s*none/);
     assert.match(cssBlock("body"), /position:\s*fixed/);
     assert.match(cssBlock("body"), /inset:\s*0/);
+    assert.match(cssBlock("body"), /overflow:\s*hidden/);
+    assert.match(cssBlock("body"), /overscroll-behavior:\s*none/);
     assert.match(cssBlock("#root"), /position:\s*fixed/);
     assert.match(cssBlock("#root"), /overflow:\s*hidden/);
+    assert.match(cssBlock("#root"), /overscroll-behavior:\s*none/);
 
     assert.match(cssBlock(".app-viewport"), /position:\s*fixed/);
     assert.match(cssBlock(".app-viewport"), /top:\s*var\(--app-visual-viewport-top,\s*0px\)/);
@@ -137,6 +141,23 @@ describe("mobile shell source contract", () => {
       cssBlock(".screen-scroll-safe"),
       /padding-bottom:\s*max\(2rem,\s*env\(safe-area-inset-bottom\)\)/,
     );
+  });
+
+  it("defines fixed-shell-safe refresh primitives without page reload fallback", () => {
+    assert.match(sources.sportIcons, /export function SportRefreshIcon/);
+    assert.match(sources.sportIcons, /<SportIconBase \{\.\.\.props\}>[\s\S]*<path d=/);
+    assert.doesNotMatch(sources.sportIcons, /from "lucide-react"|from "@lucide\/react"/);
+
+    assert.match(cssBlock(".sp-refresh-button"), /min-width:\s*44px/);
+    assert.match(cssBlock(".sp-refresh-button"), /min-height:\s*44px/);
+    assert.match(cssBlock(".sp-refresh-button--loading"), /opacity:\s*\.55/);
+    assert.match(cssBlock(".home-sport-refresh-error"), /font-size:\s*12px/);
+    assert.match(cssBlock(".sp-history-refresh-row"), /display:\s*flex/);
+    assert.match(cssBlock(".sp-history-refresh-row"), /justify-content:\s*flex-end/);
+
+    for (const source of [sources.sportIcons, sources.appCss]) {
+      assert.doesNotMatch(source, /location\.reload\(/);
+    }
   });
 
   it("keeps MainLayout as the app viewport boundary", () => {
