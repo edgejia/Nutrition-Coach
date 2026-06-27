@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../../store.js";
 import { submitIntake } from "../../api.js";
-import { useBrowserBackSentinel } from "../../useBrowserBackSentinel.js";
 import {
   applyGoalClarificationQuickNote,
   applyFieldEditRecovery,
@@ -23,6 +22,27 @@ type StepIssue = Pick<IntakeValidationIssue, "message" | "field">;
 export function getPreviousOnboardingBrowserBackStep(currentStep: StepState): OnboardingStep | null {
   if (currentStep === 1) return null;
   return currentStep === 6 ? 5 : ((currentStep - 1) as OnboardingStep);
+}
+
+const ONBOARDING_HISTORY_STATE_KEY = "nutritionCoachOnboardingStep";
+
+function getOnboardingHistoryStep(state: unknown): StepState | null {
+  if (typeof state !== "object" || state === null) {
+    return null;
+  }
+  const value = (state as { [ONBOARDING_HISTORY_STATE_KEY]?: unknown })[ONBOARDING_HISTORY_STATE_KEY];
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 6
+    ? (value as StepState)
+    : null;
+}
+
+function writeOnboardingHistoryStep(step: StepState, mode: "push" | "replace") {
+  const state = { [ONBOARDING_HISTORY_STATE_KEY]: step };
+  if (mode === "push") {
+    window.history.pushState(state, "", window.location.href);
+    return;
+  }
+  window.history.replaceState(state, "", window.location.href);
 }
 
 const ONBOARDING_NUMERIC_BOUNDS = {
@@ -1234,48 +1254,73 @@ export function OnboardingStepper() {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
 
-  const setOnboardingStep = useCallback((nextStep: StepState) => {
-    stepRef.current = nextStep;
-    setStepState(nextStep);
+  const dispatchBackDiagnostic = useCallback((
+    event: "popstate" | "go_back_handled" | "go_back_unhandled" | "browser_back_delegated",
+    currentStep: StepState,
+    nextStep: StepState | null,
+    handled?: boolean,
+  ) => {
+    if (typeof window.dispatchEvent !== "function") return;
+    window.dispatchEvent(new CustomEvent("nutrition-coach:onboarding-back-diagnostic", {
+      detail: {
+        event,
+        currentStep,
+        ...(nextStep !== null ? { nextStep } : {}),
+        ...(handled !== undefined ? { handled } : {}),
+      },
+    }));
   }, []);
 
+  const setOnboardingStep = useCallback((
+    nextStep: StepState,
+    historyMode: "auto" | "push" | "replace" | "none" = "auto",
+  ) => {
+    const currentStep = stepRef.current;
+    stepRef.current = nextStep;
+    setStepState(nextStep);
+    if (historyMode === "none") {
+      return;
+    }
+    const mode = historyMode === "auto"
+      ? nextStep > currentStep
+        ? "push"
+        : "replace"
+      : historyMode;
+    writeOnboardingHistoryStep(nextStep, mode);
+  }, []);
+
+  useEffect(() => {
+    writeOnboardingHistoryStep(stepRef.current, "replace");
+
+    const handleStepPopState = (event: PopStateEvent) => {
+      const historyStep = getOnboardingHistoryStep(event.state);
+      const currentStep = stepRef.current;
+      if (historyStep === null) {
+        dispatchBackDiagnostic("go_back_unhandled", currentStep, getPreviousOnboardingBrowserBackStep(currentStep), false);
+        dispatchBackDiagnostic("browser_back_delegated", currentStep, null, false);
+        return;
+      }
+      if (historyStep === currentStep) {
+        return;
+      }
+      dispatchBackDiagnostic("popstate", currentStep, historyStep);
+      setOnboardingStep(historyStep, "none");
+      dispatchBackDiagnostic("go_back_handled", currentStep, historyStep, true);
+    };
+
+    window.addEventListener("popstate", handleStepPopState);
+    return () => window.removeEventListener("popstate", handleStepPopState);
+  }, [dispatchBackDiagnostic, setOnboardingStep]);
+
   const handleBack = useCallback((nextStep: OnboardingStep) => {
-    setOnboardingStep(nextStep);
+    if (getOnboardingHistoryStep(window.history.state) === stepRef.current) {
+      window.history.back();
+    } else {
+      setOnboardingStep(nextStep, "replace");
+    }
     setTransportError(null);
     setLoading(false);
   }, [setOnboardingStep]);
-
-  const handleBrowserBack = useCallback(() => {
-    const currentStep = stepRef.current;
-    const previousStep = getPreviousOnboardingBrowserBackStep(currentStep);
-    if (previousStep === null) return false;
-    handleBack(previousStep);
-    if (typeof window.dispatchEvent === "function") {
-      window.dispatchEvent(new CustomEvent("nutrition-coach:onboarding-back-diagnostic", {
-        detail: {
-          event: "go_back_handled",
-          currentStep,
-          nextStep: previousStep,
-        },
-      }));
-    }
-    return true;
-  }, [handleBack]);
-
-  useBrowserBackSentinel(handleBrowserBack, {
-    sourceId: "onboarding",
-    onDiagnosticEvent: (event) => {
-      if (typeof window.dispatchEvent === "function") {
-        window.dispatchEvent(new CustomEvent("nutrition-coach:onboarding-back-diagnostic", {
-          detail: {
-            event: event.event,
-            currentStep: stepRef.current,
-            nextStep: getPreviousOnboardingBrowserBackStep(stepRef.current),
-          },
-        }));
-      }
-    },
-  });
 
   function handleFieldEdit(field: OnboardingField) {
     setValidationIssues((current) => applyFieldEditRecovery(current, field));

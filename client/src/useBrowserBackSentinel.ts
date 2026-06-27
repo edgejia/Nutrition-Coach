@@ -1,8 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 const BROWSER_BACK_SENTINEL_STATE = {
   nutritionCoachBrowserBackSentinel: true,
 } as const;
+const INITIAL_BROWSER_BACK_SENTINEL_DEPTH = 2;
+const initializedBrowserBackSentinelHistories = new WeakSet<object>();
 
 export type BrowserBackPopStateListener = (event: PopStateEvent) => void;
 
@@ -71,11 +73,29 @@ export function createBrowserBackSentinelController(options: BrowserBackControll
     }
   }
 
+  function pushSentinel() {
+    historyTarget.pushState(BROWSER_BACK_SENTINEL_STATE, "");
+  }
+
   function armSentinel({ force = false }: { force?: boolean } = {}) {
     if (!force && isBrowserBackSentinelState(historyTarget.state)) {
       return;
     }
-    historyTarget.pushState(BROWSER_BACK_SENTINEL_STATE, "");
+    pushSentinel();
+  }
+
+  function armInitialSentinels() {
+    if (isBrowserBackSentinelState(historyTarget.state)) {
+      if (!initializedBrowserBackSentinelHistories.has(historyTarget)) {
+        pushSentinel();
+        initializedBrowserBackSentinelHistories.add(historyTarget);
+      }
+      return;
+    }
+    for (let index = 0; index < INITIAL_BROWSER_BACK_SENTINEL_DEPTH; index += 1) {
+      pushSentinel();
+    }
+    initializedBrowserBackSentinelHistories.add(historyTarget);
   }
 
   function confirmRearm() {
@@ -113,7 +133,7 @@ export function createBrowserBackSentinelController(options: BrowserBackControll
     historyTarget.back();
   }
 
-  armSentinel();
+  armInitialSentinels();
   windowTarget.addEventListener("popstate", handlePopState);
 
   return () => {
@@ -126,13 +146,19 @@ export function useBrowserBackSentinel(
   goBack: () => boolean,
   options: Pick<BrowserBackControllerOptions, "sourceId" | "onDiagnosticEvent"> = {},
 ) {
+  const goBackRef = useRef(goBack);
+  const onDiagnosticEventRef = useRef(options.onDiagnosticEvent);
+  goBackRef.current = goBack;
+  onDiagnosticEventRef.current = options.onDiagnosticEvent;
+  const { sourceId } = options;
+
   useEffect(() => {
     return createBrowserBackSentinelController({
-      goBack,
+      goBack: () => goBackRef.current(),
       historyTarget: window.history,
       windowTarget: window,
-      sourceId: options.sourceId,
-      onDiagnosticEvent: options.onDiagnosticEvent,
+      sourceId,
+      onDiagnosticEvent: (event) => onDiagnosticEventRef.current?.(event),
     });
-  }, [goBack, options.onDiagnosticEvent, options.sourceId]);
+  }, [sourceId]);
 }

@@ -7,11 +7,13 @@
 // PositionalFakeHistory below reproduces a real back stack (cursor + entries; back()
 // moves the cursor, pushState truncates forward entries) so the SECOND consecutive
 // hardware Back is exercised the way Android exercises it. The consecutive-Back test
-// asserts a sentinel remains poppable BELOW the cursor between presses WITHOUT running
-// the scheduler, which fails against deferred-only re-arm and passes only with the
-// synchronous in-popstate re-push.
+// asserts each hardware Back lands on an app-owned sentinel rather than the bottom
+// history entry and that another poppable sentinel remains available before the next
+// press.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   createBrowserBackSentinelController,
@@ -19,6 +21,11 @@ import {
   type BrowserBackHistoryTarget,
   type BrowserBackWindowTarget,
 } from "../../client/src/useBrowserBackSentinel.js";
+
+const browserBackSentinelSource = await readFile(
+  fileURLToPath(new URL("../../client/src/useBrowserBackSentinel.ts", import.meta.url)),
+  "utf8",
+);
 
 function isSentinelState(state: unknown) {
   return (
@@ -181,14 +188,42 @@ describe("createBrowserBackSentinelController", () => {
     return { cleanup, events };
   }
 
-  it("pushes exactly one sentinel entry and registers one popstate listener on setup", () => {
+  it("pushes a two-entry sentinel guard and registers one popstate listener on setup", () => {
     setupController();
 
-    assert.equal(historyTarget.pushCalls.length, 1);
+    assert.equal(historyTarget.pushCalls.length, 2);
     assert.equal(windowTarget.listenerCount("popstate"), 1);
     assert.deepEqual(historyTarget.state, {
       nutritionCoachBrowserBackSentinel: true,
     });
+  });
+
+  it("upgrades a preexisting single sentinel state once on first setup", () => {
+    const positional = new PositionalFakeHistory();
+    positional.pushState({ nutritionCoachBrowserBackSentinel: true }, "");
+    assert.equal(positional.pushCalls.length, 1);
+    assert.equal(positional.canPopSentinel(), true);
+
+    const cleanupFirst = createBrowserBackSentinelController({
+      historyTarget: positional,
+      windowTarget,
+      goBack: () => true,
+    });
+
+    assert.equal(positional.pushCalls.length, 2);
+    assert.equal(positional.canPopSentinel(), true);
+
+    cleanupFirst();
+    const cleanupSecond = createBrowserBackSentinelController({
+      historyTarget: positional,
+      windowTarget,
+      goBack: () => true,
+    });
+
+    assert.equal(positional.pushCalls.length, 2);
+    assert.equal(windowTarget.listenerCount("popstate"), 1);
+
+    cleanupSecond();
   });
 
   it("calls goBack on popstate, ignores event.state, and re-arms after handled in-app back", () => {
@@ -197,7 +232,7 @@ describe("createBrowserBackSentinelController", () => {
     windowTarget.emitPopState({ routeName: "untrusted-history-state" });
 
     assert.equal(goBackCalls, 1);
-    assert.equal(historyTarget.pushCalls.length, 2);
+    assert.equal(historyTarget.pushCalls.length, 3);
     assert.deepEqual(historyTarget.state, {
       nutritionCoachBrowserBackSentinel: true,
     });
@@ -243,7 +278,7 @@ describe("createBrowserBackSentinelController", () => {
     }
 
     assert.equal(goBackCalls, 5);
-    assert.equal(historyTarget.pushCalls.length, 6);
+    assert.equal(historyTarget.pushCalls.length, 7);
     assert.deepEqual(historyTarget.state, {
       nutritionCoachBrowserBackSentinel: true,
     });
@@ -268,12 +303,17 @@ describe("createBrowserBackSentinelController", () => {
       },
     });
 
-    // Setup armed one sentinel: [null, sentinel], cursor on the sentinel.
+    // Setup armed two sentinels: [null, sentinel, sentinel], cursor on the top sentinel.
     assert.equal(positional.canPopSentinel(), true);
 
     for (let press = 0; press < 3; press += 1) {
-      // Hardware Back moves the cursor down onto the entry below the sentinel...
+      // Hardware Back moves the cursor down onto the lower sentinel, not the bottom entry...
       positional.back();
+      assert.equal(
+        isSentinelState(positional.state),
+        true,
+        `press ${press}: hardware Back must land on an app-owned sentinel`,
+      );
       // ...then the browser fires popstate for that Back.
       windowTarget.emitPopState({ routeName: `android-back-${press}` });
 
@@ -311,9 +351,9 @@ describe("createBrowserBackSentinelController", () => {
       },
     });
 
-    // Setup push counts as the first push.
+    // Setup arms the two-entry sentinel guard.
     const pushesAfterSetup = positional.pushCalls.length;
-    assert.equal(pushesAfterSetup, 1);
+    assert.equal(pushesAfterSetup, 2);
 
     positional.back();
     windowTarget.emitPopState({ routeName: "sync-push-turn" });
@@ -360,7 +400,7 @@ describe("createBrowserBackSentinelController", () => {
     windowTarget.emitPopState({ nutritionCoachBrowserBackSentinel: true });
 
     assert.equal(goBackCalls, 1);
-    assert.equal(historyTarget.pushCalls.length, 1);
+    assert.equal(historyTarget.pushCalls.length, 2);
     assert.equal(historyTarget.backCalls, 1);
     assert.equal(historyTarget.state, null);
     assert.deepEqual(events.map((event) => event.event), [
@@ -376,7 +416,7 @@ describe("createBrowserBackSentinelController", () => {
 
     const cleanupSecond = setupController();
 
-    assert.equal(historyTarget.pushCalls.length, 1);
+    assert.equal(historyTarget.pushCalls.length, 2);
     assert.equal(windowTarget.listenerCount("popstate"), 1);
 
     cleanupSecond();
@@ -391,6 +431,19 @@ describe("createBrowserBackSentinelController", () => {
 
     assert.equal(windowTarget.listenerCount("popstate"), 0);
     assert.equal(goBackCalls, 0);
-    assert.equal(historyTarget.pushCalls.length, 1);
+    assert.equal(historyTarget.pushCalls.length, 2);
+  });
+
+  it("keeps the React hook listener stable while callbacks change across step renders", () => {
+    assert.match(browserBackSentinelSource, /import \{ useEffect, useRef \} from "react";/);
+    assert.match(browserBackSentinelSource, /const initializedBrowserBackSentinelHistories = new WeakSet<object>\(\);/);
+    assert.match(browserBackSentinelSource, /const goBackRef = useRef\(goBack\);/);
+    assert.match(browserBackSentinelSource, /const onDiagnosticEventRef = useRef\(options\.onDiagnosticEvent\);/);
+    assert.match(browserBackSentinelSource, /goBackRef\.current = goBack;/);
+    assert.match(browserBackSentinelSource, /onDiagnosticEventRef\.current = options\.onDiagnosticEvent;/);
+    assert.match(browserBackSentinelSource, /goBack: \(\) => goBackRef\.current\(\),/);
+    assert.match(browserBackSentinelSource, /onDiagnosticEvent: \(event\) => onDiagnosticEventRef\.current\?\.\(event\),/);
+    assert.match(browserBackSentinelSource, /\}, \[sourceId\]\);/);
+    assert.doesNotMatch(browserBackSentinelSource, /\[goBack, options\.onDiagnosticEvent, options\.sourceId\]/);
   });
 });

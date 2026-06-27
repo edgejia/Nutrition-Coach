@@ -120,9 +120,13 @@ function assertUnique(values: readonly number[]) {
 describe("onboarding stepper UI", () => {
   it("wraps onboarding in a pre-shell pull refresh surface that reloads only from Onboarding", () => {
     assert.match(onboardingSource, /import \{ PullToRefreshSurface \} from "\.\/PullToRefreshSurface\.js";/);
+    assert.match(onboardingSource, /import \{ recordOnboardingDebugEvent \} from "\.\.\/api\.js";/);
     assert.match(onboardingSource, /function refreshOnboardingShell\(\)/);
     assert.match(onboardingSource, /document\.documentElement\.dataset\.onboardingRefreshFired = "true"/);
     assert.match(onboardingSource, /nutrition-coach:onboarding-refresh-fired/);
+    assert.match(onboardingSource, /nutrition-coach:onboarding-back-diagnostic/);
+    assert.match(onboardingSource, /recordOnboardingDebugEvent\(\{\s*event: "onboarding_back_diagnostic"/);
+    assert.match(onboardingSource, /recordOnboardingDebugEvent\(\{ event: "onboarding_refresh_fired" \}\)/);
     assert.match(onboardingSource, /window\.location\.reload\(\)/);
     assert.match(onboardingSource, /<PullToRefreshSurface[\s\S]*onRefresh=\{refreshOnboardingShell\}[\s\S]*surfaceId="onboarding"[\s\S]*ariaLabel="下拉重新整理初始設定"[\s\S]*<OnboardingStepper \/>[\s\S]*<\/PullToRefreshSurface>/);
     assert.doesNotMatch(onboardingSource, /useBrowserBackSentinel|goBack/);
@@ -135,25 +139,23 @@ describe("onboarding stepper UI", () => {
     assert.equal(getPreviousOnboardingBrowserBackStep(3), 2);
     assert.equal(getPreviousOnboardingBrowserBackStep(2), 1);
     assert.equal(getPreviousOnboardingBrowserBackStep(1), null);
-    assert.match(
-      onboardingStepperSource,
-      /import \{ useBrowserBackSentinel \} from "\.\.\/\.\.\/useBrowserBackSentinel\.js";/,
-    );
+    assert.doesNotMatch(onboardingStepperSource, /useBrowserBackSentinel/);
     assert.match(onboardingStepperSource, /export function getPreviousOnboardingBrowserBackStep\(currentStep: StepState\): OnboardingStep \| null \{/);
+    assert.match(onboardingStepperSource, /const ONBOARDING_HISTORY_STATE_KEY = "nutritionCoachOnboardingStep";/);
+    assert.match(onboardingStepperSource, /function getOnboardingHistoryStep\(state: unknown\): StepState \| null \{/);
+    assert.match(onboardingStepperSource, /function writeOnboardingHistoryStep\(step: StepState, mode: "push" \| "replace"\)/);
+    assert.match(onboardingStepperSource, /window\.history\.pushState\(state, "", window\.location\.href\)/);
+    assert.match(onboardingStepperSource, /window\.history\.replaceState\(state, "", window\.location\.href\)/);
     assert.match(onboardingStepperSource, /const handleBack = useCallback\(\(nextStep: OnboardingStep\) => \{/);
     assert.match(onboardingStepperSource, /const stepRef = useRef<StepState>\(1\)/);
-    assert.match(onboardingStepperSource, /const setOnboardingStep = useCallback\(\(nextStep: StepState\) => \{/);
+    assert.match(onboardingStepperSource, /const setOnboardingStep = useCallback\(\(\s*nextStep: StepState,\s*historyMode: "auto" \| "push" \| "replace" \| "none" = "auto",\s*\) => \{/);
     assert.match(onboardingStepperSource, /stepRef\.current = nextStep;[\s\S]*setStepState\(nextStep\)/);
-    assert.match(onboardingStepperSource, /const handleBrowserBack = useCallback\(\(\) => \{/);
-    assert.match(onboardingStepperSource, /const currentStep = stepRef\.current/);
-    assert.match(onboardingStepperSource, /const previousStep = getPreviousOnboardingBrowserBackStep\(currentStep\)/);
-    assert.match(onboardingStepperSource, /if \(previousStep === null\) return false;/);
-    assert.match(onboardingStepperSource, /handleBack\(previousStep\);/);
+    assert.match(onboardingStepperSource, /writeOnboardingHistoryStep\(stepRef\.current, "replace"\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("popstate", handleStepPopState\)/);
+    assert.match(onboardingStepperSource, /const historyStep = getOnboardingHistoryStep\(event\.state\)/);
+    assert.match(onboardingStepperSource, /setOnboardingStep\(historyStep, "none"\)/);
+    assert.match(onboardingStepperSource, /window\.history\.back\(\)/);
     assert.match(onboardingStepperSource, /nutrition-coach:onboarding-back-diagnostic/);
-    assert.match(onboardingStepperSource, /return true;/);
-    assert.match(onboardingStepperSource, /useBrowserBackSentinel\(handleBrowserBack, \{/);
-    assert.match(onboardingStepperSource, /sourceId: "onboarding"/);
-    assert.match(onboardingStepperSource, /\}, \[handleBack\]\);/);
     assert.doesNotMatch(onboardingStepperSource, /goBack = useStore|state\.goBack/);
   });
 

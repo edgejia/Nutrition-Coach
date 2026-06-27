@@ -242,8 +242,10 @@ describe("mobile shell source contract", () => {
     assert.doesNotMatch(sources.app, /useBrowserBackSentinel/);
     assert.doesNotMatch(sources.app, /goBack = useStore\(\(s\) => s\.goBack\)/);
     assert.doesNotMatch(sources.onboarding, /useBrowserBackSentinel|goBack/);
-    assert.match(sources.onboardingStepper, /useBrowserBackSentinel\(handleBrowserBack, \{/);
-    assert.match(sources.onboardingStepper, /sourceId: "onboarding"/);
+    assert.doesNotMatch(sources.onboardingStepper, /useBrowserBackSentinel/);
+    assert.match(sources.onboardingStepper, /const ONBOARDING_HISTORY_STATE_KEY = "nutritionCoachOnboardingStep";/);
+    assert.match(sources.onboardingStepper, /window\.history\.pushState\(state, "", window\.location\.href\)/);
+    assert.match(sources.onboardingStepper, /window\.addEventListener\("popstate", handleStepPopState\)/);
     assert.doesNotMatch(sources.onboardingStepper, /goBack = useStore|state\.goBack/);
   });
 
