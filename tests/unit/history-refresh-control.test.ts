@@ -149,7 +149,7 @@ describe("History manual refresh source contract", () => {
     assert.match(body, /onRefresh=\{handleManualHistoryRefresh\}/);
     assert.doesNotMatch(body, /sp-refresh-button/);
     assert.doesNotMatch(body, /aria-busy=\{refreshingHistory \? "true" : undefined\}/);
-    assert.match(body, /<div className=\{isWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}>/);
+    assert.match(body, /<div className=\{showWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}>/);
     assert.match(body, /<SelectedDayHero[\s\S]*pending=\{isSelectedDayPending\}/);
     assert.match(body, /<TimelinePanel[\s\S]*pending=\{isSelectedDayPending \|\| showInlineDayPending\}/);
     assert.doesNotMatch(body, /setActiveScreen/);

@@ -195,8 +195,46 @@ describe("History screen source contract", () => {
 
   it("wires cache-hit weekly revalidation to neutral pending treatment", () => {
     assert.match(source, /const isWeekPending = loadingTrends && hasCurrentWeekCache/);
-    assert.match(source, /className=\{isWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}/);
-    assert.match(cssSource, /\.sp-history-pending::before\s*\{[\s\S]*?height:\s*1px;[\s\S]*?background:\s*var\(--sp-line-strong\)/);
+    assert.match(source, /const WEEK_PENDING_COPY_DELAY_MS = DAY_PENDING_COPY_DELAY_MS/);
+    assert.match(source, /delayedWeekPending/);
+    assert.match(source, /setDelayedWeekPending/);
+    assert.match(source, /weekPendingTimerRef/);
+    assert.match(source, /window\.setTimeout\(\(\) => \{[\s\S]*setDelayedWeekPending\(true\)/);
+    assert.match(source, /window\.clearTimeout\(weekPendingTimerRef\.current\)/);
+    assert.match(
+      source,
+      /if \(!isWeekPending \|\| trendError\) \{[\s\S]*setDelayedWeekPending\(false\)/,
+    );
+    assert.match(
+      source,
+      /const showWeekPending = isWeekPending && !trendError && delayedWeekPending/,
+    );
+    assert.match(source, /className=\{showWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}/);
+    assert.match(
+      source,
+      /useEffect\(\(\) => \{[\s\S]*weekPendingTimerRef[\s\S]*WEEK_PENDING_COPY_DELAY_MS[\s\S]*\}, \[isWeekPending, trendError, weekStartKey\]\)/,
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.sp-history-pending::before\s*\{[\s\S]*?display:\s*block;[\s\S]*?\}/,
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.sp-history-pending::before\s*\{[\s\S]*?height:\s*1px;[\s\S]*?margin-bottom:\s*8px;[\s\S]*?\}/,
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.sp-history-pending::before\s*\{[\s\S]*?background:\s*var\(--sp-line-strong\);[\s\S]*?\}/,
+    );
+    assert.match(
+      cssSource,
+      /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?opacity:\s*(?:0\.(?:6[89]|[78]\d|9\d)|1(?:\.0+)?);[\s\S]*?\}/,
+    );
+    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?height:/);
+    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?margin(?:-[a-z]+)?:/);
+    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?padding(?:-[a-z]+)?:/);
+    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?border(?:-[a-z]+)?:/);
+    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending::(?:before|after)/);
     assert.doesNotMatch(cssSource, /\.sp-history-pending[\s\S]*animation:/);
   });
 
