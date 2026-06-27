@@ -1140,6 +1140,69 @@ describe("chat-streaming", () => {
     }
   });
 
+  it("POST /api/chat SSE photo analysis questions with images finish without meal writes", async () => {
+    assert.ok(services, "expected app services");
+
+    mockLLM.queueRoundResponse({
+      content: "這張照片看起來像雞胸餐盒；我先提供熱量與營養素估算，不會把它寫入餐點紀錄。",
+    });
+
+    const boundary = "----nutrition-photo-analysis-no-write";
+    const payload = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\n`
+        + `Content-Disposition: form-data; name="message"\r\n\r\n`
+        + `這張照片幫我分析菜色和熱量，先不要記錄\r\n`
+        + `--${boundary}\r\n`
+        + `Content-Disposition: form-data; name="image"; filename="analysis.png"\r\n`
+        + `Content-Type: image/png\r\n\r\n`,
+      ),
+      Buffer.from(validPngBytes()),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      headers: {
+        cookie: sessionCookieHeader,
+        Accept: "text/event-stream",
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const events = parseSSEEvents(res.payload);
+    const chunkText = events
+      .filter((event) => event.event === "chunk")
+      .map((event) => (JSON.parse(event.data) as { token?: string }).token ?? "")
+      .join("");
+    const doneEvents = events.filter((event) => event.event === "done");
+    assert.equal(doneEvents.length, 1);
+    assert.equal(events.at(-1)?.event, "done");
+    assert.doesNotMatch(chunkText, /已記錄|完成記錄/);
+
+    const donePayload = JSON.parse(doneEvents[0]!.data) as {
+      didLogMeal?: boolean;
+      didMutateMeal?: boolean;
+      loggedMeal?: unknown;
+      dailySummary?: unknown;
+      summaryOutcome?: unknown;
+      replyText?: string;
+    };
+    assert.equal(donePayload.didLogMeal, false);
+    assert.equal(donePayload.didMutateMeal, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "loggedMeal"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "dailySummary"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(donePayload, "summaryOutcome"), false);
+    assert.doesNotMatch(donePayload.replyText ?? "", /已記錄|完成記錄/);
+
+    const meals = await services.foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.deepEqual(meals, []);
+    const summary = await services.summaryService.getDailySummary(deviceId, new Date());
+    assert.equal(summary.mealCount, 0);
+  });
+
   it("POST /api/chat SSE done omits receipt identity when assistant receipt persistence fails after log_food", async () => {
     assert.ok(services, "expected app services");
     installAtomicReceiptPersistenceFailure(services.chatService);
@@ -3541,6 +3604,89 @@ describe("chat-streaming", () => {
       assert.equal(chunkData.token, "純文字回覆");
       assert.equal(assistantMessages.length, 1, "fallback SSE must persist the assistant reply exactly once");
       assert.equal(assistantMessages[0]?.content, "純文字回覆");
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  it("POST /api/chat planning SSE bridges validated plan_next_meal reply into chunk and done events", async () => {
+    assert.ok(services);
+    await services.foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "午餐", calories: 500, protein: 30, carbs: 60, fat: 15 },
+      ],
+    });
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_sse_plan_next_meal",
+        type: "function",
+        function: {
+          name: "plan_next_meal",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueRoundResponse({
+      content: [
+        "結論：晚餐抓 900-1100 kcal，補足蛋白質。",
+        "| 欄位 | 值 |",
+        "| --- | --- |",
+        "- 理由：剩餘熱量夠，但不要超過上限。",
+        "- 選項：雞胸飯加青菜。",
+        "- 下一步：先選主蛋白。",
+      ].join("\n"),
+    });
+
+    const form = new FormData();
+    form.append("message", "我下一餐可以怎麼吃？");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`${address}/api/chat`, {
+        method: "POST",
+        headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+        signal: controller.signal,
+        body: form,
+      });
+
+      assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+      assert.ok(res.body);
+
+      const text = await readStreamUntil(res.body.getReader(), "event: done");
+      const events = parseSSEEvents(text);
+      const chunkText = events
+        .filter((event) => event.event === "chunk")
+        .map((event) => (JSON.parse(event.data) as { token: string }).token)
+        .join("");
+      const doneEvent = events.find((event) => event.event === "done");
+      assert.ok(doneEvent, "planning stream must terminate with done");
+      const donePayload = JSON.parse(doneEvent.data) as {
+        didLogMeal: boolean;
+        didMutateMeal?: boolean;
+      };
+
+      assert.match(chunkText, /今日攝取 1 餐，共 500 kcal/);
+      assert.match(chunkText, /還剩 1000 kcal/);
+      assert.match(chunkText, /蛋白質 90 g/);
+      assert.match(chunkText, /900-1000 kcal/);
+      assert.doesNotMatch(chunkText, /900-1100 kcal/);
+      assert.doesNotMatch(chunkText, /我還沒有把這餐寫入紀錄/);
+      assert.doesNotMatch(chunkText, /\| --- \||\| 欄位 \| 值 \|/);
+      assert.equal(donePayload.didLogMeal, false);
+      assert.equal(donePayload.didMutateMeal, false);
+
+      const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+        headers: { cookie: sessionCookieHeader },
+      });
+      assert.equal(historyRes.status, 200);
+      const historyJson = await historyRes.json() as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      const assistantMessages = historyJson.messages.filter((message) => message.role === "assistant");
+      assert.equal(assistantMessages.length, 1);
+      assert.equal(assistantMessages[0]?.content, chunkText);
     } finally {
       clearTimeout(timeout);
     }

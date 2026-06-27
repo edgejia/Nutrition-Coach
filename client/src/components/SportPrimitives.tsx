@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 
 type SportElementProps = HTMLAttributes<HTMLDivElement> & {
@@ -88,16 +89,54 @@ export function SportIconButton({
   );
 }
 
+function prefersReducedMotion() {
+  return (
+    typeof window !== "undefined" &&
+    typeof matchMedia === "function" &&
+    matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 export function SportProgressBar({
   value,
   className,
   variant = "default",
+  replayKey,
 }: {
   value: number;
   variant?: "default" | "warn" | "amber" | "cyan";
   className?: string;
+  replayKey?: number;
 }) {
   const clamped = clampUnit(value);
+  // Reuse the existing `.sp-bar-fill { transition: width 360ms }` so a refresh replays the fill
+  // even when the target value is unchanged: when replayKey changes, drop the rendered width to a
+  // reduced start on the first paint of that token, then transition back up to the clamped target.
+  const previousReplayKeyRef = useRef<number | undefined>(replayKey);
+  const [fillWidth, setFillWidth] = useState(clamped);
+
+  useEffect(() => {
+    const replayChanged =
+      replayKey !== undefined &&
+      previousReplayKeyRef.current !== undefined &&
+      previousReplayKeyRef.current !== replayKey;
+    previousReplayKeyRef.current = replayKey;
+
+    if (!replayChanged || prefersReducedMotion()) {
+      // No replay (or reduced motion): snap straight to the target so the bar matches the value.
+      setFillWidth(clamped);
+      return;
+    }
+
+    const reducedStart = Math.max(0, clamped - Math.max(0.08, clamped * 0.5));
+    setFillWidth(reducedStart);
+    const frame = requestAnimationFrame(() => {
+      setFillWidth(clamped);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [clamped, replayKey]);
 
   return (
     <div className={cx("sp-bar-track", className)} role="presentation">
@@ -108,7 +147,7 @@ export function SportProgressBar({
           variant === "amber" && "sp-bar-fill-amber",
           variant === "cyan" && "sp-bar-fill-cyan",
         )}
-        style={{ width: `${clamped * 100}%` }}
+        style={{ width: `${fillWidth * 100}%` }}
       />
     </div>
   );

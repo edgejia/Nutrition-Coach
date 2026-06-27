@@ -16,6 +16,7 @@ import { useStore } from "../store.js";
 import type { HistoryDaySnapshot, HistoryTrendResponse, MealEntry } from "../types.js";
 import { formatMealRowTime, getDisplayMealLabel, getMealMacroSummary } from "./HomeScreen.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
+import { PullToRefreshSurface } from "./PullToRefreshSurface.js";
 import { SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportCard, SportChip, SportIconButton, SportScreen } from "./SportPrimitives.js";
 
@@ -72,6 +73,7 @@ function getChipVariant(variant: ReturnType<typeof getHistorySportStatusMeta>["c
 }
 
 const DAY_PENDING_COPY_DELAY_MS = 200;
+const WEEK_PENDING_COPY_DELAY_MS = DAY_PENDING_COPY_DELAY_MS;
 
 function HistoryWeekStrip({
   days,
@@ -399,8 +401,12 @@ export function HistoryScreen() {
   const [dayError, setDayError] = useState<string | null>(null);
   const [loadingTrends, setLoadingTrends] = useState(false);
   const [loadingDay, setLoadingDay] = useState(false);
+  const [refreshingHistory, setRefreshingHistory] = useState(false);
   const [delayedInlineDayPending, setDelayedInlineDayPending] = useState(false);
+  const [delayedWeekPending, setDelayedWeekPending] = useState(false);
   const inlineDayPendingTimerRef = useRef<number | null>(null);
+  const weekPendingTimerRef = useRef<number | null>(null);
+  const manualRefreshCancelRef = useRef<{ current: boolean } | null>(null);
 
   const weekEndKey = addLocalDays(weekStartKey, 6);
   const targetCalories = dailyTargets?.calories ?? null;
@@ -412,6 +418,7 @@ export function HistoryScreen() {
   const confirmedEmptyDay = selectedSnapshot !== null && selectedSnapshot.meals.length === 0;
   const showInlineDayPending = selectedDaySnapshotPending && loadingDay && !dayError && delayedInlineDayPending;
   const isWeekPending = loadingTrends && hasCurrentWeekCache;
+  const showWeekPending = isWeekPending && !trendError && delayedWeekPending;
   const weekDays = buildHistoryWeek({
     weekStartKey,
     selectedDateKey,
@@ -461,12 +468,14 @@ export function HistoryScreen() {
               return next;
             });
           }
+          return true;
         })
         .catch((error: unknown) => {
           if (error instanceof Error && error.message === "UNAUTHORIZED") {
             void recoverGuestSession();
           }
           if (!cancelledRef?.current) setTrendError(historyErrorMessage(error));
+          return false;
         })
         .finally(() => {
           if (!cancelledRef?.current) setLoadingTrends(false);
@@ -489,6 +498,7 @@ export function HistoryScreen() {
               return next;
             });
           }
+          return true;
         })
         .catch((error: unknown) => {
           if (error instanceof Error && error.message === "UNAUTHORIZED") {
@@ -502,6 +512,7 @@ export function HistoryScreen() {
             });
             setDayError(historyErrorMessage(error));
           }
+          return false;
         })
         .finally(() => {
           if (!cancelledRef?.current) setLoadingDay(false);
@@ -509,6 +520,40 @@ export function HistoryScreen() {
     },
     [recoverGuestSession, selectedDateKey],
   );
+
+  const handleManualHistoryRefresh = useCallback(async () => {
+    if (manualRefreshCancelRef.current) {
+      manualRefreshCancelRef.current.current = true;
+    }
+    const cancelledRef = { current: false };
+    manualRefreshCancelRef.current = cancelledRef;
+    setRefreshingHistory(true);
+
+    try {
+      const results = await Promise.all([
+        loadTrends(cancelledRef),
+        loadSelectedDay(cancelledRef),
+      ]);
+      if (results.some((ok) => ok === false)) {
+        throw new Error("HISTORY_REFRESH_FAILED");
+      }
+    } finally {
+      if (!cancelledRef.current) {
+        setRefreshingHistory(false);
+        manualRefreshCancelRef.current = null;
+      }
+    }
+  }, [loadSelectedDay, loadTrends]);
+
+  useEffect(() => {
+    if (!manualRefreshCancelRef.current) {
+      return;
+    }
+
+    manualRefreshCancelRef.current.current = true;
+    manualRefreshCancelRef.current = null;
+    setRefreshingHistory(false);
+  }, [selectedDateKey, weekStartKey]);
 
   useEffect(() => {
     const cancelledRef = { current: false };
@@ -550,6 +595,31 @@ export function HistoryScreen() {
       }
     };
   }, [dayError, loadingDay, selectedDateKey, selectedDaySnapshotPending]);
+
+  useEffect(() => {
+    if (weekPendingTimerRef.current !== null) {
+      window.clearTimeout(weekPendingTimerRef.current);
+      weekPendingTimerRef.current = null;
+    }
+
+    if (!isWeekPending || trendError) {
+      setDelayedWeekPending(false);
+      return;
+    }
+
+    setDelayedWeekPending(false);
+    weekPendingTimerRef.current = window.setTimeout(() => {
+      weekPendingTimerRef.current = null;
+      setDelayedWeekPending(true);
+    }, WEEK_PENDING_COPY_DELAY_MS);
+
+    return () => {
+      if (weekPendingTimerRef.current !== null) {
+        window.clearTimeout(weekPendingTimerRef.current);
+        weekPendingTimerRef.current = null;
+      }
+    };
+  }, [isWeekPending, trendError, weekStartKey]);
 
   useEffect(() => {
     if (!lastMealMutation) {
@@ -617,43 +687,51 @@ export function HistoryScreen() {
           </SportIconButton>
         </header>
 
-        <main className="screen-scroll-safe sp-history-scroll">
-          {trendError ? (
-            <SportCard className="sp-history-state-card sp-history-state-error" variant="flat">
-              {trendError}
-            </SportCard>
-          ) : null}
+        <PullToRefreshSurface
+          onRefresh={handleManualHistoryRefresh}
+          refreshing={refreshingHistory}
+          surfaceId="history"
+          completionLabel="歷史資料已更新"
+          ariaLabel="下拉重新整理歷史資料"
+        >
+          <main className="screen-scroll-safe sp-history-scroll">
+            {trendError ? (
+              <SportCard className="sp-history-state-card sp-history-state-error" variant="flat">
+                {trendError}
+              </SportCard>
+            ) : null}
 
-          <div className={isWeekPending ? "sp-history-weekly sp-history-pending" : "sp-history-weekly"}>
-            <HistoryWeekStrip
-              days={weekDays}
+            <div className={showWeekPending ? "sp-history-weekly sp-history-pending" : "sp-history-weekly"}>
+              <HistoryWeekStrip
+                days={weekDays}
+                targetCalories={targetCalories}
+                onSelect={(dateKey) => {
+                  setSelectedDateKey(dateKey);
+                }}
+              />
+              <HistoryStatGrid stats={weekStats} />
+            </div>
+            <SelectedDayHero
+              selectedDateKey={selectedDateKey}
+              selectedDay={selectedWeekDay}
+              snapshot={selectedSnapshot}
               targetCalories={targetCalories}
-              onSelect={(dateKey) => {
-                setSelectedDateKey(dateKey);
-              }}
+              pending={isSelectedDayPending}
+              cacheMiss={isSelectedDayCacheMiss}
             />
-            <HistoryStatGrid stats={weekStats} />
-          </div>
-          <SelectedDayHero
-            selectedDateKey={selectedDateKey}
-            selectedDay={selectedWeekDay}
-            snapshot={selectedSnapshot}
-            targetCalories={targetCalories}
-            pending={isSelectedDayPending}
-            cacheMiss={isSelectedDayCacheMiss}
-          />
-          <TimelinePanel
-            selectedDateKey={selectedDateKey}
-            todayKey={todayKey}
-            snapshot={selectedSnapshot}
-            dayError={dayError}
-            pending={isSelectedDayPending || showInlineDayPending}
-            confirmedEmptyDay={confirmedEmptyDay}
-            showInlineDayPending={showInlineDayPending}
-            openDayDetail={openDayDetail}
-            openConfirmedEmptyDayDetail={openConfirmedEmptyDayDetail}
-          />
-        </main>
+            <TimelinePanel
+              selectedDateKey={selectedDateKey}
+              todayKey={todayKey}
+              snapshot={selectedSnapshot}
+              dayError={dayError}
+              pending={isSelectedDayPending || showInlineDayPending}
+              confirmedEmptyDay={confirmedEmptyDay}
+              showInlineDayPending={showInlineDayPending}
+              openDayDetail={openDayDetail}
+              openConfirmedEmptyDayDetail={openConfirmedEmptyDayDetail}
+            />
+          </main>
+        </PullToRefreshSurface>
       </SportScreen>
     </div>
   );

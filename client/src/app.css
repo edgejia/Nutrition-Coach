@@ -106,6 +106,25 @@ textarea {
   50%, 100% { opacity: .24; }
 }
 
+@keyframes sp-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes home-refresh-confirm {
+  0% {
+    filter: brightness(1);
+    transform: translateY(0);
+  }
+  38% {
+    filter: brightness(1.16);
+    transform: translateY(-2px);
+  }
+  100% {
+    filter: brightness(1);
+    transform: translateY(0);
+  }
+}
+
 .app-viewport {
   position: fixed;
   top: var(--app-visual-viewport-top, 0px);
@@ -520,6 +539,109 @@ textarea {
   cursor: not-allowed;
 }
 
+.sp-refresh-button {
+  min-width: 44px;
+  min-height: 44px;
+  border-color: var(--sp-line-strong);
+  background: var(--sp-surface-2);
+  color: var(--sp-ink);
+}
+
+.sp-refresh-button--loading {
+  opacity: .55;
+  pointer-events: none;
+}
+
+.home-sport-refresh-error {
+  margin: 0;
+  color: var(--sp-amber);
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.sp-pull-refresh {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: clip;
+}
+
+.sp-pull-refresh-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.sp-pull-refresh .screen-scroll,
+.sp-pull-refresh .screen-scroll-safe,
+.sp-pull-refresh .screen-scroll-with-input,
+.sp-pull-refresh .sp-scroll {
+  touch-action: pan-y;
+  overscroll-behavior-y: contain;
+}
+
+.sp-pull-refresh-indicator {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 4;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid var(--sp-line-strong);
+  border-radius: var(--sp-r-pill);
+  background: var(--sp-surface-2);
+  color: var(--sp-lime);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% + (var(--sp-pull-refresh-progress, 0) * 48px)));
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.sp-pull-refresh--pulling .sp-pull-refresh-indicator {
+  opacity: 1;
+}
+
+.sp-pull-refresh--refreshing .sp-pull-refresh-indicator {
+  opacity: 1;
+}
+
+.sp-pull-refresh--refreshing .sp-pull-refresh-indicator svg {
+  animation: sp-spin 900ms linear infinite;
+}
+
+.sp-pull-refresh--complete .sp-pull-refresh-indicator {
+  width: auto;
+  min-width: 48px;
+  padding: 0 14px;
+  color: var(--sp-ink);
+  opacity: 1;
+  transform: translate(-50%, 10px);
+}
+
+.sp-pull-refresh--complete .sp-pull-refresh-indicator svg {
+  display: none;
+}
+
+.sp-pull-refresh-complete-label {
+  display: none;
+  color: inherit;
+  font-family: var(--sp-font-zh);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.sp-pull-refresh--complete .sp-pull-refresh-complete-label {
+  display: inline;
+}
+
 .sp-bar-track {
   position: relative;
   height: 6px;
@@ -749,6 +871,13 @@ textarea {
   padding: 24px 18px 8px;
 }
 
+.home-sport-header-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 .home-sport-title-row {
   display: flex;
   min-width: 0;
@@ -792,6 +921,10 @@ textarea {
 
 .home-sport-hero {
   min-width: 0;
+}
+
+.home-sport-refresh-cue {
+  animation: home-refresh-confirm 520ms ease-out both;
 }
 
 .home-sport-hero-main {
@@ -4062,6 +4195,12 @@ textarea {
   padding: 14px 18px calc(88px + env(safe-area-inset-bottom));
 }
 
+.sp-history-refresh-row {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 44px;
+}
+
 .sp-history-week-strip {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -4081,12 +4220,7 @@ textarea {
   position: relative;
 }
 
-.sp-history-pending::before {
-  content: "";
-  display: block;
-  height: 1px;
-  margin-bottom: 8px;
-  background: var(--sp-line-strong);
+.sp-history-weekly.sp-history-pending {
   opacity: 0.72;
 }
 

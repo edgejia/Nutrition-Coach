@@ -16,6 +16,12 @@ function countPrimaryScrollHelpers(value: string) {
   return value.match(/\bscreen-scroll(?:-with-input|-safe)?\b/g)?.length ?? 0;
 }
 
+function cssBlock(selector: string) {
+  const match = cssSource.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{[\\s\\S]*?\\}`));
+  assert.ok(match, `${selector} CSS block should exist`);
+  return match[0];
+}
+
 describe("History screen source contract", () => {
   it("uses Phase 41 sport primitives and real History helpers", () => {
     for (const expected of [
@@ -195,8 +201,44 @@ describe("History screen source contract", () => {
 
   it("wires cache-hit weekly revalidation to neutral pending treatment", () => {
     assert.match(source, /const isWeekPending = loadingTrends && hasCurrentWeekCache/);
-    assert.match(source, /className=\{isWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}/);
-    assert.match(cssSource, /\.sp-history-pending::before\s*\{[\s\S]*?height:\s*1px;[\s\S]*?background:\s*var\(--sp-line-strong\)/);
+    assert.match(source, /const WEEK_PENDING_COPY_DELAY_MS = DAY_PENDING_COPY_DELAY_MS/);
+    assert.match(source, /delayedWeekPending/);
+    assert.match(source, /setDelayedWeekPending/);
+    assert.match(source, /weekPendingTimerRef/);
+    assert.match(source, /window\.setTimeout\(\(\) => \{[\s\S]*setDelayedWeekPending\(true\)/);
+    assert.match(source, /window\.clearTimeout\(weekPendingTimerRef\.current\)/);
+    assert.match(
+      source,
+      /if \(!isWeekPending \|\| trendError\) \{[\s\S]*setDelayedWeekPending\(false\)/,
+    );
+    assert.match(
+      source,
+      /const showWeekPending = isWeekPending && !trendError && delayedWeekPending/,
+    );
+    assert.match(source, /className=\{showWeekPending \? "sp-history-weekly sp-history-pending" : "sp-history-weekly"\}/);
+    assert.match(
+      source,
+      /useEffect\(\(\) => \{[\s\S]*weekPendingTimerRef[\s\S]*WEEK_PENDING_COPY_DELAY_MS[\s\S]*\}, \[isWeekPending, trendError, weekStartKey\]\)/,
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.sp-history-pending::before\s*\{[\s\S]*?display:\s*block;[\s\S]*?\}/,
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.sp-history-pending::before\s*\{[\s\S]*?height:\s*1px;[\s\S]*?margin-bottom:\s*8px;[\s\S]*?\}/,
+    );
+    assert.doesNotMatch(
+      cssSource,
+      /\.sp-history-pending::before\s*\{[\s\S]*?background:\s*var\(--sp-line-strong\);[\s\S]*?\}/,
+    );
+    const weeklyPendingBlock = cssBlock(".sp-history-weekly.sp-history-pending");
+    assert.match(weeklyPendingBlock, /opacity:\s*(?:0\.(?:6[89]|[78]\d|9\d)|1(?:\.0+)?);/);
+    assert.doesNotMatch(weeklyPendingBlock, /height:/);
+    assert.doesNotMatch(weeklyPendingBlock, /margin(?:-[a-z]+)?:/);
+    assert.doesNotMatch(weeklyPendingBlock, /padding(?:-[a-z]+)?:/);
+    assert.doesNotMatch(weeklyPendingBlock, /border(?:-[a-z]+)?:/);
+    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending::(?:before|after)/);
     assert.doesNotMatch(cssSource, /\.sp-history-pending[\s\S]*animation:/);
   });
 

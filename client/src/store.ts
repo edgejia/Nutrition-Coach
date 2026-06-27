@@ -139,6 +139,7 @@ interface AppState {
     options?: { returnToDayDetail?: DayDetailPayload },
   ) => void;
   closeSecondaryScreen: () => void;
+  goBack: () => boolean;
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
   removeMeal: (mealId: string) => void;
@@ -227,6 +228,18 @@ export const useStore = create<AppState>((set, get) => ({
       }
       return { secondaryScreen: null };
     }),
+  goBack: () => {
+    const state = get();
+    if (state.secondaryScreen) {
+      state.closeSecondaryScreen();
+      return true;
+    }
+    if (state.activeScreen === "chat" || state.activeScreen === "history") {
+      set({ activeScreen: "home" });
+      return true;
+    }
+    return false;
+  },
   setCoachAdvice: (coachAdvice) => set({ coachAdvice }),
   setMeals: (meals) => {
     if (!isAuthoritativeMealEntryArray(meals)) {

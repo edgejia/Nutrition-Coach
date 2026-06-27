@@ -22,6 +22,7 @@ import {
 } from "./services/proposal-actions.js";
 import { createProposalCardService } from "./services/proposal-cards.js";
 import { createGuestSessionService } from "./services/guest-session.js";
+import { createRecentMealLogStateService } from "./services/turn-state.js";
 import { createOrchestrator } from "./orchestrator/index.js";
 import { renderProposalInactiveCopy } from "./orchestrator/mutation-receipts.js";
 import { createTargetGenerationService } from "./services/target-generation.js";
@@ -86,6 +87,7 @@ export interface AppServices {
   proposalActionService: ReturnType<typeof createProposalActionService>;
   proposalCardService: ReturnType<typeof createProposalCardService>;
   publisher: RealtimePublisher;
+  recentMealLogStateService: ReturnType<typeof createRecentMealLogStateService>;
   summaryService: ReturnType<typeof createSummaryService>;
 }
 
@@ -170,6 +172,7 @@ export async function buildApp(opts: AppOptions) {
   const goalProposalService = createGoalProposalService(db);
   const mealDeleteProposalService = createMealDeleteProposalService(db);
   const mealNumericProposalService = createMealNumericProposalService(db);
+  const recentMealLogStateService = createRecentMealLogStateService(db);
   const publisher = new RealtimePublisher();
 
   const proposalActionService = createProposalActionService({
@@ -196,6 +199,7 @@ export async function buildApp(opts: AppOptions) {
     deviceService,
     goalProposalService,
     proposalActionService,
+    recentMealLogStateService,
     publisher,
   });
 
@@ -214,6 +218,7 @@ export async function buildApp(opts: AppOptions) {
     proposalActionService,
     proposalCardService,
     publisher,
+    recentMealLogStateService,
     summaryService,
   });
   const corsPolicy = getCorsRegistrationPolicy({

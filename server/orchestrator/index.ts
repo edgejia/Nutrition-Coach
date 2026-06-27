@@ -25,7 +25,7 @@ import type {
   ProposalKind,
 } from "../services/proposal-cards.js";
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
-import { DEFAULT_SESSION_ID } from "../services/turn-state.js";
+import { DEFAULT_SESSION_ID, type createRecentMealLogStateService } from "../services/turn-state.js";
 import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
@@ -71,6 +71,16 @@ import {
   type SummaryHistoryFacts,
 } from "./summary-history-renderer.js";
 export type { SummaryHistoryFacts } from "./summary-history-renderer.js";
+import {
+  composePlanningReply,
+  derivePlanningFacts,
+  guardPlanningAdvice,
+  normalizeCoachAdvice,
+  renderPlanningFacts,
+  renderPlanningFallbackReply,
+  type PlanningFacts,
+} from "./planning-reply-renderer.js";
+export type { PlanningFacts } from "./planning-reply-renderer.js";
 
 interface OrchestratorDeps {
   llmProvider: LLMProvider;
@@ -83,6 +93,7 @@ interface OrchestratorDeps {
   mealDeleteProposalService?: ReturnType<typeof createMealDeleteProposalService>;
   mealNumericProposalService?: ReturnType<typeof createMealNumericProposalService>;
   proposalActionService?: ReturnType<typeof createProposalActionService>;
+  recentMealLogStateService?: ReturnType<typeof createRecentMealLogStateService>;
   publisher?: Pick<RealtimePublisher, "publishGoalsUpdate">;
 }
 
@@ -105,6 +116,7 @@ const SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL = 10;
 
 interface NoMutationSuccessGuardContext {
   summaryHistoryFacts?: SummaryHistoryFacts;
+  planningFacts?: PlanningFacts;
 }
 
 interface ClaimedMealFact {
@@ -157,6 +169,7 @@ export type OrchestratorResult =
       dailySummary?: DailySummary;
       summaryOutcome?: SummaryOutcome;
       summaryHistoryFacts?: SummaryHistoryFacts;
+      planningFacts?: PlanningFacts;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
       deletedMealId?: string;
@@ -175,6 +188,7 @@ export type OrchestratorResult =
       dailySummary?: DailySummary;
       summaryOutcome?: SummaryOutcome;
       summaryHistoryFacts?: SummaryHistoryFacts;
+      planningFacts?: PlanningFacts;
       dailyTargets?: DailyTargets;
       affectedDate?: string;
       deletedMealId?: string;
@@ -223,6 +237,15 @@ async function buildSummaryHistoryFacts(
       calories: meal.calories,
     })),
   };
+}
+
+async function buildPlanningFactsForDevice(
+  deps: OrchestratorDeps,
+  deviceId: string,
+  device: Awaited<ReturnType<ReturnType<typeof createDeviceService>["getDevice"]>>,
+): Promise<PlanningFacts> {
+  const dailySummary = await deps.summaryService.getDailySummary(deviceId, currentAppDate());
+  return derivePlanningFacts(dailySummary, getDeviceTargets(device));
 }
 
 function isImageOnlyMessage(userMessage: string, imageBase64?: string): boolean {
@@ -711,6 +734,82 @@ function caloriesCloseEnough(claimed: number, actual: number): boolean {
     && Math.abs(claimed - actual) <= SUMMARY_HISTORY_CALORIE_TOLERANCE_KCAL;
 }
 
+function shouldNormalizePlainAdviceReply(input: {
+  committedMutationState: CommittedMutationState<LoggedMealReceipt, ProposalActionEventClientMetadata>;
+  summaryHistoryFacts?: SummaryHistoryFacts;
+  planningFacts?: PlanningFacts;
+}): boolean {
+  return !projectCommittedMutationState(input.committedMutationState).hasCommittedMutation
+    && !input.summaryHistoryFacts
+    && !input.planningFacts;
+}
+
+function isPlanningIntentSafetyNetPrompt(message: string): boolean {
+  return /(下一餐|下餐|還能吃多少|還可以吃多少|晚餐還能吃|午餐還能吃|剩餘熱量|還剩多少|營養缺口|macro gap|蛋白質.*(?:補|缺口)|protein.*(?:top|gap))/i.test(message);
+}
+
+function buildPlanningRepairInstruction(facts: PlanningFacts, reasons: string[]): string {
+  const reasonText = reasons.length > 0 ? reasons.join(", ") : "planning_fact_conflict";
+  return [
+    `後端權威規劃事實：${renderPlanningFacts(facts)}`,
+    `上一版回覆違反原因：${reasonText}`,
+    "請只根據上述事實重寫下一餐建議；不要提及工具名稱、內部識別資訊或原始資料欄位。",
+  ].join("\n");
+}
+
+function buildPlanningRepairMessages(facts: PlanningFacts, reasons: string[]): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: "你是營養教練。這一輪只能根據後端權威規劃事實重寫，不能使用使用者識別資訊或內部欄位。",
+    },
+    {
+      role: "user",
+      content: buildPlanningRepairInstruction(facts, reasons),
+    },
+  ];
+}
+
+function finalizePlanningReply(
+  advice: string,
+  facts: PlanningFacts,
+  options: { repairAttempted: boolean },
+):
+  | { kind: "reply"; reply: string; finalReplySource: LlmTraceFinalReplySource }
+  | { kind: "repair"; messages: ChatMessage[] } {
+  const guarded = guardPlanningAdvice(advice, facts, {
+    repairAttempted: options.repairAttempted,
+  });
+  if (guarded.status === "needs_repair") {
+    return {
+      kind: "repair",
+      messages: buildPlanningRepairMessages(facts, guarded.reasons),
+    };
+  }
+  if (guarded.status === "fallback") {
+    return {
+      kind: "reply",
+      reply: renderPlanningFallbackReply(facts),
+      finalReplySource: "fallback",
+    };
+  }
+  return {
+    kind: "reply",
+    reply: composePlanningReply(facts, guarded.advice, {
+      repairAttempted: options.repairAttempted,
+    }),
+    finalReplySource: "renderer",
+  };
+}
+
+async function collectStreamText(stream: AsyncGenerator<string>): Promise<string> {
+  let fullReply = "";
+  for await (const token of stream) {
+    fullReply += token;
+  }
+  return fullReply;
+}
+
 export async function* appendMutationReceiptStream(
   stream: AsyncGenerator<string>,
   receipt: string | undefined,
@@ -1183,7 +1282,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           }
         : { role: "user", content: userMessage };
 
-      const messages: ChatMessage[] = [systemMsg, ...history, userContent];
+      let messages: ChatMessage[] = [systemMsg, ...history, userContent];
       const toolDefinitions = getToolDefinitions();
       const safeToolNames = new Set(toolDefinitions.map((definition) => definition.function.name));
       const toolSessionState = {
@@ -1195,6 +1294,8 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       let logMealSummary: DailySummary | undefined;
       let mealSummaryOutcome: SummaryOutcome | undefined;
       let summaryHistoryFacts: SummaryHistoryFacts | undefined;
+      let planningFacts: PlanningFacts | undefined;
+      let planningRepairAttempted = false;
       let shouldStreamFinalReply = false;
       let successfulGoalTargets: DailyTargets | undefined;
       let mutationEffects: MutationEffects | undefined;
@@ -1245,6 +1346,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               signal: opts?.signal,
             });
             if (roundResult.kind === "stream") {
+              if (planningFacts) {
+                response = { content: await collectStreamText(roundResult.streamGenerator) };
+              } else {
               const fallbackReason: FallbackPayload["reason"] = didMutateMeal ? "partial_success" : "llm_error";
               opts?.hooks?.onLLMEnd?.(round + 1, false);
               return {
@@ -1271,8 +1375,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 ...deletedMealIdFields(deletedMealId),
                 ...mutationStateFields(committedMutationState),
               };
+              }
+            } else {
+              response = roundResult.response;
             }
-            response = roundResult.response;
           } else {
             if (shouldStreamFinalReply && typeof llmProvider.chatStream === "function") {
               const fallbackReason: FallbackPayload["reason"] = didMutateMeal ? "partial_success" : "llm_error";
@@ -1406,17 +1512,73 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
+          let activePlanningFacts = planningFacts;
+          if (
+            !activePlanningFacts
+            && !summaryHistoryFacts
+            && !hasCommittedMutationKind(committedMutationState)
+            && isPlanningIntentSafetyNetPrompt(userMessage)
+          ) {
+            activePlanningFacts = await buildPlanningFactsForDevice(deps, deviceId, device);
+            planningFacts = activePlanningFacts;
+          }
+          if (activePlanningFacts) {
+            const planningFinalization = finalizePlanningReply(response.content, activePlanningFacts, {
+              repairAttempted: planningRepairAttempted,
+            });
+            if (planningFinalization.kind === "repair") {
+              planningRepairAttempted = true;
+              messages = planningFinalization.messages;
+              continue;
+            }
+            const reply = guardNoMutationSuccessClaim(
+              planningFinalization.reply,
+              projectCommittedMutationState(committedMutationState),
+              { summaryHistoryFacts, planningFacts: activePlanningFacts },
+            );
+            const finalReplySource = reply === planningFinalization.reply
+              ? planningFinalization.finalReplySource
+              : "fallback";
+            return {
+              reply,
+              didLogMeal,
+              didMutateMeal,
+              dailySummary: logMealSummary,
+              summaryOutcome: mealSummaryOutcome,
+              summaryHistoryFacts,
+              planningFacts: activePlanningFacts,
+              dailyTargets: successfulGoalTargets,
+              affectedDate: resolvedAffectedDate,
+              loggedMeal,
+              loggedMealToolMessageId,
+              ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
+                ...mutationStateFields(committedMutationState),
+              finalReplySource,
+              finalReplyShape: finalReplySource === "fallback"
+                ? classifyFallbackReplyShape(reply)
+                : classifyPlainReplyShape(reply),
+            };
+          }
+          const normalizedPlainAdvice = shouldNormalizePlainAdviceReply({
+            committedMutationState,
+            summaryHistoryFacts,
+            planningFacts,
+          })
+            ? normalizeCoachAdvice(response.content)
+            : response.content;
           const rawReply = summaryHistoryFacts
             ? composeSummaryHistoryReply(summaryHistoryFacts, response.content)
-            : response.content;
+            : normalizedPlainAdvice;
           const reply = guardNoMutationSuccessClaim(
             rawReply,
             projectCommittedMutationState(committedMutationState),
-            { summaryHistoryFacts },
+            { summaryHistoryFacts, planningFacts },
           );
           const finalReplySource = summaryHistoryFacts && reply === rawReply
             ? "renderer"
-            : reply === response.content ? "model" : "fallback";
+            : normalizedPlainAdvice !== response.content && reply === rawReply ? "renderer"
+              : reply === response.content ? "model" : "fallback";
           return {
             reply,
             didLogMeal,
@@ -1424,6 +1586,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             dailySummary: logMealSummary,
             summaryOutcome: mealSummaryOutcome,
             summaryHistoryFacts,
+            planningFacts,
             dailyTargets: successfulGoalTargets,
             affectedDate: resolvedAffectedDate,
             loggedMeal,
@@ -1472,6 +1635,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 mealMutationKind,
                 deletedMeal,
                 summaryHistoryFacts: toolSummaryHistoryFacts,
+                planningFacts: toolPlanningFacts,
                 controlledReply,
                 proposalCard,
                 validationDiagnostic,
@@ -1484,6 +1648,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 goalProposalService: deps.goalProposalService,
                 mealDeleteProposalService: deps.mealDeleteProposalService,
                 mealNumericProposalService: deps.mealNumericProposalService,
+                recentMealLogStateService: deps.recentMealLogStateService,
                 publisher: deps.publisher,
                 imagePath,
                 toolSessionState,
@@ -1557,6 +1722,18 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 if (!toolLoggedMeal) {
                   throw new Error("log_food succeeded without loggedMeal");
                 }
+                await deps.recentMealLogStateService?.putLatest({
+                  deviceId,
+                  sessionId: DEFAULT_SESSION_ID,
+                  payload: {
+                    mealId: toolLoggedMeal.mealId,
+                    mealRevisionId: toolLoggedMeal.mealRevisionId,
+                    dateKey: toolLoggedMeal.dateKey,
+                    foodName: toolLoggedMeal.foodName,
+                    itemNames: toolLoggedMeal.items?.map((item) => item.name) ?? [toolLoggedMeal.foodName],
+                    loggedAt: toolLoggedMeal.loggedAt,
+                  },
+                });
                 mutationEffects = {
                   kind: "log",
                   affectedDate: affectedDate ?? toolLoggedMeal.dateKey,
@@ -1572,6 +1749,10 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 logMealSummary = dailySummary;
                 summaryHistoryFacts = toolSummaryHistoryFacts
                   ?? await buildSummaryHistoryFacts(deps, deviceId, dailySummary);
+              }
+              if (toolCall.function.name === "plan_next_meal" && toolPlanningFacts) {
+                planningFacts = toolPlanningFacts;
+                shouldStreamFinalReply = false;
               }
               if (mealMutationKind === "update" || mealMutationKind === "delete") {
                 didMutateMeal = true;
@@ -1789,7 +1970,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               finalReplyShape: classifyPlainReplyShape(reply),
             };
           }
-          shouldStreamFinalReply = true;
+          shouldStreamFinalReply = !planningFacts;
           // Complete the tool-round LLM lifecycle event
           opts?.hooks?.onLLMEnd?.(round + 1, true);
         }
@@ -1836,6 +2017,27 @@ export function createOrchestrator(deps: OrchestratorDeps) {
                 ...mutationStateFields(committedMutationState),
           finalReplySource: "renderer",
           finalReplyShape: classifyPlainReplyShape(reply),
+          fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
+        };
+      }
+      if (planningFacts) {
+        const reply = renderPlanningFallbackReply(planningFacts);
+        return {
+          reply,
+          didLogMeal,
+          didMutateMeal,
+          dailySummary: logMealSummary,
+          summaryOutcome: mealSummaryOutcome,
+          summaryHistoryFacts,
+          planningFacts,
+          affectedDate: resolvedAffectedDate,
+          loggedMeal,
+          loggedMealToolMessageId,
+          ...mutationOutcomeFactFields(mutationOutcomeFact),
+                ...deletedMealIdFields(deletedMealId),
+                ...mutationStateFields(committedMutationState),
+          finalReplySource: "fallback",
+          finalReplyShape: classifyFallbackReplyShape(reply),
           fallbackOutcomeContext: maxRoundsFallbackOutcomeContext,
         };
       }

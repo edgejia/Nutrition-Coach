@@ -430,6 +430,15 @@ type HomeCtaClientEventPayload =
   | { event: "home_cta_intent_selected"; intent: CoachCTAIntentId }
   | { event: "home_cta_option_sent"; intent: CoachCTAIntentId; promptKey: CoachCTAOptionId };
 
+type OnboardingDebugClientEventPayload = {
+  event: "onboarding_back_diagnostic" | "onboarding_refresh_fired";
+  diagnosticEvent?: string;
+  currentStep?: number;
+  nextStep?: number;
+  handled?: boolean;
+  repaired?: boolean;
+};
+
 async function recordClientEvent(payload: HomeCtaClientEventPayload): Promise<void> {
   try {
     await fetch("/api/observability/client-event", {
@@ -449,6 +458,26 @@ export function recordHomeCtaIntentSelected(intent: CoachCTAIntentId): Promise<v
 
 export function recordHomeCtaOptionSent(intent: CoachCTAIntentId, promptKey: CoachCTAOptionId): Promise<void> {
   return recordClientEvent({ event: "home_cta_option_sent", intent, promptKey });
+}
+
+export function recordOnboardingDebugEvent(payload: OnboardingDebugClientEventPayload): void {
+  try {
+    const body = JSON.stringify(payload);
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+      const blob = new Blob([body], { type: "application/json" });
+      navigator.sendBeacon("/api/observability/onboarding-debug", blob);
+      return;
+    }
+    void fetch("/api/observability/onboarding-debug", {
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+  } catch {
+    // Debug telemetry is best-effort and must never affect onboarding.
+  }
 }
 
 function isLocalDevelopmentRuntime(): boolean {
@@ -1036,7 +1065,9 @@ export async function stopChatTurn(options: { turnId: string }): Promise<{ stopp
   return res.json() as Promise<{ stopped: boolean; turnId: string }>;
 }
 
-export async function getMeals(options?: { refreshReason?: "day_rollover" | "meal_mutation" }): Promise<{ meals: MealEntry[] }> {
+export async function getMeals(options?: {
+  refreshReason?: "day_rollover" | "meal_mutation" | "manual_refresh";
+}): Promise<{ meals: MealEntry[] }> {
   const headers: Record<string, string> = {};
   if (options?.refreshReason) {
     headers["X-Refresh-Reason"] = options.refreshReason;

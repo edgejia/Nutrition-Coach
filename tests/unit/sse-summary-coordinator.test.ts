@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createSSESummaryCoordinator } from "../../client/src/sse-summary-coordinator.js";
+import {
+  createSSESummaryCoordinator,
+  type MealRowRefreshReason,
+} from "../../client/src/sse-summary-coordinator.js";
 import { formatLocalDate } from "../../client/src/lib/time.js";
 import type { DailySummary, DailySummarySSEPayload, MealEntry } from "../../client/src/types.js";
 
@@ -59,7 +62,7 @@ function meal(id: string, calories: number): Meal {
 }
 
 function createHarness() {
-  const getMealsCalls: Array<{ refreshReason?: "day_rollover" | "meal_mutation" }> = [];
+  const getMealsCalls: Array<{ refreshReason?: MealRowRefreshReason }> = [];
   const pendingMeals: ControlledMeals[] = [];
   const commits: Array<{ type: "meals"; rows: Meal[] } | { type: "summary"; summary: DailySummary } | { type: "historical"; affectedDate: string }> = [];
 
@@ -96,7 +99,21 @@ describe("SSE summary coordinator", () => {
     assert.deepEqual(commits, [
       { type: "meals", rows },
       { type: "summary", summary: payload.summary },
+      { type: "historical", affectedDate: "2026-05-18" },
     ]);
+  });
+
+  it("passes manual refresh reason through initial meals load", async () => {
+    const { coordinator, getMealsCalls, pendingMeals, commits } = createHarness();
+    const rows = [meal("manual", 520)];
+
+    const initialLoad = coordinator.runInitialMealsLoad({ refreshReason: "manual_refresh" });
+
+    pendingMeals[0]?.resolve({ meals: rows });
+    await initialLoad;
+
+    assert.deepEqual(getMealsCalls, [{ refreshReason: "manual_refresh" }]);
+    assert.deepEqual(commits, [{ type: "meals", rows }]);
   });
 
   it("drops same-day mutation summary and rows when row refetch fails silently", async () => {
@@ -127,6 +144,7 @@ describe("SSE summary coordinator", () => {
     assert.deepEqual(commits, [
       { type: "meals", rows: newerRows },
       { type: "summary", summary: newerPayload.summary },
+      { type: "historical", affectedDate: "2026-05-18" },
     ]);
   });
 
@@ -147,6 +165,7 @@ describe("SSE summary coordinator", () => {
     assert.deepEqual(commits, [
       { type: "meals", rows: mutationRows },
       { type: "summary", summary: mutationPayload.summary },
+      { type: "historical", affectedDate: "2026-05-18" },
     ]);
   });
 
@@ -162,7 +181,7 @@ describe("SSE summary coordinator", () => {
 
   it("commits initial summary using the fixed Asia/Taipei app date key", async () => {
     const appToday = formatLocalDate(new Date("2026-05-17T16:30:00.000Z"));
-    const getMealsCalls: Array<{ refreshReason?: "day_rollover" | "meal_mutation" }> = [];
+    const getMealsCalls: Array<{ refreshReason?: MealRowRefreshReason }> = [];
     const commits: Array<{ type: "summary"; summary: DailySummary } | { type: "historical"; affectedDate: string }> = [];
     const coordinator = createSSESummaryCoordinator<Meal>({
       getMeals: (options) => {

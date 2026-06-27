@@ -220,42 +220,52 @@ describe("Home dashboard display contracts", () => {
     assert.doesNotMatch(homeSource, /disabled[^=]|暫不可編輯|不可編輯|無法編輯|tooltip|title=\{`編輯/);
   });
 
-  it("scopes count-up animation to consumed calories and ring percent", async () => {
+  it("replays count-up on the hero AND all three macro blocks on refresh", async () => {
+    // Plan 104-13 (Gap B) relaxes the prior "scopes count-up to consumed calories and ring percent"
+    // contract. WOULD-HAVE-CAUGHT: the previous version asserted exactly 3 `useCountUpNumber` calls
+    // and explicitly forbade `useCountUpNumber(macro`, which locked the device-visible bug (static
+    // macro blocks with no reload animation) into the source contract for five rounds. The relaxed
+    // contract below fails unless each macro number counts up and each macro progress bar replays
+    // its fill on every refresh, while still requiring the hero kcal/ring replay and reduced-motion
+    // handling and forbidding any SECOND parallel animation mechanism.
     const homeSource = await readSource("../../client/src/components/HomeScreen.tsx");
-    const countUpHelperMatches = homeSource.match(/useCountUpNumber/g) ?? [];
+    const sportSource = await readSource("../../client/src/components/SportPrimitives.tsx");
+    const cssSource = await readSource("../../client/src/app.css");
 
-    if (countUpHelperMatches.length > 0) {
-      assert.equal(countUpHelperMatches.length, 3);
-      assert.match(homeSource, /function useCountUpNumber|const useCountUpNumber/);
-      assert.match(homeSource, /activeAnimationTargetRef/);
-      assert.match(homeSource, /\}, \[durationMs, targetValue\]\)/);
-      assert.match(homeSource, /useCountUpNumber\([^)]*display\.consumed[^)]*shouldAnimateConsumedChange/);
-      assert.match(homeSource, /useCountUpNumber\([^)]*display\.percent[^)]*shouldAnimateConsumedChange/);
-    } else {
-      assert.match(homeSource, /requestAnimationFrame/);
-      assert.match(homeSource, /cancelAnimationFrame/);
-      assert.match(homeSource, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
-      assert.match(homeSource, /previousConsumedRef/);
-      assert.match(homeSource, /shouldAnimateConsumedChange/);
-      assert.match(
-        homeSource,
-        /previousConsumedRef\.current !== null && previousConsumedRef\.current !== display\.consumed/,
-      );
-      assert.doesNotMatch(
-        homeSource,
-        /previousPercentRef\.current !== null && previousPercentRef\.current !== display\.percent/,
-        "target-only percent changes snap through the consumed-change gate",
-      );
-      assert.match(homeSource, /display\.consumed[\s\S]*shouldAnimateConsumedChange/);
-      assert.match(homeSource, /display\.percent[\s\S]*shouldAnimateConsumedChange/);
-    }
+    // Single shared replay primitive remains in place.
+    assert.match(homeSource, /function useCountUpNumber|const useCountUpNumber/);
+    assert.match(homeSource, /activeAnimationTargetRef/);
+    assert.match(homeSource, /previousReplayKeyRef/);
+    assert.match(homeSource, /\}, \[durationMs, options\.replayKey, replayChanged, targetValue, animate\]\)/);
+    assert.match(homeSource, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
 
+    // Hero kcal number, ring percent, and animated ring value still replay on refresh.
+    assert.match(homeSource, /useCountUpNumber\(display\.consumed, \{[\s\S]*animate: shouldAnimateConsumedChange,[\s\S]*replayKey: refreshCueToken/);
+    assert.match(homeSource, /useCountUpNumber\(display\.percent, \{[\s\S]*animate: shouldAnimateConsumedChange,[\s\S]*replayKey: refreshCueToken/);
+    assert.match(homeSource, /<SportRing[\s\S]*value=\{animatedRingValue\}/);
+
+    // Each macro number now counts up via the SAME helper, keyed on refreshCueToken.
+    assert.match(homeSource, /useCountUpNumber\(macro/);
+    assert.match(homeSource, /useCountUpNumber\(macro[\s\S]*replayKey: refreshCueToken/);
+
+    // Each macro progress bar replays its fill on refresh via a refresh-keyed replay signal.
+    assert.match(homeSource, /<SportProgressBar[\s\S]*replayKey=\{refreshCueToken\}/);
+    assert.match(sportSource, /replayKey\??: ?number/);
+    assert.match(sportSource, /sp-bar-fill/);
+
+    // Reuse the existing single mechanism: the .sp-bar-fill width transition and the reduced-motion
+    // media query stay in place; no parallel keyframe system is introduced.
+    assert.match(cssSource, /\.sp-bar-fill \{[^}]*transition: width 360ms/);
+    assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\) \{ \.sp-bar-fill/);
+
+    // Guard against a SECOND parallel animation mechanism for the macro blocks.
     assert.doesNotMatch(homeSource, /sessionStorage/);
     assert.doesNotMatch(homeSource, /macroAnimation/);
     assert.doesNotMatch(homeSource, /animatedMacro/);
     assert.doesNotMatch(homeSource, /coachFade/);
     assert.doesNotMatch(homeSource, /CoachAdviceCard[\s\S]{0,160}transition/);
     assert.doesNotMatch(homeSource, /targetAnimation/);
+    assert.doesNotMatch(sportSource, /@keyframes/);
   });
 
   it("MOB-02 keeps Home CTA inside the primary scroller with bottom-nav reserve", async () => {

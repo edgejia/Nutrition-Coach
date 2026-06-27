@@ -1,5 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { eq } from "drizzle-orm";
 import { createDb } from "../../server/db/client.js";
 import { mealRevisionItems, mealRevisions, mealTransactions } from "../../server/db/schema.js";
@@ -18,14 +19,18 @@ import {
 import {
   executeTool,
   getToolDefinitions,
+  KNOWN_TOOL_POLICY_CLASSES,
+  planNextMealContract,
   redactToolArgsForHook,
   toolRegistry,
   FatalToolError,
+  TEXT_NON_FOOD_NO_SAVE_REPLY,
   type ToolDeps,
 } from "../../server/orchestrator/tools.js";
 import { runContract, type ToolExecuteResult } from "../../server/orchestrator/tool-contract.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import type { ToolCall } from "../../server/llm/types.js";
+import type { PlanningFacts } from "../../server/orchestrator/planning-reply-renderer.js";
 
 // Plan 10-02 Task 2: parity guarantees for log_food and get_daily_summary
 // after migration to the ToolContract registry. Failure-path tests assert at
@@ -59,6 +64,7 @@ function assertNoRawCandidateFields(candidate: Record<string, unknown>) {
 describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
   let db: ReturnType<typeof createDb>;
   let deviceId: string;
+  let deviceService: ReturnType<typeof createDeviceService>;
   let foodLoggingService: ReturnType<typeof createFoodLoggingService>;
   let summaryService: ReturnType<typeof createSummaryService>;
 
@@ -83,10 +89,146 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
   beforeEach(async () => {
     db = createDb(":memory:");
-    const deviceService = createDeviceService(db);
+    deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     summaryService = createSummaryService(db);
     deviceId = (await deviceService.createDevice("fat_loss")).deviceId;
+  });
+
+  describe("Phase 102: plan_next_meal planning facts contract", () => {
+    const planNextMealCall: ToolCall = {
+      id: "call_plan_next_meal",
+      type: "function",
+      function: {
+        name: "plan_next_meal",
+        arguments: JSON.stringify({}),
+      },
+    };
+
+    it("registers plan_next_meal as a strict direct-execute tool", () => {
+      const definition = getToolDefinitions().find(
+        (toolDefinition) => toolDefinition.function.name === "plan_next_meal",
+      );
+
+      assert.ok(definition, "plan_next_meal definition must be public");
+      assert.equal(KNOWN_TOOL_POLICY_CLASSES.plan_next_meal, "direct-execute");
+      assert.equal(planNextMealContract.name, "plan_next_meal");
+      assert.equal(planNextMealContract.policyClass, "direct-execute");
+      assert.equal(planNextMealContract.zodSchema.safeParse({}).success, true);
+      assert.equal(planNextMealContract.zodSchema.safeParse({ date_text: "today" }).success, false);
+      assert.deepEqual(definition.function.parameters, {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      });
+    });
+
+    it("returns backend-derived planningFacts for authenticated-device meals and targets", async () => {
+      await foodLoggingService.logGroupedMeal(deviceId, {
+        items: [
+          { foodName: "雞胸飯", calories: 500, protein: 40, carbs: 55, fat: 12 },
+        ],
+      });
+      await deviceService.updateGoals(deviceId, {
+        calories: 1600,
+        protein: 130,
+        carbs: 180,
+        fat: 55,
+      });
+
+      const result = await executeTool(planNextMealCall, deviceId, {
+        foodLoggingService,
+        summaryService,
+        deviceService,
+      });
+
+      assert.equal(result.summary, "status: planning");
+      assert.equal(result.success, true);
+      assert.equal(result.executed, true);
+      assert.ok(result.planningFacts, "planningFacts must be projected from contract result");
+      assert.deepEqual(result.planningFacts, {
+        date: formatLocalDate(new Date()),
+        consumed: { calories: 500, protein: 40, carbs: 55, fat: 12 },
+        target: { calories: 1600, protein: 130, carbs: 180, fat: 55 },
+        remaining: { calories: 1100, protein: 90, carbs: 125, fat: 43 },
+        macroGap: { protein: 90, carbs: 125, fat: 43 },
+        mealCount: 1,
+        hasLoggedMeals: true,
+        isOverBudget: false,
+      } satisfies PlanningFacts);
+      assert.deepEqual(JSON.parse(result.result), result.planningFacts);
+      assert.equal(result.mealMutationKind, undefined);
+      assert.equal(result.loggedMeal, undefined);
+      assert.equal(result.proposalCard, undefined);
+      assert.equal(result.controlledReply, undefined);
+    });
+
+    it("handles no-meal and over-budget planning states without mutation fields", async () => {
+      const noMealResult = await executeTool(planNextMealCall, deviceId, {
+        foodLoggingService,
+        summaryService,
+        deviceService,
+      });
+
+      assert.ok(noMealResult.planningFacts);
+      assert.equal(noMealResult.planningFacts.hasLoggedMeals, false);
+      assert.equal(noMealResult.planningFacts.mealCount, 0);
+      assert.equal(noMealResult.planningFacts.remaining.calories, noMealResult.planningFacts.target.calories);
+      assert.equal(noMealResult.planningFacts.isOverBudget, false);
+      assert.equal(noMealResult.mealMutationKind, undefined);
+      assert.equal(noMealResult.loggedMeal, undefined);
+      assert.equal(noMealResult.proposalCard, undefined);
+
+      const overBudgetDeviceId = (await deviceService.createDevice("fat_loss", undefined, {
+        calories: 600,
+        protein: 80,
+        carbs: 70,
+        fat: 25,
+      })).deviceId;
+      await foodLoggingService.logGroupedMeal(overBudgetDeviceId, {
+        items: [
+          { foodName: "牛肉麵", calories: 760, protein: 35, carbs: 88, fat: 28 },
+        ],
+      });
+
+      const overBudgetResult = await executeTool(planNextMealCall, overBudgetDeviceId, {
+        foodLoggingService,
+        summaryService,
+        deviceService,
+      });
+
+      assert.ok(overBudgetResult.planningFacts);
+      assert.equal(overBudgetResult.planningFacts.isOverBudget, true);
+      assert.deepEqual(overBudgetResult.planningFacts.remaining, {
+        calories: 0,
+        protein: 45,
+        carbs: 0,
+        fat: 0,
+      });
+      assert.equal(overBudgetResult.mealMutationKind, undefined);
+      assert.equal(overBudgetResult.loggedMeal, undefined);
+      assert.equal(overBudgetResult.proposalCard, undefined);
+    });
+
+    it("keeps plan_next_meal logSummary metadata-only", () => {
+      const summary = planNextMealContract.logSummary({});
+      const serialized = JSON.stringify(summary);
+
+      assert.deepEqual(summary, { tool: "plan_next_meal" });
+      assert.doesNotMatch(serialized, /\b\d{2,}\b/);
+      assert.doesNotMatch(serialized, /kcal|protein|carbs|fat|calories|prompt|user/i);
+    });
+
+    it("maps device rows to DailyTargets locally in tools.ts without importing getDeviceTargets", async () => {
+      const source = await readFile(new URL("../../server/orchestrator/tools.ts", import.meta.url), "utf8");
+
+      assert.doesNotMatch(source, /from\s+["']\.\/index\.js["']/);
+      assert.doesNotMatch(source, /\bgetDeviceTargets\b/);
+      assert.match(source, /dailyCalories/);
+      assert.match(source, /dailyProtein/);
+      assert.match(source, /dailyCarbs/);
+      assert.match(source, /dailyFat/);
+    });
   });
 
   // Plan 83-03 (D-01): the single-item union half is gone. A top-level
@@ -1106,6 +1248,358 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
 
     const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
     assert.equal(meals.length, 0);
+  });
+
+  it("returns text_non_food_no_save for text-only exercise/non-food all-zero log_food attempts", async () => {
+    const result = await executeTool({
+      id: "call_text_non_food_exercise",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "重量訓練",
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+    }, {
+      currentUserMessage: "80公斤 5下5組",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.result, TEXT_NON_FOOD_NO_SAVE_REPLY);
+    assert.equal(result.summary, "failureReason: text_non_food_no_save");
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "text_non_food_no_save",
+      text: TEXT_NON_FOOD_NO_SAVE_REPLY,
+    });
+    assert.equal(result.dailySummary, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(result.loggedMeal, undefined);
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 0);
+  });
+
+  it("keeps text_non_food_no_save distinct from failed-recognition photo copy", async () => {
+    const result = await executeTool({
+      id: "call_text_non_food_misc",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "運動紀錄",
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+    }, {
+      currentUserMessage: "今天深蹲 80kg 5x5",
+    });
+
+    assert.equal(result.result, TEXT_NON_FOOD_NO_SAVE_REPLY);
+    assert.notEqual(result.result, FAILED_RECOGNITION_NO_SAVE_REPLY);
+    assert.equal(result.controlledReply?.reason, "text_non_food_no_save");
+  });
+
+  it("returns text_non_food_no_save before recent correction proposal for positive exercise attempts", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      ],
+    });
+    const mealNumericProposalService = createMealNumericProposalService(db);
+    let logCalls = 0;
+    const wrappedFoodLoggingService = {
+      ...foodLoggingService,
+      async logGroupedMeal(...args: Parameters<typeof foodLoggingService.logGroupedMeal>) {
+        logCalls += 1;
+        return foodLoggingService.logGroupedMeal(...args);
+      },
+    } as typeof foodLoggingService;
+
+    const result = await executeTool({
+      id: "call_recent_positive_exercise_no_save",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "跑步",
+              calories: 300,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+            },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService: wrappedFoodLoggingService,
+      summaryService,
+      mealCorrectionService: createMealCorrectionService(db),
+      mealNumericProposalService,
+      recentMealLogStateService: {
+        async putLatest() {},
+        async getLatest() {
+          return {
+            mealId: created.id,
+            mealRevisionId: created.mealRevisionId,
+            dateKey: "2026-03-25",
+            foodName: "雞腿",
+            itemNames: ["雞腿"],
+            loggedAt: created.loggedAt,
+          };
+        },
+        async clear() {},
+      },
+    } as ToolDeps, {
+      currentUserMessage: "剛剛跑步30分鐘",
+    });
+
+    assert.equal(logCalls, 0);
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.result, TEXT_NON_FOOD_NO_SAVE_REPLY);
+    assert.equal(result.controlledReply?.reason, "text_non_food_no_save");
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0]?.id, created.id);
+  });
+
+  it("creates recent_correction_reestimate_proposal instead of a second log_food meal", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    const mealCorrectionService = createMealCorrectionService(db);
+    const mealNumericProposalService = createMealNumericProposalService(db);
+    const mealDeleteProposalService = createMealDeleteProposalService(db);
+    await mealDeleteProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      input: {
+        mealId: created.id,
+        expectedMealRevisionId: created.mealRevisionId,
+        snapshot: {
+          mealId: created.id,
+          expectedMealRevisionId: created.mealRevisionId,
+          mealLabel: "雞腿、白飯",
+          calories: 540,
+          protein: 28,
+          carbs: 62,
+          fat: 12.5,
+          dateKey: "2026-03-25",
+          loggedAt: created.loggedAt,
+          mealPeriod: "lunch",
+        },
+      },
+    });
+    let logCalls = 0;
+    const wrappedFoodLoggingService = {
+      ...foodLoggingService,
+      async logGroupedMeal(...args: Parameters<typeof foodLoggingService.logGroupedMeal>) {
+        logCalls += 1;
+        return foodLoggingService.logGroupedMeal(...args);
+      },
+    } as typeof foodLoggingService;
+
+    const result = await executeTool({
+      id: "call_recent_correction_reestimate",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+            { food_name: "白飯", calories: 220, protein: 6, carbs: 50, fat: 0.5 },
+          ],
+          protein_sources: [
+            { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+            { name: "白飯", protein: 6, is_primary: false, certainty: "clear" },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService: wrappedFoodLoggingService,
+      summaryService,
+      mealCorrectionService,
+      mealNumericProposalService,
+      mealDeleteProposalService,
+      recentMealLogStateService: {
+        async putLatest() {},
+        async getLatest() {
+          return {
+            mealId: created.id,
+            mealRevisionId: created.mealRevisionId,
+            dateKey: "2026-03-25",
+            foodName: "雞腿、白飯",
+            itemNames: ["雞腿", "白飯"],
+            loggedAt: created.loggedAt,
+          };
+        },
+        async clear() {},
+      },
+    } as ToolDeps, {
+      currentUserMessage: "剛剛白飯其實只有100g，不是150g。請更正剛剛那一餐，不要新增第二餐",
+    });
+    const proposal = await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+
+    assert.equal(logCalls, 0);
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, created.id);
+    assert.equal(proposal.expectedMealRevisionId, created.mealRevisionId);
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.equal(proposal.updateInput?.calories, 480);
+    assert.equal(proposal.updateInput?.protein, 30);
+    assert.equal(result.success, true);
+    assert.equal(result.executed, true);
+    assert.equal(result.summary, "status: proposal");
+    assert.ok(result.proposalCard);
+    assert.equal(result.proposalCard.proposalKind, "meal_estimate");
+    assert.match(result.result, /其實是新的一餐 -> 照常記錄/);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "meal_numeric_proposal",
+      text: result.result,
+    });
+    assert.equal(result.mealMutationKind, undefined);
+    assert.equal(result.loggedMeal, undefined);
+    assert.equal(result.summaryOutcome, undefined);
+    assert.equal(await mealDeleteProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    assert.equal(meals.length, 1);
+  });
+
+  it("does not trigger recent_correction_reestimate_proposal for explicit genuine-new-meal text", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      ],
+    });
+    const mealNumericProposalService = createMealNumericProposalService(db);
+
+    const result = await executeTool({
+      id: "call_recent_new_meal_bypass",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            { food_name: "香蕉", calories: 100, protein: 1, carbs: 23, fat: 0 },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: createMealCorrectionService(db),
+      mealNumericProposalService,
+      recentMealLogStateService: {
+        async putLatest() {},
+        async getLatest() {
+          return {
+            mealId: created.id,
+            mealRevisionId: created.mealRevisionId,
+            dateKey: "2026-03-25",
+            foodName: "雞腿",
+            itemNames: ["雞腿"],
+            loggedAt: created.loggedAt,
+          };
+        },
+        async clear() {},
+      },
+    } as ToolDeps, {
+      currentUserMessage: "其實是新的一餐，照常記錄",
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "香蕉");
+    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+  });
+
+  it("does not treat recency-only new meal text as a correction proposal", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+      ],
+    });
+    const mealNumericProposalService = createMealNumericProposalService(db);
+
+    const result = await executeTool({
+      id: "call_recent_word_new_meal_bypass",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            { food_name: "香蕉", calories: 100, protein: 1, carbs: 23, fat: 0 },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      mealCorrectionService: createMealCorrectionService(db),
+      mealNumericProposalService,
+      recentMealLogStateService: {
+        async putLatest() {},
+        async getLatest() {
+          return {
+            mealId: created.id,
+            mealRevisionId: created.mealRevisionId,
+            dateKey: "2026-03-25",
+            foodName: "雞腿",
+            itemNames: ["雞腿"],
+            loggedAt: created.loggedAt,
+          };
+        },
+        async clear() {},
+      },
+    } as ToolDeps, {
+      currentUserMessage: "剛剛又吃香蕉",
+    });
+
+    assert.equal(result.summary, "成功");
+    assert.ok(result.loggedMeal);
+    assert.equal(result.loggedMeal.foodName, "香蕉");
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 1);
+    assert.equal(meals[0]?.foodName, "香蕉");
   });
 
   it("allows plausible image log_food with one zero macro to persist", async () => {

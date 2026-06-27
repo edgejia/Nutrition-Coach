@@ -12,11 +12,22 @@ interface TurnStateRow {
 }
 
 export const DEFAULT_SESSION_ID = "__default__";
+export const RECENT_MEAL_LOG_KIND = "recent_meal_log";
+export const RECENT_MEAL_LOG_TTL_MS = 5 * 60 * 1000;
 
 export interface TurnStateKey {
   deviceId: string;
   sessionId: string;
   kind: string;
+}
+
+export interface RecentMealLogPayload {
+  mealId: string;
+  mealRevisionId: string;
+  dateKey: string;
+  foodName: string;
+  itemNames: string[];
+  loggedAt: string;
 }
 
 export interface ConsumeTurnStateParams extends TurnStateKey {
@@ -145,6 +156,58 @@ export function createTurnStateService(db: AppDatabase) {
       }
 
       return JSON.parse(row.payload) as T;
+    },
+  };
+}
+
+export function createRecentMealLogStateService(db: AppDatabase) {
+  const turnStateService = createTurnStateService(db);
+
+  return {
+    async putLatest({
+      deviceId,
+      sessionId,
+      payload,
+    }: {
+      deviceId: string;
+      sessionId: string;
+      payload: RecentMealLogPayload;
+    }): Promise<void> {
+      await turnStateService.putState({
+        deviceId,
+        sessionId,
+        kind: RECENT_MEAL_LOG_KIND,
+        payload,
+        ttlMs: RECENT_MEAL_LOG_TTL_MS,
+      });
+    },
+
+    async getLatest({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }): Promise<RecentMealLogPayload | undefined> {
+      return turnStateService.getState<RecentMealLogPayload>({
+        deviceId,
+        sessionId,
+        kind: RECENT_MEAL_LOG_KIND,
+      });
+    },
+
+    async clear({
+      deviceId,
+      sessionId,
+    }: {
+      deviceId: string;
+      sessionId: string;
+    }): Promise<void> {
+      await turnStateService.clearState({
+        deviceId,
+        sessionId,
+        kind: RECENT_MEAL_LOG_KIND,
+      });
     },
   };
 }

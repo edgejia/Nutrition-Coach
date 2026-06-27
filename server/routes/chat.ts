@@ -7,6 +7,7 @@ import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
 } from "../orchestrator/summary-history-renderer.js";
+import type { PlanningFacts } from "../orchestrator/planning-reply-renderer.js";
 import { buildAssetUrl, makeAssetRef, parseAssetRef, type createAssetService } from "../services/assets.js";
 import type { createChatService, MealReceiptStatus } from "../services/chat.js";
 import type { createDeviceService } from "../services/device.js";
@@ -124,6 +125,7 @@ interface StreamingReplyResult {
   didLogMeal: boolean;
   dailySummary?: unknown;
   summaryHistoryFacts?: SummaryHistoryFacts;
+  planningFacts?: PlanningFacts;
   stopped?: boolean;
   tokensStreamed: number;
   finalReplySource: LlmTraceFinalReplySource;
@@ -313,16 +315,22 @@ function normalizeRouteFinalReply(
   rawReply: string,
   mutationProjection: Pick<CommittedMutationProjection, "mutationKind" | "hasCommittedMutation">,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
-  opts: { composeSummaryHistory?: boolean; rendererOwnedSummaryHistory?: boolean } = {},
+  opts: {
+    composeSummaryHistory?: boolean;
+    rendererOwnedSummaryHistory?: boolean;
+    planningFacts?: PlanningFacts;
+    rendererOwnedPlanning?: boolean;
+  } = {},
 ): { reply: string; composedSummaryHistory: boolean } {
   const composedSummaryHistory = opts.composeSummaryHistory !== false
     && shouldComposeSummaryHistoryReply(mutationProjection, summaryHistoryFacts);
   const rendererOwnedSummaryHistory = opts.rendererOwnedSummaryHistory === true
     && shouldComposeSummaryHistoryReply(mutationProjection, summaryHistoryFacts);
+  const rendererOwnedPlanning = opts.rendererOwnedPlanning === true && Boolean(opts.planningFacts);
   const reply = composedSummaryHistory
     ? composeSummaryHistoryReply(summaryHistoryFacts, rawReply)
     : rawReply;
-  if (composedSummaryHistory || rendererOwnedSummaryHistory) {
+  if (composedSummaryHistory || rendererOwnedSummaryHistory || rendererOwnedPlanning) {
     return {
       reply,
       composedSummaryHistory: true,
@@ -331,6 +339,7 @@ function normalizeRouteFinalReply(
   return {
     reply: guardNoMutationSuccessClaim(reply, mutationProjection, {
       summaryHistoryFacts,
+      planningFacts: opts.planningFacts,
     }),
     composedSummaryHistory,
   };
@@ -887,6 +896,7 @@ async function handleStreamingReply(
   mutationProjection: Pick<CommittedMutationProjection, "mutationKind" | "hasCommittedMutation" | "didLogMeal" | "didMutateMeal">,
   dailySummary: unknown,
   summaryHistoryFacts: SummaryHistoryFacts | undefined,
+  planningFacts: PlanningFacts | undefined,
   receiptIdentity: ReceiptIdentity | undefined,
   mutationOutcomeFact: ChatMutationOutcomeFact | undefined,
   affectedDate?: string,
@@ -977,6 +987,7 @@ async function handleStreamingReply(
     const stoppedReply = sanitizeReply(
       guardNoMutationSuccessClaim(fullReply, mutationProjection, {
         summaryHistoryFacts,
+        planningFacts,
       }),
     ) || STOPPED_EMPTY_COPY;
     const persistedReply = await persistFinalReply(stoppedReply, { status: "stopped" });
@@ -1028,7 +1039,9 @@ async function handleStreamingReply(
   const {
     reply: guardedFullReply,
     composedSummaryHistory,
-  } = normalizeRouteFinalReply(fullReply, mutationProjection, summaryHistoryFacts);
+  } = normalizeRouteFinalReply(fullReply, mutationProjection, summaryHistoryFacts, {
+    planningFacts,
+  });
   if (noMutationLoggingClaimDetected || guardedFullReply !== fullReply) {
     const sanitizedReply = sanitizeReply(guardedFullReply);
     const finalChunk = sanitizer.flush();
@@ -1044,6 +1057,7 @@ async function handleStreamingReply(
       didLogMeal,
       dailySummary,
       summaryHistoryFacts,
+      planningFacts,
       tokensStreamed,
       finalReplySource: composedSummaryHistory ? "renderer" : "fallback",
       finalReplyShape: composedSummaryHistory
@@ -1067,6 +1081,7 @@ async function handleStreamingReply(
       didLogMeal,
       dailySummary,
       summaryHistoryFacts,
+      planningFacts,
       tokensStreamed,
       finalReplySource: composedSummaryHistory ? "renderer" : "model",
       finalReplyShape: persistedReply.trim() ? "streamed_text" : "empty_or_missing",
@@ -1251,6 +1266,7 @@ async function handleOrchestratorSSE(
         dailySummary,
         summaryOutcome,
         summaryHistoryFacts,
+        planningFacts,
         affectedDate,
         deletedMealId,
         loggedMeal,
@@ -1280,6 +1296,7 @@ async function handleOrchestratorSSE(
         mutationProjection,
         dailySummary,
         summaryHistoryFacts,
+        planningFacts,
         streamReceiptIdentity,
         streamMutationOutcomeFact,
         streamAffectedDate,
@@ -1357,6 +1374,7 @@ async function handleOrchestratorSSE(
         dailySummary,
         summaryOutcome,
         summaryHistoryFacts,
+        planningFacts,
         dailyTargets,
         affectedDate,
         deletedMealId,
@@ -1391,6 +1409,8 @@ async function handleOrchestratorSSE(
         {
           composeSummaryHistory: shouldComposeSummaryHistory,
           rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
+          planningFacts,
+          rendererOwnedPlanning: result.finalReplySource === "renderer",
         },
       ).reply;
       const alreadyPersistedAssistantReply = result.assistantReplyPersistence === "already_persisted";
@@ -1752,7 +1772,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
-          const { streamGenerator, dailySummary, summaryHistoryFacts, affectedDate } = result;
+          const { streamGenerator, dailySummary, summaryHistoryFacts, planningFacts, affectedDate } = result;
           const didLogMeal = jsonMutationProjection.didLogMeal;
           const didMutateMeal = jsonMutationProjection.didMutateMeal;
           let fullReply = "";
@@ -1774,7 +1794,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             modelReplyText,
             jsonMutationProjection,
             summaryHistoryFacts,
-            { composeSummaryHistory: !hallucinationDetected },
+            {
+              composeSummaryHistory: !hallucinationDetected,
+              planningFacts,
+            },
           );
           const finalized = await finalizeAssistantReply(
             chatService,
@@ -1836,7 +1859,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           };
         }
 
-        const { reply: replyText, dailySummary, summaryHistoryFacts, dailyTargets, affectedDate } = result;
+        const { reply: replyText, dailySummary, summaryHistoryFacts, planningFacts, dailyTargets, affectedDate } = result;
         const didLogMeal = jsonMutationProjection.didLogMeal;
         jsonProposalActionEvent = result.proposalActionEvent;
         const shouldComposeSummaryHistory = result.finalReplySource !== "renderer"
@@ -1848,6 +1871,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           {
             composeSummaryHistory: shouldComposeSummaryHistory,
             rendererOwnedSummaryHistory: result.finalReplySource === "renderer",
+            planningFacts,
+            rendererOwnedPlanning: result.finalReplySource === "renderer",
           },
         ).reply;
         const alreadyPersistedAssistantReply = result.assistantReplyPersistence === "already_persisted";

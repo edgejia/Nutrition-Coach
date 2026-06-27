@@ -12,9 +12,33 @@ function goalUpdateSection(prompt: string): string {
   return match[0];
 }
 
+function responsibilitiesSection(prompt: string): string {
+  const match = /你的職責：[\s\S]*?(?=\n\n餐點拆分與記錄規則：)/.exec(prompt);
+  assert.ok(match, "responsibilities section must be present");
+  return match[0];
+}
+
 function mealCorrectionSection(prompt: string): string {
   const match = /歷史餐點修正規則：[\s\S]*?(?=\n\n歷史日期規則：)/.exec(prompt);
   assert.ok(match, "meal correction section must be present");
+  return match[0];
+}
+
+function planningRoutingSection(prompt: string): string {
+  const match = /飲食規劃工具路由：[\s\S]*?(?=\n\n教練規劃模式 coach_planning：)/.exec(prompt);
+  assert.ok(match, "planning routing section must be present");
+  return match[0];
+}
+
+function coachPlanningSection(prompt: string): string {
+  const match = /教練規劃模式 coach_planning：[\s\S]*?(?=\n\n精簡教練模式 coach_compact：)/.exec(prompt);
+  assert.ok(match, "coach planning section must be present");
+  return match[0];
+}
+
+function coachCompactSection(prompt: string): string {
+  const match = /精簡教練模式 coach_compact：[\s\S]*?(?=\n\n目標更新規則：)/.exec(prompt);
+  assert.ok(match, "coach compact section must be present");
   return match[0];
 }
 
@@ -24,6 +48,20 @@ const LEGACY_GOAL_UPDATE_SECTION = `目標更新規則：
 3. 若上一輪你已推薦具體數值，而使用者回覆「好」、「可以」、「幫我更新」、「就這樣」等明確同意，才可以依上一輪推薦的數字更新目標。
 4. 成功更新後，最終回覆必須原文呈現工具回傳的收據文字，包含「已更新每日目標：」開頭與四行目標數值。
 5. 不要向使用者提及內部工具名稱或系統欄位。`;
+
+const LEGACY_RESPONSIBILITIES_SECTION = `你的職責：
+1. 當使用者描述吃了什麼（文字或照片）時，直接根據文字與照片內容估算餐點營養，並立即完成餐點記錄。
+2. 若只有照片沒有補充文字，使用常見份量做一次審慎估計並直接記錄。本產品沒有「方式1 / 方式2」或額外確認流程，不要要求使用者選擇處理方向。
+3. 只有在照片內容完全無法辨識為任何合理餐點時，才請使用者補充文字描述；這種不確定照片不要呼叫 log_food，也不要用 unknown、unrecognized、無法辨識內容、未知食物或 0 kcal 餐點當作記錄內容。
+4. 當使用者說「直接記錄」、「幫我記錄」、「不知道」、「隨便」等，視為同意使用目前估算值立即完成餐點記錄。
+5. 若該餐已經在本輪對話中記錄完成，就直接告知已完成記錄與大致估算；不要在記錄後再要求確認、改選方法或重新決定要不要記錄。
+6. 若前文出現「方式1 / 方式2」等選項，視為先前回覆失誤，不要延續這種流程。
+7. 當使用者詢問今日攝取狀況，先查詢今日攝取摘要後再回答。
+8. 對油、糖、醬料等隱藏熱量，估算偏高（保守估計）。
+9. 不要向使用者提及任何內部工具名稱、函式名稱或系統欄位；只描述你已完成的動作、估算方式與結果。
+10. 遇到疾病、症狀、血糖、用藥或治療相關問題時，只能提供一般健康/營養建議；不得診斷、開立處方、調整藥物，或把疾病處置說成權威照護。請建議使用者諮詢醫師或合格專業人員。
+
+回覆語言：繁體中文。保持友善、簡潔。`;
 
 const LEGACY_MEAL_CORRECTION_SECTION = `歷史餐點修正規則：
 1. 當使用者要修改或刪除舊餐點時，先解析目標餐點，再決定是否執行 mutation；不要把修正需求當成新的 log_food。
@@ -38,6 +76,10 @@ const LEGACY_MEAL_CORRECTION_SECTION = `歷史餐點修正規則：
 
 function normalizeSectionsForLegacySnapshot(prompt: string): string {
   return prompt
+    .replace(`${planningRoutingSection(prompt)}\n\n`, "")
+    .replace(`${coachPlanningSection(prompt)}\n\n`, "")
+    .replace(`${coachCompactSection(prompt)}\n\n`, "")
+    .replace(responsibilitiesSection(prompt), LEGACY_RESPONSIBILITIES_SECTION)
     .replace(goalUpdateSection(prompt), LEGACY_GOAL_UPDATE_SECTION)
     .replace(mealCorrectionSection(prompt), LEGACY_MEAL_CORRECTION_SECTION);
 }
@@ -53,6 +95,9 @@ describe("buildSystemPrompt", () => {
       mealItemization: "meal-itemization",
       proteinEstimation: "protein-estimation",
       logFoodReceipt: "log-food-receipt",
+      planningRouting: "planning-routing",
+      coachPlanning: "coach-planning",
+      coachCompact: "coach-compact",
       goalUpdates: "goal-updates",
       mealCorrections: "meal-corrections",
       historicalDates: "historical-dates",
@@ -96,6 +141,8 @@ describe("buildSystemPrompt", () => {
       outputLanguage: [
         SYSTEM_PROMPT_SECTION_IDS.responsibilities,
         SYSTEM_PROMPT_SECTION_IDS.logFoodReceipt,
+        SYSTEM_PROMPT_SECTION_IDS.coachPlanning,
+        SYSTEM_PROMPT_SECTION_IDS.coachCompact,
       ],
     } as const;
     const sectionIds = new Set(Object.values(SYSTEM_PROMPT_SECTION_IDS));
@@ -390,6 +437,79 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /主要蛋白來源/);
   });
 
+  it("adds only the Phase 102 coach planning section metadata with kebab-case IDs", () => {
+    assert.equal(SYSTEM_PROMPT_SECTION_IDS.planningRouting, "planning-routing");
+    assert.equal(SYSTEM_PROMPT_SECTION_IDS.coachPlanning, "coach-planning");
+    assert.equal(SYSTEM_PROMPT_SECTION_IDS.coachCompact, "coach-compact");
+
+    const sectionIds = Object.values(SYSTEM_PROMPT_SECTION_IDS);
+    const phase102Ids = sectionIds.filter((id) => id.includes("planning") || id.includes("compact"));
+
+    assert.deepEqual(phase102Ids, ["planning-routing", "coach-planning", "coach-compact"]);
+    assert.equal(new Set(sectionIds).size, sectionIds.length);
+    assert.ok(sectionIds.every((id) => /^[a-z]+(?:-[a-z]+)*$/.test(id)));
+  });
+
+  it("routes summary/history facts to get_daily_summary and next-meal planning to plan_next_meal", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+    const section = planningRoutingSection(prompt);
+
+    assert.match(section, /get_daily_summary/);
+    assert.match(section, /摘要|歷史|吃了什麼|攝取狀況/);
+    assert.match(section, /summary-only|只回摘要|摘要-only/);
+    assert.match(section, /plan_next_meal/);
+    assert.match(section, /下一餐|剩餘熱量|剩餘預算|macro gap|營養缺口|蛋白質補足/);
+    assert.match(section, /coach_planning/);
+    assert.match(section, /不要.*CTA promptKey|不需要.*promptKey|不依賴.*promptKey/s);
+  });
+
+  it("keeps successful log_food receipts deterministic and coach guidance out of receipt cards", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+    const receiptSection = /成功 log_food 回覆契約：[\s\S]*?(?=\n\n飲食規劃工具路由：)/.exec(prompt)?.[0] ?? "";
+    const planningSection = `${planningRoutingSection(prompt)}\n${coachPlanningSection(prompt)}\n${coachCompactSection(prompt)}`;
+
+    assert.match(receiptSection, /成功 log_food 回覆/);
+    assert.match(receiptSection, /純文字段落/);
+    assert.match(receiptSection, /最多 90/);
+    assert.match(planningSection, /成功 log_food.*既有.*deterministic|成功 log_food.*確定性收據|成功 log_food.*短 deterministic/s);
+    assert.match(planningSection, /不要.*coach note|不得.*coach note|不加.*教練補充/s);
+    assert.match(planningSection, /receipt card|收據卡/);
+    assert.match(planningSection, /後端.*事實|committed facts|persisted meal revision/s);
+    assert.match(planningSection, /coach.*normal assistant text|教練.*一般助理文字|一般聊天文字/s);
+    assert.match(planningSection, /不得.*改寫.*receipt card|不得.*收據卡.*欄位/s);
+  });
+
+  it("defines compact coach_planning and coach_compact output without markdown tables", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 200,
+      fat: 60,
+    });
+    const coachSections = `${coachPlanningSection(prompt)}\n${coachCompactSection(prompt)}`;
+
+    assert.match(coachSections, /coach_planning/);
+    assert.match(coachSections, /coach_compact/);
+    assert.match(coachSections, /直接結論/);
+    assert.match(coachSections, /簡短理由|短理由/);
+    assert.match(coachSections, /實用選項/);
+    assert.match(coachSections, /一個下一步/);
+    assert.match(coachSections, /最多 5 個 bullet|最多 5 個項目|最多五個/);
+    assert.match(coachSections, /不得.*markdown table|不要.*markdown table|不得.*表格|不要.*表格/s);
+    assert.match(coachSections, /繁體中文/);
+    assert.match(coachSections, /醫師|專業人員|不得診斷/);
+  });
+
   it("defines non-speculative grouped logging examples and allows items.length === 1", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1800,
@@ -572,6 +692,81 @@ describe("buildSystemPrompt", () => {
     assert.match(section, /find_meals.*唯一目標.*propose_meal_estimate/s);
     assert.match(section, /未指定欄位.*卡路里.*蛋白質.*碳水.*脂肪/s);
     assert.match(section, /只要求.*單一欄位.*只估.*該欄位/s);
+  });
+
+  it("Phase 103 routes concrete ingredient and portion corrections through find_meals then propose_meal_estimate", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /白飯.*100g.*150g|150g.*100g.*白飯/s);
+    assert.match(section, /蛋白質.*目測.*100g|100g.*蛋白質.*目測/s);
+    assert.match(section, /食材|ingredient|份量|portion/);
+    assert.match(section, /find_meals.*propose_meal_estimate/s);
+    assert.match(section, /不得.*明確.*kcal.*protein.*carbs.*fat|不要.*明確.*熱量.*蛋白質.*碳水.*脂肪/s);
+  });
+
+  it("Phase 103 keeps explicit macro targets on propose_meal_numeric_correction", () => {
+    const section = mealCorrectionSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /明確.*kcal|明確.*熱量/);
+    assert.match(section, /protein|蛋白質/);
+    assert.match(section, /carbs|碳水/);
+    assert.match(section, /fat|脂肪/);
+    assert.match(section, /propose_meal_numeric_correction/);
+  });
+
+  it("Phase 103 states exercise and non-food requests are nutrition-only no-save turns", () => {
+    const section = responsibilitiesSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /營養.*餐點.*only|只.*營養.*餐點|只.*餐點.*營養/s);
+    assert.match(section, /運動|exercise/);
+    assert.match(section, /非食物|non-food/);
+    assert.match(section, /不.*保存|不.*儲存|不.*寫入/);
+    assert.match(section, /不要.*log_food|不得.*log_food/);
+    assert.match(section, /不要.*承諾.*運動.*記錄|不得.*承諾.*運動.*記錄|不要.*說.*已.*運動.*記錄/s);
+  });
+
+  it("Phase 103 keeps explicit food-photo analysis and pre-eating questions non-mutating", () => {
+    const section = responsibilitiesSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /這是什麼|熱量|營養素|菜單|參考/);
+    assert.match(section, /還沒吃|尚未吃|準備吃|只是參考/);
+    assert.match(section, /只分析|只估算|分析或估算/);
+    assert.match(section, /不要.*log_food|不得.*log_food/);
+    assert.match(section, /不要.*寫入.*餐點|不得.*寫入.*餐點|不要.*記錄.*餐點/s);
+  });
+
+  it("Phase 103 preserves image-only and explicit record-this photo fast logging", () => {
+    const section = responsibilitiesSection(buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    }));
+
+    assert.match(section, /只有照片|照片沒有補充文字/);
+    assert.match(section, /直接記錄|幫我記錄|record this/);
+    assert.match(section, /log_food|記錄工具/);
+    assert.match(section, /no extra confirmation|不.*額外確認|無需.*確認|不要.*要求.*確認/);
   });
 
   it("keeps vague non-estimate corrections out of estimated direct update paths", () => {

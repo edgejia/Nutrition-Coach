@@ -7,6 +7,7 @@ import { formatLocalDate } from "../lib/time.js";
 import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
 import { PersistedAssetImage } from "./PersistedAssetImage.js";
+import { PullToRefreshSurface } from "./PullToRefreshSurface.js";
 import { SportFlameIcon, SportSettingsIcon } from "./SportIcons.js";
 import { SportCard, SportIconButton, SportProgressBar, SportRing, SportScreen } from "./SportPrimitives.js";
 import type {
@@ -148,13 +149,18 @@ function prefersReducedMotion() {
   );
 }
 
-function useCountUpNumber(targetValue: number, options: { durationMs?: number; animate?: boolean } = {}) {
+function useCountUpNumber(targetValue: number, options: { durationMs?: number; animate?: boolean; replayKey?: number } = {}) {
   const previousValueRef = useRef<number | null>(null);
+  const previousReplayKeyRef = useRef<number | undefined>(options.replayKey);
   const frameRef = useRef<number | null>(null);
   const activeAnimationTargetRef = useRef<number | null>(null);
   const [displayValue, setDisplayValue] = useState(targetValue);
   const durationMs = options.durationMs ?? 450;
   const animate = options.animate === true;
+  const replayChanged =
+    options.replayKey !== undefined &&
+    previousReplayKeyRef.current !== undefined &&
+    previousReplayKeyRef.current !== options.replayKey;
 
   useEffect(() => {
     if (frameRef.current !== null) {
@@ -163,14 +169,18 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
     }
 
     const previousValue = previousValueRef.current;
-    if (animate !== true || prefersReducedMotion() === true || previousValue === null) {
+    if ((animate !== true && !replayChanged) || prefersReducedMotion() === true || previousValue === null) {
       activeAnimationTargetRef.current = null;
       previousValueRef.current = targetValue;
+      previousReplayKeyRef.current = options.replayKey;
       setDisplayValue(targetValue);
       return;
     }
 
-    const startValue = previousValue;
+    const replayOffset = Math.max(1, Math.round(Math.abs(targetValue) * 0.08));
+    const startValue = replayChanged && previousValue === targetValue
+      ? Math.max(0, targetValue - replayOffset)
+      : previousValue;
     let startTime: number | null = null;
     activeAnimationTargetRef.current = targetValue;
 
@@ -190,6 +200,7 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
       frameRef.current = null;
       activeAnimationTargetRef.current = null;
       previousValueRef.current = targetValue;
+      previousReplayKeyRef.current = options.replayKey;
       setDisplayValue(targetValue);
     };
 
@@ -204,7 +215,7 @@ function useCountUpNumber(targetValue: number, options: { durationMs?: number; a
         activeAnimationTargetRef.current = null;
       }
     };
-  }, [durationMs, targetValue]);
+  }, [durationMs, options.replayKey, replayChanged, targetValue, animate]);
 
   return displayValue;
 }
@@ -259,6 +270,13 @@ export function sendHomeCtaTaskOption(
   stageHomeTaskOptionPrompt(option.prompt, setPendingHomeChatDraft, setActiveScreen, createId);
 }
 
+export interface HomeScreenProps {
+  onRefreshToday: () => void | Promise<void>;
+  refreshingToday: boolean;
+  refreshTodayError: string | null;
+  refreshCueToken: number;
+}
+
 function HomeHeader() {
   const openSecondaryScreen = useStore((s) => s.openSecondaryScreen);
   const sending = useStore((s) => s.sending);
@@ -286,41 +304,94 @@ function HomeHeader() {
           {dateStr} · {statusText}
         </div>
       </div>
-      <SportIconButton
-        onClick={() => {
-          if (!sending) openSecondaryScreen("settings", "home");
-        }}
-        disabled={sending}
-        aria-label="設定"
-      >
-        <SportSettingsIcon size={19} />
-      </SportIconButton>
+      <div className="home-sport-header-actions">
+        <SportIconButton
+          onClick={() => {
+            if (!sending) openSecondaryScreen("settings", "home");
+          }}
+          disabled={sending}
+          aria-label="設定"
+        >
+          <SportSettingsIcon size={19} />
+        </SportIconButton>
+      </div>
     </header>
+  );
+}
+
+function MacroCard({
+  macro,
+  refreshCueToken,
+}: {
+  macro: ReturnType<typeof getHomeMacroDisplays>[number];
+  refreshCueToken: number;
+}) {
+  // Reuse the hero's count-up mechanism so each macro number replays on every refresh, even when the
+  // value is unchanged (replayKey: refreshCueToken). The hook is called once per card at the top of
+  // MacroCard so it stays at a stable position (never inside `.map`).
+  const animatedCurrent = useCountUpNumber(macro.current, {
+    durationMs: 450,
+    animate: false,
+    replayKey: refreshCueToken,
+  });
+  const animatedPercent = useCountUpNumber(macro.percent, {
+    durationMs: 450,
+    animate: false,
+    replayKey: refreshCueToken,
+  });
+
+  return (
+    <SportCard className="home-sport-macro-card" variant="flat">
+      <div>
+        <div className="home-sport-macro-label">{macro.label}</div>
+        <div className="home-sport-macro-metric">{macro.metric}</div>
+      </div>
+      <div className="home-sport-macro-value">
+        <span>{animatedCurrent}</span>
+        <small>/{macro.target}</small>
+      </div>
+      <SportProgressBar value={macro.progress} variant={macro.variant} replayKey={refreshCueToken} />
+      <div className="home-sport-macro-percent">{animatedPercent}%</div>
+    </SportCard>
   );
 }
 
 function CalorieHero({
   dailySummary,
   dailyTargets,
+  refreshCueToken,
 }: {
   dailySummary: DailySummary | null;
   dailyTargets: DailyTargets | null;
+  refreshCueToken: number;
 }) {
   const display = getHomeCalorieDisplay(dailySummary, dailyTargets);
   const macros = getHomeMacroDisplays(dailySummary, dailyTargets);
   const previousConsumedRef = useRef<number | null>(null);
   const shouldAnimateConsumedChange =
     previousConsumedRef.current !== null && previousConsumedRef.current !== display.consumed;
-  const animatedConsumed = useCountUpNumber(display.consumed, { durationMs: 450, animate: shouldAnimateConsumedChange });
-  const animatedPercent = useCountUpNumber(display.percent, { durationMs: 450, animate: shouldAnimateConsumedChange });
+  const animatedConsumed = useCountUpNumber(display.consumed, {
+    durationMs: 450,
+    animate: shouldAnimateConsumedChange,
+    replayKey: refreshCueToken,
+  });
+  const animatedPercent = useCountUpNumber(display.percent, {
+    durationMs: 450,
+    animate: shouldAnimateConsumedChange,
+    replayKey: refreshCueToken,
+  });
+  // Derive the ring from the animated percent so the arc replays together with the kcal number.
+  const animatedRingValue = display.target > 0 ? Math.min(1, animatedPercent / 100) : display.ringValue;
 
   useEffect(() => {
     previousConsumedRef.current = display.consumed;
   }, [display.consumed]);
 
+  const refreshCueClass = refreshCueToken > 0 ? " home-sport-refresh-cue" : "";
+
   return (
     <>
-      <SportCard className="home-sport-hero" variant="glow">
+      <SportCard key={`home-hero-${refreshCueToken}`} className={`home-sport-hero${refreshCueClass}`} variant="glow">
         <div className="home-sport-hero-main">
           <div className="home-sport-calorie-copy">
             <div className="sp-label" style={{ marginBottom: 8 }}>
@@ -348,7 +419,7 @@ function CalorieHero({
           </div>
           <SportRing
             className="home-sport-ring"
-            value={display.ringValue}
+            value={animatedRingValue}
             accentTick
             label={
               <span className="home-sport-ring-label">
@@ -361,20 +432,9 @@ function CalorieHero({
           />
         </div>
       </SportCard>
-      <div className="home-sport-macro-grid">
+      <div className={`home-sport-macro-grid${refreshCueClass}`}>
         {macros.map((macro) => (
-          <SportCard key={macro.id} className="home-sport-macro-card" variant="flat">
-            <div>
-              <div className="home-sport-macro-label">{macro.label}</div>
-              <div className="home-sport-macro-metric">{macro.metric}</div>
-            </div>
-            <div className="home-sport-macro-value">
-              <span>{macro.current}</span>
-              <small>/{macro.target}</small>
-            </div>
-            <SportProgressBar value={macro.progress} variant={macro.variant} />
-            <div className="home-sport-macro-percent">{macro.percent}%</div>
-          </SportCard>
+          <MacroCard key={macro.id} macro={macro} refreshCueToken={refreshCueToken} />
         ))}
       </div>
     </>
@@ -474,7 +534,7 @@ function MealRows({
   );
 }
 
-export function HomeScreen() {
+export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError, refreshCueToken }: HomeScreenProps) {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const goal = useStore((s) => s.goal);
@@ -507,11 +567,25 @@ export function HomeScreen() {
     <div className="screen-shell sk-screen">
       <SportScreen className="home-sport-screen">
         <HomeHeader />
-        <main className="screen-scroll home-sport-scroll">
-          <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} />
-          <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
-          <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
-        </main>
+        {refreshTodayError ? (
+          <p className="home-sport-refresh-error" role="status">
+            {refreshTodayError}
+          </p>
+        ) : null}
+        <PullToRefreshSurface
+          className="home-sport-pull-refresh"
+          onRefresh={onRefreshToday}
+          refreshing={refreshingToday}
+          surfaceId="home"
+          completionLabel="今日資料已更新"
+          ariaLabel="下拉重新整理今日資料"
+        >
+          <main className="screen-scroll home-sport-scroll">
+            <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} refreshCueToken={refreshCueToken} />
+            <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
+            <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
+          </main>
+        </PullToRefreshSurface>
       </SportScreen>
     </div>
   );

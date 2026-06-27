@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../../store.js";
 import { submitIntake } from "../../api.js";
 import {
@@ -13,11 +13,37 @@ import type { IntakeData, IntakeResult, IntakeValidationIssue, OnboardingField, 
 import type { GoalClarificationQuickNoteState } from "../../lib/onboarding-stepper-flow.js";
 
 type PartialIntake = Partial<IntakeData>;
-type StepState = OnboardingStep | 6;
+export type StepState = OnboardingStep | 6;
 type BodyForm = { sex: IntakeData["sex"]; age: string; heightCm: string; weightKg: string };
 type LifestyleForm = Pick<IntakeData, "activityLevel" | "trainingFrequency"> & Pick<Partial<IntakeData>, "allergies">;
 type AdvancedForm = { bodyFatPercent: string; tdee: string; advancedNotes: string };
 type StepIssue = Pick<IntakeValidationIssue, "message" | "field">;
+
+export function getPreviousOnboardingBrowserBackStep(currentStep: StepState): OnboardingStep | null {
+  if (currentStep === 1) return null;
+  return currentStep === 6 ? 5 : ((currentStep - 1) as OnboardingStep);
+}
+
+const ONBOARDING_HISTORY_STATE_KEY = "nutritionCoachOnboardingStep";
+
+function getOnboardingHistoryStep(state: unknown): StepState | null {
+  if (typeof state !== "object" || state === null) {
+    return null;
+  }
+  const value = (state as { [ONBOARDING_HISTORY_STATE_KEY]?: unknown })[ONBOARDING_HISTORY_STATE_KEY];
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 6
+    ? (value as StepState)
+    : null;
+}
+
+function writeOnboardingHistoryStep(step: StepState, mode: "push" | "replace") {
+  const state = { [ONBOARDING_HISTORY_STATE_KEY]: step };
+  if (mode === "push") {
+    window.history.pushState(state, "", window.location.href);
+    return;
+  }
+  window.history.replaceState(state, "", window.location.href);
+}
 
 const ONBOARDING_NUMERIC_BOUNDS = {
   age: { min: 10, max: 120 },
@@ -180,7 +206,13 @@ function SpNumberWheel({
   const current = Number(value || 0);
   const activeValue = clampNumericValue(current, min, max);
   const clamp = (n: number) => String(clampNumericValue(n, min, max));
+  const activeDragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => {
+    activeDragCleanupRef.current?.();
+    activeDragCleanupRef.current = null;
+  }, []);
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    activeDragCleanupRef.current?.();
     const startX = event.clientX;
     const startValue = activeValue;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -193,9 +225,15 @@ function SpNumberWheel({
     const stop = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("blur", stop);
+      activeDragCleanupRef.current = null;
     };
+    activeDragCleanupRef.current = stop;
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", stop, { once: true });
+    window.addEventListener("blur", stop, { once: true });
   };
   const visibleCount = minimal ? 3 : 5;
   const items = buildVisibleWheelValues(current, min, max, step, visibleCount);
@@ -1203,7 +1241,8 @@ export function OnboardingStepperPresentation({
 
 export function OnboardingStepper() {
   const setDevice = useStore((s) => s.setDevice);
-  const [step, setStep] = useState<StepState>(1);
+  const [step, setStepState] = useState<StepState>(1);
+  const stepRef = useRef<StepState>(1);
   const [data, setData] = useState<PartialIntake>({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<IntakeResult | null>(null);
@@ -1211,14 +1250,77 @@ export function OnboardingStepper() {
   const [transportError, setTransportError] = useState<string | null>(null);
 
   useEffect(() => {
+    stepRef.current = step;
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [step]);
 
-  function handleBack(nextStep: OnboardingStep) {
-    setStep(nextStep);
+  const dispatchBackDiagnostic = useCallback((
+    event: "popstate" | "go_back_handled" | "go_back_unhandled" | "browser_back_delegated",
+    currentStep: StepState,
+    nextStep: StepState | null,
+    handled?: boolean,
+  ) => {
+    if (typeof window.dispatchEvent !== "function") return;
+    window.dispatchEvent(new CustomEvent("nutrition-coach:onboarding-back-diagnostic", {
+      detail: {
+        event,
+        currentStep,
+        ...(nextStep !== null ? { nextStep } : {}),
+        ...(handled !== undefined ? { handled } : {}),
+      },
+    }));
+  }, []);
+
+  const setOnboardingStep = useCallback((
+    nextStep: StepState,
+    historyMode: "auto" | "push" | "replace" | "none" = "auto",
+  ) => {
+    const currentStep = stepRef.current;
+    stepRef.current = nextStep;
+    setStepState(nextStep);
+    if (historyMode === "none") {
+      return;
+    }
+    const mode = historyMode === "auto"
+      ? nextStep > currentStep
+        ? "push"
+        : "replace"
+      : historyMode;
+    writeOnboardingHistoryStep(nextStep, mode);
+  }, []);
+
+  useEffect(() => {
+    writeOnboardingHistoryStep(stepRef.current, "replace");
+
+    const handleStepPopState = (event: PopStateEvent) => {
+      const historyStep = getOnboardingHistoryStep(event.state);
+      const currentStep = stepRef.current;
+      if (historyStep === null) {
+        dispatchBackDiagnostic("go_back_unhandled", currentStep, getPreviousOnboardingBrowserBackStep(currentStep), false);
+        dispatchBackDiagnostic("browser_back_delegated", currentStep, null, false);
+        return;
+      }
+      if (historyStep === currentStep) {
+        return;
+      }
+      dispatchBackDiagnostic("popstate", currentStep, historyStep);
+      setOnboardingStep(historyStep, "none");
+      dispatchBackDiagnostic("go_back_handled", currentStep, historyStep, true);
+    };
+
+    window.addEventListener("popstate", handleStepPopState);
+    return () => window.removeEventListener("popstate", handleStepPopState);
+  }, [dispatchBackDiagnostic, setOnboardingStep]);
+
+  const handleBack = useCallback((nextStep: OnboardingStep) => {
+    if (getOnboardingHistoryStep(window.history.state) === stepRef.current) {
+      window.history.back();
+    } else {
+      setOnboardingStep(nextStep, "replace");
+    }
     setTransportError(null);
     setLoading(false);
-  }
+  }, [setOnboardingStep]);
 
   function handleFieldEdit(field: OnboardingField) {
     setValidationIssues((current) => applyFieldEditRecovery(current, field));
@@ -1234,7 +1336,7 @@ export function OnboardingStepper() {
     setTransportError(null);
     setResult(null);
     setLoading(false);
-    setStep(outcome.issues.length > 0 ? stepNumber : outcome.nextStep);
+    setOnboardingStep(outcome.issues.length > 0 ? stepNumber : outcome.nextStep);
   }
 
   async function handleSubmit(finalData: Pick<Partial<IntakeData>, "bodyFatPercent" | "tdee" | "advancedNotes">) {
@@ -1250,20 +1352,20 @@ export function OnboardingStepper() {
 
     if (stepFiveOutcome.issues.length > 0) {
       setLoading(false);
-      setStep(5);
+      setOnboardingStep(5);
       return;
     }
 
     const completeIntake = merged as IntakeData;
     const submitOutcome = await runSubmitAttempt(completeIntake, submitIntake, () => {
-      setStep(6);
+      setOnboardingStep(6);
       setLoading(true);
       setTransportError(null);
       setValidationIssues([]);
       setResult(null);
     });
 
-    setStep(submitOutcome.nextStep);
+    setOnboardingStep(submitOutcome.nextStep);
     setValidationIssues(submitOutcome.issues);
     setTransportError(submitOutcome.transportError);
     setResult(submitOutcome.result);

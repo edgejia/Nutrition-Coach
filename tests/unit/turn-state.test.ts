@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
-import { createTurnStateService } from "../../server/services/turn-state.js";
+import {
+  createRecentMealLogStateService,
+  RECENT_MEAL_LOG_KIND,
+  createTurnStateService,
+  type RecentMealLogPayload,
+} from "../../server/services/turn-state.js";
 
 const REAL_DATE = Date;
 const FIXED_NOW = new REAL_DATE("2026-05-17T08:30:00+08:00");
@@ -351,5 +356,129 @@ describe("turn state service", () => {
       undefined,
     );
     assert.equal(await service.getState({ deviceId, sessionId: SESSION_A, kind: KIND }), undefined);
+  });
+
+  describe("recent meal log marker", () => {
+    const recentMealPayload: RecentMealLogPayload = {
+      mealId: "meal-a",
+      mealRevisionId: "revision-a",
+      dateKey: "2026-05-17",
+      foodName: "雞腿便當",
+      itemNames: ["雞腿", "白飯", "青菜"],
+      loggedAt: "2026-05-17T00:30:00.000Z",
+    };
+
+    it("stores and reads the latest marker for the same device and session", async () => {
+      const recentMealService = createRecentMealLogStateService(db);
+
+      await recentMealService.putLatest({
+        deviceId,
+        sessionId: SESSION_A,
+        payload: recentMealPayload,
+      });
+
+      assert.deepEqual(
+        await recentMealService.getLatest({ deviceId, sessionId: SESSION_A }),
+        recentMealPayload,
+      );
+      assert.deepEqual(
+        db.$client
+          .prepare(
+            `SELECT kind
+             FROM turn_states
+             WHERE device_id = ? AND session_id = ?`,
+          )
+          .all(deviceId, SESSION_A),
+        [{ kind: RECENT_MEAL_LOG_KIND }],
+      );
+    });
+
+    it("does not expose a recent meal marker to another session", async () => {
+      const recentMealService = createRecentMealLogStateService(db);
+
+      await recentMealService.putLatest({
+        deviceId,
+        sessionId: SESSION_A,
+        payload: recentMealPayload,
+      });
+
+      assert.equal(
+        await recentMealService.getLatest({ deviceId, sessionId: SESSION_B }),
+        undefined,
+      );
+      assert.deepEqual(
+        await recentMealService.getLatest({ deviceId, sessionId: SESSION_A }),
+        recentMealPayload,
+      );
+    });
+
+    it("replaces the marker for the same device and session without adding a row", async () => {
+      const recentMealService = createRecentMealLogStateService(db);
+      const replacementPayload: RecentMealLogPayload = {
+        ...recentMealPayload,
+        mealId: "meal-b",
+        mealRevisionId: "revision-b",
+        foodName: "鮭魚飯",
+        itemNames: ["鮭魚", "飯"],
+      };
+
+      await recentMealService.putLatest({
+        deviceId,
+        sessionId: SESSION_A,
+        payload: recentMealPayload,
+      });
+      await recentMealService.putLatest({
+        deviceId,
+        sessionId: SESSION_A,
+        payload: replacementPayload,
+      });
+
+      assert.deepEqual(
+        await recentMealService.getLatest({ deviceId, sessionId: SESSION_A }),
+        replacementPayload,
+      );
+      assert.deepEqual(
+        db.$client
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM turn_states
+             WHERE device_id = ? AND session_id = ? AND kind = ?`,
+          )
+          .get(deviceId, SESSION_A, RECENT_MEAL_LOG_KIND),
+        { count: 1 },
+      );
+    });
+
+    it("returns undefined and clears the row when the marker is expired", async () => {
+      const recentMealService = createRecentMealLogStateService(db);
+
+      await recentMealService.putLatest({
+        deviceId,
+        sessionId: SESSION_A,
+        payload: recentMealPayload,
+      });
+      db.$client
+        .prepare(
+          `UPDATE turn_states
+           SET expires_at = ?
+           WHERE device_id = ? AND session_id = ? AND kind = ?`,
+        )
+        .run("2026-05-16T00:00:00.000Z", deviceId, SESSION_A, RECENT_MEAL_LOG_KIND);
+
+      assert.equal(
+        await recentMealService.getLatest({ deviceId, sessionId: SESSION_A }),
+        undefined,
+      );
+      assert.deepEqual(
+        db.$client
+          .prepare(
+            `SELECT COUNT(*) AS count
+             FROM turn_states
+             WHERE device_id = ? AND session_id = ? AND kind = ?`,
+          )
+          .get(deviceId, SESSION_A, RECENT_MEAL_LOG_KIND),
+        { count: 0 },
+      );
+    });
   });
 });

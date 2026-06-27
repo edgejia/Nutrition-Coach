@@ -1,5 +1,23 @@
 # 更新日誌
 
+## v3.2 - 2026-06-27
+
+### 變更
+
+- Next-meal and compact coach guidance now use backend-owned planning facts before rendering assistant advice, so remaining calories/macros can produce concrete meal structure without letting model prose contradict deterministic mutation receipts.
+- Meal correction and routing guardrails now prevent recent correction-like follow-ups from duplicating meal records, keep exercise/non-food requests non-mutating, and let explicit photo-analysis/menu/reference prompts answer without auto-logging meals.
+- Mobile web navigation now keeps authenticated Android Back behavior inside the app shell, adds pull-to-refresh/recovery surfaces for Home, History, and onboarding/pre-shell paths, and records onboarding Back closeout through metadata-only Round 7e logger evidence.
+- History week navigation now delay-gates pending feedback and removes the pending-divider flash that could visually jump between the week strip, stats, hero, and timeline.
+- v3.2 regression proof now indexes six demo scenarios across coach planning, correction routing, unsupported-domain routing, photo-analysis boundaries, Android/mobile navigation, and History transition polish without adding production/runtime side effects.
+
+### 驗證
+
+- Phase 102-105 verification passed with 10/10 scoped requirements satisfied and all active phase validation/security artifacts present.
+- Deterministic proof includes targeted unit/integration coverage, the `meal-intent-routing` harness scenario, metadata-only Android logger evidence, and metadata-only History visual smoke.
+- v3.2 milestone audit passed `10/10` requirements, `4/4` phases, `4/4` integration checks, and `6/6` selected demo-regression flows; Home refresh animation polish is deferred to GitHub issues #93, #94, and #95.
+- Closeout `yarn release:check` passed: Asia/Taipei timezone contract, TypeScript, `1,844` Node tests, and frontend production build.
+- v3.2 closeout remains source/PR-ready only; no `main` merge, tag movement, Cloudflare Tunnel change, public smoke, or production runtime refresh was performed.
+
 ## v3.1 - 2026-06-23
 
 ### 變更

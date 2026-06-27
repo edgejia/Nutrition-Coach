@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
@@ -21,10 +22,37 @@ async function readSource(relativePath: string) {
   return readFile(sourcePath(relativePath), "utf8");
 }
 
+async function readClientSourceFiles(relativeDir = "../../client/src"): Promise<Array<{ path: string; source: string }>> {
+  const absoluteDir = sourcePath(relativeDir);
+  const entries = await readdir(absoluteDir, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const relativePath = `${relativeDir}/${entry.name}`;
+      const absolutePath = join(absoluteDir, entry.name);
+
+      if (entry.isDirectory()) {
+        return readClientSourceFiles(relativePath);
+      }
+      if (!entry.isFile() || !/\.(?:ts|tsx)$/.test(entry.name)) {
+        return [];
+      }
+
+      return [{ path: absolutePath, source: await readFile(absolutePath, "utf8") }];
+    }),
+  );
+
+  return files.flat();
+}
+
 const sources = {
+  app: await readSource("../../client/src/App.tsx"),
   appCss: await readSource("../../client/src/app.css"),
+  browserBackSentinel: await readSource("../../client/src/useBrowserBackSentinel.ts"),
   mainLayout: await readSource("../../client/src/components/MainLayout.tsx"),
   homeScreen: await readSource("../../client/src/components/HomeScreen.tsx"),
+  onboarding: await readSource("../../client/src/components/Onboarding.tsx"),
+  onboardingStepper: await readSource("../../client/src/components/onboarding/OnboardingStepper.tsx"),
+  pullToRefreshSurface: await readSource("../../client/src/components/PullToRefreshSurface.tsx"),
   chatPanel: await readSource("../../client/src/components/ChatPanel.tsx"),
   chatInput: await readSource("../../client/src/components/ChatInput.tsx"),
   sportIcons: await readSource("../../client/src/components/SportIcons.tsx"),
@@ -93,10 +121,14 @@ describe("mobile shell source contract", () => {
   it("keeps shell helpers wired to viewport, fixed-bar, and scrolling declarations", () => {
     assert.match(cssBlock("html"), /height:\s*100%/);
     assert.match(cssBlock("html"), /overflow:\s*hidden/);
+    assert.match(cssBlock("html"), /overscroll-behavior:\s*none/);
     assert.match(cssBlock("body"), /position:\s*fixed/);
     assert.match(cssBlock("body"), /inset:\s*0/);
+    assert.match(cssBlock("body"), /overflow:\s*hidden/);
+    assert.match(cssBlock("body"), /overscroll-behavior:\s*none/);
     assert.match(cssBlock("#root"), /position:\s*fixed/);
     assert.match(cssBlock("#root"), /overflow:\s*hidden/);
+    assert.match(cssBlock("#root"), /overscroll-behavior:\s*none/);
 
     assert.match(cssBlock(".app-viewport"), /position:\s*fixed/);
     assert.match(cssBlock(".app-viewport"), /top:\s*var\(--app-visual-viewport-top,\s*0px\)/);
@@ -139,6 +171,52 @@ describe("mobile shell source contract", () => {
     );
   });
 
+  it("defines fixed-shell-safe pull refresh primitives without authenticated page reload fallback", () => {
+    assert.match(sources.sportIcons, /export function SportRefreshIcon/);
+    assert.match(sources.sportIcons, /<SportIconBase \{\.\.\.props\}>[\s\S]*<path d=/);
+    assert.doesNotMatch(sources.sportIcons, /from "lucide-react"|from "@lucide\/react"/);
+
+    assert.match(sources.pullToRefreshSurface, /export function createPullToRefreshController/);
+    assert.match(sources.pullToRefreshSurface, /export function PullToRefreshSurface/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh-indicator/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--pulling/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--refreshing/);
+    assert.match(sources.pullToRefreshSurface, /sp-pull-refresh--complete/);
+    assert.match(sources.pullToRefreshSurface, /data-pull-refresh-surface/);
+    assert.match(sources.pullToRefreshSurface, /data-pull-refresh-last-event/);
+    assert.match(sources.pullToRefreshSurface, /SportRefreshIcon/);
+    assert.match(sources.pullToRefreshSurface, /ariaLabel/);
+    assert.match(sources.pullToRefreshSurface, /refreshing = false/);
+    assert.doesNotMatch(sources.pullToRefreshSurface, /location\.reload\(/);
+
+    assert.match(sources.onboarding, /PullToRefreshSurface/);
+    assert.match(sources.onboarding, /window\.location\.reload\(\)/);
+    assert.match(sources.onboarding, /<OnboardingStepper \/>/);
+
+    assert.match(cssBlock(".sp-pull-refresh"), /position:\s*relative/);
+    assert.match(cssBlock(".sp-pull-refresh"), /min-height:\s*0/);
+    assert.match(cssBlock(".sp-pull-refresh"), /flex:\s*1 1 auto/);
+    assert.match(cssBlock(".sp-pull-refresh"), /display:\s*flex/);
+    assert.match(cssBlock(".sp-pull-refresh"), /flex-direction:\s*column/);
+    assert.match(cssBlock(".sp-pull-refresh"), /overflow:\s*clip/);
+    assert.match(cssBlock(".sp-pull-refresh-content"), /min-height:\s*0/);
+    assert.match(cssBlock(".sp-pull-refresh-content"), /flex:\s*1 1 auto/);
+    assert.match(cssBlock(".sp-pull-refresh-content"), /display:\s*flex/);
+    assert.match(cssBlock(".sp-pull-refresh-content"), /flex-direction:\s*column/);
+    assert.match(cssBlock(".sp-pull-refresh-indicator"), /height:\s*48px/);
+    assert.match(cssBlock(".sp-pull-refresh-indicator"), /pointer-events:\s*none/);
+    assert.match(cssBlock(".sp-pull-refresh--pulling .sp-pull-refresh-indicator"), /opacity:\s*1/);
+    assert.match(cssBlock(".sp-pull-refresh--refreshing .sp-pull-refresh-indicator"), /opacity:\s*1/);
+    assert.match(cssBlock(".sp-pull-refresh--complete .sp-pull-refresh-indicator"), /opacity:\s*1/);
+
+    assert.match(cssBlock(".home-sport-refresh-error"), /font-size:\s*12px/);
+
+    for (const source of [sources.sportIcons, sources.appCss, sources.pullToRefreshSurface]) {
+      assert.doesNotMatch(source, /location\.reload\(/);
+    }
+  });
+
   it("keeps MainLayout as the app viewport boundary", () => {
     assert.match(sources.mainLayout, /\bapp-viewport\b/);
     assert.match(sources.mainLayout, /\bsp-app-canvas\b/);
@@ -150,6 +228,45 @@ describe("mobile shell source contract", () => {
     assert.doesNotMatch(sources.mainLayout, /document\.body\.style\.overflow/);
     assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\)/);
     assert.match(sources.mainLayout, /sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\)/);
+  });
+
+  it("keeps app-level browser-back handling in MainLayout and onboarding step handling in the stepper", () => {
+    assert.match(sources.mainLayout, /import \{ useBrowserBackSentinel \} from "\.\.\/useBrowserBackSentinel\.js";/);
+    assert.match(sources.mainLayout, /const goBack = useStore\(\(s\) => s\.goBack\);/);
+    assert.match(sources.mainLayout, /useBrowserBackSentinel\(goBack\);/);
+    assert.ok(
+      sources.browserBackSentinel.includes("goBack: () => boolean"),
+      "browser-back hook should accept only the store navigation reducer",
+    );
+
+    assert.doesNotMatch(sources.app, /useBrowserBackSentinel/);
+    assert.doesNotMatch(sources.app, /goBack = useStore\(\(s\) => s\.goBack\)/);
+    assert.doesNotMatch(sources.onboarding, /useBrowserBackSentinel|goBack/);
+    assert.doesNotMatch(sources.onboardingStepper, /useBrowserBackSentinel/);
+    assert.match(sources.onboardingStepper, /const ONBOARDING_HISTORY_STATE_KEY = "nutritionCoachOnboardingStep";/);
+    assert.match(sources.onboardingStepper, /window\.history\.pushState\(state, "", window\.location\.href\)/);
+    assert.match(sources.onboardingStepper, /window\.addEventListener\("popstate", handleStepPopState\)/);
+    assert.doesNotMatch(sources.onboardingStepper, /goBack = useStore|state\.goBack/);
+  });
+
+  it("keeps browser-back interception independent from refresh, SSE, sending, and proposal state", () => {
+    const sentinelLine = sources.mainLayout
+      .split("\n")
+      .find((line) => line.includes("useBrowserBackSentinel"));
+    assert.ok(sentinelLine, "MainLayout should call useBrowserBackSentinel");
+    assert.doesNotMatch(
+      sentinelLine,
+      /refresh|sse|SSE|sending|proposal|refreshingHomeToday|homeRefreshError/i,
+      "browser-back hook should receive only goBack, not loading or proposal state",
+    );
+
+    for (const stateToken of ["refreshingHomeToday", "homeRefreshError", "sseSummaryCoordinator", "sending", "proposal"]) {
+      assert.doesNotMatch(
+        sources.mainLayout,
+        new RegExp(`if \\([^)]*${stateToken}[^)]*\\)[\\s\\S]{0,160}useBrowserBackSentinel`),
+        `browser-back hook must not be gated by ${stateToken}`,
+      );
+    }
   });
 
   it("does not introduce sport demo device-frame chrome", () => {
@@ -168,7 +285,7 @@ describe("mobile shell source contract", () => {
     assert.doesNotMatch(sources.homeScreen, /\bscreen-scroll-with-input\b/);
     assertIncludesInOrder(sources.homeScreen, [
       ["Home screen shell", '<div className="screen-shell sk-screen">'],
-      ["Home header", "<HomeHeader />"],
+      ["Home header", "<HomeHeader"],
       ["Home content scroller", '<main className="screen-scroll'],
     ]);
   });
@@ -516,6 +633,18 @@ describe("mobile shell source contract", () => {
 
     for (const source of componentSources) {
       assert.doesNotMatch(source, blockedScopePattern);
+    }
+  });
+
+  it("does not use full page reload for any client refresh path", async () => {
+    const clientSources = await readClientSourceFiles();
+
+    for (const { path, source } of clientSources) {
+      if (path.endsWith("/client/src/components/Onboarding.tsx")) {
+        assert.match(source, /window\.location\.reload\(\)/, "Onboarding pre-shell may reload from pull refresh");
+        continue;
+      }
+      assert.doesNotMatch(source, /location\.reload\(/, `${path} should not call location.reload()`);
     }
   });
 

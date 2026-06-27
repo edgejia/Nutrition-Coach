@@ -25,10 +25,14 @@ globalThis.localStorage = {
 } as Storage;
 
 const onboardingStepperModule = await import("../../client/src/components/onboarding/OnboardingStepper.js");
-const { OnboardingStepperPresentation, SpStepGoalClarification } = onboardingStepperModule;
+const { OnboardingStepperPresentation, SpStepGoalClarification, getPreviousOnboardingBrowserBackStep } = onboardingStepperModule;
 const { StepCoachHandoff } = await import("../../client/src/components/onboarding/StepCoachHandoff.js");
 const onboardingStepperSource = await readFile(
   fileURLToPath(new URL("../../client/src/components/onboarding/OnboardingStepper.tsx", import.meta.url)),
+  "utf8",
+);
+const onboardingSource = await readFile(
+  fileURLToPath(new URL("../../client/src/components/Onboarding.tsx", import.meta.url)),
   "utf8",
 );
 
@@ -114,6 +118,47 @@ function assertUnique(values: readonly number[]) {
 }
 
 describe("onboarding stepper UI", () => {
+  it("wraps onboarding in a pre-shell pull refresh surface that reloads only from Onboarding", () => {
+    assert.match(onboardingSource, /import \{ PullToRefreshSurface \} from "\.\/PullToRefreshSurface\.js";/);
+    assert.match(onboardingSource, /import \{ recordOnboardingDebugEvent \} from "\.\.\/api\.js";/);
+    assert.match(onboardingSource, /function refreshOnboardingShell\(\)/);
+    assert.match(onboardingSource, /document\.documentElement\.dataset\.onboardingRefreshFired = "true"/);
+    assert.match(onboardingSource, /nutrition-coach:onboarding-refresh-fired/);
+    assert.match(onboardingSource, /nutrition-coach:onboarding-back-diagnostic/);
+    assert.match(onboardingSource, /recordOnboardingDebugEvent\(\{\s*event: "onboarding_back_diagnostic"/);
+    assert.match(onboardingSource, /recordOnboardingDebugEvent\(\{ event: "onboarding_refresh_fired" \}\)/);
+    assert.match(onboardingSource, /window\.location\.reload\(\)/);
+    assert.match(onboardingSource, /<PullToRefreshSurface[\s\S]*onRefresh=\{refreshOnboardingShell\}[\s\S]*surfaceId="onboarding"[\s\S]*ariaLabel="下拉重新整理初始設定"[\s\S]*<OnboardingStepper \/>[\s\S]*<\/PullToRefreshSurface>/);
+    assert.doesNotMatch(onboardingSource, /useBrowserBackSentinel|goBack/);
+  });
+
+  it("uses Android Back to move to the previous onboarding step after step one", () => {
+    assert.equal(getPreviousOnboardingBrowserBackStep(6), 5);
+    assert.equal(getPreviousOnboardingBrowserBackStep(5), 4);
+    assert.equal(getPreviousOnboardingBrowserBackStep(4), 3);
+    assert.equal(getPreviousOnboardingBrowserBackStep(3), 2);
+    assert.equal(getPreviousOnboardingBrowserBackStep(2), 1);
+    assert.equal(getPreviousOnboardingBrowserBackStep(1), null);
+    assert.doesNotMatch(onboardingStepperSource, /useBrowserBackSentinel/);
+    assert.match(onboardingStepperSource, /export function getPreviousOnboardingBrowserBackStep\(currentStep: StepState\): OnboardingStep \| null \{/);
+    assert.match(onboardingStepperSource, /const ONBOARDING_HISTORY_STATE_KEY = "nutritionCoachOnboardingStep";/);
+    assert.match(onboardingStepperSource, /function getOnboardingHistoryStep\(state: unknown\): StepState \| null \{/);
+    assert.match(onboardingStepperSource, /function writeOnboardingHistoryStep\(step: StepState, mode: "push" \| "replace"\)/);
+    assert.match(onboardingStepperSource, /window\.history\.pushState\(state, "", window\.location\.href\)/);
+    assert.match(onboardingStepperSource, /window\.history\.replaceState\(state, "", window\.location\.href\)/);
+    assert.match(onboardingStepperSource, /const handleBack = useCallback\(\(nextStep: OnboardingStep\) => \{/);
+    assert.match(onboardingStepperSource, /const stepRef = useRef<StepState>\(1\)/);
+    assert.match(onboardingStepperSource, /const setOnboardingStep = useCallback\(\(\s*nextStep: StepState,\s*historyMode: "auto" \| "push" \| "replace" \| "none" = "auto",\s*\) => \{/);
+    assert.match(onboardingStepperSource, /stepRef\.current = nextStep;[\s\S]*setStepState\(nextStep\)/);
+    assert.match(onboardingStepperSource, /writeOnboardingHistoryStep\(stepRef\.current, "replace"\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("popstate", handleStepPopState\)/);
+    assert.match(onboardingStepperSource, /const historyStep = getOnboardingHistoryStep\(event\.state\)/);
+    assert.match(onboardingStepperSource, /setOnboardingStep\(historyStep, "none"\)/);
+    assert.match(onboardingStepperSource, /window\.history\.back\(\)/);
+    assert.match(onboardingStepperSource, /nutrition-coach:onboarding-back-diagnostic/);
+    assert.doesNotMatch(onboardingStepperSource, /goBack = useStore|state\.goBack/);
+  });
+
   it("renders Step 2 quick-note selected state from selectedNotes without changing visible text", () => {
     assert.equal(typeof SpStepGoalClarification, "function");
 
@@ -326,6 +371,15 @@ describe("onboarding stepper UI", () => {
     assert.match(onboardingStepperSource, /currentValue=\{current\}/);
     assert.match(onboardingStepperSource, /aria-valuenow=\{activeValue\}/);
     assert.match(onboardingStepperSource, /if \(item\.value === currentValue\) return;/);
+    assert.match(onboardingStepperSource, /activeDragCleanupRef\.current\?\.\(\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("pointermove", move\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("pointerup", stop, \{ once: true \}\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("pointercancel", stop, \{ once: true \}\)/);
+    assert.match(onboardingStepperSource, /window\.addEventListener\("blur", stop, \{ once: true \}\)/);
+    assert.match(onboardingStepperSource, /window\.removeEventListener\("pointermove", move\)/);
+    assert.match(onboardingStepperSource, /window\.removeEventListener\("pointerup", stop\)/);
+    assert.match(onboardingStepperSource, /window\.removeEventListener\("pointercancel", stop\)/);
+    assert.match(onboardingStepperSource, /window\.removeEventListener\("blur", stop\)/);
     assert.match(onboardingStepperSource, /age: clampNumericValue\(bodyData\.age, ONBOARDING_NUMERIC_BOUNDS\.age\.min, ONBOARDING_NUMERIC_BOUNDS\.age\.max, 28\)/);
     assert.match(onboardingStepperSource, /heightCm: clampNumericValue\(\s*bodyData\.heightCm,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.heightCm\.max,\s*175,\s*\)/);
     assert.match(onboardingStepperSource, /weightKg: clampNumericValue\(\s*bodyData\.weightKg,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.min,\s*ONBOARDING_NUMERIC_BOUNDS\.weightKg\.max,\s*70,\s*\)/);

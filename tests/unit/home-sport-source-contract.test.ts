@@ -45,7 +45,11 @@ describe("Home canonical Sport kit source parity", () => {
   });
 
   it("keeps the canonical ring size and top accent tick while preserving production data binding", () => {
-    assert.match(sources.home, /<SportRing[\s\S]*value=\{display\.ringValue\}[\s\S]*accentTick[\s\S]*size=\{120\}[\s\S]*stroke=\{9\}/);
+    // Plan 104-13 (Gap B): the hero ring now binds to animatedRingValue (derived from animatedPercent)
+    // so the arc replays together with the kcal number on every refresh. It is still derived from
+    // production data (display.target / display.percent), just animated rather than static.
+    assert.match(sources.home, /<SportRing[\s\S]*value=\{animatedRingValue\}[\s\S]*accentTick[\s\S]*size=\{120\}[\s\S]*stroke=\{9\}/);
+    assert.match(sources.home, /const animatedRingValue = display\.target > 0 \? Math\.min\(1, animatedPercent \/ 100\) : display\.ringValue/);
     assert.match(sources.home, /display\.percent/);
     assert.match(sources.primitives, /accentTick\?: boolean/);
     assert.match(sources.primitives, /center - radius/);

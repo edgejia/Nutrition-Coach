@@ -481,6 +481,221 @@ describe("chat meal correction integration", () => {
     assert.equal(afterDuplicate?.protein, 28);
   });
 
+  it("redirects a correction-like duplicate log_food into a confirm-first re-estimation proposal", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "seed_recent_meal_for_duplicate_guard",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "黑胡椒雞胸肉", calories: 260, protein: 32, carbs: 0, fat: 8 },
+              { food_name: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+              { food_name: "蔬菜", calories: 60, protein: 3, carbs: 10, fat: 1 },
+            ],
+            protein_sources: [
+              { name: "黑胡椒雞胸肉", protein: 32, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+              { name: "蔬菜", protein: 3, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const logged = await postChat("黑胡椒雞胸肉餐盒");
+    assert.equal(logged.status, 200);
+    assert.equal(logged.body.didLogMeal, true);
+    assert.equal(logged.body.didMutateMeal, true);
+    assert.equal(logged.body.dailySummary?.mealCount, 1);
+    const publishCountAfterLog = publishDailySummaryCalls.length;
+    assert.equal(publishCountAfterLog, 1);
+
+    const beforeCorrectionMeals = await getMeals();
+    assert.equal(beforeCorrectionMeals.length, 1);
+    const original = beforeCorrectionMeals[0]!;
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "mistaken_duplicate_correction_log_food",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "黑胡椒雞胸肉", calories: 165, protein: 24, carbs: 0, fat: 4 },
+              { food_name: "白飯", calories: 195, protein: 3, carbs: 43, fat: 0.3 },
+              { food_name: "蔬菜", calories: 50, protein: 2, carbs: 9, fat: 1 },
+            ],
+            protein_sources: [
+              { name: "黑胡椒雞胸肉", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 3, is_primary: false, certainty: "clear" },
+              { name: "蔬菜", protein: 2, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const correction = await postChat("蛋白質應該沒這麼多 我目測約100g 飯約150g 其他都是蔬菜");
+
+    assert.equal(correction.status, 200);
+    assert.equal(correction.body.didLogMeal, false);
+    assert.equal(correction.body.didMutateMeal, false);
+    assert.ok(correction.body.proposalCard);
+    assert.match(JSON.stringify(correction.body.proposalCard), /meal_estimate/);
+    assert.match(correction.body.reply, /其實是新的一餐 -> 照常記錄/);
+    assert.equal(Object.prototype.hasOwnProperty.call(correction.body, "dailySummary"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(correction.body, "summaryOutcome"), false);
+    assert.equal(publishDailySummaryCalls.length, publishCountAfterLog);
+
+    const proposal = await services.mealNumericProposalService.getLatest(defaultSessionKey());
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, original.id);
+    assert.equal(proposal.expectedMealRevisionId, original.mealRevisionId);
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(proposal.provenance, "model_estimate");
+
+    const afterCorrectionMeals = await getMeals();
+    assert.equal(afterCorrectionMeals.length, 1);
+    assert.equal(afterCorrectionMeals[0]!.id, original.id);
+    assert.equal(afterCorrectionMeals[0]!.mealRevisionId, original.mealRevisionId);
+  });
+
+  it("routes concrete ingredient quantity corrections through find_meals then model-estimate proposal", async () => {
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+        { foodName: "蔬菜", calories: 60, protein: 3, carbs: 10, fat: 1 },
+      ],
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_ingredient_quantity_correction",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "白飯其實只有100g，不是150g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "propose_ingredient_quantity_reestimate",
+        type: "function",
+        function: {
+          name: "propose_meal_estimate",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            fields: ["calories", "protein", "carbs", "fat"],
+            estimated: {
+              calories: 470,
+              protein: 29,
+              carbs: 48,
+              fat: 13,
+            },
+          }),
+        },
+      }],
+    });
+
+    const { status, body } = await postChat("剛剛白飯其實只有100g，不是150g。請更正剛剛那一餐，不要新增第二餐");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.ok(body.proposalCard);
+    assert.match(JSON.stringify(body.proposalCard), /meal_estimate/);
+    assert.match(body.reply, /我可以幫你把.*調整|如果要套用，請回覆/);
+    assert.doesNotMatch(body.reply, /明確目標數字|沒有更新餐點紀錄/);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "dailySummary"), false);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const proposal = await services.mealNumericProposalService.getLatest(defaultSessionKey());
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, original.id);
+    assert.equal(proposal.expectedMealRevisionId, original.mealRevisionId);
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.deepEqual(proposal.updateInput, {
+      calories: 470,
+      protein: 29,
+      carbs: 48,
+      fat: 13,
+    });
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, original.mealRevisionId);
+    assert.equal(current?.calories, 600);
+  });
+
+  it("keeps explicit numeric targets on numeric correction proposals", async () => {
+    const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-04-19T04:00:00.000Z",
+      items: [
+        { foodName: "雞腿飯", calories: 650, protein: 30, carbs: 80, fat: 20 },
+      ],
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "find_explicit_numeric_target_correction",
+        type: "function",
+        function: {
+          name: "find_meals",
+          arguments: JSON.stringify({
+            action: "update",
+            query: "雞腿飯蛋白質改成 35g",
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "propose_explicit_numeric_target_correction",
+        type: "function",
+        function: {
+          name: "propose_meal_numeric_correction",
+          arguments: JSON.stringify({
+            meal_id: original.id,
+            fields: ["protein"],
+            operator: "set",
+            value: 35,
+          }),
+        },
+      }],
+    });
+
+    const { status, body } = await postChat("雞腿飯蛋白質改成 35g");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.ok(body.proposalCard);
+    assert.match(JSON.stringify(body.proposalCard), /meal_numeric/);
+    assert.doesNotMatch(JSON.stringify(body.proposalCard), /meal_estimate/);
+    assert.match(body.reply, /如果要套用，請回覆/);
+    assert.deepEqual(publishDailySummaryCalls, []);
+
+    const proposal = await services.mealNumericProposalService.getLatest(defaultSessionKey());
+    assert.ok(proposal);
+    assert.equal(proposal.mealId, original.id);
+    assert.equal(proposal.sourceOperator, "set");
+    assert.deepEqual(proposal.updateInput, { protein: 35 });
+
+    const meals = await getMeals();
+    const current = meals.find((meal) => meal.id === original.id);
+    assert.equal(current?.mealRevisionId, original.mealRevisionId);
+  });
+
   it("does not create actionable no-op meal numeric or estimate proposals", async () => {
     const original = await services.foodLoggingService.logGroupedMeal(deviceId, {
       loggedAt: "2026-04-19T04:00:00.000Z",

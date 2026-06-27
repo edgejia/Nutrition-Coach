@@ -12,7 +12,11 @@ import { createProposalActionService } from "../../server/services/proposal-acti
 import { createProposalCardService } from "../../server/services/proposal-cards.js";
 import { createSummaryService } from "../../server/services/summary.js";
 import { createChatService } from "../../server/services/chat.js";
-import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
+import {
+  DEFAULT_SESSION_ID,
+  createRecentMealLogStateService,
+  type RecentMealLogPayload,
+} from "../../server/services/turn-state.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { RealtimePublisher } from "../../server/realtime/publisher.js";
 import type {
@@ -25,6 +29,7 @@ import type {
   LLMProvider,
 } from "../../server/llm/types.js";
 import { appendMutationReceiptStream, createOrchestrator, guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
+import { derivePlanningFacts, renderPlanningFacts } from "../../server/orchestrator/planning-reply-renderer.js";
 import {
   createEmptyCommittedMutationState,
   mutationOutcomeFactFromEffects,
@@ -45,6 +50,10 @@ import {
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import { CHOICE_PROMPT_PATTERN } from "../../server/orchestrator/patterns.js";
+
+function bulletCount(text: string): number {
+  return text.split(/\r?\n/).filter((line) => line.trim().startsWith("- ")).length;
+}
 
 function assertString(value: unknown): asserts value is string {
   assert.equal(typeof value, "string");
@@ -397,6 +406,29 @@ describe("no-mutation success-claim guard", () => {
     assert.equal(renderMutationReceipt(goalsEffects), "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 190 g\n• 脂肪 55 g");
     assert.equal(renderMutationReceipt(updateEffects), "已更新半份雞腿便當，360 kcal，蛋白質 20 g。");
   });
+
+  it("does not let planning facts exempt false no-mutation log claims", () => {
+    const planningFacts = derivePlanningFacts(
+      {
+        totalCalories: 1000,
+        totalProtein: 72,
+        totalCarbs: 135,
+        totalFat: 28,
+        mealCount: 2,
+        date: today,
+      },
+      committedTargets,
+    );
+    const reply = `${renderPlanningFacts(planningFacts)}\n\n- 已記錄晚餐，500 kcal。`;
+    const guarded = guardNoMutationSuccessClaim(
+      reply,
+      projectCommittedMutationState(createEmptyCommittedMutationState()),
+      { planningFacts },
+    );
+
+    assert.notEqual(guarded, reply);
+    assert.doesNotMatch(guarded, /已記錄晚餐|500 kcal/);
+  });
 });
 
 function codePointLength(value: string) {
@@ -745,6 +777,12 @@ describe("Orchestrator - didLogMeal", () => {
   let mealNumericProposalService: ReturnType<typeof createMealNumericProposalService>;
   let proposalCardService: ReturnType<typeof createProposalCardService>;
   let proposalActionService: ReturnType<typeof createProposalActionService>;
+  let recentMealLogStateService: ReturnType<typeof createRecentMealLogStateService>;
+  let recentMealLogWrites: Array<{
+    deviceId: string;
+    sessionId: string;
+    payload: RecentMealLogPayload;
+  }>;
   let publisher: RealtimePublisher;
   let summaryService: ReturnType<typeof createSummaryService>;
   let chatService: ReturnType<typeof createChatService>;
@@ -755,6 +793,15 @@ describe("Orchestrator - didLogMeal", () => {
     deviceService = createDeviceService(db);
     foodLoggingService = createFoodLoggingService(db);
     mealCorrectionService = createMealCorrectionService(db);
+    const baseRecentMealLogStateService = createRecentMealLogStateService(db);
+    recentMealLogWrites = [];
+    recentMealLogStateService = {
+      ...baseRecentMealLogStateService,
+      async putLatest(input) {
+        recentMealLogWrites.push(input);
+        await baseRecentMealLogStateService.putLatest(input);
+      },
+    };
     summaryService = createSummaryService(db);
     chatService = createChatService(db);
     proposalCardService = createProposalCardService(db);
@@ -880,6 +927,7 @@ describe("Orchestrator - didLogMeal", () => {
       mealDeleteProposalService,
       mealNumericProposalService,
       proposalActionService,
+      recentMealLogStateService,
       publisher: {
         publishGoalsUpdate() {
           return { sent: 1 };
@@ -948,6 +996,193 @@ describe("Orchestrator - didLogMeal", () => {
 
     const history = await chatService.getHistory(deviceId, 10);
     assert.equal(history.filter((message) => message.role === "assistant").length, 0);
+  });
+
+  it("writes a recent meal marker after a successful log_food commit", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_recent_marker",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              {
+                food_name: "雞腿",
+                calories: 260,
+                protein: 24,
+                carbs: 0,
+                fat: 12,
+              },
+              {
+                food_name: "白飯",
+                calories: 280,
+                protein: 4,
+                carbs: 62,
+                fat: 0.6,
+              },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 4, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "我吃了雞腿和白飯");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, true);
+    assert.equal(result.didMutateMeal, true);
+    assert.equal(result.dailySummary?.mealCount, 1);
+    assert.equal(result.loggedMeal?.foodName, "雞腿、白飯");
+    assert.equal(result.loggedMeal?.items?.length, 2);
+    assert.deepEqual(recentMealLogWrites, [
+      {
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        payload: {
+          mealId: result.loggedMeal?.mealId ?? "",
+          mealRevisionId: result.loggedMeal?.mealRevisionId ?? "",
+          dateKey: result.loggedMeal?.dateKey ?? "",
+          foodName: "雞腿、白飯",
+          itemNames: ["雞腿", "白飯"],
+          loggedAt: result.loggedMeal?.loggedAt ?? "",
+        },
+      },
+    ]);
+    assert.notEqual(recentMealLogWrites[0]?.payload.mealId, "");
+    assert.notEqual(recentMealLogWrites[0]?.payload.mealRevisionId, "");
+    assert.notEqual(recentMealLogWrites[0]?.payload.loggedAt, "");
+    assert.equal(
+      JSON.stringify(recentMealLogWrites[0]?.payload).includes("我吃了雞腿和白飯"),
+      false,
+    );
+    assert.deepEqual(
+      await recentMealLogStateService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+      recentMealLogWrites[0]?.payload,
+    );
+  });
+
+  it("does not write a recent meal marker when log_food is blocked before persistence", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_recent_marker_no_save",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              {
+                food_name: "無法辨識的餐點",
+                calories: 0,
+                protein: 0,
+                carbs: 0,
+                fat: 0,
+              },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "(圖片)", "base64-image");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.deepEqual(recentMealLogWrites, []);
+    assert.equal(
+      await recentMealLogStateService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+      undefined,
+    );
+  });
+
+  it("routes recent correction log_food through controlled proposal without a second meal", async () => {
+    const created = await foodLoggingService.logGroupedMeal(deviceId, {
+      loggedAt: "2026-03-25T04:30:00.000Z",
+      items: [
+        { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+        { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+      ],
+    });
+    await recentMealLogStateService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      payload: {
+        mealId: created.id,
+        mealRevisionId: created.mealRevisionId,
+        dateKey: "2026-03-25",
+        foodName: "雞腿、白飯",
+        itemNames: ["雞腿", "白飯"],
+        loggedAt: created.loggedAt,
+      },
+    });
+    const toolResults: unknown[] = [];
+    const toolReceived: string[] = [];
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_recent_correction_orchestrator",
+        type: "function",
+        function: {
+          name: "log_food",
+          arguments: JSON.stringify({
+            items: [
+              { food_name: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+              { food_name: "白飯", calories: 220, protein: 6, carbs: 50, fat: 0.5 },
+            ],
+            protein_sources: [
+              { name: "雞腿", protein: 24, is_primary: true, certainty: "clear" },
+              { name: "白飯", protein: 6, is_primary: false, certainty: "clear" },
+            ],
+          }),
+        },
+      }],
+    });
+
+    const result = await orchestrator.handleMessage(
+      deviceId,
+      "剛剛白飯其實只有100g，不是150g。請更正剛剛那一餐，不要新增第二餐",
+      undefined,
+      undefined,
+      {
+        hooks: {
+          onToolReceived(_tool, argsRedacted) {
+            toolReceived.push(argsRedacted);
+          },
+          onToolResult(payload) {
+            toolResults.push(payload);
+          },
+        },
+      },
+    );
+    if (!("reply" in result)) throw new Error("expected reply result");
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date("2026-03-25T12:00:00+08:00"));
+    const proposal = await mealNumericProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
+
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.ok(result.proposalCard);
+    assert.equal(result.proposalCard.proposalKind, "meal_estimate");
+    assert.match(result.reply, /其實是新的一餐 -> 照常記錄/);
+    assert.equal(meals.length, 1);
+    assert.ok(proposal);
+    assert.equal(proposal.provenance, "model_estimate");
+    assert.equal(proposal.sourceOperator, "model_estimate");
+    assert.equal(toolResults.length, 1);
+    const toolPayload = toolResults[0] as Record<string, unknown>;
+    assert.equal(toolPayload.tool, "log_food");
+    assert.equal(toolPayload.success, true);
+    assert.equal(toolPayload.executed, true);
+    assert.equal(toolPayload.summary, "status: proposal");
+    assert.equal(toolPayload.policyClass, "execute-and-report");
+    assert.equal(toolPayload.ruleId, "base_policy_allowed");
+    assert.equal(JSON.stringify(toolResults).includes("剛剛白飯"), false);
+    assert.equal(JSON.stringify(toolResults).includes("100g"), false);
+    assert.equal(JSON.stringify(toolResults).includes("asset:"), false);
+    assert.equal(toolReceived.length, 1);
   });
 
   it("handleMessage returns { reply, didLogMeal: false } when log_food is not called", async () => {
@@ -2506,6 +2741,174 @@ describe("Orchestrator - didLogMeal", () => {
     assert.equal(result.didLogMeal, false);
     assert.equal(result.didMutateMeal, false);
     assert.equal(result.reply, "今天已記錄 2 餐，共 900 kcal：雞胸肉 450 kcal、鮭魚飯 450 kcal。");
+  });
+
+  it("finalizes plan_next_meal with deterministic planning facts and concrete advice", async () => {
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "雞胸飯", calories: 500, protein: 40, carbs: 55, fat: 12 },
+      ],
+    });
+    await deviceService.updateGoals(deviceId, {
+      calories: 1600,
+      protein: 130,
+      carbs: 180,
+      fat: 55,
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_plan_next_meal",
+        type: "function",
+        function: {
+          name: "plan_next_meal",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: [
+        "結論：下一餐抓 700-900 kcal，先補蛋白質。",
+        "- 理由：你還有足夠熱量和蛋白質空間。",
+        "- 選項：雞胸肉飯加蔬菜。",
+        "- 選項：鮭魚地瓜沙拉。",
+        "- 下一步：先選一個主蛋白，再告訴我份量。",
+      ].join("\n"),
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "下一餐怎麼吃？");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.ok(result.planningFacts, "orchestrator result must expose planningFacts");
+    assert.match(result.reply, /今日攝取 1 餐，共 500 kcal。/);
+    assert.match(result.reply, /目標 1600 kcal，還剩 1100 kcal。/);
+    assert.match(result.reply, /蛋白質 90 g/);
+    assert.match(result.reply, /下一餐抓 700-900 kcal/);
+    assert.doesNotMatch(result.reply, /我還沒有把這餐寫入紀錄/);
+    assert.doesNotMatch(result.reply, /plan_next_meal|planningFacts|remainingCalories|macroGap/);
+  });
+
+  it("clamps overflowing plan_next_meal advice before returning", async () => {
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "午餐", calories: 500, protein: 30, carbs: 60, fat: 15 },
+      ],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_plan_next_meal_clamp",
+        type: "function",
+        function: {
+          name: "plan_next_meal",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      content: "結論：下一餐可以抓 900-1100 kcal。\n- 下一步：先選低油主餐。",
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "我晚餐還能吃多少？");
+
+    assert.ok("reply" in result);
+    assert.match(result.reply, /還剩 1000 kcal/);
+    assert.match(result.reply, /900-1000 kcal/);
+    assert.doesNotMatch(result.reply, /900-1100 kcal/);
+  });
+
+  it("repairs one contradictory plan_next_meal reply then falls back deterministically", async () => {
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "午餐", calories: 500, protein: 30, carbs: 60, fat: 15 },
+      ],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_plan_next_meal_repair",
+        type: "function",
+        function: {
+          name: "plan_next_meal",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "你今天還剩 1200 kcal，可以吃牛肉飯。" });
+    mockLLM.queueChatResponse({ content: "修正後：你今天還剩 1200 kcal，可以吃便當。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "幫我規劃下一餐");
+
+    assert.ok("reply" in result);
+    assert.equal(mockLLM.chatCalls.length, 3, "must perform exactly one repair round after the tool call");
+    assert.equal(result.finalReplySource, "fallback");
+    assert.match(result.reply, /今日攝取 1 餐，共 500 kcal/);
+    assert.match(result.reply, /還剩 1000 kcal/);
+    assert.match(result.reply, /先依照後端計算的剩餘量/);
+    assert.doesNotMatch(result.reply, /1200 kcal|牛肉飯|便當/);
+    const repairMessages = mockLLM.chatCalls[2]!.messages.map((message) => JSON.stringify(message)).join("\n");
+    assert.match(repairMessages, /後端|權威|還剩 1000 kcal|蛋白質/);
+    assert.doesNotMatch(repairMessages, /幫我規劃下一餐|deviceId|session|cookie|raw/i);
+  });
+
+  it("keeps pure get_daily_summary prompts summary-only without planning advice", async () => {
+    await foodLoggingService.logGroupedMeal(deviceId, {
+      items: [
+        { foodName: "豆腐飯", calories: 520, protein: 24, carbs: 70, fat: 14 },
+      ],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "call_summary_not_planning",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "你可以下一餐吃 500 kcal 的雞胸餐。" });
+
+    const result = await orchestrator.handleMessage(deviceId, "今天吃了什麼？");
+
+    assert.ok("reply" in result);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.equal(result.reply, "今天已記錄 1 餐，共 520 kcal：豆腐飯 520 kcal。");
+    assert.equal((result as { planningFacts?: unknown }).planningFacts, undefined);
+    assert.doesNotMatch(result.reply, /下一餐|雞胸餐|500 kcal 的雞胸/);
+  });
+
+  it("normalizes general plain advice without planningFacts by context, not keyword routing", async () => {
+    mockLLM.queueChatResponse({
+      content: [
+        "結論：晚餐選高蛋白、低油的組合。",
+        "| 欄位 | 值 |",
+        "| --- | --- |",
+        "- 理由：這樣比較穩定。",
+        "- 選項：雞胸肉便當。",
+        "- 選項：豆腐蔬菜湯。",
+        "- 選項：鮭魚沙拉。",
+        "- 選項：滷牛腱加青菜。",
+        "- 選項：蛋白質點心。",
+        "- 選項：多餘選項會被移除。",
+        "- 下一步：先選一個主蛋白。",
+        "plan_next_meal planningFacts remainingCalories macroGap",
+      ].join("\n"),
+    });
+
+    const result = await orchestrator.handleMessage(deviceId, "晚餐想吃健康一點");
+
+    assert.ok("reply" in result);
+    assert.equal(result.didLogMeal, false);
+    assert.equal(result.didMutateMeal, false);
+    assert.equal(result.finalReplySource, "renderer");
+    assert.match(result.reply, /結論/);
+    assert.match(result.reply, /理由/);
+    assert.match(result.reply, /選項/);
+    assert.match(result.reply, /下一步/);
+    assert.ok(bulletCount(result.reply) <= 5);
+    assert.doesNotMatch(result.reply, /\| --- \||\| 欄位 \| 值 \|/);
+    assert.doesNotMatch(result.reply, /plan_next_meal|planningFacts|remainingCalories|macroGap/);
   });
 
   it("replaces false new-log claims after get_daily_summary without mutation", async () => {

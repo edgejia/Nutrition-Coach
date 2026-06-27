@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { useStore } from "../store.js";
 import { getMeals } from "../api.js";
 import { connectSSE, disconnectSSE } from "../sse.js";
 import { createSSESummaryCoordinator } from "../sse-summary-coordinator.js";
 import { formatLocalDate } from "../lib/time.js";
+import { useBrowserBackSentinel } from "../useBrowserBackSentinel.js";
 import { useDailyRollover } from "../useDailyRollover.js";
 import { BottomTabBar } from "./BottomTabBar.js";
 import { HomeScreen } from "./HomeScreen.js";
@@ -125,6 +126,10 @@ export function MainLayout() {
   const activeScreen = useStore((s) => s.activeScreen);
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const closeSecondaryScreen = useStore((s) => s.closeSecondaryScreen);
+  const goBack = useStore((s) => s.goBack);
+  const [refreshingHomeToday, setRefreshingHomeToday] = useState(false);
+  const [homeRefreshError, setHomeRefreshError] = useState<string | null>(null);
+  const [homeRefreshCueToken, setHomeRefreshCueToken] = useState(0);
 
   const sseSummaryCoordinator = useMemo(
     () =>
@@ -153,6 +158,27 @@ export function MainLayout() {
     await sseSummaryCoordinator.runInitialMealsLoad({ refreshReason: "day_rollover" });
   }, [deviceId, setDailyTargets, sseSummaryCoordinator]);
 
+  const refreshHomeManually = useCallback(async () => {
+    if (!deviceId) return;
+    setHomeRefreshError(null);
+    setRefreshingHomeToday(true);
+    try {
+      const { meals } = await getMeals({ refreshReason: "manual_refresh" });
+      setMeals(meals);
+      setHomeRefreshCueToken((token) => token + 1);
+    } catch (error) {
+      if (error instanceof Error && error.message === "UNAUTHORIZED") {
+        void recoverGuestSession();
+        setHomeRefreshError("正在重新建立訪客狀態...");
+        throw error;
+      }
+      setHomeRefreshError("資料暫時無法更新，請稍後再試。");
+      throw error;
+    } finally {
+      setRefreshingHomeToday(false);
+    }
+  }, [deviceId, recoverGuestSession, setMeals]);
+
   useEffect(() => {
     if (!deviceId) return;
     void sseSummaryCoordinator.runInitialMealsLoad();
@@ -176,10 +202,18 @@ export function MainLayout() {
   }, [deviceId, refreshForRollover, setRolloverRefreshHandler]);
 
   useDailyRollover(refreshForRollover);
+  useBrowserBackSentinel(goBack);
 
   return (
     <SportAppShell>
-      {activeScreen === "home" && <HomeScreen />}
+      {activeScreen === "home" && (
+        <HomeScreen
+          onRefreshToday={refreshHomeManually}
+          refreshingToday={refreshingHomeToday}
+          refreshTodayError={homeRefreshError}
+          refreshCueToken={homeRefreshCueToken}
+        />
+      )}
       {activeScreen === "chat" && <ChatPanel />}
       {activeScreen === "history" && <HistoryScreen />}
       {activeScreen !== "chat" && <BottomTabBar />}
