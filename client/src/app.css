@@ -4220,12 +4220,7 @@ textarea {
   position: relative;
 }
 
-.sp-history-pending::before {
-  content: "";
-  display: block;
-  height: 1px;
-  margin-bottom: 8px;
-  background: var(--sp-line-strong);
+.sp-history-weekly.sp-history-pending {
   opacity: 0.72;
 }
 

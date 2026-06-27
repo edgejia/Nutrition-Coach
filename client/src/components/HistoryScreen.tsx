@@ -73,6 +73,7 @@ function getChipVariant(variant: ReturnType<typeof getHistorySportStatusMeta>["c
 }
 
 const DAY_PENDING_COPY_DELAY_MS = 200;
+const WEEK_PENDING_COPY_DELAY_MS = DAY_PENDING_COPY_DELAY_MS;
 
 function HistoryWeekStrip({
   days,
@@ -402,7 +403,9 @@ export function HistoryScreen() {
   const [loadingDay, setLoadingDay] = useState(false);
   const [refreshingHistory, setRefreshingHistory] = useState(false);
   const [delayedInlineDayPending, setDelayedInlineDayPending] = useState(false);
+  const [delayedWeekPending, setDelayedWeekPending] = useState(false);
   const inlineDayPendingTimerRef = useRef<number | null>(null);
+  const weekPendingTimerRef = useRef<number | null>(null);
   const manualRefreshCancelRef = useRef<{ current: boolean } | null>(null);
 
   const weekEndKey = addLocalDays(weekStartKey, 6);
@@ -415,6 +418,7 @@ export function HistoryScreen() {
   const confirmedEmptyDay = selectedSnapshot !== null && selectedSnapshot.meals.length === 0;
   const showInlineDayPending = selectedDaySnapshotPending && loadingDay && !dayError && delayedInlineDayPending;
   const isWeekPending = loadingTrends && hasCurrentWeekCache;
+  const showWeekPending = isWeekPending && !trendError && delayedWeekPending;
   const weekDays = buildHistoryWeek({
     weekStartKey,
     selectedDateKey,
@@ -593,6 +597,31 @@ export function HistoryScreen() {
   }, [dayError, loadingDay, selectedDateKey, selectedDaySnapshotPending]);
 
   useEffect(() => {
+    if (weekPendingTimerRef.current !== null) {
+      window.clearTimeout(weekPendingTimerRef.current);
+      weekPendingTimerRef.current = null;
+    }
+
+    if (!isWeekPending || trendError) {
+      setDelayedWeekPending(false);
+      return;
+    }
+
+    setDelayedWeekPending(false);
+    weekPendingTimerRef.current = window.setTimeout(() => {
+      weekPendingTimerRef.current = null;
+      setDelayedWeekPending(true);
+    }, WEEK_PENDING_COPY_DELAY_MS);
+
+    return () => {
+      if (weekPendingTimerRef.current !== null) {
+        window.clearTimeout(weekPendingTimerRef.current);
+        weekPendingTimerRef.current = null;
+      }
+    };
+  }, [isWeekPending, trendError, weekStartKey]);
+
+  useEffect(() => {
     if (!lastMealMutation) {
       return;
     }
@@ -672,7 +701,7 @@ export function HistoryScreen() {
               </SportCard>
             ) : null}
 
-            <div className={isWeekPending ? "sp-history-weekly sp-history-pending" : "sp-history-weekly"}>
+            <div className={showWeekPending ? "sp-history-weekly sp-history-pending" : "sp-history-weekly"}>
               <HistoryWeekStrip
                 days={weekDays}
                 targetCalories={targetCalories}

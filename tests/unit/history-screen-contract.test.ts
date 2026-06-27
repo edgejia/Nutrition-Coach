@@ -16,6 +16,12 @@ function countPrimaryScrollHelpers(value: string) {
   return value.match(/\bscreen-scroll(?:-with-input|-safe)?\b/g)?.length ?? 0;
 }
 
+function cssBlock(selector: string) {
+  const match = cssSource.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{[\\s\\S]*?\\}`));
+  assert.ok(match, `${selector} CSS block should exist`);
+  return match[0];
+}
+
 describe("History screen source contract", () => {
   it("uses Phase 41 sport primitives and real History helpers", () => {
     for (const expected of [
@@ -226,14 +232,12 @@ describe("History screen source contract", () => {
       cssSource,
       /\.sp-history-pending::before\s*\{[\s\S]*?background:\s*var\(--sp-line-strong\);[\s\S]*?\}/,
     );
-    assert.match(
-      cssSource,
-      /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?opacity:\s*(?:0\.(?:6[89]|[78]\d|9\d)|1(?:\.0+)?);[\s\S]*?\}/,
-    );
-    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?height:/);
-    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?margin(?:-[a-z]+)?:/);
-    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?padding(?:-[a-z]+)?:/);
-    assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending\s*\{[\s\S]*?border(?:-[a-z]+)?:/);
+    const weeklyPendingBlock = cssBlock(".sp-history-weekly.sp-history-pending");
+    assert.match(weeklyPendingBlock, /opacity:\s*(?:0\.(?:6[89]|[78]\d|9\d)|1(?:\.0+)?);/);
+    assert.doesNotMatch(weeklyPendingBlock, /height:/);
+    assert.doesNotMatch(weeklyPendingBlock, /margin(?:-[a-z]+)?:/);
+    assert.doesNotMatch(weeklyPendingBlock, /padding(?:-[a-z]+)?:/);
+    assert.doesNotMatch(weeklyPendingBlock, /border(?:-[a-z]+)?:/);
     assert.doesNotMatch(cssSource, /\.sp-history-weekly\.sp-history-pending::(?:before|after)/);
     assert.doesNotMatch(cssSource, /\.sp-history-pending[\s\S]*animation:/);
   });
