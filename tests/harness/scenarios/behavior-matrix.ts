@@ -21,11 +21,15 @@ import { runCase05GoalAuthorization } from "../cases/case-05-goal-authorization.
 import { runCase06UpdateDeleteClarification } from "../cases/case-06-update-delete-clarification.js";
 import { runCase07PromptInjection } from "../cases/case-07-prompt-injection.js";
 import { runCase08MedicalBoundary } from "../cases/case-08-medical-boundary.js";
+import { runCase09ProfileInjection } from "../cases/case-09-profile-injection.js";
+import { runCase10PromptToolDisclosure } from "../cases/case-10-prompt-tool-disclosure.js";
+import { runCase11MaliciousToolJson } from "../cases/case-11-malicious-tool-json.js";
+import { runCase12UnauthorizedGoalUpdate } from "../cases/case-12-unauthorized-goal-update.js";
+import { runCase13HistoryToolLikeInjection } from "../cases/case-13-history-tool-like-injection.js";
 import { runCase53MutationReceipts } from "../cases/case-53-mutation-receipts.js";
 
 type BehaviorCaseRunner = () => Promise<BehaviorCaseOutcome>;
-type PendingBehaviorCaseId = "CASE-09" | "CASE-10" | "CASE-11" | "CASE-12" | "CASE-13";
-type ExecutableBehaviorCaseId = Exclude<BehaviorCaseId, PendingBehaviorCaseId> | "PHASE-53-MUTATION-RECEIPTS";
+type ExecutableBehaviorCaseId = BehaviorCaseId | "PHASE-53-MUTATION-RECEIPTS";
 
 const CASE_RUNNERS = {
   "CASE-01": runCase01ImageOnly,
@@ -36,18 +40,16 @@ const CASE_RUNNERS = {
   "CASE-06": runCase06UpdateDeleteClarification,
   "CASE-07": runCase07PromptInjection,
   "CASE-08": runCase08MedicalBoundary,
+  "CASE-09": runCase09ProfileInjection,
+  "CASE-10": runCase10PromptToolDisclosure,
+  "CASE-11": runCase11MaliciousToolJson,
+  "CASE-12": runCase12UnauthorizedGoalUpdate,
+  "CASE-13": runCase13HistoryToolLikeInjection,
   "PHASE-53-MUTATION-RECEIPTS": runCase53MutationReceipts,
 } as const satisfies Record<ExecutableBehaviorCaseId, BehaviorCaseRunner>;
 
 const EXECUTABLE_BEHAVIOR_CASE_IDS: readonly ExecutableBehaviorCaseId[] = [
-  ...ALL_BEHAVIOR_CASES.filter(
-    (entry): entry is (typeof ALL_BEHAVIOR_CASES)[number] & { caseId: ExecutableBehaviorCaseId } =>
-      entry.caseId !== "CASE-09" &&
-      entry.caseId !== "CASE-10" &&
-      entry.caseId !== "CASE-11" &&
-      entry.caseId !== "CASE-12" &&
-      entry.caseId !== "CASE-13",
-  ).map((entry) => entry.caseId),
+  ...ALL_BEHAVIOR_CASES.map((entry) => entry.caseId),
   "PHASE-53-MUTATION-RECEIPTS",
 ];
 
