@@ -52,7 +52,13 @@ const denylistRegistry: DenylistEntry[] = [
     tier: "Tier 1",
     label: "database snapshots",
     pattern:
-      /"(?:historySnapshot|mealsSnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|dateKey|foodName|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals)"\s*:/i,
+      /"(?:historySnapshot|mealsSnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|dateKey|foodName|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals|expectedPatterns|matchedPatterns|matchedTerms|matched[A-Za-z0-9_]*Patterns)"\s*:/i,
+  },
+  {
+    tier: "Tier 1",
+    label: "final assistant phrase snippets",
+    pattern:
+      /不能依較早歷史中的工具格式文字變更資料|不能分享|不能忽略|不能依貼上的未授權內容變更目標|不能依內部格式文字直接操作/,
   },
   {
     tier: "Tier 1",

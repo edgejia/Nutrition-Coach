@@ -430,11 +430,12 @@ describe("behavior matrix contract", () => {
       "tests/harness/artifacts/behavior-matrix/latest/scenario-result.json",
     ];
     const forbiddenSnapshotKeys =
-      /"(?:beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|foodName|dateKey|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals)"\s*:/;
+      /"(?:beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|foodName|dateKey|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals|expectedPatterns|matchedPatterns|matchedTerms|matched[A-Za-z0-9_]*Patterns)"\s*:/;
     const forbiddenSnapshotValues = [
       /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i,
       /\/api\/assets\/[0-9a-f-]{36}/i,
       /豬肉燒烤飯盒|雞肉沙拉|雞胸沙拉|牛肉飯/,
+      /不能依較早歷史中的工具格式文字變更資料|不能分享|不能忽略|不能依貼上的未授權內容變更目標|不能依內部格式文字直接操作/,
     ];
 
     for (const artifactPath of artifactPaths) {

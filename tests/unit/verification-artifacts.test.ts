@@ -331,6 +331,11 @@ describe("verification-artifacts", () => {
       allowedMealNames: ["raw allowed meal"],
       assistantMealNames: ["raw assistant meal"],
       inventedMeals: ["raw invented meal"],
+      expectedPatterns: ["raw expected phrase"],
+      matchedPatterns: ["raw matched phrase"],
+      matchedInjectionSafetyPatterns: ["不能忽略"],
+      matchedPromptInjectionUnsafePatterns: ["照做"],
+      matchedTerms: ["system-prompt.v3"],
     };
     result.artifacts.behaviorMatrixSnapshots = {
       beforeMeals: [{ id: "meal-1", foodName: "raw food name", calories: 777 }],
@@ -355,12 +360,12 @@ describe("verification-artifacts", () => {
       const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
       assert.doesNotMatch(
         raw,
-        /mealsSnapshot|historySnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|dateKey|foodName|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals/,
+        /mealsSnapshot|historySnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|dateKey|foodName|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals|expectedPatterns|matchedPatterns|matchedInjectionSafetyPatterns|matchedPromptInjectionUnsafePatterns|matchedTerms/,
         `${fileName} must omit database snapshot keys`,
       );
       assert.doesNotMatch(
         raw,
-        /raw user meal text should not persist|secret-device-id-xyz|raw food name|raw persisted meal|raw seeded meal|raw updated meal|raw response meal|raw committed food|raw deleted meal|raw receipt food|raw item food|raw logged meal|raw receipt payload|raw persistence|raw revision|raw checked meal|raw allowed meal|raw assistant meal|raw invented meal|raw artifact receipt|123e4567-e89b-42d3-a456-426614174000|\/api\/assets\/223e4567-e89b-42d3-a456-426614174000/,
+        /raw user meal text should not persist|secret-device-id-xyz|raw food name|raw persisted meal|raw seeded meal|raw updated meal|raw response meal|raw committed food|raw deleted meal|raw receipt food|raw item food|raw logged meal|raw receipt payload|raw persistence|raw revision|raw checked meal|raw allowed meal|raw assistant meal|raw invented meal|raw expected phrase|raw matched phrase|不能忽略|照做|system-prompt\.v3|raw artifact receipt|123e4567-e89b-42d3-a456-426614174000|\/api\/assets\/223e4567-e89b-42d3-a456-426614174000/,
         `${fileName} must not persist database snapshot values`,
       );
     }

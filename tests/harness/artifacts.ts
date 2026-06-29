@@ -115,7 +115,12 @@ function shouldRedactKey(key: string): boolean {
 
 function shouldOmitKey(key: string): boolean {
   const normalized = normalizeKey(key);
-  return OMITTED_KEYS.has(normalized);
+  return (
+    OMITTED_KEYS.has(normalized) ||
+    normalized === "expectedpatterns" ||
+    normalized === "matchedterms" ||
+    (normalized.startsWith("matched") && normalized.endsWith("patterns"))
+  );
 }
 
 function normalizeKey(key: string): string {
