@@ -310,6 +310,28 @@ describe("verification-artifacts", () => {
   test("database snapshot evidence keys are omitted from saved artifact files", async () => {
     const result = makeFailResult("omit-database-snapshots");
     result.artifacts.historySnapshot = [{ role: "user", content: "raw user meal text should not persist" }];
+    result.steps[0]!.actual = {
+      receiptLoggedMeal: {
+        mealId: "123e4567-e89b-42d3-a456-426614174000",
+        mealRevisionId: "123e4567-e89b-42d3-a456-426614174000:r1",
+        imageAssetId: "223e4567-e89b-42d3-a456-426614174000",
+        imageUrl: "/api/assets/223e4567-e89b-42d3-a456-426614174000",
+        loggedAt: "2026-06-29T17:53:28.750Z",
+        dateKey: "2026-06-30",
+        foodName: "raw receipt food",
+        items: [{ name: "raw item food", calories: 777 }],
+      },
+      normalizedFacts: {
+        loggedMeal: { foodName: "raw logged meal", calories: 777 },
+        receiptPayload: { foodName: "raw receipt payload", protein: 88 },
+        persistence: { foodName: "raw persistence", carbs: 99 },
+        persistedRevision: { foodName: "raw revision", fat: 11 },
+      },
+      checkedMealNames: ["raw checked meal"],
+      allowedMealNames: ["raw allowed meal"],
+      assistantMealNames: ["raw assistant meal"],
+      inventedMeals: ["raw invented meal"],
+    };
     result.artifacts.behaviorMatrixSnapshots = {
       beforeMeals: [{ id: "meal-1", foodName: "raw food name", calories: 777 }],
       afterMeals: [{ id: "meal-1", foodName: "raw food name", calories: 888 }],
@@ -322,21 +344,23 @@ describe("verification-artifacts", () => {
       committedTargets: { calories: 1800, protein: 130, carbs: 150, fat: 50 },
       committedFacts: { foodName: "raw committed food", calories: 520 },
       deletedMeal: { mealId: "meal-5", foodName: "raw deleted meal" },
+      receiptLoggedMeal: { mealId: "323e4567-e89b-42d3-a456-426614174000", foodName: "raw artifact receipt" },
+      normalizedFacts: { persistence: { mealId: "423e4567-e89b-42d3-a456-426614174000" } },
     };
 
     await writeScenarioArtifacts("omit-database-snapshots", result);
 
     const latestDir = path.join(tmpDir, "omit-database-snapshots", "latest");
-    for (const fileName of ["snapshots.json", "scenario-result.json"]) {
+    for (const fileName of ["steps.json", "snapshots.json", "scenario-result.json"]) {
       const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
       assert.doesNotMatch(
         raw,
-        /mealsSnapshot|historySnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|committedTargets|committedFacts|deletedMeal/,
+        /mealsSnapshot|historySnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|dateKey|foodName|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals/,
         `${fileName} must omit database snapshot keys`,
       );
       assert.doesNotMatch(
         raw,
-        /raw user meal text should not persist|secret-device-id-xyz|raw food name|raw persisted meal|raw seeded meal|raw updated meal|raw response meal|raw committed food|raw deleted meal/,
+        /raw user meal text should not persist|secret-device-id-xyz|raw food name|raw persisted meal|raw seeded meal|raw updated meal|raw response meal|raw committed food|raw deleted meal|raw receipt food|raw item food|raw logged meal|raw receipt payload|raw persistence|raw revision|raw checked meal|raw allowed meal|raw assistant meal|raw invented meal|raw artifact receipt|123e4567-e89b-42d3-a456-426614174000|\/api\/assets\/223e4567-e89b-42d3-a456-426614174000/,
         `${fileName} must not persist database snapshot values`,
       );
     }

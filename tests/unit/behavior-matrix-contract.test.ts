@@ -430,11 +430,23 @@ describe("behavior matrix contract", () => {
       "tests/harness/artifacts/behavior-matrix/latest/scenario-result.json",
     ];
     const forbiddenSnapshotKeys =
-      /"(?:beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|committedTargets|committedFacts|deletedMeal)"\s*:/;
+      /"(?:beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|foodName|dateKey|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals)"\s*:/;
+    const forbiddenSnapshotValues = [
+      /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i,
+      /\/api\/assets\/[0-9a-f-]{36}/i,
+      /豬肉燒烤飯盒|雞肉沙拉|雞胸沙拉|牛肉飯/,
+    ];
 
     for (const artifactPath of artifactPaths) {
       const raw = await readFile(artifactPath, "utf8");
       assert.doesNotMatch(raw, forbiddenSnapshotKeys, `${artifactPath} must not persist raw DB snapshot evidence`);
+      for (const forbiddenSnapshotValue of forbiddenSnapshotValues) {
+        assert.doesNotMatch(
+          raw,
+          forbiddenSnapshotValue,
+          `${artifactPath} must not persist raw DB snapshot values`,
+        );
+      }
     }
   });
 

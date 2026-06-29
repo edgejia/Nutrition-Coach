@@ -52,7 +52,13 @@ const denylistRegistry: DenylistEntry[] = [
     tier: "Tier 1",
     label: "database snapshots",
     pattern:
-      /"(?:historySnapshot|mealsSnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|committedTargets|committedFacts|deletedMeal)"\s*:/i,
+      /"(?:historySnapshot|mealsSnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|dateKey|foodName|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals)"\s*:/i,
+  },
+  {
+    tier: "Tier 1",
+    label: "artifact UUIDs and asset URLs",
+    pattern:
+      /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|\/api\/assets\/[0-9a-f-]{36}/i,
   },
   { tier: "Tier 2", label: "API keys", pattern: /\bsk-[A-Za-z0-9_-]+/ },
   { tier: "Tier 2", label: "bearer/auth headers", pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]+/i },

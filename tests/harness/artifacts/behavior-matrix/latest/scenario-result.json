@@ -132,15 +132,7 @@
           {
             "name": "no_invented_meals",
             "ok": true,
-            "evidence": {
-              "checkedMealNames": [
-                "豬肉燒烤飯盒"
-              ],
-              "allowedMealNames": [
-                "豬肉燒烤飯盒"
-              ],
-              "inventedMeals": []
-            }
+            "evidence": {}
           },
           {
             "name": "quantity_uncertainty_caveat",
@@ -181,31 +173,6 @@
             "daily_summary",
             "derived_uncertainty_range"
           ],
-          "receiptLoggedMeal": {
-            "receiptStatus": "active",
-            "mealId": "da84db86-af1f-4ab3-b52f-4b51e0cb8f67",
-            "dateKey": "2026-06-30",
-            "mealRevisionId": "da84db86-af1f-4ab3-b52f-4b51e0cb8f67:r1",
-            "loggedAt": "2026-06-29T17:53:28.750Z",
-            "imageAssetId": "6afb43d3-e479-443a-a916-c3fb6e9e1e68",
-            "imageUrl": "/api/assets/6afb43d3-e479-443a-a916-c3fb6e9e1e68",
-            "foodName": "豬肉燒烤飯盒",
-            "itemCount": 1,
-            "calories": 680,
-            "protein": 35,
-            "carbs": 86,
-            "fat": 22,
-            "items": [
-              {
-                "name": "豬肉燒烤飯盒",
-                "position": 0,
-                "calories": 680,
-                "protein": 35,
-                "carbs": 86,
-                "fat": 22
-              }
-            ]
-          },
           "observedTools": [
             "log_food"
           ],
@@ -389,15 +356,7 @@
           {
             "name": "no_invented_meals",
             "ok": true,
-            "evidence": {
-              "checkedMealNames": [
-                "雞肉沙拉"
-              ],
-              "allowedMealNames": [
-                "雞肉沙拉"
-              ],
-              "inventedMeals": []
-            }
+            "evidence": {}
           },
           {
             "name": "quantity_uncertainty_caveat",
@@ -445,31 +404,6 @@
             "derived_uncertainty_range"
           ],
           "unsupportedNumbers": [],
-          "receiptLoggedMeal": {
-            "receiptStatus": "active",
-            "mealId": "beaca088-afd8-4424-9008-97bad2194868",
-            "dateKey": "2026-06-30",
-            "mealRevisionId": "beaca088-afd8-4424-9008-97bad2194868:r1",
-            "loggedAt": "2026-06-29T17:53:28.768Z",
-            "imageAssetId": null,
-            "imageUrl": null,
-            "foodName": "雞肉沙拉",
-            "itemCount": 1,
-            "calories": 420,
-            "protein": 32,
-            "carbs": 28,
-            "fat": 18,
-            "items": [
-              {
-                "name": "雞肉沙拉",
-                "position": 0,
-                "calories": 420,
-                "protein": 32,
-                "carbs": 28,
-                "fat": 18
-              }
-            ]
-          },
           "observedTools": [
             "log_food"
           ],
@@ -563,15 +497,7 @@
           {
             "name": "no_invented_meals",
             "ok": true,
-            "evidence": {
-              "checkedMealNames": [
-                "雞胸沙拉"
-              ],
-              "allowedMealNames": [
-                "雞胸沙拉"
-              ],
-              "inventedMeals": []
-            }
+            "evidence": {}
           },
           {
             "name": "trace_final_reply_shape",
@@ -593,73 +519,6 @@
         "failedAssertions": [],
         "expectedFailures": [],
         "evidence": {
-          "normalizedFacts": {
-            "classifiedAssistant": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": null,
-              "fat": null,
-              "dateKey": null,
-              "mealId": null,
-              "mealRevisionId": null,
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            },
-            "loggedMeal": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": 58,
-              "fat": 14,
-              "dateKey": "2026-06-30",
-              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
-              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            },
-            "receiptPayload": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": 58,
-              "fat": 14,
-              "dateKey": "2026-06-30",
-              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
-              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            },
-            "persistence": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": 58,
-              "fat": 14,
-              "dateKey": "2026-06-30",
-              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
-              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            },
-            "persistedRevision": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": 58,
-              "fat": 14,
-              "dateKey": "2026-06-30",
-              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
-              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            }
-          },
           "traceSummary": {
             "finalReplyLength": null,
             "toolCount": 1,
@@ -812,15 +671,7 @@
           {
             "name": "no_invented_meals",
             "ok": true,
-            "evidence": {
-              "checkedMealNames": [
-                "牛肉飯"
-              ],
-              "allowedMealNames": [
-                "牛肉飯"
-              ],
-              "inventedMeals": []
-            }
+            "evidence": {}
           },
           {
             "name": "historical_date_consistency",
@@ -859,32 +710,6 @@
             "daily_summary"
           ],
           "unsupportedNumbers": [],
-          "receiptLoggedMeal": {
-            "receiptStatus": "active",
-            "mealId": "2d447dc1-f3ca-4f29-9628-cd122f04ff50",
-            "dateKey": "2026-05-01",
-            "mealRevisionId": "2d447dc1-f3ca-4f29-9628-cd122f04ff50:r1",
-            "loggedAt": "2026-05-01T10:30:00.000Z",
-            "mealPeriod": "dinner",
-            "imageAssetId": null,
-            "imageUrl": null,
-            "foodName": "牛肉飯",
-            "itemCount": 1,
-            "calories": 620,
-            "protein": 30,
-            "carbs": 82,
-            "fat": 18,
-            "items": [
-              {
-                "name": "牛肉飯",
-                "position": 0,
-                "calories": 620,
-                "protein": 30,
-                "carbs": 82,
-                "fat": 18
-              }
-            ]
-          },
           "observedTools": [
             "log_food"
           ],
@@ -3187,15 +3012,7 @@
           {
             "name": "no_invented_meals",
             "ok": true,
-            "evidence": {
-              "checkedMealNames": [
-                "豬肉燒烤飯盒"
-              ],
-              "allowedMealNames": [
-                "豬肉燒烤飯盒"
-              ],
-              "inventedMeals": []
-            }
+            "evidence": {}
           },
           {
             "name": "quantity_uncertainty_caveat",
@@ -3236,31 +3053,6 @@
             "daily_summary",
             "derived_uncertainty_range"
           ],
-          "receiptLoggedMeal": {
-            "receiptStatus": "active",
-            "mealId": "da84db86-af1f-4ab3-b52f-4b51e0cb8f67",
-            "dateKey": "2026-06-30",
-            "mealRevisionId": "da84db86-af1f-4ab3-b52f-4b51e0cb8f67:r1",
-            "loggedAt": "2026-06-29T17:53:28.750Z",
-            "imageAssetId": "6afb43d3-e479-443a-a916-c3fb6e9e1e68",
-            "imageUrl": "/api/assets/6afb43d3-e479-443a-a916-c3fb6e9e1e68",
-            "foodName": "豬肉燒烤飯盒",
-            "itemCount": 1,
-            "calories": 680,
-            "protein": 35,
-            "carbs": 86,
-            "fat": 22,
-            "items": [
-              {
-                "name": "豬肉燒烤飯盒",
-                "position": 0,
-                "calories": 680,
-                "protein": 35,
-                "carbs": 86,
-                "fat": 22
-              }
-            ]
-          },
           "observedTools": [
             "log_food"
           ],
@@ -3429,15 +3221,7 @@
           {
             "name": "no_invented_meals",
             "ok": true,
-            "evidence": {
-              "checkedMealNames": [
-                "雞肉沙拉"
-              ],
-              "allowedMealNames": [
-                "雞肉沙拉"
-              ],
-              "inventedMeals": []
-            }
+            "evidence": {}
           },
           {
             "name": "quantity_uncertainty_caveat",
@@ -3485,31 +3269,6 @@
             "derived_uncertainty_range"
           ],
           "unsupportedNumbers": [],
-          "receiptLoggedMeal": {
-            "receiptStatus": "active",
-            "mealId": "beaca088-afd8-4424-9008-97bad2194868",
-            "dateKey": "2026-06-30",
-            "mealRevisionId": "beaca088-afd8-4424-9008-97bad2194868:r1",
-            "loggedAt": "2026-06-29T17:53:28.768Z",
-            "imageAssetId": null,
-            "imageUrl": null,
-            "foodName": "雞肉沙拉",
-            "itemCount": 1,
-            "calories": 420,
-            "protein": 32,
-            "carbs": 28,
-            "fat": 18,
-            "items": [
-              {
-                "name": "雞肉沙拉",
-                "position": 0,
-                "calories": 420,
-                "protein": 32,
-                "carbs": 28,
-                "fat": 18
-              }
-            ]
-          },
           "observedTools": [
             "log_food"
           ],
@@ -3588,15 +3347,7 @@
           {
             "name": "no_invented_meals",
             "ok": true,
-            "evidence": {
-              "checkedMealNames": [
-                "雞胸沙拉"
-              ],
-              "allowedMealNames": [
-                "雞胸沙拉"
-              ],
-              "inventedMeals": []
-            }
+            "evidence": {}
           },
           {
             "name": "trace_final_reply_shape",
@@ -3618,73 +3369,6 @@
         "failedAssertions": [],
         "expectedFailures": [],
         "evidence": {
-          "normalizedFacts": {
-            "classifiedAssistant": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": null,
-              "fat": null,
-              "dateKey": null,
-              "mealId": null,
-              "mealRevisionId": null,
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            },
-            "loggedMeal": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": 58,
-              "fat": 14,
-              "dateKey": "2026-06-30",
-              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
-              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            },
-            "receiptPayload": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": 58,
-              "fat": 14,
-              "dateKey": "2026-06-30",
-              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
-              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            },
-            "persistence": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": 58,
-              "fat": 14,
-              "dateKey": "2026-06-30",
-              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
-              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            },
-            "persistedRevision": {
-              "foodName": "雞胸沙拉",
-              "itemCount": 1,
-              "calories": 520,
-              "protein": 38,
-              "carbs": 58,
-              "fat": 14,
-              "dateKey": "2026-06-30",
-              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
-              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
-              "traceFinalReplySource": "renderer",
-              "traceFinalReplyShape": "plain_text"
-            }
-          },
           "traceSummary": {
             "finalReplyLength": null,
             "toolCount": 1,
@@ -3822,15 +3506,7 @@
           {
             "name": "no_invented_meals",
             "ok": true,
-            "evidence": {
-              "checkedMealNames": [
-                "牛肉飯"
-              ],
-              "allowedMealNames": [
-                "牛肉飯"
-              ],
-              "inventedMeals": []
-            }
+            "evidence": {}
           },
           {
             "name": "historical_date_consistency",
@@ -3869,32 +3545,6 @@
             "daily_summary"
           ],
           "unsupportedNumbers": [],
-          "receiptLoggedMeal": {
-            "receiptStatus": "active",
-            "mealId": "2d447dc1-f3ca-4f29-9628-cd122f04ff50",
-            "dateKey": "2026-05-01",
-            "mealRevisionId": "2d447dc1-f3ca-4f29-9628-cd122f04ff50:r1",
-            "loggedAt": "2026-05-01T10:30:00.000Z",
-            "mealPeriod": "dinner",
-            "imageAssetId": null,
-            "imageUrl": null,
-            "foodName": "牛肉飯",
-            "itemCount": 1,
-            "calories": 620,
-            "protein": 30,
-            "carbs": 82,
-            "fat": 18,
-            "items": [
-              {
-                "name": "牛肉飯",
-                "position": 0,
-                "calories": 620,
-                "protein": 30,
-                "carbs": 82,
-                "fat": 18
-              }
-            ]
-          },
           "observedTools": [
             "log_food"
           ],
