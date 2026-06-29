@@ -367,7 +367,10 @@ export function authorizeMealNumericUpdate(input: {
       input.update.items,
       extractItemScopedMealNumericEvidence(
         input.currentUserMessage,
-        input.update.items.map((item) => item.foodName ?? ""),
+        [
+          ...(input.currentMeal.items ?? []).map((item) => item.foodName ?? ""),
+          ...input.update.items.map((item) => item.foodName ?? ""),
+        ],
       ),
     )
     : collectPatchUnauthorized(input.update.patch, evidence);

@@ -167,6 +167,11 @@ describe("reply sanitizer", () => {
     );
   });
 
+  it("preserves exact identifier boundaries while allowing punctuation-delimited matches", () => {
+    assert.equal(sanitizeReply("prevision revisionist xsystem-prompt.v3y"), "prevision revisionist xsystem-prompt.v3y");
+    assert.equal(sanitizeReply("請看 system-prompt.v3, ProviderRequestId。"), "請看 內部細節, 內部細節。");
+  });
+
   it("matches dotted internal identifiers as exact literals only", () => {
     assert.equal(sanitizeReply("版本是 system-promptXv3"), "版本是 system-promptXv3");
     assert.equal(sanitizeReply("版本是 system-prompt.v3"), "版本是 內部細節");

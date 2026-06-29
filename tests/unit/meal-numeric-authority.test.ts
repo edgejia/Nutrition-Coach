@@ -240,4 +240,21 @@ describe("authorizeMealNumericUpdate", () => {
     assert.equal(result.reason, "unauthorized_numeric_values");
     assert.deepEqual(result.unauthorizedFields, ["items[1].protein"]);
   });
+
+  it("allows item replacement values attached to the current item name when the item is renamed", () => {
+    const result = authorizeMealNumericUpdate({
+      currentUserMessage: "白飯熱量改成 250 卡，名稱改成糙米",
+      currentMeal,
+      update: {
+        items: [
+          { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+          { foodName: "糙米", calories: 250, protein: 4, carbs: 62, fat: 0.5 },
+          { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+          { foodName: "青菜", calories: 20, protein: 1, carbs: 20, fat: 3.5 },
+        ],
+      },
+    });
+
+    assert.deepEqual(result, { ok: true, authorizedFields: ["items[1].calories"] });
+  });
 });

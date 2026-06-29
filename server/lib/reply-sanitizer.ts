@@ -31,6 +31,7 @@ export const SENSITIVE_IDENTIFIER_REPLACEMENTS = [
 ] as const;
 
 export const COUNTER_MARKER_PATTERN = /[（(]\s*\d+\s*\/\s*\d+\s*[）)]/g;
+const IDENTIFIER_CHARS = "A-Za-z0-9_-";
 
 const AMBIGUOUS_COUNTER_SUFFIX_PATTERN =
   /([（(]\s*|[（(]\s*\d+\s*|[（(]\s*\d+\s*\/\s*|[（(]\s*\d+\s*\/\s*\d+\s*)$/;
@@ -41,15 +42,21 @@ function escapeRegExp(value: string): string {
 
 const IDENTIFIER_REPLACEMENT_PATTERNS = SENSITIVE_IDENTIFIER_REPLACEMENTS.map(
   ([identifier, replacement]) => ({
-    pattern: new RegExp(escapeRegExp(identifier), "gi"),
+    pattern: new RegExp(`(^|[^${IDENTIFIER_CHARS}])(${escapeRegExp(identifier)})(?=$|[^${IDENTIFIER_CHARS}])`, "gi"),
     replacement,
   }),
 );
 
+function precedingCharAllowsIdentifierStart(text: string, prefixLength: number): boolean {
+  if (text.length === prefixLength) return true;
+  const precedingChar = text[text.length - prefixLength - 1] ?? "";
+  return !new RegExp(`[${IDENTIFIER_CHARS}]`).test(precedingChar);
+}
+
 function getSensitiveIdentifierOverlapLength(text: string): number {
   const lowerText = text.toLocaleLowerCase();
   const endsWithCompleteIdentifier = SENSITIVE_IDENTIFIER_REPLACEMENTS.some(([identifier]) =>
-    lowerText.endsWith(identifier.toLocaleLowerCase()),
+    lowerText.endsWith(identifier.toLocaleLowerCase()) && precedingCharAllowsIdentifierStart(text, identifier.length),
   );
   if (endsWithCompleteIdentifier) {
     return 0;
@@ -58,7 +65,10 @@ function getSensitiveIdentifierOverlapLength(text: string): number {
   return SENSITIVE_IDENTIFIER_REPLACEMENTS.reduce((maxOverlap, [identifier]) => {
     const lowerIdentifier = identifier.toLocaleLowerCase();
     for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
-      if (lowerText.endsWith(lowerIdentifier.slice(0, prefixLength))) {
+      if (
+        lowerText.endsWith(lowerIdentifier.slice(0, prefixLength))
+        && precedingCharAllowsIdentifierStart(text, prefixLength)
+      ) {
         return Math.max(maxOverlap, prefixLength);
       }
     }
@@ -76,7 +86,7 @@ export function getAmbiguousCounterSuffixLength(text: string): number {
 // the system prompt rule. Applied to every reply before DB write and client emit.
 export function sanitizeReply(text: string): string {
   const sanitized = IDENTIFIER_REPLACEMENT_PATTERNS.reduce(
-    (current, { pattern, replacement }) => current.replace(pattern, replacement),
+    (current, { pattern, replacement }) => current.replace(pattern, `$1${replacement}`),
     text,
   );
 
