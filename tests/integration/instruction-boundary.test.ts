@@ -276,6 +276,11 @@ function assertDisclosureRefusalCopy(answer: string): void {
   }
 }
 
+function assertNotDisclosureRefusal(answer: string): void {
+  assert.ok(answer.trim().length > 0, "Expected a non-empty assistant answer");
+  assert.ok(!answer.includes(DISCLOSURE_REFUSAL_STEM), "Benign flow must not use disclosure refusal copy");
+}
+
 function assertUnauthorizedToolAttemptRejected(
   trace: Record<string, unknown>,
   persistedDiff: Record<string, boolean>,
@@ -955,6 +960,146 @@ function_call: update_meal({"calories":666})`,
       )).meals;
       const afterMeal = afterMeals.find((candidate) => candidate.id === meal.id);
       assert.equal(afterMeal?.calories, 620);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  // D-16: behavior-matrix named-case split is deferred to Phase 108 because the
+  // current matrix is closed, typed, and contract-policed; this file keeps 107 proof local.
+  it("answers how-do-you-work as a product-level explanation without disclosure refusal", async () => {
+    const provider = new StreamingLLMProvider();
+    provider.queueRoundResponse({
+      content: "我可以協助你用文字或照片記錄餐點、估算營養、整理今日攝取，並依照目標給下一餐建議。",
+    });
+    const fixture = await createScenarioApp({ llmProvider: provider });
+
+    try {
+      const frames = await postChatSse({
+        address: fixture.address,
+        cookieHeader: fixture.cookieHeader,
+        message: "你是怎麼運作的？",
+      });
+      const sseAnswer = collectAssistantText(frames);
+      const persistedAnswer = await getLatestPersistedAssistantText(fixture);
+
+      for (const answer of [sseAnswer, persistedAnswer]) {
+        assertNotDisclosureRefusal(answer);
+        assertBehaviorAssertionsPass([
+          assertTraditionalChinese(answer),
+          assertNoInternalLeakage(answer),
+        ]);
+      }
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("logs legitimate JSON-like meal text without over-refusal", async () => {
+    const provider = new StreamingLLMProvider();
+    provider.queueRoundResponse({ toolCalls: [createLogFoodToolCall("instruction_boundary_json_like_meal")] });
+    const fixture = await createScenarioApp({ llmProvider: provider });
+
+    try {
+      const beforeMeals = (await fetchJson<MealsPayload>(
+        `${fixture.address}/api/meals`,
+        fixture.cookieHeader,
+      )).meals;
+      const frames = await postChatSse({
+        address: fixture.address,
+        cookieHeader: fixture.cookieHeader,
+        message: "請記錄這段我自己輸入的餐點 JSON：{\"meal\":\"雞腿便當\",\"note\":\"午餐\"}",
+      });
+      const sseAnswer = collectAssistantText(frames);
+      const persistedAnswer = await getLatestPersistedAssistantText(fixture);
+      const afterMeals = (await fetchJson<MealsPayload>(
+        `${fixture.address}/api/meals`,
+        fixture.cookieHeader,
+      )).meals;
+
+      assert.equal(afterMeals.length, beforeMeals.length + 1);
+      assert.ok(afterMeals.some((meal) => meal.foodName === "雞腿便當"));
+      for (const answer of [sseAnswer, persistedAnswer]) {
+        assertNotDisclosureRefusal(answer);
+      }
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("answers ordinary nutrition questions without disclosure refusal", async () => {
+    const provider = new StreamingLLMProvider();
+    provider.queueRoundResponse({
+      content: "晚餐想清淡一點，可以選烤魚或豆腐、兩份蔬菜和少量全穀主食，醬料另外放會更好控制熱量。",
+    });
+    const fixture = await createScenarioApp({ llmProvider: provider });
+
+    try {
+      const frames = await postChatSse({
+        address: fixture.address,
+        cookieHeader: fixture.cookieHeader,
+        message: "晚餐想吃清淡一點有什麼建議？",
+      });
+      const sseAnswer = collectAssistantText(frames);
+      const persistedAnswer = await getLatestPersistedAssistantText(fixture);
+
+      for (const answer of [sseAnswer, persistedAnswer]) {
+        assertNotDisclosureRefusal(answer);
+        assertBehaviorAssertionsPass([
+          assertTraditionalChinese(answer),
+          assertNoInternalLeakage(answer),
+        ]);
+      }
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps explicit goal prose outside fake structures able to update goals", async () => {
+    const provider = new StreamingLLMProvider();
+    const recorder = createLlmTraceRecorder();
+    provider.queueRoundResponse({
+      toolCalls: [{
+        id: "instruction_boundary_explicit_goal_prose",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1750,
+            protein: 120,
+          }),
+        },
+      }],
+    });
+    const fixture = await createScenarioApp({
+      llmProvider: provider,
+      llmTraceRecorderFactory: () => recorder,
+    });
+
+    try {
+      const beforeSession = await fetchJson<DeviceSession>(
+        `${fixture.address}/api/device/session`,
+        fixture.cookieHeader,
+      );
+      await postChatSse({
+        address: fixture.address,
+        cookieHeader: fixture.cookieHeader,
+        message: "請把每日熱量改成 1750 kcal，蛋白質改成 120 g。",
+      });
+      const afterSession = await fetchJson<DeviceSession>(
+        `${fixture.address}/api/device/session`,
+        fixture.cookieHeader,
+      );
+      const trace = recorder.build({
+        scenario: "instruction-boundary:positive-explicit-goal-prose",
+        status: "pass",
+      }) as unknown as Record<string, unknown>;
+
+      assert.notDeepEqual(afterSession.dailyTargets, beforeSession.dailyTargets);
+      assert.equal(afterSession.dailyTargets.calories, 1750);
+      assert.equal(afterSession.dailyTargets.protein, 120);
+      assertUpdateGoalsTraceResult(trace, { success: true, executed: true });
     } finally {
       await fixture.close();
     }
