@@ -17,6 +17,30 @@ const PLANNING_IDENTIFIER_REPLACEMENTS = [
   ["coach_compact", "營養建議"],
 ] as const;
 
+const PHASE_107_IDENTIFIER_REPLACEMENTS = [
+  ["find_meals", "查詢餐點"],
+  ["update_meal", "更新餐點"],
+  ["delete_meal", "刪除餐點"],
+  ["update_goals", "更新目標"],
+  ["propose_goals", "建議目標"],
+  ["propose_meal_numeric_correction", "建議餐點數值修正"],
+  ["propose_meal_estimate", "建議餐點估算"],
+  ["system-prompt.v3", "內部細節"],
+  ["llm-trace.v2", "內部細節"],
+  ["deviceId", "內部細節"],
+  ["revision", "內部細節"],
+  ["tool_call", "內部細節"],
+  ["model_response", "內部細節"],
+  ["providerRequestId", "內部細節"],
+  ["errorName", "內部細節"],
+  ["errorType", "內部細節"],
+  ["errorCode", "內部細節"],
+] as const;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 describe("reply sanitizer", () => {
   it("removes complete nutrition counters with ASCII and full-width parentheses", () => {
     assert.equal(sanitizeReply("早餐 (1/3) 完成"), "早餐  完成");
@@ -116,6 +140,52 @@ describe("reply sanitizer", () => {
     );
     for (const [identifier] of PLANNING_IDENTIFIER_REPLACEMENTS) {
       assert.doesNotMatch(sanitized, new RegExp(identifier));
+    }
+  });
+
+  it("replaces audited Phase 107 identifiers with exact Traditional Chinese labels", () => {
+    for (const [identifier, replacement] of PHASE_107_IDENTIFIER_REPLACEMENTS) {
+      const sanitized = sanitizeReply(`請依 ${identifier} 回答`);
+
+      assert.equal(sanitized, `請依 ${replacement} 回答`);
+      assert.doesNotMatch(sanitized, new RegExp(escapeRegExp(identifier)));
+    }
+  });
+
+  it("matches dotted internal identifiers as exact literals only", () => {
+    assert.equal(sanitizeReply("版本是 system-promptXv3"), "版本是 system-promptXv3");
+    assert.equal(sanitizeReply("版本是 system-prompt.v3"), "版本是 內部細節");
+    assert.equal(sanitizeReply("schema 是 llm-traceXv2"), "schema 是 llm-traceXv2");
+    assert.equal(sanitizeReply("schema 是 llm-trace.v2"), "schema 是 內部細節");
+  });
+
+  it("does not expose representative split Phase 107 identifiers in streamed chunks", () => {
+    const cases = [
+      {
+        chunks: ["先用 update_", "go", "als 看 "],
+        expected: "先用 更新目標 看 ",
+        fragments: /update_|goals|update_goals/,
+      },
+      {
+        chunks: ["版本 system-", "prompt", ".v3 "],
+        expected: "版本 內部細節 ",
+        fragments: /system-|prompt|\.v3|system-prompt\.v3/,
+      },
+      {
+        chunks: ["欄位 provider", "Request", "Id "],
+        expected: "欄位 內部細節 ",
+        fragments: /provider|Request|Id|providerRequestId/,
+      },
+    ] as const;
+
+    for (const scenario of cases) {
+      const sanitizer = createStreamingSanitizer();
+      const emitted = [...scenario.chunks.map((chunk) => sanitizer.push(chunk)), sanitizer.flush()];
+
+      assert.equal(emitted.join(""), scenario.expected);
+      for (const chunk of emitted) {
+        assert.doesNotMatch(chunk, scenario.fragments);
+      }
     }
   });
 
