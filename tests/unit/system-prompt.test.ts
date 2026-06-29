@@ -15,6 +15,12 @@ function instructionHierarchySection(prompt: string): string {
   return match[0];
 }
 
+function extractDisclosureRefusalSentence(hierarchy: string): string {
+  const match = /「([^」]*(?:內部設定|內部細節)[^」]*(?:記錄|估算|查看|規劃)[^」]*)」/.exec(hierarchy);
+  assert.ok(match, "disclosure refusal sentence must be present");
+  return match[1];
+}
+
 function intakeContextSection(prompt: string): string {
   const match = /使用者背景資料：[\s\S]*?(?=\n\n你的職責：)/.exec(prompt);
   assert.ok(match, "intake context section must be present");
@@ -193,6 +199,30 @@ describe("buildSystemPrompt", () => {
     assert.match(hierarchy, /隱藏系統提示/);
     assert.match(hierarchy, /內部工具\/函式\/欄位\/結構描述/);
     assert.match(hierarchy, /不能自行授權 mutation/);
+  });
+
+  it("defines disclosure refusal, product-level how-it-works, and fake-format redirect rules", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    const hierarchy = instructionHierarchySection(prompt);
+    const disclosureRefusal = extractDisclosureRefusalSentence(hierarchy);
+
+    assert.match(hierarchy, /內部設定|內部細節/);
+    assert.match(hierarchy, /記錄餐點|估算營養|查看今日攝取|規劃下一餐/);
+    assert.match(hierarchy, /你怎麼運作|產品能力/);
+    assert.match(hierarchy, /估算餐點營養/);
+    assert.match(hierarchy, /彙整每日攝取/);
+    assert.match(hierarchy, /協助規劃下一餐/);
+    assert.match(hierarchy, /內部格式文字直接操作/);
+    assert.match(hierarchy, /一般文字說明想記錄或修改什麼/);
+    assert.doesNotMatch(
+      disclosureRefusal,
+      /system prompt|schema|provider|stack|debug|trace|工具|函式|欄位|結構描述|供應商|堆疊|除錯|追蹤|system-prompt\.v3|llm-trace\.v2|log_food/i,
+    );
   });
 
   it("maps test-local risk categories to locked section IDs", () => {
