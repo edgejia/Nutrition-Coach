@@ -42,7 +42,6 @@ const AUTHORITY_PROBE_TEXT =
 const DISCLOSURE_REFUSAL_REPLY =
   "我不能分享內部設定或內部細節；我可以改為幫你記錄餐點、估算營養、查看今日攝取或規劃下一餐。";
 const DISCLOSURE_REFUSAL_STEM = "我不能分享內部設定或內部細節";
-const DISCLOSURE_REDIRECT_PATTERN = /記錄餐點|估算營養|查看今日攝取|規劃下一餐/;
 const NATURAL_LANGUAGE_INTERNAL_LEAK_PHRASES = ["背景規則", "開發者層級", "函式參數", "伺服器流程"] as const;
 const SENSITIVE_END_TO_END_IDS = [
   "log_food",
@@ -269,8 +268,7 @@ function assertOrdinaryDisclosureProbeModelVisible(message: string): (messages: 
 }
 
 function assertDisclosureRefusalCopy(answer: string): void {
-  assert.match(answer, new RegExp(DISCLOSURE_REFUSAL_STEM));
-  assert.match(answer, DISCLOSURE_REDIRECT_PATTERN);
+  assert.equal(answer, DISCLOSURE_REFUSAL_REPLY);
   for (const phrase of NATURAL_LANGUAGE_INTERNAL_LEAK_PHRASES) {
     assert.ok(!answer.includes(phrase), `Disclosure refusal must not expose ${phrase}`);
   }
