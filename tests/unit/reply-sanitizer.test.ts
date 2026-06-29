@@ -5,6 +5,7 @@ import {
   createStreamingSanitizer,
   getAmbiguousCounterSuffixLength,
   sanitizeReply,
+  SENSITIVE_IDENTIFIER_REPLACEMENTS,
 } from "../../server/lib/reply-sanitizer.js";
 
 const COUNTER_TEXT_PATTERN = /[（(]\s*\d+\s*\/\s*\d+\s*[）)]/;
@@ -39,6 +40,13 @@ const PHASE_107_IDENTIFIER_REPLACEMENTS = [
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function splitIdentifier(identifier: string): [string, string, string] {
+  const firstCut = Math.max(1, Math.floor(identifier.length / 3));
+  const secondCut = Math.max(firstCut + 1, Math.floor((identifier.length * 2) / 3));
+
+  return [identifier.slice(0, firstCut), identifier.slice(firstCut, secondCut), identifier.slice(secondCut)];
 }
 
 describe("reply sanitizer", () => {
@@ -185,6 +193,30 @@ describe("reply sanitizer", () => {
       assert.equal(emitted.join(""), scenario.expected);
       for (const chunk of emitted) {
         assert.doesNotMatch(chunk, scenario.fragments);
+      }
+    }
+  });
+
+  it("keeps finalized and streamed identifier coverage in parity", () => {
+    for (const [identifier, replacement] of SENSITIVE_IDENTIFIER_REPLACEMENTS) {
+      const escapedIdentifier = new RegExp(escapeRegExp(identifier));
+      const finalized = sanitizeReply(`比對 ${identifier} 完成`);
+
+      assert.equal(finalized, `比對 ${replacement} 完成`);
+      assert.doesNotMatch(finalized, escapedIdentifier);
+
+      const [first, second, third] = splitIdentifier(identifier);
+      const sanitizer = createStreamingSanitizer();
+      const emitted = [
+        sanitizer.push(`比對 ${first}`),
+        sanitizer.push(second),
+        sanitizer.push(`${third} 完成`),
+        sanitizer.flush(),
+      ];
+
+      assert.equal(emitted.join(""), `比對 ${replacement} 完成`);
+      for (const chunk of emitted) {
+        assert.doesNotMatch(chunk, escapedIdentifier);
       }
     }
   });
