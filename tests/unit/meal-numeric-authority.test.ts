@@ -257,4 +257,23 @@ describe("authorizeMealNumericUpdate", () => {
 
     assert.deepEqual(result, { ok: true, authorizedFields: ["items[1].calories"] });
   });
+
+  it("rejects renamed item replacements that borrow evidence from another existing item", () => {
+    const result = authorizeMealNumericUpdate({
+      currentUserMessage: "白飯蛋白質 28g",
+      currentMeal,
+      update: {
+        items: [
+          { foodName: "白飯", calories: 260, protein: 28, carbs: 0, fat: 12 },
+          { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+          { foodName: "滷蛋", calories: 90, protein: 7, carbs: 2, fat: 6 },
+          { foodName: "青菜", calories: 20, protein: 1, carbs: 20, fat: 3.5 },
+        ],
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "unauthorized_numeric_values");
+    assert.deepEqual(result.unauthorizedFields, ["items[0].protein"]);
+  });
 });

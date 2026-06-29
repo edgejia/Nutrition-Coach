@@ -286,12 +286,11 @@ function evidenceAllowsItemField(
   field: MealNumericField,
   value: number,
 ): boolean {
-  const candidateNames = [currentItem?.foodName, nextItem.foodName]
-    .map(normalizeItemName)
-    .filter((name): name is string => Boolean(name));
-  const uniqueNames = [...new Set(candidateNames)];
+  const currentName = normalizeItemName(currentItem?.foodName);
+  const nextName = normalizeItemName(nextItem.foodName);
+  const evidenceNames = currentName ? [currentName] : nextName ? [nextName] : [];
 
-  return uniqueNames.some((name) => evidenceAllows(evidenceByItem[name] ?? emptyEvidence(), field, value));
+  return evidenceNames.some((name) => evidenceAllows(evidenceByItem[name] ?? emptyEvidence(), field, value));
 }
 
 function collectPatchUnauthorized(

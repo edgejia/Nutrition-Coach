@@ -172,6 +172,18 @@ describe("reply sanitizer", () => {
     assert.equal(sanitizeReply("請看 system-prompt.v3, ProviderRequestId。"), "請看 內部細節, 內部細節。");
   });
 
+  it("keeps streaming and finalized identifier-boundary behavior in parity across chunk edges", () => {
+    const extended = createStreamingSanitizer();
+    const extendedChunks = [extended.push("prefix update_goals"), extended.push("_extra"), extended.flush()];
+    assert.equal(extendedChunks.join(""), sanitizeReply("prefix update_goals_extra"));
+    assert.equal(extendedChunks.join(""), "prefix update_goals_extra");
+
+    const punctuated = createStreamingSanitizer();
+    const punctuatedChunks = [punctuated.push("prefix update_goals"), punctuated.push(", done"), punctuated.flush()];
+    assert.equal(punctuatedChunks.join(""), sanitizeReply("prefix update_goals, done"));
+    assert.equal(punctuatedChunks.join(""), "prefix 更新目標, done");
+  });
+
   it("matches dotted internal identifiers as exact literals only", () => {
     assert.equal(sanitizeReply("版本是 system-promptXv3"), "版本是 system-promptXv3");
     assert.equal(sanitizeReply("版本是 system-prompt.v3"), "版本是 內部細節");

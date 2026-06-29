@@ -55,15 +55,16 @@ function precedingCharAllowsIdentifierStart(text: string, prefixLength: number):
 
 function getSensitiveIdentifierOverlapLength(text: string): number {
   const lowerText = text.toLocaleLowerCase();
-  const endsWithCompleteIdentifier = SENSITIVE_IDENTIFIER_REPLACEMENTS.some(([identifier]) =>
-    lowerText.endsWith(identifier.toLocaleLowerCase()) && precedingCharAllowsIdentifierStart(text, identifier.length),
-  );
-  if (endsWithCompleteIdentifier) {
-    return 0;
-  }
 
   return SENSITIVE_IDENTIFIER_REPLACEMENTS.reduce((maxOverlap, [identifier]) => {
     const lowerIdentifier = identifier.toLocaleLowerCase();
+    if (
+      lowerText.endsWith(lowerIdentifier)
+      && precedingCharAllowsIdentifierStart(text, identifier.length)
+    ) {
+      return Math.max(maxOverlap, identifier.length);
+    }
+
     for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
       if (
         lowerText.endsWith(lowerIdentifier.slice(0, prefixLength))
