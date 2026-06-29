@@ -293,6 +293,11 @@ function evidenceAllowsItemField(
   return evidenceNames.some((name) => evidenceAllows(evidenceByItem[name] ?? emptyEvidence(), field, value));
 }
 
+function hasDuplicateItemName(items: readonly MealNumericItem[], name: string | undefined): boolean {
+  if (!name) return false;
+  return items.filter((item) => normalizeItemName(item.foodName) === name).length > 1;
+}
+
 function collectPatchUnauthorized(
   patch: Partial<Record<MealNumericField, number>>,
   evidence: MealNumericEvidence,
@@ -331,6 +336,13 @@ function collectItemsUnauthorized(
       }
 
       const path = `items[${itemIndex}].${field}`;
+      const currentName = normalizeItemName(currentItem?.foodName);
+      const nextName = normalizeItemName(nextItem.foodName);
+      if (hasDuplicateItemName(currentItems, currentName) || hasDuplicateItemName(nextItems, nextName)) {
+        unauthorizedFields.push(path);
+        continue;
+      }
+
       if (evidenceAllowsItemField(evidenceByItem, currentItem, nextItem, field, nextValue)) {
         authorizedFields.push(path);
       } else {
@@ -374,10 +386,18 @@ export function authorizeMealNumericUpdate(input: {
     )
     : collectPatchUnauthorized(input.update.patch, evidence);
 
-  if (result.unauthorizedFields.length > 0) {
+  if (classification.kind !== "explicit_final_value") {
     return {
       ok: false,
       reason: failureReasonForClassification(classification),
+      unauthorizedFields: [...result.authorizedFields, ...result.unauthorizedFields],
+    };
+  }
+
+  if (result.unauthorizedFields.length > 0) {
+    return {
+      ok: false,
+      reason: "unauthorized_numeric_values",
       unauthorizedFields: result.unauthorizedFields,
     };
   }

@@ -190,6 +190,38 @@ describe("authorizeMealNumericUpdate", () => {
     }
   });
 
+  it("rejects relative operator operands as direct final meal values", () => {
+    const cases = [
+      {
+        currentUserMessage: "蛋白質加 10g",
+        update: { patch: { protein: 10 } },
+        unauthorizedFields: ["protein"],
+      },
+      {
+        currentUserMessage: "蛋白質少 10g",
+        update: { patch: { protein: 10 } },
+        unauthorizedFields: ["protein"],
+      },
+      {
+        currentUserMessage: "熱量少 20%",
+        update: { patch: { calories: 20 } },
+        unauthorizedFields: ["calories"],
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const result = authorizeMealNumericUpdate({
+        currentUserMessage: testCase.currentUserMessage,
+        currentMeal,
+        update: testCase.update,
+      });
+
+      assert.equal(result.ok, false, testCase.currentUserMessage);
+      assert.equal(result.reason, "relative_operator_requires_proposal", testCase.currentUserMessage);
+      assert.deepEqual(result.unauthorizedFields, testCase.unauthorizedFields, testCase.currentUserMessage);
+    }
+  });
+
   it("requires current-turn evidence for each changed items[] numeric replacement value", () => {
     const authorized = authorizeMealNumericUpdate({
       currentUserMessage: "雞腿蛋白質 28g，白飯碳水 60g",
@@ -275,5 +307,31 @@ describe("authorizeMealNumericUpdate", () => {
     assert.equal(result.ok, false);
     assert.equal(result.reason, "unauthorized_numeric_values");
     assert.deepEqual(result.unauthorizedFields, ["items[0].protein"]);
+  });
+
+  it("rejects same-name item replacement when name-scoped evidence is ambiguous", () => {
+    const result = authorizeMealNumericUpdate({
+      currentUserMessage: "第一個雞腿蛋白質 28g",
+      currentMeal: {
+        calories: 400,
+        protein: 20,
+        carbs: 50,
+        fat: 10,
+        items: [
+          { foodName: "雞腿", calories: 200, protein: 20, carbs: 0, fat: 10 },
+          { foodName: "雞腿", calories: 200, protein: 0, carbs: 50, fat: 0 },
+        ],
+      },
+      update: {
+        items: [
+          { foodName: "雞腿", calories: 200, protein: 20, carbs: 0, fat: 10 },
+          { foodName: "雞腿", calories: 200, protein: 28, carbs: 50, fat: 0 },
+        ],
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "unauthorized_numeric_values");
+    assert.deepEqual(result.unauthorizedFields, ["items[1].protein"]);
   });
 });
