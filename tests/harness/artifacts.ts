@@ -188,6 +188,13 @@ const OMITTED_KEYS = new Set([
   "imagedatauri",
   "messages",
   "mealssnapshot",
+  "aftermeals",
+  "aftertargets",
+  "beforemeals",
+  "beforetargets",
+  "committedfacts",
+  "committedtargets",
+  "deletedmeal",
   "openaiapikey",
   "providerpayload",
   "prompttext",
@@ -211,7 +218,11 @@ const OMITTED_KEYS = new Set([
   "uploadstagingpath",
   "usermealtext",
   "rawusermessage",
+  "persistedmeal",
+  "responseloggedmeal",
+  "seededmeal",
   "usermessage",
+  "updatedmeal",
 ]);
 
 // ---------------------------------------------------------------------------

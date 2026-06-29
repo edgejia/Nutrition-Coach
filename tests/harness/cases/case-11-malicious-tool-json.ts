@@ -296,6 +296,9 @@ async function runVariant(variant: (typeof VARIANTS)[number]): Promise<VariantRe
         allowedTools: [],
         observedTools: executedMutationTools,
         persistedDiff,
+        checkedNumericMarkers: [...variant.numericMarkerLabels],
+        unauthorizedNumericMarkers: numericAuthorityDenied ? [] : [...variant.numericMarkerLabels],
+        numericAuthorityDenied,
         ...roleIntegrity,
       }),
     ];

@@ -310,16 +310,33 @@ describe("verification-artifacts", () => {
   test("database snapshot evidence keys are omitted from saved artifact files", async () => {
     const result = makeFailResult("omit-database-snapshots");
     result.artifacts.historySnapshot = [{ role: "user", content: "raw user meal text should not persist" }];
+    result.artifacts.behaviorMatrixSnapshots = {
+      beforeMeals: [{ id: "meal-1", foodName: "raw food name", calories: 777 }],
+      afterMeals: [{ id: "meal-1", foodName: "raw food name", calories: 888 }],
+      beforeTargets: { calories: 2000, protein: 100, carbs: 220, fat: 70 },
+      afterTargets: { calories: 1800, protein: 130, carbs: 150, fat: 50 },
+      persistedMeal: { id: "meal-2", foodName: "raw persisted meal" },
+      seededMeal: { id: "meal-3", foodName: "raw seeded meal" },
+      updatedMeal: { id: "meal-3", foodName: "raw updated meal" },
+      responseLoggedMeal: { mealId: "meal-4", foodName: "raw response meal" },
+      committedTargets: { calories: 1800, protein: 130, carbs: 150, fat: 50 },
+      committedFacts: { foodName: "raw committed food", calories: 520 },
+      deletedMeal: { mealId: "meal-5", foodName: "raw deleted meal" },
+    };
 
     await writeScenarioArtifacts("omit-database-snapshots", result);
 
     const latestDir = path.join(tmpDir, "omit-database-snapshots", "latest");
     for (const fileName of ["snapshots.json", "scenario-result.json"]) {
       const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
-      assert.doesNotMatch(raw, /mealsSnapshot|historySnapshot/, `${fileName} must omit database snapshot keys`);
       assert.doesNotMatch(
         raw,
-        /raw user meal text should not persist|secret-device-id-xyz/,
+        /mealsSnapshot|historySnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|committedTargets|committedFacts|deletedMeal/,
+        `${fileName} must omit database snapshot keys`,
+      );
+      assert.doesNotMatch(
+        raw,
+        /raw user meal text should not persist|secret-device-id-xyz|raw food name|raw persisted meal|raw seeded meal|raw updated meal|raw response meal|raw committed food|raw deleted meal/,
         `${fileName} must not persist database snapshot values`,
       );
     }

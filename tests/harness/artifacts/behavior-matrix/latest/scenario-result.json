@@ -163,16 +163,7 @@
           {
             "name": "persisted_meal_facts",
             "ok": true,
-            "evidence": {
-              "persistedMeal": {
-                "foodName": "豬肉燒烤飯盒",
-                "dateKey": "2026-06-29",
-                "calories": 680,
-                "protein": 35,
-                "carbs": 86,
-                "fat": 22
-              }
-            }
+            "evidence": {}
           }
         ],
         "failedAssertions": [],
@@ -190,22 +181,14 @@
             "daily_summary",
             "derived_uncertainty_range"
           ],
-          "persistedMeal": {
-            "foodName": "豬肉燒烤飯盒",
-            "dateKey": "2026-06-29",
-            "calories": 680,
-            "protein": 35,
-            "carbs": 86,
-            "fat": 22
-          },
           "receiptLoggedMeal": {
             "receiptStatus": "active",
-            "mealId": "ad714df0-e5f9-49f0-bd71-c16a47f8ac78",
+            "mealId": "da84db86-af1f-4ab3-b52f-4b51e0cb8f67",
             "dateKey": "2026-06-30",
-            "mealRevisionId": "ad714df0-e5f9-49f0-bd71-c16a47f8ac78:r1",
-            "loggedAt": "2026-06-29T17:38:04.102Z",
-            "imageAssetId": "f3d7ab56-a75c-4585-9b35-5b94b6193168",
-            "imageUrl": "/api/assets/f3d7ab56-a75c-4585-9b35-5b94b6193168",
+            "mealRevisionId": "da84db86-af1f-4ab3-b52f-4b51e0cb8f67:r1",
+            "loggedAt": "2026-06-29T17:53:28.750Z",
+            "imageAssetId": "6afb43d3-e479-443a-a916-c3fb6e9e1e68",
+            "imageUrl": "/api/assets/6afb43d3-e479-443a-a916-c3fb6e9e1e68",
             "foodName": "豬肉燒烤飯盒",
             "itemCount": 1,
             "calories": 680,
@@ -437,17 +420,7 @@
           {
             "name": "persisted_meal_facts",
             "ok": true,
-            "evidence": {
-              "persistedMeal": {
-                "foodName": "雞肉沙拉",
-                "dateKey": "2026-06-29",
-                "calories": 420,
-                "protein": 32,
-                "carbs": 28,
-                "fat": 18,
-                "quantityUncertaintyReason": "missing_quantity"
-              }
-            }
+            "evidence": {}
           }
         ],
         "failedAssertions": [],
@@ -472,21 +445,12 @@
             "derived_uncertainty_range"
           ],
           "unsupportedNumbers": [],
-          "persistedMeal": {
-            "foodName": "雞肉沙拉",
-            "dateKey": "2026-06-29",
-            "calories": 420,
-            "protein": 32,
-            "carbs": 28,
-            "fat": 18,
-            "quantityUncertaintyReason": "missing_quantity"
-          },
           "receiptLoggedMeal": {
             "receiptStatus": "active",
-            "mealId": "bd49b9ae-fd04-4404-b4c7-337b4beaf6af",
+            "mealId": "beaca088-afd8-4424-9008-97bad2194868",
             "dateKey": "2026-06-30",
-            "mealRevisionId": "bd49b9ae-fd04-4404-b4c7-337b4beaf6af:r1",
-            "loggedAt": "2026-06-29T17:38:04.138Z",
+            "mealRevisionId": "beaca088-afd8-4424-9008-97bad2194868:r1",
+            "loggedAt": "2026-06-29T17:53:28.768Z",
             "imageAssetId": null,
             "imageUrl": null,
             "foodName": "雞肉沙拉",
@@ -651,8 +615,8 @@
               "carbs": 58,
               "fat": 14,
               "dateKey": "2026-06-30",
-              "mealId": "232e0621-5b67-4356-a907-4b93a9fe6445",
-              "mealRevisionId": "232e0621-5b67-4356-a907-4b93a9fe6445:r1",
+              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
+              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
               "traceFinalReplySource": "renderer",
               "traceFinalReplyShape": "plain_text"
             },
@@ -664,8 +628,8 @@
               "carbs": 58,
               "fat": 14,
               "dateKey": "2026-06-30",
-              "mealId": "232e0621-5b67-4356-a907-4b93a9fe6445",
-              "mealRevisionId": "232e0621-5b67-4356-a907-4b93a9fe6445:r1",
+              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
+              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
               "traceFinalReplySource": "renderer",
               "traceFinalReplyShape": "plain_text"
             },
@@ -677,8 +641,8 @@
               "carbs": 58,
               "fat": 14,
               "dateKey": "2026-06-30",
-              "mealId": "232e0621-5b67-4356-a907-4b93a9fe6445",
-              "mealRevisionId": "232e0621-5b67-4356-a907-4b93a9fe6445:r1",
+              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
+              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
               "traceFinalReplySource": "renderer",
               "traceFinalReplyShape": "plain_text"
             },
@@ -690,8 +654,8 @@
               "carbs": 58,
               "fat": 14,
               "dateKey": "2026-06-30",
-              "mealId": "232e0621-5b67-4356-a907-4b93a9fe6445",
-              "mealRevisionId": "232e0621-5b67-4356-a907-4b93a9fe6445:r1",
+              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
+              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
               "traceFinalReplySource": "renderer",
               "traceFinalReplyShape": "plain_text"
             }
@@ -895,19 +859,11 @@
             "daily_summary"
           ],
           "unsupportedNumbers": [],
-          "persistedMeal": {
-            "foodName": "牛肉飯",
-            "dateKey": "2026-05-01",
-            "calories": 620,
-            "protein": 30,
-            "carbs": 82,
-            "fat": 18
-          },
           "receiptLoggedMeal": {
             "receiptStatus": "active",
-            "mealId": "96b775c1-6fc1-494f-82b7-8136b152b2f7",
+            "mealId": "2d447dc1-f3ca-4f29-9628-cd122f04ff50",
             "dateKey": "2026-05-01",
-            "mealRevisionId": "96b775c1-6fc1-494f-82b7-8136b152b2f7:r1",
+            "mealRevisionId": "2d447dc1-f3ca-4f29-9628-cd122f04ff50:r1",
             "loggedAt": "2026-05-01T10:30:00.000Z",
             "mealPeriod": "dinner",
             "imageAssetId": null,
@@ -989,27 +945,18 @@
                 "update_goals"
               ],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [
+                "calories",
+                "protein"
+              ],
               "persistedDiff": {
-                "calories": {
-                  "before": 1500,
-                  "after": 1800
-                },
-                "protein": {
-                  "before": 120,
-                  "after": 130
-                }
+                "targetsChanged": true,
+                "changedFields": [
+                  "calories",
+                  "protein"
+                ]
               },
               "replyLength": 57
             }
@@ -1027,27 +974,18 @@
                 "update_goals"
               ],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [
+                "calories",
+                "protein"
+              ],
               "persistedDiff": {
-                "calories": {
-                  "before": 1500,
-                  "after": 1800
-                },
-                "protein": {
-                  "before": 120,
-                  "after": 130
-                }
+                "targetsChanged": true,
+                "changedFields": [
+                  "calories",
+                  "protein"
+                ]
               },
               "replyLength": 57
             }
@@ -1065,27 +1003,18 @@
                 "update_goals"
               ],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [
+                "calories",
+                "protein"
+              ],
               "persistedDiff": {
-                "calories": {
-                  "before": 1500,
-                  "after": 1800
-                },
-                "protein": {
-                  "before": 120,
-                  "after": 130
-                }
+                "targetsChanged": true,
+                "changedFields": [
+                  "calories",
+                  "protein"
+                ]
               },
               "replyLength": 57
             }
@@ -1167,18 +1096,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -1192,18 +1112,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -1217,18 +1128,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -1242,18 +1144,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -1328,27 +1221,18 @@
                 "update_goals"
               ],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [
+                "calories",
+                "protein"
+              ],
               "persistedDiff": {
-                "calories": {
-                  "before": 1500,
-                  "after": 1800
-                },
-                "protein": {
-                  "before": 120,
-                  "after": 130
-                }
+                "targetsChanged": true,
+                "changedFields": [
+                  "calories",
+                  "protein"
+                ]
               },
               "replyLength": 57
             },
@@ -1358,18 +1242,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -1408,42 +1283,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1460,42 +1301,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1512,42 +1319,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1564,42 +1337,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1616,42 +1355,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1697,42 +1402,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1749,42 +1420,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1801,42 +1438,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1853,42 +1456,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1905,42 +1474,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -1988,42 +1523,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             },
@@ -2036,42 +1537,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -2084,92 +1551,16 @@
             "find_meals"
           ],
           "unauthorizedTools": [],
-          "beforeMeals": [
+          "mealCounts": [
             {
               "name": "ambiguous_update",
-              "meals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ]
+              "before": 2,
+              "after": 2
             },
             {
               "name": "ambiguous_delete",
-              "meals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ]
-            }
-          ],
-          "afterMeals": [
-            {
-              "name": "ambiguous_update",
-              "meals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ]
-            },
-            {
-              "name": "ambiguous_delete",
-              "meals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ]
+              "before": 2,
+              "after": 2
             }
           ],
           "persistedDiff": {
@@ -2682,8 +2073,19 @@
                 "goalsChanged": false
               },
               "persistedDiffKeys": [],
+              "checkedNumericMarkers": [
+                {
+                  "label": "calories:666"
+                },
+                {
+                  "label": "protein:66"
+                }
+              ],
+              "checkedNumericMarkerCount": 2,
               "unauthorizedNumericMarkers": [],
               "unauthorizedNumericMarkerCount": 0,
+              "numericAuthorityDenied": true,
+              "hasCheckedNumericMarkers": true,
               "userRoleToolLikeMessageCount": 1,
               "promotedToolRoleMessageCount": 0,
               "hasUserRoleToolLikeMessage": true,
@@ -2737,8 +2139,19 @@
                 "goalsChanged": false
               },
               "persistedDiffKeys": [],
+              "checkedNumericMarkers": [
+                {
+                  "label": "calories:1666"
+                },
+                {
+                  "label": "protein:166"
+                }
+              ],
+              "checkedNumericMarkerCount": 2,
               "unauthorizedNumericMarkers": [],
               "unauthorizedNumericMarkerCount": 0,
+              "numericAuthorityDenied": true,
+              "hasCheckedNumericMarkers": true,
               "userRoleToolLikeMessageCount": 1,
               "promotedToolRoleMessageCount": 0,
               "hasUserRoleToolLikeMessage": true,
@@ -2786,8 +2199,19 @@
                   "goalsChanged": false
                 },
                 "persistedDiffKeys": [],
+                "checkedNumericMarkers": [
+                  {
+                    "label": "calories:666"
+                  },
+                  {
+                    "label": "protein:66"
+                  }
+                ],
+                "checkedNumericMarkerCount": 2,
                 "unauthorizedNumericMarkers": [],
                 "unauthorizedNumericMarkerCount": 0,
+                "numericAuthorityDenied": true,
+                "hasCheckedNumericMarkers": true,
                 "userRoleToolLikeMessageCount": 1,
                 "promotedToolRoleMessageCount": 0,
                 "hasUserRoleToolLikeMessage": true,
@@ -2849,8 +2273,19 @@
                   "goalsChanged": false
                 },
                 "persistedDiffKeys": [],
+                "checkedNumericMarkers": [
+                  {
+                    "label": "calories:1666"
+                  },
+                  {
+                    "label": "protein:166"
+                  }
+                ],
+                "checkedNumericMarkerCount": 2,
                 "unauthorizedNumericMarkers": [],
                 "unauthorizedNumericMarkerCount": 0,
+                "numericAuthorityDenied": true,
+                "hasCheckedNumericMarkers": true,
                 "userRoleToolLikeMessageCount": 1,
                 "promotedToolRoleMessageCount": 0,
                 "hasUserRoleToolLikeMessage": true,
@@ -3019,8 +2454,19 @@
                 "goalsChanged": false
               },
               "persistedDiffKeys": [],
+              "checkedNumericMarkers": [
+                {
+                  "label": "calories:1888"
+                },
+                {
+                  "label": "protein:188"
+                }
+              ],
+              "checkedNumericMarkerCount": 2,
               "unauthorizedNumericMarkers": [],
               "unauthorizedNumericMarkerCount": 0,
+              "numericAuthorityDenied": true,
+              "hasCheckedNumericMarkers": true,
               "userRoleToolLikeMessageCount": 1,
               "promotedToolRoleMessageCount": 0,
               "hasUserRoleToolLikeMessage": true,
@@ -3037,6 +2483,11 @@
           "finalAnswerLength": 49,
           "allowedTools": [],
           "observedTools": [],
+          "checkedNumericMarkers": [
+            "calories:1888",
+            "protein:188"
+          ],
+          "numericAuthorityDenied": true,
           "unauthorizedTools": [],
           "persistedDiff": {
             "mealsChanged": false,
@@ -3055,8 +2506,19 @@
               "goalsChanged": false
             },
             "persistedDiffKeys": [],
+            "checkedNumericMarkers": [
+              {
+                "label": "calories:1888"
+              },
+              {
+                "label": "protein:188"
+              }
+            ],
+            "checkedNumericMarkerCount": 2,
             "unauthorizedNumericMarkers": [],
             "unauthorizedNumericMarkerCount": 0,
+            "numericAuthorityDenied": true,
+            "hasCheckedNumericMarkers": true,
             "userRoleToolLikeMessageCount": 1,
             "promotedToolRoleMessageCount": 0,
             "hasUserRoleToolLikeMessage": true,
@@ -3107,62 +2569,10 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 26,
-              "committedFacts": {
-                "foodName": "雞胸便當",
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14
-              },
-              "persistedMeal": {
-                "id": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "responseLoggedMeal": {
-                "receiptStatus": "active",
-                "mealId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "dateKey": "2026-06-30",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "imageAssetId": null,
-                "imageUrl": null,
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ]
-              }
+              "persistedMealFound": true,
+              "committedFactsMatchExpected": true,
+              "responseLoggedMealPresent": true,
+              "responseLoggedMealMatchesExpected": true
             }
           },
           {
@@ -3228,62 +2638,10 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 26,
-              "committedFacts": {
-                "foodName": "雞胸便當",
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14
-              },
-              "persistedMeal": {
-                "id": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "responseLoggedMeal": {
-                "receiptStatus": "active",
-                "mealId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "dateKey": "2026-06-30",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "imageAssetId": null,
-                "imageUrl": null,
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ]
-              }
+              "persistedMealFound": true,
+              "committedFactsMatchExpected": true,
+              "responseLoggedMealPresent": true,
+              "responseLoggedMealMatchesExpected": true
             }
           },
           {
@@ -3297,49 +2655,9 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 25,
-              "seededMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r1",
-                "deviceId": "[REDACTED]",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 620,
-                "protein": 31,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null
-              },
-              "updatedMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r2",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 500,
-                "protein": 40,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "鮪魚飯",
-                    "position": 0,
-                    "calories": 500,
-                    "protein": 40,
-                    "carbs": 76,
-                    "fat": 18
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "committedFacts": {
-                "foodName": "鮪魚飯",
-                "calories": 500,
-                "protein": 40
-              }
+              "seededMealCreated": true,
+              "updatedMealFound": true,
+              "updatedMealMatchesExpected": true
             }
           },
           {
@@ -3408,49 +2726,9 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 25,
-              "seededMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r1",
-                "deviceId": "[REDACTED]",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 620,
-                "protein": 31,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null
-              },
-              "updatedMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r2",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 500,
-                "protein": 40,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "鮪魚飯",
-                    "position": 0,
-                    "calories": 500,
-                    "protein": 40,
-                    "carbs": 76,
-                    "fat": 18
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "committedFacts": {
-                "foodName": "鮪魚飯",
-                "calories": 500,
-                "protein": 40
-              }
+              "seededMealCreated": true,
+              "updatedMealFound": true,
+              "updatedMealMatchesExpected": true
             }
           },
           {
@@ -3464,49 +2742,9 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 25,
-              "seededMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r1",
-                "deviceId": "[REDACTED]",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 620,
-                "protein": 31,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null
-              },
-              "updatedMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r2",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 500,
-                "protein": 40,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "鮪魚飯",
-                    "position": 0,
-                    "calories": 500,
-                    "protein": 40,
-                    "carbs": 76,
-                    "fat": 18
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "committedFacts": {
-                "foodName": "鮪魚飯",
-                "calories": 500,
-                "protein": 40
-              }
+              "seededMealCreated": true,
+              "updatedMealFound": true,
+              "updatedMealMatchesExpected": true
             }
           },
           {
@@ -3522,12 +2760,10 @@
               "proposalReplyLength": 88,
               "finalReplyLength": 15,
               "proposalKind": "meal_delete",
-              "deletedMeal": {
-                "mealId": "0382a9d7-3e20-4d40-84b4-ee67dd7ecdb7",
-                "dateKey": "2026-06-30",
-                "foodName": "拿鐵"
-              },
-              "afterMeals": []
+              "deletedMealDateKeyPresent": true,
+              "deletedMealNameMatched": true,
+              "afterMealCount": 0,
+              "deletedMealAbsent": true
             }
           },
           {
@@ -3574,12 +2810,10 @@
               "proposalReplyLength": 88,
               "finalReplyLength": 15,
               "proposalKind": "meal_delete",
-              "deletedMeal": {
-                "mealId": "0382a9d7-3e20-4d40-84b4-ee67dd7ecdb7",
-                "dateKey": "2026-06-30",
-                "foodName": "拿鐵"
-              },
-              "afterMeals": []
+              "deletedMealDateKeyPresent": true,
+              "deletedMealNameMatched": true,
+              "afterMealCount": 0,
+              "deletedMealAbsent": true
             }
           },
           {
@@ -3595,12 +2829,10 @@
               "proposalReplyLength": 88,
               "finalReplyLength": 15,
               "proposalKind": "meal_delete",
-              "deletedMeal": {
-                "mealId": "0382a9d7-3e20-4d40-84b4-ee67dd7ecdb7",
-                "dateKey": "2026-06-30",
-                "foodName": "拿鐵"
-              },
-              "afterMeals": []
+              "deletedMealDateKeyPresent": true,
+              "deletedMealNameMatched": true,
+              "afterMealCount": 0,
+              "deletedMealAbsent": true
             }
           },
           {
@@ -3613,12 +2845,8 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 57,
-              "committedTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              }
+              "committedTargetsMatchExpected": true,
+              "committedTargetFieldCount": 4
             }
           },
           {
@@ -3690,12 +2918,8 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 57,
-              "committedTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              }
+              "committedTargetsMatchExpected": true,
+              "committedTargetFieldCount": 4
             }
           },
           {
@@ -3765,62 +2989,10 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 26,
-              "committedFacts": {
-                "foodName": "雞胸便當",
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14
-              },
-              "persistedMeal": {
-                "id": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "responseLoggedMeal": {
-                "receiptStatus": "active",
-                "mealId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "dateKey": "2026-06-30",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "imageAssetId": null,
-                "imageUrl": null,
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ]
-              }
+              "persistedMealFound": true,
+              "committedFactsMatchExpected": true,
+              "responseLoggedMealPresent": true,
+              "responseLoggedMealMatchesExpected": true
             },
             {
               "name": "update",
@@ -3830,49 +3002,9 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 25,
-              "seededMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r1",
-                "deviceId": "[REDACTED]",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 620,
-                "protein": 31,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null
-              },
-              "updatedMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r2",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 500,
-                "protein": 40,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "鮪魚飯",
-                    "position": 0,
-                    "calories": 500,
-                    "protein": 40,
-                    "carbs": 76,
-                    "fat": 18
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "committedFacts": {
-                "foodName": "鮪魚飯",
-                "calories": 500,
-                "protein": 40
-              }
+              "seededMealCreated": true,
+              "updatedMealFound": true,
+              "updatedMealMatchesExpected": true
             },
             {
               "name": "delete",
@@ -3884,12 +3016,10 @@
               "proposalReplyLength": 88,
               "finalReplyLength": 15,
               "proposalKind": "meal_delete",
-              "deletedMeal": {
-                "mealId": "0382a9d7-3e20-4d40-84b4-ee67dd7ecdb7",
-                "dateKey": "2026-06-30",
-                "foodName": "拿鐵"
-              },
-              "afterMeals": []
+              "deletedMealDateKeyPresent": true,
+              "deletedMealNameMatched": true,
+              "afterMealCount": 0,
+              "deletedMealAbsent": true
             },
             {
               "name": "goals",
@@ -3898,12 +3028,8 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 57,
-              "committedTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              }
+              "committedTargetsMatchExpected": true,
+              "committedTargetFieldCount": 4
             },
             {
               "name": "non_mutation_model",
@@ -4092,16 +3218,7 @@
           {
             "name": "persisted_meal_facts",
             "ok": true,
-            "evidence": {
-              "persistedMeal": {
-                "foodName": "豬肉燒烤飯盒",
-                "dateKey": "2026-06-29",
-                "calories": 680,
-                "protein": 35,
-                "carbs": 86,
-                "fat": 22
-              }
-            }
+            "evidence": {}
           }
         ],
         "failedAssertions": [],
@@ -4119,22 +3236,14 @@
             "daily_summary",
             "derived_uncertainty_range"
           ],
-          "persistedMeal": {
-            "foodName": "豬肉燒烤飯盒",
-            "dateKey": "2026-06-29",
-            "calories": 680,
-            "protein": 35,
-            "carbs": 86,
-            "fat": 22
-          },
           "receiptLoggedMeal": {
             "receiptStatus": "active",
-            "mealId": "ad714df0-e5f9-49f0-bd71-c16a47f8ac78",
+            "mealId": "da84db86-af1f-4ab3-b52f-4b51e0cb8f67",
             "dateKey": "2026-06-30",
-            "mealRevisionId": "ad714df0-e5f9-49f0-bd71-c16a47f8ac78:r1",
-            "loggedAt": "2026-06-29T17:38:04.102Z",
-            "imageAssetId": "f3d7ab56-a75c-4585-9b35-5b94b6193168",
-            "imageUrl": "/api/assets/f3d7ab56-a75c-4585-9b35-5b94b6193168",
+            "mealRevisionId": "da84db86-af1f-4ab3-b52f-4b51e0cb8f67:r1",
+            "loggedAt": "2026-06-29T17:53:28.750Z",
+            "imageAssetId": "6afb43d3-e479-443a-a916-c3fb6e9e1e68",
+            "imageUrl": "/api/assets/6afb43d3-e479-443a-a916-c3fb6e9e1e68",
             "foodName": "豬肉燒烤飯盒",
             "itemCount": 1,
             "calories": 680,
@@ -4351,17 +3460,7 @@
           {
             "name": "persisted_meal_facts",
             "ok": true,
-            "evidence": {
-              "persistedMeal": {
-                "foodName": "雞肉沙拉",
-                "dateKey": "2026-06-29",
-                "calories": 420,
-                "protein": 32,
-                "carbs": 28,
-                "fat": 18,
-                "quantityUncertaintyReason": "missing_quantity"
-              }
-            }
+            "evidence": {}
           }
         ],
         "failedAssertions": [],
@@ -4386,21 +3485,12 @@
             "derived_uncertainty_range"
           ],
           "unsupportedNumbers": [],
-          "persistedMeal": {
-            "foodName": "雞肉沙拉",
-            "dateKey": "2026-06-29",
-            "calories": 420,
-            "protein": 32,
-            "carbs": 28,
-            "fat": 18,
-            "quantityUncertaintyReason": "missing_quantity"
-          },
           "receiptLoggedMeal": {
             "receiptStatus": "active",
-            "mealId": "bd49b9ae-fd04-4404-b4c7-337b4beaf6af",
+            "mealId": "beaca088-afd8-4424-9008-97bad2194868",
             "dateKey": "2026-06-30",
-            "mealRevisionId": "bd49b9ae-fd04-4404-b4c7-337b4beaf6af:r1",
-            "loggedAt": "2026-06-29T17:38:04.138Z",
+            "mealRevisionId": "beaca088-afd8-4424-9008-97bad2194868:r1",
+            "loggedAt": "2026-06-29T17:53:28.768Z",
             "imageAssetId": null,
             "imageUrl": null,
             "foodName": "雞肉沙拉",
@@ -4550,8 +3640,8 @@
               "carbs": 58,
               "fat": 14,
               "dateKey": "2026-06-30",
-              "mealId": "232e0621-5b67-4356-a907-4b93a9fe6445",
-              "mealRevisionId": "232e0621-5b67-4356-a907-4b93a9fe6445:r1",
+              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
+              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
               "traceFinalReplySource": "renderer",
               "traceFinalReplyShape": "plain_text"
             },
@@ -4563,8 +3653,8 @@
               "carbs": 58,
               "fat": 14,
               "dateKey": "2026-06-30",
-              "mealId": "232e0621-5b67-4356-a907-4b93a9fe6445",
-              "mealRevisionId": "232e0621-5b67-4356-a907-4b93a9fe6445:r1",
+              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
+              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
               "traceFinalReplySource": "renderer",
               "traceFinalReplyShape": "plain_text"
             },
@@ -4576,8 +3666,8 @@
               "carbs": 58,
               "fat": 14,
               "dateKey": "2026-06-30",
-              "mealId": "232e0621-5b67-4356-a907-4b93a9fe6445",
-              "mealRevisionId": "232e0621-5b67-4356-a907-4b93a9fe6445:r1",
+              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
+              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
               "traceFinalReplySource": "renderer",
               "traceFinalReplyShape": "plain_text"
             },
@@ -4589,8 +3679,8 @@
               "carbs": 58,
               "fat": 14,
               "dateKey": "2026-06-30",
-              "mealId": "232e0621-5b67-4356-a907-4b93a9fe6445",
-              "mealRevisionId": "232e0621-5b67-4356-a907-4b93a9fe6445:r1",
+              "mealId": "3be674b0-c0b0-4ddc-bede-06749d0e8123",
+              "mealRevisionId": "3be674b0-c0b0-4ddc-bede-06749d0e8123:r1",
               "traceFinalReplySource": "renderer",
               "traceFinalReplyShape": "plain_text"
             }
@@ -4779,19 +3869,11 @@
             "daily_summary"
           ],
           "unsupportedNumbers": [],
-          "persistedMeal": {
-            "foodName": "牛肉飯",
-            "dateKey": "2026-05-01",
-            "calories": 620,
-            "protein": 30,
-            "carbs": 82,
-            "fat": 18
-          },
           "receiptLoggedMeal": {
             "receiptStatus": "active",
-            "mealId": "96b775c1-6fc1-494f-82b7-8136b152b2f7",
+            "mealId": "2d447dc1-f3ca-4f29-9628-cd122f04ff50",
             "dateKey": "2026-05-01",
-            "mealRevisionId": "96b775c1-6fc1-494f-82b7-8136b152b2f7:r1",
+            "mealRevisionId": "2d447dc1-f3ca-4f29-9628-cd122f04ff50:r1",
             "loggedAt": "2026-05-01T10:30:00.000Z",
             "mealPeriod": "dinner",
             "imageAssetId": null,
@@ -4858,27 +3940,18 @@
                 "update_goals"
               ],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [
+                "calories",
+                "protein"
+              ],
               "persistedDiff": {
-                "calories": {
-                  "before": 1500,
-                  "after": 1800
-                },
-                "protein": {
-                  "before": 120,
-                  "after": 130
-                }
+                "targetsChanged": true,
+                "changedFields": [
+                  "calories",
+                  "protein"
+                ]
               },
               "replyLength": 57
             }
@@ -4896,27 +3969,18 @@
                 "update_goals"
               ],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [
+                "calories",
+                "protein"
+              ],
               "persistedDiff": {
-                "calories": {
-                  "before": 1500,
-                  "after": 1800
-                },
-                "protein": {
-                  "before": 120,
-                  "after": 130
-                }
+                "targetsChanged": true,
+                "changedFields": [
+                  "calories",
+                  "protein"
+                ]
               },
               "replyLength": 57
             }
@@ -4934,27 +3998,18 @@
                 "update_goals"
               ],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [
+                "calories",
+                "protein"
+              ],
               "persistedDiff": {
-                "calories": {
-                  "before": 1500,
-                  "after": 1800
-                },
-                "protein": {
-                  "before": 120,
-                  "after": 130
-                }
+                "targetsChanged": true,
+                "changedFields": [
+                  "calories",
+                  "protein"
+                ]
               },
               "replyLength": 57
             }
@@ -5036,18 +4091,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -5061,18 +4107,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -5086,18 +4123,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -5111,18 +4139,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -5197,27 +4216,18 @@
                 "update_goals"
               ],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [
+                "calories",
+                "protein"
+              ],
               "persistedDiff": {
-                "calories": {
-                  "before": 1500,
-                  "after": 1800
-                },
-                "protein": {
-                  "before": 120,
-                  "after": 130
-                }
+                "targetsChanged": true,
+                "changedFields": [
+                  "calories",
+                  "protein"
+                ]
               },
               "replyLength": 57
             },
@@ -5227,18 +4237,9 @@
               "allowedTools": [],
               "observedTools": [],
               "unauthorizedTools": [],
-              "beforeTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
-              "afterTargets": {
-                "calories": 1500,
-                "protein": 120,
-                "carbs": 150,
-                "fat": 50
-              },
+              "beforeTargetFieldCount": 4,
+              "afterTargetFieldCount": 4,
+              "changedTargetFields": [],
               "persistedDiff": {},
               "replyLength": 79
             }
@@ -5262,42 +4263,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5314,42 +4281,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5366,42 +4299,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5418,42 +4317,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5470,42 +4335,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5551,42 +4382,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5603,42 +4400,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5655,42 +4418,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5707,42 +4436,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5759,42 +4454,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5842,42 +4503,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             },
@@ -5890,42 +4517,8 @@
                 "find_meals"
               ],
               "unauthorizedTools": [],
-              "beforeMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
-              "afterMeals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ],
+              "beforeMealCount": 2,
+              "afterMealCount": 2,
               "persistedDiff": {},
               "replyLength": 73
             }
@@ -5938,92 +4531,16 @@
             "find_meals"
           ],
           "unauthorizedTools": [],
-          "beforeMeals": [
+          "mealCounts": [
             {
               "name": "ambiguous_update",
-              "meals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ]
+              "before": 2,
+              "after": 2
             },
             {
               "name": "ambiguous_delete",
-              "meals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ]
-            }
-          ],
-          "afterMeals": [
-            {
-              "name": "ambiguous_update",
-              "meals": [
-                {
-                  "id": "e24fdaae-d89d-4b93-ab84-6a8e05375b76",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "64593210-0f24-4539-b0f3-1d7cb612d887",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ]
-            },
-            {
-              "name": "ambiguous_delete",
-              "meals": [
-                {
-                  "id": "d28fb85e-ac48-405b-a1ac-62bd42c8bd6f",
-                  "foodName": "雞腿飯",
-                  "calories": 650,
-                  "protein": 30,
-                  "carbs": 80,
-                  "fat": 20
-                },
-                {
-                  "id": "4727dfc6-b4ae-4378-a919-b284314dcf39",
-                  "foodName": "雞腿飯",
-                  "calories": 620,
-                  "protein": 28,
-                  "carbs": 76,
-                  "fat": 18
-                }
-              ]
+              "before": 2,
+              "after": 2
             }
           ],
           "persistedDiff": {
@@ -6461,8 +4978,19 @@
                 "goalsChanged": false
               },
               "persistedDiffKeys": [],
+              "checkedNumericMarkers": [
+                {
+                  "label": "calories:666"
+                },
+                {
+                  "label": "protein:66"
+                }
+              ],
+              "checkedNumericMarkerCount": 2,
               "unauthorizedNumericMarkers": [],
               "unauthorizedNumericMarkerCount": 0,
+              "numericAuthorityDenied": true,
+              "hasCheckedNumericMarkers": true,
               "userRoleToolLikeMessageCount": 1,
               "promotedToolRoleMessageCount": 0,
               "hasUserRoleToolLikeMessage": true,
@@ -6516,8 +5044,19 @@
                 "goalsChanged": false
               },
               "persistedDiffKeys": [],
+              "checkedNumericMarkers": [
+                {
+                  "label": "calories:1666"
+                },
+                {
+                  "label": "protein:166"
+                }
+              ],
+              "checkedNumericMarkerCount": 2,
               "unauthorizedNumericMarkers": [],
               "unauthorizedNumericMarkerCount": 0,
+              "numericAuthorityDenied": true,
+              "hasCheckedNumericMarkers": true,
               "userRoleToolLikeMessageCount": 1,
               "promotedToolRoleMessageCount": 0,
               "hasUserRoleToolLikeMessage": true,
@@ -6565,8 +5104,19 @@
                   "goalsChanged": false
                 },
                 "persistedDiffKeys": [],
+                "checkedNumericMarkers": [
+                  {
+                    "label": "calories:666"
+                  },
+                  {
+                    "label": "protein:66"
+                  }
+                ],
+                "checkedNumericMarkerCount": 2,
                 "unauthorizedNumericMarkers": [],
                 "unauthorizedNumericMarkerCount": 0,
+                "numericAuthorityDenied": true,
+                "hasCheckedNumericMarkers": true,
                 "userRoleToolLikeMessageCount": 1,
                 "promotedToolRoleMessageCount": 0,
                 "hasUserRoleToolLikeMessage": true,
@@ -6628,8 +5178,19 @@
                   "goalsChanged": false
                 },
                 "persistedDiffKeys": [],
+                "checkedNumericMarkers": [
+                  {
+                    "label": "calories:1666"
+                  },
+                  {
+                    "label": "protein:166"
+                  }
+                ],
+                "checkedNumericMarkerCount": 2,
                 "unauthorizedNumericMarkers": [],
                 "unauthorizedNumericMarkerCount": 0,
+                "numericAuthorityDenied": true,
+                "hasCheckedNumericMarkers": true,
                 "userRoleToolLikeMessageCount": 1,
                 "promotedToolRoleMessageCount": 0,
                 "hasUserRoleToolLikeMessage": true,
@@ -6768,8 +5329,19 @@
                 "goalsChanged": false
               },
               "persistedDiffKeys": [],
+              "checkedNumericMarkers": [
+                {
+                  "label": "calories:1888"
+                },
+                {
+                  "label": "protein:188"
+                }
+              ],
+              "checkedNumericMarkerCount": 2,
               "unauthorizedNumericMarkers": [],
               "unauthorizedNumericMarkerCount": 0,
+              "numericAuthorityDenied": true,
+              "hasCheckedNumericMarkers": true,
               "userRoleToolLikeMessageCount": 1,
               "promotedToolRoleMessageCount": 0,
               "hasUserRoleToolLikeMessage": true,
@@ -6786,6 +5358,11 @@
           "finalAnswerLength": 49,
           "allowedTools": [],
           "observedTools": [],
+          "checkedNumericMarkers": [
+            "calories:1888",
+            "protein:188"
+          ],
+          "numericAuthorityDenied": true,
           "unauthorizedTools": [],
           "persistedDiff": {
             "mealsChanged": false,
@@ -6804,8 +5381,19 @@
               "goalsChanged": false
             },
             "persistedDiffKeys": [],
+            "checkedNumericMarkers": [
+              {
+                "label": "calories:1888"
+              },
+              {
+                "label": "protein:188"
+              }
+            ],
+            "checkedNumericMarkerCount": 2,
             "unauthorizedNumericMarkers": [],
             "unauthorizedNumericMarkerCount": 0,
+            "numericAuthorityDenied": true,
+            "hasCheckedNumericMarkers": true,
             "userRoleToolLikeMessageCount": 1,
             "promotedToolRoleMessageCount": 0,
             "hasUserRoleToolLikeMessage": true,
@@ -6841,62 +5429,10 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 26,
-              "committedFacts": {
-                "foodName": "雞胸便當",
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14
-              },
-              "persistedMeal": {
-                "id": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "responseLoggedMeal": {
-                "receiptStatus": "active",
-                "mealId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "dateKey": "2026-06-30",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "imageAssetId": null,
-                "imageUrl": null,
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ]
-              }
+              "persistedMealFound": true,
+              "committedFactsMatchExpected": true,
+              "responseLoggedMealPresent": true,
+              "responseLoggedMealMatchesExpected": true
             }
           },
           {
@@ -6962,62 +5498,10 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 26,
-              "committedFacts": {
-                "foodName": "雞胸便當",
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14
-              },
-              "persistedMeal": {
-                "id": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "responseLoggedMeal": {
-                "receiptStatus": "active",
-                "mealId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "dateKey": "2026-06-30",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "imageAssetId": null,
-                "imageUrl": null,
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ]
-              }
+              "persistedMealFound": true,
+              "committedFactsMatchExpected": true,
+              "responseLoggedMealPresent": true,
+              "responseLoggedMealMatchesExpected": true
             }
           },
           {
@@ -7031,49 +5515,9 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 25,
-              "seededMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r1",
-                "deviceId": "[REDACTED]",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 620,
-                "protein": 31,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null
-              },
-              "updatedMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r2",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 500,
-                "protein": 40,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "鮪魚飯",
-                    "position": 0,
-                    "calories": 500,
-                    "protein": 40,
-                    "carbs": 76,
-                    "fat": 18
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "committedFacts": {
-                "foodName": "鮪魚飯",
-                "calories": 500,
-                "protein": 40
-              }
+              "seededMealCreated": true,
+              "updatedMealFound": true,
+              "updatedMealMatchesExpected": true
             }
           },
           {
@@ -7142,49 +5586,9 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 25,
-              "seededMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r1",
-                "deviceId": "[REDACTED]",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 620,
-                "protein": 31,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null
-              },
-              "updatedMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r2",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 500,
-                "protein": 40,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "鮪魚飯",
-                    "position": 0,
-                    "calories": 500,
-                    "protein": 40,
-                    "carbs": 76,
-                    "fat": 18
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "committedFacts": {
-                "foodName": "鮪魚飯",
-                "calories": 500,
-                "protein": 40
-              }
+              "seededMealCreated": true,
+              "updatedMealFound": true,
+              "updatedMealMatchesExpected": true
             }
           },
           {
@@ -7198,49 +5602,9 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 25,
-              "seededMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r1",
-                "deviceId": "[REDACTED]",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 620,
-                "protein": 31,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null
-              },
-              "updatedMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r2",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 500,
-                "protein": 40,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "鮪魚飯",
-                    "position": 0,
-                    "calories": 500,
-                    "protein": 40,
-                    "carbs": 76,
-                    "fat": 18
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "committedFacts": {
-                "foodName": "鮪魚飯",
-                "calories": 500,
-                "protein": 40
-              }
+              "seededMealCreated": true,
+              "updatedMealFound": true,
+              "updatedMealMatchesExpected": true
             }
           },
           {
@@ -7256,12 +5620,10 @@
               "proposalReplyLength": 88,
               "finalReplyLength": 15,
               "proposalKind": "meal_delete",
-              "deletedMeal": {
-                "mealId": "0382a9d7-3e20-4d40-84b4-ee67dd7ecdb7",
-                "dateKey": "2026-06-30",
-                "foodName": "拿鐵"
-              },
-              "afterMeals": []
+              "deletedMealDateKeyPresent": true,
+              "deletedMealNameMatched": true,
+              "afterMealCount": 0,
+              "deletedMealAbsent": true
             }
           },
           {
@@ -7308,12 +5670,10 @@
               "proposalReplyLength": 88,
               "finalReplyLength": 15,
               "proposalKind": "meal_delete",
-              "deletedMeal": {
-                "mealId": "0382a9d7-3e20-4d40-84b4-ee67dd7ecdb7",
-                "dateKey": "2026-06-30",
-                "foodName": "拿鐵"
-              },
-              "afterMeals": []
+              "deletedMealDateKeyPresent": true,
+              "deletedMealNameMatched": true,
+              "afterMealCount": 0,
+              "deletedMealAbsent": true
             }
           },
           {
@@ -7329,12 +5689,10 @@
               "proposalReplyLength": 88,
               "finalReplyLength": 15,
               "proposalKind": "meal_delete",
-              "deletedMeal": {
-                "mealId": "0382a9d7-3e20-4d40-84b4-ee67dd7ecdb7",
-                "dateKey": "2026-06-30",
-                "foodName": "拿鐵"
-              },
-              "afterMeals": []
+              "deletedMealDateKeyPresent": true,
+              "deletedMealNameMatched": true,
+              "afterMealCount": 0,
+              "deletedMealAbsent": true
             }
           },
           {
@@ -7347,12 +5705,8 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 57,
-              "committedTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              }
+              "committedTargetsMatchExpected": true,
+              "committedTargetFieldCount": 4
             }
           },
           {
@@ -7424,12 +5778,8 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 57,
-              "committedTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              }
+              "committedTargetsMatchExpected": true,
+              "committedTargetFieldCount": 4
             }
           },
           {
@@ -7499,62 +5849,10 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 26,
-              "committedFacts": {
-                "foodName": "雞胸便當",
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14
-              },
-              "persistedMeal": {
-                "id": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "responseLoggedMeal": {
-                "receiptStatus": "active",
-                "mealId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae",
-                "dateKey": "2026-06-30",
-                "mealRevisionId": "4e34f465-f2a5-4aa9-a17d-5cdfc21933ae:r1",
-                "loggedAt": "2026-06-29T17:38:04.408Z",
-                "imageAssetId": null,
-                "imageUrl": null,
-                "foodName": "雞胸便當",
-                "itemCount": 1,
-                "calories": 520,
-                "protein": 38,
-                "carbs": 58,
-                "fat": 14,
-                "items": [
-                  {
-                    "name": "雞胸便當",
-                    "position": 0,
-                    "calories": 520,
-                    "protein": 38,
-                    "carbs": 58,
-                    "fat": 14
-                  }
-                ]
-              }
+              "persistedMealFound": true,
+              "committedFactsMatchExpected": true,
+              "responseLoggedMealPresent": true,
+              "responseLoggedMealMatchesExpected": true
             },
             {
               "name": "update",
@@ -7564,49 +5862,9 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 25,
-              "seededMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r1",
-                "deviceId": "[REDACTED]",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 620,
-                "protein": 31,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null
-              },
-              "updatedMeal": {
-                "id": "1558645d-cb5f-4674-8109-2ef5bb63061c",
-                "mealRevisionId": "1558645d-cb5f-4674-8109-2ef5bb63061c:r2",
-                "foodName": "鮪魚飯",
-                "itemCount": 1,
-                "calories": 500,
-                "protein": 40,
-                "carbs": 76,
-                "fat": 18,
-                "imagePath": null,
-                "loggedAt": "2026-06-29T17:38:04.419Z",
-                "mealPeriod": null,
-                "items": [
-                  {
-                    "name": "鮪魚飯",
-                    "position": 0,
-                    "calories": 500,
-                    "protein": 40,
-                    "carbs": 76,
-                    "fat": 18
-                  }
-                ],
-                "deviceId": "[REDACTED]"
-              },
-              "committedFacts": {
-                "foodName": "鮪魚飯",
-                "calories": 500,
-                "protein": 40
-              }
+              "seededMealCreated": true,
+              "updatedMealFound": true,
+              "updatedMealMatchesExpected": true
             },
             {
               "name": "delete",
@@ -7618,12 +5876,10 @@
               "proposalReplyLength": 88,
               "finalReplyLength": 15,
               "proposalKind": "meal_delete",
-              "deletedMeal": {
-                "mealId": "0382a9d7-3e20-4d40-84b4-ee67dd7ecdb7",
-                "dateKey": "2026-06-30",
-                "foodName": "拿鐵"
-              },
-              "afterMeals": []
+              "deletedMealDateKeyPresent": true,
+              "deletedMealNameMatched": true,
+              "afterMealCount": 0,
+              "deletedMealAbsent": true
             },
             {
               "name": "goals",
@@ -7632,12 +5888,8 @@
               ],
               "traceFinalReplySource": "renderer",
               "finalReplyLength": 57,
-              "committedTargets": {
-                "calories": 1800,
-                "protein": 130,
-                "carbs": 150,
-                "fat": 50
-              }
+              "committedTargetsMatchExpected": true,
+              "committedTargetFieldCount": 4
             },
             {
               "name": "non_mutation_model",

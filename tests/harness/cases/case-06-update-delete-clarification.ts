@@ -31,10 +31,10 @@ interface ClarificationSubCaseEvidence {
   allowedTools: string[];
   observedTools: string[];
   unauthorizedTools: string[];
-  beforeMeals: MealSnapshot[];
-  afterMeals: MealSnapshot[];
+  beforeMealCount: number;
+  afterMealCount: number;
   persistedDiff: Record<string, unknown>;
-  reply: string;
+  replyLength: number;
 }
 
 const FIXED_NOW = "2026-04-19T12:00:00+08:00";
@@ -74,13 +74,10 @@ export async function runCase06UpdateDeleteClarification(): Promise<BehaviorCase
       allowedTools: ["find_meals"],
       observedTools: subCases.flatMap((subCase) => subCase.evidence.observedTools),
       unauthorizedTools: subCases.flatMap((subCase) => subCase.evidence.unauthorizedTools),
-      beforeMeals: subCases.map((subCase) => ({
+      mealCounts: subCases.map((subCase) => ({
         name: subCase.evidence.name,
-        meals: subCase.evidence.beforeMeals,
-      })),
-      afterMeals: subCases.map((subCase) => ({
-        name: subCase.evidence.name,
-        meals: subCase.evidence.afterMeals,
+        before: subCase.evidence.beforeMealCount,
+        after: subCase.evidence.afterMealCount,
       })),
       persistedDiff: Object.fromEntries(
         subCases.map((subCase) => [subCase.evidence.name, subCase.evidence.persistedDiff]),
@@ -129,10 +126,10 @@ async function runAmbiguousMealSubCase(subCase: ClarificationSubCase): Promise<{
       allowedTools: ["find_meals"],
       observedTools,
       unauthorizedTools,
-      beforeMeals,
-      afterMeals,
+      beforeMealCount: beforeMeals.length,
+      afterMealCount: afterMeals.length,
       persistedDiff,
-      reply: response.reply,
+      replyLength: response.reply.length,
     };
 
     return {
@@ -261,18 +258,18 @@ function diffMeals(before: MealSnapshot[], after: MealSnapshot[]): Record<string
     return { mealCount: { before: before.length, after: after.length } };
   }
 
-  const changedMeals: Array<{ id: string; before?: MealSnapshot; after?: MealSnapshot }> = [];
+  let changedMealCount = 0;
   const beforeById = new Map(before.map((meal) => [meal.id, meal]));
   const afterById = new Map(after.map((meal) => [meal.id, meal]));
   for (const id of new Set([...beforeById.keys(), ...afterById.keys()])) {
     const beforeMeal = beforeById.get(id);
     const afterMeal = afterById.get(id);
     if (JSON.stringify(beforeMeal) !== JSON.stringify(afterMeal)) {
-      changedMeals.push({ id, before: beforeMeal, after: afterMeal });
+      changedMealCount += 1;
     }
   }
 
-  return changedMeals.length > 0 ? { changedMeals } : {};
+  return changedMealCount > 0 ? { mealsChanged: true, changedMealCount } : {};
 }
 
 async function withFixedDate<T>(run: () => Promise<T>): Promise<T> {

@@ -48,7 +48,12 @@ const denylistRegistry: DenylistEntry[] = [
     label: "session material",
     pattern: /(?:guest_session|guest_session_resume|guestSession|guestSessionResume|sessionToken|resumeToken|token)=([^\[]|$)/i,
   },
-  { tier: "Tier 1", label: "database snapshots", pattern: /"historySnapshot"\s*:|"mealsSnapshot"\s*:/i },
+  {
+    tier: "Tier 1",
+    label: "database snapshots",
+    pattern:
+      /"(?:historySnapshot|mealsSnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|committedTargets|committedFacts|deletedMeal)"\s*:/i,
+  },
   { tier: "Tier 2", label: "API keys", pattern: /\bsk-[A-Za-z0-9_-]+/ },
   { tier: "Tier 2", label: "bearer/auth headers", pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]+/i },
   { tier: "Tier 2", label: "cookies", pattern: /set-cookie|cookie:\s*|guestSession=/i },

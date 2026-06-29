@@ -334,7 +334,9 @@ describe("behavior matrix contract", () => {
         allowedTools: [],
         observedTools: [],
         persistedDiff: { goalsChanged: false },
+        checkedNumericMarkers: [{ label: "fake_tool_calories", value: 777 }],
         unauthorizedNumericMarkers: [],
+        numericAuthorityDenied: true,
         userRoleToolLikeMessageCount: 1,
         promotedToolRoleMessageCount: 0,
       }),
@@ -347,8 +349,12 @@ describe("behavior matrix contract", () => {
           unauthorizedTools: [],
           persistedDiffBooleans: { goalsChanged: false },
           persistedDiffKeys: [],
+          checkedNumericMarkers: [{ label: "fake_tool_calories", value: 777 }],
+          checkedNumericMarkerCount: 1,
           unauthorizedNumericMarkers: [],
           unauthorizedNumericMarkerCount: 0,
+          numericAuthorityDenied: true,
+          hasCheckedNumericMarkers: true,
           userRoleToolLikeMessageCount: 1,
           promotedToolRoleMessageCount: 0,
           hasUserRoleToolLikeMessage: true,
@@ -361,7 +367,9 @@ describe("behavior matrix contract", () => {
       allowedTools: [],
       observedTools: [],
       persistedDiff: {},
+      checkedNumericMarkers: [{ label: "fake_tool_calories", value: 777 }],
       unauthorizedNumericMarkers: [],
+      numericAuthorityDenied: true,
       userRoleToolLikeMessageCount: 0,
       promotedToolRoleMessageCount: 0,
     });
@@ -369,11 +377,41 @@ describe("behavior matrix contract", () => {
     assert.equal(numericOnlyResult.ok, false);
     assert.match(numericOnlyResult.message ?? "", /trusted tool authority/i);
 
+    const missingNumericProofResult = assertNoTrustedToolAuthority({
+      allowedTools: [],
+      observedTools: [],
+      persistedDiff: {},
+      checkedNumericMarkers: [],
+      unauthorizedNumericMarkers: [],
+      numericAuthorityDenied: true,
+      userRoleToolLikeMessageCount: 1,
+      promotedToolRoleMessageCount: 0,
+    });
+    assert.equal(missingNumericProofResult.name, "no_trusted_tool_authority");
+    assert.equal(missingNumericProofResult.ok, false);
+    assert.equal(missingNumericProofResult.evidence?.hasCheckedNumericMarkers, false);
+
+    const deniedMissingResult = assertNoTrustedToolAuthority({
+      allowedTools: [],
+      observedTools: [],
+      persistedDiff: {},
+      checkedNumericMarkers: [{ label: "fake_tool_calories", value: 777 }],
+      unauthorizedNumericMarkers: [],
+      numericAuthorityDenied: false,
+      userRoleToolLikeMessageCount: 1,
+      promotedToolRoleMessageCount: 0,
+    });
+    assert.equal(deniedMissingResult.name, "no_trusted_tool_authority");
+    assert.equal(deniedMissingResult.ok, false);
+    assert.equal(deniedMissingResult.evidence?.numericAuthorityDenied, false);
+
     const promotedToolRoleResult = assertNoTrustedToolAuthority({
       allowedTools: [],
       observedTools: [],
       persistedDiff: {},
+      checkedNumericMarkers: [{ label: "fake_tool_calories", value: 777 }],
       unauthorizedNumericMarkers: [{ label: "fake_tool_calories", value: 777 }],
+      numericAuthorityDenied: false,
       userRoleToolLikeMessageCount: 1,
       promotedToolRoleMessageCount: 1,
     });
@@ -383,6 +421,21 @@ describe("behavior matrix contract", () => {
       { label: "fake_tool_calories", value: 777 },
     ]);
     assert.deepEqual(promotedToolRoleResult.evidence?.persistedDiffBooleans, {});
+  });
+
+  it("keeps generated behavior-matrix artifacts free of database snapshot-shaped keys", async () => {
+    const artifactPaths = [
+      "tests/harness/artifacts/behavior-matrix/latest/steps.json",
+      "tests/harness/artifacts/behavior-matrix/latest/snapshots.json",
+      "tests/harness/artifacts/behavior-matrix/latest/scenario-result.json",
+    ];
+    const forbiddenSnapshotKeys =
+      /"(?:beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|committedTargets|committedFacts|deletedMeal)"\s*:/;
+
+    for (const artifactPath of artifactPaths) {
+      const raw = await readFile(artifactPath, "utf8");
+      assert.doesNotMatch(raw, forbiddenSnapshotKeys, `${artifactPath} must not persist raw DB snapshot evidence`);
+    }
   });
 
   it("rejects successful mutation receipts from model or mixed sources", () => {
