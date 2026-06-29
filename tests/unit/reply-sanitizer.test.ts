@@ -160,6 +160,13 @@ describe("reply sanitizer", () => {
     }
   });
 
+  it("replaces audited identifiers regardless of casing in finalized replies", () => {
+    assert.equal(
+      sanitizeReply("LOG_FOOD / UPDATE_GOALS / ProviderRequestId / SYSTEM-PROMPT.V3"),
+      "完成記錄 / 更新目標 / 內部細節 / 內部細節",
+    );
+  });
+
   it("matches dotted internal identifiers as exact literals only", () => {
     assert.equal(sanitizeReply("版本是 system-promptXv3"), "版本是 system-promptXv3");
     assert.equal(sanitizeReply("版本是 system-prompt.v3"), "版本是 內部細節");
@@ -180,9 +187,14 @@ describe("reply sanitizer", () => {
         fragments: /system-|prompt|\.v3|system-prompt\.v3/,
       },
       {
-        chunks: ["欄位 provider", "Request", "Id "],
+        chunks: ["欄位 Provider", "Request", "Id "],
         expected: "欄位 內部細節 ",
-        fragments: /provider|Request|Id|providerRequestId/,
+        fragments: /Provider|Request|Id|providerRequestId/i,
+      },
+      {
+        chunks: ["先用 UPDATE_", "GO", "ALS 看 "],
+        expected: "先用 更新目標 看 ",
+        fragments: /UPDATE_|GOALS|update_goals/i,
       },
     ] as const;
 
@@ -199,13 +211,13 @@ describe("reply sanitizer", () => {
 
   it("keeps finalized and streamed identifier coverage in parity", () => {
     for (const [identifier, replacement] of SENSITIVE_IDENTIFIER_REPLACEMENTS) {
-      const escapedIdentifier = new RegExp(escapeRegExp(identifier));
-      const finalized = sanitizeReply(`比對 ${identifier} 完成`);
+      const escapedIdentifier = new RegExp(escapeRegExp(identifier), "i");
+      const finalized = sanitizeReply(`比對 ${identifier.toLocaleUpperCase()} 完成`);
 
       assert.equal(finalized, `比對 ${replacement} 完成`);
       assert.doesNotMatch(finalized, escapedIdentifier);
 
-      const [first, second, third] = splitIdentifier(identifier);
+      const [first, second, third] = splitIdentifier(identifier.toLocaleUpperCase());
       const sanitizer = createStreamingSanitizer();
       const emitted = [
         sanitizer.push(`比對 ${first}`),

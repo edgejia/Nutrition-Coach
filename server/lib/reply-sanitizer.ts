@@ -39,17 +39,26 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const IDENTIFIER_REPLACEMENT_PATTERNS = SENSITIVE_IDENTIFIER_REPLACEMENTS.map(
+  ([identifier, replacement]) => ({
+    pattern: new RegExp(escapeRegExp(identifier), "gi"),
+    replacement,
+  }),
+);
+
 function getSensitiveIdentifierOverlapLength(text: string): number {
+  const lowerText = text.toLocaleLowerCase();
   const endsWithCompleteIdentifier = SENSITIVE_IDENTIFIER_REPLACEMENTS.some(([identifier]) =>
-    text.endsWith(identifier),
+    lowerText.endsWith(identifier.toLocaleLowerCase()),
   );
   if (endsWithCompleteIdentifier) {
     return 0;
   }
 
   return SENSITIVE_IDENTIFIER_REPLACEMENTS.reduce((maxOverlap, [identifier]) => {
+    const lowerIdentifier = identifier.toLocaleLowerCase();
     for (let prefixLength = identifier.length - 1; prefixLength > 0; prefixLength -= 1) {
-      if (text.endsWith(identifier.slice(0, prefixLength))) {
+      if (lowerText.endsWith(lowerIdentifier.slice(0, prefixLength))) {
         return Math.max(maxOverlap, prefixLength);
       }
     }
@@ -66,8 +75,8 @@ export function getAmbiguousCounterSuffixLength(text: string): number {
 // Last-gate filter: strip internal tool identifiers even when the model ignores
 // the system prompt rule. Applied to every reply before DB write and client emit.
 export function sanitizeReply(text: string): string {
-  const sanitized = SENSITIVE_IDENTIFIER_REPLACEMENTS.reduce(
-    (current, [identifier, replacement]) => current.replace(new RegExp(escapeRegExp(identifier), "g"), replacement),
+  const sanitized = IDENTIFIER_REPLACEMENT_PATTERNS.reduce(
+    (current, { pattern, replacement }) => current.replace(pattern, replacement),
     text,
   );
 

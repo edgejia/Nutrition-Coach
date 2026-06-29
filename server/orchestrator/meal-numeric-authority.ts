@@ -25,6 +25,7 @@ export type MealNumericUpdate =
   | { items: MealNumericItem[] };
 
 export type MealNumericEvidence = Record<MealNumericField, number[]>;
+type ItemScopedMealNumericEvidence = Record<string, MealNumericEvidence>;
 
 export type MealNumericAdjustmentClassification =
   | { kind: "explicit_final_value" }
@@ -88,6 +89,15 @@ function emptyEvidence(): MealNumericEvidence {
     carbs: [],
     fat: [],
   };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeItemName(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.toLocaleLowerCase() : undefined;
 }
 
 function fieldForLabel(label: string): MealNumericField | undefined {
@@ -223,6 +233,67 @@ function evidenceAllows(evidence: MealNumericEvidence, field: MealNumericField, 
   return evidence[field].includes(normalizeValue(value));
 }
 
+function mergeEvidence(target: MealNumericEvidence, source: MealNumericEvidence): void {
+  for (const field of MEAL_NUMERIC_FIELDS) {
+    for (const value of source[field]) {
+      pushUnique(target[field], value);
+    }
+  }
+}
+
+function extractItemScopedMealNumericEvidence(
+  text: string,
+  itemNames: readonly string[],
+): ItemScopedMealNumericEvidence {
+  const evidenceByItem: ItemScopedMealNumericEvidence = {};
+  const uniqueNames = [...new Set(itemNames.map((name) => name.trim()).filter(Boolean))]
+    .sort((left, right) => right.length - left.length);
+  if (uniqueNames.length === 0) return evidenceByItem;
+
+  const evidenceText = stripToolLikeRegions(text);
+  const itemNamePattern = new RegExp(uniqueNames.map(escapeRegExp).join("|"), "gi");
+  const itemMatches = [...evidenceText.matchAll(itemNamePattern)];
+
+  for (let index = 0; index < itemMatches.length; index += 1) {
+    const match = itemMatches[index]!;
+    const itemName = normalizeItemName(match[0]);
+    if (!itemName) continue;
+
+    const segmentStart = match.index + match[0].length;
+    const segmentEnd = itemMatches[index + 1]?.index ?? evidenceText.length;
+    const segment = evidenceText.slice(segmentStart, segmentEnd);
+    evidenceByItem[itemName] ??= emptyEvidence();
+    mergeEvidence(evidenceByItem[itemName], extractMealNumericEvidence(segment));
+  }
+
+  for (const clause of evidenceText.split(/[，,。；;\n]+/)) {
+    const matchingNames = uniqueNames.filter((name) => clause.toLocaleLowerCase().includes(name.toLocaleLowerCase()));
+    if (matchingNames.length !== 1) continue;
+    const itemName = normalizeItemName(matchingNames[0]);
+    if (!itemName) continue;
+
+    evidenceByItem[itemName] ??= emptyEvidence();
+    mergeEvidence(evidenceByItem[itemName], extractMealNumericEvidence(clause));
+  }
+
+  return evidenceByItem;
+}
+
+function evidenceAllowsItemField(
+  evidenceByItem: ItemScopedMealNumericEvidence,
+  currentItem: MealNumericItem | undefined,
+  nextItem: MealNumericItem,
+  field: MealNumericField,
+  value: number,
+): boolean {
+  const candidateNames = [currentItem?.foodName, nextItem.foodName]
+    .map(normalizeItemName)
+    .filter((name): name is string => Boolean(name));
+  const uniqueNames = [...new Set(candidateNames)];
+
+  return uniqueNames.some((name) => evidenceAllows(evidenceByItem[name] ?? emptyEvidence(), field, value));
+}
+
 function collectPatchUnauthorized(
   patch: Partial<Record<MealNumericField, number>>,
   evidence: MealNumericEvidence,
@@ -246,7 +317,7 @@ function collectPatchUnauthorized(
 function collectItemsUnauthorized(
   currentItems: readonly MealNumericItem[],
   nextItems: readonly MealNumericItem[],
-  evidence: MealNumericEvidence,
+  evidenceByItem: ItemScopedMealNumericEvidence,
 ): { authorizedFields: string[]; unauthorizedFields: string[] } {
   const authorizedFields: string[] = [];
   const unauthorizedFields: string[] = [];
@@ -261,7 +332,7 @@ function collectItemsUnauthorized(
       }
 
       const path = `items[${itemIndex}].${field}`;
-      if (evidenceAllows(evidence, field, nextValue)) {
+      if (evidenceAllowsItemField(evidenceByItem, currentItem, nextItem, field, nextValue)) {
         authorizedFields.push(path);
       } else {
         unauthorizedFields.push(path);
@@ -291,7 +362,14 @@ export function authorizeMealNumericUpdate(input: {
   const evidence = extractMealNumericEvidence(input.currentUserMessage);
   const classification = classifyMealNumericAdjustment(input.currentUserMessage);
   const result = "items" in input.update
-    ? collectItemsUnauthorized(input.currentMeal.items ?? [], input.update.items, evidence)
+    ? collectItemsUnauthorized(
+      input.currentMeal.items ?? [],
+      input.update.items,
+      extractItemScopedMealNumericEvidence(
+        input.currentUserMessage,
+        input.update.items.map((item) => item.foodName ?? ""),
+      ),
+    )
     : collectPatchUnauthorized(input.update.patch, evidence);
 
   if (result.unauthorizedFields.length > 0) {
