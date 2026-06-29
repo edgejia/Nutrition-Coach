@@ -1,4 +1,4 @@
-import { normalizeNumericSourceText } from "./source-text-guard.js";
+import { normalizeNumericSourceText, stripToolLikeRegions } from "./source-text-guard.js";
 
 export const MEAL_NUMERIC_FIELDS = ["calories", "protein", "carbs", "fat"] as const;
 
@@ -147,8 +147,9 @@ function numbersFromText(text: string): number[] {
 
 export function extractMealNumericEvidence(text: string): MealNumericEvidence {
   const evidence = emptyEvidence();
-  const matches = [...text.matchAll(FIELD_LABEL_RE)];
-  const globalNegatedValues = negatedValuesFromText(text);
+  const evidenceText = stripToolLikeRegions(text);
+  const matches = [...evidenceText.matchAll(FIELD_LABEL_RE)];
+  const globalNegatedValues = negatedValuesFromText(evidenceText);
 
   for (let index = 0; index < matches.length; index += 1) {
     const match = matches[index]!;
@@ -157,14 +158,14 @@ export function extractMealNumericEvidence(text: string): MealNumericEvidence {
 
     const segmentStart = match.index + match[0].length;
     const nextMatch = matches[index + 1];
-    const segmentEnd = nextMatch?.index ?? text.length;
-    const segment = text.slice(segmentStart, segmentEnd);
+    const segmentEnd = nextMatch?.index ?? evidenceText.length;
+    const segment = evidenceText.slice(segmentStart, segmentEnd);
     for (const value of numbersFromText(segment)) {
       pushUnique(evidence[field], value);
     }
   }
 
-  for (const match of text.matchAll(CALORIE_UNIT_RE)) {
+  for (const match of evidenceText.matchAll(CALORIE_UNIT_RE)) {
     const value = Number(match[1]);
     if (Number.isFinite(value) && !globalNegatedValues.includes(normalizeValue(value))) {
       pushUnique(evidence.calories, normalizeValue(value));
