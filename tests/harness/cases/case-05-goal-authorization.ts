@@ -7,6 +7,7 @@ import {
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
 import { createScenarioApp } from "../app-fixture.js";
+import { parseSSEEvents } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 
 interface DailyTargets {
@@ -62,7 +63,7 @@ async function runExplicitNumericGoalUpdate(): Promise<{
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
@@ -188,11 +189,22 @@ async function postChat(
 
   const res = await fetch(`${address}/api/chat`, {
     method: "POST",
-    headers: { cookie: cookieHeader },
+    headers: { cookie: cookieHeader, Accept: "text/event-stream" },
     body: form,
   });
-  const body = await res.json() as { reply?: string };
-  return { status: res.status, reply: body.reply ?? "" };
+  const rawSse = await res.text();
+  const events = parseSSEEvents(rawSse);
+  const reply = events
+    .filter((event) => event.event === "chunk")
+    .map((event) => {
+      try {
+        return (JSON.parse(event.data) as { token?: string }).token ?? "";
+      } catch {
+        return "";
+      }
+    })
+    .join("");
+  return { status: res.status, reply };
 }
 
 async function readTargets(address: string, cookieHeader: string): Promise<DailyTargets> {

@@ -26,6 +26,10 @@ interface ChatResponse {
     carbs?: number;
     fat?: number;
   };
+  proposalCard?: {
+    proposalId?: string;
+    proposalKind?: string;
+  };
 }
 
 interface DailyTargets {
@@ -268,6 +272,7 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
     });
 
     const response = await postChat(fixture, message);
+    const approvalResponse = await postChat(fixture, "確認刪除這筆餐點");
     const trace = recorder.build({ scenario: "behavior-matrix:phase-53-delete", status: "pass" });
     const afterMeals = await readMeals(fixture);
     const deletedMeal = {
@@ -279,7 +284,9 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
       name: "delete",
       observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
-      finalReplyLength: response.reply.length,
+      proposalReplyLength: response.reply.length,
+      finalReplyLength: approvalResponse.reply.length,
+      proposalKind: response.proposalCard?.proposalKind,
       deletedMeal,
       afterMeals,
     };
@@ -295,7 +302,7 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
         assertNoForbiddenReceiptCopy(response.reply),
         namedAssertion(
           "phase_53_delete_committed_snapshot",
-          response.reply.includes(deletedMeal.foodName) &&
+          approvalResponse.reply.includes(deletedMeal.foodName) &&
             deletedMeal.mealId === seededMeal.id &&
             deletedMeal.dateKey.length > 0 &&
             deletedMeal.foodName === "拿鐵",
@@ -323,7 +330,13 @@ async function runGoalsSubflow(): Promise<SubflowResult> {
       type: "function",
       function: {
         name: "update_goals",
-        arguments: JSON.stringify({ calories: 1800, protein: 130, carbs: 150, fat: 50 }),
+        arguments: JSON.stringify({
+          mode: "current_turn_values",
+          calories: 1800,
+          protein: 130,
+          carbs: 150,
+          fat: 50,
+        }),
       },
     }],
   });
