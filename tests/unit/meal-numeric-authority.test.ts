@@ -222,6 +222,23 @@ describe("authorizeMealNumericUpdate", () => {
     }
   });
 
+  it("allows explicit final values when half-portion wording is part of a food name", () => {
+    const result = authorizeMealNumericUpdate({
+      currentUserMessage: "把雞腿便當改成半份雞腿便當，360 kcal，蛋白質 20 g，碳水 45 g，脂肪 10 g",
+      currentMeal,
+      update: {
+        patch: {
+          calories: 360,
+          protein: 20,
+          carbs: 45,
+          fat: 10,
+        },
+      },
+    });
+
+    assert.deepEqual(result, { ok: true, authorizedFields: ["calories", "protein", "carbs", "fat"] });
+  });
+
   it("requires current-turn evidence for each changed items[] numeric replacement value", () => {
     const authorized = authorizeMealNumericUpdate({
       currentUserMessage: "雞腿蛋白質 28g，白飯碳水 60g",
@@ -288,6 +305,26 @@ describe("authorizeMealNumericUpdate", () => {
     });
 
     assert.deepEqual(result, { ok: true, authorizedFields: ["items[1].calories"] });
+  });
+
+  it("allows item replacement values attached to a user-linked new item name", () => {
+    const result = authorizeMealNumericUpdate({
+      currentUserMessage: "滷蛋改成兩顆水煮蛋，熱量 150 卡，蛋白質 13g，碳水 1g，脂肪 10g",
+      currentMeal,
+      update: {
+        items: [
+          { foodName: "雞腿", calories: 260, protein: 24, carbs: 0, fat: 12 },
+          { foodName: "白飯", calories: 280, protein: 4, carbs: 62, fat: 0.5 },
+          { foodName: "兩顆水煮蛋", calories: 150, protein: 13, carbs: 1, fat: 10 },
+          { foodName: "青菜", calories: 20, protein: 1, carbs: 20, fat: 3.5 },
+        ],
+      },
+    });
+
+    assert.deepEqual(result, {
+      ok: true,
+      authorizedFields: ["items[2].calories", "items[2].protein", "items[2].carbs", "items[2].fat"],
+    });
   });
 
   it("rejects renamed item replacements that borrow evidence from another existing item", () => {

@@ -63,6 +63,8 @@ const CALORIE_UNIT_RE = /(\d+(?:\.\d+)?)\s*(?:kcal|卡)/gi;
 const VAGUE_RE = /(合理一點|合理點|正常一點|正常點|怪怪的|不太對|不對勁|平均(?:一下|一點)?)/;
 const DIRECTION_ONLY_RE = /(偏高|太高|高了|偏低|太低|低了|過高|過低)/;
 const HALF_RE = /(減半|半份|一半)/;
+const DIRECT_HALF_RE = /(減半|一半)/;
+const HALF_PORTION_RE = /半份/;
 const SUBTRACT_PERCENT_RE = /(少|減|降低|降|扣)\s*(\d+(?:\.\d+)?)\s*%/;
 const ADD_AMOUNT_RE = /(加|增加|提高|多)\s*(\d+(?:\.\d+)?)\s*(?:g|克|卡|kcal)?/i;
 const SUBTRACT_AMOUNT_RE = /(少|減|降低|降|扣)\s*(\d+(?:\.\d+)?)\s*(?:g|克|卡|kcal)?/i;
@@ -187,7 +189,8 @@ export function extractMealNumericEvidence(text: string): MealNumericEvidence {
 
 export function classifyMealNumericAdjustment(text: string): MealNumericAdjustmentClassification {
   const normalized = text.replace(/\s+/g, "");
-  if (HALF_RE.test(normalized)) {
+  const hasFinalEvidence = MEAL_NUMERIC_FIELDS.some((field) => extractMealNumericEvidence(text)[field].length > 0);
+  if (DIRECT_HALF_RE.test(normalized) || (HALF_PORTION_RE.test(normalized) && !hasFinalEvidence)) {
     return { kind: "proposal_candidate", operator: "half" };
   }
 
@@ -281,6 +284,7 @@ function extractItemScopedMealNumericEvidence(
 
 function evidenceAllowsItemField(
   evidenceByItem: ItemScopedMealNumericEvidence,
+  currentUserMessage: string,
   currentItem: MealNumericItem | undefined,
   nextItem: MealNumericItem,
   field: MealNumericField,
@@ -288,9 +292,28 @@ function evidenceAllowsItemField(
 ): boolean {
   const currentName = normalizeItemName(currentItem?.foodName);
   const nextName = normalizeItemName(nextItem.foodName);
-  const evidenceNames = currentName ? [currentName] : nextName ? [nextName] : [];
+  const evidenceNames = currentName ? [currentName] : [];
+  if (!currentName && nextName) {
+    evidenceNames.push(nextName);
+  } else if (
+    currentName
+    && nextName
+    && currentName !== nextName
+    && userTextLinksItemRename(currentUserMessage, currentName, nextName)
+  ) {
+    evidenceNames.push(nextName);
+  }
 
   return evidenceNames.some((name) => evidenceAllows(evidenceByItem[name] ?? emptyEvidence(), field, value));
+}
+
+function userTextLinksItemRename(text: string, currentName: string, nextName: string): boolean {
+  const evidenceText = stripToolLikeRegions(text).toLocaleLowerCase();
+  const currentPattern = escapeRegExp(currentName);
+  const nextPattern = escapeRegExp(nextName);
+  const renameVerbPattern = "(?:改成|改為|改到|變成|換成|調成)";
+  return new RegExp(`${currentPattern}.{0,40}${renameVerbPattern}.{0,40}${nextPattern}`).test(evidenceText)
+    || new RegExp(`${nextPattern}.{0,40}(?:取代|替代|代替).{0,40}${currentPattern}`).test(evidenceText);
 }
 
 function hasDuplicateItemName(items: readonly MealNumericItem[], name: string | undefined): boolean {
@@ -319,6 +342,7 @@ function collectPatchUnauthorized(
 }
 
 function collectItemsUnauthorized(
+  currentUserMessage: string,
   currentItems: readonly MealNumericItem[],
   nextItems: readonly MealNumericItem[],
   evidenceByItem: ItemScopedMealNumericEvidence,
@@ -343,7 +367,7 @@ function collectItemsUnauthorized(
         continue;
       }
 
-      if (evidenceAllowsItemField(evidenceByItem, currentItem, nextItem, field, nextValue)) {
+      if (evidenceAllowsItemField(evidenceByItem, currentUserMessage, currentItem, nextItem, field, nextValue)) {
         authorizedFields.push(path);
       } else {
         unauthorizedFields.push(path);
@@ -374,6 +398,7 @@ export function authorizeMealNumericUpdate(input: {
   const classification = classifyMealNumericAdjustment(input.currentUserMessage);
   const result = "items" in input.update
     ? collectItemsUnauthorized(
+      input.currentUserMessage,
       input.currentMeal.items ?? [],
       input.update.items,
       extractItemScopedMealNumericEvidence(
