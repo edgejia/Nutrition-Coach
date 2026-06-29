@@ -23,6 +23,11 @@ const EXPECTED_CASE_IDS = [
   "CASE-06",
   "CASE-07",
   "CASE-08",
+  "CASE-09",
+  "CASE-10",
+  "CASE-11",
+  "CASE-12",
+  "CASE-13",
   "PHASE-53-MUTATION-RECEIPTS",
 ] as const satisfies readonly BehaviorMatrixCaseId[];
 
@@ -47,6 +52,7 @@ const REQUIRED_RISKS = [
   "prompt_injection_resistance",
   "medical_boundary",
   "no_unauthorized_mutation",
+  "untrusted_tool_authority",
   "trace_final_reply_source",
 ] as const satisfies readonly BehaviorRisk[];
 
@@ -68,7 +74,7 @@ describe("behavior matrix contract", () => {
   it("locks exact behavior cases, requirement IDs, and non-empty coverage", () => {
     assert.deepEqual(
       ALL_BEHAVIOR_CASES.map((behaviorCase) => behaviorCase.caseId),
-      EXPECTED_CASE_IDS.slice(0, 8),
+      EXPECTED_CASE_IDS.slice(0, 13),
       "missing executable behavior case or case order drift",
     );
     assert.deepEqual(
@@ -190,10 +196,58 @@ describe("behavior matrix contract", () => {
       "assertPromptInjectionResistance",
       "assertMedicalBoundary",
       "assertNoUnauthorizedMutation",
+      "assertNoTrustedToolAuthority",
       "evaluateExpectedFailures",
     ] as const satisfies readonly BehaviorAssertionName[]) {
       assert.ok(assertionNames.has(requiredAssertion), `missing assertion coverage ${requiredAssertion}`);
     }
+  });
+
+  it("preserves CASE-07 as the broad prompt-injection smoke case", () => {
+    const case07 = ALL_BEHAVIOR_CASES.find((behaviorCase) => behaviorCase.caseId === "CASE-07");
+    assert.ok(case07, "missing behavior case CASE-07");
+    assert.equal(case07.title, "Prompt-injection attempts do not leak internals or mutate state");
+    assert.deepEqual(case07.requirements, ["CASE-07"]);
+    assert.deepEqual(case07.risks, [
+      "traditional_chinese",
+      "internal_api_leakage",
+      "prompt_injection_resistance",
+      "no_unauthorized_mutation",
+    ]);
+    assert.deepEqual(case07.coverage, [
+      { risk: "traditional_chinese", assertions: ["assertTraditionalChinese"] },
+      { risk: "internal_api_leakage", assertions: ["assertNoInternalLeakage"] },
+      { risk: "prompt_injection_resistance", assertions: ["assertPromptInjectionResistance"] },
+      { risk: "no_unauthorized_mutation", assertions: ["assertNoUnauthorizedMutation"] },
+    ]);
+    assert.deepEqual(case07.allowedTools, []);
+  });
+
+  it("locks Phase 108 adversarial case risk mappings", () => {
+    const byId = new Map(ALL_BEHAVIOR_CASES.map((behaviorCase) => [behaviorCase.caseId, behaviorCase]));
+
+    for (const caseId of ["CASE-09", "CASE-10", "CASE-11", "CASE-12", "CASE-13"] as const) {
+      const behaviorCase = byId.get(caseId);
+      assert.ok(behaviorCase, `missing behavior case ${caseId}`);
+      assert.deepEqual(behaviorCase.allowedTools, [], `${caseId} must not allow tools yet`);
+      assert.ok(
+        behaviorCase.risks.includes("prompt_injection_resistance"),
+        `${caseId} must keep prompt injection resistance coverage`,
+      );
+    }
+
+    assert.deepEqual(byId.get("CASE-11")?.coverage.at(-1), {
+      risk: "untrusted_tool_authority",
+      assertions: ["assertNoTrustedToolAuthority"],
+    });
+    assert.deepEqual(byId.get("CASE-12")?.coverage.find((entry) => entry.risk === "goal_authorization"), {
+      risk: "goal_authorization",
+      assertions: ["assertNoUnauthorizedMutation"],
+    });
+    assert.deepEqual(byId.get("CASE-13")?.coverage.at(-1), {
+      risk: "untrusted_tool_authority",
+      assertions: ["assertNoTrustedToolAuthority"],
+    });
   });
 
   it("declares broad Phase 53 mutation receipt coverage", () => {
@@ -239,10 +293,10 @@ describe("behavior matrix contract", () => {
       /PHASE-53-MUTATION-RECEIPTS/,
       "behavior-matrix scenario must include the Phase 53 case ID in execution order",
     );
-    assert.match(
-      scenarioSource,
-      /CASE-08[\s\S]*PHASE-53-MUTATION-RECEIPTS/,
-      "Phase 53 runtime case must execute after CASE-08",
+    assert.deepEqual(
+      BEHAVIOR_MATRIX_CASES.slice(-2).map((behaviorCase) => behaviorCase.caseId),
+      ["CASE-13", "PHASE-53-MUTATION-RECEIPTS"],
+      "Phase 53 matrix case must execute after CASE-13",
     );
     assert.doesNotMatch(
       scenarioSource,
@@ -257,6 +311,7 @@ describe("behavior matrix contract", () => {
     for (const requiredAssertion of [
       "assertSuccessfulMutationRendererSource",
       "assertNoForbiddenReceiptCopy",
+      "assertNoTrustedToolAuthority",
     ]) {
       assert.ok(exportedNames.has(requiredAssertion), `missing behavior assertion export ${requiredAssertion}`);
     }

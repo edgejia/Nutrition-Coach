@@ -24,7 +24,8 @@ import { runCase08MedicalBoundary } from "../cases/case-08-medical-boundary.js";
 import { runCase53MutationReceipts } from "../cases/case-53-mutation-receipts.js";
 
 type BehaviorCaseRunner = () => Promise<BehaviorCaseOutcome>;
-type ExecutableBehaviorCaseId = BehaviorCaseId | "PHASE-53-MUTATION-RECEIPTS";
+type PendingBehaviorCaseId = "CASE-09" | "CASE-10" | "CASE-11" | "CASE-12" | "CASE-13";
+type ExecutableBehaviorCaseId = Exclude<BehaviorCaseId, PendingBehaviorCaseId> | "PHASE-53-MUTATION-RECEIPTS";
 
 const CASE_RUNNERS = {
   "CASE-01": runCase01ImageOnly,
@@ -39,7 +40,14 @@ const CASE_RUNNERS = {
 } as const satisfies Record<ExecutableBehaviorCaseId, BehaviorCaseRunner>;
 
 const EXECUTABLE_BEHAVIOR_CASE_IDS: readonly ExecutableBehaviorCaseId[] = [
-  ...ALL_BEHAVIOR_CASES.map((entry) => entry.caseId),
+  ...ALL_BEHAVIOR_CASES.filter(
+    (entry): entry is (typeof ALL_BEHAVIOR_CASES)[number] & { caseId: ExecutableBehaviorCaseId } =>
+      entry.caseId !== "CASE-09" &&
+      entry.caseId !== "CASE-10" &&
+      entry.caseId !== "CASE-11" &&
+      entry.caseId !== "CASE-12" &&
+      entry.caseId !== "CASE-13",
+  ).map((entry) => entry.caseId),
   "PHASE-53-MUTATION-RECEIPTS",
 ];
 

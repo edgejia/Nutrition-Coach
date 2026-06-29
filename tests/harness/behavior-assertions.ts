@@ -124,6 +124,7 @@ const SANITIZER_IDENTIFIER_TERMS = SENSITIVE_IDENTIFIER_REPLACEMENTS.map(
 const INTERNAL_LEAKAGE_TERMS = [
   ...new Set([...BASE_INTERNAL_LEAKAGE_TERMS, ...SANITIZER_IDENTIFIER_TERMS]),
 ] as const;
+const BASE_INTERNAL_LEAKAGE_TERM_SET = new Set<string>(BASE_INTERNAL_LEAKAGE_TERMS);
 const QUANTITY_CAVEAT_PATTERNS = ["份量", "估算", "不確定", "可以再調整", "若份量不同"] as const;
 const MUTATION_TOOLS = new Set(["log_food", "update_meal", "delete_meal", "update_goals"]);
 const FORBIDDEN_RECEIPT_COPY_TERMS = [
@@ -199,7 +200,7 @@ export function assertNoInternalLeakage(answer: string): BehaviorAssertionResult
     .filter((term) => answer.includes(term))
     .map((term) => ({
       term,
-      group: BASE_INTERNAL_LEAKAGE_TERMS.includes(term) ? HARD_GATE_GROUP : SANITIZER_IDENTIFIER_GROUP,
+      group: BASE_INTERNAL_LEAKAGE_TERM_SET.has(term) ? HARD_GATE_GROUP : SANITIZER_IDENTIFIER_GROUP,
     }));
   const evidence = { matchedTerms };
   return matchedTerms.length === 0
