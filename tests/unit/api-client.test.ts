@@ -37,6 +37,20 @@ function mockFetch(status: number, body: unknown) {
   }) as typeof fetch;
 }
 
+function mockFetchWithJsonError(status: number, error: Error) {
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    fetchCalls.push({ url, init: init ?? {} });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => {
+        throw error;
+      },
+    } as Response;
+  }) as typeof fetch;
+}
+
 function makeSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -1653,6 +1667,48 @@ describe("API Client", () => {
     storage.set("deviceId", "d-1");
     mockFetch(401, { error: "Invalid" });
     await assert.rejects(() => api.updateGoals({ calories: 2000 }), { message: "UNAUTHORIZED" });
+  });
+
+  it("updateGoals maps unsafe calorie floor responses to GoalSafetyError", async () => {
+    const apiWithSafety = api as typeof api & {
+      GOAL_SAFETY_ERROR_REASON?: unknown;
+      GoalSafetyError?: unknown;
+      isGoalSafetyError?: (error: unknown) => boolean;
+    };
+    assert.equal(apiWithSafety.GOAL_SAFETY_ERROR_REASON, "unsafe_calorie_floor");
+    assert.equal(typeof apiWithSafety.GoalSafetyError, "function");
+    assert.equal(typeof apiWithSafety.isGoalSafetyError, "function");
+
+    mockFetch(400, {
+      error: "Unsafe calorie target",
+      reason: "unsafe_calorie_floor",
+    });
+
+    await assert.rejects(
+      () => api.updateGoals({ calories: 500 }),
+      (error: unknown) => {
+        assert.ok(apiWithSafety.isGoalSafetyError?.(error));
+        assert.equal(error instanceof Error ? error.message : "", "Unsafe calorie target");
+        assert.equal((error as { reason?: unknown }).reason, "unsafe_calorie_floor");
+        return true;
+      },
+    );
+  });
+
+  it("updateGoals keeps generic failure for non-safety failed JSON responses", async () => {
+    mockFetch(400, { error: "Unsafe calorie target", reason: "different_reason" });
+
+    await assert.rejects(() => api.updateGoals({ calories: 500 }), {
+      message: "Failed to update goals",
+    });
+  });
+
+  it("updateGoals keeps generic failure when failed responses are not JSON", async () => {
+    mockFetchWithJsonError(500, new SyntaxError("Unexpected token < in JSON"));
+
+    await assert.rejects(() => api.updateGoals({ calories: 500 }), {
+      message: "Failed to update goals",
+    });
   });
 
   it("updateGoals keeps PUT compatibility contract", async () => {
