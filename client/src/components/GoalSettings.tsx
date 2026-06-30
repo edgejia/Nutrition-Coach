@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store.js";
-import { updateGoals } from "../api.js";
+import { isGoalSafetyError, updateGoals } from "../api.js";
 import { normalizeTargetInputValue } from "../lib/target-input.js";
 import { SportBoltIcon, SportChevronLeftIcon, SportChevronRightIcon } from "./SportIcons.js";
 import { SportIconButton, SportScreen } from "./SportPrimitives.js";
+
+const GOAL_SAFETY_ERROR_COPY = "這個目標太低，暫時不會更新。請改成較安全的每日目標。";
+const GOAL_SAVE_ERROR_COPY = "更新目標失敗，請稍後再試。";
 
 const TARGET_FIELDS = [
   { key: "calories", zh: "熱量", hint: "每日 kcal", unit: "kcal" },
@@ -29,6 +32,7 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState(() => createTargetForm(dailyTargets));
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [goalSafetyError, setGoalSafetyError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!editing) {
@@ -42,11 +46,13 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
 
   function startEditing() {
     setForm(createTargetForm(dailyTargets));
+    setGoalSafetyError(null);
     setEditing(true);
   }
 
   function handleCancel() {
     resetFormFromTargets();
+    setGoalSafetyError(null);
     setEditing(false);
   }
 
@@ -55,12 +61,15 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
     try {
       const { dailyTargets: updated } = await updateGoals(form);
       setDailyTargets(updated);
+      setGoalSafetyError(null);
       setEditing(false);
     } catch (err) {
       if (err instanceof Error && err.message === "UNAUTHORIZED") {
         void recoverGuestSession();
+      } else if (isGoalSafetyError(err)) {
+        setGoalSafetyError(GOAL_SAFETY_ERROR_COPY);
       } else {
-        alert("更新目標失敗，請稍後再試。");
+        setGoalSafetyError(GOAL_SAVE_ERROR_COPY);
       }
     } finally {
       setSaving(false);
@@ -218,6 +227,24 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
                     </div>
                   </label>
                 ))}
+                {goalSafetyError ? (
+                  <div
+                    role="alert"
+                    className="sp-zh"
+                    style={{
+                      padding: "10px 12px",
+                      border: "1px solid rgba(255,77,77,.32)",
+                      borderRadius: "var(--sp-r-sm)",
+                      background: "rgba(255,77,77,.12)",
+                      color: "#ffb3b3",
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {goalSafetyError}
+                  </div>
+                ) : null}
                 <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                   <button type="button" className="sp-btn sp-btn-ghost" style={{ flex: 1 }} onClick={handleCancel}>
                     取消
@@ -229,7 +256,7 @@ export function GoalSettings({ onClose }: { onClose: () => void }) {
                     onClick={handleSave}
                     disabled={saving}
                   >
-                    {saving ? "儲存中…" : "儲存"}
+                    {saving ? "儲存中..." : "儲存目標"}
                   </button>
                 </div>
               </div>
