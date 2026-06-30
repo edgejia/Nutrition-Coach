@@ -41,7 +41,7 @@ function goalUpdateSection(prompt: string): string {
 }
 
 function responsibilitiesSection(prompt: string): string {
-  const match = /你的職責：[\s\S]*?(?=\n\n餐點拆分與記錄規則：)/.exec(prompt);
+  const match = /你的職責：[\s\S]*?(?=\n\n營養安全界線：)/.exec(prompt);
   assert.ok(match, "responsibilities section must be present");
   return match[0];
 }
@@ -145,6 +145,7 @@ const LEGACY_MEAL_CORRECTION_SECTION = `歷史餐點修正規則：
 function normalizeSectionsForLegacySnapshot(prompt: string): string {
   return normalizeIntakeFenceForLegacySnapshot(prompt)
     .replace(`${instructionHierarchySection(prompt)}\n\n`, "")
+    .replace(`${nutritionSafetySection(prompt)}\n\n`, "")
     .replace(`${planningRoutingSection(prompt)}\n\n`, "")
     .replace(`${coachPlanningSection(prompt)}\n\n`, "")
     .replace(`${coachCompactSection(prompt)}\n\n`, "")
@@ -254,7 +255,7 @@ describe("buildSystemPrompt", () => {
         SYSTEM_PROMPT_SECTION_IDS.goalUpdates,
       ],
       safety: [
-        (SYSTEM_PROMPT_SECTION_IDS as { nutritionSafety?: string }).nutritionSafety,
+        SYSTEM_PROMPT_SECTION_IDS.nutritionSafety,
         SYSTEM_PROMPT_SECTION_IDS.responsibilities,
         SYSTEM_PROMPT_SECTION_IDS.logFoodReceipt,
         SYSTEM_PROMPT_SECTION_IDS.goalUpdates,
