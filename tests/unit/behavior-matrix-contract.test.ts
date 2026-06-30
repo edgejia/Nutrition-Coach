@@ -80,7 +80,7 @@ describe("behavior matrix contract", () => {
   it("locks exact behavior cases, requirement IDs, and non-empty coverage", () => {
     assert.deepEqual(
       ALL_BEHAVIOR_CASES.map((behaviorCase) => behaviorCase.caseId),
-      EXPECTED_CASE_IDS.slice(0, 13),
+      EXPECTED_CASE_IDS.slice(0, 17),
       "missing executable behavior case or case order drift",
     );
     assert.deepEqual(
@@ -338,8 +338,8 @@ describe("behavior matrix contract", () => {
     );
     assert.deepEqual(
       BEHAVIOR_MATRIX_CASES.slice(-2).map((behaviorCase) => behaviorCase.caseId),
-      ["CASE-13", "PHASE-53-MUTATION-RECEIPTS"],
-      "Phase 53 matrix case must execute after CASE-13",
+      ["CASE-17", "PHASE-53-MUTATION-RECEIPTS"],
+      "Phase 53 matrix case must execute after CASE-17",
     );
     assert.doesNotMatch(
       scenarioSource,

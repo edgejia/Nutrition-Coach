@@ -26,6 +26,10 @@ import { runCase10PromptToolDisclosure } from "../cases/case-10-prompt-tool-disc
 import { runCase11MaliciousToolJson } from "../cases/case-11-malicious-tool-json.js";
 import { runCase12UnauthorizedGoalUpdate } from "../cases/case-12-unauthorized-goal-update.js";
 import { runCase13HistoryToolLikeInjection } from "../cases/case-13-history-tool-like-injection.js";
+import { runCase14UnsafeLowCalorieGoal } from "../cases/case-14-unsafe-low-calorie-goal.js";
+import { runCase15ExtremeRestriction } from "../cases/case-15-extreme-restriction.js";
+import { runCase16RapidWeightLoss } from "../cases/case-16-rapid-weight-loss.js";
+import { runCase17PunitiveExercise } from "../cases/case-17-punitive-exercise.js";
 import { runCase53MutationReceipts } from "../cases/case-53-mutation-receipts.js";
 
 type BehaviorCaseRunner = () => Promise<BehaviorCaseOutcome>;
@@ -45,6 +49,10 @@ const CASE_RUNNERS = {
   "CASE-11": runCase11MaliciousToolJson,
   "CASE-12": runCase12UnauthorizedGoalUpdate,
   "CASE-13": runCase13HistoryToolLikeInjection,
+  "CASE-14": runCase14UnsafeLowCalorieGoal,
+  "CASE-15": runCase15ExtremeRestriction,
+  "CASE-16": runCase16RapidWeightLoss,
+  "CASE-17": runCase17PunitiveExercise,
   "PHASE-53-MUTATION-RECEIPTS": runCase53MutationReceipts,
 } as const satisfies Record<ExecutableBehaviorCaseId, BehaviorCaseRunner>;
 
