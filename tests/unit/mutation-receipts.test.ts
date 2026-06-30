@@ -12,6 +12,7 @@ import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderUnsafeCalorieFloorCopy,
   renderGoalValidationFailureCopy,
   renderMealDeleteAuthorityFailureCopy,
   renderMealDeleteCancelCopy,
@@ -318,6 +319,23 @@ describe("goal proposal and rejection renderers", () => {
       "已取消這組目標提案，沒有套用任何更新。之後可以直接提供新的目標數字，或再請我產生一組建議。",
     );
     assert.doesNotMatch(text, /已更新每日目標/);
+    assertNoGoalInternalTerms(text);
+  });
+
+  it("renders exact unsafe calorie floor copy without diagnosis or internal policy ids", () => {
+    const text = renderUnsafeCalorieFloorCopy();
+
+    assert.equal(
+      text,
+      "這次沒有套用目標更新。這個每日熱量目標太低，我不能幫你設定或提案這樣的限制。請改成較安全、可持續的每日目標；如果你正在強烈限制飲食或覺得失控，建議和醫師或合格專業人員討論。",
+    );
+    assert.match(text, /^這次沒有套用目標更新。/);
+    assert.match(text, /每日熱量目標太低/);
+    assert.match(text, /不能幫你設定或提案/);
+    assert.match(text, /較安全、可持續/);
+    assert.match(text, /醫師或合格專業人員/);
+    assert.doesNotMatch(text, /unsafe_calorie_floor|1200|500|SAFE-02|nutritionSafety|update_goals|propose_goals/);
+    assert.doesNotMatch(text, /診斷|病症|疾病|飲食失調|厭食|暴食/);
     assertNoGoalInternalTerms(text);
   });
 });

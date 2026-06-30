@@ -22,6 +22,7 @@ import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderUnsafeCalorieFloorCopy,
   renderGoalValidationFailureCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import type { ToolCall } from "../../server/llm/types.js";
@@ -137,6 +138,52 @@ describe("update_goals ToolContract", () => {
     assert.equal(published.length, 0);
   });
 
+  it("Test 2b: unsafe propose_goals returns guard projection without proposal card or hidden pending state", async () => {
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+    const localDeps = {
+      ...deps,
+      goalProposalService: guardedGoalProposalService,
+    } as ToolDeps;
+    const unsafeTargets = {
+      calories: 500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    };
+
+    const result = await executeTool(proposeGoalsCall(unsafeTargets), deviceId, localDeps, {
+      currentUserMessage: "幫我設成每天 500 kcal",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.equal(result.result, renderUnsafeCalorieFloorCopy());
+    assert.equal(result.proposalCard, undefined);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "unsafe_calorie_floor",
+      text: renderUnsafeCalorieFloorCopy(),
+    });
+    assert.equal(putLatestCalls, 0);
+    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
   it("Test 3: update_goals rejects empty args and any args without mode", async () => {
     for (const args of [{}, { calories: 1800, sugar: 20 }, { calories: 1800 }]) {
       const result = await executeTool(updateGoalsCall(args), deviceId, deps, {
@@ -215,6 +262,50 @@ describe("update_goals ToolContract", () => {
       reason: "goal_authority_failure",
       text: renderGoalAuthorityFailureCopy(),
     });
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 5b: current_turn_values rejects unsafe calories before device goal mutation", async () => {
+    let updateGoalsCalls = 0;
+    const guardedDeviceService = {
+      ...deviceService,
+      async updateGoals(id: string, patch: Partial<DailyTargets>) {
+        updateGoalsCalls += 1;
+        return deviceService.updateGoals(id, patch);
+      },
+    } as typeof deviceService;
+    const localDeps = {
+      ...deps,
+      deviceService: guardedDeviceService,
+    } as ToolDeps;
+
+    const result = await executeTool(
+      updateGoalsCall({ mode: "current_turn_values", calories: 500 }),
+      deviceId,
+      localDeps,
+      {
+        currentUserMessage: "卡路里改成 500",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.equal(result.result, renderUnsafeCalorieFloorCopy());
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "unsafe_calorie_floor",
+      text: renderUnsafeCalorieFloorCopy(),
+    });
+    assert.deepEqual(result.updatedFields, ["calories"]);
+    assert.equal(updateGoalsCalls, 0);
     assert.deepEqual(await readTargets(deviceService, deviceId), {
       calories: 1500,
       protein: 120,
