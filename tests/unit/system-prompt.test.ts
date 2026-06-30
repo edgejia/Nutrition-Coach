@@ -46,6 +46,12 @@ function responsibilitiesSection(prompt: string): string {
   return match[0];
 }
 
+function nutritionSafetySection(prompt: string): string {
+  const match = /營養安全界線：[\s\S]*?(?=\n\n餐點拆分與記錄規則：)/.exec(prompt);
+  assert.ok(match, "nutrition safety section must be present");
+  return match[0];
+}
+
 function mealCorrectionSection(prompt: string): string {
   const match = /歷史餐點修正規則：[\s\S]*?(?=\n\n歷史日期規則：)/.exec(prompt);
   assert.ok(match, "meal correction section must be present");
@@ -165,6 +171,7 @@ describe("buildSystemPrompt", () => {
       goalUpdates: "goal-updates",
       mealCorrections: "meal-corrections",
       historicalDates: "historical-dates",
+      nutritionSafety: "nutrition-safety",
     });
   });
 
@@ -175,6 +182,7 @@ describe("buildSystemPrompt", () => {
     assert.ok(sectionIds.every((id) => /^[a-z]+(?:-[a-z]+)*$/.test(id)));
     assert.ok(sectionIds.includes("instruction-hierarchy"));
     assert.ok(sectionIds.includes("intake-context"));
+    assert.ok(sectionIds.includes("nutrition-safety"));
   });
 
   it("renders the instruction hierarchy and privacy section before the role section", () => {
@@ -246,6 +254,7 @@ describe("buildSystemPrompt", () => {
         SYSTEM_PROMPT_SECTION_IDS.goalUpdates,
       ],
       safety: [
+        (SYSTEM_PROMPT_SECTION_IDS as { nutritionSafety?: string }).nutritionSafety,
         SYSTEM_PROMPT_SECTION_IDS.responsibilities,
         SYSTEM_PROMPT_SECTION_IDS.logFoodReceipt,
         SYSTEM_PROMPT_SECTION_IDS.goalUpdates,
@@ -265,6 +274,80 @@ describe("buildSystemPrompt", () => {
         assert.ok(sectionIds.has(mappedId));
       }
     }
+  });
+
+  it("renders a dedicated nutrition safety section after responsibilities", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    const responsibilities = responsibilitiesSection(prompt);
+    const section = nutritionSafetySection(prompt);
+    const mealItemizationIndex = prompt.indexOf("\n\n餐點拆分與記錄規則：");
+
+    assert.equal((SYSTEM_PROMPT_SECTION_IDS as { nutritionSafety?: string }).nutritionSafety, "nutrition-safety");
+    assert.ok(prompt.indexOf(section) > prompt.indexOf(responsibilities));
+    assert.ok(prompt.indexOf(section) < mealItemizationIndex);
+    assert.match(section, /營養安全界線/);
+  });
+
+  it("covers disordered eating, extreme restriction, unsafe rapid loss, and punitive exercise", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = nutritionSafetySection(prompt);
+
+    assert.match(section, /飲食失調|進食障礙/);
+    assert.match(section, /自我傷害|傷害自己/);
+    assert.match(section, /極端節食|極端限制/);
+    assert.match(section, /禁食|斷食/);
+    assert.match(section, /過低熱量|極低熱量|低於安全/);
+    assert.match(section, /快速減重|急速減重/);
+    assert.match(section, /懲罰性運動|補償性運動/);
+  });
+
+  it("forbids harmful targets and restrictive step plans while redirecting supportively", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = nutritionSafetySection(prompt);
+
+    assert.match(section, /不得提供|不要提供/);
+    assert.match(section, /精準.*目標|具體.*目標|精確.*數字/);
+    assert.match(section, /逐步|步驟|計畫/);
+    assert.match(section, /限制|禁食|斷食/);
+    assert.match(section, /支持|陪你|先停下來/);
+    assert.match(section, /醫師|合格專業人員|專業支持/);
+    assert.match(section, /較安全|安全調整|一般.*建議/);
+  });
+
+  it("preserves existing medical-boundary copy outside nutrition safety", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = nutritionSafetySection(prompt);
+    const medicalSections = `${responsibilitiesSection(prompt)}\n${coachPlanningSection(prompt)}\n${coachCompactSection(prompt)}`;
+
+    assert.doesNotMatch(section, /血糖|用藥|治療/);
+    assert.match(medicalSections, /疾病/);
+    assert.match(medicalSections, /症狀/);
+    assert.match(medicalSections, /血糖/);
+    assert.match(medicalSections, /用藥/);
+    assert.match(medicalSections, /治療/);
+    assert.match(medicalSections, /不得診斷/);
+    assert.match(medicalSections, /調整藥物/);
+    assert.match(medicalSections, /醫師或合格專業人員/);
   });
 
   it("describes protein_sources as conditional credible-anchor evidence", () => {
