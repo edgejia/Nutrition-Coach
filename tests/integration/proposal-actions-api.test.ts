@@ -7,6 +7,7 @@ import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { renderUnsafeCalorieFloorCopy } from "../../server/orchestrator/mutation-receipts.js";
 import type { ProposalActionTestHooks } from "../../server/services/proposal-actions.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 
@@ -562,6 +563,55 @@ describe("proposal action API", () => {
     assert.equal(replayBody.proposalCard?.status, "approved");
     assert.equal(replayBody.proposalCard?.isActionable, false);
     assert.deepEqual(await readTargets(), targets);
+  });
+
+  it("blocks unsafe goal proposal approval before mutating targets or publishing updates", async () => {
+    const defaults = await readTargets();
+    const unsafeTargets = { calories: 500, protein: 125, carbs: 130, fat: 45 };
+    const { proposalId } = await createGoalCard(unsafeTargets);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      reply?: string;
+      dailyTargets?: DailyTargets;
+      mutationOutcomeFact?: unknown;
+      proposalCard?: {
+        proposalId: string;
+        status: string;
+        isActionable: boolean;
+        lapseCopy?: string;
+      };
+      proposalActionEvent?: unknown;
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.status, "stale");
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.mutationOutcomeFact, undefined);
+    assert.equal(body.proposalActionEvent, undefined);
+    assert.equal(body.proposalCard?.proposalId, proposalId);
+    assert.equal(body.proposalCard?.status, "stale");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.equal(body.proposalCard?.lapseCopy, renderUnsafeCalorieFloorCopy());
+    assert.deepEqual(await readTargets(), defaults);
+    assert.equal(await services.goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    }), undefined);
+    assert.equal(await historyHasActionEvent(proposalId), false);
+    assert.equal(mutationOutcomeRows().length, 0);
+    assert.equal(publishedGoalUpdates.length, 0);
   });
 
   it("rolls back goal approval when structured outcome persistence fails", async () => {

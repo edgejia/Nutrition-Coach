@@ -17,7 +17,9 @@ import {
   renderProposalInactiveCopy,
   renderProposalRecoverableFailureCopy,
   renderGuardedMutationReceipt,
+  renderUnsafeCalorieFloorCopy,
 } from "../orchestrator/mutation-receipts.js";
+import { checkNutritionSafetyTargets } from "../orchestrator/nutrition-safety-policy.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { MealRevisionPreconditionError } from "./meal-transactions.js";
 import type { ChatMutationOutcomeFact } from "./chat-mutation-outcomes.js";
@@ -94,6 +96,7 @@ export type ProposalActionServiceResult =
       status: "stale";
       proposalCard?: ProposalCardClientMetadata;
       didMutateMeal: false;
+      reply?: string;
     }
   | {
       ok: false;
@@ -279,6 +282,28 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       status: "retryable",
       didMutateMeal: false,
       reply: renderProposalRecoverableFailureCopy(),
+      ...(card ? { proposalCard: projectProposalCardForClient(card) } : {}),
+    };
+  }
+
+  async function blockUnsafeGoalProposalAction(input: {
+    deviceId: string;
+    proposalId: string;
+  }): Promise<Extract<ProposalActionServiceResult, { status: "stale" }>> {
+    const reply = renderUnsafeCalorieFloorCopy();
+    await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+    await deps.proposalCardService.markProposalStatus({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      status: "stale",
+      lapseCopy: reply,
+    });
+    const card = await loadCard(input);
+    return {
+      ok: false,
+      status: "stale",
+      didMutateMeal: false,
+      reply,
       ...(card ? { proposalCard: projectProposalCardForClient(card) } : {}),
     };
   }
@@ -491,12 +516,16 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             deviceId: input.deviceId,
             sessionId: DEFAULT_SESSION_ID,
           });
-          if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+          if (!proposal || !activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
             return { result: await markStale(input) };
           }
           if (input.action === "reject") {
             await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
             return { result: await completeActiveAction({ ...input, card: activeCard }) };
+          }
+          const safetyCheck = checkNutritionSafetyTargets(proposal.targets);
+          if (!safetyCheck.ok) {
+            return { result: await blockUnsafeGoalProposalAction(input) };
           }
           const consumed = await deps.goalProposalService.consumeLatest({
             deviceId: input.deviceId,

@@ -986,7 +986,7 @@ function buildTypedActionResult(input: {
   const mutationProjection = projectProposalActionMutationResult(input.actionResult);
   const rawReply = input.actionResult.ok
     ? input.actionResult.reply ?? input.actionResult.proposalActionEvent.transcriptCopy
-    : "reply" in input.actionResult
+    : "reply" in input.actionResult && typeof input.actionResult.reply === "string"
       ? input.actionResult.reply
       : input.actionResult.proposalCard?.lapseCopy ?? input.fallbackReply;
   const reply = guardNoMutationSuccessClaim(rawReply, mutationProjection);
