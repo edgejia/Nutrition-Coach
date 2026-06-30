@@ -630,6 +630,10 @@ export function renderGoalAuthorityFailureCopy(): string {
   return "這次沒有套用目標更新。請直接提供新的每日目標數字，或再請我產生一組建議。";
 }
 
+export function renderUnsafeCalorieFloorCopy(): string {
+  return "這次沒有套用目標更新。這個每日熱量目標太低，我不能幫你設定或提案這樣的限制。請改成較安全、可持續的每日目標；如果你正在強烈限制飲食或覺得失控，建議和醫師或合格專業人員討論。";
+}
+
 type GoalTargetField = keyof DailyTargets;
 
 const GOAL_FIELD_RANGE_COPY: Record<GoalTargetField, { label: string; range: string }> = {

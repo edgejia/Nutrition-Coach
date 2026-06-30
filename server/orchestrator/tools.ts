@@ -57,6 +57,10 @@ import {
   isGoalProposalConsent,
 } from "./source-text-guard.js";
 import {
+  checkNutritionSafetyTargets,
+  UNSAFE_CALORIE_FLOOR_REASON,
+} from "./nutrition-safety-policy.js";
+import {
   authorizeMealNumericUpdate,
   classifyMealNumericAdjustment,
   extractMealNumericEvidence,
@@ -67,6 +71,7 @@ import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderUnsafeCalorieFloorCopy,
   renderGoalValidationFailureCopy,
   getProposalActionLabels,
   renderCorrectionTargetClarificationCopy,
@@ -143,6 +148,7 @@ export interface ToolExecutionResult {
     reason:
       | "goal_proposal"
       | "goal_authority_failure"
+      | "unsafe_calorie_floor"
       | "goal_validation_failure"
       | "goal_cancel"
       | "meal_target_clarification"
@@ -508,10 +514,11 @@ interface GoalControlledResult {
   reply: string;
 }
 
-type ProposeGoalsResult = GoalControlledResult & {
+type GoalProposalResult = GoalControlledResult & {
   reason: "goal_proposal";
   proposalCard: PendingProposalCardInput;
 };
+type ProposeGoalsResult = GoalProposalResult | GoalControlledResult;
 
 interface MealNumericControlledResult {
   status: "controlled_reply";
@@ -2643,6 +2650,16 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       throw new Error("propose_goals contract missing goalProposalService/deviceId in context");
     }
 
+    const safetyCheck = checkNutritionSafetyTargets(args);
+    if (!safetyCheck.ok) {
+      const reply = renderUnsafeCalorieFloorCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult(UNSAFE_CALORIE_FLOOR_REASON, reply),
+        toolMessage: reply,
+      };
+    }
+
     const proposal = await deps.goalProposalService.putLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
@@ -2861,6 +2878,16 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       updatePatch = {
         ...authorization.proposal.targets,
         ...overridePatch,
+      };
+    }
+
+    const safetyCheck = checkNutritionSafetyTargets(updatePatch);
+    if (!safetyCheck.ok) {
+      const reply = renderUnsafeCalorieFloorCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult(UNSAFE_CALORIE_FLOOR_REASON, reply),
+        toolMessage: reply,
       };
     }
 
@@ -3646,12 +3673,13 @@ export async function executeTool(
 
   if (toolCall.function.name === "propose_goals") {
     const contractResult = outcome.contractResult as ProposeGoalsResult;
+    const isProposal = contractResult.reason === "goal_proposal" && "proposalCard" in contractResult;
     return attachPolicyFact({
       result: contractResult.reply,
-      summary: "status: proposal",
-      success: true,
-      executed: true,
-      proposalCard: contractResult.proposalCard,
+      summary: isProposal ? "status: proposal" : "failureReason: guard",
+      success: isProposal,
+      executed: isProposal,
+      ...(isProposal ? { proposalCard: contractResult.proposalCard } : { failureReason: "guard" as const }),
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,
