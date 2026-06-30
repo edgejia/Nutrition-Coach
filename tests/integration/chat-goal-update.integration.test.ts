@@ -9,6 +9,7 @@ import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderUnsafeCalorieFloorCopy,
   renderGoalValidationFailureCopy,
   renderProposalKindAmbiguityCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
@@ -72,6 +73,20 @@ const PROPOSAL_TARGETS: DailyTargets = {
   fat: 45,
 };
 
+const UNSAFE_TARGETS: DailyTargets = {
+  calories: 500,
+  protein: 120,
+  carbs: 150,
+  fat: 50,
+};
+
+const FLOOR_TARGETS: DailyTargets = {
+  calories: 1200,
+  protein: 120,
+  carbs: 150,
+  fat: 50,
+};
+
 const SUCCESS_RECEIPT = [
   "已更新每日目標：",
   "• 卡路里 1800 kcal",
@@ -86,6 +101,14 @@ const PROPOSAL_SUCCESS_RECEIPT = [
   "• 蛋白質 125 g",
   "• 碳水 130 g",
   "• 脂肪 45 g",
+].join("\n");
+
+const FLOOR_SUCCESS_RECEIPT = [
+  "已更新每日目標：",
+  "• 卡路里 1200 kcal",
+  "• 蛋白質 120 g",
+  "• 碳水 150 g",
+  "• 脂肪 50 g",
 ].join("\n");
 
 const SUCCESS_STYLE_COPY = /已更新每日目標|已經幫你更新|更新好了/;
@@ -288,6 +311,138 @@ describe("chat goal update integration", () => {
     assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
     assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
     assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("blocks unsafe current-turn goal updates without mutation or goals_update publish", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unsafe_goal_update",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 500,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該改寫安全阻擋回覆。" });
+
+    const before = await readTargets();
+    const { status, body } = await postChat("卡路里改成 500");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /這次沒有套用目標更新/);
+    assert.match(body.reply, /每日熱量目標太低/);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.deepEqual(await readTargets(), before);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("blocks unsafe goal proposals without an actionable card or hidden pending state", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unsafe_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UNSAFE_TARGETS),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型不應該產生可確認提案。" });
+
+    const before = await readTargets();
+    const { status, body } = await postChat("幫我建議每天 500 kcal 的目標");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /每日熱量目標太低/);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.deepEqual(await readTargets(), before);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("keeps unsafe proposal consent replay from applying hidden 500 kcal state", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unsafe_goal_proposal_for_replay",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UNSAFE_TARGETS),
+        },
+      }],
+    });
+    const unsafeProposal = await postChat("幫我建議每天 500 kcal 的目標");
+    assert.equal(unsafeProposal.status, 200);
+    assert.equal(unsafeProposal.body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(unsafeProposal.body.proposalCard, undefined);
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unsafe_goal_replay",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "latest_proposal" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已經幫你更新每日目標。" });
+    const replayed = await postChat("好");
+
+    assert.equal(replayed.status, 200);
+    assert.equal(replayed.body.didLogMeal, false);
+    assert.equal(replayed.body.didMutateMeal, false);
+    assert.equal(replayed.body.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(replayed.body.dailyTargets, undefined);
+    assert.equal(replayed.body.proposalCard, undefined);
+    assert.doesNotMatch(replayed.body.reply, SUCCESS_STYLE_COPY);
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("allows exactly-floor current-turn goal updates and publishes goals_update", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "floor_goal_update",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1200,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型不應改寫已提交結果。" });
+
+    const { status, body } = await postChat("卡路里改成 1200");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, FLOOR_SUCCESS_RECEIPT);
+    assert.deepEqual(body.dailyTargets, FLOOR_TARGETS);
+    assert.deepEqual(await readTargets(), FLOOR_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
   });
 
   it("creates a backend proposal for vague intent without mutating targets or publishing", async () => {
