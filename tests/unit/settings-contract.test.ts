@@ -42,12 +42,17 @@ describe("Settings source contract", () => {
     assert.match(source, /cursor: "default"/);
     assert.match(source, /營養教練/);
     assert.match(source, /sport/);
-    assert.match(source, /儲存中…/);
-    assert.match(source, /儲存/);
+    assert.match(source, /儲存中\.\.\./);
+    assert.match(source, /儲存目標/);
     assert.match(source, /取消/);
 
     assert.ok(source.includes("updateGoals(form)"));
     assert.ok(source.includes("setDailyTargets(updated)"));
+    assert.match(source, /isGoalSafetyError/);
+    assert.match(source, /這個目標太低，暫時不會更新。請改成較安全的每日目標。/);
+    assert.match(source, /role="alert"/);
+    assert.match(source, /setGoalSafetyError/);
+    assert.doesNotMatch(source, /alert\("更新目標失敗，請稍後再試。"\)/);
     assert.match(source, /recoverGuestSession/);
     assert.match(source, /function createTargetForm/);
     assert.match(source, /normalizeTargetInputValue/);
@@ -71,6 +76,10 @@ describe("Settings source contract", () => {
     assert.doesNotMatch(source, /wipe/i);
     assert.doesNotMatch(source, /deviceId\}/);
     assert.doesNotMatch(source, /deviceId:/);
+    assert.doesNotMatch(source, /unsafe_calorie_floor/);
+    assert.doesNotMatch(source, /GOAL_SAFETY_ERROR_REASON/);
+    assert.doesNotMatch(source, /SAFE-02/);
+    assert.doesNotMatch(source, /nutritionSafety/);
   });
 
   it("normalizes daily target numeric input without preserving prefix zeros", () => {
