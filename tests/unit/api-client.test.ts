@@ -47,7 +47,7 @@ function mockFetchWithJsonError(status: number, error: Error) {
       json: async () => {
         throw error;
       },
-    } as Response;
+    } as unknown as Response;
   }) as typeof fetch;
 }
 
