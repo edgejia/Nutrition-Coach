@@ -23,6 +23,7 @@ import {
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import {
   GOAL_PROPOSAL_TTL_MS,
+  goalProposalTargetSignature,
   type createGoalProposalService,
   type GoalProposalPayload,
 } from "../services/goal-proposals.js";
@@ -825,7 +826,7 @@ function proposalMealPeriodLabel(period: MealPeriod): string {
   }
 }
 
-function buildGoalProposalCard(proposal: GoalProposalPayload): PendingProposalCardInput {
+export function buildGoalProposalCard(proposal: GoalProposalPayload): PendingProposalCardInput {
   const labels = getProposalActionLabels("goal");
   return {
     proposalId: proposal.proposalId,
@@ -837,6 +838,7 @@ function buildGoalProposalCard(proposal: GoalProposalPayload): PendingProposalCa
         label: goalFieldLabel(field),
         after: formatGoalValue(field, proposal.targets[field]),
       })),
+      targetSignature: proposal.targetSignature ?? goalProposalTargetSignature(proposal.targets),
     },
     actions: {
       approveLabel: labels.approveLabel,

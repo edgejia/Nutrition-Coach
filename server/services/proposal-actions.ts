@@ -25,7 +25,11 @@ import { MealRevisionPreconditionError } from "./meal-transactions.js";
 import type { ChatMutationOutcomeFact } from "./chat-mutation-outcomes.js";
 import type { createChatService } from "./chat.js";
 import type { createDeviceService, DailyTargets } from "./device.js";
-import type { createGoalProposalService, GoalProposalPayload } from "./goal-proposals.js";
+import {
+  goalProposalTargetSignature,
+  type createGoalProposalService,
+  type GoalProposalPayload,
+} from "./goal-proposals.js";
 import type { createMealCorrectionService } from "./meal-correction.js";
 import type {
   createMealNumericProposalService,
@@ -483,6 +487,15 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       && activeKindMatches({ kind: input.kind, proposal });
   }
 
+  function goalProposalMatchesCardTarget(
+    proposal: GoalProposalPayload,
+    card: ProposalCardMetadata,
+  ): boolean {
+    const expectedSignature = goalProposalTargetSignature(proposal.targets);
+    return proposal.targetSignature === expectedSignature
+      && card.details.targetSignature === proposal.targetSignature;
+  }
+
   return {
     async validateEditContext(
       input: ProposalEditContextValidationInput,
@@ -516,7 +529,12 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             deviceId: input.deviceId,
             sessionId: DEFAULT_SESSION_ID,
           });
-          if (!proposal || !activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+          if (
+            !proposal
+            || !activeProposalIdMatches(proposal, input.proposalId)
+            || !activeKindMatches({ kind: input.kind, proposal })
+            || !goalProposalMatchesCardTarget(proposal, activeCard)
+          ) {
             return { result: await markStale(input) };
           }
           if (input.action === "reject") {

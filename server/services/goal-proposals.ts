@@ -8,7 +8,17 @@ export const GOAL_PROPOSAL_TTL_MS = 30 * 60 * 1000;
 export interface GoalProposalPayload {
   proposalId: string;
   targets: DailyTargets;
+  targetSignature: string;
   createdAt: string;
+}
+
+export function goalProposalTargetSignature(targets: DailyTargets): string {
+  return [
+    `calories:${targets.calories}`,
+    `protein:${targets.protein}`,
+    `carbs:${targets.carbs}`,
+    `fat:${targets.fat}`,
+  ].join("|");
 }
 
 export function createGoalProposalService(db: AppDatabase) {
@@ -27,6 +37,7 @@ export function createGoalProposalService(db: AppDatabase) {
       const proposal: GoalProposalPayload = {
         proposalId: crypto.randomUUID(),
         targets: { ...targets },
+        targetSignature: goalProposalTargetSignature(targets),
         createdAt: new Date().toISOString(),
       };
 

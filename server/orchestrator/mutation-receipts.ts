@@ -617,11 +617,12 @@ export function renderProposalKindAmbiguityCopy(): string {
 
 export function renderGoalProposalCopy(targets: DailyTargets): string {
   return [
-    "我可以先幫你改成這組每日目標：",
+    "依你想調整目標的方向，我先整理一組比較完整、可執行的每日目標：",
     `• 卡路里 ${formatNumber(targets.calories)} kcal`,
     `• 蛋白質 ${formatNumber(targets.protein)} g`,
     `• 碳水 ${formatNumber(targets.carbs)} g`,
     `• 脂肪 ${formatNumber(targets.fat)} g`,
+    "這組數字讓熱量、蛋白質、碳水和脂肪一起對齊，比只改單一數字更穩定。",
     "如果要套用，請回覆「好」；如果要調整，請直接給新的數字。",
   ].join("\n");
 }
