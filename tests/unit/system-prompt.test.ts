@@ -330,6 +330,51 @@ describe("buildSystemPrompt", () => {
     assert.match(section, /較安全|安全調整|一般.*建議/);
   });
 
+  it("names 1200 kcal/day as the user-facing daily goal safety floor", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = nutritionSafetySection(prompt);
+
+    assert.match(section, /1200 kcal\/day/);
+    assert.match(section, /安全下限|下限/);
+    assert.match(section, /每日.*目標/);
+    assert.match(section, /不是臨床處方|非臨床|不是醫療建議/);
+  });
+
+  it("allows exact-floor and above-floor daily calorie targets when otherwise authorized", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = nutritionSafetySection(prompt);
+
+    assert.match(section, /1200[\s\S]*(剛好|正好|等於|exact)/);
+    assert.match(section, /(高於|以上|不低於)[\s\S]*1200/);
+    assert.match(section, /可以.*(請求|提案|套用|更新)/);
+    assert.match(section, /低於[\s\S]*1200[\s\S]*(不要|不得|拒絕|不套用)/);
+  });
+
+  it("does not make an existing 1800 kcal/day target sound immovable", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = nutritionSafetySection(prompt);
+
+    assert.match(section, /1800 kcal\/day/);
+    assert.match(section, /不是.*下限|不代表.*不能.*更低|不要.*不能.*往下調/);
+    assert.match(section, /1200[\s\S]*(下限|安全)/);
+    assert.doesNotMatch(section, /1800[^\n。]*(不能|不可|不得)[^\n。]*(更低|往下|降低)/);
+  });
+
   it("preserves existing medical-boundary copy outside nutrition safety", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1500,
@@ -647,6 +692,39 @@ describe("buildSystemPrompt", () => {
     assert.match(prompt, /推薦一組具體數值/);
     assert.match(prompt, /詢問使用者是否要套用/);
     assert.match(prompt, /明確同意/);
+  });
+
+  it("routes vague lower-target requests through safe above-floor proposals", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
+    const section = goalUpdateSection(prompt);
+
+    assert.match(section, /再低一點/);
+    assert.match(section, /propose_goals/);
+    assert.match(section, /1200 kcal\/day/);
+    assert.match(section, /(高於|以上|不低於)[\s\S]*安全下限/);
+    assert.match(section, /直接.*1200|1200.*update_goals|本輪.*1200/);
+  });
+
+  it("keeps internal safety identifiers out of user-facing guidance", () => {
+    const prompt = buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    });
+    const userFacingSections = [
+      nutritionSafetySection(prompt),
+      goalUpdateSection(prompt),
+    ].join("\n");
+
+    assert.doesNotMatch(userFacingSections, /unsafe_calorie_floor/);
+    assert.doesNotMatch(userFacingSections, /SAFE-02/);
+    assert.doesNotMatch(userFacingSections, /nutritionSafety/);
   });
 
   it("says successful update receipts beginning 已更新每日目標： must be shown verbatim", () => {
