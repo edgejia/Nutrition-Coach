@@ -11,7 +11,10 @@ import type { AppServices } from "../../server/app.js";
 import { LLMProviderError } from "../../server/llm/errors.js";
 import { formatLocalDate } from "../../server/lib/time.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
-import { renderMealNumericAuthorityFailureCopy } from "../../server/orchestrator/mutation-receipts.js";
+import {
+  renderMealNumericAuthorityFailureCopy,
+  renderUnsafeNutritionGuidanceCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 import type { SummaryOutcome } from "../../server/services/summary-outcome.js";
 import type { FastifyInstance } from "fastify";
 import type {
@@ -658,6 +661,359 @@ describe("chat-streaming", () => {
     } finally {
       clearTimeout(timeout);
     }
+  });
+
+  it("POST /api/chat SSE guards unsafe streamed nutrition guidance before emitting chunks", async () => {
+    mockLLM.queueChatStream(["每天只吃 ", "500 kcal。"]);
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const chunkText = parseSSEEvents(text)
+      .filter((event) => event.event === "chunk")
+      .map((event) => {
+        const payload = JSON.parse(event.data) as { token?: string };
+        return payload.token ?? "";
+      })
+      .join("");
+
+    assert.equal(chunkText, renderUnsafeNutritionGuidanceCopy());
+    assert.doesNotMatch(chunkText, /500 kcal|每天只吃/);
+    assert.equal(traceRecorders.length, 1);
+    const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-test", status: "pass" });
+    assert.deepEqual(trace.summary.finalReply, {
+      source: "renderer",
+      shape: "fallback_text",
+    });
+  });
+
+  it("POST /api/chat SSE suppresses unsafe-compliance prelude before later unsafe guidance", async () => {
+    mockLLM.queueChatStream(["可以，以下是計畫：", "每天只吃 500 kcal。"]);
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const chunkText = parseSSEEvents(text)
+      .filter((event) => event.event === "chunk")
+      .map((event) => {
+        const payload = JSON.parse(event.data) as { token?: string };
+        return payload.token ?? "";
+      })
+      .join("");
+
+    assert.equal(chunkText, renderUnsafeNutritionGuidanceCopy());
+    assert.doesNotMatch(chunkText, /可以|以下是計畫|500 kcal|每天只吃/);
+  });
+
+  it("POST /api/chat SSE suppresses neutral prelude before later unsafe guidance", async () => {
+    mockLLM.queueChatStream(["好的，", "每天只吃 500 kcal。"]);
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const chunkText = parseSSEEvents(text)
+      .filter((event) => event.event === "chunk")
+      .map((event) => {
+        const payload = JSON.parse(event.data) as { token?: string };
+        return payload.token ?? "";
+      })
+      .join("");
+
+    assert.equal(chunkText, renderUnsafeNutritionGuidanceCopy());
+    assert.doesNotMatch(chunkText, /好的|500 kcal|每天只吃/);
+  });
+
+  it("POST /api/chat SSE guards value-first unsafe streamed nutrition guidance", async () => {
+    mockLLM.queueChatStream(["500 kcal ", "每天只吃。"]);
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const chunkText = parseSSEEvents(text)
+      .filter((event) => event.event === "chunk")
+      .map((event) => {
+        const payload = JSON.parse(event.data) as { token?: string };
+        return payload.token ?? "";
+      })
+      .join("");
+
+    assert.equal(chunkText, renderUnsafeNutritionGuidanceCopy());
+    assert.doesNotMatch(chunkText, /500 kcal|每天只吃/);
+  });
+
+  it("POST /api/chat SSE suppresses restrictive meal-plan calorie fragments before fallback", async () => {
+    mockLLM.queueChatStream([
+      "早餐 100 kcal，",
+      "午餐 200 kcal，晚餐 200 kcal，",
+      "每天只吃 500 kcal。",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "你好");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const chunkText = parseSSEEvents(text)
+      .filter((event) => event.event === "chunk")
+      .map((event) => {
+        const payload = JSON.parse(event.data) as { token?: string };
+        return payload.token ?? "";
+      })
+      .join("");
+
+    assert.equal(chunkText, renderUnsafeNutritionGuidanceCopy());
+    assert.doesNotMatch(chunkText, /早餐|午餐|晚餐|100 kcal|200 kcal|500 kcal|每天只吃/);
+  });
+
+  it("POST /api/chat SSE guards meal-slot-only sub-floor nutrition plans", async () => {
+    mockLLM.queueChatStream([
+      "早餐 100 kcal，",
+      "午餐 200 kcal，",
+      "晚餐 200 kcal。",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "幫我安排一天菜單");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const chunkText = parseSSEEvents(text)
+      .filter((event) => event.event === "chunk")
+      .map((event) => {
+        const payload = JSON.parse(event.data) as { token?: string };
+        return payload.token ?? "";
+      })
+      .join("");
+
+    assert.equal(chunkText, renderUnsafeNutritionGuidanceCopy());
+    assert.doesNotMatch(chunkText, /早餐|午餐|晚餐|100 kcal|200 kcal/);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    assert.equal(latestAssistantMessage(historyJson.messages)?.content, renderUnsafeNutritionGuidanceCopy());
+  });
+
+  it("POST /api/chat SSE holds split meal-slot prefixes before unsafe fallback", async () => {
+    mockLLM.queueChatStream([
+      "早餐 ",
+      "100 kcal，",
+      "午餐 200 kcal，晚餐 200 kcal。",
+    ]);
+
+    const form = new FormData();
+    form.append("message", "幫我安排一天菜單");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const chunkText = parseSSEEvents(text)
+      .filter((event) => event.event === "chunk")
+      .map((event) => {
+        const payload = JSON.parse(event.data) as { token?: string };
+        return payload.token ?? "";
+      })
+      .join("");
+
+    assert.equal(chunkText, renderUnsafeNutritionGuidanceCopy());
+    assert.doesNotMatch(chunkText, /早餐|午餐|晚餐|100 kcal|200 kcal/);
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    assert.equal(latestAssistantMessage(historyJson.messages)?.content, renderUnsafeNutritionGuidanceCopy());
+  });
+
+  it("POST /api/chat JSON stream drain records unsafe nutrition fallback as renderer-owned", async () => {
+    mockLLM.queueChatStream(["Eat 500 kcal per day."]);
+
+    const form = new FormData();
+    form.append("message", "hello");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    const body = await res.json() as { reply?: string };
+    assert.equal(res.status, 200);
+    assert.equal(body.reply, renderUnsafeNutritionGuidanceCopy());
+    assert.equal(traceRecorders.length, 1);
+    const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-json-test", status: "pass" });
+    assert.deepEqual(trace.summary.finalReply, {
+      source: "renderer",
+      shape: "fallback_text",
+    });
+  });
+
+  it("POST /api/chat JSON guards meal-slot-only sub-floor nutrition plans from plain replies", async () => {
+    mockLLM.queueRoundResponse({
+      content: "早餐 100 kcal，午餐 200 kcal，晚餐 200 kcal。",
+    });
+
+    const form = new FormData();
+    form.append("message", "幫我安排一天菜單");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    const body = await res.json() as { reply?: string };
+    assert.equal(res.status, 200);
+    assert.equal(body.reply, renderUnsafeNutritionGuidanceCopy());
+    assert.equal(traceRecorders.length, 1);
+    const trace = traceRecorders[0]!.build({ scenario: "chat-json-meal-slot-unsafe-test", status: "pass" });
+    assert.deepEqual(trace.summary.finalReply, {
+      source: "renderer",
+      shape: "plain_text",
+    });
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    assert.equal(latestAssistantMessage(historyJson.messages)?.content, renderUnsafeNutritionGuidanceCopy());
+  });
+
+  it("POST /api/chat SSE keeps unsafe nutrition fallback renderer-owned with summary context", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_summary_unsafe_sse",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["每天只吃 ", "500 kcal。"]);
+
+    const form = new FormData();
+    form.append("message", "今天吃了什麼？");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader, "Accept": "text/event-stream" },
+      body: form,
+    });
+
+    assert.ok(res.body);
+    const text = await readStreamUntil(res.body.getReader(), "event: done");
+    const chunkText = parseSSEEvents(text)
+      .filter((event) => event.event === "chunk")
+      .map((event) => {
+        const payload = JSON.parse(event.data) as { token?: string };
+        return payload.token ?? "";
+      })
+      .join("");
+
+    assert.equal(chunkText, renderUnsafeNutritionGuidanceCopy());
+    assert.doesNotMatch(chunkText, /今天已記錄|500 kcal|每天只吃/);
+    assert.equal(traceRecorders.length, 1);
+    const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-summary-unsafe-test", status: "pass" });
+    assert.deepEqual(trace.summary.finalReply, {
+      source: "renderer",
+      shape: "fallback_text",
+    });
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    assert.equal(latestAssistantMessage(historyJson.messages)?.content, renderUnsafeNutritionGuidanceCopy());
+  });
+
+  it("POST /api/chat JSON stream drain keeps unsafe nutrition fallback renderer-owned with summary context", async () => {
+    mockLLM.queueRoundResponse({
+      toolCalls: [{
+        id: "call_summary_unsafe_json",
+        type: "function",
+        function: {
+          name: "get_daily_summary",
+          arguments: "{}",
+        },
+      }],
+    });
+    mockLLM.queueChatStream(["Eat 500 kcal per day."]);
+
+    const form = new FormData();
+    form.append("message", "今天吃了什麼？");
+
+    const res = await fetch(`${address}/api/chat`, {
+      method: "POST",
+      headers: { cookie: sessionCookieHeader },
+      body: form,
+    });
+
+    const body = await res.json() as { reply?: string };
+    assert.equal(res.status, 200);
+    assert.equal(body.reply, renderUnsafeNutritionGuidanceCopy());
+    assert.equal(traceRecorders.length, 1);
+    const trace = traceRecorders[0]!.build({ scenario: "chat-streaming-json-summary-unsafe-test", status: "pass" });
+    assert.deepEqual(trace.summary.finalReply, {
+      source: "renderer",
+      shape: "fallback_text",
+    });
+
+    const historyRes = await fetch(`${address}/api/chat/history?limit=10`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    const historyJson = await historyRes.json() as { messages: Array<{ role: string; content: string }> };
+    assert.equal(latestAssistantMessage(historyJson.messages)?.content, renderUnsafeNutritionGuidanceCopy());
   });
 
   it("POST /api/chat SSE rejects raw selectors before stream frames or active-turn side effects", async () => {
@@ -3626,16 +3982,13 @@ describe("chat-streaming", () => {
         },
       }],
     });
-    mockLLM.queueRoundResponse({
-      content: [
-        "結論：晚餐抓 900-1100 kcal，補足蛋白質。",
-        "| 欄位 | 值 |",
-        "| --- | --- |",
-        "- 理由：剩餘熱量夠，但不要超過上限。",
-        "- 選項：雞胸飯加青菜。",
-        "- 下一步：先選主蛋白。",
-      ].join("\n"),
-    });
+    mockLLM.queueChatStream([
+      "結論：晚餐抓 900-1100 kcal，補足蛋白質。\n",
+      "| 欄位 | 值 |\n| --- | --- |\n",
+      "- 理由：剩餘熱量夠，但不要超過上限。\n",
+      "- 選項：雞胸飯加青菜。\n",
+      "- 下一步：先選主蛋白。",
+    ]);
 
     const form = new FormData();
     form.append("message", "我下一餐可以怎麼吃？");
@@ -3785,7 +4138,6 @@ describe("chat-streaming", () => {
         .map((payload) => payload.token)
         .join("");
 
-      assert.match(combinedChunkText, /豬肉飯/);
       assert.doesNotMatch(combinedChunkText, /已記錄|完成記錄/);
       assert.match(combinedChunkText, /還沒有把這餐寫入紀錄/);
       assert.match(text, /event: done/);

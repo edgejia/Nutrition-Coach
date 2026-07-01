@@ -13,6 +13,7 @@ import type {
   ProposalStatus,
 } from "../services/proposal-cards.js";
 import type { MutationEffects } from "./mutation-effects.js";
+import { NUTRITION_SAFETY_CALORIE_FLOOR } from "./nutrition-safety-policy.js";
 import {
   logMutationReceiptGuardTripped,
   type MutationReceiptGuardOperation,
@@ -635,10 +636,14 @@ export function renderUnsafeCalorieFloorCopy(): string {
   return "這次沒有套用目標更新。這個每日熱量目標太低，我不能幫你設定或提案這樣的限制。請改成較安全、可持續的每日目標；如果你正在強烈限制飲食或覺得失控，建議和醫師或合格專業人員討論。";
 }
 
+export function renderUnsafeNutritionGuidanceCopy(): string {
+  return "我不能幫你安排極端限制、快速暴瘦或懲罰式運動。先改成較安全、可持續的飲食與活動節奏；如果你正在強烈限制飲食、想快速減重或因吃東西感到很內疚，建議和醫師或合格專業人員討論。";
+}
+
 type GoalTargetField = keyof DailyTargets;
 
 const GOAL_FIELD_RANGE_COPY: Record<GoalTargetField, { label: string; range: string }> = {
-  calories: { label: "卡路里", range: "500-8000 kcal" },
+  calories: { label: "卡路里", range: `${NUTRITION_SAFETY_CALORIE_FLOOR}-8000 kcal` },
   protein: { label: "蛋白質", range: "0-400 g" },
   carbs: { label: "碳水", range: "0-1000 g" },
   fat: { label: "脂肪", range: "0-300 g" },

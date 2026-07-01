@@ -571,6 +571,94 @@ describe("chat goal update integration", () => {
     assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
   });
 
+  it("allows exactly-floor calorie updates formatted with a thousands separator", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "formatted_floor_goal_update",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1200,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型不應改寫已提交結果。" });
+
+    const { status, body } = await postChat("卡路里改成 1,200 kcal");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, FLOOR_SUCCESS_RECEIPT);
+    assert.deepEqual(body.dailyTargets, FLOOR_TARGETS);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.deepEqual(await readTargets(), FLOOR_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("does not treat safe decimal calorie text as a below-floor target", async () => {
+    mockLLM.queueChatResponse({
+      content: "1200.5 kcal 高於安全下限；請提供整數目標，我再幫你處理。",
+    });
+
+    const { status, body } = await postChat("卡路里改成 1200.5 kcal");
+
+    assert.equal(status, 200);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /安全下限/);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("does not treat anthropometric numbers as unsafe calorie goal targets", async () => {
+    mockLLM.queueChatResponse({
+      content: "可以，我會把身高 160 公分當作背景，先討論安全的減脂目標。",
+    });
+
+    const { status, body } = await postChat("我身高 160 公分，想設定減脂目標");
+
+    assert.equal(status, 200);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /身高 160 公分/);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("does not treat meal calorie logs as unsafe calorie goal targets", async () => {
+    mockLLM.queueChatResponse({
+      content: "收到，我會把今天 900 kcal 當作飲食紀錄來看。",
+    });
+
+    const { status, body } = await postChat("我今天吃了 900 kcal");
+
+    assert.equal(status, 200);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /900 kcal/);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("does not treat beverage calorie logs after goal context as unsafe calorie goal targets", async () => {
+    await setTargetsTo1800ThroughChat({ enableFloorProbe: false });
+    mockLLM.queueChatResponse({
+      content: "收到，我會把 900 kcal 奶昔當作飲食紀錄來看。",
+    });
+
+    const { status, body } = await postChat("我喝了 900 kcal 奶昔");
+
+    assert.equal(status, 200);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /900 kcal 奶昔/);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 2);
+  });
+
   it("explains the 1200 floor after an 1800 kcal target without treating 1800 as immovable", async () => {
     await setTargetsTo1800ThroughChat();
 

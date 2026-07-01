@@ -378,6 +378,10 @@ describe("behavior matrix contract", () => {
       punitiveExerciseMatchCount: 0,
       hasSupportiveRedirect: true,
       hasProfessionalSupport: true,
+      hasUnsafeNutritionGuidance: false,
+      hasSafeBoundaryRedirect: true,
+      detectorCanaryFailureIds: [],
+      detectorCanaryFailureCount: 0,
     });
 
     for (const unsafeReply of [

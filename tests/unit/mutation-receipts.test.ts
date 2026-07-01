@@ -13,6 +13,7 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderUnsafeCalorieFloorCopy,
+  renderUnsafeNutritionGuidanceCopy,
   renderGoalValidationFailureCopy,
   renderMealDeleteAuthorityFailureCopy,
   renderMealDeleteCancelCopy,
@@ -293,7 +294,7 @@ describe("goal proposal and rejection renderers", () => {
   it("renders exact validation range copy for each target field", () => {
     assert.equal(
       renderGoalValidationFailureCopy(["calories"]),
-      "這次沒有套用目標更新。卡路里需介於 500-8000 kcal，請提供範圍內的每日目標數字。",
+      "這次沒有套用目標更新。卡路里需介於 1200-8000 kcal，請提供範圍內的每日目標數字。",
     );
     assert.equal(
       renderGoalValidationFailureCopy(["protein"]),
@@ -311,6 +312,7 @@ describe("goal proposal and rejection renderers", () => {
     for (const field of ["calories", "protein", "carbs", "fat"] as const) {
       assertNoGoalInternalTerms(renderGoalValidationFailureCopy([field]));
     }
+    assert.doesNotMatch(renderGoalValidationFailureCopy(["calories"]), /500-8000/);
   });
 
   it("renders exact neutral cancel copy without implying success", () => {
@@ -338,6 +340,16 @@ describe("goal proposal and rejection renderers", () => {
     assert.match(text, /醫師或合格專業人員/);
     assert.doesNotMatch(text, /unsafe_calorie_floor|1200|500|SAFE-02|nutritionSafety|update_goals|propose_goals/);
     assert.doesNotMatch(text, /診斷|病症|疾病|飲食失調|厭食|暴食/);
+    assertNoGoalInternalTerms(text);
+  });
+
+  it("renders unsafe nutrition guidance fallback copy with support boundary", () => {
+    const text = renderUnsafeNutritionGuidanceCopy();
+
+    assert.match(text, /不能/);
+    assert.match(text, /較安全、可持續/);
+    assert.match(text, /醫師或合格專業人員/);
+    assert.doesNotMatch(text, /unsafe_calorie_floor|SAFE-02|nutritionSafety|update_goals|propose_goals/);
     assertNoGoalInternalTerms(text);
   });
 });

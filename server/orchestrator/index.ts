@@ -60,6 +60,7 @@ import {
   renderGoalCancelCopy,
   renderGoalProposalCopy,
   renderUnsafeCalorieFloorCopy,
+  renderUnsafeNutritionGuidanceCopy,
   renderMealDeleteAuthorityFailureCopy,
   renderMealDeleteCancelCopy,
   renderMealDeleteStaleCopy,
@@ -69,7 +70,11 @@ import {
   renderProposalKindAmbiguityCopy,
 } from "./mutation-receipts.js";
 import { isGoalProposalCancel, isGoalProposalConsent, stripToolLikeRegions } from "./source-text-guard.js";
-import { NUTRITION_SAFETY_CALORIE_FLOOR } from "./nutrition-safety-policy.js";
+import {
+  NUTRITION_SAFETY_CALORIE_FLOOR,
+  hasSafeUnsafeNutritionBoundaryReply,
+  hasUnsafeNutritionGuidance,
+} from "./nutrition-safety-policy.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -149,6 +154,11 @@ interface FinalReplyTraceMetadata {
   fallbackOutcomeContext?: FallbackOutcomeContext;
 }
 
+export interface StreamFinalReplyTraceMetadata {
+  finalReplySource?: LlmTraceFinalReplySource;
+  finalReplyShape?: LlmTraceFinalReplyShape;
+}
+
 function policyFactPayload(
   policyFact: ToolPolicyDecisionFact | undefined,
   turnId: string | undefined,
@@ -203,6 +213,7 @@ export type OrchestratorResult =
       proposalCard?: PendingProposalCardInput | ProposalCardClientMetadata;
       proposalActionEvent?: ProposalActionEventClientMetadata;
       assistantReplyPersistence?: "already_persisted";
+      streamFinalReplyTraceMetadata?: StreamFinalReplyTraceMetadata;
     } & FinalReplyTraceMetadata);
 
 type LoggedMealReceipt = NonNullable<ToolExecutionResult["loggedMeal"]>;
@@ -397,7 +408,10 @@ function hasExplicitNumericGoalValue(message: string): boolean {
 }
 
 function normalizeNumericToken(value: string): number {
-  const ascii = value.replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
+  const ascii = value
+    .replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0))
+    .replace(/．/g, ".")
+    .replace(/[,，]/g, "");
   return Number(ascii);
 }
 
@@ -420,8 +434,13 @@ function isIdentifierEmbeddedNumericToken(message: string, start: number, end: n
   return false;
 }
 
+const INTAKE_LOG_CONTEXT_PATTERN =
+  /(吃了|喝了|飲用|攝取|記錄|早餐|午餐|晚餐|宵夜|餐點|餐|飯|麵|粥|湯|便當|沙拉|飲料|奶昔|meal|food|drink|beverage)/i;
+const STREAMED_LOGGED_INTAKE_CONTEXT_PATTERN =
+  /(?:已記錄|紀錄|收到|吃了|喝了|飲用|攝取|logged|recorded|共\s*[0-9０-９]+\s*餐|總共)/i;
+
 function explicitCalorieGoalValues(message: string): number[] {
-  const matches = [...message.matchAll(/[0-9０-９]+/g)];
+  const matches = [...message.matchAll(/[0-9０-９]+(?:[,.，][0-9０-９]+)*/g)];
   const values: number[] = [];
 
   for (const match of matches) {
@@ -440,6 +459,14 @@ function explicitCalorieGoalValues(message: string): number[] {
     const before = message.slice(Math.max(0, start - 12), start);
     const after = message.slice(end, Math.min(message.length, end + 12));
     const nearby = `${before}${rawValue}${after}`;
+    if (INTAKE_LOG_CONTEXT_PATTERN.test(nearby)) {
+      continue;
+    }
+
+    if (/(身高|體重|年齡|歲|公分|厘米|cm|kg|公斤|體脂)/i.test(nearby)) {
+      continue;
+    }
+
     if (/(蛋白|protein|碳水|carb|脂肪|fat)/i.test(nearby)) {
       continue;
     }
@@ -457,8 +484,15 @@ function explicitCalorieGoalValues(message: string): number[] {
   return values;
 }
 
+function hasCalorieGoalTargetContext(message: string): boolean {
+  const action = "(?:改成|設定|調(?:成|整|低)|降低|降到|目標|每日目標|熱量目標|卡路里目標|goal)";
+  const calorie = "(?:卡路里|熱量|kcal|calorie)";
+  return new RegExp(`${action}.{0,16}${calorie}|${calorie}.{0,16}${action}`, "i").test(message)
+    || /(每日)?目標|\bgoal\b|改成|設定|調(?:成|整|低)|降低|降到/i.test(message);
+}
+
 function hasGoalTargetContext(message: string, previousAssistantMessage?: string): boolean {
-  return /(每日)?目標|卡路里|熱量|kcal|calorie|\bgoal\b|改成|設定|調(?:成|整|低)|降低/i.test(message)
+  return hasCalorieGoalTargetContext(message)
     || /每日目標|安全下限|卡路里[^\n]*kcal|熱量目標/.test(previousAssistantMessage ?? "");
 }
 
@@ -470,6 +504,12 @@ function hasExplicitUnsafeCalorieGoalValue(message: string, previousAssistantMes
 
   const values = explicitCalorieGoalValues(conversationalMessage);
   return values.some((value) => value < NUTRITION_SAFETY_CALORIE_FLOOR);
+}
+
+function needsUnsafeNutritionBoundaryReply(userMessage: string, reply: string): boolean {
+  const conversationalMessage = stripToolLikeRegions(userMessage);
+  return hasUnsafeNutritionGuidance(reply)
+    || (hasUnsafeNutritionGuidance(conversationalMessage) && !hasSafeUnsafeNutritionBoundaryReply(reply));
 }
 
 function mentionsNonCalorieMacro(message: string): boolean {
@@ -970,6 +1010,79 @@ async function collectStreamText(stream: AsyncGenerator<string>): Promise<string
     fullReply += token;
   }
   return fullReply;
+}
+
+async function* guardUnsafeNutritionStream(
+  userMessage: string,
+  stream: AsyncGenerator<string>,
+  options: { onFallback?: () => void } = {},
+): AsyncGenerator<string> {
+  const bufferWholeReply = hasUnsafeNutritionGuidance(stripToolLikeRegions(userMessage));
+  let held = "";
+  let emittedTail = "";
+
+  for await (const token of stream) {
+    held += token;
+    if (!bufferWholeReply && needsUnsafeNutritionBoundaryReply(userMessage, held)) {
+      options.onFallback?.();
+      yield renderUnsafeNutritionGuidanceCopy();
+      return;
+    }
+
+    if (!bufferWholeReply && !mayContainUnsafeNutritionPrefix(held, emittedTail)) {
+      emittedTail = `${emittedTail}${held}`.slice(-96);
+      yield held;
+      held = "";
+    }
+  }
+
+  if (!held) {
+    return;
+  }
+
+  if (needsUnsafeNutritionBoundaryReply(userMessage, held)) {
+    options.onFallback?.();
+    yield renderUnsafeNutritionGuidanceCopy();
+    return;
+  }
+
+  yield held;
+}
+
+function mayContainUnsafeNutritionPrefix(text: string, previousText = ""): boolean {
+  const combined = `${previousText}${text}`;
+  const tail = combined.slice(-96);
+  return /早餐|早上|午餐|中午|晚餐|晚上|宵夜|breakfast|lunch|dinner/i.test(tail)
+    || /可以|以下|計畫|安排|步驟|菜單|每天|每日|目標|設定|只吃|第一天|第1天|三天|兩天|七天|一週|最快|快速|短時間|極低熱量|超低熱量|低到最低|懲罰|補償|吃太多|罪惡|內疚/.test(tail)
+    || mayContainSubFloorCalorieGuidancePrefix(tail)
+    || /^(?:好的?|當然|沒問題|可以的|ok|sure)[，,、：:\s]*$/i.test(text.trim());
+}
+
+function mayContainSubFloorCalorieGuidancePrefix(text: string): boolean {
+  if (STREAMED_LOGGED_INTAKE_CONTEXT_PATTERN.test(text)) {
+    return false;
+  }
+  const matches = [...text.matchAll(/([0-9０-９]+(?:[,.，][0-9０-９]+)*(?:[.．][0-9０-９]+)?)\s*(?:kcal|卡路里|卡|大卡|calories?)(?:\s|[，,。.]|$)/gi)];
+  return matches.some((match) => {
+    const value = normalizeNumericToken(match[1] ?? "");
+    return Number.isFinite(value) && value < NUTRITION_SAFETY_CALORIE_FLOOR;
+  });
+}
+
+function createUnsafeNutritionGuardedStream(
+  userMessage: string,
+  stream: AsyncGenerator<string>,
+): { stream: AsyncGenerator<string>; metadata: StreamFinalReplyTraceMetadata } {
+  const metadata: StreamFinalReplyTraceMetadata = {};
+  return {
+    metadata,
+    stream: guardUnsafeNutritionStream(userMessage, stream, {
+      onFallback: () => {
+        metadata.finalReplySource = "renderer";
+        metadata.finalReplyShape = "fallback_text";
+      },
+    }),
+  };
 }
 
 export async function* appendMutationReceiptStream(
@@ -1531,35 +1644,38 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               signal: opts?.signal,
             });
             if (roundResult.kind === "stream") {
-              if (planningFacts) {
-                response = { content: await collectStreamText(roundResult.streamGenerator) };
-              } else {
               const fallbackReason: FallbackPayload["reason"] = didMutateMeal ? "partial_success" : "llm_error";
-              opts?.hooks?.onLLMEnd?.(round + 1, false);
-              return {
-                streamGenerator: appendMutationReceiptStream(
-                  observeProviderStream(
-                    roundResult.streamGenerator,
-                    opts?.hooks,
-                    round + 1,
-                    fallbackReason,
-                    lastTool,
+              const observedStream = observeProviderStream(
+                roundResult.streamGenerator,
+                opts?.hooks,
+                round + 1,
+                fallbackReason,
+                lastTool,
+              );
+              if (planningFacts) {
+                response = { content: await collectStreamText(observedStream) };
+              } else {
+                const guardedStream = createUnsafeNutritionGuardedStream(userMessage, observedStream);
+                opts?.hooks?.onLLMEnd?.(round + 1, false);
+                return {
+                  streamGenerator: appendMutationReceiptStream(
+                    guardedStream.stream,
+                    mutationReceiptText,
                   ),
-                  mutationReceiptText,
-                ),
-                didLogMeal,
-                didMutateMeal,
-                dailySummary: logMealSummary,
-                summaryOutcome: mealSummaryOutcome,
-                summaryHistoryFacts,
-                dailyTargets: successfulGoalTargets,
-                affectedDate: resolvedAffectedDate,
-                loggedMeal,
-                loggedMealToolMessageId,
-                ...mutationOutcomeFactFields(mutationOutcomeFact),
-                ...deletedMealIdFields(deletedMealId),
-                ...mutationStateFields(committedMutationState),
-              };
+                  streamFinalReplyTraceMetadata: guardedStream.metadata,
+                  didLogMeal,
+                  didMutateMeal,
+                  dailySummary: logMealSummary,
+                  summaryOutcome: mealSummaryOutcome,
+                  summaryHistoryFacts,
+                  dailyTargets: successfulGoalTargets,
+                  affectedDate: resolvedAffectedDate,
+                  loggedMeal,
+                  loggedMealToolMessageId,
+                  ...mutationOutcomeFactFields(mutationOutcomeFact),
+                  ...deletedMealIdFields(deletedMealId),
+                  ...mutationStateFields(committedMutationState),
+                };
               }
             } else {
               response = roundResult.response;
@@ -1567,34 +1683,41 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           } else {
             if (shouldStreamFinalReply && typeof llmProvider.chatStream === "function") {
               const fallbackReason: FallbackPayload["reason"] = didMutateMeal ? "partial_success" : "llm_error";
-              opts?.hooks?.onLLMEnd?.(round + 1, false);
-              return {
-                streamGenerator: appendMutationReceiptStream(
-                  observeProviderStream(
-                    llmProvider.chatStream(messages, [], { signal: opts?.signal }),
-                    opts?.hooks,
-                    round + 1,
-                    fallbackReason,
-                    lastTool,
+              const observedStream = observeProviderStream(
+                llmProvider.chatStream(messages, [], { signal: opts?.signal }),
+                opts?.hooks,
+                round + 1,
+                fallbackReason,
+                lastTool,
+              );
+              if (planningFacts) {
+                response = { content: await collectStreamText(observedStream) };
+              } else {
+                const guardedStream = createUnsafeNutritionGuardedStream(userMessage, observedStream);
+                opts?.hooks?.onLLMEnd?.(round + 1, false);
+                return {
+                  streamGenerator: appendMutationReceiptStream(
+                    guardedStream.stream,
+                    mutationReceiptText,
                   ),
-                  mutationReceiptText,
-                ),
-                didLogMeal,
-                didMutateMeal,
-                dailySummary: logMealSummary,
-                summaryOutcome: mealSummaryOutcome,
-                summaryHistoryFacts,
-                dailyTargets: successfulGoalTargets,
-                affectedDate: resolvedAffectedDate,
-                loggedMeal,
-                loggedMealToolMessageId,
-                ...mutationOutcomeFactFields(mutationOutcomeFact),
-                ...deletedMealIdFields(deletedMealId),
-                ...mutationStateFields(committedMutationState),
-              };
+                  streamFinalReplyTraceMetadata: guardedStream.metadata,
+                  didLogMeal,
+                  didMutateMeal,
+                  dailySummary: logMealSummary,
+                  summaryOutcome: mealSummaryOutcome,
+                  summaryHistoryFacts,
+                  dailyTargets: successfulGoalTargets,
+                  affectedDate: resolvedAffectedDate,
+                  loggedMeal,
+                  loggedMealToolMessageId,
+                  ...mutationOutcomeFactFields(mutationOutcomeFact),
+                  ...deletedMealIdFields(deletedMealId),
+                  ...mutationStateFields(committedMutationState),
+                };
+              }
+            } else {
+              response = await llmProvider.chat(messages, toolDefinitions, { signal: opts?.signal });
             }
-
-            response = await llmProvider.chat(messages, toolDefinitions, { signal: opts?.signal });
           }
         } catch (err) {
           const fallbackReason: FallbackPayload["reason"] = didMutateMeal ? "partial_success" : "llm_error";
@@ -1782,15 +1905,20 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           const rawReply = summaryHistoryFacts
             ? composeSummaryHistoryReply(summaryHistoryFacts, response.content)
             : normalizedPlainAdvice;
+          const nutritionGuardedReply = needsUnsafeNutritionBoundaryReply(userMessage, rawReply)
+            ? (mutationReceiptText ?? renderUnsafeNutritionGuidanceCopy())
+            : rawReply;
           const reply = guardNoMutationSuccessClaim(
-            rawReply,
+            nutritionGuardedReply,
             projectCommittedMutationState(committedMutationState),
             { summaryHistoryFacts, planningFacts },
           );
-          const finalReplySource = summaryHistoryFacts && reply === rawReply
+          const finalReplySource = nutritionGuardedReply !== rawReply
             ? "renderer"
-            : normalizedPlainAdvice !== response.content && reply === rawReply ? "renderer"
-              : reply === response.content ? "model" : "fallback";
+            : summaryHistoryFacts && reply === rawReply
+              ? "renderer"
+              : normalizedPlainAdvice !== response.content && reply === rawReply ? "renderer"
+                : reply === response.content ? "model" : "fallback";
           return {
             reply,
             didLogMeal,
