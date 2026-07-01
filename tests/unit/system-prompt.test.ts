@@ -370,7 +370,7 @@ describe("buildSystemPrompt", () => {
     const section = nutritionSafetySection(prompt);
 
     assert.match(section, /1800 kcal\/day/);
-    assert.match(section, /不是.*下限|不代表.*不能.*更低|不要.*不能.*往下調/);
+    assert.match(section, /不是.*下限|仍可.*較低|可以.*降低/);
     assert.match(section, /1200[\s\S]*(下限|安全)/);
     assert.doesNotMatch(section, /1800[^\n。]*(不能|不可|不得)[^\n。]*(更低|往下|降低)/);
   });
