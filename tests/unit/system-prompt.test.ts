@@ -723,7 +723,10 @@ describe("buildSystemPrompt", () => {
     ].join("\n");
 
     assert.doesNotMatch(userFacingSections, /unsafe_calorie_floor/);
+    assert.doesNotMatch(userFacingSections, /nutrition-safety/);
+    assert.doesNotMatch(userFacingSections, /SAFE-01/);
     assert.doesNotMatch(userFacingSections, /SAFE-02/);
+    assert.doesNotMatch(userFacingSections, /SAFE-03/);
     assert.doesNotMatch(userFacingSections, /nutritionSafety/);
   });
 
