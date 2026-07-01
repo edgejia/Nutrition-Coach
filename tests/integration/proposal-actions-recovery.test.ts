@@ -6,6 +6,10 @@ import { readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import {
+  goalProposalTargetSignature,
+  type GoalProposalPayload,
+} from "../../server/services/goal-proposals.js";
 import type {
   ProposalActionRequestAction,
   ProposalActionRequestKind,
@@ -188,7 +192,10 @@ describe("proposal action retryable recovery", () => {
     return { meal, proposalId: proposal.proposalId };
   }
 
-  async function createGoalCard(proposalId = "stale-goal-proposal") {
+  async function createGoalCard(
+    proposalId = "stale-goal-proposal",
+    targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 },
+  ) {
     const assistant = await services.chatService.saveMessage(deviceId, "assistant", "請確認這組每日目標提案。");
     await services.proposalCardService.saveAssistantProposalCard({
       deviceId,
@@ -199,9 +206,12 @@ describe("proposal action retryable recovery", () => {
       title: "請確認這組每日目標提案。",
       details: {
         rows: [
-          { label: "卡路里", after: "1400 kcal" },
-          { label: "蛋白質", after: "125 g" },
+          { label: "卡路里", after: `${targets.calories} kcal` },
+          { label: "蛋白質", after: `${targets.protein} g` },
+          { label: "碳水", after: `${targets.carbs} g` },
+          { label: "脂肪", after: `${targets.fat} g` },
         ],
+        targetSignature: goalProposalTargetSignature(targets),
       },
       actions: {
         approveLabel: "套用目標",
@@ -213,7 +223,7 @@ describe("proposal action retryable recovery", () => {
   }
 
   async function createActiveGoalCard() {
-    const proposal = await services.goalProposalService.putLatest({
+    const proposal: GoalProposalPayload = await services.goalProposalService.putLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
       targets: {
@@ -223,7 +233,7 @@ describe("proposal action retryable recovery", () => {
         fat: 45,
       },
     });
-    await createGoalCard(proposal.proposalId);
+    await createGoalCard(proposal.proposalId, proposal.targets);
     return proposal.proposalId;
   }
 
