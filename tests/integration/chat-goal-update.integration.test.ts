@@ -4,6 +4,12 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import type {
+  ChatMessage,
+  LLMCallOptions,
+  LLMResponse,
+  ToolDefinition,
+} from "../../server/llm/types.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import {
   renderGoalAuthorityFailureCopy,
@@ -73,6 +79,13 @@ const PROPOSAL_TARGETS: DailyTargets = {
   fat: 45,
 };
 
+const SAFE_LOWER_PROPOSAL_TARGETS: DailyTargets = {
+  calories: 1600,
+  protein: 130,
+  carbs: 150,
+  fat: 45,
+};
+
 const UNSAFE_TARGETS: DailyTargets = {
   calories: 500,
   protein: 120,
@@ -83,6 +96,13 @@ const UNSAFE_TARGETS: DailyTargets = {
 const FLOOR_TARGETS: DailyTargets = {
   calories: 1200,
   protein: 120,
+  carbs: 150,
+  fat: 50,
+};
+
+const EXACT_FLOOR_FOLLOWUP_TARGETS: DailyTargets = {
+  calories: 1200,
+  protein: 130,
   carbs: 150,
   fat: 50,
 };
@@ -111,11 +131,110 @@ const FLOOR_SUCCESS_RECEIPT = [
   "• 脂肪 50 g",
 ].join("\n");
 
+const EXACT_FLOOR_FOLLOWUP_RECEIPT = [
+  "已更新每日目標：",
+  "• 卡路里 1200 kcal",
+  "• 蛋白質 130 g",
+  "• 碳水 150 g",
+  "• 脂肪 50 g",
+].join("\n");
+
+const FLOOR_EXPLANATION_REPLY = "可以往下調，1200 kcal/天是這個產品的安全下限；目前 1800 仍可改成 1200 或任何高於 1200 的目標。你可以直接指定想要的數字，我再幫你處理。";
+
 const SUCCESS_STYLE_COPY = /已更新每日目標|已經幫你更新|更新好了/;
+const IMMOVABLE_1800_COPY = /1800[^\n。]*(不能|不可|不得)[^\n。]*(更低|往下|降低|動)/;
+const INTERNAL_SAFETY_IDS = /unsafe_calorie_floor|nutritionSafety|SAFE-02|propose_goals|update_goals/;
+
+function chatContentToText(content: ChatMessage["content"]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content.map((part) => part.type === "text" ? part.text ?? "" : "").join("\n");
+  }
+  return "";
+}
+
+function latestUserText(messages: ChatMessage[]): string {
+  const message = [...messages].reverse().find((candidate) => candidate.role === "user");
+  return message ? chatContentToText(message.content) : "";
+}
+
+function systemPromptText(messages: ChatMessage[]): string {
+  const message = messages.find((candidate) => candidate.role === "system");
+  return message ? chatContentToText(message.content) : "";
+}
+
+class GoalFloorPromptProbeProvider extends MockLLMProvider {
+  private goalFloorProbeEnabled = false;
+
+  enableGoalFloorProbe() {
+    this.goalFloorProbeEnabled = true;
+  }
+
+  async chat(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    opts?: LLMCallOptions,
+  ): Promise<LLMResponse> {
+    if (!this.goalFloorProbeEnabled) {
+      return super.chat(messages, tools, opts);
+    }
+
+    this.chatCalls.push({ messages, tools, opts });
+    const prompt = systemPromptText(messages);
+    const userText = latestUserText(messages);
+    const hasFloorContract = (
+      prompt.includes("1200 kcal/day") &&
+      prompt.includes("安全下限") &&
+      prompt.includes("1800 kcal/day 不是安全下限") &&
+      prompt.includes("高於或等於安全下限 1200 kcal/day")
+    );
+
+    if (!hasFloorContract) {
+      return { content: "缺少 1200 安全下限提示。" };
+    }
+
+    if (userText.includes("不是可以到1200")) {
+      return { content: FLOOR_EXPLANATION_REPLY };
+    }
+
+    if (userText.includes("再低一點")) {
+      return {
+        toolCalls: [{
+          id: "safe_lower_goal_proposal",
+          type: "function",
+          function: {
+            name: "propose_goals",
+            arguments: JSON.stringify(SAFE_LOWER_PROPOSAL_TARGETS),
+          },
+        }],
+      };
+    }
+
+    if (userText.includes("改成 1200")) {
+      return {
+        toolCalls: [{
+          id: "exact_floor_goal_update",
+          type: "function",
+          function: {
+            name: "update_goals",
+            arguments: JSON.stringify({
+              mode: "current_turn_values",
+              calories: 1200,
+            }),
+          },
+        }],
+      };
+    }
+
+    return { content: "Mock: 已記錄您的飲食！" };
+  }
+}
 
 describe("chat goal update integration", () => {
   let app: FastifyInstance;
-  let mockLLM: MockLLMProvider;
+  let mockLLM: GoalFloorPromptProbeProvider;
   let address: string;
   let deviceId: string;
   let sessionCookieHeader: string;
@@ -133,7 +252,7 @@ describe("chat goal update integration", () => {
   }
 
   beforeEach(async () => {
-    mockLLM = new MockLLMProvider();
+    mockLLM = new GoalFloorPromptProbeProvider();
     publishCalls = [];
     traceRecorders = [];
     app = await buildApp({
@@ -193,6 +312,32 @@ describe("chat goal update integration", () => {
     assert.equal(res.status, 200);
     const body = await res.json() as { dailyTargets: DailyTargets };
     return body.dailyTargets;
+  }
+
+  async function setTargetsTo1800ThroughChat() {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_success_before_floor_followup",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1800,
+            protein: 130,
+          }),
+        },
+      }],
+    });
+
+    const initial = await postChat("卡路里改成 1800，蛋白質 130 克");
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.reply, SUCCESS_RECEIPT);
+    assert.deepEqual(initial.body.dailyTargets, SUCCESS_TARGETS);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+    publishCalls = [];
+    mockLLM.enableGoalFloorProbe();
   }
 
   async function saveMealNumericProposalCard(input: {
@@ -442,6 +587,65 @@ describe("chat goal update integration", () => {
     assert.equal(body.reply, FLOOR_SUCCESS_RECEIPT);
     assert.deepEqual(body.dailyTargets, FLOOR_TARGETS);
     assert.deepEqual(await readTargets(), FLOOR_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+  });
+
+  it("explains the 1200 floor after an 1800 kcal target without treating 1800 as immovable", async () => {
+    await setTargetsTo1800ThroughChat();
+
+    const { status, body } = await postChat("不是可以到1200嗎為什麼1800就不能動了？");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, FLOOR_EXPLANATION_REPLY);
+    assert.match(body.reply, /1200/);
+    assert.match(body.reply, /安全下限/);
+    assert.doesNotMatch(body.reply, IMMOVABLE_1800_COPY);
+    assert.doesNotMatch(body.reply, INTERNAL_SAFETY_IDS);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("turns a vague lower-target follow-up after 1800 into a safe above-floor proposal", async () => {
+    await setTargetsTo1800ThroughChat();
+
+    const { status, body } = await postChat("那幫我再低一點");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderGoalProposalCopy(SAFE_LOWER_PROPOSAL_TARGETS));
+    assert.doesNotMatch(body.reply, INTERNAL_SAFETY_IDS);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard?.proposalKind, "goal");
+    assert.equal(body.proposalCard?.proposalLane, "goal");
+    assert.equal(body.proposalCard?.status, "active");
+    assert.equal(body.proposalCard?.isActionable, true);
+    assert.deepEqual(body.proposalCard?.details.rows.map((row) => row.after), [
+      "1600 kcal",
+      "130 g",
+      "150 g",
+      "45 g",
+    ]);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("applies an exact-floor follow-up after 1800 through the existing goal receipt path", async () => {
+    await setTargetsTo1800ThroughChat();
+
+    const { status, body } = await postChat("那改成 1200");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, EXACT_FLOOR_FOLLOWUP_RECEIPT);
+    assert.deepEqual(body.dailyTargets, EXACT_FLOOR_FOLLOWUP_TARGETS);
+    assert.equal(body.proposalCard, undefined);
+    assert.deepEqual(await readTargets(), EXACT_FLOOR_FOLLOWUP_TARGETS);
     assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
   });
 
