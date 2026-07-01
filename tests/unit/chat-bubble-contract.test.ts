@@ -465,6 +465,67 @@ describe("chat bubble source contract", () => {
     }
   });
 
+  it("renders approved and rejected proposal cards without inactive lapse paragraphs", () => {
+    const terminalCases = [
+      {
+        status: "approved" as const,
+        expectedStatusCopy: "已套用",
+        staleCopy: "這個目標提案已超過 30 分鐘，請重新提出目標調整。",
+      },
+      {
+        status: "rejected" as const,
+        expectedStatusCopy: "已取消",
+        staleCopy: "這個目標提案已被新的目標提案取代。",
+      },
+    ];
+
+    for (const item of terminalCases) {
+      const html = renderProposalCard({
+        proposalCard: {
+          ...activeMealEstimateProposal,
+          proposalId: `goal-${item.status}`,
+          proposalKind: "goal",
+          proposalLane: "goal",
+          status: item.status,
+          isActionable: false,
+          title: "每日目標提案",
+          lapseCopy: item.staleCopy,
+        },
+      });
+
+      assert.match(html, new RegExp(item.expectedStatusCopy));
+      assert.doesNotMatch(html, /sp-proposal-lapse/);
+      assert.doesNotMatch(html, new RegExp(escapeRegExp(item.staleCopy)));
+      assert.doesNotMatch(html, /<button/);
+    }
+  });
+
+  it("keeps stale and superseded cards inactive with explanatory lapse copy", () => {
+    const cases = [
+      { status: "stale" as const, lapseCopy: "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。" },
+      { status: "superseded" as const, lapseCopy: "這個目標提案已被新的目標提案取代。" },
+    ];
+
+    for (const item of cases) {
+      const html = renderProposalCard({
+        proposalCard: {
+          ...activeMealEstimateProposal,
+          proposalId: `goal-${item.status}`,
+          proposalKind: "goal",
+          proposalLane: "goal",
+          status: item.status,
+          isActionable: false,
+          title: "每日目標提案",
+          lapseCopy: item.lapseCopy,
+        },
+      });
+
+      assert.match(html, /sp-proposal-lapse/);
+      assert.match(html, new RegExp(escapeRegExp(item.lapseCopy)));
+      assert.doesNotMatch(html, /<button/);
+    }
+  });
+
   it("renders structured proposal action events as user-side events distinct from typed bubbles", () => {
     const message: Message = {
       id: "proposal-action-event-1",

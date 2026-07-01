@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { goalProposalTargetSignature } from "../../server/services/goal-proposals.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 
 interface DailyTargets {
@@ -131,6 +132,13 @@ describe("typed proposal actions through /api/chat", () => {
       sessionId: DEFAULT_SESSION_ID,
       targets,
     });
+    await services.proposalCardService.markSupersededInLane({
+      deviceId,
+      proposalLane: "goal",
+      replacementProposalId: proposal.proposalId,
+      supersededByKind: "goal",
+      lapseCopy: "這個目標提案已被新的目標提案取代。",
+    });
     const assistant = await services.chatService.saveMessage(deviceId, "assistant", "請確認這組每日目標提案。");
     await services.proposalCardService.saveAssistantProposalCard({
       deviceId,
@@ -146,6 +154,7 @@ describe("typed proposal actions through /api/chat", () => {
           { label: "碳水", after: `${targets.carbs} g` },
           { label: "脂肪", after: `${targets.fat} g` },
         ],
+        targetSignature: goalProposalTargetSignature(targets),
       },
       actions: {
         approveLabel: "套用目標",
@@ -372,6 +381,41 @@ describe("typed proposal actions through /api/chat", () => {
     const card = history.find((message) => message.proposalCard?.proposalId === proposal.proposalId)?.proposalCard;
     assert.equal(card?.status, "approved");
     assert.equal(card?.isActionable, false);
+  });
+
+  it("typed approval applies the same newest goal target set shown on the active proposal card", async () => {
+    const olderTargets = { calories: 1500, protein: 130, carbs: 150, fat: 45 };
+    const newerTargets = { calories: 2200, protein: 165, carbs: 240, fat: 70 };
+    const olderProposal = await createGoalCard(olderTargets);
+    const newerProposal = await createGoalCard(newerTargets);
+
+    const active = await services.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID });
+    assert.equal(active?.proposalId, newerProposal.proposalId);
+    assert.deepEqual(active?.targets, newerTargets);
+    assert.equal(active?.targetSignature, goalProposalTargetSignature(newerTargets));
+
+    const body = await postChat("好");
+
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.deepEqual(body.dailyTargets, newerTargets);
+    assert.equal(body.proposalCard?.proposalId, newerProposal.proposalId);
+    assert.equal(body.proposalCard?.status, "approved");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.equal(body.proposalActionEvent?.proposalId, newerProposal.proposalId);
+    assert.equal(body.proposalActionEvent?.proposalKind, "goal");
+    assert.equal(body.proposalActionEvent?.action, "approve");
+    assert.deepEqual(await readTargets(), newerTargets);
+
+    const history = await getHistory();
+    assert.equal(
+      history.find((message) => message.proposalCard?.proposalId === newerProposal.proposalId)?.proposalCard?.status,
+      "approved",
+    );
+    assert.equal(
+      history.find((message) => message.proposalCard?.proposalId === olderProposal.proposalId)?.proposalCard?.status,
+      "superseded",
+    );
   });
 
   it("rejects a delete proposal from typed cancel text without deleting the meal", async () => {

@@ -242,6 +242,58 @@ describe("proposal card metadata service", () => {
     );
   });
 
+  it("suppresses stale lapse copy for approved and rejected terminal card projections", async () => {
+    const approvedCard: ProposalCardMetadata = {
+      id: "card-approved",
+      deviceId,
+      assistantMessageId: "assistant-approved",
+      proposalId: "goal-approved",
+      proposalKind: "goal",
+      proposalLane: "goal",
+      status: "approved",
+      title: "每日目標提案",
+      details: { rows: [{ label: "卡路里", after: "2200 kcal" }] },
+      actions: { approveLabel: "套用目標", editLabel: "調整目標", rejectLabel: "取消提案" },
+      expiresAt: "2026-06-14T08:30:00.000Z",
+      lapseCopy: "這個目標提案已超過 30 分鐘，請重新提出目標調整。",
+      supersededByKind: null,
+      createdAt: "2026-06-14T08:00:00.000Z",
+      updatedAt: "2026-06-14T08:00:00.000Z",
+    };
+    const rejectedCard: ProposalCardMetadata = {
+      ...approvedCard,
+      id: "card-rejected",
+      assistantMessageId: "assistant-rejected",
+      proposalId: "goal-rejected",
+      status: "rejected",
+      lapseCopy: "這個目標提案已被新的目標提案取代。",
+    };
+
+    const projections = service.projectStatusForCards({
+      deviceId,
+      cards: [approvedCard, rejectedCard],
+      activeProposals: [],
+      now: new Date("2026-06-14T09:00:00.000Z"),
+    });
+
+    assert.deepEqual(
+      {
+        status: expectProjected(projections, "goal-approved").status,
+        actionable: expectProjected(projections, "goal-approved").isActionable,
+        copy: expectProjected(projections, "goal-approved").lapseCopy,
+      },
+      { status: "approved", actionable: false, copy: null },
+    );
+    assert.deepEqual(
+      {
+        status: expectProjected(projections, "goal-rejected").status,
+        actionable: expectProjected(projections, "goal-rejected").isActionable,
+        copy: expectProjected(projections, "goal-rejected").lapseCopy,
+      },
+      { status: "rejected", actionable: false, copy: null },
+    );
+  });
+
   it("persists proposal action events as distinct user action metadata", async () => {
     insertChatMessage(db, { id: "assistant-delete", deviceId, role: "assistant" });
     insertChatMessage(db, { id: "action-delete", deviceId, role: "user", content: "" });

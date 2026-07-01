@@ -8,6 +8,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import { renderUnsafeCalorieFloorCopy } from "../../server/orchestrator/mutation-receipts.js";
+import { goalProposalTargetSignature } from "../../server/services/goal-proposals.js";
 import type { ProposalActionTestHooks } from "../../server/services/proposal-actions.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 
@@ -142,6 +143,7 @@ describe("proposal action API", () => {
           { label: "卡路里", after: `${targets.calories} kcal` },
           { label: "蛋白質", after: `${targets.protein} g` },
         ],
+        targetSignature: goalProposalTargetSignature(targets),
       },
       actions: {
         approveLabel: "套用目標",
@@ -610,6 +612,115 @@ describe("proposal action API", () => {
       sessionId: DEFAULT_SESSION_ID,
     }), undefined);
     assert.equal(await historyHasActionEvent(proposalId), false);
+    assert.equal(mutationOutcomeRows().length, 0);
+    assert.equal(publishedGoalUpdates.length, 0);
+  });
+
+  it("treats older same-lane goal proposal approval as stale after a newer target set exists", async () => {
+    const defaults = await readTargets();
+    const olderTargets = { calories: 1500, protein: 130, carbs: 150, fat: 45 };
+    const newerTargets = { calories: 2200, protein: 165, carbs: 240, fat: 70 };
+    const older = await createGoalCard(olderTargets);
+    const newer = await createGoalCard(newerTargets);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId: older.proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      dailyTargets?: DailyTargets;
+      proposalCard?: { proposalId: string; status: string; isActionable: boolean };
+      proposalActionEvent?: unknown;
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.status, "stale");
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard?.proposalId, older.proposalId);
+    assert.equal(body.proposalCard?.status, "stale");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.equal(body.proposalActionEvent, undefined);
+    assert.deepEqual(await readTargets(), defaults);
+    assert.deepEqual(
+      await services.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }),
+      {
+        proposalId: newer.proposalId,
+        targets: newerTargets,
+        targetSignature: goalProposalTargetSignature(newerTargets),
+        createdAt: (await services.goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.createdAt,
+      },
+    );
+    assert.equal(mutationOutcomeRows().length, 0);
+    assert.equal(publishedGoalUpdates.length, 0);
+  });
+
+  it("fails closed when the active goal proposal and persisted card target signatures disagree", async () => {
+    const defaults = await readTargets();
+    const visibleTargets = { calories: 2200, protein: 165, carbs: 240, fat: 70 };
+    const staleTargets = { calories: 1500, protein: 130, carbs: 150, fat: 45 };
+    const proposal = await services.goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: visibleTargets,
+    });
+    const assistant = await services.chatService.saveMessage(deviceId, "assistant", "請確認這組每日目標提案。");
+    await services.proposalCardService.saveAssistantProposalCard({
+      deviceId,
+      assistantMessageId: assistant.id,
+      proposalId: proposal.proposalId,
+      proposalKind: "goal",
+      proposalLane: "goal",
+      title: "請確認這組每日目標提案。",
+      details: {
+        rows: [
+          { label: "卡路里", after: `${visibleTargets.calories} kcal` },
+          { label: "蛋白質", after: `${visibleTargets.protein} g` },
+        ],
+        targetSignature: goalProposalTargetSignature(staleTargets),
+      },
+      actions: {
+        approveLabel: "套用目標",
+        editLabel: "調整目標",
+        rejectLabel: "取消提案",
+      },
+    });
+    let mutated = false;
+    proposalActionTestHooks.afterDomainMutation = () => {
+      mutated = true;
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/proposals/actions",
+      headers: { cookie: sessionCookieHeader },
+      payload: { proposalId: proposal.proposalId, kind: "goal", action: "approve" },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as {
+      ok: boolean;
+      status: string;
+      didMutateMeal: boolean;
+      dailyTargets?: DailyTargets;
+      proposalCard?: { status: string; isActionable: boolean };
+      proposalActionEvent?: unknown;
+    };
+    assert.equal(body.ok, false);
+    assert.equal(body.status, "stale");
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard?.status, "stale");
+    assert.equal(body.proposalCard?.isActionable, false);
+    assert.equal(body.proposalActionEvent, undefined);
+    assert.equal(mutated, false);
+    assert.deepEqual(await readTargets(), defaults);
     assert.equal(mutationOutcomeRows().length, 0);
     assert.equal(publishedGoalUpdates.length, 0);
   });

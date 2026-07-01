@@ -262,19 +262,21 @@ describe("MutationEffects contract", () => {
 });
 
 describe("goal proposal and rejection renderers", () => {
-  it("renders exact proposal copy with all four target values", () => {
+  it("renders natural proposal copy with all four target values and a concise rationale", () => {
     const text = renderGoalProposalCopy({
-      calories: 1400,
-      protein: 120,
-      carbs: 130,
-      fat: 45,
+      calories: 2200,
+      protein: 165,
+      carbs: 240,
+      fat: 70,
     });
 
     assert.equal(
       text,
-      "我可以先幫你改成這組每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 120 g\n• 碳水 130 g\n• 脂肪 45 g\n如果要套用，請回覆「好」；如果要調整，請直接給新的數字。",
+      "依你想調整目標的方向，我先整理一組比較完整、可執行的每日目標：\n• 卡路里 2200 kcal\n• 蛋白質 165 g\n• 碳水 240 g\n• 脂肪 70 g\n這組數字讓熱量、蛋白質、碳水和脂肪一起對齊，比只改單一數字更穩定。\n如果要套用，請回覆「好」；如果要調整，請直接給新的數字。",
     );
     assert.doesNotMatch(text, /已更新每日目標/);
+    assert.doesNotMatch(text, /kcal\/day/);
+    assert.doesNotMatch(text, /proposalId|targetSignature|SAFE-|propose_goals|update_goals|nutritionSafety/);
     assertNoGoalInternalTerms(text);
   });
 
