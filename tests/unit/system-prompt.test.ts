@@ -330,7 +330,7 @@ describe("buildSystemPrompt", () => {
     assert.match(section, /較安全|安全調整|一般.*建議/);
   });
 
-  it("names 1200 kcal/day as the user-facing daily goal safety floor", () => {
+  it("names 1200 kcal/天 as the user-facing daily goal safety floor", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1800,
       protein: 130,
@@ -339,7 +339,7 @@ describe("buildSystemPrompt", () => {
     });
     const section = nutritionSafetySection(prompt);
 
-    assert.match(section, /1200 kcal\/day/);
+    assert.match(section, /1200 kcal\/天/);
     assert.match(section, /安全下限|下限/);
     assert.match(section, /每日.*目標/);
     assert.match(section, /不是臨床處方|非臨床|不是醫療建議/);
@@ -360,7 +360,7 @@ describe("buildSystemPrompt", () => {
     assert.match(section, /低於[\s\S]*1200[\s\S]*(不要|不得|拒絕|不套用)/);
   });
 
-  it("does not make an existing 1800 kcal/day target sound immovable", () => {
+  it("does not make an existing 1800 kcal/天 target sound immovable", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1800,
       protein: 130,
@@ -369,7 +369,7 @@ describe("buildSystemPrompt", () => {
     });
     const section = nutritionSafetySection(prompt);
 
-    assert.match(section, /1800 kcal\/day/);
+    assert.match(section, /1800 kcal\/天/);
     assert.match(section, /不是.*下限|仍可.*較低|可以.*降低/);
     assert.match(section, /1200[\s\S]*(下限|安全)/);
     assert.doesNotMatch(section, /1800[^\n。]*(不能|不可|不得)[^\n。]*(更低|往下|降低)/);
@@ -708,6 +708,8 @@ describe("buildSystemPrompt", () => {
     assert.match(section, /1200 kcal\/day/);
     assert.match(section, /(高於|以上|不低於)[\s\S]*安全下限/);
     assert.match(section, /直接.*1200|1200.*update_goals|本輪.*1200/);
+    assert.match(section, /不要只回覆/);
+    assert.doesNotMatch(nutritionSafetySection(prompt), /請詢問使用者想要哪個/);
   });
 
   it("keeps internal safety identifiers out of user-facing guidance", () => {

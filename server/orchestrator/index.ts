@@ -30,6 +30,7 @@ import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import {
+  buildGoalProposalCard,
   getToolDefinitions,
   executeTool,
   isFatalToolError,
@@ -57,6 +58,8 @@ import {
 import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
+  renderGoalProposalCopy,
+  renderUnsafeCalorieFloorCopy,
   renderMealDeleteAuthorityFailureCopy,
   renderMealDeleteCancelCopy,
   renderMealDeleteStaleCopy,
@@ -65,7 +68,8 @@ import {
   renderGuardedMutationReceipt,
   renderProposalKindAmbiguityCopy,
 } from "./mutation-receipts.js";
-import { isGoalProposalCancel, isGoalProposalConsent } from "./source-text-guard.js";
+import { isGoalProposalCancel, isGoalProposalConsent, stripToolLikeRegions } from "./source-text-guard.js";
+import { NUTRITION_SAFETY_CALORIE_FLOOR } from "./nutrition-safety-policy.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -385,6 +389,164 @@ function getDeviceTargets(device: Awaited<ReturnType<ReturnType<typeof createDev
     protein: device.dailyProtein,
     carbs: device.dailyCarbs,
     fat: device.dailyFat,
+  };
+}
+
+function hasExplicitNumericGoalValue(message: string): boolean {
+  return /[0-9０-９]/.test(message);
+}
+
+function normalizeNumericToken(value: string): number {
+  const ascii = value.replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
+  return Number(ascii);
+}
+
+function isIdentifierEmbeddedNumericToken(message: string, start: number, end: number): boolean {
+  const before = message[start - 1];
+  if (before && /[A-Za-z0-9_-]/.test(before)) {
+    return true;
+  }
+
+  const after = message[end];
+  if (!after) {
+    return false;
+  }
+  if (/[-_0-9]/.test(after)) {
+    return true;
+  }
+  if (/[A-Za-z]/.test(after)) {
+    return !/^(?:kcal|calorie|calories)\b/i.test(message.slice(end));
+  }
+  return false;
+}
+
+function explicitCalorieGoalValues(message: string): number[] {
+  const matches = [...message.matchAll(/[0-9０-９]+/g)];
+  const values: number[] = [];
+
+  for (const match of matches) {
+    const rawValue = match[0];
+    const start = match.index ?? 0;
+    const end = start + rawValue.length;
+    if (isIdentifierEmbeddedNumericToken(message, start, end)) {
+      continue;
+    }
+
+    const value = normalizeNumericToken(rawValue);
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+
+    const before = message.slice(Math.max(0, start - 12), start);
+    const after = message.slice(end, Math.min(message.length, end + 12));
+    const nearby = `${before}${rawValue}${after}`;
+    if (/(蛋白|protein|碳水|carb|脂肪|fat)/i.test(nearby)) {
+      continue;
+    }
+
+    if (/(卡路里|熱量|kcal|calorie)/i.test(nearby)) {
+      values.push(value);
+      continue;
+    }
+
+    if (matches.length === 1 && /(每日)?目標|卡路里|熱量|kcal|calorie|改成|設定|調(?:成|整|低)|降低/i.test(message)) {
+      values.push(value);
+    }
+  }
+
+  return values;
+}
+
+function hasGoalTargetContext(message: string, previousAssistantMessage?: string): boolean {
+  return /(每日)?目標|卡路里|熱量|kcal|calorie|\bgoal\b|改成|設定|調(?:成|整|低)|降低/i.test(message)
+    || /每日目標|安全下限|卡路里[^\n]*kcal|熱量目標/.test(previousAssistantMessage ?? "");
+}
+
+function hasExplicitUnsafeCalorieGoalValue(message: string, previousAssistantMessage?: string): boolean {
+  const conversationalMessage = stripToolLikeRegions(message);
+  if (!hasGoalTargetContext(conversationalMessage, previousAssistantMessage)) {
+    return false;
+  }
+
+  const values = explicitCalorieGoalValues(conversationalMessage);
+  return values.some((value) => value < NUTRITION_SAFETY_CALORIE_FLOOR);
+}
+
+function mentionsNonCalorieMacro(message: string): boolean {
+  return /(蛋白質|protein|碳水|carb|脂肪|fat)/i.test(message);
+}
+
+function mentionsCalories(message: string): boolean {
+  return /(卡路里|熱量|kcal|calorie)/i.test(message);
+}
+
+function isVagueLowerGoalIntent(message: string, previousAssistantMessage?: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  if (!normalized || hasExplicitNumericGoalValue(normalized)) {
+    return false;
+  }
+
+  if (/(建議|提案|推薦).*(目標)|目標.*(建議|提案|推薦)/i.test(normalized)) {
+    return false;
+  }
+
+  const hasLowerIntent = /(再?低一點|低一些|再?降一點|降低一點|調低一點|熱量少一點|卡路里少一點|目標少一點)/i.test(normalized);
+  if (!hasLowerIntent) {
+    return false;
+  }
+
+  if (mentionsNonCalorieMacro(message) && !mentionsCalories(message)) {
+    return false;
+  }
+
+  return hasGoalTargetContext(message, previousAssistantMessage);
+}
+
+function buildSafeLowerGoalProposalTargets(targets: DailyTargets): DailyTargets | null {
+  if (targets.calories <= NUTRITION_SAFETY_CALORIE_FLOOR) {
+    return null;
+  }
+
+  const nextCalories = Math.max(NUTRITION_SAFETY_CALORIE_FLOOR, Math.round((targets.calories - 200) / 50) * 50);
+  if (nextCalories >= targets.calories) {
+    return null;
+  }
+
+  return {
+    ...targets,
+    calories: nextCalories,
+    fat: Math.max(0, targets.fat - 5),
+  };
+}
+
+async function createVagueLowerGoalProposalFallback(input: {
+  deps: OrchestratorDeps;
+  deviceId: string;
+  userMessage: string;
+  previousAssistantMessage?: string;
+  currentTargets: DailyTargets;
+}): Promise<undefined | { reply: string; proposalCard: PendingProposalCardInput }> {
+  if (!input.deps.goalProposalService) {
+    return undefined;
+  }
+  if (!isVagueLowerGoalIntent(input.userMessage, input.previousAssistantMessage)) {
+    return undefined;
+  }
+
+  const targets = buildSafeLowerGoalProposalTargets(input.currentTargets);
+  if (!targets) {
+    return undefined;
+  }
+
+  const proposal = await input.deps.goalProposalService.putLatest({
+    deviceId: input.deviceId,
+    sessionId: DEFAULT_SESSION_ID,
+    targets,
+  });
+
+  return {
+    reply: renderGoalProposalCopy(targets),
+    proposalCard: buildGoalProposalCard(proposal),
   };
 }
 
@@ -1246,16 +1408,39 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         );
         if (typedResult) return typedResult;
       }
+      const currentTargets = getDeviceTargets(device);
+      if (hasExplicitUnsafeCalorieGoalValue(userMessage, previousAssistantMessage)) {
+        const reply = renderUnsafeCalorieFloorCopy();
+        return {
+          reply,
+          didLogMeal: false,
+          didMutateMeal: false,
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(reply),
+        };
+      }
+      const earlyGoalProposalFallback = await createVagueLowerGoalProposalFallback({
+        deps,
+        deviceId,
+        userMessage,
+        previousAssistantMessage,
+        currentTargets,
+      });
+      if (earlyGoalProposalFallback) {
+        return {
+          reply: earlyGoalProposalFallback.reply,
+          didLogMeal: false,
+          didMutateMeal: false,
+          proposalCard: earlyGoalProposalFallback.proposalCard,
+          finalReplySource: "renderer",
+          finalReplyShape: classifyPlainReplyShape(earlyGoalProposalFallback.reply),
+        };
+      }
       const systemMsg: ChatMessage = {
         role: "system",
         content: buildSystemPrompt(
           device.goal,
-          {
-            calories: device.dailyCalories,
-            protein: device.dailyProtein,
-            carbs: device.dailyCarbs,
-            fat: device.dailyFat,
-          },
+          currentTargets,
           {
             sex: device.sex,
             age: device.age,
@@ -1512,6 +1697,33 @@ export function createOrchestrator(deps: OrchestratorDeps) {
 
         if (response.content !== undefined) {
           opts?.hooks?.onLLMEnd?.(round + 1, false);
+          if (hasExplicitUnsafeCalorieGoalValue(userMessage, previousAssistantMessage)) {
+            const reply = renderUnsafeCalorieFloorCopy();
+            return {
+              reply,
+              didLogMeal: false,
+              didMutateMeal: false,
+              finalReplySource: "renderer",
+              finalReplyShape: classifyPlainReplyShape(reply),
+            };
+          }
+          const goalProposalFallback = await createVagueLowerGoalProposalFallback({
+            deps,
+            deviceId,
+            userMessage,
+            previousAssistantMessage,
+            currentTargets: getDeviceTargets(device),
+          });
+          if (goalProposalFallback) {
+            return {
+              reply: goalProposalFallback.reply,
+              didLogMeal: false,
+              didMutateMeal: false,
+              proposalCard: goalProposalFallback.proposalCard,
+              finalReplySource: "renderer",
+              finalReplyShape: classifyPlainReplyShape(goalProposalFallback.reply),
+            };
+          }
           let activePlanningFacts = planningFacts;
           if (
             !activePlanningFacts

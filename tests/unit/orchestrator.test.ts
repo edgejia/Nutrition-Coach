@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createDb } from "../../server/db/client.js";
 import { createDeviceService } from "../../server/services/device.js";
 import { createFoodLoggingService } from "../../server/services/food-logging.js";
-import { createGoalProposalService } from "../../server/services/goal-proposals.js";
+import { createGoalProposalService, goalProposalTargetSignature } from "../../server/services/goal-proposals.js";
 import { createMealCorrectionService } from "../../server/services/meal-correction.js";
 import { createMealDeleteProposalService } from "../../server/services/meal-delete-proposals.js";
 import { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
@@ -42,6 +42,7 @@ import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderUnsafeCalorieFloorCopy,
   renderGoalValidationFailureCopy,
   renderMealDeleteCancelCopy,
   renderMealNumericCancelCopy,
@@ -825,6 +826,7 @@ describe("Orchestrator - didLogMeal", () => {
               { label: "卡路里", after: `${input.targets.calories} kcal` },
               { label: "蛋白質", after: `${input.targets.protein} g` },
             ],
+            targetSignature: goalProposalTargetSignature(input.targets),
           },
           actions: {
             approveLabel: "套用目標",
@@ -3289,10 +3291,10 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(deviceId, "卡路里 100");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, renderGoalValidationFailureCopy(["calories"]));
+    assert.equal(result.reply, renderUnsafeCalorieFloorCopy());
     assert.equal(result.finalReplySource, "renderer");
     assert.equal(result.finalReplyShape, "plain_text");
-    assert.equal(mockLLM.chatCalls.length, 1);
+    assert.equal(mockLLM.chatCalls.length, 0);
     const device = await deviceService.getDevice(deviceId);
     assert.equal(device?.dailyCalories, 1500);
     assert.equal(device?.dailyProtein, 120);

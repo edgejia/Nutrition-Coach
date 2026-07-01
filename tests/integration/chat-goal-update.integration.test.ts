@@ -185,9 +185,9 @@ class GoalFloorPromptProbeProvider extends MockLLMProvider {
     const prompt = systemPromptText(messages);
     const userText = latestUserText(messages);
     const hasFloorContract = (
-      prompt.includes("1200 kcal/day") &&
+      prompt.includes("1200 kcal/天") &&
       prompt.includes("安全下限") &&
-      prompt.includes("1800 kcal/day 不是安全下限") &&
+      prompt.includes("1800 kcal/天不是安全下限") &&
       prompt.includes("高於或等於安全下限 1200 kcal/day")
     );
 
@@ -314,7 +314,7 @@ describe("chat goal update integration", () => {
     return body.dailyTargets;
   }
 
-  async function setTargetsTo1800ThroughChat() {
+  async function setTargetsTo1800ThroughChat(options: { enableFloorProbe?: boolean } = { enableFloorProbe: true }) {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "goal_success_before_floor_followup",
@@ -337,7 +337,9 @@ describe("chat goal update integration", () => {
     assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
     assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
     publishCalls = [];
-    mockLLM.enableGoalFloorProbe();
+    if (options.enableFloorProbe !== false) {
+      mockLLM.enableGoalFloorProbe();
+    }
   }
 
   async function saveMealNumericProposalCard(input: {
@@ -459,21 +461,6 @@ describe("chat goal update integration", () => {
   });
 
   it("blocks unsafe current-turn goal updates without mutation or goals_update publish", async () => {
-    mockLLM.queueChatResponse({
-      toolCalls: [{
-        id: "unsafe_goal_update",
-        type: "function",
-        function: {
-          name: "update_goals",
-          arguments: JSON.stringify({
-            mode: "current_turn_values",
-            calories: 500,
-          }),
-        },
-      }],
-    });
-    mockLLM.queueChatResponse({ content: "模型不應該改寫安全阻擋回覆。" });
-
     const before = await readTargets();
     const { status, body } = await postChat("卡路里改成 500");
 
@@ -487,22 +474,25 @@ describe("chat goal update integration", () => {
     assert.equal(body.proposalCard, undefined);
     assert.deepEqual(await readTargets(), before);
     assert.deepEqual(publishCalls, []);
-    assert.equal(mockLLM.chatCalls.length, 1);
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
+  it("routes unsafe calorie target text to renderer safety copy before calling the model", async () => {
+    const before = await readTargets();
+    const { status, body } = await postChat("把我的每日熱量改成 500 kcal");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.deepEqual(await readTargets(), before);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 0);
   });
 
   it("blocks unsafe goal proposals without an actionable card or hidden pending state", async () => {
-    mockLLM.queueChatResponse({
-      toolCalls: [{
-        id: "unsafe_goal_proposal",
-        type: "function",
-        function: {
-          name: "propose_goals",
-          arguments: JSON.stringify(UNSAFE_TARGETS),
-        },
-      }],
-    });
-    mockLLM.queueChatResponse({ content: "模型不應該產生可確認提案。" });
-
     const before = await readTargets();
     const { status, body } = await postChat("幫我建議每天 500 kcal 的目標");
 
@@ -516,20 +506,10 @@ describe("chat goal update integration", () => {
     assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
     assert.deepEqual(await readTargets(), before);
     assert.deepEqual(publishCalls, []);
-    assert.equal(mockLLM.chatCalls.length, 1);
+    assert.equal(mockLLM.chatCalls.length, 0);
   });
 
   it("keeps unsafe proposal consent replay from applying hidden 500 kcal state", async () => {
-    mockLLM.queueChatResponse({
-      toolCalls: [{
-        id: "unsafe_goal_proposal_for_replay",
-        type: "function",
-        function: {
-          name: "propose_goals",
-          arguments: JSON.stringify(UNSAFE_TARGETS),
-        },
-      }],
-    });
     const unsafeProposal = await postChat("幫我建議每天 500 kcal 的目標");
     assert.equal(unsafeProposal.status, 200);
     assert.equal(unsafeProposal.body.reply, renderUnsafeCalorieFloorCopy());
@@ -537,6 +517,7 @@ describe("chat goal update integration", () => {
     assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
     assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 0);
 
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -620,6 +601,29 @@ describe("chat goal update integration", () => {
     assert.equal(body.reply, renderGoalProposalCopy(SAFE_LOWER_PROPOSAL_TARGETS));
     assert.doesNotMatch(body.reply, INTERNAL_SAFETY_IDS);
     assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard?.proposalKind, "goal");
+    assert.equal(body.proposalCard?.proposalLane, "goal");
+    assert.equal(body.proposalCard?.status, "active");
+    assert.equal(body.proposalCard?.isActionable, true);
+    assert.deepEqual(body.proposalCard?.details.rows.map((row) => row.after), [
+      "1600 kcal",
+      "130 g",
+      "150 g",
+      "45 g",
+    ]);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("routes vague lower-target text to a backend safe proposal before relying on the model", async () => {
+    await setTargetsTo1800ThroughChat({ enableFloorProbe: false });
+
+    const { status, body } = await postChat("那幫我再低一點");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderGoalProposalCopy(SAFE_LOWER_PROPOSAL_TARGETS));
     assert.equal(body.proposalCard?.proposalKind, "goal");
     assert.equal(body.proposalCard?.proposalLane, "goal");
     assert.equal(body.proposalCard?.status, "active");
