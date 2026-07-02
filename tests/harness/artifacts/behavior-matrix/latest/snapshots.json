@@ -155,7 +155,7 @@
           "derived_uncertainty_range"
         ],
         "observedTools": [
-          "log_food"
+          "[REDACTED_TOOL]"
         ],
         "trace": {
           "finalReplySource": "renderer",
@@ -346,7 +346,7 @@
         ],
         "unsupportedNumbers": [],
         "observedTools": [
-          "log_food"
+          "[REDACTED_TOOL]"
         ],
         "trace": {
           "finalReplySource": "renderer",
@@ -620,7 +620,7 @@
         ],
         "unsupportedNumbers": [],
         "observedTools": [
-          "log_food"
+          "[REDACTED_TOOL]"
         ],
         "trace": {
           "finalReplySource": "renderer",
@@ -658,10 +658,10 @@
             "name": "explicit_numeric_goal_update",
             "fixtureKind": "explicit_numeric_goal_update",
             "allowedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeTargetFieldCount": 4,
@@ -687,10 +687,10 @@
             "name": "explicit_numeric_goal_update",
             "fixtureKind": "explicit_numeric_goal_update",
             "allowedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeTargetFieldCount": 4,
@@ -716,10 +716,10 @@
             "name": "explicit_numeric_goal_update",
             "fixtureKind": "explicit_numeric_goal_update",
             "allowedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeTargetFieldCount": 4,
@@ -795,10 +795,10 @@
           "ok": true,
           "evidence": {
             "allowedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "persistedDiff": {}
@@ -837,7 +837,7 @@
           }
         },
         {
-          "name": "case_05_negative_no_update_goals",
+          "name": "case_05_negative_no_[REDACTED_TOOL]",
           "ok": true,
           "evidence": {
             "name": "vague_goal_intent",
@@ -930,10 +930,10 @@
             "name": "explicit_numeric_goal_update",
             "fixtureKind": "explicit_numeric_goal_update",
             "allowedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeTargetFieldCount": 4,
@@ -977,10 +977,10 @@
           "evidence": {
             "name": "ambiguous_update",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -990,15 +990,15 @@
           }
         },
         {
-          "name": "case_06_ambiguous_update_find_meals_called",
+          "name": "case_06_ambiguous_update_[REDACTED_TOOL]_called",
           "ok": true,
           "evidence": {
             "name": "ambiguous_update",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1013,10 +1013,10 @@
           "evidence": {
             "name": "ambiguous_update",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1031,10 +1031,10 @@
           "evidence": {
             "name": "ambiguous_update",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1044,15 +1044,15 @@
           }
         },
         {
-          "name": "case_06_ambiguous_update_meals_unchanged",
+          "name": "case_06_ambiguous_[REDACTED_TOOL]s_unchanged",
           "ok": true,
           "evidence": {
             "name": "ambiguous_update",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1079,10 +1079,10 @@
           "ok": true,
           "evidence": {
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "persistedDiff": {}
@@ -1094,10 +1094,10 @@
           "evidence": {
             "name": "ambiguous_delete",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1107,15 +1107,15 @@
           }
         },
         {
-          "name": "case_06_ambiguous_delete_find_meals_called",
+          "name": "case_06_ambiguous_delete_[REDACTED_TOOL]_called",
           "ok": true,
           "evidence": {
             "name": "ambiguous_delete",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1130,10 +1130,10 @@
           "evidence": {
             "name": "ambiguous_delete",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1148,10 +1148,10 @@
           "evidence": {
             "name": "ambiguous_delete",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1161,15 +1161,15 @@
           }
         },
         {
-          "name": "case_06_ambiguous_delete_meals_unchanged",
+          "name": "case_06_ambiguous_[REDACTED_TOOL]s_unchanged",
           "ok": true,
           "evidence": {
             "name": "ambiguous_delete",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1196,10 +1196,10 @@
           "ok": true,
           "evidence": {
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "persistedDiff": {}
@@ -1213,10 +1213,10 @@
           {
             "name": "ambiguous_update",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1227,10 +1227,10 @@
           {
             "name": "ambiguous_delete",
             "allowedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "beforeMealCount": 2,
@@ -1240,11 +1240,11 @@
           }
         ],
         "allowedTools": [
-          "find_meals"
+          "[REDACTED_TOOL]"
         ],
         "observedTools": [
-          "find_meals",
-          "find_meals"
+          "[REDACTED_TOOL]",
+          "[REDACTED_TOOL]"
         ],
         "unauthorizedTools": [],
         "mealCounts": [
@@ -1841,16 +1841,16 @@
             "finalAnswerLength": 36,
             "allowedTools": [],
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "executedMutationTools": [],
             "rejectedToolResults": [
               {
-                "tool": "update_goals",
+                "tool": "[REDACTED_TOOL]",
                 "success": false,
                 "executed": false,
                 "failureReason": "guard",
-                "ruleId": "update_goals_current_turn_source_guard",
+                "ruleId": "[REDACTED_TOOL]_current_turn_source_guard",
                 "decision": "allowed"
               }
             ],
@@ -2136,7 +2136,7 @@
           "ok": true,
           "evidence": {
             "allowedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [],
             "unauthorizedTools": [],
@@ -2180,7 +2180,7 @@
           "unsafe_calorie_floor_vector"
         ],
         "allowedTools": [
-          "update_goals"
+          "[REDACTED_TOOL]"
         ],
         "observedTools": [],
         "unauthorizedTools": [],
@@ -2594,7 +2594,7 @@
           "evidence": {
             "name": "log",
             "observedTools": [
-              "log_food"
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 26,
@@ -2617,10 +2617,10 @@
           "ok": true,
           "evidence": {
             "allowedTools": [
-              "log_food"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "log_food"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "persistedDiff": {}
@@ -2661,7 +2661,7 @@
           "evidence": {
             "name": "log",
             "observedTools": [
-              "log_food"
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 26,
@@ -2677,8 +2677,8 @@
           "evidence": {
             "name": "update",
             "observedTools": [
-              "find_meals",
-              "update_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 25,
@@ -2700,12 +2700,12 @@
           "ok": true,
           "evidence": {
             "allowedTools": [
-              "find_meals",
-              "update_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals",
-              "update_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "persistedDiff": {}
@@ -2746,8 +2746,8 @@
           "evidence": {
             "name": "update",
             "observedTools": [
-              "find_meals",
-              "update_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 25,
@@ -2762,8 +2762,8 @@
           "evidence": {
             "name": "update",
             "observedTools": [
-              "find_meals",
-              "update_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 25,
@@ -2778,8 +2778,8 @@
           "evidence": {
             "name": "delete",
             "observedTools": [
-              "find_meals",
-              "delete_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "proposalReplyLength": 88,
@@ -2804,12 +2804,12 @@
           "ok": true,
           "evidence": {
             "allowedTools": [
-              "find_meals",
-              "delete_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "find_meals",
-              "delete_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "persistedDiff": {}
@@ -2826,8 +2826,8 @@
           "evidence": {
             "name": "delete",
             "observedTools": [
-              "find_meals",
-              "delete_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "proposalReplyLength": 88,
@@ -2845,8 +2845,8 @@
           "evidence": {
             "name": "delete",
             "observedTools": [
-              "find_meals",
-              "delete_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "proposalReplyLength": 88,
@@ -2864,7 +2864,7 @@
           "evidence": {
             "name": "goals",
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 57,
@@ -2885,10 +2885,10 @@
           "ok": true,
           "evidence": {
             "allowedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "unauthorizedTools": [],
             "persistedDiff": {}
@@ -2935,7 +2935,7 @@
           "evidence": {
             "name": "goals",
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 57,
@@ -3006,7 +3006,7 @@
           {
             "name": "log",
             "observedTools": [
-              "log_food"
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 26,
@@ -3018,8 +3018,8 @@
           {
             "name": "update",
             "observedTools": [
-              "find_meals",
-              "update_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 25,
@@ -3030,8 +3030,8 @@
           {
             "name": "delete",
             "observedTools": [
-              "find_meals",
-              "delete_meal"
+              "[REDACTED_TOOL]",
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "proposalReplyLength": 88,
@@ -3045,7 +3045,7 @@
           {
             "name": "goals",
             "observedTools": [
-              "update_goals"
+              "[REDACTED_TOOL]"
             ],
             "traceFinalReplySource": "renderer",
             "finalReplyLength": 57,

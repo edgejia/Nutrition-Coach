@@ -167,7 +167,7 @@ describe("verification-artifacts", () => {
 
     assert.equal(trace.summary.source, "shape survives");
     assert.equal(trace.summary.deviceId, "[REDACTED]");
-    assert.deepEqual(trace.timeline, [{ type: "tool_result", tool: "log_food", success: true }]);
+    assert.deepEqual(trace.timeline, [{ type: "tool_result", tool: "[REDACTED_TOOL]", success: true }]);
     assert.doesNotMatch(traceRaw, /must not appear in llm trace/);
     assert.doesNotMatch(traceRaw, /must not become llm-trace\.json/);
     assert.doesNotMatch(traceRaw, /secret-device-id-xyz/);
@@ -647,7 +647,7 @@ describe("verification-artifacts", () => {
     assert.equal(trace.summary.finalReply.source, "stream");
     assert.equal(trace.summary.finalReply.shape, "streamed_text");
     assert.deepEqual(trace.timeline[0], {
-      tool: "log_food",
+      tool: "[REDACTED_TOOL]",
       success: true,
       executed: true,
       source: "orchestrator",
@@ -657,6 +657,41 @@ describe("verification-artifacts", () => {
       raw,
       /apiKey|api_key|OPENAI_API_KEY|cookie|set-cookie|guestSession|sessionToken|bearer|messages|rawMessages|rawPrompt|promptText|providerPayload|rawProviderPayload|arguments|rawArguments|toolArguments|toolResult|rawToolResult|finalAnswer|assistantContent|finalAssistantContent/,
     );
+  });
+
+  test("persisted artifacts redact internal tool identifiers in metadata", async () => {
+    const result = makePassResult("tool-id-redaction") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.steps[0]!.name = "case_14_unsafe_update_goals";
+    result.steps[0]!.actual = {
+      allowedTools: ["update_goals"],
+      observedTools: ["update_goals", "propose_goals"],
+      note: "update_goals and propose_goals should not persist",
+    };
+    result.artifacts = {
+      scenario: "case_14_unsafe_update_goals",
+      toolSummary: ["log_food", "update_meal", "delete_meal", "find_meals", "get_daily_summary"],
+    };
+    result.llmTrace = {
+      summary: { toolCount: 2 },
+      timeline: [
+        { type: "tool_received", tool: "update_goals" },
+        { type: "tool_result", tool: "propose_goals" },
+      ],
+    };
+
+    await writeScenarioArtifacts("tool-id-redaction", result);
+
+    for (const fileName of ["summary.json", "steps.json", "snapshots.json", "scenario-result.json", "llm-trace.json"]) {
+      const raw = readArtifact(tmpDir, "tool-id-redaction", fileName);
+      assert.doesNotMatch(
+        raw,
+        /\b(?:log_food|update_meal|delete_meal|find_meals|get_daily_summary|update_goals|propose_goals)\b/,
+        `${fileName} must redact internal tool identifiers`,
+      );
+      assert.match(raw, /\[REDACTED_TOOL\]/, `${fileName} should include tool redaction placeholder`);
+    }
   });
 
   test("persisted llm-trace.json preserves provider metadata while removing raw provider payload material", async () => {
