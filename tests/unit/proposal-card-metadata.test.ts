@@ -162,6 +162,87 @@ describe("proposal card metadata service", () => {
     assert.equal(cards.get("assistant-meal-new")?.status, "active");
   });
 
+  it("clears stored lapse copy on terminal status transitions unless explicitly supplied", async () => {
+    insertChatMessage(db, { id: "assistant-approved", deviceId, role: "assistant" });
+    insertChatMessage(db, { id: "assistant-rejected", deviceId, role: "assistant" });
+    insertChatMessage(db, { id: "assistant-stale", deviceId, role: "assistant" });
+    insertChatMessage(db, { id: "assistant-explicit", deviceId, role: "assistant" });
+    const expiredCopy = "這個目標提案已超過 30 分鐘，請重新提出目標調整。";
+    const staleCopy = "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。";
+    const explicitTerminalCopy = "explicit terminal copy";
+    const baseInput = {
+      deviceId,
+      proposalKind: "goal" as const,
+      proposalLane: "goal" as const,
+      title: "每日目標提案",
+      details: { rows: [{ label: "卡路里", after: "1600 kcal" }] },
+      actions: { approveLabel: "套用目標", editLabel: "調整目標", rejectLabel: "取消提案" },
+      lapseCopy: expiredCopy,
+    };
+
+    await service.saveAssistantProposalCard({
+      ...baseInput,
+      assistantMessageId: "assistant-approved",
+      proposalId: "goal-approved",
+    });
+    await service.saveAssistantProposalCard({
+      ...baseInput,
+      assistantMessageId: "assistant-rejected",
+      proposalId: "goal-rejected",
+    });
+    await service.saveAssistantProposalCard({
+      ...baseInput,
+      assistantMessageId: "assistant-stale",
+      proposalId: "goal-stale",
+    });
+    await service.saveAssistantProposalCard({
+      ...baseInput,
+      assistantMessageId: "assistant-explicit",
+      proposalId: "goal-explicit",
+    });
+
+    await service.markProposalStatus({ deviceId, proposalId: "goal-approved", status: "approved" });
+    await service.markProposalStatus({ deviceId, proposalId: "goal-rejected", status: "rejected" });
+    await service.markProposalStatus({ deviceId, proposalId: "goal-stale", status: "stale" });
+    await service.markProposalStatus({
+      deviceId,
+      proposalId: "goal-explicit",
+      status: "approved",
+      lapseCopy: explicitTerminalCopy,
+    });
+
+    const cards = await service.getCardsForAssistantMessages({
+      deviceId,
+      assistantMessageIds: [
+        "assistant-approved",
+        "assistant-rejected",
+        "assistant-stale",
+        "assistant-explicit",
+      ],
+    });
+
+    assert.equal(cards.get("assistant-approved")?.status, "approved");
+    assert.equal(cards.get("assistant-approved")?.lapseCopy, null);
+    assert.equal(cards.get("assistant-rejected")?.status, "rejected");
+    assert.equal(cards.get("assistant-rejected")?.lapseCopy, null);
+    assert.equal(cards.get("assistant-stale")?.status, "stale");
+    assert.equal(cards.get("assistant-stale")?.lapseCopy, expiredCopy);
+    assert.equal(cards.get("assistant-explicit")?.status, "approved");
+    assert.equal(cards.get("assistant-explicit")?.lapseCopy, explicitTerminalCopy);
+
+    await service.markProposalStatus({
+      deviceId,
+      proposalId: "goal-stale",
+      status: "stale",
+      lapseCopy: staleCopy,
+    });
+    const updated = await service.getCardsForAssistantMessages({
+      deviceId,
+      assistantMessageIds: ["assistant-stale"],
+    });
+    assert.equal(updated.get("assistant-stale")?.lapseCopy, staleCopy);
+  });
+
   it("projects status from persisted metadata plus active proposal authority", async () => {
     const activeCard: ProposalCardMetadata = {
       id: "card-active",

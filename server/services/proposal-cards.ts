@@ -275,6 +275,10 @@ function projectLapseCopyForClient(
   return status === "approved" || status === "rejected" ? null : lapseCopy;
 }
 
+function isTerminalStatus(status: ProposalStatus): boolean {
+  return status === "approved" || status === "rejected";
+}
+
 export function projectProposalCardForClient(
   card: ProposalCardMetadata,
   projection?: ProposalStatusProjection,
@@ -460,7 +464,7 @@ export function createProposalCardService(db: AppDatabase) {
         .update(chatProposalCards)
         .set({
           status,
-          ...(lapseCopy !== undefined ? { lapseCopy } : {}),
+          ...(lapseCopy !== undefined ? { lapseCopy } : isTerminalStatus(status) ? { lapseCopy: null } : {}),
           ...(supersededByKind !== undefined ? { supersededByKind } : {}),
           updatedAt: new Date().toISOString(),
         })

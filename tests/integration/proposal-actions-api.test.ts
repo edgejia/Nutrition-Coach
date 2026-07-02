@@ -26,6 +26,7 @@ interface PublishRecord {
 
 const RECOVERABLE_PROPOSAL_ACTION_COPY = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
 const IDEMPOTENT_PROPOSAL_ACTION_COPY = "這個提案已經處理過，不需要再確認一次。";
+const GOAL_PROPOSAL_EXPIRED_COPY = "這個目標提案已超過 30 分鐘，請重新提出目標調整。";
 
 function toCookieHeader(rawHeader: string | string[] | undefined) {
   const values = Array.isArray(rawHeader) ? rawHeader : rawHeader ? [rawHeader] : [];
@@ -150,6 +151,7 @@ describe("proposal action API", () => {
         editLabel: "調整目標",
         rejectLabel: "取消提案",
       },
+      lapseCopy: GOAL_PROPOSAL_EXPIRED_COPY,
     });
     return { proposalId: proposalId ?? proposal!.proposalId, assistantMessageId: assistant.id };
   }
@@ -282,6 +284,18 @@ describe("proposal action API", () => {
         goalFat: number | null;
         updatedGoalFields: string | null;
       }>;
+  }
+
+  function proposalCardRow(proposalId: string) {
+    return services.db.$client
+      .prepare(`
+        SELECT
+          status,
+          lapse_copy AS lapseCopy
+        FROM chat_proposal_cards
+        WHERE proposal_id = ?
+      `)
+      .get(proposalId) as { status: string; lapseCopy: string | null } | undefined;
   }
 
   async function compressedHistoryContent() {
@@ -530,6 +544,7 @@ describe("proposal action API", () => {
     assert.equal(outcomes[0]?.goalCarbs, 130);
     assert.equal(outcomes[0]?.goalFat, 45);
     assert.deepEqual(JSON.parse(outcomes[0]?.updatedGoalFields ?? "[]"), ["卡路里", "蛋白質", "碳水", "脂肪"]);
+    assert.deepEqual(proposalCardRow(proposalId), { status: "approved", lapseCopy: null });
     assert.ok(
       (await compressedHistoryContent()).includes(
         `[系統已更新目標：${outcomes[0]?.affectedDate} 卡路里 1400 kcal、蛋白質 125 g、碳水 130 g、脂肪 45 g]`,
@@ -802,12 +817,39 @@ describe("proposal action API", () => {
     assert.equal(body.proposalActionEvent?.proposalKind, "goal");
     assert.equal(body.proposalActionEvent?.action, "reject");
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已取消目標提案");
+    assert.deepEqual(proposalCardRow(proposalId), { status: "rejected", lapseCopy: null });
     assert.equal(publishedGoalUpdates.length, 0);
     await assertHistoryActionReply({
       proposalId,
       action: "reject",
       transcriptCopy: "已取消目標提案",
       reply: body.reply,
+    });
+  });
+
+  it("keeps superseded goal proposal rows with inactive lapse copy", async () => {
+    const olderTargets = { calories: 1500, protein: 130, carbs: 150, fat: 45 };
+    const newerTargets = { calories: 1600, protein: 135, carbs: 150, fat: 55 };
+    const older = await createGoalCard(olderTargets);
+    const newer = await createGoalCard(newerTargets);
+    const supersededCopy = "這個目標提案已被新的目標提案取代。";
+
+    const count = await services.proposalCardService.markSupersededInLane({
+      deviceId,
+      proposalLane: "goal",
+      replacementProposalId: newer.proposalId,
+      supersededByKind: "goal",
+      lapseCopy: supersededCopy,
+    });
+
+    assert.equal(count, 1);
+    assert.deepEqual(proposalCardRow(older.proposalId), {
+      status: "superseded",
+      lapseCopy: supersededCopy,
+    });
+    assert.deepEqual(proposalCardRow(newer.proposalId), {
+      status: "active",
+      lapseCopy: GOAL_PROPOSAL_EXPIRED_COPY,
     });
   });
 
