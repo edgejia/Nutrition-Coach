@@ -89,3 +89,40 @@ describe("nutrition safety calorie-floor policy", () => {
     );
   });
 });
+
+describe("unsafe-reply scan delta, per-macro, and digit-boundary contexts (UAT-21 truth 2)", () => {
+  it("does not flag adjustment-delta amounts near goal keywords as sub-floor guidance", () => {
+    assert.equal(hasUnsafeNutritionGuidance("熱量目標一次調降 200 kcal，蛋白質維持不變。"), false);
+    assert.equal(hasUnsafeNutritionGuidance("好，我先把每日目標調降 200 kcal，變成 2050 kcal。"), false);
+    assert.equal(hasUnsafeNutritionGuidance("目標主要減少 150 kcal 的碳水熱量。"), false);
+    assert.equal(
+      hasUnsafeNutritionGuidance("這組是從上一組 2250 kcal 的每日目標往下調 200 kcal，主要調低碳水。"),
+      false,
+    );
+  });
+
+  it("does not flag per-macro kcal breakdown lines as sub-floor guidance", () => {
+    assert.equal(
+      hasUnsafeNutritionGuidance("這組每日目標：蛋白質140g（約560 kcal）、碳水226g、脂肪58g。"),
+      false,
+    );
+    assert.equal(hasUnsafeNutritionGuidance("每日目標中脂肪58g約 522 kcal。"), false);
+  });
+
+  it("does not split a compliant calorie number to fabricate a sub-floor match", () => {
+    assert.equal(hasUnsafeNutritionGuidance("這組每日目標 2050 kcal，蛋白質 140 g。"), false);
+    assert.equal(hasUnsafeNutritionGuidance("2050 kcal 的每日目標可以維持。"), false);
+  });
+
+  it("still flags genuine sub-floor absolute daily-target guidance", () => {
+    assert.equal(hasUnsafeNutritionGuidance("每天只吃 800 kcal。"), true);
+    assert.equal(hasUnsafeNutritionGuidance("把每日目標設成 900 kcal。"), true);
+    assert.equal(hasUnsafeNutritionGuidance("降到 1000 kcal 的每日目標。"), true);
+    assert.equal(hasUnsafeNutritionGuidance("每日目標 950.5 kcal。"), true);
+    assert.equal(hasUnsafeNutritionGuidance("早餐 100 kcal，午餐 200 kcal，晚餐 200 kcal。"), true);
+  });
+
+  it("still flags sub-floor macro totals marked as a combined sum", () => {
+    assert.equal(hasUnsafeNutritionGuidance("目標碳水 100g，共約 900 kcal。"), true);
+  });
+});

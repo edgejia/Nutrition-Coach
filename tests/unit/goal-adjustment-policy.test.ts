@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import type { DailyTargets } from "../../server/services/device.js";
 import {
   hasReasonableGoalMacroCalories,
+  isExplicitGoalApplyIntent,
+  isGoalConfirmationQuestion,
+  isGoalExplanationQuestion,
+  isGoalMacroCaloriesOverAllocated,
   isRelativeLowerGoalAdjustmentIntent,
   validateRelativeLowerGoalProposal,
 } from "../../server/orchestrator/goal-adjustment-policy.js";
@@ -126,5 +130,68 @@ describe("goal-adjustment policy", () => {
     });
 
     assert.deepEqual(result, { ok: true, reason: "not_relative_lower" });
+  });
+});
+
+describe("goal-turn question intent (UAT-21 truth 2)", () => {
+  it("classifies explanation questions about the visible goal target", () => {
+    assert.equal(isGoalExplanationQuestion("為什麼是這個數值"), true);
+    assert.equal(isGoalExplanationQuestion("為何是2050"), true);
+    assert.equal(isGoalExplanationQuestion("這個數字怎麼來的"), true);
+    assert.equal(isGoalExplanationQuestion("這組目標的依據是什麼？"), true);
+  });
+
+  it("does not classify consent, apply, or adjustment turns as explanation questions", () => {
+    assert.equal(isGoalExplanationQuestion("好吧那就這樣"), false);
+    assert.equal(isGoalExplanationQuestion("套用1200"), false);
+    assert.equal(isGoalExplanationQuestion("再低一點"), false);
+    assert.equal(isGoalExplanationQuestion("好"), false);
+  });
+
+  it("classifies target-acceptability confirmation questions", () => {
+    assert.equal(isGoalConfirmationQuestion("1200可以嗎"), true);
+    assert.equal(isGoalConfirmationQuestion("這樣可以嗎"), true);
+    assert.equal(isGoalConfirmationQuestion("再低一點1200可以嗎"), true);
+    assert.equal(isGoalConfirmationQuestion("1200行嗎"), true);
+    assert.equal(isGoalConfirmationQuestion("改成1200？"), true);
+  });
+
+  it("does not classify consent, apply, or cancel turns as confirmation questions", () => {
+    assert.equal(isGoalConfirmationQuestion("好吧那就這樣"), false);
+    assert.equal(isGoalConfirmationQuestion("就用1200吧"), false);
+    assert.equal(isGoalConfirmationQuestion("套用1200"), false);
+    assert.equal(isGoalConfirmationQuestion("取消"), false);
+    assert.equal(isGoalConfirmationQuestion("好"), false);
+  });
+
+  it("classifies explicit apply intent and keeps questions out of it", () => {
+    assert.equal(isExplicitGoalApplyIntent("套用1200"), true);
+    assert.equal(isExplicitGoalApplyIntent("請把每日目標改成1200"), true);
+    assert.equal(isExplicitGoalApplyIntent("1200可以嗎"), false);
+    assert.equal(isExplicitGoalApplyIntent("為什麼是這個數值"), false);
+  });
+});
+
+describe("goal target integrity helpers (UAT-21 truth 3)", () => {
+  it("detects merged targets whose macro calories over-allocate the calorie target", () => {
+    assert.equal(
+      isGoalMacroCaloriesOverAllocated({ calories: 1200, protein: 140, carbs: 226, fat: 58 }),
+      true,
+    );
+    assert.equal(
+      isGoalMacroCaloriesOverAllocated({ calories: 1500, protein: 200, carbs: 150, fat: 50 }),
+      true,
+    );
+  });
+
+  it("allows consistent and under-allocated merged targets", () => {
+    assert.equal(
+      isGoalMacroCaloriesOverAllocated({ calories: 2050, protein: 140, carbs: 226, fat: 58 }),
+      false,
+    );
+    assert.equal(
+      isGoalMacroCaloriesOverAllocated({ calories: 1800, protein: 130, carbs: 150, fat: 50 }),
+      false,
+    );
   });
 });
