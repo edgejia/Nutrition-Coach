@@ -672,6 +672,21 @@ function isGoalKindApproval(message: string): boolean {
   return /套用(?:每日)?目標|目標更新|applygoal/i.test(normalized);
 }
 
+function isGoalProposalAcceptanceIntent(message: string): boolean {
+  const normalized = normalizeProposalDecisionText(message);
+  if (!normalized || isGoalProposalCancel(message) || isGoalKindCancel(message)) {
+    return false;
+  }
+  if (/[?？嗎么]|(好像|想想|再想|考慮|考虑|猶豫|犹豫|有點|有点|不確定|不确定)/i.test(normalized)) {
+    return false;
+  }
+  return /^(?:好吧)?(?:那)?就這樣吧?$/.test(normalized);
+}
+
+function isGoalProposalApprovalIntent(message: string): boolean {
+  return isGoalProposalConsent(message) || isGoalProposalAcceptanceIntent(message);
+}
+
 function buildMealNumericProposalUpdateInput(
   proposal: MealNumericProposalPayload,
 ): Parameters<ReturnType<typeof createMealCorrectionService>["updateMeal"]>[2] {
@@ -1213,7 +1228,7 @@ function selectedProposalReject(message: string, kind: ProposalKind): boolean {
 
 function selectedProposalApprove(message: string, kind: ProposalKind): boolean {
   if (kind === "goal") {
-    return isGoalProposalConsent(message) || isGoalKindApproval(message);
+    return isGoalProposalApprovalIntent(message) || isGoalKindApproval(message);
   }
   if (kind === "meal_delete") {
     return isMealDeleteProposalApproval(message, { requireExplicitDelete: true });
@@ -1517,7 +1532,7 @@ export function createOrchestrator(deps: OrchestratorDeps) {
       if (
         activeGoalProposal
         && !activeMealMutationProposal
-        && (isGoalProposalConsent(userMessage) || isGoalKindApproval(userMessage))
+        && (isGoalProposalApprovalIntent(userMessage) || isGoalKindApproval(userMessage))
       ) {
         const typedResult = await runTypedProposalDecision(
           { proposalId: activeGoalProposal.proposalId, kind: "goal", action: "approve" },
