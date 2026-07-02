@@ -81,9 +81,9 @@ const PROPOSAL_TARGETS: DailyTargets = {
 
 const SAFE_LOWER_PROPOSAL_TARGETS: DailyTargets = {
   calories: 1600,
-  protein: 130,
-  carbs: 150,
-  fat: 45,
+  protein: 132,
+  carbs: 153,
+  fat: 51,
 };
 
 const UAT_21_REBOUND_BASELINE_TARGETS: DailyTargets = {
@@ -748,9 +748,9 @@ describe("chat goal update integration", () => {
     assert.equal(body.proposalCard?.isActionable, true);
     assert.deepEqual(body.proposalCard?.details.rows.map((row) => row.after), [
       "1600 kcal",
-      "130 g",
-      "150 g",
-      "45 g",
+      "132 g",
+      "153 g",
+      "51 g",
     ]);
     assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
     assert.deepEqual(publishCalls, []);
@@ -771,9 +771,9 @@ describe("chat goal update integration", () => {
     assert.equal(body.proposalCard?.isActionable, true);
     assert.deepEqual(body.proposalCard?.details.rows.map((row) => row.after), [
       "1600 kcal",
-      "130 g",
-      "150 g",
-      "45 g",
+      "132 g",
+      "153 g",
+      "51 g",
     ]);
     assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
     assert.deepEqual(publishCalls, []);

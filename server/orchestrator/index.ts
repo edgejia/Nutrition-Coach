@@ -552,10 +552,24 @@ function buildSafeLowerGoalProposalTargets(targets: DailyTargets): DailyTargets 
     return null;
   }
 
-  return {
-    ...targets,
+  const macroCalories = targets.protein * 4 + targets.carbs * 4 + targets.fat * 9;
+  const scale = macroCalories > 0 ? nextCalories / macroCalories : 0;
+  const scaledTargets = {
     calories: nextCalories,
-    fat: Math.max(0, targets.fat - 5),
+    protein: Math.max(0, Math.round(targets.protein * scale)),
+    carbs: Math.max(0, Math.round(targets.carbs * scale)),
+    fat: Math.max(0, Math.round(targets.fat * scale)),
+  };
+  const scaledMacroCalories = scaledTargets.protein * 4 + scaledTargets.carbs * 4 + scaledTargets.fat * 9;
+  if (Math.abs(scaledMacroCalories - nextCalories) / nextCalories <= 0.1) {
+    return scaledTargets;
+  }
+
+  return {
+    calories: nextCalories,
+    protein: Math.max(0, Math.round((nextCalories * 0.3) / 4)),
+    carbs: Math.max(0, Math.round((nextCalories * 0.4) / 4)),
+    fat: Math.max(0, Math.round((nextCalories * 0.3) / 9)),
   };
 }
 
@@ -590,7 +604,7 @@ async function createVagueLowerGoalProposalFallback(input: {
   });
 
   return {
-    reply: renderGoalProposalCopy(targets),
+    reply: renderGoalProposalCopy(targets, input.activeGoalProposal?.targets),
     proposalCard: buildGoalProposalCard(proposal),
   };
 }
