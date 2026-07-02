@@ -59,6 +59,7 @@ import {
 } from "./source-text-guard.js";
 import {
   checkNutritionSafetyTargets,
+  NUTRITION_SAFETY_CALORIE_FLOOR,
   UNSAFE_CALORIE_FLOOR_REASON,
 } from "./nutrition-safety-policy.js";
 import {
@@ -104,6 +105,10 @@ import {
   derivePlanningFacts,
   type PlanningFacts,
 } from "./planning-reply-renderer.js";
+import {
+  validateRelativeLowerGoalProposal,
+  type RelativeLowerGoalProposalValidationReason,
+} from "./goal-adjustment-policy.js";
 
 // ---------------------------------------------------------------------------
 // Public types preserved for the orchestrator (Phase 8/9 callers).
@@ -519,7 +524,16 @@ type GoalProposalResult = GoalControlledResult & {
   reason: "goal_proposal";
   proposalCard: PendingProposalCardInput;
 };
-type ProposeGoalsResult = GoalProposalResult | GoalControlledResult;
+interface GoalRetryableGuardResult {
+  status: "guard_feedback";
+  reason: Extract<
+    RelativeLowerGoalProposalValidationReason,
+    "rebound_or_not_lower" | "macro_calorie_inconsistent"
+  >;
+  reply: string;
+}
+
+type ProposeGoalsResult = GoalProposalResult | GoalControlledResult | GoalRetryableGuardResult;
 
 interface MealNumericControlledResult {
   status: "controlled_reply";
@@ -762,6 +776,20 @@ function makeGoalControlledResult(
 ): GoalControlledResult {
   return {
     status: "controlled_reply",
+    reason,
+    reply,
+  };
+}
+
+function makeRelativeLowerGuardFeedback(
+  reason: GoalRetryableGuardResult["reason"],
+  activeTargets: DailyTargets,
+): GoalRetryableGuardResult {
+  const reply = reason === "macro_calorie_inconsistent"
+    ? "Guard feedback: provide a complete calories/protein/carbs/fat target set whose macro calories are within 10% of total calories."
+    : `Guard feedback: for this lower-target request, propose calories lower than ${activeTargets.calories} kcal and at or above ${NUTRITION_SAFETY_CALORIE_FLOOR} kcal.`;
+  return {
+    status: "guard_feedback",
     reason,
     reply,
   };
@@ -2662,12 +2690,58 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       };
     }
 
+    const activeGoalProposal = await deps.goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    });
+    const relativeLowerValidation = validateRelativeLowerGoalProposal({
+      userMessage: context.currentUserMessage,
+      previousAssistantMessage: context.previousAssistantMessage,
+      activeProposalTargets: activeGoalProposal?.targets,
+      proposedTargets: args,
+    });
+    if (
+      !relativeLowerValidation.ok
+      && (
+        relativeLowerValidation.reason === "below_floor"
+        || relativeLowerValidation.reason === "active_at_floor"
+      )
+    ) {
+      const reply = renderUnsafeCalorieFloorCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult(UNSAFE_CALORIE_FLOOR_REASON, reply),
+        toolMessage: reply,
+      };
+    }
+    if (
+      !relativeLowerValidation.ok
+      && activeGoalProposal
+      && (
+        relativeLowerValidation.reason === "rebound_or_not_lower"
+        || relativeLowerValidation.reason === "macro_calorie_inconsistent"
+      )
+    ) {
+      const guardResult = makeRelativeLowerGuardFeedback(
+        relativeLowerValidation.reason,
+        activeGoalProposal.targets,
+      );
+      return {
+        ok: true,
+        result: guardResult,
+        toolMessage: guardResult.reply,
+      };
+    }
+
     const proposal = await deps.goalProposalService.putLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
       targets: args,
     });
-    const reply = renderGoalProposalCopy(args);
+    const reply = renderGoalProposalCopy(
+      args,
+      relativeLowerValidation.reason === "ok" ? activeGoalProposal?.targets : undefined,
+    );
 
     return {
       ok: true,
@@ -3675,6 +3749,15 @@ export async function executeTool(
 
   if (toolCall.function.name === "propose_goals") {
     const contractResult = outcome.contractResult as ProposeGoalsResult;
+    if (contractResult.status === "guard_feedback") {
+      return attachPolicyFact({
+        result: contractResult.reply,
+        summary: "failureReason: guard",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+      });
+    }
     const isProposal = contractResult.reason === "goal_proposal" && "proposalCard" in contractResult;
     return attachPolicyFact({
       result: contractResult.reply,

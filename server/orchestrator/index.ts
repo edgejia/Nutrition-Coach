@@ -8,7 +8,7 @@ import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
 import type { createMealCorrectionService } from "../services/meal-correction.js";
-import type { createGoalProposalService, GoalProposalPayload } from "../services/goal-proposals.js";
+import type { createGoalProposalService } from "../services/goal-proposals.js";
 import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import type {
   createMealNumericProposalService,
@@ -30,7 +30,6 @@ import type { RealtimePublisher } from "../realtime/publisher.js";
 import { loadHistory } from "./history.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import {
-  buildGoalProposalCard,
   getToolDefinitions,
   executeTool,
   isFatalToolError,
@@ -58,7 +57,6 @@ import {
 import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
-  renderGoalProposalCopy,
   renderUnsafeCalorieFloorCopy,
   renderUnsafeNutritionGuidanceCopy,
   renderMealDeleteAuthorityFailureCopy,
@@ -75,6 +73,7 @@ import {
   hasSafeUnsafeNutritionBoundaryReply,
   hasUnsafeNutritionGuidance,
 } from "./nutrition-safety-policy.js";
+import { isRelativeLowerGoalAdjustmentIntent } from "./goal-adjustment-policy.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -512,100 +511,16 @@ function needsUnsafeNutritionBoundaryReply(userMessage: string, reply: string): 
     || (hasUnsafeNutritionGuidance(conversationalMessage) && !hasSafeUnsafeNutritionBoundaryReply(reply));
 }
 
-function mentionsNonCalorieMacro(message: string): boolean {
-  return /(蛋白質|protein|碳水|carb|脂肪|fat)/i.test(message);
-}
-
-function mentionsCalories(message: string): boolean {
-  return /(卡路里|熱量|kcal|calorie)/i.test(message);
-}
-
-function isVagueLowerGoalIntent(message: string, previousAssistantMessage?: string): boolean {
-  const normalized = normalizeProposalDecisionText(message);
-  if (!normalized || hasExplicitNumericGoalValue(normalized)) {
-    return false;
-  }
-
-  if (/(建議|提案|推薦).*(目標)|目標.*(建議|提案|推薦)/i.test(normalized)) {
-    return false;
-  }
-
-  const hasLowerIntent = /(再?低一點|低一些|再?降一點|降低一點|調低一點|熱量少一點|卡路里少一點|目標少一點|再低|更低|還是太高|仍然太高|還太高|太高了?)/i.test(normalized);
-  if (!hasLowerIntent) {
-    return false;
-  }
-
-  if (mentionsNonCalorieMacro(message) && !mentionsCalories(message)) {
-    return false;
-  }
-
-  return hasGoalTargetContext(message, previousAssistantMessage);
-}
-
-function buildSafeLowerGoalProposalTargets(targets: DailyTargets): DailyTargets | null {
-  if (targets.calories <= NUTRITION_SAFETY_CALORIE_FLOOR) {
-    return null;
-  }
-
-  const nextCalories = Math.max(NUTRITION_SAFETY_CALORIE_FLOOR, Math.round((targets.calories - 200) / 50) * 50);
-  if (nextCalories >= targets.calories) {
-    return null;
-  }
-
-  const macroCalories = targets.protein * 4 + targets.carbs * 4 + targets.fat * 9;
-  const scale = macroCalories > 0 ? nextCalories / macroCalories : 0;
-  const scaledTargets = {
-    calories: nextCalories,
-    protein: Math.max(0, Math.round(targets.protein * scale)),
-    carbs: Math.max(0, Math.round(targets.carbs * scale)),
-    fat: Math.max(0, Math.round(targets.fat * scale)),
-  };
-  const scaledMacroCalories = scaledTargets.protein * 4 + scaledTargets.carbs * 4 + scaledTargets.fat * 9;
-  if (Math.abs(scaledMacroCalories - nextCalories) / nextCalories <= 0.1) {
-    return scaledTargets;
-  }
-
+function buildRelativeLowerGoalAdjustmentContext(targets: DailyTargets): ChatMessage {
   return {
-    calories: nextCalories,
-    protein: Math.max(0, Math.round((nextCalories * 0.3) / 4)),
-    carbs: Math.max(0, Math.round((nextCalories * 0.4) / 4)),
-    fat: Math.max(0, Math.round((nextCalories * 0.3) / 9)),
-  };
-}
-
-async function createVagueLowerGoalProposalFallback(input: {
-  deps: OrchestratorDeps;
-  deviceId: string;
-  userMessage: string;
-  previousAssistantMessage?: string;
-  currentTargets: DailyTargets;
-  activeGoalProposal?: GoalProposalPayload;
-}): Promise<undefined | { reply: string; proposalCard?: PendingProposalCardInput }> {
-  if (!input.deps.goalProposalService) {
-    return undefined;
-  }
-  if (!isVagueLowerGoalIntent(input.userMessage, input.previousAssistantMessage)) {
-    return undefined;
-  }
-
-  const baselineTargets = input.activeGoalProposal?.targets ?? input.currentTargets;
-  const targets = buildSafeLowerGoalProposalTargets(baselineTargets);
-  if (!targets) {
-    if (input.activeGoalProposal && baselineTargets.calories <= NUTRITION_SAFETY_CALORIE_FLOOR) {
-      return { reply: renderUnsafeCalorieFloorCopy() };
-    }
-    return undefined;
-  }
-
-  const proposal = await input.deps.goalProposalService.putLatest({
-    deviceId: input.deviceId,
-    sessionId: DEFAULT_SESSION_ID,
-    targets,
-  });
-
-  return {
-    reply: renderGoalProposalCopy(targets, input.activeGoalProposal?.targets),
-    proposalCard: buildGoalProposalCard(proposal),
+    role: "system",
+    content: [
+      "Current user turn is a relative-lower adjustment to the active visible goal proposal.",
+      `Active visible proposal targets: calories ${targets.calories} kcal, protein ${targets.protein} g, carbs ${targets.carbs} g, fat ${targets.fat} g.`,
+      `Product floor: NUTRITION_SAFETY_CALORIE_FLOOR = ${NUTRITION_SAFETY_CALORIE_FLOOR} kcal/day.`,
+      "Recommend concrete target numbers by calling propose_goals. For lower recommendations, calories must be lower than the active visible proposal and at or above 1200 kcal/day.",
+      "If the active proposal is already at or below the floor, explain the floor instead of proposing a lower numeric target.",
+    ].join("\n"),
   };
 }
 
@@ -1566,24 +1481,30 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           finalReplyShape: classifyPlainReplyShape(reply),
         };
       }
-      const earlyGoalProposalFallback = await createVagueLowerGoalProposalFallback({
-        deps,
-        deviceId,
-        userMessage,
-        previousAssistantMessage,
-        currentTargets,
-        activeGoalProposal,
-      });
-      if (earlyGoalProposalFallback) {
+      const isRelativeLowerTurn = activeGoalProposal
+        ? isRelativeLowerGoalAdjustmentIntent({
+          userMessage,
+          previousAssistantMessage,
+          activeProposalTargets: activeGoalProposal.targets,
+        })
+        : false;
+      if (
+        isRelativeLowerTurn
+        && activeGoalProposal
+        && activeGoalProposal.targets.calories <= NUTRITION_SAFETY_CALORIE_FLOOR
+      ) {
+        const reply = renderUnsafeCalorieFloorCopy();
         return {
-          reply: earlyGoalProposalFallback.reply,
+          reply,
           didLogMeal: false,
           didMutateMeal: false,
-          ...(earlyGoalProposalFallback.proposalCard ? { proposalCard: earlyGoalProposalFallback.proposalCard } : {}),
           finalReplySource: "renderer",
-          finalReplyShape: classifyPlainReplyShape(earlyGoalProposalFallback.reply),
+          finalReplyShape: classifyPlainReplyShape(reply),
         };
       }
+      const relativeLowerContextMessage = isRelativeLowerTurn && activeGoalProposal
+        ? buildRelativeLowerGoalAdjustmentContext(activeGoalProposal.targets)
+        : undefined;
       const systemMsg: ChatMessage = {
         role: "system",
         content: buildSystemPrompt(
@@ -1615,7 +1536,12 @@ export function createOrchestrator(deps: OrchestratorDeps) {
           }
         : { role: "user", content: userMessage };
 
-      let messages: ChatMessage[] = [systemMsg, ...history, userContent];
+      let messages: ChatMessage[] = [
+        systemMsg,
+        ...history,
+        ...(relativeLowerContextMessage ? [relativeLowerContextMessage] : []),
+        userContent,
+      ];
       const toolDefinitions = getToolDefinitions();
       const safeToolNames = new Set(toolDefinitions.map((definition) => definition.function.name));
       const toolSessionState = {
@@ -1863,24 +1789,6 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               didMutateMeal: false,
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(reply),
-            };
-          }
-          const goalProposalFallback = await createVagueLowerGoalProposalFallback({
-            deps,
-            deviceId,
-            userMessage,
-            previousAssistantMessage,
-            currentTargets: getDeviceTargets(device),
-            activeGoalProposal,
-          });
-          if (goalProposalFallback) {
-            return {
-              reply: goalProposalFallback.reply,
-              didLogMeal: false,
-              didMutateMeal: false,
-              ...(goalProposalFallback.proposalCard ? { proposalCard: goalProposalFallback.proposalCard } : {}),
-              finalReplySource: "renderer",
-              finalReplyShape: classifyPlainReplyShape(goalProposalFallback.reply),
             };
           }
           let activePlanningFacts = planningFacts;
