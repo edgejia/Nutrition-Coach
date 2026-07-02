@@ -281,6 +281,32 @@ describe("goal proposal and rejection renderers", () => {
     assertNoGoalInternalTerms(text);
   });
 
+  it("renders goal proposal copy without reply-to-apply imperative and can name the previous target baseline", () => {
+    const renderWithBaseline = renderGoalProposalCopy as (
+      targets: DailyTargets,
+      previousTargets?: DailyTargets,
+    ) => string;
+    const text = renderWithBaseline(
+      {
+        calories: 1300,
+        protein: 130,
+        carbs: 125,
+        fat: 35,
+      },
+      {
+        calories: 1500,
+        protein: 150,
+        carbs: 140,
+        fat: 45,
+      },
+    );
+
+    assert.doesNotMatch(text, /如果要套用|請回覆「好」|回覆.*套用/);
+    assert.match(text, /1500\s*kcal/);
+    assert.match(text, /1300\s*kcal/);
+    assertNoGoalInternalTerms(text);
+  });
+
   it("renders one generic authority failure copy for unavailable proposal states", () => {
     const expected = "這次沒有套用目標更新。請直接提供新的每日目標數字，或再請我產生一組建議。";
 
