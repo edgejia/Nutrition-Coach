@@ -8,7 +8,7 @@ import type { createFoodLoggingService } from "../services/food-logging.js";
 import type { createDeviceService, DailyTargets } from "../services/device.js";
 import type { ChatMutationOutcomeFact } from "../services/chat-mutation-outcomes.js";
 import type { createMealCorrectionService } from "../services/meal-correction.js";
-import type { createGoalProposalService } from "../services/goal-proposals.js";
+import type { createGoalProposalService, GoalProposalPayload } from "../services/goal-proposals.js";
 import type { createMealDeleteProposalService } from "../services/meal-delete-proposals.js";
 import type {
   createMealNumericProposalService,
@@ -565,7 +565,8 @@ async function createVagueLowerGoalProposalFallback(input: {
   userMessage: string;
   previousAssistantMessage?: string;
   currentTargets: DailyTargets;
-}): Promise<undefined | { reply: string; proposalCard: PendingProposalCardInput }> {
+  activeGoalProposal?: GoalProposalPayload;
+}): Promise<undefined | { reply: string; proposalCard?: PendingProposalCardInput }> {
   if (!input.deps.goalProposalService) {
     return undefined;
   }
@@ -573,8 +574,12 @@ async function createVagueLowerGoalProposalFallback(input: {
     return undefined;
   }
 
-  const targets = buildSafeLowerGoalProposalTargets(input.currentTargets);
+  const baselineTargets = input.activeGoalProposal?.targets ?? input.currentTargets;
+  const targets = buildSafeLowerGoalProposalTargets(baselineTargets);
   if (!targets) {
+    if (input.activeGoalProposal && baselineTargets.calories <= NUTRITION_SAFETY_CALORIE_FLOOR) {
+      return { reply: renderUnsafeCalorieFloorCopy() };
+    }
     return undefined;
   }
 
@@ -1538,13 +1543,14 @@ export function createOrchestrator(deps: OrchestratorDeps) {
         userMessage,
         previousAssistantMessage,
         currentTargets,
+        activeGoalProposal,
       });
       if (earlyGoalProposalFallback) {
         return {
           reply: earlyGoalProposalFallback.reply,
           didLogMeal: false,
           didMutateMeal: false,
-          proposalCard: earlyGoalProposalFallback.proposalCard,
+          ...(earlyGoalProposalFallback.proposalCard ? { proposalCard: earlyGoalProposalFallback.proposalCard } : {}),
           finalReplySource: "renderer",
           finalReplyShape: classifyPlainReplyShape(earlyGoalProposalFallback.reply),
         };
@@ -1836,13 +1842,14 @@ export function createOrchestrator(deps: OrchestratorDeps) {
             userMessage,
             previousAssistantMessage,
             currentTargets: getDeviceTargets(device),
+            activeGoalProposal,
           });
           if (goalProposalFallback) {
             return {
               reply: goalProposalFallback.reply,
               didLogMeal: false,
               didMutateMeal: false,
-              proposalCard: goalProposalFallback.proposalCard,
+              ...(goalProposalFallback.proposalCard ? { proposalCard: goalProposalFallback.proposalCard } : {}),
               finalReplySource: "renderer",
               finalReplyShape: classifyPlainReplyShape(goalProposalFallback.reply),
             };

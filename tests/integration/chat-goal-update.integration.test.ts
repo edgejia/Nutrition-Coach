@@ -845,7 +845,6 @@ describe("chat goal update integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "模型不應改寫 1500 提案。" });
     const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
 
     assert.equal(initial.status, 200);
@@ -874,7 +873,6 @@ describe("chat goal update integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "模型不應改寫 1200 提案。" });
     const floorProposal = await postChat("再低還是太高");
 
     assert.equal(floorProposal.status, 200);
