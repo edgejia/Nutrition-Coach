@@ -530,7 +530,7 @@ function isVagueLowerGoalIntent(message: string, previousAssistantMessage?: stri
     return false;
   }
 
-  const hasLowerIntent = /(再?低一點|低一些|再?降一點|降低一點|調低一點|熱量少一點|卡路里少一點|目標少一點)/i.test(normalized);
+  const hasLowerIntent = /(再?低一點|低一些|再?降一點|降低一點|調低一點|熱量少一點|卡路里少一點|目標少一點|再低|更低|還是太高|仍然太高|還太高|太高了?)/i.test(normalized);
   if (!hasLowerIntent) {
     return false;
   }

@@ -851,6 +851,7 @@ describe("chat goal update integration", () => {
     assert.equal(initial.body.proposalCard?.proposalKind, "goal");
     assert.equal(proposalCalories(initial.body), UAT_21_INITIAL_PROPOSAL_TARGETS.calories);
     assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    const initialModelCallCount = mockLLM.chatCalls.length;
 
     const lowerFromInitial = await postChat("再低一點");
 
@@ -862,14 +863,15 @@ describe("chat goal update integration", () => {
       `Expected lower proposal below ${UAT_21_INITIAL_PROPOSAL_TARGETS.calories}, got ${lowerFromInitialCalories}`,
     );
     assert.notEqual(lowerFromInitialCalories, UAT_21_REBOUND_BASELINE_TARGETS.calories);
+    assert.equal(mockLLM.chatCalls.length, initialModelCallCount);
 
     mockLLM.queueChatResponse({
       toolCalls: [{
-        id: "uat21_floor_goal_proposal",
+        id: "uat21_rebound_model_proposal_must_not_win_for_still_too_high",
         type: "function",
         function: {
           name: "propose_goals",
-          arguments: JSON.stringify(UAT_21_FLOOR_PROPOSAL_TARGETS),
+          arguments: JSON.stringify(UAT_21_REBOUND_BASELINE_TARGETS),
         },
       }],
     });
@@ -879,17 +881,8 @@ describe("chat goal update integration", () => {
     assert.equal(floorProposal.body.proposalCard?.proposalKind, "goal");
     assert.equal(proposalCalories(floorProposal.body), UAT_21_FLOOR_PROPOSAL_TARGETS.calories);
     assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    assert.equal(mockLLM.chatCalls.length, initialModelCallCount);
 
-    mockLLM.queueChatResponse({
-      toolCalls: [{
-        id: "uat21_rebound_model_proposal_must_not_win",
-        type: "function",
-        function: {
-          name: "propose_goals",
-          arguments: JSON.stringify(UAT_21_REBOUND_BASELINE_TARGETS),
-        },
-      }],
-    });
     const lowerAtFloor = await postChat("再低一點");
 
     assert.equal(lowerAtFloor.status, 200);
@@ -898,6 +891,7 @@ describe("chat goal update integration", () => {
     assert.equal(lowerAtFloor.body.dailyTargets, undefined);
     assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
     assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, initialModelCallCount);
   });
 
   it("applies an active proposal once, then replayed consent fails closed without mutation", async () => {
