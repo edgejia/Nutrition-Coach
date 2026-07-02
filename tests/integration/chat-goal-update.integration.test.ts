@@ -86,6 +86,27 @@ const SAFE_LOWER_PROPOSAL_TARGETS: DailyTargets = {
   fat: 45,
 };
 
+const UAT_21_REBOUND_BASELINE_TARGETS: DailyTargets = {
+  calories: 2700,
+  protein: 150,
+  carbs: 390,
+  fat: 75,
+};
+
+const UAT_21_INITIAL_PROPOSAL_TARGETS: DailyTargets = {
+  calories: 1500,
+  protein: 150,
+  carbs: 140,
+  fat: 45,
+};
+
+const UAT_21_FLOOR_PROPOSAL_TARGETS: DailyTargets = {
+  calories: 1200,
+  protein: 130,
+  carbs: 105,
+  fat: 35,
+};
+
 const UNSAFE_TARGETS: DailyTargets = {
   calories: 500,
   protein: 120,
@@ -312,6 +333,32 @@ describe("chat goal update integration", () => {
     assert.equal(res.status, 200);
     const body = await res.json() as { dailyTargets: DailyTargets };
     return body.dailyTargets;
+  }
+
+  async function setTargetsThroughDeviceApi(targets: DailyTargets): Promise<void> {
+    const res = await fetch(`${address}/api/device/goals`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        cookie: sessionCookieHeader,
+      },
+      body: JSON.stringify(targets),
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { dailyTargets: DailyTargets };
+    assert.deepEqual(body.dailyTargets, targets);
+    publishCalls = [];
+  }
+
+  function proposalCalories(body: ChatBody): number {
+    const after = body.proposalCard?.details.rows[0]?.after;
+    if (typeof after !== "string") {
+      assert.fail(`Expected calorie row, got ${String(after)}`);
+    }
+    const match = after.match(/([0-9]+)\s*kcal/);
+    assert.ok(match, `Expected calorie row, got ${after}`);
+    return Number(match[1]);
   }
 
   async function setTargetsTo1800ThroughChat(options: { enableFloorProbe?: boolean } = { enableFloorProbe: true }) {
@@ -782,6 +829,77 @@ describe("chat goal update integration", () => {
     const assistantProposal = history.messages.find((message) => message.proposalCard);
     assert.equal(assistantProposal?.proposalCard?.proposalId, body.proposalCard?.proposalId);
     assert.equal(assistantProposal?.proposalCard?.isActionable, true);
+  });
+
+  it("UAT-21 keeps relative lower follow-ups monotonic from the active proposal to the floor", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型不應改寫 1500 提案。" });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.proposalCard?.proposalKind, "goal");
+    assert.equal(proposalCalories(initial.body), UAT_21_INITIAL_PROPOSAL_TARGETS.calories);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+
+    const lowerFromInitial = await postChat("再低一點");
+
+    assert.equal(lowerFromInitial.status, 200);
+    assert.equal(lowerFromInitial.body.proposalCard?.proposalKind, "goal");
+    const lowerFromInitialCalories = proposalCalories(lowerFromInitial.body);
+    assert.ok(
+      lowerFromInitialCalories < UAT_21_INITIAL_PROPOSAL_TARGETS.calories,
+      `Expected lower proposal below ${UAT_21_INITIAL_PROPOSAL_TARGETS.calories}, got ${lowerFromInitialCalories}`,
+    );
+    assert.notEqual(lowerFromInitialCalories, UAT_21_REBOUND_BASELINE_TARGETS.calories);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_floor_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_FLOOR_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "模型不應改寫 1200 提案。" });
+    const floorProposal = await postChat("再低還是太高");
+
+    assert.equal(floorProposal.status, 200);
+    assert.equal(floorProposal.body.proposalCard?.proposalKind, "goal");
+    assert.equal(proposalCalories(floorProposal.body), UAT_21_FLOOR_PROPOSAL_TARGETS.calories);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_rebound_model_proposal_must_not_win",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_REBOUND_BASELINE_TARGETS),
+        },
+      }],
+    });
+    const lowerAtFloor = await postChat("再低一點");
+
+    assert.equal(lowerAtFloor.status, 200);
+    assert.equal(lowerAtFloor.body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(lowerAtFloor.body.proposalCard, undefined);
+    assert.equal(lowerAtFloor.body.dailyTargets, undefined);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    assert.deepEqual(publishCalls, []);
   });
 
   it("applies an active proposal once, then replayed consent fails closed without mutation", async () => {
