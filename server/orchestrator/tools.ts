@@ -2866,29 +2866,11 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       };
     }
 
-    const consumedProposal = await deps.goalProposalService.consumeLatest({
-      deviceId,
-      sessionId: DEFAULT_SESSION_ID,
-      proposalId: activeProposal.proposalId,
-    });
-    if (!consumedProposal) {
-      return {
-        allowed: false,
-        fact: {
-          tool: "update_goals",
-          policyClass: "direct-execute",
-          decision: "blocked",
-          ruleId: "update_goals_latest_proposal_confirm_first",
-          proposalId: activeProposal.proposalId,
-        },
-      };
-    }
-
     context.policyAuthorization = {
       ...context.policyAuthorization,
       updateGoalsLatestProposal: {
-        proposalId: consumedProposal.proposalId,
-        proposal: consumedProposal,
+        proposalId: activeProposal.proposalId,
+        proposal: activeProposal,
       } satisfies GoalProposalPolicyAuthorization,
     };
 
@@ -2899,7 +2881,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
         policyClass: "direct-execute",
         decision: "allowed",
         ruleId: "update_goals_latest_proposal_confirm_first",
-        proposalId: consumedProposal.proposalId,
+        proposalId: activeProposal.proposalId,
       },
     };
   },
@@ -2937,6 +2919,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
     }
 
     let updatePatch: Partial<DailyTargets>;
+    let latestProposalAuthorization: GoalProposalPolicyAuthorization | undefined;
     if (args.mode === "current_turn_values") {
       updatePatch = overridePatch;
     } else {
@@ -2951,6 +2934,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
           toolMessage: reply,
         };
       }
+      latestProposalAuthorization = authorization;
       updatePatch = {
         ...authorization.proposal.targets,
         ...overridePatch,
@@ -2964,6 +2948,37 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
         ok: true,
         result: makeGoalControlledResult(UNSAFE_CALORIE_FLOOR_REASON, reply),
         toolMessage: reply,
+      };
+    }
+
+    if (args.mode === "latest_proposal") {
+      const authorization = latestProposalAuthorization;
+      if (!authorization) {
+        const reply = renderGoalAuthorityFailureCopy();
+        return {
+          ok: true,
+          result: makeGoalControlledResult("goal_authority_failure", reply),
+          toolMessage: reply,
+        };
+      }
+
+      const consumedProposal = await deps.goalProposalService.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: authorization.proposalId,
+      });
+      if (!consumedProposal) {
+        const reply = renderGoalAuthorityFailureCopy();
+        return {
+          ok: true,
+          result: makeGoalControlledResult("goal_authority_failure", reply),
+          toolMessage: reply,
+        };
+      }
+
+      updatePatch = {
+        ...consumedProposal.targets,
+        ...overridePatch,
       };
     }
 

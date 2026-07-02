@@ -743,6 +743,78 @@ describe("update_goals ToolContract", () => {
     assert.deepEqual(retryableProposal?.targets, proposed);
   });
 
+  it("Test 9d: latest_proposal keeps pending proposal retryable when unsafe override fails before consume", async () => {
+    const proposed = { calories: 1850, protein: 135, carbs: 165, fat: 60 };
+    const pending = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: proposed,
+    });
+    let getLatestCalls = 0;
+    let consumeCalls = 0;
+    let updateGoalsCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async getLatest(params: Parameters<typeof goalProposalService.getLatest>[0]) {
+        getLatestCalls += 1;
+        return goalProposalService.getLatest(params);
+      },
+      async consumeLatest(params: Parameters<typeof goalProposalService.consumeLatest>[0]) {
+        consumeCalls += 1;
+        return goalProposalService.consumeLatest(params);
+      },
+    } as typeof goalProposalService;
+    const guardedDeviceService = {
+      ...deviceService,
+      async updateGoals(id: string, patch: Partial<DailyTargets>) {
+        updateGoalsCalls += 1;
+        return deviceService.updateGoals(id, patch);
+      },
+    } as typeof deviceService;
+    const localDeps = {
+      ...deps,
+      deviceService: guardedDeviceService,
+      goalProposalService: guardedGoalProposalService,
+    } as ToolDeps;
+
+    const result = await executeTool(
+      updateGoalsCall({ mode: "latest_proposal", calories: 500 }),
+      deviceId,
+      localDeps,
+      {
+        currentUserMessage: "好，但卡路里 500",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.equal(result.result, renderUnsafeCalorieFloorCopy());
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "unsafe_calorie_floor",
+      text: renderUnsafeCalorieFloorCopy(),
+    });
+    assert.deepEqual(result.updatedFields, ["calories"]);
+    assert.equal(getLatestCalls, 1);
+    assert.equal(consumeCalls, 0);
+    assert.equal(updateGoalsCalls, 0);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+    const retryableProposal = await goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    });
+    assert.equal(retryableProposal?.proposalId, pending.proposalId);
+    assert.deepEqual(retryableProposal?.targets, proposed);
+  });
+
   it("Test 10: cancel terms clear proposal without mutating or publishing and never count as consent", async () => {
     for (const term of ["不要", "取消", "先不用", "不好", "不可以", "不行", "no"]) {
       await goalProposalService.putLatest({
