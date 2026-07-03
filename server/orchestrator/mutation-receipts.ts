@@ -616,18 +616,73 @@ export function renderProposalKindAmbiguityCopy(): string {
   return "這次沒有更新任何內容。你同時有餐點修正和每日目標提案，請回覆「套用餐點修正」或「套用每日目標」。";
 }
 
-export function renderGoalProposalCopy(targets: DailyTargets, previousTargets?: DailyTargets): string {
-  const baselineLine = previousTargets && previousTargets.calories > targets.calories
-    ? [`這次是從前一組 ${formatNumber(previousTargets.calories)} kcal 的提案再往下調整。`]
-    : [];
+function formatGoalTargetRows(targets: DailyTargets): string[] {
   return [
-    "依你想調整目標的方向，我先整理一組比較完整、可執行的每日目標：",
-    ...baselineLine,
     `• 卡路里 ${formatNumber(targets.calories)} kcal`,
     `• 蛋白質 ${formatNumber(targets.protein)} g`,
     `• 碳水 ${formatNumber(targets.carbs)} g`,
     `• 脂肪 ${formatNumber(targets.fat)} g`,
+  ];
+}
+
+function formatGoalDeltaVerb(delta: number): string {
+  if (delta < 0) {
+    return "下修";
+  }
+  if (delta > 0) {
+    return "提高";
+  }
+  return "維持";
+}
+
+function formatMacroAdjustment(
+  label: string,
+  before: number,
+  after: number,
+): string {
+  const delta = after - before;
+  if (delta === 0) {
+    return `${label}維持 ${formatNumber(after)} g`;
+  }
+  return `${label}${formatGoalDeltaVerb(delta)} ${formatNumber(Math.abs(delta))} g（${formatNumber(before)} -> ${formatNumber(after)} g）`;
+}
+
+function formatGoalCalorieBaselineLine(targets: DailyTargets, previousTargets: DailyTargets): string {
+  const delta = targets.calories - previousTargets.calories;
+  if (delta === 0) {
+    return `這次沿用前一組 ${formatNumber(previousTargets.calories)} kcal，提案仍是 ${formatNumber(targets.calories)} kcal：`;
+  }
+  return `這次從前一組 ${formatNumber(previousTargets.calories)} kcal ${formatGoalDeltaVerb(delta)} ${formatNumber(Math.abs(delta))} kcal，調整到 ${formatNumber(targets.calories)} kcal：`;
+}
+
+function formatGoalMacroAdjustmentLine(targets: DailyTargets, previousTargets: DailyTargets): string {
+  return `調整重點：${[
+    formatMacroAdjustment("蛋白質", previousTargets.protein, targets.protein),
+    formatMacroAdjustment("碳水", previousTargets.carbs, targets.carbs),
+    formatMacroAdjustment("脂肪", previousTargets.fat, targets.fat),
+  ].join("；")}。`;
+}
+
+export function renderGoalProposalCopy(targets: DailyTargets, previousTargets?: DailyTargets): string {
+  if (previousTargets) {
+    return [
+      formatGoalCalorieBaselineLine(targets, previousTargets),
+      ...formatGoalTargetRows(targets),
+      formatGoalMacroAdjustmentLine(targets, previousTargets),
+    ].join("\n");
+  }
+
+  return [
+    "依你想調整目標的方向，我先整理一組比較完整、可執行的每日目標：",
+    ...formatGoalTargetRows(targets),
     "這組數字讓熱量、蛋白質、碳水和脂肪一起對齊，比只改單一數字更穩定。",
+  ].join("\n");
+}
+
+export function renderGoalUpdateReceipt(targets: DailyTargets): string {
+  return [
+    `已更新每日目標：已套用 ${formatNumber(targets.calories)} kcal 這組設定`,
+    ...formatGoalTargetRows(targets),
   ].join("\n");
 }
 
@@ -709,12 +764,6 @@ export function renderMutationReceipt(effects: MutationEffects): string {
       return `已刪除${datePrefix}${effects.deletedMeal.foodName}，已從當日紀錄移除。`;
     }
     case "goals":
-      return [
-        "已更新每日目標：",
-        `• 卡路里 ${formatNumber(effects.targets.calories)} kcal`,
-        `• 蛋白質 ${formatNumber(effects.targets.protein)} g`,
-        `• 碳水 ${formatNumber(effects.targets.carbs)} g`,
-        `• 脂肪 ${formatNumber(effects.targets.fat)} g`,
-      ].join("\n");
+      return renderGoalUpdateReceipt(effects.targets);
   }
 }

@@ -73,6 +73,7 @@ import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderGoalUpdateReceipt,
   renderUnsafeCalorieFloorCopy,
   renderGoalValidationFailureCopy,
   getProposalActionLabels,
@@ -978,10 +979,6 @@ function goalToolProperties(required = false) {
 
 const goalTargetProperties = goalToolProperties();
 
-function formatGoalsReceipt(targets: DailyTargets): string {
-  return `已更新每日目標：\n• 卡路里 ${targets.calories} kcal\n• 蛋白質 ${targets.protein} g\n• 碳水 ${targets.carbs} g\n• 脂肪 ${targets.fat} g`;
-}
-
 function buildHistoricalToolMessage(
   result: HistoricalToolClarification | { status: "multiple_targets"; dateKeys: string[] },
 ): string {
@@ -1570,6 +1567,20 @@ function deviceRowToDailyTargets(device: DeviceRow): DailyTargets {
     carbs: device.dailyCarbs,
     fat: device.dailyFat,
   };
+}
+
+function goalProposalCopyBaseline(input: {
+  activeGoalProposal?: GoalProposalPayload;
+  currentTargets?: DailyTargets;
+  proposedTargets: DailyTargets;
+}): DailyTargets | undefined {
+  if (input.activeGoalProposal) {
+    return input.activeGoalProposal.targets;
+  }
+  if (input.currentTargets && input.proposedTargets.calories < input.currentTargets.calories) {
+    return input.currentTargets;
+  }
+  return undefined;
 }
 
 function classificationMatchesOperator(
@@ -2706,6 +2717,10 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
     });
+    const currentDevice = deps.deviceService
+      ? await deps.deviceService.getDevice(deviceId)
+      : undefined;
+    const currentTargets = currentDevice ? deviceRowToDailyTargets(currentDevice) : undefined;
     const relativeLowerValidation = validateRelativeLowerGoalProposal({
       userMessage: context.currentUserMessage,
       previousAssistantMessage: context.previousAssistantMessage,
@@ -2760,7 +2775,11 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
     });
     const reply = renderGoalProposalCopy(
       args,
-      relativeLowerValidation.reason === "ok" ? activeGoalProposal?.targets : undefined,
+      goalProposalCopyBaseline({
+        activeGoalProposal,
+        currentTargets,
+        proposedTargets: args,
+      }),
     );
 
     return {
@@ -3071,7 +3090,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
         updatedFields,
         publishedEvents,
       },
-      toolMessage: formatGoalsReceipt(targets),
+      toolMessage: renderGoalUpdateReceipt(targets),
     };
   },
 };
