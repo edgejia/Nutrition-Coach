@@ -394,6 +394,21 @@ describe("typed proposal actions through /api/chat", () => {
     assert.deepEqual(active?.targets, newerTargets);
     assert.equal(active?.targetSignature, goalProposalTargetSignature(newerTargets));
 
+    const preApprovalHistory = await getHistory();
+    assert.equal(
+      preApprovalHistory.filter((message) =>
+        message.proposalCard?.proposalKind === "goal" &&
+        message.proposalCard.status === "active" &&
+        message.proposalCard.isActionable
+      ).length,
+      1,
+    );
+    assert.equal(
+      preApprovalHistory.find((message) => message.proposalCard?.proposalId === olderProposal.proposalId)
+        ?.proposalCard?.isActionable,
+      false,
+    );
+
     const body = await postChat("好");
 
     assert.equal(body.didLogMeal, false);
@@ -408,6 +423,14 @@ describe("typed proposal actions through /api/chat", () => {
     assert.deepEqual(await readTargets(), newerTargets);
 
     const history = await getHistory();
+    assert.equal(
+      history.filter((message) =>
+        message.proposalCard?.proposalKind === "goal" &&
+        message.proposalCard.status === "active" &&
+        message.proposalCard.isActionable
+      ).length,
+      0,
+    );
     assert.equal(
       history.find((message) => message.proposalCard?.proposalId === newerProposal.proposalId)?.proposalCard?.status,
       "approved",
