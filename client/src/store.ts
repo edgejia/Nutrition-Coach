@@ -103,6 +103,80 @@ function redactReceiptIdentityFromMessages(messages: Message[], mealId: string):
   });
 }
 
+const GOAL_PROPOSAL_SUPERSEDED_COPY = "這個目標提案已被新的目標提案取代。";
+const GOAL_PROPOSAL_STALE_COPY = "這個目標提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。";
+
+function isGoalProposalCard(card: ProposalCardMetadata | undefined): card is ProposalCardMetadata {
+  return card?.proposalKind === "goal" && card.proposalLane === "goal";
+}
+
+function isActiveGoalProposalCard(card: ProposalCardMetadata | undefined): card is ProposalCardMetadata {
+  return isGoalProposalCard(card) && card.status === "active" && card.isActionable;
+}
+
+function isTerminalGoalProposalCard(card: ProposalCardMetadata | undefined): card is ProposalCardMetadata {
+  return isGoalProposalCard(card) && (card.status === "approved" || card.status === "rejected");
+}
+
+function deactivateGoalProposalCard(
+  card: ProposalCardMetadata,
+  status: Extract<ProposalCardMetadata["status"], "stale" | "superseded">,
+): ProposalCardMetadata {
+  return {
+    ...card,
+    status,
+    isActionable: false,
+    lapseCopy: card.lapseCopy ?? (
+      status === "superseded" ? GOAL_PROPOSAL_SUPERSEDED_COPY : GOAL_PROPOSAL_STALE_COPY
+    ),
+    ...(status === "superseded" ? { supersededByKind: "goal" as const } : {}),
+  };
+}
+
+function normalizeGoalProposalCards(
+  messages: Message[],
+  options: { deactivateActiveGoalCards?: boolean } = {},
+): Message[] {
+  const terminalByProposal = new Map<string, ProposalCardMetadata>();
+  for (const message of messages) {
+    if (isTerminalGoalProposalCard(message.proposalCard)) {
+      terminalByProposal.set(message.proposalCard.proposalId, message.proposalCard);
+    }
+  }
+
+  const terminalNormalized = messages.map((message) => {
+    const card = message.proposalCard;
+    if (!isActiveGoalProposalCard(card)) {
+      return message;
+    }
+    const terminalCard = terminalByProposal.get(card.proposalId);
+    return terminalCard ? { ...message, proposalCard: terminalCard } : message;
+  });
+
+  if (options.deactivateActiveGoalCards) {
+    return terminalNormalized.map((message) => {
+      const card = message.proposalCard;
+      return isActiveGoalProposalCard(card)
+        ? { ...message, proposalCard: deactivateGoalProposalCard(card, "stale") }
+        : message;
+    });
+  }
+
+  let latestActiveGoalIndex = -1;
+  terminalNormalized.forEach((message, index) => {
+    if (isActiveGoalProposalCard(message.proposalCard)) {
+      latestActiveGoalIndex = index;
+    }
+  });
+
+  return terminalNormalized.map((message, index) => {
+    const card = message.proposalCard;
+    return isActiveGoalProposalCard(card) && index !== latestActiveGoalIndex
+      ? { ...message, proposalCard: deactivateGoalProposalCard(card, "superseded") }
+      : message;
+  });
+}
+
 const STOPPED_EMPTY_COPY = "已停止生成。";
 const RAW_STOPPED_PLACEHOLDER = "（已停止）";
 
@@ -356,8 +430,8 @@ export const useStore = create<AppState>((set, get) => ({
   markGuestSessionRecoveryAttempted: () => set({ guestSessionRecoveryAttempted: true }),
   resetGuestSessionRecovery: () => set({ guestSessionRecoveryAttempted: false }),
 
-  addMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
-  setMessages: (messages) => set({ messages }),
+  addMessage: (message) => set((s) => ({ messages: normalizeGoalProposalCards([...s.messages, message]) })),
+  setMessages: (messages) => set({ messages: normalizeGoalProposalCards(messages) }),
   // Guarded summary write boundary (D-10, D-11, D-13, T-09-05, T-09-06).
   // Writes only when `summary.date` equals local today. Mismatches fire the
   // registered rollover refresh handler without propagating errors to callers.
@@ -390,7 +464,10 @@ export const useStore = create<AppState>((set, get) => ({
       return;
     }
     localStorage.setItem("dailyTargets", JSON.stringify(dailyTargets));
-    set({ dailyTargets });
+    set((state) => ({
+      dailyTargets,
+      messages: normalizeGoalProposalCards(state.messages, { deactivateActiveGoalCards: true }),
+    }));
   },
   setSending: (sending) => set({ sending }),
   setProvisionalBubble: (provisionalBubble) => set({ provisionalBubble }),
@@ -446,7 +523,12 @@ export const useStore = create<AppState>((set, get) => ({
         ? redactReceiptIdentityFromMessages(state.messages, extra.deletedMealId)
         : state.messages;
 
-      return { messages: [...messages, finalMessage], provisionalBubble: null };
+      return {
+        messages: normalizeGoalProposalCards([...messages, finalMessage], {
+          deactivateActiveGoalCards: Boolean(extra.dailyTargets && !isActiveGoalProposalCard(extra.proposalCard)),
+        }),
+        provisionalBubble: null,
+      };
     });
     if (extra.dailySummary) {
       get().setDailySummary(extra.dailySummary);
@@ -478,7 +560,12 @@ export const useStore = create<AppState>((set, get) => ({
         ? redactReceiptIdentityFromMessages(state.messages, extra.deletedMealId)
         : state.messages;
 
-      return { messages: [...messages, finalMessage], provisionalBubble: null };
+      return {
+        messages: normalizeGoalProposalCards([...messages, finalMessage], {
+          deactivateActiveGoalCards: Boolean(extra.dailyTargets && !isActiveGoalProposalCard(extra.proposalCard)),
+        }),
+        provisionalBubble: null,
+      };
     });
     if (extra.dailySummary) {
       get().setDailySummary(extra.dailySummary);

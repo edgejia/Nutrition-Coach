@@ -290,7 +290,7 @@ export function projectProposalCardForClient(
     proposalKind: card.proposalKind,
     proposalLane: card.proposalLane,
     status,
-    isActionable: projection?.isActionable ?? card.status === "active",
+    isActionable: status === "active" && (projection?.isActionable ?? card.status === "active"),
     title: card.title,
     details: projectDetailsForClient(card.details),
     actions: card.actions,
