@@ -526,6 +526,56 @@ describe("chat bubble source contract", () => {
     }
   });
 
+  it("renders superseded goal cards with replacement copy and keeps expiry copy only for expired cards", () => {
+    const expiredCopy = "這個目標提案已超過 30 分鐘，請重新提出目標調整。";
+    const supersededCopy = "這個目標提案已被新的目標提案取代。";
+    const staleCopy = "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。";
+    const supersededHtml = renderProposalCard({
+      proposalCard: {
+        ...activeMealEstimateProposal,
+        proposalId: "goal-superseded-copy-pair",
+        proposalKind: "goal",
+        proposalLane: "goal",
+        status: "superseded",
+        isActionable: false,
+        title: "每日目標提案",
+        lapseCopy: supersededCopy,
+      },
+    });
+    const expiredHtml = renderProposalCard({
+      proposalCard: {
+        ...activeMealEstimateProposal,
+        proposalId: "goal-expired-copy-pair",
+        proposalKind: "goal",
+        proposalLane: "goal",
+        status: "expired",
+        isActionable: false,
+        title: "每日目標提案",
+        lapseCopy: expiredCopy,
+      },
+    });
+    const staleHtml = renderProposalCard({
+      proposalCard: {
+        ...activeMealEstimateProposal,
+        proposalId: "goal-stale-copy-pair",
+        proposalKind: "goal",
+        proposalLane: "goal",
+        status: "stale",
+        isActionable: false,
+        title: "每日目標提案",
+        lapseCopy: staleCopy,
+      },
+    });
+
+    assert.match(supersededHtml, /已取代/);
+    assert.match(supersededHtml, new RegExp(escapeRegExp(supersededCopy)));
+    assert.doesNotMatch(supersededHtml, new RegExp(escapeRegExp(expiredCopy)));
+    assert.match(expiredHtml, /已過期/);
+    assert.match(expiredHtml, new RegExp(escapeRegExp(expiredCopy)));
+    assert.match(staleHtml, /已失效/);
+    assert.match(staleHtml, new RegExp(escapeRegExp(staleCopy)));
+  });
+
   it("renders structured proposal action events as user-side events distinct from typed bubbles", () => {
     const message: Message = {
       id: "proposal-action-event-1",

@@ -1,6 +1,11 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import type { ProposalCardMetadata } from "../../client/src/types.js";
+import {
+  renderProposalExpiredCopy,
+  renderProposalInactiveCopy,
+  renderProposalSupersededCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 
 // Minimal localStorage shim for Node.js (must precede store import)
 const storage = new Map<string, string>();
@@ -19,6 +24,15 @@ const { formatLocalDate } = await import("../../client/src/lib/time.js");
 const { buildReceiptMealEditPayload } = await import("../../client/src/meal-edit-payload.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
 const originalFetch = globalThis.fetch;
+const GOAL_PROPOSAL_EXPIRED_COPY = renderProposalExpiredCopy("goal");
+const GOAL_PROPOSAL_SUPERSEDED_COPY = renderProposalSupersededCopy({
+  proposalKind: "goal",
+  supersededByKind: "goal",
+});
+const GOAL_PROPOSAL_STALE_COPY = renderProposalInactiveCopy({
+  proposalKind: "goal",
+  status: "stale",
+});
 
 async function loadFreshStore(suffix: string) {
   return import(`${storeModuleUrl.href}?${suffix}`);
@@ -1271,6 +1285,38 @@ describe("ProvisionalBubble actions", () => {
     );
   });
 
+  it("commitProvisionalBubble pairs superseded goal cards with backend replacement copy even when active cards carry expiry copy", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-goal-old",
+        role: "assistant",
+        content: "請確認 2050 kcal。",
+        createdAt: "2026-06-14T08:00:00.000Z",
+        proposalCard: goalProposalCard("goal-old", 2050, {
+          lapseCopy: GOAL_PROPOSAL_EXPIRED_COPY,
+        }),
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "assistant-goal-new",
+      statusLabel: "",
+      content: "請確認 1800 kcal。",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      proposalCard: goalProposalCard("goal-new", 1800, {
+        lapseCopy: GOAL_PROPOSAL_EXPIRED_COPY,
+      }),
+    });
+
+    const [oldMessage] = useStore.getState().messages;
+    assert.equal(oldMessage?.proposalCard?.status, "superseded");
+    assert.equal(oldMessage?.proposalCard?.lapseCopy, GOAL_PROPOSAL_SUPERSEDED_COPY);
+    assert.notEqual(oldMessage?.proposalCard?.lapseCopy, GOAL_PROPOSAL_EXPIRED_COPY);
+  });
+
   it("commitProvisionalBubble deactivates active goal cards when dailyTargets commit without a new proposal", () => {
     useStore.getState().setMessages([
       {
@@ -1305,6 +1351,36 @@ describe("ProvisionalBubble actions", () => {
       ),
       false,
     );
+  });
+
+  it("commitProvisionalBubble pairs stale goal cards with stale copy even when active cards carry expiry copy", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-goal-old",
+        role: "assistant",
+        content: "請確認 2050 kcal。",
+        createdAt: "2026-06-14T08:00:00.000Z",
+        proposalCard: goalProposalCard("goal-old", 2050, {
+          lapseCopy: GOAL_PROPOSAL_EXPIRED_COPY,
+        }),
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "assistant-update",
+      statusLabel: "",
+      content: "已更新每日目標。",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      dailyTargets: { calories: 1800, protein: 125, carbs: 170, fat: 50 },
+    });
+
+    const oldMessage = useStore.getState().messages[0];
+    assert.equal(oldMessage?.proposalCard?.status, "stale");
+    assert.equal(oldMessage?.proposalCard?.lapseCopy, GOAL_PROPOSAL_STALE_COPY);
+    assert.notEqual(oldMessage?.proposalCard?.lapseCopy, GOAL_PROPOSAL_EXPIRED_COPY);
   });
 
   it("commitProvisionalBubble finalizes message when malformed authoritative additions are rejected", () => {

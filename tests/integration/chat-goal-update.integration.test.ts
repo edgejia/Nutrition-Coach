@@ -19,6 +19,7 @@ import {
   renderUnsafeNutritionGuidanceCopy,
   renderGoalValidationFailureCopy,
   renderProposalKindAmbiguityCopy,
+  renderProposalSupersededCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import { buildGoalProposalCard } from "../../server/orchestrator/tools.js";
 import type { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
@@ -47,6 +48,7 @@ interface ChatBody {
     details: { rows: Array<Record<string, unknown>> };
     actions: Record<string, string>;
     expiresAt: string | null;
+    lapseCopy?: string | null;
   };
   proposalActionEvent?: {
     proposalId: string;
@@ -2080,6 +2082,24 @@ describe("chat goal update integration", () => {
       targetCalories: 2050,
       deltaCalories: 200,
     });
+
+    const historyRes = await fetch(`${address}/api/chat/history`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(historyRes.status, 200);
+    const history = await historyRes.json() as { messages: Array<{ proposalCard?: ChatBody["proposalCard"] }> };
+    const goalCards = history.messages
+      .map((message) => message.proposalCard)
+      .filter((card): card is NonNullable<ChatBody["proposalCard"]> => card?.proposalKind === "goal");
+    assert.equal(goalCards.length, 2);
+    const [olderCard, newestCard] = goalCards;
+    assert.equal(olderCard.status, "superseded");
+    assert.equal(olderCard.lapseCopy, renderProposalSupersededCopy({
+      proposalKind: "goal",
+      supersededByKind: "goal",
+    }));
+    assert.equal(newestCard.status, "active");
+    assert.equal(newestCard.isActionable, true);
 
     const accepted = await postChat("好吧那就這樣");
     assert.equal(accepted.status, 200);
