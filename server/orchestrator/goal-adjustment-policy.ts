@@ -97,6 +97,16 @@ export function hasReasonableGoalMacroCalories(targets: DailyTargets): boolean {
   return Math.abs(macroCalories - targets.calories) / targets.calories <= 0.1;
 }
 
+const EQUIVALENT_CALORIE_TOLERANCE = 10;
+const EQUIVALENT_MACRO_TOLERANCE = 2;
+
+export function areGoalTargetsEquivalent(a: DailyTargets, b: DailyTargets): boolean {
+  return Math.abs(a.calories - b.calories) <= EQUIVALENT_CALORIE_TOLERANCE
+    && Math.abs(a.protein - b.protein) <= EQUIVALENT_MACRO_TOLERANCE
+    && Math.abs(a.carbs - b.carbs) <= EQUIVALENT_MACRO_TOLERANCE
+    && Math.abs(a.fat - b.fat) <= EQUIVALENT_MACRO_TOLERANCE;
+}
+
 export function isGoalMacroCaloriesOverAllocated(targets: DailyTargets): boolean {
   if (targets.calories <= 0) {
     return true;

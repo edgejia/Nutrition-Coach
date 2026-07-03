@@ -679,6 +679,11 @@ export function renderGoalProposalCopy(targets: DailyTargets, previousTargets?: 
   ].join("\n");
 }
 
+export function renderDuplicateGoalProposalCopy(activeTargets: DailyTargets): string {
+  const labels = getProposalActionLabels("goal");
+  return `目前已經有一張待確認的 ${formatNumber(activeTargets.calories)} kcal 目標提案。請直接在那張卡片選擇「${labels.approveLabel}」、「${labels.editLabel}」或「${labels.rejectLabel}」；我不會再建立相同目標的提案。`;
+}
+
 export function renderGoalUpdateReceipt(targets: DailyTargets): string {
   return [
     `已更新每日目標：已套用 ${formatNumber(targets.calories)} kcal 這組設定`,

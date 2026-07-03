@@ -72,6 +72,7 @@ import {
 import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
+  renderDuplicateGoalProposalCopy,
   renderGoalProposalCopy,
   renderGoalUpdateReceipt,
   renderUnsafeCalorieFloorCopy,
@@ -107,6 +108,7 @@ import {
   type PlanningFacts,
 } from "./planning-reply-renderer.js";
 import {
+  areGoalTargetsEquivalent,
   hasReasonableGoalMacroCalories,
   isExplicitGoalApplyIntent,
   isGoalConfirmationQuestion,
@@ -160,6 +162,7 @@ export interface ToolExecutionResult {
     reason:
       | "goal_proposal"
       | "goal_authority_failure"
+      | "duplicate_goal_proposal"
       | "unsafe_calorie_floor"
       | "goal_validation_failure"
       | "goal_cancel"
@@ -2765,6 +2768,15 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
         ok: true,
         result: guardResult,
         toolMessage: guardResult.reply,
+      };
+    }
+
+    if (activeGoalProposal && areGoalTargetsEquivalent(args, activeGoalProposal.targets)) {
+      const reply = renderDuplicateGoalProposalCopy(activeGoalProposal.targets);
+      return {
+        ok: true,
+        result: makeGoalControlledResult("duplicate_goal_proposal", reply),
+        toolMessage: reply,
       };
     }
 
