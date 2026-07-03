@@ -106,6 +106,11 @@ import {
   type PlanningFacts,
 } from "./planning-reply-renderer.js";
 import {
+  hasReasonableGoalMacroCalories,
+  isExplicitGoalApplyIntent,
+  isGoalConfirmationQuestion,
+  isGoalExplanationQuestion,
+  isGoalMacroCaloriesOverAllocated,
   validateRelativeLowerGoalProposal,
   type RelativeLowerGoalProposalValidationReason,
 } from "./goal-adjustment-policy.js";
@@ -526,10 +531,12 @@ type GoalProposalResult = GoalControlledResult & {
 };
 interface GoalRetryableGuardResult {
   status: "guard_feedback";
-  reason: Extract<
-    RelativeLowerGoalProposalValidationReason,
-    "rebound_or_not_lower" | "macro_calorie_inconsistent"
-  >;
+  reason:
+    | Extract<
+        RelativeLowerGoalProposalValidationReason,
+        "rebound_or_not_lower" | "macro_calorie_inconsistent"
+      >
+    | "question_form_mutation";
   reply: string;
 }
 
@@ -547,7 +554,7 @@ interface MealTargetControlledResult {
   reply: string;
 }
 
-type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult;
+type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult | GoalRetryableGuardResult;
 type UpdateMealContractResult = UpdateMealResult | MealNumericControlledResult | MealTargetControlledResult;
 type ProposeMealNumericCorrectionResult = MealNumericControlledResult & {
   reason: "meal_numeric_proposal";
@@ -783,11 +790,16 @@ function makeGoalControlledResult(
 
 function makeRelativeLowerGuardFeedback(
   reason: GoalRetryableGuardResult["reason"],
-  activeTargets: DailyTargets,
+  activeTargets?: DailyTargets,
 ): GoalRetryableGuardResult {
-  const reply = reason === "macro_calorie_inconsistent"
-    ? "Guard feedback: provide a complete calories/protein/carbs/fat target set whose macro calories are within 10% of total calories."
-    : `Guard feedback: for this lower-target request, propose calories lower than ${activeTargets.calories} kcal and at or above ${NUTRITION_SAFETY_CALORIE_FLOOR} kcal.`;
+  let reply: string;
+  if (reason === "macro_calorie_inconsistent") {
+    reply = "Guard feedback: provide a complete calories/protein/carbs/fat target set whose macro calories are within 10% of total calories.";
+  } else if (reason === "question_form_mutation") {
+    reply = "Guard feedback: this is a question turn. Answer the user's question without updating goals.";
+  } else {
+    reply = `Guard feedback: for this lower-target request, propose calories lower than ${activeTargets?.calories ?? "the active target"} kcal and at or above ${NUTRITION_SAFETY_CALORIE_FLOOR} kcal.`;
+  }
   return {
     status: "guard_feedback",
     reason,
@@ -2732,6 +2744,14 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
         toolMessage: guardResult.reply,
       };
     }
+    if (!hasReasonableGoalMacroCalories(args)) {
+      const guardResult = makeRelativeLowerGuardFeedback("macro_calorie_inconsistent");
+      return {
+        ok: true,
+        result: guardResult,
+        toolMessage: guardResult.reply,
+      };
+    }
 
     const proposal = await deps.goalProposalService.putLatest({
       deviceId,
@@ -2902,6 +2922,22 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       };
     }
 
+    if (
+      args.mode === "current_turn_values"
+      && !isExplicitGoalApplyIntent(context.currentUserMessage)
+      && (
+        isGoalConfirmationQuestion(context.currentUserMessage)
+        || isGoalExplanationQuestion(context.currentUserMessage)
+      )
+    ) {
+      const guardResult = makeRelativeLowerGuardFeedback("question_form_mutation");
+      return {
+        ok: true,
+        result: guardResult,
+        toolMessage: guardResult.reply,
+      };
+    }
+
     const overridePatch = pickTargetPatch(args);
     const overrideFields = updatedGoalFields(overridePatch);
     if (overrideFields.length > 0) {
@@ -2917,6 +2953,12 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
         };
       }
     }
+
+    const currentDevice = await deps.deviceService.getDevice(deviceId);
+    if (!currentDevice) {
+      throw new Error("update_goals contract missing device targets");
+    }
+    const currentTargets = deviceRowToDailyTargets(currentDevice);
 
     let updatePatch: Partial<DailyTargets>;
     let latestProposalAuthorization: GoalProposalPolicyAuthorization | undefined;
@@ -2947,6 +2989,28 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       return {
         ok: true,
         result: makeGoalControlledResult(UNSAFE_CALORIE_FLOOR_REASON, reply),
+        toolMessage: reply,
+      };
+    }
+
+    if (args.mode === "current_turn_values") {
+      const candidateTargets: DailyTargets = {
+        ...currentTargets,
+        ...updatePatch,
+      };
+      if (isGoalMacroCaloriesOverAllocated(candidateTargets)) {
+        const guardResult = makeRelativeLowerGuardFeedback("macro_calorie_inconsistent");
+        return {
+          ok: true,
+          result: guardResult,
+          toolMessage: guardResult.reply,
+        };
+      }
+    } else if (!hasReasonableGoalMacroCalories(updatePatch as DailyTargets)) {
+      const reply = renderGoalAuthorityFailureCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult("goal_authority_failure", reply),
         toolMessage: reply,
       };
     }
@@ -3826,6 +3890,21 @@ export async function executeTool(
 
   if (toolCall.function.name === "update_goals") {
     const contractResult = outcome.contractResult as UpdateGoalsContractResult;
+    if ("status" in contractResult && contractResult.status === "guard_feedback") {
+      return attachPolicyFact({
+        result: contractResult.reply,
+        summary: "failureReason: guard",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        updatedFields:
+          typeof outcome.logSummary === "object" &&
+          outcome.logSummary !== null &&
+          Array.isArray(outcome.logSummary.updatedFields)
+            ? [...(outcome.logSummary.updatedFields as UpdateGoalField[])]
+            : undefined,
+      });
+    }
     if (isGoalControlledResult(contractResult)) {
       const failureReason = contractResult.reason === "goal_validation_failure"
         ? "validation"

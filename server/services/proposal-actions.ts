@@ -20,6 +20,7 @@ import {
   renderUnsafeCalorieFloorCopy,
 } from "../orchestrator/mutation-receipts.js";
 import { checkNutritionSafetyTargets } from "../orchestrator/nutrition-safety-policy.js";
+import { hasReasonableGoalMacroCalories } from "../orchestrator/goal-adjustment-policy.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { MealRevisionPreconditionError } from "./meal-transactions.js";
 import type { ChatMutationOutcomeFact } from "./chat-mutation-outcomes.js";
@@ -544,6 +545,9 @@ export function createProposalActionService(deps: ProposalActionDeps) {
           const safetyCheck = checkNutritionSafetyTargets(proposal.targets);
           if (!safetyCheck.ok) {
             return { result: await blockUnsafeGoalProposalAction(input) };
+          }
+          if (!hasReasonableGoalMacroCalories(proposal.targets)) {
+            return { result: await buildRetryableProposalActionResult(input) };
           }
           const consumed = await deps.goalProposalService.consumeLatest({
             deviceId: input.deviceId,

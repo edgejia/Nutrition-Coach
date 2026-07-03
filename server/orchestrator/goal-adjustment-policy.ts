@@ -33,6 +33,10 @@ function normalizeProposalDecisionText(message: string): string {
   return message.trim().toLowerCase().replace(/\s+/g, "");
 }
 
+function normalizeGoalIntentText(message: string): string {
+  return stripToolLikeRegions(message).trim().toLowerCase().replace(/\s+/g, "");
+}
+
 function hasExplicitNumericGoalValue(message: string): boolean {
   return /[0-9０-９]/.test(message);
 }
@@ -91,6 +95,47 @@ export function hasReasonableGoalMacroCalories(targets: DailyTargets): boolean {
   }
   const macroCalories = targets.protein * 4 + targets.carbs * 4 + targets.fat * 9;
   return Math.abs(macroCalories - targets.calories) / targets.calories <= 0.1;
+}
+
+export function isGoalMacroCaloriesOverAllocated(targets: DailyTargets): boolean {
+  if (targets.calories <= 0) {
+    return true;
+  }
+  const macroCalories = targets.protein * 4 + targets.carbs * 4 + targets.fat * 9;
+  return macroCalories > targets.calories * 1.1;
+}
+
+export function isGoalExplanationQuestion(message: string): boolean {
+  const normalized = normalizeGoalIntentText(message);
+  if (!normalized || isExplicitGoalApplyIntent(normalized)) {
+    return false;
+  }
+  return /(?:為什麼|為何|怎麼來|依據|原因|why|how).*(?:數值|數字|目標|卡路里|熱量|kcal|goal|target)|(?:數值|數字|目標|卡路里|熱量|kcal|goal|target).*(?:為什麼|為何|怎麼來|依據|原因|why|how)/i
+    .test(normalized)
+    || /(?:為什麼|為何|why).*[0-9０-９]/i.test(normalized);
+}
+
+export function isGoalConfirmationQuestion(message: string): boolean {
+  const normalized = normalizeGoalIntentText(message);
+  if (!normalized || isExplicitGoalApplyIntent(normalized) || /^(?:取消|不要|不用|先不用|no|nope)$/i.test(normalized)) {
+    return false;
+  }
+  const hasQuestionMarker = /[?？]|嗎|么|可不可以|行不行|可以嗎|行嗎|ok嗎|okay嗎/i.test(normalized);
+  if (!hasQuestionMarker) {
+    return false;
+  }
+  return /[0-9０-９]|這樣|這組|目標|每日目標|卡路里|熱量|kcal|calorie|goal|target|改成|設定|調低|降低|再低/i
+    .test(normalized);
+}
+
+export function isExplicitGoalApplyIntent(message: string): boolean {
+  const normalized = normalizeGoalIntentText(message);
+  if (!normalized || /[?？]|嗎|么|可不可以|行不行|可以嗎|行嗎|為什麼|為何|怎麼來|依據|why|how/i.test(normalized)) {
+    return false;
+  }
+  return /^(?:套用|apply)(?:每日)?(?:目標)?/i.test(normalized)
+    || /(?:請把|幫我|直接|就|那|改|設定|更新|套用).{0,8}(?:每日目標|目標|卡路里|熱量)?.{0,8}(?:改成|設成|設定|更新|套用|用)/i.test(normalized)
+    || /(?:每日目標|目標|卡路里|熱量).{0,8}(?:改成|設成|設定|更新|套用|用)/i.test(normalized);
 }
 
 export function validateRelativeLowerGoalProposal(

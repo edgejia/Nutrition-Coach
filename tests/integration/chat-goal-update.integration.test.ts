@@ -144,20 +144,6 @@ const UNSAFE_TARGETS: DailyTargets = {
   fat: 50,
 };
 
-const FLOOR_TARGETS: DailyTargets = {
-  calories: 1200,
-  protein: 120,
-  carbs: 150,
-  fat: 50,
-};
-
-const EXACT_FLOOR_FOLLOWUP_TARGETS: DailyTargets = {
-  calories: 1200,
-  protein: 130,
-  carbs: 150,
-  fat: 50,
-};
-
 const SUCCESS_RECEIPT = [
   "已更新每日目標：",
   "• 卡路里 1800 kcal",
@@ -172,22 +158,6 @@ const PROPOSAL_SUCCESS_RECEIPT = [
   "• 蛋白質 125 g",
   "• 碳水 130 g",
   "• 脂肪 45 g",
-].join("\n");
-
-const FLOOR_SUCCESS_RECEIPT = [
-  "已更新每日目標：",
-  "• 卡路里 1200 kcal",
-  "• 蛋白質 120 g",
-  "• 碳水 150 g",
-  "• 脂肪 50 g",
-].join("\n");
-
-const EXACT_FLOOR_FOLLOWUP_RECEIPT = [
-  "已更新每日目標：",
-  "• 卡路里 1200 kcal",
-  "• 蛋白質 130 g",
-  "• 碳水 150 g",
-  "• 脂肪 50 g",
 ].join("\n");
 
 const FLOOR_EXPLANATION_REPLY = "可以往下調，1200 kcal/天是這個產品的安全下限；目前 1800 仍可改成 1200 或任何高於 1200 的目標。你可以直接指定想要的數字，我再幫你處理。";
@@ -627,7 +597,7 @@ describe("chat goal update integration", () => {
     assert.deepEqual(publishCalls, []);
   });
 
-  it("allows exactly-floor current-turn goal updates and publishes goals_update", async () => {
+  it("rejects exactly-floor calorie-only updates when existing macros would over-allocate calories", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "floor_goal_update",
@@ -641,20 +611,20 @@ describe("chat goal update integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "模型不應改寫已提交結果。" });
+    mockLLM.queueChatResponse({ content: "請補上蛋白質、碳水與脂肪後，我再幫你套用 1200 kcal。" });
 
     const { status, body } = await postChat("卡路里改成 1200");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, false);
-    assert.equal(body.reply, FLOOR_SUCCESS_RECEIPT);
-    assert.deepEqual(body.dailyTargets, FLOOR_TARGETS);
-    assert.deepEqual(await readTargets(), FLOOR_TARGETS);
-    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+    assert.equal(body.reply, "請補上蛋白質、碳水與脂肪後，我再幫你套用 1200 kcal。");
+    assert.equal(body.dailyTargets, undefined);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
   });
 
-  it("allows exactly-floor calorie updates formatted with a thousands separator", async () => {
+  it("rejects formatted exactly-floor calorie-only updates when merged targets are inconsistent", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
         id: "formatted_floor_goal_update",
@@ -668,17 +638,17 @@ describe("chat goal update integration", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "模型不應改寫已提交結果。" });
+    mockLLM.queueChatResponse({ content: "請補上完整巨量營養素後，我再套用 1,200 kcal。" });
 
     const { status, body } = await postChat("卡路里改成 1,200 kcal");
 
     assert.equal(status, 200);
-    assert.equal(body.reply, FLOOR_SUCCESS_RECEIPT);
-    assert.deepEqual(body.dailyTargets, FLOOR_TARGETS);
+    assert.equal(body.reply, "請補上完整巨量營養素後，我再套用 1,200 kcal。");
+    assert.equal(body.dailyTargets, undefined);
     assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
-    assert.deepEqual(await readTargets(), FLOOR_TARGETS);
-    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
-    assert.equal(mockLLM.chatCalls.length, 1);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 2);
   });
 
   it("does not treat safe decimal calorie text as a below-floor target", async () => {
@@ -837,19 +807,33 @@ describe("chat goal update integration", () => {
     assert.deepEqual(publishCalls, []);
   });
 
-  it("applies an exact-floor follow-up after 1800 through the existing goal receipt path", async () => {
-    await setTargetsTo1800ThroughChat();
+  it("rejects an exact-floor follow-up after 1800 when macros are not supplied", async () => {
+    await setTargetsTo1800ThroughChat({ enableFloorProbe: false });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "exact_floor_goal_update",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1200,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "請補上完整蛋白質、碳水與脂肪後，我再套用 1200 kcal。" });
 
     const { status, body } = await postChat("那改成 1200");
 
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, false);
-    assert.equal(body.reply, EXACT_FLOOR_FOLLOWUP_RECEIPT);
-    assert.deepEqual(body.dailyTargets, EXACT_FLOOR_FOLLOWUP_TARGETS);
+    assert.equal(body.reply, "請補上完整蛋白質、碳水與脂肪後，我再套用 1200 kcal。");
+    assert.equal(body.dailyTargets, undefined);
     assert.equal(body.proposalCard, undefined);
-    assert.deepEqual(await readTargets(), EXACT_FLOOR_FOLLOWUP_TARGETS);
-    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
   });
 
   it("creates a backend proposal for vague intent without mutating targets or publishing", async () => {
@@ -2074,7 +2058,15 @@ describe("chat goal update integration", () => {
       `Expected persisted macro/calorie diff <= 10%, got ${macroCalorieDiffRatio(persisted)}`,
     );
 
-    const history = await services.chatService.getHistory(deviceId, 30);
+    const activeGoalProposal = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeGoalProposal);
+    const history = await services.chatService.getHistory(deviceId, 30, {
+      activeProposals: [{
+        proposalId: activeGoalProposal.proposalId,
+        proposalKind: "goal",
+        proposalLane: "goal",
+      }],
+    });
     const actionableCards = history.filter((message) => {
       const card = (message as { proposalCard?: { status: string; isActionable: boolean } }).proposalCard;
       return card?.status === "active" && card.isActionable === true;
