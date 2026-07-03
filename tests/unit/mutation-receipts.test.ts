@@ -11,6 +11,7 @@ import {
   assertNoForbiddenReceiptTerms,
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
+  renderDuplicateGoalProposalCopy,
   renderGoalProposalCopy,
   renderGoalUpdateReceipt,
   renderUnsafeCalorieFloorCopy,
@@ -40,6 +41,7 @@ import {
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
 import { hasUnsafeNutritionGuidance } from "../../server/orchestrator/nutrition-safety-policy.js";
+import { guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
 
 const committedSummary: DailySummary = {
   totalCalories: 520,
@@ -735,6 +737,25 @@ describe("proposal card labels, action events, and inactive copy", () => {
       renderProposalInactiveCopy({ proposalKind: "meal_delete", status: "stale" }),
       "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。",
     );
+  });
+
+  it("renders duplicate goal proposal copy that points to the active card without safety or success-claim wording", () => {
+    const text = renderDuplicateGoalProposalCopy({
+      calories: 1200,
+      protein: 140,
+      carbs: 95,
+      fat: 33,
+    });
+    const labels = getProposalActionLabels("goal");
+
+    assert.match(text, /待確認/);
+    assert.match(text, /1200\s*kcal/);
+    assert.match(text, new RegExp(labels.approveLabel));
+    assert.match(text, new RegExp(labels.editLabel));
+    assert.match(text, new RegExp(labels.rejectLabel));
+    assert.equal(hasUnsafeNutritionGuidance(text), false);
+    assert.equal(guardNoMutationSuccessClaim(text, { hasCommittedMutation: false }), text);
+    assertNoGoalInternalTerms(text);
   });
 
   it("renders exact already-processed proposal copy without forbidden receipt terms", () => {

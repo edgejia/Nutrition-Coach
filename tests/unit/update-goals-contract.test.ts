@@ -19,6 +19,7 @@ import {
   isGoalProposalConsent,
 } from "../../server/orchestrator/source-text-guard.js";
 import {
+  renderDuplicateGoalProposalCopy,
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
@@ -322,6 +323,116 @@ describe("update_goals ToolContract", () => {
       fat: 50,
     });
     assert.equal(published.length, 0);
+  });
+
+  it("Test 2f: duplicate-equivalent propose_goals returns terminal guard copy without replacing active proposal", async () => {
+    const activeTargets = { calories: 1200, protein: 140, carbs: 95, fat: 33 };
+    const activeProposal = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: activeTargets,
+    });
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+
+    const result = await executeTool(
+      proposeGoalsCall({ calories: 1200, protein: 140, carbs: 95, fat: 33 }),
+      deviceId,
+      { ...deps, goalProposalService: guardedGoalProposalService } as ToolDeps,
+      {
+        currentUserMessage: "啥",
+        previousAssistantMessage: renderUnsafeCalorieFloorCopy(),
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.equal(result.result, renderDuplicateGoalProposalCopy(activeTargets));
+    assert.equal(result.proposalCard, undefined);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "duplicate_goal_proposal",
+      text: renderDuplicateGoalProposalCopy(activeTargets),
+    });
+    assert.equal(putLatestCalls, 0);
+    assert.deepEqual(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), activeProposal);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 2g: identical propose_goals creates a proposal normally when no active proposal exists", async () => {
+    const proposed = { calories: 1200, protein: 140, carbs: 95, fat: 33 };
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: proposed,
+    });
+    db.$client
+      .prepare("UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND session_id = ? AND kind = ?")
+      .run("2000-01-01T00:00:00.000Z", deviceId, DEFAULT_SESSION_ID, GOAL_PROPOSAL_KIND);
+
+    const result = await executeTool(proposeGoalsCall(proposed), deviceId, deps, {
+      currentUserMessage: "幫我提案 1200 kcal",
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.executed, true);
+    assert.equal(result.summary, "status: proposal");
+    assert.equal(result.controlledReply?.reason, "goal_proposal");
+    assert.ok(result.proposalCard);
+    assert.deepEqual(
+      (await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.targets,
+      proposed,
+    );
+  });
+
+  it("Test 2h: relative-lower equivalent targets keep retryable rebound feedback before duplicate guard", async () => {
+    const activeTargets = { calories: 1500, protein: 150, carbs: 140, fat: 45 };
+    const activeProposal = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: activeTargets,
+    });
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+
+    const result = await executeTool(
+      proposeGoalsCall(activeTargets),
+      deviceId,
+      { ...deps, goalProposalService: guardedGoalProposalService } as ToolDeps,
+      {
+        currentUserMessage: "再低一點",
+        previousAssistantMessage: "我先提案每日目標 1500 kcal。",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.match(result.result, /lower than 1500 kcal/);
+    assert.equal(result.controlledReply, undefined);
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(putLatestCalls, 0);
+    assert.deepEqual(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), activeProposal);
   });
 
   it("Test 3: update_goals rejects empty args and any args without mode", async () => {

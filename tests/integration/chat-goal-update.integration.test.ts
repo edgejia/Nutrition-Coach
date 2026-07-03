@@ -14,6 +14,7 @@ import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
+  renderDuplicateGoalProposalCopy,
   renderGoalProposalCopy,
   renderUnsafeCalorieFloorCopy,
   renderUnsafeNutritionGuidanceCopy,
@@ -165,6 +166,20 @@ const UAT_21_COPY_SECOND_LOWER_TARGETS: DailyTargets = {
   protein: 140,
   carbs: 164,
   fat: 53,
+};
+
+const UAT_21_DUPLICATE_TARGETS: DailyTargets = {
+  calories: 1200,
+  protein: 140,
+  carbs: 95,
+  fat: 33,
+};
+
+const UAT_21_DIFFERENT_TARGETS: DailyTargets = {
+  calories: 1300,
+  protein: 150,
+  carbs: 100,
+  fat: 40,
 };
 
 const UNSAFE_TARGETS: DailyTargets = {
@@ -396,6 +411,21 @@ describe("chat goal update integration", () => {
     const match = after.match(/([0-9]+)\s*kcal/);
     assert.ok(match, `Expected calorie row, got ${after}`);
     return Number(match[1]);
+  }
+
+  function goalProposalRows(): Array<{
+    proposal_id: string;
+    status: string;
+    lapse_copy: string | null;
+  }> {
+    return services.db.$client
+      .prepare(`
+        SELECT proposal_id, status, lapse_copy
+        FROM chat_proposal_cards
+        WHERE device_id = ? AND proposal_kind = 'goal'
+        ORDER BY created_at
+      `)
+      .all(deviceId) as Array<{ proposal_id: string; status: string; lapse_copy: string | null }>;
   }
 
   function assertLowerFollowUpCopy(input: {
@@ -2205,5 +2235,80 @@ describe("chat goal update integration", () => {
       return card?.status === "active" && card.isActionable === true;
     });
     assert.equal(actionableCards.length, 1);
+  });
+
+  it("UAT-21 duplicate-equivalent proposal replay keeps one active card and different targets replace normally", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_duplicate_initial_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_DUPLICATE_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("沒關係 那我改成減脂 熱量改成1200可以嗎");
+    assert.equal(initial.status, 200);
+    assert.equal(proposalCalories(initial.body), UAT_21_DUPLICATE_TARGETS.calories);
+    assert.equal(goalProposalRows().length, 1);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_duplicate_equivalent_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_DUPLICATE_TARGETS),
+        },
+      }],
+    });
+    const duplicate = await postChat("啥");
+    assert.equal(duplicate.status, 200);
+    assert.equal(duplicate.body.reply, renderDuplicateGoalProposalCopy(UAT_21_DUPLICATE_TARGETS));
+    assert.equal(duplicate.body.proposalCard, undefined);
+    assert.equal(goalProposalRows().length, 1);
+
+    const activeGoalProposal = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeGoalProposal);
+    const afterDuplicateHistory = await services.chatService.getHistory(deviceId, 30, {
+      activeProposals: [{
+        proposalId: activeGoalProposal.proposalId,
+        proposalKind: "goal",
+        proposalLane: "goal",
+      }],
+    });
+    const activeCards = afterDuplicateHistory.filter((message) => {
+      const card = (message as { proposalCard?: { status: string; isActionable: boolean } }).proposalCard;
+      return card?.status === "active" && card.isActionable === true;
+    });
+    assert.equal(activeCards.length, 1);
+    assert.match(duplicate.body.reply, /1200\s*kcal/);
+    assert.match(duplicate.body.reply, /套用目標/);
+    assert.match(duplicate.body.reply, /調整目標/);
+    assert.match(duplicate.body.reply, /取消提案/);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_duplicate_negative_control",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_DIFFERENT_TARGETS),
+        },
+      }],
+    });
+    const replacement = await postChat("那改成 1300 呢");
+    assert.equal(replacement.status, 200);
+    assert.equal(proposalCalories(replacement.body), UAT_21_DIFFERENT_TARGETS.calories);
+
+    const rows = goalProposalRows();
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0]?.status, "superseded");
+    assert.equal(rows[0]?.lapse_copy, renderProposalSupersededCopy({
+      proposalKind: "goal",
+      supersededByKind: "goal",
+    }));
+    assert.equal(rows[1]?.status, "active");
   });
 });

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { DailyTargets } from "../../server/services/device.js";
 import {
+  areGoalTargetsEquivalent,
   hasReasonableGoalMacroCalories,
   isExplicitGoalApplyIntent,
   isGoalConfirmationQuestion,
@@ -191,6 +192,49 @@ describe("goal target integrity helpers (UAT-21 truth 3)", () => {
     );
     assert.equal(
       isGoalMacroCaloriesOverAllocated({ calories: 1800, protein: 130, carbs: 150, fat: 50 }),
+      false,
+    );
+  });
+});
+
+describe("goal target equivalence", () => {
+  it("treats identical and narrow rounding-delta targets as equivalent", () => {
+    assert.equal(
+      areGoalTargetsEquivalent(
+        { calories: 1200, protein: 140, carbs: 95, fat: 33 },
+        { calories: 1200, protein: 140, carbs: 95, fat: 33 },
+      ),
+      true,
+    );
+    assert.equal(
+      areGoalTargetsEquivalent(
+        { calories: 1195, protein: 141, carbs: 95, fat: 33 },
+        { calories: 1200, protein: 140, carbs: 95, fat: 33 },
+      ),
+      true,
+    );
+  });
+
+  it("rejects genuinely different targets and boundary deltas outside the narrow tolerance", () => {
+    assert.equal(
+      areGoalTargetsEquivalent(
+        { calories: 1200, protein: 160, carbs: 85, fat: 35 },
+        { calories: 1200, protein: 140, carbs: 95, fat: 33 },
+      ),
+      false,
+    );
+    assert.equal(
+      areGoalTargetsEquivalent(
+        { calories: 1189, protein: 140, carbs: 95, fat: 33 },
+        { calories: 1200, protein: 140, carbs: 95, fat: 33 },
+      ),
+      false,
+    );
+    assert.equal(
+      areGoalTargetsEquivalent(
+        { calories: 1200, protein: 143, carbs: 95, fat: 33 },
+        { calories: 1200, protein: 140, carbs: 95, fat: 33 },
+      ),
       false,
     );
   });
