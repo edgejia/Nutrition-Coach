@@ -712,6 +712,28 @@ describe("buildSystemPrompt", () => {
     assert.doesNotMatch(nutritionSafetySection(prompt), /請詢問使用者想要哪個/);
   });
 
+  it("places pending-proposal confusion guidance before the final goal routing disclaimer", () => {
+    const section = goalUpdateSection(buildSystemPrompt("fat_loss", {
+      calories: 1800,
+      protein: 130,
+      carbs: 150,
+      fat: 50,
+    }));
+    const guidance =
+      "如果已有待確認目標提案，或上一輪剛拒絕不安全／低於安全下限的目標，使用者只回「啥」「什麼意思」「看不懂」這類短句時，請用文字解釋目前提案或拒絕原因，不要再次呼叫 propose_goals 產生相同或等效數字。";
+    const finalRule = "這些規則只是工具路由指引；是否能套用更新由後端工具驗證、提案狀態與使用者本輪文字決定。不要向使用者提及內部工具名稱或系統欄位。";
+
+    assert.match(section, /待確認目標提案/);
+    assert.match(section, /拒絕不安全／低於安全下限/);
+    assert.match(section, /文字解釋目前提案或拒絕原因/);
+    assert.match(section, /不要再次呼叫 propose_goals/);
+    assert.equal((section.match(/不要再次呼叫 propose_goals/g) ?? []).length, 1);
+    assert.ok(section.indexOf(guidance) >= 0);
+    assert.ok(section.indexOf(guidance) < section.indexOf(finalRule));
+    assert.ok(section.trim().endsWith(`7. ${finalRule}`));
+    assert.doesNotMatch(guidance, /duplicate_goal_proposal|NUTRITION_SAFETY_CALORIE_FLOOR|unsafe_calorie_floor/);
+  });
+
   it("keeps internal safety identifiers out of user-facing guidance", () => {
     const prompt = buildSystemPrompt("fat_loss", {
       calories: 1800,
