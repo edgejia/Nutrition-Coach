@@ -126,9 +126,7 @@ function deactivateGoalProposalCard(
     ...card,
     status,
     isActionable: false,
-    lapseCopy: card.lapseCopy ?? (
-      status === "superseded" ? GOAL_PROPOSAL_SUPERSEDED_COPY : GOAL_PROPOSAL_STALE_COPY
-    ),
+    lapseCopy: status === "superseded" ? GOAL_PROPOSAL_SUPERSEDED_COPY : GOAL_PROPOSAL_STALE_COPY,
     ...(status === "superseded" ? { supersededByKind: "goal" as const } : {}),
   };
 }

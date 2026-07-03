@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import type { ProposalCardMetadata } from "../../client/src/types.js";
 import {
   renderProposalExpiredCopy,
-  renderProposalInactiveCopy,
   renderProposalSupersededCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 
@@ -29,10 +28,7 @@ const GOAL_PROPOSAL_SUPERSEDED_COPY = renderProposalSupersededCopy({
   proposalKind: "goal",
   supersededByKind: "goal",
 });
-const GOAL_PROPOSAL_STALE_COPY = renderProposalInactiveCopy({
-  proposalKind: "goal",
-  status: "stale",
-});
+const GOAL_PROPOSAL_STALE_COPY = "這個目標提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。";
 
 async function loadFreshStore(suffix: string) {
   return import(`${storeModuleUrl.href}?${suffix}`);
