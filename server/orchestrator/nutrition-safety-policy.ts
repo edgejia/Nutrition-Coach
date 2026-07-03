@@ -15,13 +15,25 @@ export type NutritionSafetyTargetCheckResult =
     };
 
 const CALORIE_GUIDANCE_PATTERNS = [
-  /(?:每天|每日|目標|設定|只吃).{0,12}([0-9０-９]+(?:[,，][0-9０-９]+)*(?:[.．][0-9０-９]+)?)\s*(?:kcal|卡路里|卡|大卡)/g,
-  /([0-9０-９]+(?:[,，][0-9０-９]+)*(?:[.．][0-9０-９]+)?)\s*(?:kcal|卡路里|卡|大卡).{0,12}(?:每天|每日|目標|設定|只吃)/g,
-  /(?:eat|eating|only|limit|target|goal).{0,16}([0-9]+(?:,\d{3})*(?:\.\d+)?)\s*(?:kcal|calories?)(?:.{0,16}(?:per day|daily|a day))?/gi,
-  /([0-9]+(?:,\d{3})*(?:\.\d+)?)\s*(?:kcal|calories?).{0,16}(?:per day|daily|a day|only|limit|target|goal)/gi,
+  /(?:每天|每日|目標|設定|只吃).{0,12}(?<![0-9０-９.．,，])([0-9０-９]+(?:[,，][0-9０-９]+)*(?:[.．][0-9０-９]+)?)\s*(?:kcal|卡路里|卡|大卡)/gd,
+  /(?<![0-9０-９.．,，])([0-9０-９]+(?:[,，][0-9０-９]+)*(?:[.．][0-9０-９]+)?)\s*(?:kcal|卡路里|卡|大卡).{0,12}(?:每天|每日|目標|設定|只吃)/gd,
+  /(?:eat|eating|only|limit|target|goal).{0,16}(?<![0-9.,])([0-9]+(?:,\d{3})*(?:\.\d+)?)\s*(?:kcal|calories?)(?:.{0,16}(?:per day|daily|a day))?/gid,
+  /(?<![0-9.,])([0-9]+(?:,\d{3})*(?:\.\d+)?)\s*(?:kcal|calories?).{0,16}(?:per day|daily|a day|only|limit|target|goal)/gid,
 ] as const;
+// Sub-floor numbers that describe an adjustment amount (調降 200 kcal) rather
+// than an absolute daily target must not count as unsafe guidance. Verb forms
+// that bind an absolute value (降到/降至/改成/設成) end with 到/至/成 and thus
+// do not match this suffix pattern.
+const CALORIE_DELTA_CONTEXT_SUFFIX_PATTERN =
+  /(?:調降|下修|下調|往下調|下降|調低|降低|減少|再降|再減|削減|減|少|by)\s*$/i;
+// Sub-floor kcal amounts attached to a single macro's gram line (蛋白質140g（約
+// 560 kcal）) are a per-macro breakdown, not a daily calorie target. A sentence
+// boundary or a combined-sum marker (共/總/合計) between the gram amount and the
+// kcal amount disqualifies the exclusion so totals stay guarded.
+const PER_MACRO_BREAKDOWN_PREFIX_PATTERN =
+  /(?:蛋白質|碳水(?:化合物)?|脂肪)\s*[0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:g|克|公克)(?<tail>[^0-9０-９]*)$/;
 const MEAL_SLOT_CALORIE_PATTERN =
-  /(?:早餐|早上|午餐|中午|晚餐|晚上|宵夜|breakfast|lunch|dinner).{0,12}([0-9０-９]+(?:[,，][0-9０-９]+)*(?:[.．][0-9０-９]+)?)\s*(?:kcal|卡路里|卡|大卡|calories?)/gi;
+  /(?:早餐|早上|午餐|中午|晚餐|晚上|宵夜|breakfast|lunch|dinner).{0,12}(?<![0-9０-９.．,，])([0-9０-９]+(?:[,，][0-9０-９]+)*(?:[.．][0-9０-９]+)?)\s*(?:kcal|卡路里|卡|大卡|calories?)/gi;
 const LOGGED_INTAKE_CONTEXT_PATTERN =
   /(?:已記錄|紀錄|記錄了|收到|吃了|喝了|飲用|攝取|\b(?:logged|recorded|ate|drank|consumed)\b)/i;
 const UNSAFE_NUTRITION_HARMFUL_TARGET_PATTERNS = [
@@ -142,10 +154,33 @@ function matchedUnsafeCalorieGuidanceIds(answer: string): string[] {
       .filter((match) => !isUnsafeNutritionLocallyNegated(answer, match.index ?? 0))
       .filter((match) => {
         const value = normalizeNumericToken(match[1] ?? "");
-        return Number.isFinite(value) && value < NUTRITION_SAFETY_CALORIE_FLOOR;
+        if (!Number.isFinite(value) || value >= NUTRITION_SAFETY_CALORIE_FLOOR) {
+          return false;
+        }
+        const valueStart = match.indices?.[1]?.[0];
+        if (valueStart === undefined) {
+          return true;
+        }
+        return !isCalorieAdjustmentDeltaContext(answer, valueStart)
+          && !isPerMacroCalorieBreakdownContext(answer, valueStart);
       })
       .map(() => "sub_floor_calorie_guidance")
   );
+}
+
+function isCalorieAdjustmentDeltaContext(answer: string, valueStart: number): boolean {
+  const prefix = answer.slice(Math.max(0, valueStart - 8), valueStart);
+  return CALORIE_DELTA_CONTEXT_SUFFIX_PATTERN.test(prefix);
+}
+
+function isPerMacroCalorieBreakdownContext(answer: string, valueStart: number): boolean {
+  const prefix = answer.slice(Math.max(0, valueStart - 20), valueStart);
+  const match = prefix.match(PER_MACRO_BREAKDOWN_PREFIX_PATTERN);
+  const tail = match?.groups?.tail;
+  if (tail === undefined) {
+    return false;
+  }
+  return !/[。！？\n]/.test(tail) && !/(?:共|總|合計)/.test(tail);
 }
 
 function matchedUnsafeMealSlotPlanIds(answer: string): string[] {

@@ -964,9 +964,14 @@ async function collectStreamText(stream: AsyncGenerator<string>): Promise<string
 async function* guardUnsafeNutritionStream(
   userMessage: string,
   stream: AsyncGenerator<string>,
-  options: { onFallback?: () => void } = {},
+  options: { onFallback?: () => void; bufferWholeReply?: boolean } = {},
 ): AsyncGenerator<string> {
-  const bufferWholeReply = hasUnsafeNutritionGuidance(stripToolLikeRegions(userMessage));
+  // Goal-context turns buffer the whole reply before the unsafe-reply decision:
+  // once a token is emitted over SSE it cannot be recalled, so a mid-stream
+  // fallback would concatenate the emitted model prefix with the refusal copy
+  // (the UAT-21 我會用你的目我不能 failure).
+  const bufferWholeReply = options.bufferWholeReply === true
+    || hasUnsafeNutritionGuidance(stripToolLikeRegions(userMessage));
   let held = "";
   let emittedTail = "";
 
@@ -1021,11 +1026,13 @@ function mayContainSubFloorCalorieGuidancePrefix(text: string): boolean {
 function createUnsafeNutritionGuardedStream(
   userMessage: string,
   stream: AsyncGenerator<string>,
+  options: { bufferWholeReply?: boolean } = {},
 ): { stream: AsyncGenerator<string>; metadata: StreamFinalReplyTraceMetadata } {
   const metadata: StreamFinalReplyTraceMetadata = {};
   return {
     metadata,
     stream: guardUnsafeNutritionStream(userMessage, stream, {
+      bufferWholeReply: options.bufferWholeReply,
       onFallback: () => {
         metadata.finalReplySource = "renderer";
         metadata.finalReplyShape = "fallback_text";
@@ -1616,7 +1623,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (planningFacts) {
                 response = { content: await collectStreamText(observedStream) };
               } else {
-                const guardedStream = createUnsafeNutritionGuardedStream(userMessage, observedStream);
+                const guardedStream = createUnsafeNutritionGuardedStream(userMessage, observedStream, {
+                  bufferWholeReply: Boolean(activeGoalProposal) || hasCalorieGoalTargetContext(userMessage),
+                });
                 opts?.hooks?.onLLMEnd?.(round + 1, false);
                 return {
                   streamGenerator: appendMutationReceiptStream(
@@ -1654,7 +1663,9 @@ export function createOrchestrator(deps: OrchestratorDeps) {
               if (planningFacts) {
                 response = { content: await collectStreamText(observedStream) };
               } else {
-                const guardedStream = createUnsafeNutritionGuardedStream(userMessage, observedStream);
+                const guardedStream = createUnsafeNutritionGuardedStream(userMessage, observedStream, {
+                  bufferWholeReply: Boolean(activeGoalProposal) || hasCalorieGoalTargetContext(userMessage),
+                });
                 opts?.hooks?.onLLMEnd?.(round + 1, false);
                 return {
                   streamGenerator: appendMutationReceiptStream(
