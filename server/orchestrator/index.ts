@@ -517,7 +517,7 @@ function buildRelativeLowerGoalAdjustmentContext(targets: DailyTargets): ChatMes
     content: [
       "Current user turn is a relative-lower adjustment to the active visible goal proposal.",
       `Active visible proposal targets: calories ${targets.calories} kcal, protein ${targets.protein} g, carbs ${targets.carbs} g, fat ${targets.fat} g.`,
-      `Product floor: NUTRITION_SAFETY_CALORIE_FLOOR = ${NUTRITION_SAFETY_CALORIE_FLOOR} kcal/day.`,
+      `Product floor: ${NUTRITION_SAFETY_CALORIE_FLOOR} kcal/day.`,
       "Recommend concrete target numbers by calling propose_goals. For lower recommendations, calories must be lower than the active visible proposal and at or above 1200 kcal/day.",
       "If the active proposal is already at or below the floor, explain the floor instead of proposing a lower numeric target.",
     ].join("\n"),
