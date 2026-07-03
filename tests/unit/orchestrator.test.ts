@@ -42,6 +42,7 @@ import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderGoalUpdateReceipt,
   renderGoalValidationFailureCopy,
   renderMealDeleteCancelCopy,
   renderMealNumericCancelCopy,
@@ -58,6 +59,13 @@ function bulletCount(text: string): number {
 function assertString(value: unknown): asserts value is string {
   assert.equal(typeof value, "string");
 }
+
+const EXPECTED_1800_GOAL_RECEIPT = renderGoalUpdateReceipt({
+  calories: 1800,
+  protein: 130,
+  carbs: 150,
+  fat: 50,
+});
 
 type ExpectedMutationOutcomeFact = {
   action: "log_food" | "update_meal" | "delete_meal" | "update_goals";
@@ -372,7 +380,7 @@ describe("no-mutation success-claim guard", () => {
       "已記錄雞腿便當，620 kcal，蛋白質 24 g。",
       "已更新雞腿便當，620 kcal，蛋白質 24 g。",
       "已刪除雞腿便當，已從當日紀錄移除。",
-      "已更新每日目標：\n• 卡路里 1800 kcal",
+      renderGoalUpdateReceipt(committedTargets),
     ]) {
       const guarded = guardWithState(claim);
       assert.notEqual(guarded, claim);
@@ -395,7 +403,7 @@ describe("no-mutation success-claim guard", () => {
     assert.notEqual(guardWithState("已刪除雞腿便當，已從當日紀錄移除。", stateFor(logEffects)), "已刪除雞腿便當，已從當日紀錄移除。");
     assert.notEqual(guardWithState("已更新雞腿便當，620 kcal，蛋白質 24 g。", stateFor(deleteEffects)), "已更新雞腿便當，620 kcal，蛋白質 24 g。");
     assert.notEqual(guardWithState("已記錄雞腿便當，620 kcal，蛋白質 24 g。", stateFor(updateEffects)), "已記錄雞腿便當，620 kcal，蛋白質 24 g。");
-    assert.notEqual(guardWithState("已更新每日目標：\n• 卡路里 1800 kcal", stateFor(updateEffects)), "已更新每日目標：\n• 卡路里 1800 kcal");
+    assert.notEqual(guardWithState(renderGoalUpdateReceipt(committedTargets), stateFor(updateEffects)), renderGoalUpdateReceipt(committedTargets));
   });
 
   it("preserves canonical committed receipts byte-for-byte for matching mutation kinds", () => {
@@ -403,7 +411,7 @@ describe("no-mutation success-claim guard", () => {
       const receipt = renderMutationReceipt(effects);
       assert.equal(guardWithState(receipt, stateFor(effects)), receipt);
     }
-    assert.equal(renderMutationReceipt(goalsEffects), "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 190 g\n• 脂肪 55 g");
+    assert.equal(renderMutationReceipt(goalsEffects), renderGoalUpdateReceipt(committedTargets));
     assert.equal(renderMutationReceipt(updateEffects), "已更新半份雞腿便當，360 kcal，蛋白質 20 g。");
   });
 
@@ -1539,7 +1547,7 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.reply, EXPECTED_1800_GOAL_RECEIPT);
     assert.equal(result.finalReplySource, "renderer");
     assert.equal(result.finalReplyShape, "plain_text");
     assert.equal(result.didLogMeal, false);
@@ -1591,7 +1599,7 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.reply, EXPECTED_1800_GOAL_RECEIPT);
     const device = await localDeviceService.getDevice(localDeviceId);
     assert.equal(device?.dailyCalories, 1800);
     assert.equal(device?.dailyProtein, 130);
@@ -3143,7 +3151,7 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.reply, EXPECTED_1800_GOAL_RECEIPT);
     assert.equal(result.finalReplySource, "renderer");
     assert.equal(result.finalReplyShape, "plain_text");
     const device = await localDeviceService.getDevice(localDeviceId);
@@ -3190,7 +3198,7 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.reply, EXPECTED_1800_GOAL_RECEIPT);
     assert.equal(result.finalReplySource, "renderer");
   });
 
@@ -3233,7 +3241,7 @@ describe("Orchestrator - didLogMeal", () => {
     const result = await orchestrator.handleMessage(localDeviceId, "卡路里 1800 蛋白質 130");
 
     assert.ok("reply" in result);
-    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.reply, EXPECTED_1800_GOAL_RECEIPT);
     assert.equal(result.finalReplySource, "renderer");
   });
 

@@ -15,6 +15,7 @@ import { OpenAIProvider } from "../../server/llm/openai.js";
 import { createOrchestrator, type OrchestratorResult } from "../../server/orchestrator/index.js";
 import {
   renderGoalAuthorityFailureCopy,
+  renderGoalUpdateReceipt,
   renderGoalValidationFailureCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import { createStructuredHooks } from "../../server/orchestrator/hooks.js";
@@ -71,6 +72,13 @@ const providerMetadataFixture: ProviderErrorMetadata = {
   errorType: "rate_limit_exceeded",
   errorCode: "rate_limit",
 };
+
+const EXPECTED_1800_GOAL_RECEIPT = renderGoalUpdateReceipt({
+  calories: 1800,
+  protein: 130,
+  carbs: 150,
+  fat: 50,
+});
 
 function assertProviderMetadataExact(metadata: ProviderErrorMetadata) {
   assert.deepEqual(Object.keys(metadata).sort(), [
@@ -290,7 +298,7 @@ describe("Orchestrator", () => {
     assertReplyResult(partialSuccessResult);
     assert.equal(partialSuccessResult.finalReplySource, "renderer");
     assert.equal(partialSuccessResult.finalReplyShape, "plain_text");
-    assert.equal(partialSuccessResult.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(partialSuccessResult.reply, EXPECTED_1800_GOAL_RECEIPT);
     assert.equal(partialSuccessResult.providerFallbackContext, undefined);
   });
 
@@ -918,11 +926,11 @@ describe("Orchestrator", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g" });
+    mockLLM.queueChatResponse({ content: EXPECTED_1800_GOAL_RECEIPT });
 
     const result = await orchestrator.handleMessage(deviceId, "卡路里改 1800，蛋白質 130", undefined, undefined, { hooks: spyHooks });
     assertReplyResult(result);
-    assert.equal(result.reply, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.reply, EXPECTED_1800_GOAL_RECEIPT);
     assert.equal(result.finalReplySource, "renderer");
 
     const device = await deviceService.getDevice(deviceId);
@@ -1012,7 +1020,7 @@ describe("Orchestrator", () => {
         },
       }],
     });
-    mockLLM.queueChatResponse({ content: "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g" });
+    mockLLM.queueChatResponse({ content: EXPECTED_1800_GOAL_RECEIPT });
 
     await orchestrator.handleMessage(deviceId, rawUserText, undefined, undefined, { hooks: spyHooks });
 

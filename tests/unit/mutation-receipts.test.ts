@@ -12,6 +12,7 @@ import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderGoalUpdateReceipt,
   renderUnsafeCalorieFloorCopy,
   renderUnsafeNutritionGuidanceCopy,
   renderGoalValidationFailureCopy,
@@ -38,6 +39,7 @@ import {
   renderProposalSupersededCopy,
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
+import { hasUnsafeNutritionGuidance } from "../../server/orchestrator/nutrition-safety-policy.js";
 
 const committedSummary: DailySummary = {
   totalCalories: 520,
@@ -305,6 +307,63 @@ describe("goal proposal and rejection renderers", () => {
     assert.match(text, /1500\s*kcal/);
     assert.match(text, /1300\s*kcal/);
     assertNoGoalInternalTerms(text);
+  });
+
+  it("renders follow-up goal proposal copy as a shorter baseline-naming continuation", () => {
+    const text = renderGoalProposalCopy(
+      {
+        calories: 2250,
+        protein: 150,
+        carbs: 240,
+        fat: 65,
+      },
+      {
+        calories: 2450,
+        protein: 160,
+        carbs: 260,
+        fat: 75,
+      },
+    );
+
+    assert.match(text, /2450\s*kcal/);
+    assert.match(text, /2250\s*kcal/);
+    assert.match(text, /下修\s*200\s*kcal/);
+    assert.doesNotMatch(text, /依你想調整目標的方向/);
+    assert.doesNotMatch(text, /這組數字讓熱量、蛋白質、碳水和脂肪一起對齊/);
+    assert.match(text, /• 卡路里 2250 kcal/);
+    assert.match(text, /• 蛋白質 150 g/);
+    assert.match(text, /• 碳水 240 g/);
+    assert.match(text, /• 脂肪 65 g/);
+    assert.match(text, /蛋白質下修\s*10\s*g/);
+    assert.match(text, /碳水下修\s*20\s*g/);
+    assert.match(text, /脂肪下修\s*10\s*g/);
+    assert.doesNotMatch(text, /蛋白質維持/);
+    assert.equal(hasUnsafeNutritionGuidance(text), false);
+    assertNoGoalInternalTerms(text);
+  });
+
+  it("renders macro-change wording from actual diffs only", () => {
+    const text = renderGoalProposalCopy(
+      {
+        calories: 1800,
+        protein: 140,
+        carbs: 164,
+        fat: 53,
+      },
+      {
+        calories: 2050,
+        protein: 140,
+        carbs: 226,
+        fat: 58,
+      },
+    );
+
+    assert.match(text, /2050\s*kcal/);
+    assert.match(text, /下修\s*250\s*kcal/);
+    assert.match(text, /蛋白質維持\s*140\s*g/);
+    assert.match(text, /碳水下修\s*62\s*g/);
+    assert.match(text, /脂肪下修\s*5\s*g/);
+    assert.equal(hasUnsafeNutritionGuidance(text), false);
   });
 
   it("renders one generic authority failure copy for unavailable proposal states", () => {
@@ -981,7 +1040,7 @@ describe("mutation receipt renderer", () => {
     }
   });
 
-  it("renders goal receipts with all four committed target rows", () => {
+  it("renders goal receipts with the applied calorie value and all four committed target rows", () => {
     const text = renderMutationReceipt({
       kind: "goals",
       affectedDate: "2026-05-10",
@@ -991,7 +1050,8 @@ describe("mutation receipt renderer", () => {
       updatedFields: ["calories", "protein"],
     });
 
-    assert.equal(text, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(text, "已更新每日目標：已套用 1800 kcal 這組設定\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(renderGoalUpdateReceipt(committedTargets), text);
     assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
   });
 

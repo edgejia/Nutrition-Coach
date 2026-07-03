@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import { renderGoalUpdateReceipt } from "../../server/orchestrator/mutation-receipts.js";
 import { goalProposalTargetSignature } from "../../server/services/goal-proposals.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 
@@ -54,6 +55,7 @@ const UPDATED_TARGETS: DailyTargets = {
   carbs: 130,
   fat: 45,
 };
+const UPDATED_TARGETS_RECEIPT = renderGoalUpdateReceipt(UPDATED_TARGETS);
 const RECOVERABLE_COPY = "這次沒有完成套用，資料沒有變更。請再試一次，或取消這個提案。";
 const IDEMPOTENT_COPY = "這個提案已經處理過，不需要再確認一次。";
 const STALE_LAPSE_COPY = "這個估值修改提案已超過 30 分鐘，請重新提出修改。";
@@ -358,10 +360,7 @@ describe("typed proposal actions through /api/chat", () => {
     assert.equal(body.proposalActionEvent?.proposalKind, "goal");
     assert.equal(body.proposalActionEvent?.action, "approve");
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
-    assert.equal(
-      body.reply,
-      "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g",
-    );
+    assert.equal(body.reply, UPDATED_TARGETS_RECEIPT);
     assert.deepEqual(await readTargets(), UPDATED_TARGETS);
 
     const history = await getHistory();

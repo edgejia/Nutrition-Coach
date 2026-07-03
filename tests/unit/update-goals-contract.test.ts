@@ -367,7 +367,7 @@ describe("update_goals ToolContract", () => {
 
     assert.equal(result.success, true);
     assert.equal(result.executed, true);
-    assert.equal(result.result, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.result, "已更新每日目標：已套用 1800 kcal 這組設定\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
     assert.deepEqual(result.updatedFields, ["calories", "protein"]);
     assert.deepEqual(await readTargets(deviceService, deviceId), {
       calories: 1800,

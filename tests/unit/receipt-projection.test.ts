@@ -2,9 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { MutationEffects } from "../../server/orchestrator/mutation-effects.js";
 import {
+  renderGoalProposalCopy,
   renderGuardedMutationReceipt,
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
+import { guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
 import { projectPublicMealItems } from "../../server/lib/public-meal-items.js";
 import { buildReceiptMealEditPayload } from "../../client/src/meal-edit-payload.js";
 
@@ -154,6 +156,27 @@ describe("renderGuardedMutationReceipt", () => {
         renderMutationReceipt(effects),
       );
     }
+  });
+
+  it("keeps goal proposal copy out of success-claim detection and goal receipts in the goal lane", () => {
+    const proposalCopy = renderGoalProposalCopy(
+      { calories: 1800, protein: 140, carbs: 164, fat: 53 },
+      { calories: 2050, protein: 140, carbs: 226, fat: 58 },
+    );
+    const receipt = renderMutationReceipt(goalEffects());
+
+    assert.equal(
+      guardNoMutationSuccessClaim(proposalCopy, { hasCommittedMutation: false }),
+      proposalCopy,
+    );
+    assert.equal(
+      guardNoMutationSuccessClaim(receipt, { hasCommittedMutation: true, mutationKind: "goals" }),
+      receipt,
+    );
+    assert.notEqual(
+      guardNoMutationSuccessClaim(receipt, { hasCommittedMutation: true, mutationKind: "update" }),
+      receipt,
+    );
   });
 });
 

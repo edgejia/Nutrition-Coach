@@ -7,7 +7,7 @@ import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
-import { renderUnsafeCalorieFloorCopy } from "../../server/orchestrator/mutation-receipts.js";
+import { renderGoalUpdateReceipt, renderUnsafeCalorieFloorCopy } from "../../server/orchestrator/mutation-receipts.js";
 import { goalProposalTargetSignature } from "../../server/services/goal-proposals.js";
 import type { ProposalActionTestHooks } from "../../server/services/proposal-actions.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
@@ -509,10 +509,7 @@ describe("proposal action API", () => {
     assert.equal(body.ok, true);
     assert.equal(body.status, "approved");
     assert.equal(body.didMutateMeal, false);
-    assert.equal(
-      body.reply,
-      "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g",
-    );
+    assert.equal(body.reply, renderGoalUpdateReceipt(targets));
     assert.deepEqual(body.dailyTargets, targets);
     assert.deepEqual(await readTargets(), targets);
     assert.equal(body.proposalCard?.proposalId, proposalId);
@@ -744,7 +741,7 @@ describe("proposal action API", () => {
     const defaults = await readTargets();
     const targets = { calories: 1400, protein: 125, carbs: 130, fat: 45 };
     const { proposalId } = await createGoalCard(targets);
-    const goalReply = "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g";
+    const goalReply = renderGoalUpdateReceipt(targets);
     const originalSaveAssistantReplyWithReceipt = services.chatService.saveAssistantReplyWithReceipt;
     services.chatService.saveAssistantReplyWithReceipt = async () => {
       throw new Error("injected structured outcome persistence failure");
@@ -872,7 +869,7 @@ describe("proposal action API", () => {
     assert.deepEqual(await readTargets(), defaults);
     assert.equal(publishedGoalUpdates.length, 0);
     assert.equal(await historyHasActionEvent(proposalId), false);
-    const goalReply = "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g";
+    const goalReply = renderGoalUpdateReceipt(targets);
     assert.equal(await historyHasAssistantReply(goalReply), false);
     assert.equal((await services.goalProposalService.getLatest({
       deviceId,
@@ -1171,10 +1168,7 @@ describe("proposal action API", () => {
     assert.equal(body.proposalActionEvent?.proposalId, proposalId);
     assert.equal(body.proposalActionEvent?.action, "approve");
     assert.equal(body.proposalActionEvent?.transcriptCopy, "已選擇套用目標");
-    assert.equal(
-      body.reply,
-      "已更新每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 125 g\n• 碳水 130 g\n• 脂肪 45 g",
-    );
+    assert.equal(body.reply, renderGoalUpdateReceipt(targets));
     await assertHistoryActionReply({
       proposalId,
       action: "approve",
