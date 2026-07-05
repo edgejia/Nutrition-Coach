@@ -7,6 +7,7 @@ import {
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
 import { createScenarioApp } from "../app-fixture.js";
+import { parseSSEEvents } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
 
 interface DailyTargets {
@@ -22,10 +23,11 @@ interface GoalSubCaseEvidence {
   allowedTools: string[];
   observedTools: string[];
   unauthorizedTools: string[];
-  beforeTargets: DailyTargets;
-  afterTargets: DailyTargets;
-  persistedDiff: Record<string, { before: number; after: number }>;
-  reply: string;
+  beforeTargetFieldCount: number;
+  afterTargetFieldCount: number;
+  changedTargetFields: string[];
+  persistedDiff: Record<string, unknown>;
+  replyLength: number;
 }
 
 const MUTATION_TOOLS = new Set(["log_food", "update_meal", "delete_meal", "update_goals"]);
@@ -62,7 +64,7 @@ async function runExplicitNumericGoalUpdate(): Promise<{
         type: "function",
         function: {
           name: "update_goals",
-          arguments: JSON.stringify({ calories: 1800, protein: 130 }),
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1800, protein: 130 }),
         },
       }],
     });
@@ -81,10 +83,11 @@ async function runExplicitNumericGoalUpdate(): Promise<{
       allowedTools: ["update_goals"],
       observedTools,
       unauthorizedTools,
-      beforeTargets,
-      afterTargets,
+      beforeTargetFieldCount: Object.keys(beforeTargets).length,
+      afterTargetFieldCount: Object.keys(afterTargets).length,
+      changedTargetFields: changedTargetFields(beforeTargets, afterTargets),
       persistedDiff,
-      reply: response.reply,
+      replyLength: response.reply.length,
     };
 
     return {
@@ -142,10 +145,11 @@ async function runVagueGoalIntent(): Promise<{
       allowedTools: [],
       observedTools,
       unauthorizedTools,
-      beforeTargets,
-      afterTargets,
+      beforeTargetFieldCount: Object.keys(beforeTargets).length,
+      afterTargetFieldCount: Object.keys(afterTargets).length,
+      changedTargetFields: changedTargetFields(beforeTargets, afterTargets),
       persistedDiff,
-      reply: response.reply,
+      replyLength: response.reply.length,
     };
 
     return {
@@ -188,11 +192,22 @@ async function postChat(
 
   const res = await fetch(`${address}/api/chat`, {
     method: "POST",
-    headers: { cookie: cookieHeader },
+    headers: { cookie: cookieHeader, Accept: "text/event-stream" },
     body: form,
   });
-  const body = await res.json() as { reply?: string };
-  return { status: res.status, reply: body.reply ?? "" };
+  const rawSse = await res.text();
+  const events = parseSSEEvents(rawSse);
+  const reply = events
+    .filter((event) => event.event === "chunk")
+    .map((event) => {
+      try {
+        return (JSON.parse(event.data) as { token?: string }).token ?? "";
+      } catch {
+        return "";
+      }
+    })
+    .join("");
+  return { status: res.status, reply };
 }
 
 async function readTargets(address: string, cookieHeader: string): Promise<DailyTargets> {
@@ -227,17 +242,15 @@ function collectUnauthorizedTools(observedTools: string[], allowedTools: string[
   return observedTools.filter((tool) => MUTATION_TOOLS.has(tool) && !allowed.has(tool));
 }
 
-function diffTargets(
-  before: DailyTargets,
-  after: DailyTargets,
-): Record<string, { before: number; after: number }> {
-  const diff: Record<string, { before: number; after: number }> = {};
-  for (const key of ["calories", "protein", "carbs", "fat"] as const) {
-    if (before[key] !== after[key]) {
-      diff[key] = { before: before[key], after: after[key] };
-    }
-  }
-  return diff;
+function changedTargetFields(before: DailyTargets, after: DailyTargets): string[] {
+  return (["calories", "protein", "carbs", "fat"] as const).filter((key) => before[key] !== after[key]);
+}
+
+function diffTargets(before: DailyTargets, after: DailyTargets): Record<string, unknown> {
+  const changedFields = changedTargetFields(before, after);
+  return changedFields.length > 0
+    ? { targetsChanged: true, changedFields }
+    : {};
 }
 
 function namedAssertion(

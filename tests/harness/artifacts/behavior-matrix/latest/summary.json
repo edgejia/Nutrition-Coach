@@ -1,0 +1,28 @@
+{
+  "scenarioName": "behavior-matrix",
+  "ok": true,
+  "consoleSummary": "PASS behavior-matrix 18/18",
+  "totalSteps": 18,
+  "passedSteps": 18,
+  "stepNames": [
+    "CASE-01",
+    "CASE-02",
+    "CASE-03",
+    "CASE-04",
+    "CASE-05",
+    "CASE-06",
+    "CASE-07",
+    "CASE-08",
+    "CASE-09",
+    "CASE-10",
+    "CASE-11",
+    "CASE-12",
+    "CASE-13",
+    "CASE-14",
+    "CASE-15",
+    "CASE-16",
+    "CASE-17",
+    "PHASE-53-MUTATION-RECEIPTS"
+  ],
+  "writtenAt": "2026-07-02T05:55:51.893Z"
+}

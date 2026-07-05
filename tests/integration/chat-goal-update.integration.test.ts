@@ -4,14 +4,25 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp, type AppServices } from "../../server/app.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
+import type {
+  ChatMessage,
+  LLMCallOptions,
+  LLMResponse,
+  ToolDefinition,
+} from "../../server/llm/types.js";
 import { createLlmTraceRecorder } from "../../server/orchestrator/llm-trace.js";
 import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
+  renderDuplicateGoalProposalCopy,
   renderGoalProposalCopy,
+  renderUnsafeCalorieFloorCopy,
+  renderUnsafeNutritionGuidanceCopy,
   renderGoalValidationFailureCopy,
   renderProposalKindAmbiguityCopy,
+  renderProposalSupersededCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
+import { buildGoalProposalCard } from "../../server/orchestrator/tools.js";
 import type { createMealNumericProposalService } from "../../server/services/meal-numeric-proposals.js";
 import { DEFAULT_SESSION_ID } from "../../server/services/turn-state.js";
 import type { FastifyInstance } from "fastify";
@@ -38,6 +49,7 @@ interface ChatBody {
     details: { rows: Array<Record<string, unknown>> };
     actions: Record<string, string>;
     expiresAt: string | null;
+    lapseCopy?: string | null;
   };
   proposalActionEvent?: {
     proposalId: string;
@@ -72,8 +84,113 @@ const PROPOSAL_TARGETS: DailyTargets = {
   fat: 45,
 };
 
+const SAFE_LOWER_PROPOSAL_TARGETS: DailyTargets = {
+  calories: 1600,
+  protein: 132,
+  carbs: 153,
+  fat: 51,
+};
+
+const LLM_LOWER_FROM_1800_TARGETS: DailyTargets = {
+  calories: 1550,
+  protein: 125,
+  carbs: 160,
+  fat: 45,
+};
+
+const UAT_21_REBOUND_BASELINE_TARGETS: DailyTargets = {
+  calories: 2700,
+  protein: 150,
+  carbs: 390,
+  fat: 75,
+};
+
+const UAT_21_INITIAL_PROPOSAL_TARGETS: DailyTargets = {
+  calories: 1500,
+  protein: 150,
+  carbs: 140,
+  fat: 45,
+};
+
+const UAT_21_FLOOR_PROPOSAL_TARGETS: DailyTargets = {
+  calories: 1200,
+  protein: 130,
+  carbs: 105,
+  fat: 35,
+};
+
+const UAT_21_VALID_RETRY_TARGETS: DailyTargets = {
+  calories: 1350,
+  protein: 130,
+  carbs: 120,
+  fat: 40,
+};
+
+const UAT_21_BELOW_FLOOR_LLM_TARGETS: DailyTargets = {
+  calories: 1000,
+  protein: 110,
+  carbs: 95,
+  fat: 35,
+};
+
+const UAT_21_MACRO_INCONSISTENT_TARGETS: DailyTargets = {
+  calories: 1300,
+  protein: 150,
+  carbs: 200,
+  fat: 80,
+};
+
+const UAT_21_COPY_BASELINE_TARGETS: DailyTargets = {
+  calories: 2450,
+  protein: 160,
+  carbs: 260,
+  fat: 75,
+};
+
+const UAT_21_COPY_FIRST_LOWER_TARGETS: DailyTargets = {
+  calories: 2250,
+  protein: 150,
+  carbs: 240,
+  fat: 65,
+};
+
+const UAT_21_COPY_APPLIED_TARGETS: DailyTargets = {
+  calories: 2050,
+  protein: 140,
+  carbs: 226,
+  fat: 58,
+};
+
+const UAT_21_COPY_SECOND_LOWER_TARGETS: DailyTargets = {
+  calories: 1800,
+  protein: 140,
+  carbs: 164,
+  fat: 53,
+};
+
+const UAT_21_DUPLICATE_TARGETS: DailyTargets = {
+  calories: 1200,
+  protein: 140,
+  carbs: 95,
+  fat: 33,
+};
+
+const UAT_21_DIFFERENT_TARGETS: DailyTargets = {
+  calories: 1300,
+  protein: 150,
+  carbs: 100,
+  fat: 40,
+};
+
+const UNSAFE_TARGETS: DailyTargets = {
+  calories: 500,
+  protein: 120,
+  carbs: 150,
+  fat: 50,
+};
+
 const SUCCESS_RECEIPT = [
-  "已更新每日目標：",
+  "已更新每日目標：已套用 1800 kcal 這組設定",
   "• 卡路里 1800 kcal",
   "• 蛋白質 130 g",
   "• 碳水 150 g",
@@ -81,18 +198,116 @@ const SUCCESS_RECEIPT = [
 ].join("\n");
 
 const PROPOSAL_SUCCESS_RECEIPT = [
-  "已更新每日目標：",
+  "已更新每日目標：已套用 1400 kcal 這組設定",
   "• 卡路里 1400 kcal",
   "• 蛋白質 125 g",
   "• 碳水 130 g",
   "• 脂肪 45 g",
 ].join("\n");
 
+const FLOOR_EXPLANATION_REPLY = "可以往下調，1200 kcal/天是這個產品的安全下限；目前 1800 仍可改成 1200 或任何高於 1200 的目標。你可以直接指定想要的數字，我再幫你處理。";
+
 const SUCCESS_STYLE_COPY = /已更新每日目標|已經幫你更新|更新好了/;
+const IMMOVABLE_1800_COPY = /1800[^\n。]*(不能|不可|不得)[^\n。]*(更低|往下|降低|動)/;
+const INTERNAL_SAFETY_IDS = /NUTRITION_SAFETY_CALORIE_FLOOR|unsafe_calorie_floor|nutritionSafety|nutrition-safety|SAFE-0[123]|propose_goals|update_goals/;
+const GOAL_PROPOSAL_APPROVAL_REQUEST_COPY = /如果要套用|請回覆「好」|回覆.*套用/;
+
+function macroCalorieDiffRatio(targets: DailyTargets): number {
+  const macroCalories = targets.protein * 4 + targets.carbs * 4 + targets.fat * 9;
+  return Math.abs(macroCalories - targets.calories) / targets.calories;
+}
+
+function chatContentToText(content: ChatMessage["content"]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content.map((part) => part.type === "text" ? part.text ?? "" : "").join("\n");
+  }
+  return "";
+}
+
+function latestUserText(messages: ChatMessage[]): string {
+  const message = [...messages].reverse().find((candidate) => candidate.role === "user");
+  return message ? chatContentToText(message.content) : "";
+}
+
+function systemPromptText(messages: ChatMessage[]): string {
+  const message = messages.find((candidate) => candidate.role === "system");
+  return message ? chatContentToText(message.content) : "";
+}
+
+class GoalFloorPromptProbeProvider extends MockLLMProvider {
+  private goalFloorProbeEnabled = false;
+
+  enableGoalFloorProbe() {
+    this.goalFloorProbeEnabled = true;
+  }
+
+  async chat(
+    messages: ChatMessage[],
+    tools: ToolDefinition[],
+    opts?: LLMCallOptions,
+  ): Promise<LLMResponse> {
+    if (!this.goalFloorProbeEnabled) {
+      return super.chat(messages, tools, opts);
+    }
+
+    this.chatCalls.push({ messages, tools, opts });
+    const prompt = systemPromptText(messages);
+    const userText = latestUserText(messages);
+    const hasFloorContract = (
+      prompt.includes("1200 kcal/天") &&
+      prompt.includes("安全下限") &&
+      prompt.includes("1800 kcal/天不是安全下限") &&
+      prompt.includes("高於或等於安全下限 1200 kcal/day") &&
+      !prompt.includes("NUTRITION_SAFETY_CALORIE_FLOOR")
+    );
+
+    if (!hasFloorContract) {
+      return { content: "缺少 1200 安全下限提示。" };
+    }
+
+    if (userText.includes("不是可以到1200")) {
+      return { content: FLOOR_EXPLANATION_REPLY };
+    }
+
+    if (userText.includes("再低一點")) {
+      return {
+        toolCalls: [{
+          id: "safe_lower_goal_proposal",
+          type: "function",
+          function: {
+            name: "propose_goals",
+            arguments: JSON.stringify(SAFE_LOWER_PROPOSAL_TARGETS),
+          },
+        }],
+      };
+    }
+
+    if (userText.includes("改成 1200")) {
+      return {
+        toolCalls: [{
+          id: "exact_floor_goal_update",
+          type: "function",
+          function: {
+            name: "update_goals",
+            arguments: JSON.stringify({
+              mode: "current_turn_values",
+              calories: 1200,
+            }),
+          },
+        }],
+      };
+    }
+
+    return { content: "Mock: 已記錄您的飲食！" };
+  }
+}
 
 describe("chat goal update integration", () => {
   let app: FastifyInstance;
-  let mockLLM: MockLLMProvider;
+  let mockLLM: GoalFloorPromptProbeProvider;
   let address: string;
   let deviceId: string;
   let sessionCookieHeader: string;
@@ -110,7 +325,7 @@ describe("chat goal update integration", () => {
   }
 
   beforeEach(async () => {
-    mockLLM = new MockLLMProvider();
+    mockLLM = new GoalFloorPromptProbeProvider();
     publishCalls = [];
     traceRecorders = [];
     app = await buildApp({
@@ -170,6 +385,88 @@ describe("chat goal update integration", () => {
     assert.equal(res.status, 200);
     const body = await res.json() as { dailyTargets: DailyTargets };
     return body.dailyTargets;
+  }
+
+  async function setTargetsThroughDeviceApi(targets: DailyTargets): Promise<void> {
+    const res = await fetch(`${address}/api/device/goals`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        cookie: sessionCookieHeader,
+      },
+      body: JSON.stringify(targets),
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { dailyTargets: DailyTargets };
+    assert.deepEqual(body.dailyTargets, targets);
+    publishCalls = [];
+  }
+
+  function proposalCalories(body: ChatBody): number {
+    const after = body.proposalCard?.details.rows[0]?.after;
+    if (typeof after !== "string") {
+      assert.fail(`Expected calorie row, got ${String(after)}`);
+    }
+    const match = after.match(/([0-9]+)\s*kcal/);
+    assert.ok(match, `Expected calorie row, got ${after}`);
+    return Number(match[1]);
+  }
+
+  function goalProposalRows(): Array<{
+    proposal_id: string;
+    status: string;
+    lapse_copy: string | null;
+  }> {
+    return services.db.$client
+      .prepare(`
+        SELECT proposal_id, status, lapse_copy
+        FROM chat_proposal_cards
+        WHERE device_id = ? AND proposal_kind = 'goal'
+        ORDER BY created_at
+      `)
+      .all(deviceId) as Array<{ proposal_id: string; status: string; lapse_copy: string | null }>;
+  }
+
+  function assertLowerFollowUpCopy(input: {
+    reply: string;
+    baselineCalories: number;
+    targetCalories: number;
+    deltaCalories: number;
+  }) {
+    assert.match(input.reply, new RegExp(`${input.baselineCalories}\\s*kcal`));
+    assert.match(input.reply, new RegExp(`${input.targetCalories}\\s*kcal`));
+    assert.match(input.reply, new RegExp(`下修\\s*${input.deltaCalories}\\s*kcal`));
+    assert.doesNotMatch(input.reply, /依你想調整目標的方向/);
+    assert.doesNotMatch(input.reply, /這組數字讓熱量、蛋白質、碳水和脂肪一起對齊/);
+  }
+
+  async function setTargetsTo1800ThroughChat(options: { enableFloorProbe?: boolean } = { enableFloorProbe: true }) {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "goal_success_before_floor_followup",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1800,
+            protein: 130,
+          }),
+        },
+      }],
+    });
+
+    const initial = await postChat("卡路里改成 1800，蛋白質 130 克");
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.reply, SUCCESS_RECEIPT);
+    assert.deepEqual(initial.body.dailyTargets, SUCCESS_TARGETS);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+    publishCalls = [];
+    if (options.enableFloorProbe !== false) {
+      mockLLM.enableGoalFloorProbe();
+    }
   }
 
   async function saveMealNumericProposalCard(input: {
@@ -290,6 +587,329 @@ describe("chat goal update integration", () => {
     assert.equal(mockLLM.chatCalls.length, 1);
   });
 
+  it("blocks unsafe current-turn goal updates without mutation or goals_update publish", async () => {
+    const before = await readTargets();
+    const { status, body } = await postChat("卡路里改成 500");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /這次沒有套用目標更新/);
+    assert.match(body.reply, /每日熱量目標太低/);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.deepEqual(await readTargets(), before);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
+  it("routes unsafe calorie target text to renderer safety copy before calling the model", async () => {
+    const before = await readTargets();
+    const { status, body } = await postChat("把我的每日熱量改成 500 kcal");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.deepEqual(await readTargets(), before);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
+  it("blocks unsafe goal proposals without an actionable card or hidden pending state", async () => {
+    const before = await readTargets();
+    const { status, body } = await postChat("幫我建議每天 500 kcal 的目標");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /每日熱量目標太低/);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.deepEqual(await readTargets(), before);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 0);
+  });
+
+  it("keeps unsafe proposal consent replay from applying hidden 500 kcal state", async () => {
+    const unsafeProposal = await postChat("幫我建議每天 500 kcal 的目標");
+    assert.equal(unsafeProposal.status, 200);
+    assert.equal(unsafeProposal.body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(unsafeProposal.body.proposalCard, undefined);
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 0);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "unsafe_goal_replay",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "latest_proposal" }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "已經幫你更新每日目標。" });
+    const replayed = await postChat("好");
+
+    assert.equal(replayed.status, 200);
+    assert.equal(replayed.body.didLogMeal, false);
+    assert.equal(replayed.body.didMutateMeal, false);
+    assert.equal(replayed.body.reply, renderGoalAuthorityFailureCopy());
+    assert.equal(replayed.body.dailyTargets, undefined);
+    assert.equal(replayed.body.proposalCard, undefined);
+    assert.doesNotMatch(replayed.body.reply, SUCCESS_STYLE_COPY);
+    assert.equal(await services.goalProposalService.getLatest(defaultSessionKey()), undefined);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("rejects exactly-floor calorie-only updates when existing macros would over-allocate calories", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "floor_goal_update",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1200,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "請補上蛋白質、碳水與脂肪後，我再幫你套用 1200 kcal。" });
+
+    const { status, body } = await postChat("卡路里改成 1200");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, "請補上蛋白質、碳水與脂肪後，我再幫你套用 1200 kcal。");
+    assert.equal(body.dailyTargets, undefined);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("rejects formatted exactly-floor calorie-only updates when merged targets are inconsistent", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "formatted_floor_goal_update",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1200,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "請補上完整巨量營養素後，我再套用 1,200 kcal。" });
+
+    const { status, body } = await postChat("卡路里改成 1,200 kcal");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, "請補上完整巨量營養素後，我再套用 1,200 kcal。");
+    assert.equal(body.dailyTargets, undefined);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 2);
+  });
+
+  it("does not treat safe decimal calorie text as a below-floor target", async () => {
+    mockLLM.queueChatResponse({
+      content: "1200.5 kcal 高於安全下限；請提供整數目標，我再幫你處理。",
+    });
+
+    const { status, body } = await postChat("卡路里改成 1200.5 kcal");
+
+    assert.equal(status, 200);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /安全下限/);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("does not treat anthropometric numbers as unsafe calorie goal targets", async () => {
+    mockLLM.queueChatResponse({
+      content: "可以，我會把身高 160 公分當作背景，先討論安全的減脂目標。",
+    });
+
+    const { status, body } = await postChat("我身高 160 公分，想設定減脂目標");
+
+    assert.equal(status, 200);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /身高 160 公分/);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("does not treat meal calorie logs as unsafe calorie goal targets", async () => {
+    mockLLM.queueChatResponse({
+      content: "收到，我會把今天 900 kcal 當作飲食紀錄來看。",
+    });
+
+    const { status, body } = await postChat("我今天吃了 900 kcal");
+
+    assert.equal(status, 200);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /900 kcal/);
+    assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("does not treat beverage calorie logs after goal context as unsafe calorie goal targets", async () => {
+    await setTargetsTo1800ThroughChat({ enableFloorProbe: false });
+    mockLLM.queueChatResponse({
+      content: "收到，我會把 900 kcal 奶昔當作飲食紀錄來看。",
+    });
+
+    const { status, body } = await postChat("我喝了 900 kcal 奶昔");
+
+    assert.equal(status, 200);
+    assert.notEqual(body.reply, renderUnsafeCalorieFloorCopy());
+    assert.match(body.reply, /900 kcal 奶昔/);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+    assert.equal(mockLLM.chatCalls.length, 2);
+  });
+
+  it("explains the 1200 floor after an 1800 kcal target without treating 1800 as immovable", async () => {
+    await setTargetsTo1800ThroughChat();
+
+    const { status, body } = await postChat("不是可以到1200嗎為什麼1800就不能動了？");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, FLOOR_EXPLANATION_REPLY);
+    assert.match(body.reply, /1200/);
+    assert.match(body.reply, /安全下限/);
+    assert.doesNotMatch(body.reply, IMMOVABLE_1800_COPY);
+    assert.doesNotMatch(body.reply, INTERNAL_SAFETY_IDS);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("turns a vague lower-target follow-up after 1800 into an LLM-owned above-floor proposal", async () => {
+    await setTargetsTo1800ThroughChat({ enableFloorProbe: false });
+    const beforeLowerModelCallCount = mockLLM.chatCalls.length;
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "llm_lower_from_1800_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(LLM_LOWER_FROM_1800_TARGETS),
+        },
+      }],
+    });
+
+    const { status, body } = await postChat("那幫我再低一點");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderGoalProposalCopy(LLM_LOWER_FROM_1800_TARGETS, SUCCESS_TARGETS));
+    assert.doesNotMatch(body.reply, INTERNAL_SAFETY_IDS);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard?.proposalKind, "goal");
+    assert.equal(body.proposalCard?.proposalLane, "goal");
+    assert.equal(body.proposalCard?.status, "active");
+    assert.equal(body.proposalCard?.isActionable, true);
+    assert.equal(mockLLM.chatCalls.length, beforeLowerModelCallCount + 1);
+    assert.deepEqual(body.proposalCard?.details.rows.map((row) => row.after), [
+      "1550 kcal",
+      "125 g",
+      "160 g",
+      "45 g",
+    ]);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("consumes queued model output for vague lower-target text instead of backend-generating targets", async () => {
+    await setTargetsTo1800ThroughChat({ enableFloorProbe: false });
+    const beforeLowerModelCallCount = mockLLM.chatCalls.length;
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "llm_exact_lower_target_must_win",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(LLM_LOWER_FROM_1800_TARGETS),
+        },
+      }],
+    });
+
+    const { status, body } = await postChat("那幫我再低一點");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, renderGoalProposalCopy(LLM_LOWER_FROM_1800_TARGETS, SUCCESS_TARGETS));
+    assert.equal(body.proposalCard?.proposalKind, "goal");
+    assert.equal(body.proposalCard?.proposalLane, "goal");
+    assert.equal(body.proposalCard?.status, "active");
+    assert.equal(body.proposalCard?.isActionable, true);
+    assert.equal(mockLLM.chatCalls.length, beforeLowerModelCallCount + 1);
+    assert.deepEqual(body.proposalCard?.details.rows.map((row) => row.after), [
+      "1550 kcal",
+      "125 g",
+      "160 g",
+      "45 g",
+    ]);
+    assert.deepEqual(
+      (await services.goalProposalService.getLatest(defaultSessionKey()))?.targets,
+      LLM_LOWER_FROM_1800_TARGETS,
+    );
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("rejects an exact-floor follow-up after 1800 when macros are not supplied", async () => {
+    await setTargetsTo1800ThroughChat({ enableFloorProbe: false });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "exact_floor_goal_update",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({
+            mode: "current_turn_values",
+            calories: 1200,
+          }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({ content: "請補上完整蛋白質、碳水與脂肪後，我再套用 1200 kcal。" });
+
+    const { status, body } = await postChat("那改成 1200");
+
+    assert.equal(status, 200);
+    assert.equal(body.didLogMeal, false);
+    assert.equal(body.didMutateMeal, false);
+    assert.equal(body.reply, "請補上完整蛋白質、碳水與脂肪後，我再套用 1200 kcal。");
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.proposalCard, undefined);
+    assert.deepEqual(await readTargets(), SUCCESS_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
   it("creates a backend proposal for vague intent without mutating targets or publishing", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -308,7 +928,7 @@ describe("chat goal update integration", () => {
     assert.equal(status, 200);
     assert.equal(body.didLogMeal, false);
     assert.equal(body.didMutateMeal, false);
-    assert.equal(body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS));
+    assert.equal(body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS, DEFAULT_TARGETS));
     assert.equal(body.dailyTargets, undefined);
     assert.equal(body.proposalCard?.proposalKind, "goal");
     assert.equal(body.proposalCard?.proposalLane, "goal");
@@ -333,6 +953,447 @@ describe("chat goal update integration", () => {
     assert.equal(assistantProposal?.proposalCard?.isActionable, true);
   });
 
+  it("UAT-21 calls the LLM for relative-lower follow-ups and accepts valid model targets exactly", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.proposalCard?.proposalKind, "goal");
+    assert.equal(proposalCalories(initial.body), UAT_21_INITIAL_PROPOSAL_TARGETS.calories);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    const beforeLowerModelCallCount = mockLLM.chatCalls.length;
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_valid_lower_model_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_VALID_RETRY_TARGETS),
+        },
+      }],
+    });
+
+    const lowerFromInitial = await postChat("再低一點");
+
+    assert.equal(lowerFromInitial.status, 200);
+    assert.equal(lowerFromInitial.body.proposalCard?.proposalKind, "goal");
+    assert.equal(proposalCalories(lowerFromInitial.body), UAT_21_VALID_RETRY_TARGETS.calories);
+    assert.equal(mockLLM.chatCalls.length, beforeLowerModelCallCount + 1);
+    assert.deepEqual(
+      (await services.goalProposalService.getLatest(defaultSessionKey()))?.targets,
+      UAT_21_VALID_RETRY_TARGETS,
+    );
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("UAT-21 rejects rebound relative-lower model proposals before persistence and accepts a valid retry", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_rebound_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+    assert.equal(initial.status, 200);
+    const activeBefore = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeBefore);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_rebound_model_proposal_rejected",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_REBOUND_BASELINE_TARGETS),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_rebound_retry_model_proposal_accepted",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_VALID_RETRY_TARGETS),
+        },
+      }],
+    });
+    const callCountBeforeLower = mockLLM.chatCalls.length;
+
+    const lower = await postChat("再低還是太高");
+
+    assert.equal(lower.status, 200);
+    assert.equal(lower.body.proposalCard?.proposalKind, "goal");
+    assert.equal(proposalCalories(lower.body), UAT_21_VALID_RETRY_TARGETS.calories);
+    assert.equal(mockLLM.chatCalls.length, callCountBeforeLower + 2);
+    assert.deepEqual(
+      (await services.goalProposalService.getLatest(defaultSessionKey()))?.targets,
+      UAT_21_VALID_RETRY_TARGETS,
+    );
+    assert.notEqual(lower.body.proposalCard?.proposalId, activeBefore.proposalId);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("UAT-21 returns terminal floor copy for below-floor and active-at-floor relative-lower model proposals", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_below_floor_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+    assert.equal(initial.status, 200);
+    const activeBefore = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeBefore);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_below_floor_model_proposal_rejected",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_BELOW_FLOOR_LLM_TARGETS),
+        },
+      }],
+    });
+    const callCountBeforeBelowFloor = mockLLM.chatCalls.length;
+
+    const belowFloor = await postChat("再低一點");
+
+    assert.equal(belowFloor.status, 200);
+    assert.equal(belowFloor.body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(belowFloor.body.proposalCard, undefined);
+    assert.equal(mockLLM.chatCalls.length, callCountBeforeBelowFloor + 1);
+    assert.deepEqual(
+      await services.goalProposalService.getLatest(defaultSessionKey()),
+      activeBefore,
+    );
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+
+    await services.goalProposalService.putLatest({
+      ...defaultSessionKey(),
+      targets: UAT_21_FLOOR_PROPOSAL_TARGETS,
+    });
+    const floorActive = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(floorActive);
+    const callCountBeforeAtFloor = mockLLM.chatCalls.length;
+
+    const lowerAtFloor = await postChat("再低一點");
+
+    assert.equal(lowerAtFloor.status, 200);
+    assert.equal(lowerAtFloor.body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(lowerAtFloor.body.proposalCard, undefined);
+    assert.equal(lowerAtFloor.body.dailyTargets, undefined);
+    assert.equal(mockLLM.chatCalls.length, callCountBeforeAtFloor);
+    assert.deepEqual(
+      await services.goalProposalService.getLatest(defaultSessionKey()),
+      floorActive,
+    );
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("UAT-21 rejects macro-inconsistent relative-lower proposals before persistence and accepts a valid retry", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_macro_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+    assert.equal(initial.status, 200);
+    const activeBefore = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeBefore);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_macro_inconsistent_model_proposal_rejected",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_MACRO_INCONSISTENT_TARGETS),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_macro_retry_model_proposal_accepted",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_VALID_RETRY_TARGETS),
+        },
+      }],
+    });
+    const callCountBeforeLower = mockLLM.chatCalls.length;
+
+    const lower = await postChat("再低一點");
+
+    assert.equal(lower.status, 200);
+    assert.equal(lower.body.proposalCard?.proposalKind, "goal");
+    assert.equal(proposalCalories(lower.body), UAT_21_VALID_RETRY_TARGETS.calories);
+    assert.equal(mockLLM.chatCalls.length, callCountBeforeLower + 2);
+    assert.deepEqual(
+      (await services.goalProposalService.getLatest(defaultSessionKey()))?.targets,
+      UAT_21_VALID_RETRY_TARGETS,
+    );
+    assert.notEqual(lower.body.proposalCard?.proposalId, activeBefore.proposalId);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("UAT-21 accepts a clear floor-proposal confirmation idiom through the guarded goal approval path", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_acceptance_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+    assert.equal(initial.status, 200);
+    assert.equal(proposalCalories(initial.body), UAT_21_INITIAL_PROPOSAL_TARGETS.calories);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_acceptance_valid_lower_model_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_VALID_RETRY_TARGETS),
+        },
+      }],
+    });
+    const lowerFromInitial = await postChat("再低一點");
+    assert.equal(lowerFromInitial.status, 200);
+    assert.equal(lowerFromInitial.body.proposalCard?.proposalKind, "goal");
+    const activeProposal = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeProposal);
+    assert.deepEqual(activeProposal.targets, UAT_21_VALID_RETRY_TARGETS);
+    assert.deepEqual(await readTargets(), UAT_21_REBOUND_BASELINE_TARGETS);
+    publishCalls = [];
+
+    const confirmed = await postChat("好吧那就這樣");
+
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.didLogMeal, false);
+    assert.equal(confirmed.body.didMutateMeal, false);
+    assert.deepEqual(confirmed.body.dailyTargets, activeProposal.targets);
+    assert.deepEqual(await readTargets(), activeProposal.targets);
+    assert.equal(confirmed.body.proposalCard?.status, "approved");
+    assert.equal(confirmed.body.proposalActionEvent?.proposalId, activeProposal.proposalId);
+    assert.equal(confirmed.body.proposalActionEvent?.proposalKind, "goal");
+    assert.equal(confirmed.body.proposalActionEvent?.action, "approve");
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+  });
+
+  it("UAT-21 cannot later approve a rejected relative-lower model target", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_rejected_target_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+    assert.equal(initial.status, 200);
+    const activeBefore = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeBefore);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_invalid_only_below_floor_model_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_BELOW_FLOOR_LLM_TARGETS),
+        },
+      }],
+    });
+    const invalid = await postChat("再低一點");
+    assert.equal(invalid.status, 200);
+    assert.equal(invalid.body.reply, renderUnsafeCalorieFloorCopy());
+    assert.equal(invalid.body.proposalCard, undefined);
+    assert.deepEqual(
+      await services.goalProposalService.getLatest(defaultSessionKey()),
+      activeBefore,
+    );
+    publishCalls = [];
+
+    const confirmed = await postChat("好吧那就這樣");
+
+    assert.equal(confirmed.status, 200);
+    assert.deepEqual(confirmed.body.dailyTargets, activeBefore.targets);
+    assert.notDeepEqual(confirmed.body.dailyTargets, UAT_21_BELOW_FLOOR_LLM_TARGETS);
+    assert.deepEqual(await readTargets(), activeBefore.targets);
+    assert.deepEqual(publishCalls, [{ event: "goals_update" }]);
+  });
+
+  it("UAT-21 fails closed for ambiguous, questioning, and negated active-goal-proposal replies", async () => {
+    await services.goalProposalService.putLatest({ ...defaultSessionKey(), targets: PROPOSAL_TARGETS });
+    const before = await readTargets();
+
+    for (const message of ["這樣好嗎", "我再想想", "好像有點低", "不要好了"]) {
+      const proposal = await services.goalProposalService.getLatest(defaultSessionKey());
+      assert.ok(proposal);
+      publishCalls = [];
+
+      const { status, body } = await postChat(message);
+
+      assert.equal(status, 200);
+      assert.equal(body.dailyTargets, undefined);
+      assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+      assert.deepEqual(await readTargets(), before);
+      assert.deepEqual(publishCalls, []);
+      if (message !== "不要好了") {
+        assert.ok(await services.goalProposalService.getLatest(defaultSessionKey()));
+      }
+    }
+  });
+
+  it("UAT-21 renders applied-safe goal proposal copy without reply-to-apply instructions", async () => {
+    const proposedTargets = {
+      calories: 2200,
+      protein: 165,
+      carbs: 240,
+      fat: 70,
+    };
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_applied_safe_goal_proposal_copy",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(proposedTargets),
+        },
+      }],
+    });
+    const proposal = await postChat("請提案 2200 kcal 的每日目標，不要直接套用");
+    assert.equal(proposal.status, 200);
+    assert.equal(proposal.body.proposalCard?.proposalKind, "goal");
+    assert.doesNotMatch(proposal.body.reply, GOAL_PROPOSAL_APPROVAL_REQUEST_COPY);
+
+    const activeProposal = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeProposal);
+    const confirmed = await postChat("好");
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.proposalCard?.status, "approved");
+    assert.deepEqual(confirmed.body.dailyTargets, activeProposal.targets);
+  });
+
+  it("UAT-21 names the previous proposed calorie baseline in relative-lower goal copy", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_baseline_copy_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+    assert.equal(initial.status, 200);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_baseline_copy_lower_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_VALID_RETRY_TARGETS),
+        },
+      }],
+    });
+    const lowerFromInitial = await postChat("再低一點");
+
+    assert.equal(lowerFromInitial.status, 200);
+    assert.equal(lowerFromInitial.body.proposalCard?.proposalKind, "goal");
+    assert.match(lowerFromInitial.body.reply, /1500\s*kcal/);
+    assert.equal(proposalCalories(lowerFromInitial.body), UAT_21_VALID_RETRY_TARGETS.calories);
+  });
+
+  it("UAT-21 accepts lowered LLM proposal macros within the existing calorie consistency tolerance", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_REBOUND_BASELINE_TARGETS);
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_macro_consistency_initial_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_INITIAL_PROPOSAL_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("請先提案把我的每日目標調低到1500 kcal，不要直接套用，等我確認。");
+    assert.equal(initial.status, 200);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_macro_consistency_lower_goal_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_VALID_RETRY_TARGETS),
+        },
+      }],
+    });
+    const lowerFromInitial = await postChat("再低一點");
+    assert.equal(lowerFromInitial.status, 200);
+    const activeProposal = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeProposal);
+
+    assert.equal(activeProposal.targets.calories >= 1200, true);
+    assert.equal(activeProposal.targets.calories < UAT_21_INITIAL_PROPOSAL_TARGETS.calories, true);
+    assert.deepEqual(activeProposal.targets, UAT_21_VALID_RETRY_TARGETS);
+    assert.equal(
+      macroCalorieDiffRatio(activeProposal.targets) <= 0.1,
+      true,
+      `Expected macro/calorie diff <= 10%, got ${macroCalorieDiffRatio(activeProposal.targets)}`,
+    );
+  });
+
   it("applies an active proposal once, then replayed consent fails closed without mutation", async () => {
     mockLLM.queueChatResponse({
       toolCalls: [{
@@ -346,7 +1407,7 @@ describe("chat goal update integration", () => {
     });
     const proposal = await postChat("我想少吃一點，幫我建議一組目標");
     assert.equal(proposal.status, 200);
-    assert.equal(proposal.body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS));
+    assert.equal(proposal.body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS, DEFAULT_TARGETS));
     assert.deepEqual(publishCalls, []);
     const activeProposal = await services.goalProposalService.getLatest(defaultSessionKey());
     assert.ok(activeProposal);
@@ -536,7 +1597,7 @@ describe("chat goal update integration", () => {
       });
       const proposal = await postChat("我想少吃一點，幫我建議一組目標");
       assert.equal(proposal.status, 200);
-      assert.equal(proposal.body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS));
+      assert.equal(proposal.body.reply, renderGoalProposalCopy(PROPOSAL_TARGETS, DEFAULT_TARGETS));
 
       const cancelled = await postChat(term);
 
@@ -819,5 +1880,435 @@ describe("chat goal update integration", () => {
     assert.deepEqual(await readTargets(), DEFAULT_TARGETS);
     assert.deepEqual(publishCalls, []);
     assert.equal(mockLLM.chatCalls.length, 1);
+  });
+
+  it("UAT-21 returns a benign goal-explanation reply verbatim instead of unsafe-refusal copy", async () => {
+    await setTargetsThroughDeviceApi({ calories: 2250, protein: 150, carbs: 240, fat: 65 });
+    await services.goalProposalService.putLatest({
+      ...defaultSessionKey(),
+      targets: { calories: 2050, protein: 140, carbs: 225, fat: 55 },
+    });
+    const proposalBefore = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(proposalBefore);
+
+    const explanation =
+      "這組每日目標 2050 kcal 是從上一組 2250 kcal 往下調 200 kcal：蛋白質140g（約560 kcal）維持不變，主要調低碳水，避免一次降太多。";
+    mockLLM.queueChatResponse({ content: explanation });
+
+    const { status, body } = await postChat("為什麼是這個數值");
+
+    assert.equal(status, 200);
+    assert.equal(body.reply, explanation);
+    assert.equal(body.dailyTargets, undefined);
+    assert.deepEqual(await readTargets(), { calories: 2250, protein: 150, carbs: 240, fat: 65 });
+    assert.equal(
+      (await services.goalProposalService.getLatest(defaultSessionKey()))?.proposalId,
+      proposalBefore.proposalId,
+    );
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("UAT-21 replaces a genuinely unsafe goal-context streamed reply atomically without a leaked prefix", async () => {
+    class StreamingGoalProvider extends MockLLMProvider {
+      private streamRounds: string[][] = [];
+
+      queueStreamTokens(tokens: string[]) {
+        this.streamRounds.push(tokens);
+      }
+
+      async chatRound(messages: ChatMessage[], tools: ToolDefinition[], opts?: LLMCallOptions) {
+        const tokens = this.streamRounds.shift();
+        if (!tokens) {
+          return { kind: "response" as const, response: await this.chat(messages, tools, opts) };
+        }
+        this.chatCalls.push({ messages, tools, opts });
+        return {
+          kind: "stream" as const,
+          streamGenerator: (async function* () {
+            for (const token of tokens) {
+              yield token;
+            }
+          })(),
+        };
+      }
+    }
+
+    async function readSseUntilDone(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+      const decoder = new TextDecoder();
+      let combined = "";
+      for (let index = 0; index < 50; index += 1) {
+        const chunk = await reader.read();
+        if (chunk.value) {
+          combined += decoder.decode(chunk.value, { stream: !chunk.done });
+        }
+        if (combined.includes("event: done") || chunk.done) {
+          break;
+        }
+      }
+      return combined;
+    }
+
+    function visibleChunkText(body: string): string {
+      return body
+        .split("\n\n")
+        .map((block) => block.trim())
+        .filter((block) => block.startsWith("event: chunk"))
+        .map((block) => {
+          const dataLine = block.split("\n").find((line) => line.startsWith("data: "));
+          return dataLine ? (JSON.parse(dataLine.slice("data: ".length)) as { token: string }).token : "";
+        })
+        .join("");
+    }
+
+    const streamingLLM = new StreamingGoalProvider();
+    let streamingServices: AppServicesWithMealProposal | undefined;
+    const streamingApp = await buildApp({
+      dbPath: ":memory:",
+      llmProvider: streamingLLM,
+      onServicesReady(appServices: AppServices) {
+        streamingServices = appServices as AppServicesWithMealProposal;
+      },
+    });
+
+    try {
+      const deviceRes = await streamingApp.inject({ method: "POST", url: "/api/device", payload: { goal: "fat_loss" } });
+      const streamingDeviceId = (deviceRes.json() as { deviceId: string }).deviceId;
+      const streamingCookie = toCookieHeader(deviceRes.headers["set-cookie"]);
+      const streamingAddress = await streamingApp.listen({ port: 0 });
+      assert.ok(streamingServices);
+      await streamingServices.goalProposalService.putLatest({
+        deviceId: streamingDeviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        targets: { calories: 2050, protein: 140, carbs: 225, fat: 55 },
+      });
+
+      streamingLLM.queueStreamTokens(["我會用你的目", "標安排：每天只吃 900 kcal", "，先照這樣執行一週。"]);
+
+      const form = new FormData();
+      form.append("message", "為什麼是這個數值");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        const res = await fetch(`${streamingAddress}/api/chat`, {
+          method: "POST",
+          headers: { cookie: streamingCookie, Accept: "text/event-stream" },
+          body: form,
+          signal: controller.signal,
+        });
+        assert.ok(res.body);
+        const raw = await readSseUntilDone(res.body.getReader());
+        const visible = visibleChunkText(raw);
+        assert.equal(visible, renderUnsafeNutritionGuidanceCopy());
+        assert.doesNotMatch(visible, /我會用你的目/);
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const history = await streamingServices.chatService.getHistory(streamingDeviceId, 5);
+      const lastAssistant = [...history].reverse().find((message) => message.role === "assistant");
+      assert.equal(lastAssistant?.content, renderUnsafeNutritionGuidanceCopy());
+    } finally {
+      if (streamingApp.server.listening) {
+        await streamingApp.close();
+      }
+    }
+  });
+
+  it("UAT-21 treats 1200可以嗎 as a confirmation question even when the model attempts update_goals", async () => {
+    await setTargetsThroughDeviceApi({ calories: 2050, protein: 140, carbs: 225, fat: 55 });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_question_direct_apply_attempt",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1200 }),
+        },
+      }],
+    });
+    const answer =
+      "1200 kcal 是這個產品的安全下限，低於多數人的長期需求；如果你確定要用這個數字，我可以先提案一組完整的目標讓你確認。";
+    mockLLM.queueChatResponse({ content: answer });
+
+    const { status, body } = await postChat("1200可以嗎");
+
+    assert.equal(status, 200);
+    assert.equal(body.dailyTargets, undefined);
+    assert.equal(body.reply, answer);
+    assert.doesNotMatch(body.reply, SUCCESS_STYLE_COPY);
+    assert.deepEqual(await readTargets(), { calories: 2050, protein: 140, carbs: 225, fat: 55 });
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("UAT-21 typed approval blocks a macro-inconsistent pending goal proposal without mutation", async () => {
+    const badProposal = await services.goalProposalService.putLatest({
+      ...defaultSessionKey(),
+      targets: { calories: 1200, protein: 140, carbs: 226, fat: 58 },
+    });
+    const assistant = await services.chatService.saveMessage(deviceId, "assistant", "請確認這組每日目標提案。");
+    await services.proposalCardService.saveAssistantProposalCard({
+      deviceId,
+      assistantMessageId: assistant.id,
+      ...buildGoalProposalCard(badProposal),
+    });
+    const actionMessage = await services.chatService.saveMessage(deviceId, "user", "套用每日目標");
+    const before = await readTargets();
+    publishCalls = [];
+
+    const result = await services.proposalActionService.handleAction({
+      deviceId,
+      proposalId: badProposal.proposalId,
+      kind: "goal",
+      action: "approve",
+      actionMessageId: actionMessage.id,
+    });
+
+    assert.notEqual((result as { status?: string }).status, "approved");
+    assert.equal((result as { dailyTargets?: DailyTargets }).dailyTargets, undefined);
+    assert.deepEqual(await readTargets(), before);
+    assert.deepEqual(publishCalls, []);
+  });
+
+  it("UAT-21 names proposal baselines and the applied calorie set in backend-owned copy", async () => {
+    await setTargetsThroughDeviceApi(UAT_21_COPY_BASELINE_TARGETS);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_copy_first_lower_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_COPY_FIRST_LOWER_TARGETS),
+        },
+      }],
+    });
+    const first = await postChat("目標太高了，幫我先往下提案一組");
+    assert.equal(first.status, 200);
+    assert.equal(proposalCalories(first.body), 2250);
+    assertLowerFollowUpCopy({
+      reply: first.body.reply,
+      baselineCalories: 2450,
+      targetCalories: 2250,
+      deltaCalories: 200,
+    });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_copy_second_lower_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_COPY_APPLIED_TARGETS),
+        },
+      }],
+    });
+    const second = await postChat("再低一點");
+    assert.equal(second.status, 200);
+    assert.equal(proposalCalories(second.body), 2050);
+    assertLowerFollowUpCopy({
+      reply: second.body.reply,
+      baselineCalories: 2250,
+      targetCalories: 2050,
+      deltaCalories: 200,
+    });
+
+    const historyRes = await fetch(`${address}/api/chat/history`, {
+      headers: { cookie: sessionCookieHeader },
+    });
+    assert.equal(historyRes.status, 200);
+    const history = await historyRes.json() as { messages: Array<{ proposalCard?: ChatBody["proposalCard"] }> };
+    const goalCards = history.messages
+      .map((message) => message.proposalCard)
+      .filter((card): card is NonNullable<ChatBody["proposalCard"]> => card?.proposalKind === "goal");
+    assert.equal(goalCards.length, 2);
+    const [olderCard, newestCard] = goalCards;
+    assert.equal(olderCard.status, "superseded");
+    assert.equal(olderCard.lapseCopy, renderProposalSupersededCopy({
+      proposalKind: "goal",
+      supersededByKind: "goal",
+    }));
+    assert.equal(newestCard.status, "active");
+    assert.equal(newestCard.isActionable, true);
+
+    const accepted = await postChat("好吧那就這樣");
+    assert.equal(accepted.status, 200);
+    assert.match(accepted.body.reply, /已套用\s*2050\s*kcal/);
+    assert.deepEqual(accepted.body.dailyTargets, UAT_21_COPY_APPLIED_TARGETS);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_copy_after_applied_lower_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_COPY_SECOND_LOWER_TARGETS),
+        },
+      }],
+    });
+    const afterApplied = await postChat("再低一點");
+    assert.equal(afterApplied.status, 200);
+    assert.equal(proposalCalories(afterApplied.body), 1800);
+    assertLowerFollowUpCopy({
+      reply: afterApplied.body.reply,
+      baselineCalories: 2050,
+      targetCalories: 1800,
+      deltaCalories: 250,
+    });
+    assert.match(afterApplied.body.reply, /蛋白質維持\s*140\s*g/);
+    assert.deepEqual(await readTargets(), UAT_21_COPY_APPLIED_TARGETS);
+  });
+
+  it("UAT-21 combined regression: question turns never mutate and persisted targets stay macro-credible", async () => {
+    await setTargetsThroughDeviceApi({ calories: 2450, protein: 160, carbs: 260, fat: 75 });
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_combined_first_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify({ calories: 2250, protein: 150, carbs: 240, fat: 65 }),
+        },
+      }],
+    });
+    const firstProposal = await postChat("目標太高了，幫我先提案往下調一組");
+    assert.equal(firstProposal.status, 200);
+    assert.equal(proposalCalories(firstProposal.body), 2250);
+
+    const explanation =
+      "這組每日目標 2250 kcal 是從 2450 kcal 往下調 200 kcal，蛋白質150g（約600 kcal）維持接近原本。";
+    mockLLM.queueChatResponse({ content: explanation });
+    const why = await postChat("為什麼是這個數值");
+    assert.equal(why.status, 200);
+    assert.equal(why.body.reply, explanation);
+    assert.equal(why.body.dailyTargets, undefined);
+
+    const accepted = await postChat("好吧那就這樣");
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(accepted.body.dailyTargets, { calories: 2250, protein: 150, carbs: 240, fat: 65 });
+    assert.equal(accepted.body.proposalCard?.status, "approved");
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_combined_question_apply_attempt",
+        type: "function",
+        function: {
+          name: "update_goals",
+          arguments: JSON.stringify({ mode: "current_turn_values", calories: 1200 }),
+        },
+      }],
+    });
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_combined_lower_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify({ calories: 1800, protein: 140, carbs: 164, fat: 53 }),
+        },
+      }],
+    });
+    const confirm = await postChat("再低一點1200可以嗎");
+    assert.equal(confirm.status, 200);
+    assert.equal(confirm.body.dailyTargets, undefined);
+    assert.equal(proposalCalories(confirm.body), 1800);
+
+    const persisted = await readTargets();
+    assert.deepEqual(persisted, { calories: 2250, protein: 150, carbs: 240, fat: 65 });
+    assert.ok(
+      macroCalorieDiffRatio(persisted) <= 0.1,
+      `Expected persisted macro/calorie diff <= 10%, got ${macroCalorieDiffRatio(persisted)}`,
+    );
+
+    const activeGoalProposal = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeGoalProposal);
+    const history = await services.chatService.getHistory(deviceId, 30, {
+      activeProposals: [{
+        proposalId: activeGoalProposal.proposalId,
+        proposalKind: "goal",
+        proposalLane: "goal",
+      }],
+    });
+    const actionableCards = history.filter((message) => {
+      const card = (message as { proposalCard?: { status: string; isActionable: boolean } }).proposalCard;
+      return card?.status === "active" && card.isActionable === true;
+    });
+    assert.equal(actionableCards.length, 1);
+  });
+
+  it("UAT-21 duplicate-equivalent proposal replay keeps one active card and different targets replace normally", async () => {
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_duplicate_initial_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_DUPLICATE_TARGETS),
+        },
+      }],
+    });
+    const initial = await postChat("沒關係 那我改成減脂 熱量改成1200可以嗎");
+    assert.equal(initial.status, 200);
+    assert.equal(proposalCalories(initial.body), UAT_21_DUPLICATE_TARGETS.calories);
+    assert.equal(goalProposalRows().length, 1);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_duplicate_equivalent_proposal",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_DUPLICATE_TARGETS),
+        },
+      }],
+    });
+    const duplicate = await postChat("啥");
+    assert.equal(duplicate.status, 200);
+    assert.equal(duplicate.body.reply, renderDuplicateGoalProposalCopy(UAT_21_DUPLICATE_TARGETS));
+    assert.equal(duplicate.body.proposalCard, undefined);
+    assert.equal(goalProposalRows().length, 1);
+
+    const activeGoalProposal = await services.goalProposalService.getLatest(defaultSessionKey());
+    assert.ok(activeGoalProposal);
+    const afterDuplicateHistory = await services.chatService.getHistory(deviceId, 30, {
+      activeProposals: [{
+        proposalId: activeGoalProposal.proposalId,
+        proposalKind: "goal",
+        proposalLane: "goal",
+      }],
+    });
+    const activeCards = afterDuplicateHistory.filter((message) => {
+      const card = (message as { proposalCard?: { status: string; isActionable: boolean } }).proposalCard;
+      return card?.status === "active" && card.isActionable === true;
+    });
+    assert.equal(activeCards.length, 1);
+    assert.match(duplicate.body.reply, /1200\s*kcal/);
+    assert.match(duplicate.body.reply, /套用目標/);
+    assert.match(duplicate.body.reply, /調整目標/);
+    assert.match(duplicate.body.reply, /取消提案/);
+
+    mockLLM.queueChatResponse({
+      toolCalls: [{
+        id: "uat21_duplicate_negative_control",
+        type: "function",
+        function: {
+          name: "propose_goals",
+          arguments: JSON.stringify(UAT_21_DIFFERENT_TARGETS),
+        },
+      }],
+    });
+    const replacement = await postChat("那改成 1300 呢");
+    assert.equal(replacement.status, 200);
+    assert.equal(proposalCalories(replacement.body), UAT_21_DIFFERENT_TARGETS.calories);
+
+    const rows = goalProposalRows();
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0]?.status, "superseded");
+    assert.equal(rows[0]?.lapse_copy, renderProposalSupersededCopy({
+      proposalKind: "goal",
+      supersededByKind: "goal",
+    }));
+    assert.equal(rows[1]?.status, "active");
   });
 });

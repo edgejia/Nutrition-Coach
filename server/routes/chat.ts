@@ -2,7 +2,11 @@ import { PassThrough } from "node:stream";
 import { writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance, FastifyRequest, FastifyBaseLogger } from "fastify";
-import type { createOrchestrator, ProposalEditContext } from "../orchestrator/index.js";
+import type {
+  createOrchestrator,
+  ProposalEditContext,
+  StreamFinalReplyTraceMetadata,
+} from "../orchestrator/index.js";
 import {
   composeSummaryHistoryReply,
   type SummaryHistoryFacts,
@@ -904,6 +908,7 @@ async function handleStreamingReply(
   hooks?: OrchestratorHooks,
   log?: FastifyBaseLogger,
   stopControl?: StreamingStopControl,
+  orchestratorFinalReplyMetadata?: StreamFinalReplyTraceMetadata,
 ): Promise<StreamingReplyResult> {
   const sanitizer = createStreamingSanitizer();
   const didLogMeal = mutationProjection.didLogMeal;
@@ -1040,7 +1045,10 @@ async function handleStreamingReply(
     reply: guardedFullReply,
     composedSummaryHistory,
   } = normalizeRouteFinalReply(fullReply, mutationProjection, summaryHistoryFacts, {
+    composeSummaryHistory: orchestratorFinalReplyMetadata?.finalReplySource !== "renderer",
+    rendererOwnedSummaryHistory: orchestratorFinalReplyMetadata?.finalReplySource === "renderer",
     planningFacts,
+    rendererOwnedPlanning: orchestratorFinalReplyMetadata?.finalReplySource === "renderer",
   });
   if (noMutationLoggingClaimDetected || guardedFullReply !== fullReply) {
     const sanitizedReply = sanitizeReply(guardedFullReply);
@@ -1059,10 +1067,11 @@ async function handleStreamingReply(
       summaryHistoryFacts,
       planningFacts,
       tokensStreamed,
-      finalReplySource: composedSummaryHistory ? "renderer" : "fallback",
-      finalReplyShape: composedSummaryHistory
+      finalReplySource: orchestratorFinalReplyMetadata?.finalReplySource ??
+        (composedSummaryHistory ? "renderer" : "fallback"),
+      finalReplyShape: orchestratorFinalReplyMetadata?.finalReplyShape ?? (composedSummaryHistory
         ? (sanitizedReply.trim() ? "streamed_text" : "empty_or_missing")
-        : (persistedReply.trim() ? "fallback_text" : "empty_or_missing"),
+        : (persistedReply.trim() ? "fallback_text" : "empty_or_missing")),
       receiptPersistence,
     };
   }
@@ -1083,8 +1092,10 @@ async function handleStreamingReply(
       summaryHistoryFacts,
       planningFacts,
       tokensStreamed,
-      finalReplySource: composedSummaryHistory ? "renderer" : "model",
-      finalReplyShape: persistedReply.trim() ? "streamed_text" : "empty_or_missing",
+      finalReplySource: orchestratorFinalReplyMetadata?.finalReplySource ??
+        (composedSummaryHistory ? "renderer" : "model"),
+      finalReplyShape: orchestratorFinalReplyMetadata?.finalReplyShape ??
+        (persistedReply.trim() ? "streamed_text" : "empty_or_missing"),
       receiptPersistence,
     };
   }
@@ -1106,8 +1117,9 @@ async function handleStreamingReply(
     dailySummary,
     summaryHistoryFacts,
     tokensStreamed,
-    finalReplySource: "model",
-    finalReplyShape: persistedReply.trim() ? "streamed_text" : "empty_or_missing",
+    finalReplySource: orchestratorFinalReplyMetadata?.finalReplySource ?? "model",
+    finalReplyShape: orchestratorFinalReplyMetadata?.finalReplyShape ??
+      (persistedReply.trim() ? "streamed_text" : "empty_or_missing"),
     receiptPersistence,
   };
 }
@@ -1272,6 +1284,7 @@ async function handleOrchestratorSSE(
         loggedMeal,
         proposalCard,
         proposalActionEvent,
+        streamFinalReplyTraceMetadata,
       } = result;
       const didLogMeal = mutationProjection.didLogMeal;
       streamDidLogMeal = didLogMeal;
@@ -1304,6 +1317,7 @@ async function handleOrchestratorSSE(
         hooks,
         deps.log,
         stopControl,
+        streamFinalReplyTraceMetadata,
       );
       streamDidLogMeal = streamResult.didLogMeal;
       streamDailySummary = streamResult.dailySummary;
@@ -1772,7 +1786,14 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
 
         if ("streamGenerator" in result) {
           // Non-SSE caller received a stream result — drain and return as JSON
-          const { streamGenerator, dailySummary, summaryHistoryFacts, planningFacts, affectedDate } = result;
+          const {
+            streamGenerator,
+            dailySummary,
+            summaryHistoryFacts,
+            planningFacts,
+            affectedDate,
+            streamFinalReplyTraceMetadata,
+          } = result;
           const didLogMeal = jsonMutationProjection.didLogMeal;
           const didMutateMeal = jsonMutationProjection.didMutateMeal;
           let fullReply = "";
@@ -1790,13 +1811,16 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
           const modelReplyText = hallucinationDetected
             ? fallbackReply
             : appendHistoricalDateSuffixIfMissing(fullReply, affectedDate);
+          const rendererOwnedStreamReply = streamFinalReplyTraceMetadata?.finalReplySource === "renderer";
           const { reply: replyText, composedSummaryHistory } = normalizeRouteFinalReply(
             modelReplyText,
             jsonMutationProjection,
             summaryHistoryFacts,
             {
-              composeSummaryHistory: !hallucinationDetected,
+              composeSummaryHistory: !hallucinationDetected && !rendererOwnedStreamReply,
+              rendererOwnedSummaryHistory: rendererOwnedStreamReply,
               planningFacts,
+              rendererOwnedPlanning: rendererOwnedStreamReply,
             },
           );
           const finalized = await finalizeAssistantReply(
@@ -1820,8 +1844,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: Deps) {
             proposalCard: result.proposalCard,
           });
           traceRecorder?.recordFinalReply({
-            source: hallucinationDetected ? "fallback" : composedSummaryHistory ? "renderer" : "model",
-            shape: sanitized.trim() ? (hallucinationDetected ? "fallback_text" : "streamed_text") : "empty_or_missing",
+            source: hallucinationDetected
+              ? "fallback"
+              : streamFinalReplyTraceMetadata?.finalReplySource ?? (composedSummaryHistory ? "renderer" : "model"),
+            shape: hallucinationDetected
+              ? (sanitized.trim() ? "fallback_text" : "empty_or_missing")
+              : streamFinalReplyTraceMetadata?.finalReplyShape ??
+                (sanitized.trim() ? "streamed_text" : "empty_or_missing"),
           });
           // D-03/C6: JSON path publish boundary — immediately before reply.send().
           // C1: try/catch ensures publish failure never changes the HTTP response or status code.

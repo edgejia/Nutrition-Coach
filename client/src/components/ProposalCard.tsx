@@ -45,6 +45,10 @@ function getDefaultInputHint(proposalKind: ProposalCardMetadata["proposalKind"])
   }
 }
 
+function shouldShowInactiveProposalCopy(status: ProposalCardMetadata["status"]) {
+  return status === "expired" || status === "superseded" || status === "stale";
+}
+
 export function ProposalActionEvent({ event }: { event: ProposalActionEventMetadata }) {
   return (
     <div className="sp-message-row sp-message-row-user">
@@ -240,11 +244,11 @@ export function ProposalCard({
               </p>
             ) : null}
           </>
-        ) : (
+        ) : shouldShowInactiveProposalCopy(proposalCard.status) ? (
           <p className="sp-proposal-lapse">
             {proposalCard.lapseCopy ?? "這個提案目前無法處理，可能已過期或被新的提案取代。請重新提出需求。"}
           </p>
-        )}
+        ) : null}
       </section>
     </div>
   );

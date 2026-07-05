@@ -28,6 +28,11 @@ describe("behavior matrix source scanner", () => {
       "BehaviorRisk",
       "BehaviorAssertionName",
       "CASE-08",
+      "CASE-13",
+      "CASE-14",
+      "CASE-17",
+      "untrusted_tool_authority",
+      "unsafe_nutrition_guidance",
       "trace_final_reply_source",
     ]) {
       assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `missing source token ${token}`);
@@ -40,6 +45,8 @@ describe("behavior matrix source scanner", () => {
 
     assert.match(assertionSource, /export function assertTraditionalChinese/);
     assert.match(assertionSource, /export function assertNoUnauthorizedMutation/);
+    assert.match(assertionSource, /export function assertNoTrustedToolAuthority/);
+    assert.match(assertionSource, /export function assertNoUnsafeNutritionGuidance/);
     assert.match(assertionSource, /export function evaluateExpectedFailures/);
     assert.match(traceSource, /export type LlmTraceFinalReplySource/);
     assert.match(traceSource, /orchestrator_projected_reply/);

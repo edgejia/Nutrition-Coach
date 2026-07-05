@@ -1,8 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { createDeviceService, Goal, IntakeFields } from "../services/device.js";
+import type { createDeviceService, DailyTargets, Goal, IntakeFields } from "../services/device.js";
 import type { createGuestSessionService } from "../services/guest-session.js";
 import type { createTargetGenerationService } from "../services/target-generation.js";
 import { config, isDeployedLikeRuntime } from "../config.js";
+import {
+  checkNutritionSafetyTargets,
+  UNSAFE_CALORIE_FLOOR_REASON,
+} from "../orchestrator/nutrition-safety-policy.js";
+import { isGoalMacroCaloriesOverAllocated } from "../orchestrator/goal-adjustment-policy.js";
 import {
   logDeviceGoalsValidationFailed,
   logDeviceGoalsUpdatedRest,
@@ -553,6 +558,38 @@ export function registerDeviceRoutes(
     if (Object.keys(goals).length === 0) {
       logDeviceGoalsValidationFailed(request.log, { fields: [], codes: ["empty_valid_fields"] });
       return reply.code(400).send({ error: "Request must include at least one valid goal field (calories, protein, carbs, fat)" });
+    }
+    const current = await deviceService.getDevice(deviceId);
+    if (!current) {
+      return reply.code(404).send({ error: "Device not found" });
+    }
+    const candidateTargets: DailyTargets = {
+      calories: goals.calories ?? current.dailyCalories,
+      protein: goals.protein ?? current.dailyProtein,
+      carbs: goals.carbs ?? current.dailyCarbs,
+      fat: goals.fat ?? current.dailyFat,
+    };
+    const safetyCheck = checkNutritionSafetyTargets(candidateTargets);
+    if (!safetyCheck.ok) {
+      logDeviceGoalsValidationFailed(request.log, {
+        fields: safetyCheck.fields,
+        codes: [UNSAFE_CALORIE_FLOOR_REASON],
+      });
+      return reply.code(400).send({
+        error: "Unsafe calorie target",
+        reason: UNSAFE_CALORIE_FLOOR_REASON,
+      });
+    }
+    if (isGoalMacroCaloriesOverAllocated(candidateTargets)) {
+      const targetFields = Object.keys(candidateTargets) as Array<keyof DailyTargets>;
+      logDeviceGoalsValidationFailed(request.log, {
+        fields: targetFields,
+        codes: ["macro_calorie_inconsistent"],
+      });
+      return reply.code(400).send({
+        error: "Macro targets exceed calorie target",
+        reason: "macro_calorie_inconsistent",
+      });
     }
     const dailyTargets = await deviceService.updateGoals(deviceId, goals);
     logDeviceGoalsUpdatedRest(request.log, { updatedFields: Object.keys(goals) });

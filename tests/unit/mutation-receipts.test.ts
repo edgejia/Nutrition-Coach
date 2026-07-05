@@ -11,7 +11,11 @@ import {
   assertNoForbiddenReceiptTerms,
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
+  renderDuplicateGoalProposalCopy,
   renderGoalProposalCopy,
+  renderGoalUpdateReceipt,
+  renderUnsafeCalorieFloorCopy,
+  renderUnsafeNutritionGuidanceCopy,
   renderGoalValidationFailureCopy,
   renderMealDeleteAuthorityFailureCopy,
   renderMealDeleteCancelCopy,
@@ -36,6 +40,8 @@ import {
   renderProposalSupersededCopy,
   renderMutationReceipt,
 } from "../../server/orchestrator/mutation-receipts.js";
+import { hasUnsafeNutritionGuidance } from "../../server/orchestrator/nutrition-safety-policy.js";
+import { guardNoMutationSuccessClaim } from "../../server/orchestrator/index.js";
 
 const committedSummary: DailySummary = {
   totalCalories: 520,
@@ -261,20 +267,105 @@ describe("MutationEffects contract", () => {
 });
 
 describe("goal proposal and rejection renderers", () => {
-  it("renders exact proposal copy with all four target values", () => {
+  it("renders natural proposal copy with all four target values and a concise rationale", () => {
     const text = renderGoalProposalCopy({
-      calories: 1400,
-      protein: 120,
-      carbs: 130,
-      fat: 45,
+      calories: 2200,
+      protein: 165,
+      carbs: 240,
+      fat: 70,
     });
 
     assert.equal(
       text,
-      "我可以先幫你改成這組每日目標：\n• 卡路里 1400 kcal\n• 蛋白質 120 g\n• 碳水 130 g\n• 脂肪 45 g\n如果要套用，請回覆「好」；如果要調整，請直接給新的數字。",
+      "依你想調整目標的方向，我先整理一組比較完整、可執行的每日目標：\n• 卡路里 2200 kcal\n• 蛋白質 165 g\n• 碳水 240 g\n• 脂肪 70 g\n這組數字讓熱量、蛋白質、碳水和脂肪一起對齊，比只改單一數字更穩定。",
     );
     assert.doesNotMatch(text, /已更新每日目標/);
+    assert.doesNotMatch(text, /kcal\/day/);
+    assert.doesNotMatch(text, /proposalId|targetSignature|SAFE-|propose_goals|update_goals|nutritionSafety/);
     assertNoGoalInternalTerms(text);
+  });
+
+  it("renders goal proposal copy without reply-to-apply imperative and can name the previous target baseline", () => {
+    const renderWithBaseline = renderGoalProposalCopy as (
+      targets: DailyTargets,
+      previousTargets?: DailyTargets,
+    ) => string;
+    const text = renderWithBaseline(
+      {
+        calories: 1300,
+        protein: 130,
+        carbs: 125,
+        fat: 35,
+      },
+      {
+        calories: 1500,
+        protein: 150,
+        carbs: 140,
+        fat: 45,
+      },
+    );
+
+    assert.doesNotMatch(text, /如果要套用|請回覆「好」|回覆.*套用/);
+    assert.match(text, /1500\s*kcal/);
+    assert.match(text, /1300\s*kcal/);
+    assertNoGoalInternalTerms(text);
+  });
+
+  it("renders follow-up goal proposal copy as a shorter baseline-naming continuation", () => {
+    const text = renderGoalProposalCopy(
+      {
+        calories: 2250,
+        protein: 150,
+        carbs: 240,
+        fat: 65,
+      },
+      {
+        calories: 2450,
+        protein: 160,
+        carbs: 260,
+        fat: 75,
+      },
+    );
+
+    assert.match(text, /2450\s*kcal/);
+    assert.match(text, /2250\s*kcal/);
+    assert.match(text, /下修\s*200\s*kcal/);
+    assert.doesNotMatch(text, /依你想調整目標的方向/);
+    assert.doesNotMatch(text, /這組數字讓熱量、蛋白質、碳水和脂肪一起對齊/);
+    assert.match(text, /• 卡路里 2250 kcal/);
+    assert.match(text, /• 蛋白質 150 g/);
+    assert.match(text, /• 碳水 240 g/);
+    assert.match(text, /• 脂肪 65 g/);
+    assert.match(text, /蛋白質下修\s*10\s*g/);
+    assert.match(text, /碳水下修\s*20\s*g/);
+    assert.match(text, /脂肪下修\s*10\s*g/);
+    assert.doesNotMatch(text, /蛋白質維持/);
+    assert.equal(hasUnsafeNutritionGuidance(text), false);
+    assertNoGoalInternalTerms(text);
+  });
+
+  it("renders macro-change wording from actual diffs only", () => {
+    const text = renderGoalProposalCopy(
+      {
+        calories: 1800,
+        protein: 140,
+        carbs: 164,
+        fat: 53,
+      },
+      {
+        calories: 2050,
+        protein: 140,
+        carbs: 226,
+        fat: 58,
+      },
+    );
+
+    assert.match(text, /2050\s*kcal/);
+    assert.match(text, /下修\s*250\s*kcal/);
+    assert.match(text, /蛋白質維持\s*140\s*g/);
+    assert.match(text, /碳水下修\s*62\s*g/);
+    assert.match(text, /脂肪下修\s*5\s*g/);
+    assert.equal(hasUnsafeNutritionGuidance(text), false);
   });
 
   it("renders one generic authority failure copy for unavailable proposal states", () => {
@@ -290,7 +381,7 @@ describe("goal proposal and rejection renderers", () => {
   it("renders exact validation range copy for each target field", () => {
     assert.equal(
       renderGoalValidationFailureCopy(["calories"]),
-      "這次沒有套用目標更新。卡路里需介於 500-8000 kcal，請提供範圍內的每日目標數字。",
+      "這次沒有套用目標更新。卡路里需介於 1200-8000 kcal，請提供範圍內的每日目標數字。",
     );
     assert.equal(
       renderGoalValidationFailureCopy(["protein"]),
@@ -308,6 +399,7 @@ describe("goal proposal and rejection renderers", () => {
     for (const field of ["calories", "protein", "carbs", "fat"] as const) {
       assertNoGoalInternalTerms(renderGoalValidationFailureCopy([field]));
     }
+    assert.doesNotMatch(renderGoalValidationFailureCopy(["calories"]), /500-8000/);
   });
 
   it("renders exact neutral cancel copy without implying success", () => {
@@ -318,6 +410,33 @@ describe("goal proposal and rejection renderers", () => {
       "已取消這組目標提案，沒有套用任何更新。之後可以直接提供新的目標數字，或再請我產生一組建議。",
     );
     assert.doesNotMatch(text, /已更新每日目標/);
+    assertNoGoalInternalTerms(text);
+  });
+
+  it("renders exact unsafe calorie floor copy without diagnosis or internal policy ids", () => {
+    const text = renderUnsafeCalorieFloorCopy();
+
+    assert.equal(
+      text,
+      "這次沒有套用目標更新。這個每日熱量目標太低，我不能幫你設定或提案這樣的限制。請改成較安全、可持續的每日目標；如果你正在強烈限制飲食或覺得失控，建議和醫師或合格專業人員討論。",
+    );
+    assert.match(text, /^這次沒有套用目標更新。/);
+    assert.match(text, /每日熱量目標太低/);
+    assert.match(text, /不能幫你設定或提案/);
+    assert.match(text, /較安全、可持續/);
+    assert.match(text, /醫師或合格專業人員/);
+    assert.doesNotMatch(text, /unsafe_calorie_floor|1200|500|SAFE-02|nutritionSafety|update_goals|propose_goals/);
+    assert.doesNotMatch(text, /診斷|病症|疾病|飲食失調|厭食|暴食/);
+    assertNoGoalInternalTerms(text);
+  });
+
+  it("renders unsafe nutrition guidance fallback copy with support boundary", () => {
+    const text = renderUnsafeNutritionGuidanceCopy();
+
+    assert.match(text, /不能/);
+    assert.match(text, /較安全、可持續/);
+    assert.match(text, /醫師或合格專業人員/);
+    assert.doesNotMatch(text, /unsafe_calorie_floor|SAFE-02|nutritionSafety|update_goals|propose_goals/);
     assertNoGoalInternalTerms(text);
   });
 });
@@ -618,6 +737,25 @@ describe("proposal card labels, action events, and inactive copy", () => {
       renderProposalInactiveCopy({ proposalKind: "meal_delete", status: "stale" }),
       "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。",
     );
+  });
+
+  it("renders duplicate goal proposal copy that points to the active card without safety or success-claim wording", () => {
+    const text = renderDuplicateGoalProposalCopy({
+      calories: 1200,
+      protein: 140,
+      carbs: 95,
+      fat: 33,
+    });
+    const labels = getProposalActionLabels("goal");
+
+    assert.match(text, /待確認/);
+    assert.match(text, /1200\s*kcal/);
+    assert.match(text, new RegExp(labels.approveLabel));
+    assert.match(text, new RegExp(labels.editLabel));
+    assert.match(text, new RegExp(labels.rejectLabel));
+    assert.equal(hasUnsafeNutritionGuidance(text), false);
+    assert.equal(guardNoMutationSuccessClaim(text, { hasCommittedMutation: false }), text);
+    assertNoGoalInternalTerms(text);
   });
 
   it("renders exact already-processed proposal copy without forbidden receipt terms", () => {
@@ -923,7 +1061,7 @@ describe("mutation receipt renderer", () => {
     }
   });
 
-  it("renders goal receipts with all four committed target rows", () => {
+  it("renders goal receipts with the applied calorie value and all four committed target rows", () => {
     const text = renderMutationReceipt({
       kind: "goals",
       affectedDate: "2026-05-10",
@@ -933,7 +1071,8 @@ describe("mutation receipt renderer", () => {
       updatedFields: ["calories", "protein"],
     });
 
-    assert.equal(text, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(text, "已更新每日目標：已套用 1800 kcal 這組設定\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(renderGoalUpdateReceipt(committedTargets), text);
     assert.deepEqual(assertNoForbiddenReceiptTerms(text), []);
   });
 

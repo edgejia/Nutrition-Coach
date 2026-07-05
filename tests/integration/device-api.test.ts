@@ -11,6 +11,7 @@ import type { AppServices } from "../../server/app.js";
 import { applyMigrations } from "../../server/db/migrate.js";
 import { MockLLMProvider } from "../../server/llm/mock.js";
 import type { FastifyInstance } from "fastify";
+import { UNSAFE_CALORIE_FLOOR_REASON } from "../../server/orchestrator/nutrition-safety-policy.js";
 import { createDeviceService, getGoalDefaults, type Goal } from "../../server/services/device.js";
 
 function getSetCookieHeaders(res: Awaited<ReturnType<FastifyInstance["inject"]>>) {
@@ -351,6 +352,108 @@ describe("Device API", () => {
     assertRecord(body);
     assertRecord(body.dailyTargets);
     assert.equal(body.dailyTargets.protein, 150);
+  });
+
+  it("PUT /api/device/goals rejects below-floor calorie targets before persistence", async () => {
+    const create = await createGuestDevice();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: create.cookieHeader },
+      payload: { calories: 500 },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.json(), {
+      error: "Unsafe calorie target",
+      reason: UNSAFE_CALORIE_FLOOR_REASON,
+    });
+
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: create.cookieHeader },
+      payload: {},
+    });
+    assert.equal(session.statusCode, 200);
+    assert.deepEqual(session.json().dailyTargets, create.dailyTargets);
+  });
+
+  it("PATCH /api/device/goals rejects below-floor calorie targets before persistence", async () => {
+    const create = await createGuestDevice();
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/device/goals",
+      headers: { cookie: create.cookieHeader },
+      payload: { calories: 500 },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.json(), {
+      error: "Unsafe calorie target",
+      reason: UNSAFE_CALORIE_FLOOR_REASON,
+    });
+
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: create.cookieHeader },
+      payload: {},
+    });
+    assert.equal(session.statusCode, 200);
+    assert.deepEqual(session.json().dailyTargets, create.dailyTargets);
+  });
+
+  it("PUT /api/device/goals rejects calorie-only exact-floor targets when persisted macros exceed calories", async () => {
+    const create = await createGuestDevice();
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: create.cookieHeader },
+      payload: { calories: 1200 },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.json(), {
+      error: "Macro targets exceed calorie target",
+      reason: "macro_calorie_inconsistent",
+    });
+
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/device/session",
+      headers: { cookie: create.cookieHeader },
+      payload: {},
+    });
+    assert.equal(session.statusCode, 200);
+    assert.deepEqual(session.json().dailyTargets, create.dailyTargets);
+  });
+
+  it("PUT /api/device/goals allows complete macro-credible exact-floor targets", async () => {
+    const create = await createGuestDevice();
+    const exactFloorTargets = {
+      calories: 1200,
+      protein: 110,
+      carbs: 110,
+      fat: 35,
+    };
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/device/goals",
+      headers: { cookie: create.cookieHeader },
+      payload: exactFloorTargets,
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as unknown;
+    assertGoalsResponseDto(body);
+    assertRecord(body);
+    assertRecord(body.dailyTargets);
+    assert.deepEqual(body.dailyTargets, exactFloorTargets);
   });
 
   it("PUT /api/device/goals projects only public dailyTargets", async () => {
@@ -875,7 +978,7 @@ describe("Device API", () => {
       method: "PUT",
       url: "/api/device/goals",
       headers: { cookie: activeOnlyCookie },
-      payload: { protein: 152 },
+      payload: { carbs: 145 },
     });
     assert.equal(originalActive.statusCode, 200);
     assert.deepEqual(getSetCookieHeaders(originalActive), []);

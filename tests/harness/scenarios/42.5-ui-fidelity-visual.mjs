@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Visual evidence command:
+// yarn node tests/harness/scenarios/42.5-ui-fidelity-visual.mjs --output-dir tests/harness/artifacts/42.5-ui-fidelity/latest
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 

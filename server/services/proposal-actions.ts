@@ -17,13 +17,20 @@ import {
   renderProposalInactiveCopy,
   renderProposalRecoverableFailureCopy,
   renderGuardedMutationReceipt,
+  renderUnsafeCalorieFloorCopy,
 } from "../orchestrator/mutation-receipts.js";
+import { checkNutritionSafetyTargets } from "../orchestrator/nutrition-safety-policy.js";
+import { hasReasonableGoalMacroCalories } from "../orchestrator/goal-adjustment-policy.js";
 import { currentAppDate, formatLocalDate } from "../lib/time.js";
 import { MealRevisionPreconditionError } from "./meal-transactions.js";
 import type { ChatMutationOutcomeFact } from "./chat-mutation-outcomes.js";
 import type { createChatService } from "./chat.js";
 import type { createDeviceService, DailyTargets } from "./device.js";
-import type { createGoalProposalService, GoalProposalPayload } from "./goal-proposals.js";
+import {
+  goalProposalTargetSignature,
+  type createGoalProposalService,
+  type GoalProposalPayload,
+} from "./goal-proposals.js";
 import type { createMealCorrectionService } from "./meal-correction.js";
 import type {
   createMealNumericProposalService,
@@ -94,6 +101,7 @@ export type ProposalActionServiceResult =
       status: "stale";
       proposalCard?: ProposalCardClientMetadata;
       didMutateMeal: false;
+      reply?: string;
     }
   | {
       ok: false;
@@ -283,6 +291,28 @@ export function createProposalActionService(deps: ProposalActionDeps) {
     };
   }
 
+  async function blockUnsafeGoalProposalAction(input: {
+    deviceId: string;
+    proposalId: string;
+  }): Promise<Extract<ProposalActionServiceResult, { status: "stale" }>> {
+    const reply = renderUnsafeCalorieFloorCopy();
+    await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
+    await deps.proposalCardService.markProposalStatus({
+      deviceId: input.deviceId,
+      proposalId: input.proposalId,
+      status: "stale",
+      lapseCopy: reply,
+    });
+    const card = await loadCard(input);
+    return {
+      ok: false,
+      status: "stale",
+      didMutateMeal: false,
+      reply,
+      ...(card ? { proposalCard: projectProposalCardForClient(card) } : {}),
+    };
+  }
+
   function buildIdempotentProposalActionResult(
     card: ProposalCardMetadata,
   ): Extract<ProposalActionServiceResult, { status: "idempotent" }> {
@@ -458,6 +488,15 @@ export function createProposalActionService(deps: ProposalActionDeps) {
       && activeKindMatches({ kind: input.kind, proposal });
   }
 
+  function goalProposalMatchesCardTarget(
+    proposal: GoalProposalPayload,
+    card: ProposalCardMetadata,
+  ): boolean {
+    const expectedSignature = goalProposalTargetSignature(proposal.targets);
+    return proposal.targetSignature === expectedSignature
+      && card.details.targetSignature === proposal.targetSignature;
+  }
+
   return {
     async validateEditContext(
       input: ProposalEditContextValidationInput,
@@ -491,12 +530,24 @@ export function createProposalActionService(deps: ProposalActionDeps) {
             deviceId: input.deviceId,
             sessionId: DEFAULT_SESSION_ID,
           });
-          if (!activeProposalIdMatches(proposal, input.proposalId) || !activeKindMatches({ kind: input.kind, proposal })) {
+          if (
+            !proposal
+            || !activeProposalIdMatches(proposal, input.proposalId)
+            || !activeKindMatches({ kind: input.kind, proposal })
+            || !goalProposalMatchesCardTarget(proposal, activeCard)
+          ) {
             return { result: await markStale(input) };
           }
           if (input.action === "reject") {
             await deps.goalProposalService.clear({ deviceId: input.deviceId, sessionId: DEFAULT_SESSION_ID });
             return { result: await completeActiveAction({ ...input, card: activeCard }) };
+          }
+          const safetyCheck = checkNutritionSafetyTargets(proposal.targets);
+          if (!safetyCheck.ok) {
+            return { result: await blockUnsafeGoalProposalAction(input) };
+          }
+          if (!hasReasonableGoalMacroCalories(proposal.targets)) {
+            return { result: await buildRetryableProposalActionResult(input) };
           }
           const consumed = await deps.goalProposalService.consumeLatest({
             deviceId: input.deviceId,

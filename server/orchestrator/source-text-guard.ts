@@ -53,6 +53,102 @@ const GOAL_PROPOSAL_CANCEL_PATTERNS = [
   /^(先)?不要/,
 ] as const;
 
+const TOOL_LIKE_MARKER_PATTERN =
+  /(?:"(?:role|name|content)"\s*:|(?:function_call|tool_call|tool_result|arguments)\s*:|tool_call\b|tool_result\b)/gi;
+
+function replaceRangeWithSpaces(text: string, start: number, end: number): string {
+  return text.slice(0, start) + " ".repeat(Math.max(0, end - start)) + text.slice(end);
+}
+
+function findBalancedSpanEnd(text: string, start: number, open: string, close: string): number | null {
+  let depth = 0;
+  let quote: "\"" | "'" | null = null;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (ch === "\"" || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === open) {
+      depth += 1;
+      continue;
+    }
+    if (ch === close) {
+      depth -= 1;
+      if (depth === 0) {
+        return i + 1;
+      }
+      if (depth < 0) {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+function maskBalancedDelimitedSpans(input: string): string {
+  let text = input;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const close = ch === "{" ? "}" : ch === "[" ? "]" : undefined;
+    if (!close) continue;
+    const end = findBalancedSpanEnd(text, i, ch, close);
+    if (end === null) continue;
+    text = replaceRangeWithSpaces(text, i, end);
+    i = end - 1;
+  }
+  return text;
+}
+
+function maskFunctionCallSpans(input: string): string {
+  let text = input;
+  const callPattern = /\b[A-Za-z_][A-Za-z0-9_]*\s*\(/g;
+  let match: RegExpExecArray | null;
+  while ((match = callPattern.exec(text)) !== null) {
+    const openIndex = match.index + match[0].lastIndexOf("(");
+    const end = findBalancedSpanEnd(text, openIndex, "(", ")");
+    if (end === null) continue;
+    text = replaceRangeWithSpaces(text, match.index, end);
+    callPattern.lastIndex = end;
+  }
+  return text;
+}
+
+function maskToolLikeMarkerSpans(input: string): string {
+  let text = input;
+  let match: RegExpExecArray | null;
+  TOOL_LIKE_MARKER_PATTERN.lastIndex = 0;
+  while ((match = TOOL_LIKE_MARKER_PATTERN.exec(text)) !== null) {
+    const lineEndIndex = text.indexOf("\n", match.index);
+    const end = lineEndIndex === -1 ? text.length : lineEndIndex;
+    text = replaceRangeWithSpaces(text, match.index, end);
+    TOOL_LIKE_MARKER_PATTERN.lastIndex = end;
+  }
+  return text;
+}
+
+export function stripToolLikeRegions(text: string): string {
+  return maskToolLikeMarkerSpans(
+    maskFunctionCallSpans(
+      maskBalancedDelimitedSpans(text),
+    ),
+  );
+}
+
 function normalizeGoalProposalDecisionText(message: string): string {
   return message.trim().toLowerCase().replace(/\s+/g, "");
 }
@@ -255,7 +351,7 @@ function parseChineseNumeralAt(
  * `多` are also dropped.
  */
 export function normalizeNumericSourceText(text: string): string[] {
-  const stripped = stripFormatting(text);
+  const stripped = stripFormatting(stripToolLikeRegions(text));
   const candidates = new Set<string>();
 
   // Arabic digit runs, including decimal final targets.

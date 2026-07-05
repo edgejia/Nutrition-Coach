@@ -19,9 +19,11 @@ import {
   isGoalProposalConsent,
 } from "../../server/orchestrator/source-text-guard.js";
 import {
+  renderDuplicateGoalProposalCopy,
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
   renderGoalProposalCopy,
+  renderUnsafeCalorieFloorCopy,
   renderGoalValidationFailureCopy,
 } from "../../server/orchestrator/mutation-receipts.js";
 import type { ToolCall } from "../../server/llm/types.js";
@@ -137,6 +139,302 @@ describe("update_goals ToolContract", () => {
     assert.equal(published.length, 0);
   });
 
+  it("Test 2b: unsafe propose_goals returns guard projection without proposal card or hidden pending state", async () => {
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+    const localDeps = {
+      ...deps,
+      goalProposalService: guardedGoalProposalService,
+    } as ToolDeps;
+    const unsafeTargets = {
+      calories: 500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    };
+
+    const result = await executeTool(proposeGoalsCall(unsafeTargets), deviceId, localDeps, {
+      currentUserMessage: "幫我設成每天 500 kcal",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.equal(result.result, renderUnsafeCalorieFloorCopy());
+    assert.equal(result.proposalCard, undefined);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "unsafe_calorie_floor",
+      text: renderUnsafeCalorieFloorCopy(),
+    });
+    assert.equal(putLatestCalls, 0);
+    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 2c: active-at-floor relative-lower propose_goals returns terminal floor copy without replacing the active proposal", async () => {
+    const floorTargets = {
+      calories: 1200,
+      protein: 130,
+      carbs: 105,
+      fat: 35,
+    };
+    const activeProposal = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: floorTargets,
+    });
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+
+    const result = await executeTool(
+      proposeGoalsCall({ calories: 1300, protein: 130, carbs: 120, fat: 40 }),
+      deviceId,
+      { ...deps, goalProposalService: guardedGoalProposalService } as ToolDeps,
+      {
+        currentUserMessage: "再低一點",
+        previousAssistantMessage: "我先提案每日目標 1200 kcal。",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.result, renderUnsafeCalorieFloorCopy());
+    assert.equal(result.proposalCard, undefined);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "unsafe_calorie_floor",
+      text: renderUnsafeCalorieFloorCopy(),
+    });
+    assert.equal(putLatestCalls, 0);
+    assert.deepEqual(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), activeProposal);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 2d: rebound relative-lower propose_goals returns retryable guard feedback without persistence", async () => {
+    const activeTargets = { calories: 1500, protein: 150, carbs: 140, fat: 45 };
+    const activeProposal = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: activeTargets,
+    });
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+
+    const result = await executeTool(
+      proposeGoalsCall({ calories: 2700, protein: 150, carbs: 390, fat: 75 }),
+      deviceId,
+      { ...deps, goalProposalService: guardedGoalProposalService } as ToolDeps,
+      {
+        currentUserMessage: "再低一點",
+        previousAssistantMessage: "我先提案每日目標 1500 kcal。",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.match(result.result, /lower than 1500 kcal/);
+    assert.equal(result.controlledReply, undefined);
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(putLatestCalls, 0);
+    assert.deepEqual(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), activeProposal);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 2e: macro-inconsistent relative-lower propose_goals returns retryable guard feedback without persistence", async () => {
+    const activeTargets = { calories: 1500, protein: 150, carbs: 140, fat: 45 };
+    const activeProposal = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: activeTargets,
+    });
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+
+    const result = await executeTool(
+      proposeGoalsCall({ calories: 1300, protein: 150, carbs: 200, fat: 80 }),
+      deviceId,
+      { ...deps, goalProposalService: guardedGoalProposalService } as ToolDeps,
+      {
+        currentUserMessage: "再低一點",
+        previousAssistantMessage: "我先提案每日目標 1500 kcal。",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.match(result.result, /within 10%/);
+    assert.equal(result.controlledReply, undefined);
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(putLatestCalls, 0);
+    assert.deepEqual(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), activeProposal);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 2f: duplicate-equivalent propose_goals returns terminal guard copy without replacing active proposal", async () => {
+    const activeTargets = { calories: 1200, protein: 140, carbs: 95, fat: 33 };
+    const activeProposal = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: activeTargets,
+    });
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+
+    const result = await executeTool(
+      proposeGoalsCall({ calories: 1200, protein: 140, carbs: 95, fat: 33 }),
+      deviceId,
+      { ...deps, goalProposalService: guardedGoalProposalService } as ToolDeps,
+      {
+        currentUserMessage: "啥",
+        previousAssistantMessage: renderUnsafeCalorieFloorCopy(),
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.equal(result.result, renderDuplicateGoalProposalCopy(activeTargets));
+    assert.equal(result.proposalCard, undefined);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "duplicate_goal_proposal",
+      text: renderDuplicateGoalProposalCopy(activeTargets),
+    });
+    assert.equal(putLatestCalls, 0);
+    assert.deepEqual(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), activeProposal);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 2g: identical propose_goals creates a proposal normally when no active proposal exists", async () => {
+    const proposed = { calories: 1200, protein: 140, carbs: 95, fat: 33 };
+    await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: proposed,
+    });
+    db.$client
+      .prepare("UPDATE turn_states SET expires_at = ? WHERE device_id = ? AND session_id = ? AND kind = ?")
+      .run("2000-01-01T00:00:00.000Z", deviceId, DEFAULT_SESSION_ID, GOAL_PROPOSAL_KIND);
+
+    const result = await executeTool(proposeGoalsCall(proposed), deviceId, deps, {
+      currentUserMessage: "幫我提案 1200 kcal",
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.executed, true);
+    assert.equal(result.summary, "status: proposal");
+    assert.equal(result.controlledReply?.reason, "goal_proposal");
+    assert.ok(result.proposalCard);
+    assert.deepEqual(
+      (await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.targets,
+      proposed,
+    );
+  });
+
+  it("Test 2h: relative-lower equivalent targets keep retryable rebound feedback before duplicate guard", async () => {
+    const activeTargets = { calories: 1500, protein: 150, carbs: 140, fat: 45 };
+    const activeProposal = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: activeTargets,
+    });
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+
+    const result = await executeTool(
+      proposeGoalsCall(activeTargets),
+      deviceId,
+      { ...deps, goalProposalService: guardedGoalProposalService } as ToolDeps,
+      {
+        currentUserMessage: "再低一點",
+        previousAssistantMessage: "我先提案每日目標 1500 kcal。",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.match(result.result, /lower than 1500 kcal/);
+    assert.equal(result.controlledReply, undefined);
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(putLatestCalls, 0);
+    assert.deepEqual(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), activeProposal);
+  });
+
   it("Test 3: update_goals rejects empty args and any args without mode", async () => {
     for (const args of [{}, { calories: 1800, sugar: 20 }, { calories: 1800 }]) {
       const result = await executeTool(updateGoalsCall(args), deviceId, deps, {
@@ -180,7 +478,7 @@ describe("update_goals ToolContract", () => {
 
     assert.equal(result.success, true);
     assert.equal(result.executed, true);
-    assert.equal(result.result, "已更新每日目標：\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
+    assert.equal(result.result, "已更新每日目標：已套用 1800 kcal 這組設定\n• 卡路里 1800 kcal\n• 蛋白質 130 g\n• 碳水 150 g\n• 脂肪 50 g");
     assert.deepEqual(result.updatedFields, ["calories", "protein"]);
     assert.deepEqual(await readTargets(deviceService, deviceId), {
       calories: 1800,
@@ -215,6 +513,50 @@ describe("update_goals ToolContract", () => {
       reason: "goal_authority_failure",
       text: renderGoalAuthorityFailureCopy(),
     });
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 5b: current_turn_values rejects unsafe calories before device goal mutation", async () => {
+    let updateGoalsCalls = 0;
+    const guardedDeviceService = {
+      ...deviceService,
+      async updateGoals(id: string, patch: Partial<DailyTargets>) {
+        updateGoalsCalls += 1;
+        return deviceService.updateGoals(id, patch);
+      },
+    } as typeof deviceService;
+    const localDeps = {
+      ...deps,
+      deviceService: guardedDeviceService,
+    } as ToolDeps;
+
+    const result = await executeTool(
+      updateGoalsCall({ mode: "current_turn_values", calories: 500 }),
+      deviceId,
+      localDeps,
+      {
+        currentUserMessage: "卡路里改成 500",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.equal(result.result, renderUnsafeCalorieFloorCopy());
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "unsafe_calorie_floor",
+      text: renderUnsafeCalorieFloorCopy(),
+    });
+    assert.deepEqual(result.updatedFields, ["calories"]);
+    assert.equal(updateGoalsCalls, 0);
     assert.deepEqual(await readTargets(deviceService, deviceId), {
       calories: 1500,
       protein: 120,
@@ -512,6 +854,78 @@ describe("update_goals ToolContract", () => {
     assert.deepEqual(retryableProposal?.targets, proposed);
   });
 
+  it("Test 9d: latest_proposal keeps pending proposal retryable when unsafe override fails before consume", async () => {
+    const proposed = { calories: 1850, protein: 135, carbs: 165, fat: 60 };
+    const pending = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: proposed,
+    });
+    let getLatestCalls = 0;
+    let consumeCalls = 0;
+    let updateGoalsCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async getLatest(params: Parameters<typeof goalProposalService.getLatest>[0]) {
+        getLatestCalls += 1;
+        return goalProposalService.getLatest(params);
+      },
+      async consumeLatest(params: Parameters<typeof goalProposalService.consumeLatest>[0]) {
+        consumeCalls += 1;
+        return goalProposalService.consumeLatest(params);
+      },
+    } as typeof goalProposalService;
+    const guardedDeviceService = {
+      ...deviceService,
+      async updateGoals(id: string, patch: Partial<DailyTargets>) {
+        updateGoalsCalls += 1;
+        return deviceService.updateGoals(id, patch);
+      },
+    } as typeof deviceService;
+    const localDeps = {
+      ...deps,
+      deviceService: guardedDeviceService,
+      goalProposalService: guardedGoalProposalService,
+    } as ToolDeps;
+
+    const result = await executeTool(
+      updateGoalsCall({ mode: "latest_proposal", calories: 500 }),
+      deviceId,
+      localDeps,
+      {
+        currentUserMessage: "好，但卡路里 500",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.equal(result.summary, "failureReason: guard");
+    assert.equal(result.result, renderUnsafeCalorieFloorCopy());
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "unsafe_calorie_floor",
+      text: renderUnsafeCalorieFloorCopy(),
+    });
+    assert.deepEqual(result.updatedFields, ["calories"]);
+    assert.equal(getLatestCalls, 1);
+    assert.equal(consumeCalls, 0);
+    assert.equal(updateGoalsCalls, 0);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+    const retryableProposal = await goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    });
+    assert.equal(retryableProposal?.proposalId, pending.proposalId);
+    assert.deepEqual(retryableProposal?.targets, proposed);
+  });
+
   it("Test 10: cancel terms clear proposal without mutating or publishing and never count as consent", async () => {
     for (const term of ["不要", "取消", "先不用", "不好", "不可以", "不行", "no"]) {
       await goalProposalService.putLatest({
@@ -675,5 +1089,211 @@ describe("update_goals ToolContract", () => {
     assert.match(updateSummary, /latest_proposal/);
     assert.match(updateSummary, /protein/);
     assert.doesNotMatch(updateSummary, /130|proposalId|好|卡路里/);
+  });
+
+  it("Test 15: question-form current-turn goal text cannot mutate targets (UAT-21 truth 2)", async () => {
+    let updateGoalsCalls = 0;
+    const guardedDeviceService = {
+      ...deviceService,
+      async updateGoals(id: string, patch: Partial<DailyTargets>) {
+        updateGoalsCalls += 1;
+        return deviceService.updateGoals(id, patch);
+      },
+    } as typeof deviceService;
+
+    const result = await executeTool(
+      updateGoalsCall({ mode: "current_turn_values", calories: 1200 }),
+      deviceId,
+      { ...deps, deviceService: guardedDeviceService } as ToolDeps,
+      {
+        currentUserMessage: "1200可以嗎",
+        previousAssistantMessage: "目前每日目標 1500 kcal。",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.match(String(result.result), /question/i);
+    assert.equal(result.controlledReply, undefined);
+    assert.equal(updateGoalsCalls, 0);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 16: explicit apply intent with a complete credible floor target still commits", async () => {
+    const result = await executeTool(
+      updateGoalsCall({ mode: "current_turn_values", calories: 1200, protein: 110, carbs: 105, fat: 30 }),
+      deviceId,
+      deps,
+      {
+        currentUserMessage: "套用 1200，蛋白質 110，碳水 105，脂肪 30",
+      },
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(result.executed, true);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1200,
+      protein: 110,
+      carbs: 105,
+      fat: 30,
+    });
+    assert.equal(published.length, 1);
+  });
+
+  it("Test 17: calorie-only update whose merged target over-allocates macros is rejected retryably (UAT-21 truth 3)", async () => {
+    let updateGoalsCalls = 0;
+    const guardedDeviceService = {
+      ...deviceService,
+      async updateGoals(id: string, patch: Partial<DailyTargets>) {
+        updateGoalsCalls += 1;
+        return deviceService.updateGoals(id, patch);
+      },
+    } as typeof deviceService;
+
+    const result = await executeTool(
+      updateGoalsCall({ mode: "current_turn_values", calories: 1200 }),
+      deviceId,
+      { ...deps, deviceService: guardedDeviceService } as ToolDeps,
+      {
+        currentUserMessage: "請把每日目標改成 1200",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.match(String(result.result), /macro calories/i);
+    assert.equal(result.controlledReply, undefined);
+    assert.equal(updateGoalsCalls, 0);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 18: single-macro over-allocation is rejected retryably and a complete consistent retry commits", async () => {
+    const rejected = await executeTool(
+      updateGoalsCall({ mode: "current_turn_values", protein: 200 }),
+      deviceId,
+      deps,
+      {
+        currentUserMessage: "蛋白質改成 200",
+      },
+    );
+
+    assert.equal(rejected.success, false);
+    assert.equal(rejected.executed, false);
+    assert.equal(rejected.failureReason, "guard");
+    assert.match(String(rejected.result), /macro calories/i);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
+
+    const recovered = await executeTool(
+      updateGoalsCall({ mode: "current_turn_values", calories: 1900, protein: 170, carbs: 170, fat: 60 }),
+      deviceId,
+      deps,
+      {
+        currentUserMessage: "那改成 1900，蛋白質 170，碳水 170，脂肪 60",
+      },
+    );
+
+    assert.equal(recovered.success, true);
+    assert.equal(recovered.executed, true);
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1900,
+      protein: 170,
+      carbs: 170,
+      fat: 60,
+    });
+    assert.equal(published.length, 1);
+  });
+
+  it("Test 19: macro-inconsistent propose_goals without an active proposal is rejected before persistence (UAT-21 truth 3)", async () => {
+    let putLatestCalls = 0;
+    const guardedGoalProposalService = {
+      ...goalProposalService,
+      async putLatest(params: Parameters<typeof goalProposalService.putLatest>[0]) {
+        putLatestCalls += 1;
+        return goalProposalService.putLatest(params);
+      },
+    } as typeof goalProposalService;
+
+    const result = await executeTool(
+      proposeGoalsCall({ calories: 1200, protein: 140, carbs: 226, fat: 58 }),
+      deviceId,
+      { ...deps, goalProposalService: guardedGoalProposalService } as ToolDeps,
+      {
+        currentUserMessage: "幫我提案 1200 的每日目標",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "guard");
+    assert.match(String(result.result), /within 10%/);
+    assert.equal(result.proposalCard, undefined);
+    assert.equal(putLatestCalls, 0);
+    assert.equal(await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }), undefined);
+    assert.equal(published.length, 0);
+  });
+
+  it("Test 20: latest_proposal consent cannot commit a macro-inconsistent pending proposal (UAT-21 truth 3)", async () => {
+    const badProposal = await goalProposalService.putLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+      targets: { calories: 1200, protein: 140, carbs: 226, fat: 58 },
+    });
+    let updateGoalsCalls = 0;
+    const guardedDeviceService = {
+      ...deviceService,
+      async updateGoals(id: string, patch: Partial<DailyTargets>) {
+        updateGoalsCalls += 1;
+        return deviceService.updateGoals(id, patch);
+      },
+    } as typeof deviceService;
+
+    const result = await executeTool(
+      updateGoalsCall({ mode: "latest_proposal" }),
+      deviceId,
+      { ...deps, deviceService: guardedDeviceService } as ToolDeps,
+      {
+        currentUserMessage: "好",
+      },
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.deepEqual(result.controlledReply, {
+      source: "renderer",
+      reason: "goal_authority_failure",
+      text: renderGoalAuthorityFailureCopy(),
+    });
+    assert.equal(updateGoalsCalls, 0);
+    assert.deepEqual(
+      (await goalProposalService.getLatest({ deviceId, sessionId: DEFAULT_SESSION_ID }))?.proposalId,
+      badProposal.proposalId,
+    );
+    assert.deepEqual(await readTargets(deviceService, deviceId), {
+      calories: 1500,
+      protein: 120,
+      carbs: 150,
+      fat: 50,
+    });
+    assert.equal(published.length, 0);
   });
 });

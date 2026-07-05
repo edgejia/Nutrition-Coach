@@ -12,6 +12,7 @@
  *   - Image data URIs, bearer tokens, and OpenAI-style API keys  → "[REDACTED]"
  *   - Object keys containing `deviceId` in camelCase, snake_case, or kebab-case  → "[REDACTED]"
  *   - Raw prompt/message/provider/tool/final-assistant/database snapshot payload keys are omitted
+ *   - Internal tool identifiers in string metadata  → "[REDACTED_TOOL]"
  */
 
 import fs from "node:fs";
@@ -51,6 +52,7 @@ function latestDir(scenarioName: string): string {
 
 const REDACTED = "[REDACTED]";
 const REDACTED_PATH = "[REDACTED_PATH]";
+const REDACTED_TOOL = "[REDACTED_TOOL]";
 
 /**
  * Recursively walk a JSON-serialisable value and apply redaction rules.
@@ -84,7 +86,7 @@ function redactString(s: string): string {
   );
   s = s.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, `Bearer ${REDACTED}`);
   s = s.replace(/\bsk-[A-Za-z0-9_-]+/g, REDACTED);
-  return s;
+  return redactInternalToolIdentifiers(s);
 }
 
 function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
@@ -115,7 +117,12 @@ function shouldRedactKey(key: string): boolean {
 
 function shouldOmitKey(key: string): boolean {
   const normalized = normalizeKey(key);
-  return OMITTED_KEYS.has(normalized);
+  return (
+    OMITTED_KEYS.has(normalized) ||
+    normalized === "expectedpatterns" ||
+    normalized === "matchedterms" ||
+    (normalized.startsWith("matched") && normalized.endsWith("patterns"))
+  );
 }
 
 function normalizeKey(key: string): string {
@@ -188,7 +195,30 @@ const OMITTED_KEYS = new Set([
   "imagedatauri",
   "messages",
   "mealssnapshot",
+  "aftermeals",
+  "aftertargets",
+  "beforemeals",
+  "beforetargets",
+  "committedfacts",
+  "committedtargets",
+  "deletedmeal",
+  "allowedmealnames",
+  "assistantmealnames",
+  "checkedmealnames",
+  "datekey",
+  "foodname",
+  "imageassetid",
+  "imageurl",
+  "inventedmeals",
+  "items",
+  "loggedat",
+  "loggedmeal",
+  "mealid",
+  "mealrevisionid",
+  "normalizedfacts",
   "openaiapikey",
+  "persistence",
+  "persistedrevision",
   "providerpayload",
   "prompttext",
   "rawarguments",
@@ -211,7 +241,13 @@ const OMITTED_KEYS = new Set([
   "uploadstagingpath",
   "usermealtext",
   "rawusermessage",
+  "persistedmeal",
+  "receiptloggedmeal",
+  "receiptpayload",
+  "responseloggedmeal",
+  "seededmeal",
   "usermessage",
+  "updatedmeal",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -259,8 +295,17 @@ function buildSafeConsoleSummary(
 }
 
 function redactIdentifier(value: string): string {
-  return /^[a-z0-9][a-z0-9._:-]*$/i.test(value) ? value : REDACTED;
+  return /^[a-z0-9][a-z0-9._:-]*$/i.test(value)
+    ? redactInternalToolIdentifiers(value)
+    : REDACTED;
 }
+
+function redactInternalToolIdentifiers(value: string): string {
+  return value.replace(INTERNAL_TOOL_IDENTIFIER_PATTERN, REDACTED_TOOL);
+}
+
+const INTERNAL_TOOL_IDENTIFIER_PATTERN =
+  /(?:log_food|update_meal|delete_meal|find_meals|get_daily_summary|update_goals|propose_goals|propose_meal_numeric_correction|propose_meal_estimate|plan_next_meal)/g;
 
 /**
  * Write structured, redacted JSON artifacts for a completed scenario run.

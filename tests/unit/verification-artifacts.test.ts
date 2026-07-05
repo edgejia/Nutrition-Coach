@@ -167,7 +167,7 @@ describe("verification-artifacts", () => {
 
     assert.equal(trace.summary.source, "shape survives");
     assert.equal(trace.summary.deviceId, "[REDACTED]");
-    assert.deepEqual(trace.timeline, [{ type: "tool_result", tool: "log_food", success: true }]);
+    assert.deepEqual(trace.timeline, [{ type: "tool_result", tool: "[REDACTED_TOOL]", success: true }]);
     assert.doesNotMatch(traceRaw, /must not appear in llm trace/);
     assert.doesNotMatch(traceRaw, /must not become llm-trace\.json/);
     assert.doesNotMatch(traceRaw, /secret-device-id-xyz/);
@@ -310,16 +310,62 @@ describe("verification-artifacts", () => {
   test("database snapshot evidence keys are omitted from saved artifact files", async () => {
     const result = makeFailResult("omit-database-snapshots");
     result.artifacts.historySnapshot = [{ role: "user", content: "raw user meal text should not persist" }];
+    result.steps[0]!.actual = {
+      receiptLoggedMeal: {
+        mealId: "123e4567-e89b-42d3-a456-426614174000",
+        mealRevisionId: "123e4567-e89b-42d3-a456-426614174000:r1",
+        imageAssetId: "223e4567-e89b-42d3-a456-426614174000",
+        imageUrl: "/api/assets/223e4567-e89b-42d3-a456-426614174000",
+        loggedAt: "2026-06-29T17:53:28.750Z",
+        dateKey: "2026-06-30",
+        foodName: "raw receipt food",
+        items: [{ name: "raw item food", calories: 777 }],
+      },
+      normalizedFacts: {
+        loggedMeal: { foodName: "raw logged meal", calories: 777 },
+        receiptPayload: { foodName: "raw receipt payload", protein: 88 },
+        persistence: { foodName: "raw persistence", carbs: 99 },
+        persistedRevision: { foodName: "raw revision", fat: 11 },
+      },
+      checkedMealNames: ["raw checked meal"],
+      allowedMealNames: ["raw allowed meal"],
+      assistantMealNames: ["raw assistant meal"],
+      inventedMeals: ["raw invented meal"],
+      expectedPatterns: ["raw expected phrase"],
+      matchedPatterns: ["raw matched phrase"],
+      matchedInjectionSafetyPatterns: ["不能忽略"],
+      matchedPromptInjectionUnsafePatterns: ["照做"],
+      matchedTerms: ["system-prompt.v3"],
+    };
+    result.artifacts.behaviorMatrixSnapshots = {
+      beforeMeals: [{ id: "meal-1", foodName: "raw food name", calories: 777 }],
+      afterMeals: [{ id: "meal-1", foodName: "raw food name", calories: 888 }],
+      beforeTargets: { calories: 2000, protein: 100, carbs: 220, fat: 70 },
+      afterTargets: { calories: 1800, protein: 130, carbs: 150, fat: 50 },
+      persistedMeal: { id: "meal-2", foodName: "raw persisted meal" },
+      seededMeal: { id: "meal-3", foodName: "raw seeded meal" },
+      updatedMeal: { id: "meal-3", foodName: "raw updated meal" },
+      responseLoggedMeal: { mealId: "meal-4", foodName: "raw response meal" },
+      committedTargets: { calories: 1800, protein: 130, carbs: 150, fat: 50 },
+      committedFacts: { foodName: "raw committed food", calories: 520 },
+      deletedMeal: { mealId: "meal-5", foodName: "raw deleted meal" },
+      receiptLoggedMeal: { mealId: "323e4567-e89b-42d3-a456-426614174000", foodName: "raw artifact receipt" },
+      normalizedFacts: { persistence: { mealId: "423e4567-e89b-42d3-a456-426614174000" } },
+    };
 
     await writeScenarioArtifacts("omit-database-snapshots", result);
 
     const latestDir = path.join(tmpDir, "omit-database-snapshots", "latest");
-    for (const fileName of ["snapshots.json", "scenario-result.json"]) {
+    for (const fileName of ["steps.json", "snapshots.json", "scenario-result.json"]) {
       const raw = fs.readFileSync(path.join(latestDir, fileName), "utf-8");
-      assert.doesNotMatch(raw, /mealsSnapshot|historySnapshot/, `${fileName} must omit database snapshot keys`);
       assert.doesNotMatch(
         raw,
-        /raw user meal text should not persist|secret-device-id-xyz/,
+        /mealsSnapshot|historySnapshot|beforeMeals|afterMeals|beforeTargets|afterTargets|persistedMeal|seededMeal|updatedMeal|responseLoggedMeal|receiptLoggedMeal|normalizedFacts|loggedMeal|receiptPayload|persistence|persistedRevision|committedTargets|committedFacts|deletedMeal|mealId|mealRevisionId|imageAssetId|imageUrl|loggedAt|dateKey|foodName|items|checkedMealNames|allowedMealNames|assistantMealNames|inventedMeals|expectedPatterns|matchedPatterns|matchedInjectionSafetyPatterns|matchedPromptInjectionUnsafePatterns|matchedTerms/,
+        `${fileName} must omit database snapshot keys`,
+      );
+      assert.doesNotMatch(
+        raw,
+        /raw user meal text should not persist|secret-device-id-xyz|raw food name|raw persisted meal|raw seeded meal|raw updated meal|raw response meal|raw committed food|raw deleted meal|raw receipt food|raw item food|raw logged meal|raw receipt payload|raw persistence|raw revision|raw checked meal|raw allowed meal|raw assistant meal|raw invented meal|raw expected phrase|raw matched phrase|不能忽略|照做|system-prompt\.v3|raw artifact receipt|123e4567-e89b-42d3-a456-426614174000|\/api\/assets\/223e4567-e89b-42d3-a456-426614174000/,
         `${fileName} must not persist database snapshot values`,
       );
     }
@@ -601,7 +647,7 @@ describe("verification-artifacts", () => {
     assert.equal(trace.summary.finalReply.source, "stream");
     assert.equal(trace.summary.finalReply.shape, "streamed_text");
     assert.deepEqual(trace.timeline[0], {
-      tool: "log_food",
+      tool: "[REDACTED_TOOL]",
       success: true,
       executed: true,
       source: "orchestrator",
@@ -611,6 +657,41 @@ describe("verification-artifacts", () => {
       raw,
       /apiKey|api_key|OPENAI_API_KEY|cookie|set-cookie|guestSession|sessionToken|bearer|messages|rawMessages|rawPrompt|promptText|providerPayload|rawProviderPayload|arguments|rawArguments|toolArguments|toolResult|rawToolResult|finalAnswer|assistantContent|finalAssistantContent/,
     );
+  });
+
+  test("persisted artifacts redact internal tool identifiers in metadata", async () => {
+    const result = makePassResult("tool-id-redaction") as ScenarioResult & {
+      llmTrace?: Record<string, unknown>;
+    };
+    result.steps[0]!.name = "case_14_unsafe_update_goals";
+    result.steps[0]!.actual = {
+      allowedTools: ["update_goals"],
+      observedTools: ["update_goals", "propose_goals"],
+      note: "update_goals and propose_goals should not persist",
+    };
+    result.artifacts = {
+      scenario: "case_14_unsafe_update_goals",
+      toolSummary: ["log_food", "update_meal", "delete_meal", "find_meals", "get_daily_summary"],
+    };
+    result.llmTrace = {
+      summary: { toolCount: 2 },
+      timeline: [
+        { type: "tool_received", tool: "update_goals" },
+        { type: "tool_result", tool: "propose_goals" },
+      ],
+    };
+
+    await writeScenarioArtifacts("tool-id-redaction", result);
+
+    for (const fileName of ["summary.json", "steps.json", "snapshots.json", "scenario-result.json", "llm-trace.json"]) {
+      const raw = readArtifact(tmpDir, "tool-id-redaction", fileName);
+      assert.doesNotMatch(
+        raw,
+        /\b(?:log_food|update_meal|delete_meal|find_meals|get_daily_summary|update_goals|propose_goals)\b/,
+        `${fileName} must redact internal tool identifiers`,
+      );
+      assert.match(raw, /\[REDACTED_TOOL\]/, `${fileName} should include tool redaction placeholder`);
+    }
   });
 
   test("persisted llm-trace.json preserves provider metadata while removing raw provider payload material", async () => {

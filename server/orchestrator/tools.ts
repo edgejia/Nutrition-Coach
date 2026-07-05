@@ -23,6 +23,7 @@ import {
 import { MealRevisionPreconditionError } from "../services/meal-transactions.js";
 import {
   GOAL_PROPOSAL_TTL_MS,
+  goalProposalTargetSignature,
   type createGoalProposalService,
   type GoalProposalPayload,
 } from "../services/goal-proposals.js";
@@ -57,6 +58,11 @@ import {
   isGoalProposalConsent,
 } from "./source-text-guard.js";
 import {
+  checkNutritionSafetyTargets,
+  NUTRITION_SAFETY_CALORIE_FLOOR,
+  UNSAFE_CALORIE_FLOOR_REASON,
+} from "./nutrition-safety-policy.js";
+import {
   authorizeMealNumericUpdate,
   classifyMealNumericAdjustment,
   extractMealNumericEvidence,
@@ -66,7 +72,10 @@ import {
 import {
   renderGoalAuthorityFailureCopy,
   renderGoalCancelCopy,
+  renderDuplicateGoalProposalCopy,
   renderGoalProposalCopy,
+  renderGoalUpdateReceipt,
+  renderUnsafeCalorieFloorCopy,
   renderGoalValidationFailureCopy,
   getProposalActionLabels,
   renderCorrectionTargetClarificationCopy,
@@ -98,6 +107,16 @@ import {
   derivePlanningFacts,
   type PlanningFacts,
 } from "./planning-reply-renderer.js";
+import {
+  areGoalTargetsEquivalent,
+  hasReasonableGoalMacroCalories,
+  isExplicitGoalApplyIntent,
+  isGoalConfirmationQuestion,
+  isGoalExplanationQuestion,
+  isGoalMacroCaloriesOverAllocated,
+  validateRelativeLowerGoalProposal,
+  type RelativeLowerGoalProposalValidationReason,
+} from "./goal-adjustment-policy.js";
 
 // ---------------------------------------------------------------------------
 // Public types preserved for the orchestrator (Phase 8/9 callers).
@@ -143,6 +162,8 @@ export interface ToolExecutionResult {
     reason:
       | "goal_proposal"
       | "goal_authority_failure"
+      | "duplicate_goal_proposal"
+      | "unsafe_calorie_floor"
       | "goal_validation_failure"
       | "goal_cancel"
       | "meal_target_clarification"
@@ -508,10 +529,22 @@ interface GoalControlledResult {
   reply: string;
 }
 
-type ProposeGoalsResult = GoalControlledResult & {
+type GoalProposalResult = GoalControlledResult & {
   reason: "goal_proposal";
   proposalCard: PendingProposalCardInput;
 };
+interface GoalRetryableGuardResult {
+  status: "guard_feedback";
+  reason:
+    | Extract<
+        RelativeLowerGoalProposalValidationReason,
+        "rebound_or_not_lower" | "macro_calorie_inconsistent"
+      >
+    | "question_form_mutation";
+  reply: string;
+}
+
+type ProposeGoalsResult = GoalProposalResult | GoalControlledResult | GoalRetryableGuardResult;
 
 interface MealNumericControlledResult {
   status: "controlled_reply";
@@ -525,7 +558,7 @@ interface MealTargetControlledResult {
   reply: string;
 }
 
-type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult;
+type UpdateGoalsContractResult = UpdateGoalsResult | GoalControlledResult | GoalRetryableGuardResult;
 type UpdateMealContractResult = UpdateMealResult | MealNumericControlledResult | MealTargetControlledResult;
 type ProposeMealNumericCorrectionResult = MealNumericControlledResult & {
   reason: "meal_numeric_proposal";
@@ -759,6 +792,25 @@ function makeGoalControlledResult(
   };
 }
 
+function makeRelativeLowerGuardFeedback(
+  reason: GoalRetryableGuardResult["reason"],
+  activeTargets?: DailyTargets,
+): GoalRetryableGuardResult {
+  let reply: string;
+  if (reason === "macro_calorie_inconsistent") {
+    reply = "Guard feedback: provide a complete calories/protein/carbs/fat target set whose macro calories are within 10% of total calories.";
+  } else if (reason === "question_form_mutation") {
+    reply = "Guard feedback: this is a question turn. Answer the user's question without updating goals.";
+  } else {
+    reply = `Guard feedback: for this lower-target request, propose calories lower than ${activeTargets?.calories ?? "the active target"} kcal and at or above ${NUTRITION_SAFETY_CALORIE_FLOOR} kcal.`;
+  }
+  return {
+    status: "guard_feedback",
+    reason,
+    reply,
+  };
+}
+
 function formatGoalValue(field: keyof DailyTargets, value: number): string {
   return field === "calories" ? `${value} kcal` : `${value} g`;
 }
@@ -818,7 +870,7 @@ function proposalMealPeriodLabel(period: MealPeriod): string {
   }
 }
 
-function buildGoalProposalCard(proposal: GoalProposalPayload): PendingProposalCardInput {
+export function buildGoalProposalCard(proposal: GoalProposalPayload): PendingProposalCardInput {
   const labels = getProposalActionLabels("goal");
   return {
     proposalId: proposal.proposalId,
@@ -830,6 +882,7 @@ function buildGoalProposalCard(proposal: GoalProposalPayload): PendingProposalCa
         label: goalFieldLabel(field),
         after: formatGoalValue(field, proposal.targets[field]),
       })),
+      targetSignature: proposal.targetSignature ?? goalProposalTargetSignature(proposal.targets),
     },
     actions: {
       approveLabel: labels.approveLabel,
@@ -928,10 +981,6 @@ function goalToolProperties(required = false) {
 }
 
 const goalTargetProperties = goalToolProperties();
-
-function formatGoalsReceipt(targets: DailyTargets): string {
-  return `已更新每日目標：\n• 卡路里 ${targets.calories} kcal\n• 蛋白質 ${targets.protein} g\n• 碳水 ${targets.carbs} g\n• 脂肪 ${targets.fat} g`;
-}
 
 function buildHistoricalToolMessage(
   result: HistoricalToolClarification | { status: "multiple_targets"; dateKeys: string[] },
@@ -1521,6 +1570,20 @@ function deviceRowToDailyTargets(device: DeviceRow): DailyTargets {
     carbs: device.dailyCarbs,
     fat: device.dailyFat,
   };
+}
+
+function goalProposalCopyBaseline(input: {
+  activeGoalProposal?: GoalProposalPayload;
+  currentTargets?: DailyTargets;
+  proposedTargets: DailyTargets;
+}): DailyTargets | undefined {
+  if (input.activeGoalProposal) {
+    return input.activeGoalProposal.targets;
+  }
+  if (input.currentTargets && input.proposedTargets.calories < input.currentTargets.calories) {
+    return input.currentTargets;
+  }
+  return undefined;
 }
 
 function classificationMatchesOperator(
@@ -2643,12 +2706,93 @@ const proposeGoalsContract: ToolContract<DailyTargets, ProposeGoalsResult> = {
       throw new Error("propose_goals contract missing goalProposalService/deviceId in context");
     }
 
+    const safetyCheck = checkNutritionSafetyTargets(args);
+    if (!safetyCheck.ok) {
+      const reply = renderUnsafeCalorieFloorCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult(UNSAFE_CALORIE_FLOOR_REASON, reply),
+        toolMessage: reply,
+      };
+    }
+
+    const activeGoalProposal = await deps.goalProposalService.getLatest({
+      deviceId,
+      sessionId: DEFAULT_SESSION_ID,
+    });
+    const currentDevice = deps.deviceService
+      ? await deps.deviceService.getDevice(deviceId)
+      : undefined;
+    const currentTargets = currentDevice ? deviceRowToDailyTargets(currentDevice) : undefined;
+    const relativeLowerValidation = validateRelativeLowerGoalProposal({
+      userMessage: context.currentUserMessage,
+      previousAssistantMessage: context.previousAssistantMessage,
+      activeProposalTargets: activeGoalProposal?.targets,
+      proposedTargets: args,
+    });
+    if (
+      !relativeLowerValidation.ok
+      && (
+        relativeLowerValidation.reason === "below_floor"
+        || relativeLowerValidation.reason === "active_at_floor"
+      )
+    ) {
+      const reply = renderUnsafeCalorieFloorCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult(UNSAFE_CALORIE_FLOOR_REASON, reply),
+        toolMessage: reply,
+      };
+    }
+    if (
+      !relativeLowerValidation.ok
+      && activeGoalProposal
+      && (
+        relativeLowerValidation.reason === "rebound_or_not_lower"
+        || relativeLowerValidation.reason === "macro_calorie_inconsistent"
+      )
+    ) {
+      const guardResult = makeRelativeLowerGuardFeedback(
+        relativeLowerValidation.reason,
+        activeGoalProposal.targets,
+      );
+      return {
+        ok: true,
+        result: guardResult,
+        toolMessage: guardResult.reply,
+      };
+    }
+    if (!hasReasonableGoalMacroCalories(args)) {
+      const guardResult = makeRelativeLowerGuardFeedback("macro_calorie_inconsistent");
+      return {
+        ok: true,
+        result: guardResult,
+        toolMessage: guardResult.reply,
+      };
+    }
+
+    if (activeGoalProposal && areGoalTargetsEquivalent(args, activeGoalProposal.targets)) {
+      const reply = renderDuplicateGoalProposalCopy(activeGoalProposal.targets);
+      return {
+        ok: true,
+        result: makeGoalControlledResult("duplicate_goal_proposal", reply),
+        toolMessage: reply,
+      };
+    }
+
     const proposal = await deps.goalProposalService.putLatest({
       deviceId,
       sessionId: DEFAULT_SESSION_ID,
       targets: args,
     });
-    const reply = renderGoalProposalCopy(args);
+    const reply = renderGoalProposalCopy(
+      args,
+      goalProposalCopyBaseline({
+        activeGoalProposal,
+        currentTargets,
+        proposedTargets: args,
+      }),
+    );
 
     return {
       ok: true,
@@ -2773,29 +2917,11 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       };
     }
 
-    const consumedProposal = await deps.goalProposalService.consumeLatest({
-      deviceId,
-      sessionId: DEFAULT_SESSION_ID,
-      proposalId: activeProposal.proposalId,
-    });
-    if (!consumedProposal) {
-      return {
-        allowed: false,
-        fact: {
-          tool: "update_goals",
-          policyClass: "direct-execute",
-          decision: "blocked",
-          ruleId: "update_goals_latest_proposal_confirm_first",
-          proposalId: activeProposal.proposalId,
-        },
-      };
-    }
-
     context.policyAuthorization = {
       ...context.policyAuthorization,
       updateGoalsLatestProposal: {
-        proposalId: consumedProposal.proposalId,
-        proposal: consumedProposal,
+        proposalId: activeProposal.proposalId,
+        proposal: activeProposal,
       } satisfies GoalProposalPolicyAuthorization,
     };
 
@@ -2806,7 +2932,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
         policyClass: "direct-execute",
         decision: "allowed",
         ruleId: "update_goals_latest_proposal_confirm_first",
-        proposalId: consumedProposal.proposalId,
+        proposalId: activeProposal.proposalId,
       },
     };
   },
@@ -2827,6 +2953,22 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       };
     }
 
+    if (
+      args.mode === "current_turn_values"
+      && !isExplicitGoalApplyIntent(context.currentUserMessage)
+      && (
+        isGoalConfirmationQuestion(context.currentUserMessage)
+        || isGoalExplanationQuestion(context.currentUserMessage)
+      )
+    ) {
+      const guardResult = makeRelativeLowerGuardFeedback("question_form_mutation");
+      return {
+        ok: true,
+        result: guardResult,
+        toolMessage: guardResult.reply,
+      };
+    }
+
     const overridePatch = pickTargetPatch(args);
     const overrideFields = updatedGoalFields(overridePatch);
     if (overrideFields.length > 0) {
@@ -2843,7 +2985,14 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
       }
     }
 
+    const currentDevice = await deps.deviceService.getDevice(deviceId);
+    if (!currentDevice) {
+      throw new Error("update_goals contract missing device targets");
+    }
+    const currentTargets = deviceRowToDailyTargets(currentDevice);
+
     let updatePatch: Partial<DailyTargets>;
+    let latestProposalAuthorization: GoalProposalPolicyAuthorization | undefined;
     if (args.mode === "current_turn_values") {
       updatePatch = overridePatch;
     } else {
@@ -2858,8 +3007,72 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
           toolMessage: reply,
         };
       }
+      latestProposalAuthorization = authorization;
       updatePatch = {
         ...authorization.proposal.targets,
+        ...overridePatch,
+      };
+    }
+
+    const safetyCheck = checkNutritionSafetyTargets(updatePatch);
+    if (!safetyCheck.ok) {
+      const reply = renderUnsafeCalorieFloorCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult(UNSAFE_CALORIE_FLOOR_REASON, reply),
+        toolMessage: reply,
+      };
+    }
+
+    if (args.mode === "current_turn_values") {
+      const candidateTargets: DailyTargets = {
+        ...currentTargets,
+        ...updatePatch,
+      };
+      if (isGoalMacroCaloriesOverAllocated(candidateTargets)) {
+        const guardResult = makeRelativeLowerGuardFeedback("macro_calorie_inconsistent");
+        return {
+          ok: true,
+          result: guardResult,
+          toolMessage: guardResult.reply,
+        };
+      }
+    } else if (!hasReasonableGoalMacroCalories(updatePatch as DailyTargets)) {
+      const reply = renderGoalAuthorityFailureCopy();
+      return {
+        ok: true,
+        result: makeGoalControlledResult("goal_authority_failure", reply),
+        toolMessage: reply,
+      };
+    }
+
+    if (args.mode === "latest_proposal") {
+      const authorization = latestProposalAuthorization;
+      if (!authorization) {
+        const reply = renderGoalAuthorityFailureCopy();
+        return {
+          ok: true,
+          result: makeGoalControlledResult("goal_authority_failure", reply),
+          toolMessage: reply,
+        };
+      }
+
+      const consumedProposal = await deps.goalProposalService.consumeLatest({
+        deviceId,
+        sessionId: DEFAULT_SESSION_ID,
+        proposalId: authorization.proposalId,
+      });
+      if (!consumedProposal) {
+        const reply = renderGoalAuthorityFailureCopy();
+        return {
+          ok: true,
+          result: makeGoalControlledResult("goal_authority_failure", reply),
+          toolMessage: reply,
+        };
+      }
+
+      updatePatch = {
+        ...consumedProposal.targets,
         ...overridePatch,
       };
     }
@@ -2889,7 +3102,7 @@ const updateGoalsContract: ToolContract<UpdateGoalsArgs, UpdateGoalsContractResu
         updatedFields,
         publishedEvents,
       },
-      toolMessage: formatGoalsReceipt(targets),
+      toolMessage: renderGoalUpdateReceipt(targets),
     };
   },
 };
@@ -3646,12 +3859,22 @@ export async function executeTool(
 
   if (toolCall.function.name === "propose_goals") {
     const contractResult = outcome.contractResult as ProposeGoalsResult;
+    if (contractResult.status === "guard_feedback") {
+      return attachPolicyFact({
+        result: contractResult.reply,
+        summary: "failureReason: guard",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+      });
+    }
+    const isProposal = contractResult.reason === "goal_proposal" && "proposalCard" in contractResult;
     return attachPolicyFact({
       result: contractResult.reply,
-      summary: "status: proposal",
-      success: true,
-      executed: true,
-      proposalCard: contractResult.proposalCard,
+      summary: isProposal ? "status: proposal" : "failureReason: guard",
+      success: isProposal,
+      executed: isProposal,
+      ...(isProposal ? { proposalCard: contractResult.proposalCard } : { failureReason: "guard" as const }),
       controlledReply: {
         source: "renderer",
         reason: contractResult.reason,
@@ -3698,6 +3921,21 @@ export async function executeTool(
 
   if (toolCall.function.name === "update_goals") {
     const contractResult = outcome.contractResult as UpdateGoalsContractResult;
+    if ("status" in contractResult && contractResult.status === "guard_feedback") {
+      return attachPolicyFact({
+        result: contractResult.reply,
+        summary: "failureReason: guard",
+        success: false,
+        executed: false,
+        failureReason: "guard",
+        updatedFields:
+          typeof outcome.logSummary === "object" &&
+          outcome.logSummary !== null &&
+          Array.isArray(outcome.logSummary.updatedFields)
+            ? [...(outcome.logSummary.updatedFields as UpdateGoalField[])]
+            : undefined,
+      });
+    }
     if (isGoalControlledResult(contractResult)) {
       const failureReason = contractResult.reason === "goal_validation_failure"
         ? "validation"

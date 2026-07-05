@@ -75,6 +75,21 @@ export class MealRevisionConflictError extends Error {
   }
 }
 
+export const GOAL_SAFETY_ERROR_REASON = "unsafe_calorie_floor";
+
+export class GoalSafetyError extends Error {
+  readonly reason = GOAL_SAFETY_ERROR_REASON;
+
+  constructor(message = "Unsafe calorie target") {
+    super(message);
+    this.name = "GoalSafetyError";
+  }
+}
+
+export function isGoalSafetyError(error: unknown): error is GoalSafetyError {
+  return error instanceof GoalSafetyError;
+}
+
 const MOCK_NEXT_INTAKE_VALIDATION_ERROR_KEY = "nutritionCoach:mockNextIntakeValidationError";
 const MAX_CHAT_IMAGE_BYTES = 5 * 1024 * 1024;
 const CHAT_IMAGE_MAX_DIMENSION = 1600;
@@ -795,7 +810,13 @@ export async function updateGoals(goals: Partial<DailyTargets>): Promise<{ daily
     body: JSON.stringify(goals),
   });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) throw new Error("Failed to update goals");
+  if (!res.ok) {
+    const body = await readJsonSafe(res);
+    if (isRecord(body) && body.reason === GOAL_SAFETY_ERROR_REASON) {
+      throw new GoalSafetyError(getResponseErrorMessage(body) ?? undefined);
+    }
+    throw new Error("Failed to update goals");
+  }
   const body = await res.json() as unknown;
   assertUpdateGoalsResponse(body);
   return body;

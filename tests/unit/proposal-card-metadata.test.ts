@@ -7,6 +7,7 @@ import { chatMessages } from "../../server/db/schema.js";
 import { createDeviceService } from "../../server/services/device.js";
 import {
   createProposalCardService,
+  projectProposalCardForClient,
   type ProposalCardMetadata,
   type ProposalStatusProjection,
 } from "../../server/services/proposal-cards.js";
@@ -162,6 +163,87 @@ describe("proposal card metadata service", () => {
     assert.equal(cards.get("assistant-meal-new")?.status, "active");
   });
 
+  it("clears stored lapse copy on terminal status transitions unless explicitly supplied", async () => {
+    insertChatMessage(db, { id: "assistant-approved", deviceId, role: "assistant" });
+    insertChatMessage(db, { id: "assistant-rejected", deviceId, role: "assistant" });
+    insertChatMessage(db, { id: "assistant-stale", deviceId, role: "assistant" });
+    insertChatMessage(db, { id: "assistant-explicit", deviceId, role: "assistant" });
+    const expiredCopy = "這個目標提案已超過 30 分鐘，請重新提出目標調整。";
+    const staleCopy = "這個提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。";
+    const explicitTerminalCopy = "explicit terminal copy";
+    const baseInput = {
+      deviceId,
+      proposalKind: "goal" as const,
+      proposalLane: "goal" as const,
+      title: "每日目標提案",
+      details: { rows: [{ label: "卡路里", after: "1600 kcal" }] },
+      actions: { approveLabel: "套用目標", editLabel: "調整目標", rejectLabel: "取消提案" },
+      lapseCopy: expiredCopy,
+    };
+
+    await service.saveAssistantProposalCard({
+      ...baseInput,
+      assistantMessageId: "assistant-approved",
+      proposalId: "goal-approved",
+    });
+    await service.saveAssistantProposalCard({
+      ...baseInput,
+      assistantMessageId: "assistant-rejected",
+      proposalId: "goal-rejected",
+    });
+    await service.saveAssistantProposalCard({
+      ...baseInput,
+      assistantMessageId: "assistant-stale",
+      proposalId: "goal-stale",
+    });
+    await service.saveAssistantProposalCard({
+      ...baseInput,
+      assistantMessageId: "assistant-explicit",
+      proposalId: "goal-explicit",
+    });
+
+    await service.markProposalStatus({ deviceId, proposalId: "goal-approved", status: "approved" });
+    await service.markProposalStatus({ deviceId, proposalId: "goal-rejected", status: "rejected" });
+    await service.markProposalStatus({ deviceId, proposalId: "goal-stale", status: "stale" });
+    await service.markProposalStatus({
+      deviceId,
+      proposalId: "goal-explicit",
+      status: "approved",
+      lapseCopy: explicitTerminalCopy,
+    });
+
+    const cards = await service.getCardsForAssistantMessages({
+      deviceId,
+      assistantMessageIds: [
+        "assistant-approved",
+        "assistant-rejected",
+        "assistant-stale",
+        "assistant-explicit",
+      ],
+    });
+
+    assert.equal(cards.get("assistant-approved")?.status, "approved");
+    assert.equal(cards.get("assistant-approved")?.lapseCopy, null);
+    assert.equal(cards.get("assistant-rejected")?.status, "rejected");
+    assert.equal(cards.get("assistant-rejected")?.lapseCopy, null);
+    assert.equal(cards.get("assistant-stale")?.status, "stale");
+    assert.equal(cards.get("assistant-stale")?.lapseCopy, expiredCopy);
+    assert.equal(cards.get("assistant-explicit")?.status, "approved");
+    assert.equal(cards.get("assistant-explicit")?.lapseCopy, explicitTerminalCopy);
+
+    await service.markProposalStatus({
+      deviceId,
+      proposalId: "goal-stale",
+      status: "stale",
+      lapseCopy: staleCopy,
+    });
+    const updated = await service.getCardsForAssistantMessages({
+      deviceId,
+      assistantMessageIds: ["assistant-stale"],
+    });
+    assert.equal(updated.get("assistant-stale")?.lapseCopy, staleCopy);
+  });
+
   it("projects status from persisted metadata plus active proposal authority", async () => {
     const activeCard: ProposalCardMetadata = {
       id: "card-active",
@@ -239,6 +321,118 @@ describe("proposal card metadata service", () => {
         copy: expectProjected(projections, "meal-superseded").lapseCopy,
       },
       { status: "superseded", actionable: false, copy: "這個提案已被新的餐點修改取代。" },
+    );
+  });
+
+  it("projects only the latest active goal proposal as actionable", async () => {
+    const olderGoalCard: ProposalCardMetadata = {
+      id: "card-goal-older",
+      deviceId,
+      assistantMessageId: "assistant-goal-older",
+      proposalId: "goal-older",
+      proposalKind: "goal",
+      proposalLane: "goal",
+      status: "active",
+      title: "每日目標提案",
+      details: { rows: [{ label: "卡路里", after: "2050 kcal" }], targetSignature: "older-signature" },
+      actions: { approveLabel: "套用目標", editLabel: "調整目標", rejectLabel: "取消提案" },
+      expiresAt: "2026-06-14T08:30:00.000Z",
+      lapseCopy: "這個目標提案已超過 30 分鐘，請重新提出目標調整。",
+      supersededByKind: null,
+      createdAt: "2026-06-14T08:00:00.000Z",
+      updatedAt: "2026-06-14T08:00:00.000Z",
+    };
+    const newerGoalCard: ProposalCardMetadata = {
+      ...olderGoalCard,
+      id: "card-goal-newer",
+      assistantMessageId: "assistant-goal-newer",
+      proposalId: "goal-newer",
+      details: { rows: [{ label: "卡路里", after: "1800 kcal" }], targetSignature: "newer-signature" },
+    };
+
+    const projections = service.projectStatusForCards({
+      deviceId,
+      cards: [olderGoalCard, newerGoalCard],
+      activeProposals: [
+        {
+          proposalId: "goal-newer",
+          proposalKind: "goal",
+          proposalLane: "goal",
+          expiresAt: "2026-06-14T08:30:00.000Z",
+        },
+      ],
+      now: new Date("2026-06-14T08:10:00.000Z"),
+    });
+
+    const olderProjection = expectProjected(projections, "goal-older");
+    const newerProjection = expectProjected(projections, "goal-newer");
+    assert.deepEqual(
+      {
+        status: olderProjection.status,
+        actionable: olderProjection.isActionable,
+        publicSignature: projectProposalCardForClient(olderGoalCard, olderProjection).details.targetSignature,
+      },
+      { status: "stale", actionable: false, publicSignature: undefined },
+    );
+    assert.deepEqual(
+      {
+        status: newerProjection.status,
+        actionable: newerProjection.isActionable,
+        publicSignature: projectProposalCardForClient(newerGoalCard, newerProjection).details.targetSignature,
+      },
+      { status: "active", actionable: true, publicSignature: undefined },
+    );
+  });
+
+  it("suppresses stale lapse copy for approved and rejected terminal card projections", async () => {
+    const approvedCard: ProposalCardMetadata = {
+      id: "card-approved",
+      deviceId,
+      assistantMessageId: "assistant-approved",
+      proposalId: "goal-approved",
+      proposalKind: "goal",
+      proposalLane: "goal",
+      status: "approved",
+      title: "每日目標提案",
+      details: { rows: [{ label: "卡路里", after: "2200 kcal" }] },
+      actions: { approveLabel: "套用目標", editLabel: "調整目標", rejectLabel: "取消提案" },
+      expiresAt: "2026-06-14T08:30:00.000Z",
+      lapseCopy: "這個目標提案已超過 30 分鐘，請重新提出目標調整。",
+      supersededByKind: null,
+      createdAt: "2026-06-14T08:00:00.000Z",
+      updatedAt: "2026-06-14T08:00:00.000Z",
+    };
+    const rejectedCard: ProposalCardMetadata = {
+      ...approvedCard,
+      id: "card-rejected",
+      assistantMessageId: "assistant-rejected",
+      proposalId: "goal-rejected",
+      status: "rejected",
+      lapseCopy: "這個目標提案已被新的目標提案取代。",
+    };
+
+    const projections = service.projectStatusForCards({
+      deviceId,
+      cards: [approvedCard, rejectedCard],
+      activeProposals: [],
+      now: new Date("2026-06-14T09:00:00.000Z"),
+    });
+
+    assert.deepEqual(
+      {
+        status: expectProjected(projections, "goal-approved").status,
+        actionable: expectProjected(projections, "goal-approved").isActionable,
+        copy: expectProjected(projections, "goal-approved").lapseCopy,
+      },
+      { status: "approved", actionable: false, copy: null },
+    );
+    assert.deepEqual(
+      {
+        status: expectProjected(projections, "goal-rejected").status,
+        actionable: expectProjected(projections, "goal-rejected").isActionable,
+        copy: expectProjected(projections, "goal-rejected").lapseCopy,
+      },
+      { status: "rejected", actionable: false, copy: null },
     );
   });
 

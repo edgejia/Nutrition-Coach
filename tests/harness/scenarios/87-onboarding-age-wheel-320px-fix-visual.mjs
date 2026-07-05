@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Visual evidence command:
+// yarn build
+// yarn node tests/harness/scenarios/87-onboarding-age-wheel-320px-fix-visual.mjs --output-dir tests/harness/artifacts/87-onboarding-age-wheel-320px-fix/latest
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createServer } from "node:http";

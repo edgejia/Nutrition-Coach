@@ -6,7 +6,9 @@ import {
   type BehaviorCaseOutcome,
 } from "../behavior-assertions.js";
 import { createScenarioApp } from "../app-fixture.js";
+import { parseSSEEvents } from "../sse.js";
 import { StreamingLLMProvider } from "../streaming-llm.js";
+import { createLlmTraceRecorder } from "../../../server/orchestrator/llm-trace.js";
 
 interface MealSnapshot {
   id: string;
@@ -29,10 +31,10 @@ interface ClarificationSubCaseEvidence {
   allowedTools: string[];
   observedTools: string[];
   unauthorizedTools: string[];
-  beforeMeals: MealSnapshot[];
-  afterMeals: MealSnapshot[];
+  beforeMealCount: number;
+  afterMealCount: number;
   persistedDiff: Record<string, unknown>;
-  reply: string;
+  replyLength: number;
 }
 
 const FIXED_NOW = "2026-04-19T12:00:00+08:00";
@@ -72,13 +74,10 @@ export async function runCase06UpdateDeleteClarification(): Promise<BehaviorCase
       allowedTools: ["find_meals"],
       observedTools: subCases.flatMap((subCase) => subCase.evidence.observedTools),
       unauthorizedTools: subCases.flatMap((subCase) => subCase.evidence.unauthorizedTools),
-      beforeMeals: subCases.map((subCase) => ({
+      mealCounts: subCases.map((subCase) => ({
         name: subCase.evidence.name,
-        meals: subCase.evidence.beforeMeals,
-      })),
-      afterMeals: subCases.map((subCase) => ({
-        name: subCase.evidence.name,
-        meals: subCase.evidence.afterMeals,
+        before: subCase.evidence.beforeMealCount,
+        after: subCase.evidence.afterMealCount,
       })),
       persistedDiff: Object.fromEntries(
         subCases.map((subCase) => [subCase.evidence.name, subCase.evidence.persistedDiff]),
@@ -92,7 +91,11 @@ async function runAmbiguousMealSubCase(subCase: ClarificationSubCase): Promise<{
   evidence: ClarificationSubCaseEvidence;
 }> {
   const llmProvider = new StreamingLLMProvider();
-  const ctx = await createScenarioApp({ llmProvider });
+  const recorder = createLlmTraceRecorder();
+  const ctx = await createScenarioApp({
+    llmProvider,
+    llmTraceRecorderFactory: () => recorder,
+  });
 
   try {
     await seedSharedMultiCandidateMeals(ctx.deviceId, ctx.services.foodLoggingService);
@@ -113,8 +116,9 @@ async function runAmbiguousMealSubCase(subCase: ClarificationSubCase): Promise<{
     llmProvider.queueRoundResponse({ content: subCase.reply });
 
     const response = await postChat(ctx.address, ctx.cookieHeader, subCase.message);
+    const trace = recorder.build({ scenario: `behavior-matrix:case-06:${subCase.name}`, status: "pass" });
     const afterMeals = await readMeals(ctx.address, ctx.cookieHeader);
-    const observedTools = collectObservedTools(llmProvider);
+    const observedTools = collectObservedTools(trace);
     const unauthorizedTools = collectUnauthorizedTools(observedTools, ["find_meals"]);
     const persistedDiff = diffMeals(beforeMeals, afterMeals);
     const evidence: ClarificationSubCaseEvidence = {
@@ -122,10 +126,10 @@ async function runAmbiguousMealSubCase(subCase: ClarificationSubCase): Promise<{
       allowedTools: ["find_meals"],
       observedTools,
       unauthorizedTools,
-      beforeMeals,
-      afterMeals,
+      beforeMealCount: beforeMeals.length,
+      afterMealCount: afterMeals.length,
       persistedDiff,
-      reply: response.reply,
+      replyLength: response.reply.length,
     };
 
     return {
@@ -143,7 +147,7 @@ async function runAmbiguousMealSubCase(subCase: ClarificationSubCase): Promise<{
         ),
         namedAssertion(
           `case_06_${subCase.name}_clarifying_question`,
-          /哪一筆|多筆|請回覆/.test(response.reply),
+          /哪一筆|多筆|請回覆|回覆編號/.test(response.reply),
           evidence,
         ),
         namedAssertion(
@@ -205,11 +209,22 @@ async function postChat(
 
   const res = await fetch(`${address}/api/chat`, {
     method: "POST",
-    headers: { cookie: cookieHeader },
+    headers: { cookie: cookieHeader, Accept: "text/event-stream" },
     body: form,
   });
-  const body = await res.json() as { reply?: string };
-  return { status: res.status, reply: body.reply ?? "" };
+  const rawSse = await res.text();
+  const events = parseSSEEvents(rawSse);
+  const reply = events
+    .filter((event) => event.event === "chunk")
+    .map((event) => {
+      try {
+        return (JSON.parse(event.data) as { token?: string }).token ?? "";
+      } catch {
+        return "";
+      }
+    })
+    .join("");
+  return { status: res.status, reply };
 }
 
 async function readMeals(address: string, cookieHeader: string): Promise<MealSnapshot[]> {
@@ -227,18 +242,10 @@ async function readMeals(address: string, cookieHeader: string): Promise<MealSna
   }));
 }
 
-function collectObservedTools(llmProvider: StreamingLLMProvider): string[] {
-  const observed: string[] = [];
-  for (const call of llmProvider.chatCalls) {
-    for (const message of call.messages) {
-      if (!("tool_calls" in message) || !Array.isArray(message.tool_calls)) continue;
-      for (const toolCall of message.tool_calls) {
-        const name = toolCall?.function?.name;
-        if (typeof name === "string") observed.push(name);
-      }
-    }
-  }
-  return observed;
+function collectObservedTools(trace: ReturnType<ReturnType<typeof createLlmTraceRecorder>["build"]>): string[] {
+  return trace.timeline
+    .filter((event) => event.type === "tool_received")
+    .map((event) => event.tool);
 }
 
 function collectUnauthorizedTools(observedTools: string[], allowedTools: string[]): string[] {
@@ -251,18 +258,18 @@ function diffMeals(before: MealSnapshot[], after: MealSnapshot[]): Record<string
     return { mealCount: { before: before.length, after: after.length } };
   }
 
-  const changedMeals: Array<{ id: string; before?: MealSnapshot; after?: MealSnapshot }> = [];
+  let changedMealCount = 0;
   const beforeById = new Map(before.map((meal) => [meal.id, meal]));
   const afterById = new Map(after.map((meal) => [meal.id, meal]));
   for (const id of new Set([...beforeById.keys(), ...afterById.keys()])) {
     const beforeMeal = beforeById.get(id);
     const afterMeal = afterById.get(id);
     if (JSON.stringify(beforeMeal) !== JSON.stringify(afterMeal)) {
-      changedMeals.push({ id, before: beforeMeal, after: afterMeal });
+      changedMealCount += 1;
     }
   }
 
-  return changedMeals.length > 0 ? { changedMeals } : {};
+  return changedMealCount > 0 ? { mealsChanged: true, changedMealCount } : {};
 }
 
 async function withFixedDate<T>(run: () => Promise<T>): Promise<T> {

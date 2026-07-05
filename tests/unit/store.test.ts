@@ -1,5 +1,10 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import type { ProposalCardMetadata } from "../../client/src/types.js";
+import {
+  renderProposalExpiredCopy,
+  renderProposalSupersededCopy,
+} from "../../server/orchestrator/mutation-receipts.js";
 
 // Minimal localStorage shim for Node.js (must precede store import)
 const storage = new Map<string, string>();
@@ -18,6 +23,12 @@ const { formatLocalDate } = await import("../../client/src/lib/time.js");
 const { buildReceiptMealEditPayload } = await import("../../client/src/meal-edit-payload.js");
 const storeModuleUrl = new URL("../../client/src/store.ts", import.meta.url);
 const originalFetch = globalThis.fetch;
+const GOAL_PROPOSAL_EXPIRED_COPY = renderProposalExpiredCopy("goal");
+const GOAL_PROPOSAL_SUPERSEDED_COPY = renderProposalSupersededCopy({
+  proposalKind: "goal",
+  supersededByKind: "goal",
+});
+const GOAL_PROPOSAL_STALE_COPY = "這個目標提案已不是目前有效狀態，沒有更新任何資料。請重新提出需求。";
 
 async function loadFreshStore(suffix: string) {
   return import(`${storeModuleUrl.href}?${suffix}`);
@@ -47,6 +58,38 @@ const sampleMeals = [
     loggedAt: "2026-04-01T08:00:00.000Z",
   },
 ];
+
+function goalProposalCard(
+  proposalId: string,
+  calories: number,
+  overrides: Partial<ProposalCardMetadata> = {},
+): ProposalCardMetadata {
+  return {
+    proposalId,
+    proposalKind: "goal",
+    proposalLane: "goal",
+    status: "active",
+    isActionable: true,
+    title: "每日目標提案",
+    details: {
+      rows: [
+        { label: "卡路里", after: `${calories} kcal` },
+        { label: "蛋白質", after: "120 g" },
+        { label: "碳水", after: "150 g" },
+        { label: "脂肪", after: "45 g" },
+      ],
+    },
+    actions: {
+      approveLabel: "套用目標",
+      editLabel: "調整目標",
+      rejectLabel: "取消提案",
+    },
+    expiresAt: "2026-06-14T08:30:00.000Z",
+    lapseCopy: null,
+    supersededByKind: null,
+    ...overrides,
+  };
+}
 
 describe("AppStore", () => {
   beforeEach(() => {
@@ -1198,6 +1241,142 @@ describe("ProvisionalBubble actions", () => {
     assert.equal(useStore.getState().messages.length, 1);
     assert.equal(useStore.getState().dailySummary, null);
     assert.equal(handlerCallCount, 1);
+  });
+
+  it("commitProvisionalBubble supersedes older active goal cards when a newer goal proposal arrives", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-goal-old",
+        role: "assistant",
+        content: "請確認 2050 kcal。",
+        createdAt: "2026-06-14T08:00:00.000Z",
+        proposalCard: goalProposalCard("goal-old", 2050),
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "assistant-goal-new",
+      statusLabel: "",
+      content: "請確認 1800 kcal。",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      proposalCard: goalProposalCard("goal-new", 1800),
+    });
+
+    const [oldMessage, newMessage] = useStore.getState().messages;
+    assert.equal(oldMessage?.proposalCard?.status, "superseded");
+    assert.equal(oldMessage?.proposalCard?.isActionable, false);
+    assert.equal(oldMessage?.proposalCard?.supersededByKind, "goal");
+    assert.equal(newMessage?.proposalCard?.status, "active");
+    assert.equal(newMessage?.proposalCard?.isActionable, true);
+    assert.equal(
+      useStore.getState().messages.filter((message) =>
+        message.proposalCard?.proposalKind === "goal" &&
+        message.proposalCard.status === "active" &&
+        message.proposalCard.isActionable
+      ).length,
+      1,
+    );
+  });
+
+  it("commitProvisionalBubble pairs superseded goal cards with backend replacement copy even when active cards carry expiry copy", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-goal-old",
+        role: "assistant",
+        content: "請確認 2050 kcal。",
+        createdAt: "2026-06-14T08:00:00.000Z",
+        proposalCard: goalProposalCard("goal-old", 2050, {
+          lapseCopy: GOAL_PROPOSAL_EXPIRED_COPY,
+        }),
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "assistant-goal-new",
+      statusLabel: "",
+      content: "請確認 1800 kcal。",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      proposalCard: goalProposalCard("goal-new", 1800, {
+        lapseCopy: GOAL_PROPOSAL_EXPIRED_COPY,
+      }),
+    });
+
+    const [oldMessage] = useStore.getState().messages;
+    assert.equal(oldMessage?.proposalCard?.status, "superseded");
+    assert.equal(oldMessage?.proposalCard?.lapseCopy, GOAL_PROPOSAL_SUPERSEDED_COPY);
+    assert.notEqual(oldMessage?.proposalCard?.lapseCopy, GOAL_PROPOSAL_EXPIRED_COPY);
+  });
+
+  it("commitProvisionalBubble deactivates active goal cards when dailyTargets commit without a new proposal", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-goal-old",
+        role: "assistant",
+        content: "請確認 2050 kcal。",
+        createdAt: "2026-06-14T08:00:00.000Z",
+        proposalCard: goalProposalCard("goal-old", 2050),
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "assistant-update",
+      statusLabel: "",
+      content: "已更新每日目標。",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      dailyTargets: { calories: 1800, protein: 125, carbs: 170, fat: 50 },
+    });
+
+    const oldMessage = useStore.getState().messages[0];
+    assert.equal(oldMessage?.proposalCard?.status, "stale");
+    assert.equal(oldMessage?.proposalCard?.isActionable, false);
+    assert.equal(useStore.getState().dailyTargets?.calories, 1800);
+    assert.equal(
+      useStore.getState().messages.some((message) =>
+        message.proposalCard?.proposalKind === "goal" &&
+        message.proposalCard.status === "active" &&
+        message.proposalCard.isActionable
+      ),
+      false,
+    );
+  });
+
+  it("commitProvisionalBubble pairs stale goal cards with stale copy even when active cards carry expiry copy", () => {
+    useStore.getState().setMessages([
+      {
+        id: "assistant-goal-old",
+        role: "assistant",
+        content: "請確認 2050 kcal。",
+        createdAt: "2026-06-14T08:00:00.000Z",
+        proposalCard: goalProposalCard("goal-old", 2050, {
+          lapseCopy: GOAL_PROPOSAL_EXPIRED_COPY,
+        }),
+      },
+    ]);
+    useStore.getState().setProvisionalBubble({
+      id: "assistant-update",
+      statusLabel: "",
+      content: "已更新每日目標。",
+      isStreaming: true,
+    });
+
+    useStore.getState().commitProvisionalBubble({
+      didLogMeal: false,
+      dailyTargets: { calories: 1800, protein: 125, carbs: 170, fat: 50 },
+    });
+
+    const oldMessage = useStore.getState().messages[0];
+    assert.equal(oldMessage?.proposalCard?.status, "stale");
+    assert.equal(oldMessage?.proposalCard?.lapseCopy, GOAL_PROPOSAL_STALE_COPY);
+    assert.notEqual(oldMessage?.proposalCard?.lapseCopy, GOAL_PROPOSAL_EXPIRED_COPY);
   });
 
   it("commitProvisionalBubble finalizes message when malformed authoritative additions are rejected", () => {

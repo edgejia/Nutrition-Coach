@@ -26,6 +26,10 @@ interface ChatResponse {
     carbs?: number;
     fat?: number;
   };
+  proposalCard?: {
+    proposalId?: string;
+    proposalKind?: string;
+  };
 }
 
 interface DailyTargets {
@@ -109,21 +113,21 @@ async function runLogSubflow(): Promise<SubflowResult> {
     const response = await postChat(fixture, "我吃了一份雞胸便當");
     const trace = recorder.build({ scenario: "behavior-matrix:phase-53-log", status: "pass" });
     const persistedMeal = (await readMeals(fixture)).find((meal) => meal.foodName === "雞胸便當");
-    const committedFacts = {
-      foodName: persistedMeal?.foodName,
-      calories: persistedMeal?.calories,
-      protein: persistedMeal?.protein,
-      carbs: persistedMeal?.carbs,
-      fat: persistedMeal?.fat,
-    };
     const evidence = {
       name: "log",
       observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
       finalReplyLength: response.reply.length,
-      committedFacts,
-      persistedMeal,
-      responseLoggedMeal: response.loggedMeal,
+      persistedMealFound: Boolean(persistedMeal),
+      committedFactsMatchExpected:
+        persistedMeal?.foodName === "雞胸便當" &&
+        persistedMeal.calories === 520 &&
+        persistedMeal.protein === 38,
+      responseLoggedMealPresent: Boolean(response.loggedMeal),
+      responseLoggedMealMatchesExpected:
+        response.loggedMeal?.foodName === "雞胸便當" &&
+        response.loggedMeal.calories === 520 &&
+        response.loggedMeal.protein === 38,
     };
 
     return {
@@ -192,13 +196,12 @@ async function runUpdateSubflow(): Promise<SubflowResult> {
       observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
       finalReplyLength: response.reply.length,
-      seededMeal,
-      updatedMeal,
-      committedFacts: {
-        foodName: updatedMeal?.foodName,
-        calories: updatedMeal?.calories,
-        protein: updatedMeal?.protein,
-      },
+      seededMealCreated: Boolean(seededMeal.id),
+      updatedMealFound: Boolean(updatedMeal),
+      updatedMealMatchesExpected:
+        updatedMeal?.foodName === "鮪魚飯" &&
+        updatedMeal.calories === 500 &&
+        updatedMeal.protein === 40,
     };
 
     return {
@@ -268,6 +271,7 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
     });
 
     const response = await postChat(fixture, message);
+    const approvalResponse = await postChat(fixture, "確認刪除這筆餐點");
     const trace = recorder.build({ scenario: "behavior-matrix:phase-53-delete", status: "pass" });
     const afterMeals = await readMeals(fixture);
     const deletedMeal = {
@@ -279,9 +283,13 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
       name: "delete",
       observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
-      finalReplyLength: response.reply.length,
-      deletedMeal,
-      afterMeals,
+      proposalReplyLength: response.reply.length,
+      finalReplyLength: approvalResponse.reply.length,
+      proposalKind: response.proposalCard?.proposalKind,
+      deletedMealDateKeyPresent: deletedMeal.dateKey.length > 0,
+      deletedMealNameMatched: deletedMeal.foodName === "拿鐵",
+      afterMealCount: afterMeals.length,
+      deletedMealAbsent: !afterMeals.some((meal) => meal.id === seededMeal.id),
     };
 
     return {
@@ -295,7 +303,7 @@ async function runDeleteSubflow(): Promise<SubflowResult> {
         assertNoForbiddenReceiptCopy(response.reply),
         namedAssertion(
           "phase_53_delete_committed_snapshot",
-          response.reply.includes(deletedMeal.foodName) &&
+          approvalResponse.reply.includes(deletedMeal.foodName) &&
             deletedMeal.mealId === seededMeal.id &&
             deletedMeal.dateKey.length > 0 &&
             deletedMeal.foodName === "拿鐵",
@@ -323,7 +331,13 @@ async function runGoalsSubflow(): Promise<SubflowResult> {
       type: "function",
       function: {
         name: "update_goals",
-        arguments: JSON.stringify({ calories: 1800, protein: 130, carbs: 150, fat: 50 }),
+        arguments: JSON.stringify({
+          mode: "current_turn_values",
+          calories: 1800,
+          protein: 130,
+          carbs: 150,
+          fat: 50,
+        }),
       },
     }],
   });
@@ -341,7 +355,12 @@ async function runGoalsSubflow(): Promise<SubflowResult> {
       observedTools: collectTraceTools(trace),
       traceFinalReplySource: trace.summary.finalReply.source,
       finalReplyLength: response.reply.length,
-      committedTargets: targets,
+      committedTargetsMatchExpected:
+        targets.calories === 1800 &&
+        targets.protein === 130 &&
+        targets.carbs === 150 &&
+        targets.fat === 50,
+      committedTargetFieldCount: Object.keys(targets).length,
     };
 
     return {

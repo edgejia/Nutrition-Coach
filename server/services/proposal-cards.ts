@@ -263,21 +263,39 @@ export function proposalKindToLane(proposalKind: ProposalKind): ProposalLane {
   return proposalKind === "goal" ? "goal" : "meal_mutation";
 }
 
+function projectDetailsForClient(details: ProposalCardDetails): ProposalCardDetails {
+  const { targetSignature: _targetSignature, ...clientDetails } = details;
+  return JSON.parse(JSON.stringify(clientDetails)) as ProposalCardDetails;
+}
+
+function projectLapseCopyForClient(
+  status: ProposalStatus,
+  lapseCopy: string | null,
+): string | null {
+  return status === "approved" || status === "rejected" ? null : lapseCopy;
+}
+
+function isTerminalStatus(status: ProposalStatus): boolean {
+  return status === "approved" || status === "rejected";
+}
+
 export function projectProposalCardForClient(
   card: ProposalCardMetadata,
   projection?: ProposalStatusProjection,
 ): ProposalCardClientMetadata {
+  const status = projection?.status ?? card.status;
+  const lapseCopy = projection?.lapseCopy ?? card.lapseCopy;
   return {
     proposalId: card.proposalId,
     proposalKind: card.proposalKind,
     proposalLane: card.proposalLane,
-    status: projection?.status ?? card.status,
-    isActionable: projection?.isActionable ?? card.status === "active",
+    status,
+    isActionable: status === "active" && (projection?.isActionable ?? card.status === "active"),
     title: card.title,
-    details: card.details,
+    details: projectDetailsForClient(card.details),
     actions: card.actions,
     expiresAt: projection?.expiresAt ?? card.expiresAt,
-    lapseCopy: projection?.lapseCopy ?? card.lapseCopy,
+    lapseCopy: projectLapseCopyForClient(status, lapseCopy),
     supersededByKind: card.supersededByKind,
   };
 }
@@ -446,7 +464,7 @@ export function createProposalCardService(db: AppDatabase) {
         .update(chatProposalCards)
         .set({
           status,
-          ...(lapseCopy !== undefined ? { lapseCopy } : {}),
+          ...(lapseCopy !== undefined ? { lapseCopy } : isTerminalStatus(status) ? { lapseCopy: null } : {}),
           ...(supersededByKind !== undefined ? { supersededByKind } : {}),
           updatedAt: new Date().toISOString(),
         })
@@ -547,7 +565,7 @@ export function createProposalCardService(db: AppDatabase) {
             status: card.status,
             isActionable: false,
             expiresAt: card.expiresAt,
-            lapseCopy: card.lapseCopy,
+            lapseCopy: projectLapseCopyForClient(card.status, card.lapseCopy),
           };
         }
 

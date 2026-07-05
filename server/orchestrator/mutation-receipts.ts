@@ -13,6 +13,7 @@ import type {
   ProposalStatus,
 } from "../services/proposal-cards.js";
 import type { MutationEffects } from "./mutation-effects.js";
+import { NUTRITION_SAFETY_CALORIE_FLOOR } from "./nutrition-safety-policy.js";
 import {
   logMutationReceiptGuardTripped,
   type MutationReceiptGuardOperation,
@@ -615,14 +616,78 @@ export function renderProposalKindAmbiguityCopy(): string {
   return "這次沒有更新任何內容。你同時有餐點修正和每日目標提案，請回覆「套用餐點修正」或「套用每日目標」。";
 }
 
-export function renderGoalProposalCopy(targets: DailyTargets): string {
+function formatGoalTargetRows(targets: DailyTargets): string[] {
   return [
-    "我可以先幫你改成這組每日目標：",
     `• 卡路里 ${formatNumber(targets.calories)} kcal`,
     `• 蛋白質 ${formatNumber(targets.protein)} g`,
     `• 碳水 ${formatNumber(targets.carbs)} g`,
     `• 脂肪 ${formatNumber(targets.fat)} g`,
-    "如果要套用，請回覆「好」；如果要調整，請直接給新的數字。",
+  ];
+}
+
+function formatGoalDeltaVerb(delta: number): string {
+  if (delta < 0) {
+    return "下修";
+  }
+  if (delta > 0) {
+    return "提高";
+  }
+  return "維持";
+}
+
+function formatMacroAdjustment(
+  label: string,
+  before: number,
+  after: number,
+): string {
+  const delta = after - before;
+  if (delta === 0) {
+    return `${label}維持 ${formatNumber(after)} g`;
+  }
+  return `${label}${formatGoalDeltaVerb(delta)} ${formatNumber(Math.abs(delta))} g（${formatNumber(before)} -> ${formatNumber(after)} g）`;
+}
+
+function formatGoalCalorieBaselineLine(targets: DailyTargets, previousTargets: DailyTargets): string {
+  const delta = targets.calories - previousTargets.calories;
+  if (delta === 0) {
+    return `這次沿用前一組 ${formatNumber(previousTargets.calories)} kcal，提案仍是 ${formatNumber(targets.calories)} kcal：`;
+  }
+  return `這次從前一組 ${formatNumber(previousTargets.calories)} kcal ${formatGoalDeltaVerb(delta)} ${formatNumber(Math.abs(delta))} kcal，調整到 ${formatNumber(targets.calories)} kcal：`;
+}
+
+function formatGoalMacroAdjustmentLine(targets: DailyTargets, previousTargets: DailyTargets): string {
+  return `調整重點：${[
+    formatMacroAdjustment("蛋白質", previousTargets.protein, targets.protein),
+    formatMacroAdjustment("碳水", previousTargets.carbs, targets.carbs),
+    formatMacroAdjustment("脂肪", previousTargets.fat, targets.fat),
+  ].join("；")}。`;
+}
+
+export function renderGoalProposalCopy(targets: DailyTargets, previousTargets?: DailyTargets): string {
+  if (previousTargets) {
+    return [
+      formatGoalCalorieBaselineLine(targets, previousTargets),
+      ...formatGoalTargetRows(targets),
+      formatGoalMacroAdjustmentLine(targets, previousTargets),
+    ].join("\n");
+  }
+
+  return [
+    "依你想調整目標的方向，我先整理一組比較完整、可執行的每日目標：",
+    ...formatGoalTargetRows(targets),
+    "這組數字讓熱量、蛋白質、碳水和脂肪一起對齊，比只改單一數字更穩定。",
+  ].join("\n");
+}
+
+export function renderDuplicateGoalProposalCopy(activeTargets: DailyTargets): string {
+  const labels = getProposalActionLabels("goal");
+  return `目前已經有一張待確認的 ${formatNumber(activeTargets.calories)} kcal 目標提案。請直接在那張卡片選擇「${labels.approveLabel}」、「${labels.editLabel}」或「${labels.rejectLabel}」；我不會再建立相同目標的提案。`;
+}
+
+export function renderGoalUpdateReceipt(targets: DailyTargets): string {
+  return [
+    `已更新每日目標：已套用 ${formatNumber(targets.calories)} kcal 這組設定`,
+    ...formatGoalTargetRows(targets),
   ].join("\n");
 }
 
@@ -630,10 +695,18 @@ export function renderGoalAuthorityFailureCopy(): string {
   return "這次沒有套用目標更新。請直接提供新的每日目標數字，或再請我產生一組建議。";
 }
 
+export function renderUnsafeCalorieFloorCopy(): string {
+  return "這次沒有套用目標更新。這個每日熱量目標太低，我不能幫你設定或提案這樣的限制。請改成較安全、可持續的每日目標；如果你正在強烈限制飲食或覺得失控，建議和醫師或合格專業人員討論。";
+}
+
+export function renderUnsafeNutritionGuidanceCopy(): string {
+  return "我不能幫你安排極端限制、快速暴瘦或懲罰式運動。先改成較安全、可持續的飲食與活動節奏；如果你正在強烈限制飲食、想快速減重或因吃東西感到很內疚，建議和醫師或合格專業人員討論。";
+}
+
 type GoalTargetField = keyof DailyTargets;
 
 const GOAL_FIELD_RANGE_COPY: Record<GoalTargetField, { label: string; range: string }> = {
-  calories: { label: "卡路里", range: "500-8000 kcal" },
+  calories: { label: "卡路里", range: `${NUTRITION_SAFETY_CALORIE_FLOOR}-8000 kcal` },
   protein: { label: "蛋白質", range: "0-400 g" },
   carbs: { label: "碳水", range: "0-1000 g" },
   fat: { label: "脂肪", range: "0-300 g" },
@@ -696,12 +769,6 @@ export function renderMutationReceipt(effects: MutationEffects): string {
       return `已刪除${datePrefix}${effects.deletedMeal.foodName}，已從當日紀錄移除。`;
     }
     case "goals":
-      return [
-        "已更新每日目標：",
-        `• 卡路里 ${formatNumber(effects.targets.calories)} kcal`,
-        `• 蛋白質 ${formatNumber(effects.targets.protein)} g`,
-        `• 碳水 ${formatNumber(effects.targets.carbs)} g`,
-        `• 脂肪 ${formatNumber(effects.targets.fat)} g`,
-      ].join("\n");
+      return renderGoalUpdateReceipt(effects.targets);
   }
 }
