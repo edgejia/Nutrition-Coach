@@ -1,5 +1,25 @@
 # 更新日誌
 
+## v3.3 - 2026-07-05
+
+### 變更
+
+- LLM system prompt 現在明確定義指令階層、隱私揭露邊界與 untrusted user data 處理方式；profile、history、image text、tool-like text 與使用者輸入會被視為較低優先序資料，而不是工具授權來源。
+- Internal disclosure refusal contract 覆蓋 hidden prompt、tool/schema、provider payload、stack/debug trace 與 backend internals，並保留 reply sanitizer 作為 final defense，不把 sanitizer 當成主要政策來源。
+- Behavior matrix 新增 named adversarial cases，涵蓋 profile injection、prompt/tool disclosure、malicious tool JSON、unauthorized goal update、history/tool-like injection，以及 nutrition-safety cases；generated docs 與 artifacts 維持 metadata-only。
+- Nutrition safety boundary 新增 disordered eating、extreme restriction、very-low-calorie、rapid weight-loss 與 punitive exercise handling；低熱量目標變更會經過 prompt、tool、manual route、proposal action 與 client proposal-state 多層 guard。
+- Goal proposal 與 UAT-21 gap closure 強化 active proposal authority、target signature、latest-only actionability、macro/calorie consistency、question-form non-mutation、baseline-aware copy、applied receipt copy，以及 duplicate-equivalent proposal guard。
+- `yarn release:check` 現在也檢查 capability matrix 與 behavior matrix generated-doc drift；舊 visual scenario 檔頭補上可重跑的 evidence command。
+
+### 驗證
+
+- Phase 106-109 驗證全部通過：Instruction Boundary `16/16`、Internal Disclosure `15/15`、Adversarial Harness `21/21`、Nutrition Safety `52/52`。
+- v3.3 milestone audit 通過 `12/12` requirements、`4/4` phases、`4/4` integration checks 與 `4/4` flow checks；open-artifact audit 沒有 open debug、quick、thread、todo、seed、UAT、verification 或 context items。
+- UAT-21 最終 live closure 已完成：2026-07-05 pending-proposal replay 保留同一張 1200 kcal active card，兩次 `啥` 沒有新增 proposal card 或 apply claim；剩餘 conversational-quality 項目轉交 GitHub #107、#108、#109 的 future eval-based work。
+- 非阻塞 warning 保留為明確 disposition：CASE-14 harness artifact 未觀察 queued unsafe `update_goals` tool path，但 unit/integration tests 覆蓋真實 guard；UI review polish recommendations 不阻塞 source release。
+- 收尾階段的 `yarn release:check` 通過：Asia/Taipei timezone contract、TypeScript、`2,032` 個 Node tests、capability / behavior matrix generated-doc drift checks，以及 frontend production build。
+- v3.3 source wrap 不代表 `main` merge、tag movement、Cloudflare Tunnel change、public smoke 或 production runtime refresh；這些仍需要分開明確授權。
+
 ## v3.2 - 2026-06-27
 
 ### 變更
