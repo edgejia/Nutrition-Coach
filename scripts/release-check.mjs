@@ -135,6 +135,8 @@ if (touchesServerBoundary) {
   );
 }
 
+runStep("Capability matrix generated doc drift", ["matrix:gen:check"]);
+runStep("Behavior matrix generated doc drift", ["behavior-matrix:gen:check"]);
 runStep("Frontend build", ["build"]);
 
 console.log("\n[release-check] PASS");

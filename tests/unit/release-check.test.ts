@@ -68,11 +68,13 @@ describe("release:check timezone contract", () => {
     assert.match(result.output, /Dry run complete/);
   });
 
-  test("normal path still includes TypeScript, test, and build gates", () => {
+  test("normal path still includes TypeScript, test, generated-doc drift, and build gates", () => {
     const script = fs.readFileSync(new URL("../../scripts/release-check.mjs", import.meta.url), "utf8");
 
     assert.match(script, /runStep\("TypeScript gate", \["tsc", "--noEmit"\]\);/);
     assert.match(script, /runStep\("Full test suite", \["test"\]\);/);
+    assert.match(script, /runStep\("Capability matrix generated doc drift", \["matrix:gen:check"\]\);/);
+    assert.match(script, /runStep\("Behavior matrix generated doc drift", \["behavior-matrix:gen:check"\]\);/);
     assert.match(script, /runStep\("Frontend build", \["build"\]\);/);
   });
 
