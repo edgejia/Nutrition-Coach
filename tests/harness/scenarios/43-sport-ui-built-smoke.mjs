@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Visual evidence command:
+// yarn build
+// yarn node tests/harness/scenarios/43-sport-ui-built-smoke.mjs --output-dir tests/harness/artifacts/43-sport-ui-closeout/latest
 import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createServer } from "node:http";
