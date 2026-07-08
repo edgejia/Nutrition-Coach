@@ -279,6 +279,7 @@ interface AppState {
   goBack: () => boolean;
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
+  applyManualHomeRefresh: (meals: MealEntry[]) => void;
   removeMeal: (mealId: string) => void;
   redactChatReceiptIdentity: (mealId: string) => void;
   recordMealMutation: (affectedDate: string) => void;
@@ -329,7 +330,13 @@ export const useStore = create<AppState>((set, get) => ({
   sending: false,
   provisionalBubble: null,
 
-  setActiveScreen: (activeScreen) => set({ activeScreen }),
+  setActiveScreen: (activeScreen) => {
+    const prev = get().activeScreen;
+    set({ activeScreen });
+    if (prev !== "home" && activeScreen === "home") {
+      get().requestHomeEntryAnimation(prev === "history" ? "nav_from_history" : "nav_from_chat");
+    }
+  },
   openSecondaryScreen: (screen, origin) =>
     set((state) => ({
       secondaryScreen: {
@@ -375,7 +382,9 @@ export const useStore = create<AppState>((set, get) => ({
       return true;
     }
     if (state.activeScreen === "chat" || state.activeScreen === "history") {
+      const prev = state.activeScreen;
       set({ activeScreen: "home" });
+      get().requestHomeEntryAnimation(prev === "history" ? "nav_from_history" : "nav_from_chat");
       return true;
     }
     return false;
@@ -399,6 +408,44 @@ export const useStore = create<AppState>((set, get) => ({
               ),
             }
           : {}),
+      };
+    });
+  },
+  applyManualHomeRefresh: (meals) => {
+    if (!isAuthoritativeMealEntryArray(meals)) {
+      return;
+    }
+    set((state) => {
+      const today = formatLocalDate(new Date());
+      const dailySummary = buildSummaryFromCurrentMeals(meals);
+      const current = buildHomeNutritionSnapshot({
+        date: today,
+        summary: dailySummary,
+        targets: state.dailyTargets,
+      });
+      const { intent } = deriveHomeEntryIntent({
+        trigger: "manual_refresh",
+        today,
+        baseline: state.homeAnimation.baseline,
+        current,
+        unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
+      });
+      const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
+      const pendingIntent: HomeAnimationPendingIntent | null =
+        intent.kind === "delta"
+          ? { kind: "delta", from: intent.from, token, origin: "manual_refresh" }
+          : intent.kind === "replay"
+            ? { kind: "replay", from: null, token, origin: "manual_refresh" }
+            : null;
+
+      return {
+        meals,
+        dailySummary,
+        homeAnimation: {
+          baseline: current,
+          unseenTodayMutation: false,
+          pendingIntent,
+        },
       };
     });
   },

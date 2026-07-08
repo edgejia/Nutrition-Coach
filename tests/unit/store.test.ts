@@ -433,6 +433,146 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().dailySummary?.totalCalories, 720);
   });
 
+  it("setActiveScreen arms replay when returning from chat without unseen today mutations", () => {
+    const today = formatLocalDate(new Date());
+    const frozenBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 820,
+        totalProtein: 64,
+        totalCarbs: 78,
+        totalFat: 30,
+        mealCount: 3,
+      },
+      homeAnimation: {
+        baseline: frozenBaseline,
+        unseenTodayMutation: false,
+        pendingIntent: null,
+      },
+    });
+
+    useStore.getState().setActiveScreen("home");
+
+    assert.equal(useStore.getState().activeScreen, "home");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "nav_from_chat",
+    });
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+  });
+
+  it("setActiveScreen arms a collapsed delta when returning from chat with an unseen today mutation", () => {
+    const today = formatLocalDate(new Date());
+    const frozenBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 900,
+        totalProtein: 70,
+        totalCarbs: 90,
+        totalFat: 32,
+        mealCount: 3,
+      },
+      homeAnimation: {
+        baseline: frozenBaseline,
+        unseenTodayMutation: true,
+        pendingIntent: null,
+      },
+    });
+
+    useStore.getState().setActiveScreen("home");
+
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.kind, "delta");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent?.from, frozenBaseline);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.origin, "nav_from_chat");
+    assert.equal(useStore.getState().homeAnimation.baseline?.kcal, 900);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+  });
+
+  it("setActiveScreen returning from history arms a navigation replay", () => {
+    const today = formatLocalDate(new Date());
+
+    useStore.setState({
+      activeScreen: "history",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 700,
+        totalProtein: 54,
+        totalCarbs: 68,
+        totalFat: 24,
+        mealCount: 2,
+      },
+      homeAnimation: {
+        baseline: {
+          date: today,
+          kcal: 700,
+          protein: 54,
+          carbs: 68,
+          fat: 24,
+          targets: dailyTargets,
+        },
+        unseenTodayMutation: false,
+        pendingIntent: null,
+      },
+    });
+
+    useStore.getState().setActiveScreen("home");
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "nav_from_history",
+    });
+  });
+
+  it("setActiveScreen does not arm a home animation intent when leaving home", () => {
+    const pendingIntent = {
+      kind: "replay" as const,
+      from: null,
+      token: 4,
+      origin: "cold_start" as const,
+    };
+
+    useStore.setState({
+      activeScreen: "home",
+      homeAnimation: {
+        baseline: null,
+        unseenTodayMutation: false,
+        pendingIntent,
+      },
+    });
+
+    useStore.getState().setActiveScreen("chat");
+
+    assert.equal(useStore.getState().activeScreen, "chat");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, pendingIntent);
+  });
+
   it("tracks activeScreen changes and meal collection helpers", () => {
     useStore.getState().setActiveScreen("history");
     useStore.getState().setMeals(sampleMeals);
@@ -771,25 +911,132 @@ describe("AppStore", () => {
   });
 
   it("goBack from an overlay does not create or consume home animation intent", () => {
-    const pendingIntent = {
-      kind: "replay" as const,
-      from: null,
-      token: 7,
-      origin: "cold_start" as const,
-    };
     useStore.setState({
       activeScreen: "home",
       homeAnimation: {
         baseline: null,
         unseenTodayMutation: false,
-        pendingIntent,
+        pendingIntent: null,
       },
     });
     useStore.getState().openSecondaryScreen("settings", "home");
 
     assert.equal(useStore.getState().goBack(), true);
     assert.equal(useStore.getState().secondaryScreen, null);
-    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, pendingIntent);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent, null);
+  });
+
+  it("goBack from chat returns home and arms a nav_from_chat replay intent", () => {
+    const today = formatLocalDate(new Date());
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      dailySummary: {
+        date: today,
+        totalCalories: 700,
+        totalProtein: 54,
+        totalCarbs: 68,
+        totalFat: 24,
+        mealCount: 2,
+      },
+      homeAnimation: {
+        baseline: {
+          date: today,
+          kcal: 700,
+          protein: 54,
+          carbs: 68,
+          fat: 24,
+          targets: dailyTargets,
+        },
+        unseenTodayMutation: false,
+        pendingIntent: null,
+      },
+    });
+
+    assert.equal(useStore.getState().goBack(), true);
+    assert.equal(useStore.getState().activeScreen, "home");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "nav_from_chat",
+    });
+  });
+
+  it("applyManualHomeRefresh replays unchanged totals against the old baseline", () => {
+    const today = formatLocalDate(new Date());
+    const baseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+
+    useStore.setState({
+      activeScreen: "home",
+      dailyTargets,
+      homeAnimation: {
+        baseline,
+        unseenTodayMutation: true,
+        pendingIntent: null,
+      },
+    });
+
+    useStore.getState().applyManualHomeRefresh(sampleMeals);
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "replay",
+      from: null,
+      token: 1,
+      origin: "manual_refresh",
+    });
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, baseline);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+    assert.equal(useStore.getState().dailySummary?.totalCalories, 700);
+  });
+
+  it("applyManualHomeRefresh derives a changed refresh delta from the old baseline", () => {
+    const today = formatLocalDate(new Date());
+    const oldBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+    const changedMeals = [{ ...sampleMeals[0], calories: 540, protein: 44 }, sampleMeals[1]];
+
+    useStore.setState({
+      activeScreen: "home",
+      dailyTargets,
+      homeAnimation: {
+        baseline: oldBaseline,
+        unseenTodayMutation: true,
+        pendingIntent: null,
+      },
+    });
+
+    useStore.getState().applyManualHomeRefresh(changedMeals);
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "delta",
+      from: oldBaseline,
+      token: 1,
+      origin: "manual_refresh",
+    });
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, {
+      date: today,
+      kcal: 720,
+      protein: 56,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    });
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
   });
 
   it("consumeHomeAnimationIntent clears only the matching pending token", () => {
