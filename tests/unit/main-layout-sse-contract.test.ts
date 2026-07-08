@@ -22,6 +22,7 @@ describe("MainLayout SSE summary coordinator contract", () => {
     assert.equal(source.match(/createSSESummaryCoordinator/g)?.length, 2);
     assert.match(source, /const sseSummaryCoordinator = useMemo\([\s\S]*createSSESummaryCoordinator/);
     assert.match(source, /const recordMealMutation = useStore\(\(s\) => s\.recordMealMutation\)/);
+    assert.match(source, /const applyManualHomeRefresh = useStore\(\(s\) => s\.applyManualHomeRefresh\)/);
     assert.match(source, /recordMealMutation,/);
     assert.match(source, /onUnauthorized: \(\) => {\s*void recoverGuestSession\(\);/);
 
@@ -36,9 +37,10 @@ describe("MainLayout SSE summary coordinator contract", () => {
     assert.match(source, /sseSummaryCoordinator\.runInitialMealsLoad\(\{ refreshReason: "day_rollover" \}\)/);
     assert.match(source, /sseSummaryCoordinator\.runInitialMealsLoad\(\)/);
     const sourceWithoutManualHomeRefresh = source.replace(
-      /const refreshHomeManually = useCallback\(async \(\) => \{[\s\S]*?\}, \[deviceId, recoverGuestSession, setMeals\]\);/,
+      /const refreshHomeManually = useCallback\(async \(\) => \{[\s\S]*?\}, \[applyManualHomeRefresh, deviceId, recoverGuestSession\]\);/,
       "",
     );
+    assert.match(source, /getMeals\(\{ refreshReason: "manual_refresh" \}\)[\s\S]*applyManualHomeRefresh\(meals\)/);
     assert.doesNotMatch(sourceWithoutManualHomeRefresh, /\.then\(\(\{ meals \}\) => setMeals\(meals\)\)/);
     assert.doesNotMatch(sourceWithoutManualHomeRefresh, /setMeals\(meals\)/);
   });

@@ -225,8 +225,9 @@ describe("Home dashboard display contracts", () => {
     const sportSource = await readSource("../../client/src/components/SportPrimitives.tsx");
     const cssSource = await readSource("../../client/src/app.css");
 
-    assert.match(homeSource, /function useHomeNutritionTimeline\(input: \{ refreshCueToken: number \}\): HomeTimelineFrame/);
-    assert.match(homeSource, /const frame = useHomeNutritionTimeline\(\{ refreshCueToken \}\)/);
+    assert.match(homeSource, /function useHomeNutritionTimeline\(\): HomeTimelineFrame/);
+    assert.match(homeSource, /const frame = useHomeNutritionTimeline\(\)/);
+    assert.doesNotMatch(homeSource, /refreshCueToken/);
     assert.match(homeSource, /frameAt\(start, end, easeShared\(progress\)\)/);
     assert.match(homeSource, /HOME_TIMELINE_DURATION_MS/);
     assert.match(homeSource, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
@@ -267,7 +268,7 @@ describe("Home dashboard display contracts", () => {
     const cssSource = await readSource("../../client/src/app.css");
     const homeScrollBlock = cssBlock(cssSource, ".home-sport-scroll");
 
-    assert.match(homeSource, /<main className="screen-scroll home-sport-scroll">/);
+    assert.match(homeSource, /<main ref=\{homeScrollRef\} className="screen-scroll home-sport-scroll">/);
     assert.match(homeSource, /<CoachAdviceCard advice=\{coachAdvice\} cta=\{cta\}/);
     assert.match(homeSource, /sendHomeCtaTaskOption\(option, intent, setPendingHomeChatDraft, setActiveScreen\)/);
     assert.match(homeScrollBlock, /display:\s*flex/);

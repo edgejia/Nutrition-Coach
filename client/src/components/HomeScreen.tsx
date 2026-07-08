@@ -3,7 +3,7 @@ import { useStore } from "../store.js";
 import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { createClientId } from "../lib/clientId.js";
-import type { HomeNutritionSnapshot } from "../lib/home-animation-intent.js";
+import { isNavigationEntryTrigger, type HomeNutritionSnapshot } from "../lib/home-animation-intent.js";
 import {
   easeShared,
   frameAt,
@@ -190,7 +190,7 @@ function getSnapshotTimelineEndpoints(
   );
 }
 
-function useHomeNutritionTimeline(input: { refreshCueToken: number }): HomeTimelineFrame {
+function useHomeNutritionTimeline(): HomeTimelineFrame {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const pendingIntent = useStore((s) => s.homeAnimation.pendingIntent);
@@ -204,19 +204,16 @@ function useHomeNutritionTimeline(input: { refreshCueToken: number }): HomeTimel
   const frameRequestRef = useRef<number | null>(null);
   const activeRunRef = useRef(0);
   const lastStartedIntentTokenRef = useRef<number | null>(null);
-  const previousRefreshCueRef = useRef(input.refreshCueToken);
   const runningRef = useRef(false);
 
   useEffect(() => {
     const intentToken = pendingIntent?.token ?? null;
     const hasNewIntent = pendingIntent !== null && lastStartedIntentTokenRef.current !== intentToken;
-    const refreshCueChanged = previousRefreshCueRef.current !== input.refreshCueToken;
 
-    if (!hasNewIntent && !refreshCueChanged) {
+    if (!hasNewIntent) {
       return;
     }
 
-    previousRefreshCueRef.current = input.refreshCueToken;
     if (intentToken !== null) {
       lastStartedIntentTokenRef.current = intentToken;
     }
@@ -271,7 +268,7 @@ function useHomeNutritionTimeline(input: { refreshCueToken: number }): HomeTimel
     };
 
     frameRequestRef.current = requestAnimationFrame(step);
-  }, [consumeHomeAnimationIntent, dailyTargets, end, input.refreshCueToken, pendingIntent]);
+  }, [consumeHomeAnimationIntent, dailyTargets, end, pendingIntent]);
 
   useEffect(() => {
     return () => {
@@ -341,7 +338,6 @@ export interface HomeScreenProps {
   onRefreshToday: () => void | Promise<void>;
   refreshingToday: boolean;
   refreshTodayError: string | null;
-  refreshCueToken: number;
 }
 
 function HomeHeader() {
@@ -571,9 +567,10 @@ function MealRows({
   );
 }
 
-export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError, refreshCueToken }: HomeScreenProps) {
+export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError }: HomeScreenProps) {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
+  const pendingIntent = useStore((s) => s.homeAnimation.pendingIntent);
   const goal = useStore((s) => s.goal);
   const storedCoachAdvice = useStore((s) => s.coachAdvice);
   const setCoachAdvice = useStore((s) => s.setCoachAdvice);
@@ -586,11 +583,33 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError,
   const cta = getCoachCTA(dailySummary, dailyTargets, undefined, goal);
   const emptyCopy = getHomeEmptyCoachCopy();
   const todayDateKey = dailySummary?.date ?? formatLocalDate(new Date());
-  const frame = useHomeNutritionTimeline({ refreshCueToken });
+  const homeScrollRef = useRef<HTMLElement | null>(null);
+  const lastNavigationScrollTokenRef = useRef<number | null>(null);
+  const frame = useHomeNutritionTimeline();
 
   useEffect(() => {
     setCoachAdvice(coachAdvice);
   }, [coachAdvice, setCoachAdvice]);
+
+  useEffect(() => {
+    if (!pendingIntent || !isNavigationEntryTrigger(pendingIntent.origin)) {
+      return;
+    }
+    if (lastNavigationScrollTokenRef.current === pendingIntent.token) {
+      return;
+    }
+    lastNavigationScrollTokenRef.current = pendingIntent.token;
+
+    const scrollContainer = homeScrollRef.current;
+    if (!scrollContainer) {
+      return;
+    }
+    if (typeof scrollContainer.scrollTo === "function") {
+      scrollContainer.scrollTo(0, 0);
+      return;
+    }
+    scrollContainer.scrollTop = 0;
+  }, [pendingIntent]);
 
   function handleTaskOptionClick(option: CoachCTATaskOption, intent: CoachCTAIntent) {
     sendHomeCtaTaskOption(option, intent, setPendingHomeChatDraft, setActiveScreen);
@@ -618,7 +637,7 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError,
           completionLabel="今日資料已更新"
           ariaLabel="下拉重新整理今日資料"
         >
-          <main className="screen-scroll home-sport-scroll">
+          <main ref={homeScrollRef} className="screen-scroll home-sport-scroll">
             <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} frame={frame} />
             <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
             <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
