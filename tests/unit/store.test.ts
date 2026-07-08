@@ -1138,6 +1138,48 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().homeAnimation.pendingIntent?.origin, "nav_from_chat");
   });
 
+  it("applyMealMutationRefresh preserves an existing Home-visible mutation intent during duplicate refreshes", () => {
+    const today = formatLocalDate(new Date());
+    const oldBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+    const currentBaseline = {
+      date: today,
+      kcal: 180,
+      protein: 12,
+      carbs: 20,
+      fat: 6,
+      targets: dailyTargets,
+    };
+    const pendingIntent = {
+      kind: "delta" as const,
+      from: oldBaseline,
+      token: 3,
+      origin: "meal_mutation" as const,
+    };
+
+    useStore.setState({
+      activeScreen: "home",
+      dailyTargets,
+      homeAnimation: {
+        baseline: currentBaseline,
+        unseenTodayMutation: false,
+        pendingIntent,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().applyMealMutationRefresh([sampleMeals[1]]);
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, pendingIntent);
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, currentBaseline);
+  });
+
   it("consumeHomeAnimationIntent clears only the matching pending token", () => {
     const pendingIntent = {
       kind: "replay" as const,

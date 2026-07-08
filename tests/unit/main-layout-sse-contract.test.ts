@@ -23,7 +23,9 @@ describe("MainLayout SSE summary coordinator contract", () => {
     assert.match(source, /const sseSummaryCoordinator = useMemo\([\s\S]*createSSESummaryCoordinator/);
     assert.match(source, /const recordMealMutation = useStore\(\(s\) => s\.recordMealMutation\)/);
     assert.match(source, /const applyManualHomeRefresh = useStore\(\(s\) => s\.applyManualHomeRefresh\)/);
+    assert.match(source, /const applyMealMutationRefresh = useStore\(\(s\) => s\.applyMealMutationRefresh\)/);
     assert.match(source, /recordMealMutation,/);
+    assert.match(source, /applyMealMutationRefresh,/);
     assert.match(source, /onUnauthorized: \(\) => {\s*void recoverGuestSession\(\);/);
 
     const connectCalls = source.match(/connectSSE\([\s\S]*?\}\);/g) ?? [];

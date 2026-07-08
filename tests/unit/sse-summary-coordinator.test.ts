@@ -64,7 +64,12 @@ function meal(id: string, calories: number): Meal {
 function createHarness() {
   const getMealsCalls: Array<{ refreshReason?: MealRowRefreshReason }> = [];
   const pendingMeals: ControlledMeals[] = [];
-  const commits: Array<{ type: "meals"; rows: Meal[] } | { type: "summary"; summary: DailySummary } | { type: "historical"; affectedDate: string }> = [];
+  const commits: Array<
+    | { type: "meals"; rows: Meal[] }
+    | { type: "mealMutationRows"; rows: Meal[] }
+    | { type: "summary"; summary: DailySummary }
+    | { type: "historical"; affectedDate: string }
+  > = [];
 
   const coordinator = createSSESummaryCoordinator<Meal>({
     getMeals: (options) => {
@@ -74,6 +79,7 @@ function createHarness() {
       return controlled.promise;
     },
     setMeals: (rows) => commits.push({ type: "meals", rows }),
+    applyMealMutationRefresh: (rows) => commits.push({ type: "mealMutationRows", rows }),
     setDailySummary: (summary) => commits.push({ type: "summary", summary }),
     recordMealMutation: (affectedDate) => commits.push({ type: "historical", affectedDate }),
     todayKey: () => "2026-05-18",
@@ -91,15 +97,15 @@ describe("SSE summary coordinator", () => {
     const handling = coordinator.handleSummary(payload);
 
     assert.deepEqual(getMealsCalls, [{ refreshReason: "meal_mutation" }]);
-    assert.deepEqual(commits, []);
+    assert.deepEqual(commits, [{ type: "historical", affectedDate: "2026-05-18" }]);
 
     pendingMeals[0]?.resolve({ meals: rows });
     await handling;
 
     assert.deepEqual(commits, [
-      { type: "meals", rows },
-      { type: "summary", summary: payload.summary },
       { type: "historical", affectedDate: "2026-05-18" },
+      { type: "mealMutationRows", rows },
+      { type: "summary", summary: payload.summary },
     ]);
   });
 
@@ -123,7 +129,7 @@ describe("SSE summary coordinator", () => {
     pendingMeals[0]?.reject(new Error("network unavailable"));
     await assert.doesNotReject(handling);
 
-    assert.deepEqual(commits, []);
+    assert.deepEqual(commits, [{ type: "historical", affectedDate: "2026-05-18" }]);
   });
 
   it("commits only the latest overlapping same-day mutation token", async () => {
@@ -142,9 +148,10 @@ describe("SSE summary coordinator", () => {
     await olderHandling;
 
     assert.deepEqual(commits, [
-      { type: "meals", rows: newerRows },
-      { type: "summary", summary: newerPayload.summary },
       { type: "historical", affectedDate: "2026-05-18" },
+      { type: "historical", affectedDate: "2026-05-18" },
+      { type: "mealMutationRows", rows: newerRows },
+      { type: "summary", summary: newerPayload.summary },
     ]);
   });
 
@@ -163,9 +170,9 @@ describe("SSE summary coordinator", () => {
     await initialLoad;
 
     assert.deepEqual(commits, [
-      { type: "meals", rows: mutationRows },
-      { type: "summary", summary: mutationPayload.summary },
       { type: "historical", affectedDate: "2026-05-18" },
+      { type: "mealMutationRows", rows: mutationRows },
+      { type: "summary", summary: mutationPayload.summary },
     ]);
   });
 
@@ -189,6 +196,7 @@ describe("SSE summary coordinator", () => {
         return Promise.resolve({ meals: [] });
       },
       setMeals: () => undefined,
+      applyMealMutationRefresh: () => undefined,
       setDailySummary: (summary) => commits.push({ type: "summary", summary }),
       recordMealMutation: (affectedDate) => commits.push({ type: "historical", affectedDate }),
       todayKey: () => appToday,

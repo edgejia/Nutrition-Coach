@@ -494,7 +494,9 @@ export const useStore = create<AppState>((set, get) => ({
         unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
       });
       const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
-      const pendingIntent = toHomeAnimationPendingIntent(intent, token, "meal_mutation");
+      const pendingIntent =
+        toHomeAnimationPendingIntent(intent, token, "meal_mutation")
+        ?? state.homeAnimation.pendingIntent;
 
       return {
         meals,

@@ -121,6 +121,7 @@ export function MainLayout() {
   const setDailyTargets = useStore((s) => s.setDailyTargets);
   const setMeals = useStore((s) => s.setMeals);
   const applyManualHomeRefresh = useStore((s) => s.applyManualHomeRefresh);
+  const applyMealMutationRefresh = useStore((s) => s.applyMealMutationRefresh);
   const recordMealMutation = useStore((s) => s.recordMealMutation);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
   const setRolloverRefreshHandler = useStore((s) => s.setRolloverRefreshHandler);
@@ -136,6 +137,7 @@ export function MainLayout() {
       createSSESummaryCoordinator({
         getMeals,
         setMeals,
+        applyMealMutationRefresh,
         setDailySummary,
         recordMealMutation,
         todayKey: () => formatLocalDate(new Date()),
@@ -143,7 +145,7 @@ export function MainLayout() {
           void recoverGuestSession();
         },
       }),
-    [setMeals, setDailySummary, recordMealMutation, recoverGuestSession],
+    [setMeals, applyMealMutationRefresh, setDailySummary, recordMealMutation, recoverGuestSession],
   );
 
   const refreshForRollover = useCallback(async () => {
