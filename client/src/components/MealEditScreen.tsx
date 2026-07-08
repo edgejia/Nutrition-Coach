@@ -346,7 +346,7 @@ function MealEditImageFrame({ payload }: { payload: MealEditPayload }) {
 export function MealEditScreen({ onBack }: { onBack: () => void }) {
   const secondaryScreen = useStore((s) => s.secondaryScreen);
   const setDailySummary = useStore((s) => s.setDailySummary);
-  const setMeals = useStore((s) => s.setMeals);
+  const applyMealMutationRefresh = useStore((s) => s.applyMealMutationRefresh);
   const redactChatReceiptIdentity = useStore((s) => s.redactChatReceiptIdentity);
   const recordMealMutation = useStore((s) => s.recordMealMutation);
   const recoverGuestSession = useStore((s) => s.recoverGuestSession);
@@ -395,7 +395,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
     }
 
     const { meals } = await getMeals({ refreshReason: "meal_mutation" });
-    setMeals(meals);
+    applyMealMutationRefresh(meals);
   }
 
   async function handleMealRevisionConflict(error: MealRevisionConflictError, mode: "save" | "delete") {
@@ -420,7 +420,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
 
     if (staleAffectedDate === formatLocalDate(new Date())) {
       const { meals } = await getMeals({ refreshReason: "meal_mutation" });
-      setMeals(meals);
+      applyMealMutationRefresh(meals);
     }
 
     onBack();
@@ -510,7 +510,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
             recordMealMutation,
             setDailySummary,
             getMeals,
-            setMeals,
+            applyMealMutationRefresh,
             todayKey: () => formatLocalDate(new Date()),
           }, {
             mealId: payload.mealId,
@@ -560,7 +560,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
           recordMealMutation,
           setDailySummary,
           getMeals,
-          setMeals,
+          applyMealMutationRefresh,
           todayKey: () => formatLocalDate(new Date()),
         }, {
           mealId: payload.mealId,
@@ -605,7 +605,7 @@ export function MealEditScreen({ onBack }: { onBack: () => void }) {
           recordMealMutation,
           setDailySummary,
           getMeals,
-          setMeals,
+          applyMealMutationRefresh,
           todayKey: () => formatLocalDate(new Date()),
         }, {
           mealId: payload.mealId,

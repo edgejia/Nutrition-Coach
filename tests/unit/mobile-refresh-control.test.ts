@@ -130,7 +130,9 @@ describe("Home manual refresh source contract", () => {
       ["Home content scroller", '<main ref={homeScrollRef} className="screen-scroll home-sport-scroll">'],
     ]);
     assert.match(screenBody, /ariaLabel="下拉重新整理今日資料"/);
-    assert.match(screenBody, /const frame = useHomeNutritionTimeline\(\)/);
+    assert.match(screenBody, /const secondaryScreen = useStore\(\(s\) => s\.secondaryScreen\)/);
+    assert.match(screenBody, /const homeAnimationEnabled = secondaryScreen === null/);
+    assert.match(screenBody, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
     assert.match(screenBody, /<CalorieHero dailySummary=\{dailySummary\} dailyTargets=\{dailyTargets\} frame=\{frame\} \/>/);
     assertIncludesInOrder(headerBody, [
       ["Settings control", 'aria-label="設定"'],
@@ -140,7 +142,8 @@ describe("Home manual refresh source contract", () => {
   it("routes manual refresh replay through the single Home nutrition frame", () => {
     const body = functionBody(sources.homeScreen, "CalorieHero");
 
-    assert.match(sources.homeScreen, /function useHomeNutritionTimeline\(\): HomeTimelineFrame/);
+    assert.match(sources.homeScreen, /function useHomeNutritionTimeline\(enabled: boolean\): HomeTimelineFrame/);
+    assert.match(sources.homeScreen, /if \(!enabled\)\s*\{\s*return;\s*\}/);
     assert.doesNotMatch(sources.homeScreen, /refreshCueChanged|previousRefreshCueRef|input\.refreshCueToken/);
     assert.match(sources.homeScreen, /pendingIntent\?\.kind === "delta" && pendingIntent\.from[\s\S]*getSnapshotTimelineEndpoints\(pendingIntent\.from, dailyTargets\)[\s\S]*zeroEndpoints\(end\)/);
     assert.match(sources.homeScreen, /setFrame\(finishImmediately \? end : frameAt\(start, end, 0\)\)/);
@@ -153,7 +156,7 @@ describe("Home manual refresh source contract", () => {
     assert.match(body, /value=\{frame\.ringValue\}/);
     assert.match(body, /drivenExternally/);
     assert.match(sources.homeScreen, /<SportProgressBar value=\{framePart\.barValue\} variant=\{macro\.variant\} drivenExternally \/>/);
-    assert.match(sources.homeScreen, /const frame = useHomeNutritionTimeline\(\)/);
+    assert.match(sources.homeScreen, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
     assert.doesNotMatch(sources.homeScreen, /function useCountUpNumber/);
     assert.doesNotMatch(sources.homeScreen, /home-sport-refresh-cue/);
     assert.doesNotMatch(sources.homeScreen, /key=\{`home-hero-/);

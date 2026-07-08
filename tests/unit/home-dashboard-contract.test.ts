@@ -225,8 +225,11 @@ describe("Home dashboard display contracts", () => {
     const sportSource = await readSource("../../client/src/components/SportPrimitives.tsx");
     const cssSource = await readSource("../../client/src/app.css");
 
-    assert.match(homeSource, /function useHomeNutritionTimeline\(\): HomeTimelineFrame/);
-    assert.match(homeSource, /const frame = useHomeNutritionTimeline\(\)/);
+    assert.match(homeSource, /function useHomeNutritionTimeline\(enabled: boolean\): HomeTimelineFrame/);
+    assert.match(homeSource, /if \(!enabled\)\s*\{\s*return;\s*\}/);
+    assert.match(homeSource, /const secondaryScreen = useStore\(\(s\) => s\.secondaryScreen\)/);
+    assert.match(homeSource, /const homeAnimationEnabled = secondaryScreen === null/);
+    assert.match(homeSource, /const frame = useHomeNutritionTimeline\(homeAnimationEnabled\)/);
     assert.doesNotMatch(homeSource, /refreshCueToken/);
     assert.match(homeSource, /frameAt\(start, end, easeShared\(progress\)\)/);
     assert.match(homeSource, /HOME_TIMELINE_DURATION_MS/);

@@ -14,7 +14,12 @@ export type HomeAnimationIntent =
   | { kind: "delta"; from: HomeNutritionSnapshot }
   | { kind: "none" };
 
-export type HomeEntryTrigger = "cold_start" | "manual_refresh" | "nav_from_chat" | "nav_from_history";
+export type HomeEntryTrigger =
+  | "cold_start"
+  | "manual_refresh"
+  | "meal_mutation"
+  | "nav_from_chat"
+  | "nav_from_history";
 
 export function buildHomeNutritionSnapshot(input: {
   date: string;
@@ -59,6 +64,15 @@ export function deriveHomeEntryIntent(input: {
     return {
       intent: snapshotsEqual(input.baseline, input.current)
         ? { kind: "replay" }
+        : { kind: "delta", from: input.baseline },
+      nextBaseline: input.current,
+    };
+  }
+
+  if (input.trigger === "meal_mutation") {
+    return {
+      intent: snapshotsEqual(input.baseline, input.current)
+        ? { kind: "none" }
         : { kind: "delta", from: input.baseline },
       nextBaseline: input.current,
     };

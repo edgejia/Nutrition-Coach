@@ -90,6 +90,7 @@ interface HomeAnimationState {
   baseline: HomeNutritionSnapshot | null;
   unseenTodayMutation: boolean;
   pendingIntent: HomeAnimationPendingIntent | null;
+  homeVisibleMutationBaseline: HomeNutritionSnapshot | null;
 }
 
 function createInitialHomeAnimation(): HomeAnimationState {
@@ -97,6 +98,7 @@ function createInitialHomeAnimation(): HomeAnimationState {
     baseline: null,
     unseenTodayMutation: false,
     pendingIntent: null,
+    homeVisibleMutationBaseline: null,
   };
 }
 
@@ -119,6 +121,7 @@ function commitHomeVisibleNutritionSnapshot(
   homeAnimation: HomeAnimationState,
   summary: DailySummary,
   targets: DailyTargets | null,
+  options: { preserveHomeVisibleMutationBaseline?: boolean } = {},
 ): HomeAnimationState {
   const baseline = buildCurrentHomeNutritionSnapshot({ summary, targets });
   const pendingIntent = homeAnimation.baseline
@@ -134,7 +137,24 @@ function commitHomeVisibleNutritionSnapshot(
     baseline,
     unseenTodayMutation: false,
     pendingIntent,
+    homeVisibleMutationBaseline: options.preserveHomeVisibleMutationBaseline
+      ? homeAnimation.homeVisibleMutationBaseline
+      : null,
   };
+}
+
+function toHomeAnimationPendingIntent(
+  intent: ReturnType<typeof deriveHomeEntryIntent>["intent"],
+  token: number,
+  origin: HomeEntryTrigger,
+): HomeAnimationPendingIntent | null {
+  if (intent.kind === "delta") {
+    return { kind: "delta", from: intent.from, token, origin };
+  }
+  if (intent.kind === "replay") {
+    return { kind: "replay", from: null, token, origin };
+  }
+  return null;
 }
 
 function redactReceiptIdentityFromMessages(messages: Message[], mealId: string): Message[] {
@@ -280,6 +300,7 @@ interface AppState {
   setCoachAdvice: (advice: string | null) => void;
   setMeals: (meals: MealEntry[]) => void;
   applyManualHomeRefresh: (meals: MealEntry[]) => void;
+  applyMealMutationRefresh: (meals: MealEntry[]) => void;
   removeMeal: (mealId: string) => void;
   redactChatReceiptIdentity: (mealId: string) => void;
   recordMealMutation: (affectedDate: string) => void;
@@ -431,12 +452,7 @@ export const useStore = create<AppState>((set, get) => ({
         unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
       });
       const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
-      const pendingIntent: HomeAnimationPendingIntent | null =
-        intent.kind === "delta"
-          ? { kind: "delta", from: intent.from, token, origin: "manual_refresh" }
-          : intent.kind === "replay"
-            ? { kind: "replay", from: null, token, origin: "manual_refresh" }
-            : null;
+      const pendingIntent = toHomeAnimationPendingIntent(intent, token, "manual_refresh");
 
       return {
         meals,
@@ -445,6 +461,49 @@ export const useStore = create<AppState>((set, get) => ({
           baseline: current,
           unseenTodayMutation: false,
           pendingIntent,
+          homeVisibleMutationBaseline: null,
+        },
+      };
+    });
+  },
+  applyMealMutationRefresh: (meals) => {
+    if (!isAuthoritativeMealEntryArray(meals)) {
+      return;
+    }
+    set((state) => {
+      const dailySummary = buildSummaryFromCurrentMeals(meals);
+      if (state.activeScreen !== "home") {
+        return {
+          meals,
+          dailySummary,
+        };
+      }
+
+      const today = formatLocalDate(new Date());
+      const current = buildHomeNutritionSnapshot({
+        date: today,
+        summary: dailySummary,
+        targets: state.dailyTargets,
+      });
+      const baseline = state.homeAnimation.homeVisibleMutationBaseline ?? state.homeAnimation.baseline;
+      const { intent } = deriveHomeEntryIntent({
+        trigger: "meal_mutation",
+        today,
+        baseline,
+        current,
+        unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
+      });
+      const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
+      const pendingIntent = toHomeAnimationPendingIntent(intent, token, "meal_mutation");
+
+      return {
+        meals,
+        dailySummary,
+        homeAnimation: {
+          baseline: current,
+          unseenTodayMutation: false,
+          pendingIntent,
+          homeVisibleMutationBaseline: null,
         },
       };
     });
@@ -462,6 +521,10 @@ export const useStore = create<AppState>((set, get) => ({
       },
       homeAnimation: {
         ...state.homeAnimation,
+        homeVisibleMutationBaseline:
+          affectedDate === formatLocalDate(new Date()) && state.activeScreen === "home"
+            ? state.homeAnimation.homeVisibleMutationBaseline ?? state.homeAnimation.baseline
+            : state.homeAnimation.homeVisibleMutationBaseline,
         unseenTodayMutation: applyMealMutationMark({
           affectedDate,
           today: formatLocalDate(new Date()),
@@ -484,18 +547,14 @@ export const useStore = create<AppState>((set, get) => ({
         unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
       });
       const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
-      const pendingIntent: HomeAnimationPendingIntent | null =
-        intent.kind === "delta"
-          ? { kind: "delta", from: intent.from, token, origin: trigger }
-          : intent.kind === "replay"
-            ? { kind: "replay", from: null, token, origin: trigger }
-            : null;
+      const pendingIntent = toHomeAnimationPendingIntent(intent, token, trigger);
 
       return {
         homeAnimation: {
           baseline: nextBaseline,
           unseenTodayMutation: false,
           pendingIntent,
+          homeVisibleMutationBaseline: null,
         },
       };
     }),
@@ -627,6 +686,7 @@ export const useStore = create<AppState>((set, get) => ({
                 state.homeAnimation,
                 summary,
                 state.dailyTargets,
+                { preserveHomeVisibleMutationBaseline: true },
               ),
             }
           : {}),

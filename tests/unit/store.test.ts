@@ -66,6 +66,7 @@ function initialHomeAnimation() {
     baseline: null,
     unseenTodayMutation: false,
     pendingIntent: null,
+    homeVisibleMutationBaseline: null,
   };
 }
 
@@ -459,6 +460,7 @@ describe("AppStore", () => {
         baseline: frozenBaseline,
         unseenTodayMutation: false,
         pendingIntent: null,
+        homeVisibleMutationBaseline: null,
       },
     });
 
@@ -500,6 +502,7 @@ describe("AppStore", () => {
         baseline: frozenBaseline,
         unseenTodayMutation: true,
         pendingIntent: null,
+        homeVisibleMutationBaseline: null,
       },
     });
 
@@ -537,6 +540,7 @@ describe("AppStore", () => {
         },
         unseenTodayMutation: false,
         pendingIntent: null,
+        homeVisibleMutationBaseline: null,
       },
     });
 
@@ -564,6 +568,7 @@ describe("AppStore", () => {
         baseline: null,
         unseenTodayMutation: false,
         pendingIntent,
+        homeVisibleMutationBaseline: null,
       },
     });
 
@@ -888,6 +893,7 @@ describe("AppStore", () => {
         baseline: frozenBaseline,
         unseenTodayMutation: true,
         pendingIntent: null,
+        homeVisibleMutationBaseline: null,
       },
     });
 
@@ -917,6 +923,7 @@ describe("AppStore", () => {
         baseline: null,
         unseenTodayMutation: false,
         pendingIntent: null,
+        homeVisibleMutationBaseline: null,
       },
     });
     useStore.getState().openSecondaryScreen("settings", "home");
@@ -951,6 +958,7 @@ describe("AppStore", () => {
         },
         unseenTodayMutation: false,
         pendingIntent: null,
+        homeVisibleMutationBaseline: null,
       },
     });
 
@@ -982,6 +990,7 @@ describe("AppStore", () => {
         baseline,
         unseenTodayMutation: true,
         pendingIntent: null,
+        homeVisibleMutationBaseline: null,
       },
     });
 
@@ -1017,6 +1026,7 @@ describe("AppStore", () => {
         baseline: oldBaseline,
         unseenTodayMutation: true,
         pendingIntent: null,
+        homeVisibleMutationBaseline: null,
       },
     });
 
@@ -1039,6 +1049,95 @@ describe("AppStore", () => {
     assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
   });
 
+  it("applyMealMutationRefresh animates a Home-visible delete from the pre-mutation baseline", () => {
+    const today = formatLocalDate(new Date());
+    const oldBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+    const deletedMealSummary = {
+      date: today,
+      totalCalories: 180,
+      totalProtein: 12,
+      totalCarbs: 20,
+      totalFat: 6,
+      mealCount: 1,
+    };
+
+    useStore.setState({
+      activeScreen: "home",
+      dailyTargets,
+      homeAnimation: {
+        baseline: oldBaseline,
+        unseenTodayMutation: false,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().recordMealMutation(today);
+    useStore.getState().setDailySummary(deletedMealSummary);
+    useStore.getState().applyMealMutationRefresh([sampleMeals[1]]);
+
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent, {
+      kind: "delta",
+      from: oldBaseline,
+      token: 1,
+      origin: "meal_mutation",
+    });
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, {
+      date: today,
+      kcal: 180,
+      protein: 12,
+      carbs: 20,
+      fat: 6,
+      targets: dailyTargets,
+    });
+    assert.equal(useStore.getState().homeAnimation.homeVisibleMutationBaseline, null);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, false);
+  });
+
+  it("applyMealMutationRefresh preserves away mutation state for chat-to-home delta", () => {
+    const today = formatLocalDate(new Date());
+    const oldBaseline = {
+      date: today,
+      kcal: 700,
+      protein: 54,
+      carbs: 68,
+      fat: 24,
+      targets: dailyTargets,
+    };
+    const changedMeals = [{ ...sampleMeals[0], calories: 540, protein: 44 }, sampleMeals[1]];
+
+    useStore.setState({
+      activeScreen: "chat",
+      dailyTargets,
+      homeAnimation: {
+        baseline: oldBaseline,
+        unseenTodayMutation: false,
+        pendingIntent: null,
+        homeVisibleMutationBaseline: null,
+      },
+    });
+
+    useStore.getState().recordMealMutation(today);
+    useStore.getState().applyMealMutationRefresh(changedMeals);
+
+    assert.deepEqual(useStore.getState().homeAnimation.baseline, oldBaseline);
+    assert.equal(useStore.getState().homeAnimation.unseenTodayMutation, true);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent, null);
+
+    useStore.getState().setActiveScreen("home");
+
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.kind, "delta");
+    assert.deepEqual(useStore.getState().homeAnimation.pendingIntent?.from, oldBaseline);
+    assert.equal(useStore.getState().homeAnimation.pendingIntent?.origin, "nav_from_chat");
+  });
+
   it("consumeHomeAnimationIntent clears only the matching pending token", () => {
     const pendingIntent = {
       kind: "replay" as const,
@@ -1051,6 +1150,7 @@ describe("AppStore", () => {
         baseline: null,
         unseenTodayMutation: false,
         pendingIntent,
+        homeVisibleMutationBaseline: null,
       },
     });
 

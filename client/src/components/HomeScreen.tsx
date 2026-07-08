@@ -190,7 +190,7 @@ function getSnapshotTimelineEndpoints(
   );
 }
 
-function useHomeNutritionTimeline(): HomeTimelineFrame {
+function useHomeNutritionTimeline(enabled: boolean): HomeTimelineFrame {
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const pendingIntent = useStore((s) => s.homeAnimation.pendingIntent);
@@ -207,6 +207,10 @@ function useHomeNutritionTimeline(): HomeTimelineFrame {
   const runningRef = useRef(false);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const intentToken = pendingIntent?.token ?? null;
     const hasNewIntent = pendingIntent !== null && lastStartedIntentTokenRef.current !== intentToken;
 
@@ -268,7 +272,7 @@ function useHomeNutritionTimeline(): HomeTimelineFrame {
     };
 
     frameRequestRef.current = requestAnimationFrame(step);
-  }, [consumeHomeAnimationIntent, dailyTargets, end, pendingIntent]);
+  }, [consumeHomeAnimationIntent, dailyTargets, enabled, end, pendingIntent]);
 
   useEffect(() => {
     return () => {
@@ -571,6 +575,7 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError 
   const dailySummary = useStore((s) => s.dailySummary);
   const dailyTargets = useStore((s) => s.dailyTargets);
   const pendingIntent = useStore((s) => s.homeAnimation.pendingIntent);
+  const secondaryScreen = useStore((s) => s.secondaryScreen);
   const goal = useStore((s) => s.goal);
   const storedCoachAdvice = useStore((s) => s.coachAdvice);
   const setCoachAdvice = useStore((s) => s.setCoachAdvice);
@@ -585,7 +590,8 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError 
   const todayDateKey = dailySummary?.date ?? formatLocalDate(new Date());
   const homeScrollRef = useRef<HTMLElement | null>(null);
   const lastNavigationScrollTokenRef = useRef<number | null>(null);
-  const frame = useHomeNutritionTimeline();
+  const homeAnimationEnabled = secondaryScreen === null;
+  const frame = useHomeNutritionTimeline(homeAnimationEnabled);
 
   useEffect(() => {
     setCoachAdvice(coachAdvice);

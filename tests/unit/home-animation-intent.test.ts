@@ -139,6 +139,33 @@ describe("home animation intent model", () => {
     );
   });
 
+  it("derives home-visible meal mutation delta only when display totals change", () => {
+    const baseline = snapshot({ kcal: 700, protein: 54, carbs: 68, fat: 24 });
+    const unchanged = snapshot({ kcal: 700, protein: 54, carbs: 68, fat: 24 });
+    const decreased = snapshot({ kcal: 520, protein: 42, carbs: 48, fat: 18 });
+
+    assert.deepEqual(
+      deriveHomeEntryIntent({
+        trigger: "meal_mutation",
+        today: "2026-07-07",
+        baseline,
+        current: unchanged,
+        unseenTodayMutation: false,
+      }).intent,
+      { kind: "none" },
+    );
+    assert.deepEqual(
+      deriveHomeEntryIntent({
+        trigger: "meal_mutation",
+        today: "2026-07-07",
+        baseline,
+        current: decreased,
+        unseenTodayMutation: false,
+      }).intent,
+      { kind: "delta", from: baseline },
+    );
+  });
+
   it("derives cold-start replay", () => {
     const baseline = snapshot({ kcal: 700 });
     const current = snapshot({ kcal: 760 });
