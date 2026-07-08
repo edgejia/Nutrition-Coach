@@ -1153,6 +1153,41 @@ describe("Phase 10-02: log_food / get_daily_summary contract parity", () => {
     assert.equal(meals.length, 0);
   });
 
+  it("rejects image log_food visible meat labels with zero protein before persistence", async () => {
+    const result = await executeTool({
+      id: "call_roast_meat_zero_protein",
+      type: "function",
+      function: {
+        name: "log_food",
+        arguments: JSON.stringify({
+          items: [
+            {
+              food_name: "燒肉便當",
+              calories: 820,
+              protein: 0,
+              carbs: 78,
+              fat: 40,
+            },
+          ],
+        }),
+      },
+    }, deviceId, {
+      foodLoggingService,
+      summaryService,
+      imagePath: "asset:roast-meat-bento",
+    }, {
+      currentUserMessage: "(圖片)",
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.executed, false);
+    assert.equal(result.failureReason, "execute");
+    assert.match(result.result, /trusted protein basis required/);
+
+    const meals = await foodLoggingService.getMealsByDate(deviceId, new Date());
+    assert.equal(meals.length, 0);
+  });
+
   it("rejects failed-recognition placeholder names before image log_food persistence", async () => {
     const placeholderCases = [
       { id: "call_unknown", food_name: "unknown" },

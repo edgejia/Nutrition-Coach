@@ -69,6 +69,7 @@ const SUBTRACT_PERCENT_RE = /(少|減|降低|降|扣)\s*(\d+(?:\.\d+)?)\s*%/;
 const ADD_AMOUNT_RE = /(加|增加|提高|多)\s*(\d+(?:\.\d+)?)\s*(?:g|克|卡|kcal)?/i;
 const SUBTRACT_AMOUNT_RE = /(少|減|降低|降|扣)\s*(\d+(?:\.\d+)?)\s*(?:g|克|卡|kcal)?/i;
 const TARGET_BARE_CHINESE_DIGIT_RE = /(?:改成|改為|改到|變成|換成|調成)([零一二兩三四五六七八九])(?![十百千])/g;
+const FINAL_VALUE_ACTION_RE = /(?:改(?:成|為|到)?|變成|換成|調成)(?:\d|[０-９]|[零一二兩三四五六七八九十百千])/;
 const NEGATED_VALUE_RE = /(?:不是|不要|別|非)\s*(\d+(?:\.\d+)?|[零一二兩三四五六七八九十百千]+)/g;
 const BARE_CHINESE_DIGIT: Record<string, number> = {
   零: 0,
@@ -219,6 +220,10 @@ export function classifyMealNumericAdjustment(text: string): MealNumericAdjustme
       operator: "subtract_amount",
       value: normalizeValue(Number(subtractAmount[2])),
     };
+  }
+
+  if (hasFinalEvidence && FINAL_VALUE_ACTION_RE.test(stripToolLikeRegions(text).replace(/\s+/g, ""))) {
+    return { kind: "explicit_final_value" };
   }
 
   if (VAGUE_RE.test(normalized)) {

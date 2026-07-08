@@ -97,6 +97,7 @@ describe("protein trust helper", () => {
 
   it("classifies representative source names across anchor, conditional, trace, and unknown buckets", () => {
     assert.equal(classifyProteinSource("希臘優格"), "anchor");
+    assert.equal(classifyProteinSource("燒肉便當"), "anchor");
     assert.equal(classifyProteinSource("燕麥"), "conditional");
     assert.equal(classifyProteinSource("白飯"), "trace");
     assert.equal(classifyProteinSource("海苔"), "unknown");

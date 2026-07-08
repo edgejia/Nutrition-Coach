@@ -37,7 +37,7 @@ export interface TrustedProteinEstimate {
 const ANCHOR_PATTERNS = [
   /雞|雞腿|雞胸|雞排/i,
   /牛|牛肉|beef|steak/i,
-  /豬|豬肉|豬排|pork|ham|bacon/i,
+  /豬|豬肉|豬排|燒肉|烤肉|叉燒|pork|ham|bacon/i,
   /魚|鮭魚|鮪魚|鯖魚|虱目魚|fish|salmon|tuna|cod/i,
   /海鮮|蝦|蝦仁|蛤蜊|貝|干貝|海鮮|shrimp|prawn|seafood|scallop|clam/i,
   /蛋|水煮蛋|茶葉蛋|雞蛋|egg/i,
