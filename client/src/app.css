@@ -110,21 +110,6 @@ textarea {
   to { transform: rotate(360deg); }
 }
 
-@keyframes home-refresh-confirm {
-  0% {
-    filter: brightness(1);
-    transform: translateY(0);
-  }
-  38% {
-    filter: brightness(1.16);
-    transform: translateY(-2px);
-  }
-  100% {
-    filter: brightness(1);
-    transform: translateY(0);
-  }
-}
-
 .app-viewport {
   position: fixed;
   top: var(--app-visual-viewport-top, 0px);
@@ -654,6 +639,10 @@ textarea {
 
 .sp-ring-progress { transition: stroke-dashoffset 360ms ease; }
 
+.sp-bar-fill--driven { transition: none; }
+
+.sp-ring-progress--driven { transition: none; }
+
 .sp-bar-fill-warn {
   background: var(--sp-red);
 }
@@ -921,10 +910,6 @@ textarea {
 
 .home-sport-hero {
   min-width: 0;
-}
-
-.home-sport-refresh-cue {
-  animation: home-refresh-confirm 520ms ease-out both;
 }
 
 .home-sport-hero-main {
