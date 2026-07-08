@@ -23,6 +23,12 @@ import type {
   SecondaryScreen,
   SecondaryScreenState,
 } from "./types.js";
+import {
+  applyMealMutationMark,
+  buildHomeNutritionSnapshot,
+  deriveHomeEntryIntent,
+} from "./lib/home-animation-intent.js";
+import type { HomeEntryTrigger, HomeNutritionSnapshot } from "./lib/home-animation-intent.js";
 import { formatLocalDate } from "./lib/time.js";
 
 function readStoredJson<T>(key: string): T | null {
@@ -72,6 +78,64 @@ type CommitProvisionalBubbleExtra = {
   turnId?: string;
   replyText?: string;
 };
+
+export type HomeAnimationPendingIntent = {
+  kind: "replay" | "delta";
+  from: HomeNutritionSnapshot | null;
+  token: number;
+  origin: HomeEntryTrigger;
+};
+
+interface HomeAnimationState {
+  baseline: HomeNutritionSnapshot | null;
+  unseenTodayMutation: boolean;
+  pendingIntent: HomeAnimationPendingIntent | null;
+}
+
+function createInitialHomeAnimation(): HomeAnimationState {
+  return {
+    baseline: null,
+    unseenTodayMutation: false,
+    pendingIntent: null,
+  };
+}
+
+function nextHomeAnimationToken(pendingIntent: HomeAnimationPendingIntent | null): number {
+  return (pendingIntent?.token ?? 0) + 1;
+}
+
+function buildCurrentHomeNutritionSnapshot(input: {
+  summary: DailySummary | null;
+  targets: DailyTargets | null;
+}): HomeNutritionSnapshot {
+  return buildHomeNutritionSnapshot({
+    date: formatLocalDate(new Date()),
+    summary: input.summary,
+    targets: input.targets,
+  });
+}
+
+function commitHomeVisibleNutritionSnapshot(
+  homeAnimation: HomeAnimationState,
+  summary: DailySummary,
+  targets: DailyTargets | null,
+): HomeAnimationState {
+  const baseline = buildCurrentHomeNutritionSnapshot({ summary, targets });
+  const pendingIntent = homeAnimation.baseline
+    ? homeAnimation.pendingIntent
+    : {
+        kind: "replay" as const,
+        from: null,
+        token: nextHomeAnimationToken(homeAnimation.pendingIntent),
+        origin: "cold_start" as const,
+      };
+
+  return {
+    baseline,
+    unseenTodayMutation: false,
+    pendingIntent,
+  };
+}
 
 function redactReceiptIdentityFromMessages(messages: Message[], mealId: string): Message[] {
   return messages.map((message) => {
@@ -199,6 +263,7 @@ interface AppState {
   meals: MealEntry[];
   pendingHomeChatDraft: PendingHomeChatDraft | null;
   lastMealMutation: MealMutationNotice | null;
+  homeAnimation: HomeAnimationState;
   showSettings: boolean;
   secondaryScreen: SecondaryScreenState;
   sending: boolean;
@@ -217,6 +282,8 @@ interface AppState {
   removeMeal: (mealId: string) => void;
   redactChatReceiptIdentity: (mealId: string) => void;
   recordMealMutation: (affectedDate: string) => void;
+  requestHomeEntryAnimation: (trigger: HomeEntryTrigger) => void;
+  consumeHomeAnimationIntent: (token: number) => void;
   setPendingHomeChatDraft: (draft: PendingHomeChatDraft | null) => void;
   clearPendingHomeChatDraft: () => void;
   clearDraftLinkedAssistantArtifact: (artifactId: string) => void;
@@ -256,6 +323,7 @@ export const useStore = create<AppState>((set, get) => ({
   meals: [],
   pendingHomeChatDraft: null,
   lastMealMutation: null,
+  homeAnimation: createInitialHomeAnimation(),
   showSettings: false,
   secondaryScreen: null,
   sending: false,
@@ -317,7 +385,22 @@ export const useStore = create<AppState>((set, get) => ({
     if (!isAuthoritativeMealEntryArray(meals)) {
       return;
     }
-    set({ meals, dailySummary: buildSummaryFromCurrentMeals(meals) });
+    set((state) => {
+      const dailySummary = buildSummaryFromCurrentMeals(meals);
+      return {
+        meals,
+        dailySummary,
+        ...(state.activeScreen === "home"
+          ? {
+              homeAnimation: commitHomeVisibleNutritionSnapshot(
+                state.homeAnimation,
+                dailySummary,
+                state.dailyTargets,
+              ),
+            }
+          : {}),
+      };
+    });
   },
   removeMeal: (mealId) => set((state) => ({ meals: state.meals.filter((meal) => meal.id !== mealId) })),
   redactChatReceiptIdentity: (mealId) =>
@@ -330,7 +413,57 @@ export const useStore = create<AppState>((set, get) => ({
         affectedDate,
         nonce: (state.lastMealMutation?.nonce ?? 0) + 1,
       },
+      homeAnimation: {
+        ...state.homeAnimation,
+        unseenTodayMutation: applyMealMutationMark({
+          affectedDate,
+          today: formatLocalDate(new Date()),
+          homeVisible: state.activeScreen === "home",
+          unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
+        }),
+      },
     })),
+  requestHomeEntryAnimation: (trigger) =>
+    set((state) => {
+      const current = buildCurrentHomeNutritionSnapshot({
+        summary: state.dailySummary,
+        targets: state.dailyTargets,
+      });
+      const { intent, nextBaseline } = deriveHomeEntryIntent({
+        trigger,
+        today: formatLocalDate(new Date()),
+        baseline: state.homeAnimation.baseline,
+        current,
+        unseenTodayMutation: state.homeAnimation.unseenTodayMutation,
+      });
+      const token = nextHomeAnimationToken(state.homeAnimation.pendingIntent);
+      const pendingIntent: HomeAnimationPendingIntent | null =
+        intent.kind === "delta"
+          ? { kind: "delta", from: intent.from, token, origin: trigger }
+          : intent.kind === "replay"
+            ? { kind: "replay", from: null, token, origin: trigger }
+            : null;
+
+      return {
+        homeAnimation: {
+          baseline: nextBaseline,
+          unseenTodayMutation: false,
+          pendingIntent,
+        },
+      };
+    }),
+  consumeHomeAnimationIntent: (token) =>
+    set((state) => {
+      if (state.homeAnimation.pendingIntent?.token !== token) {
+        return {};
+      }
+      return {
+        homeAnimation: {
+          ...state.homeAnimation,
+          pendingIntent: null,
+        },
+      };
+    }),
   setPendingHomeChatDraft: (pendingHomeChatDraft) => set({ pendingHomeChatDraft }),
   clearPendingHomeChatDraft: () => set({ pendingHomeChatDraft: null }),
   clearDraftLinkedAssistantArtifact: (artifactId) =>
@@ -439,7 +572,18 @@ export const useStore = create<AppState>((set, get) => ({
     }
     const activeDate = formatLocalDate(new Date());
     if (summary.date === activeDate) {
-      set({ dailySummary: summary });
+      set((state) => ({
+        dailySummary: summary,
+        ...(state.activeScreen === "home"
+          ? {
+              homeAnimation: commitHomeVisibleNutritionSnapshot(
+                state.homeAnimation,
+                summary,
+                state.dailyTargets,
+              ),
+            }
+          : {}),
+      }));
       return;
     }
     // Fire-and-forget: never throw into SSE/chat event handlers (T-09-06).
@@ -589,6 +733,7 @@ export const useStore = create<AppState>((set, get) => ({
       meals: [],
       pendingHomeChatDraft: null,
       lastMealMutation: null,
+      homeAnimation: createInitialHomeAnimation(),
       showSettings: false,
       secondaryScreen: null,
       sending: false,
