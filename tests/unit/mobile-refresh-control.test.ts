@@ -129,29 +129,34 @@ describe("Home manual refresh source contract", () => {
       ["Home content scroller", '<main className="screen-scroll home-sport-scroll">'],
     ]);
     assert.match(screenBody, /ariaLabel="下拉重新整理今日資料"/);
-    assert.match(screenBody, /refreshCueToken=\{refreshCueToken\}/);
+    assert.match(screenBody, /const frame = useHomeNutritionTimeline\(\{ refreshCueToken \}\)/);
+    assert.match(screenBody, /<CalorieHero dailySummary=\{dailySummary\} dailyTargets=\{dailyTargets\} frame=\{frame\} \/>/);
     assertIncludesInOrder(headerBody, [
       ["Settings control", 'aria-label="設定"'],
     ]);
   });
 
-  it("replays a visible Home completion cue after successful manual refresh", () => {
+  it("routes manual refresh replay through the single Home nutrition frame", () => {
     const body = functionBody(sources.homeScreen, "CalorieHero");
 
-    assert.match(sources.homeScreen, /function useCountUpNumber\(targetValue: number, options: \{ durationMs\?: number; animate\?: boolean; replayKey\?: number \} = \{\}\)/);
-    assert.match(sources.homeScreen, /const previousReplayKeyRef = useRef<number \| undefined>\(options\.replayKey\)/);
-    assert.match(sources.homeScreen, /const replayChanged =[\s\S]*previousReplayKeyRef\.current !== options\.replayKey/);
+    assert.match(sources.homeScreen, /function useHomeNutritionTimeline\(input: \{ refreshCueToken: number \}\): HomeTimelineFrame/);
+    assert.match(sources.homeScreen, /const refreshCueChanged = previousRefreshCueRef\.current !== input\.refreshCueToken/);
+    assert.match(sources.homeScreen, /pendingIntent\?\.kind === "delta" && pendingIntent\.from[\s\S]*getSnapshotTimelineEndpoints\(pendingIntent\.from, dailyTargets\)[\s\S]*zeroEndpoints\(end\)/);
+    assert.match(sources.homeScreen, /setFrame\(finishImmediately \? end : frameAt\(start, end, 0\)\)/);
+    assert.match(sources.homeScreen, /consumeHomeAnimationIntent\(intentToken\)/);
+    assert.match(sources.homeScreen, /HOME_TIMELINE_DURATION_MS/);
     assert.match(
       sources.homeScreen,
-      /function CalorieHero\(\{\s*dailySummary,\s*dailyTargets,\s*refreshCueToken,\s*\}: \{/,
+      /function CalorieHero\(\{\s*dailySummary,\s*dailyTargets,\s*frame,\s*\}: \{/,
     );
-    assert.match(body, /replayKey: refreshCueToken/);
-    assert.match(body, /const refreshCueClass = refreshCueToken > 0 \? " home-sport-refresh-cue" : ""/);
-    assert.match(body, /key=\{`home-hero-\$\{refreshCueToken\}`\}/);
-    // Plan 104-13 (Gap B): the macro grid no longer remounts on refresh via a
-    // key={`home-macros-${refreshCueToken}`}; a remount would reset MacroCard hook state and skip the
-    // count-up. The macro replay now runs in place through MacroCard + replayKey={refreshCueToken}.
-    assert.match(body, /<MacroCard key=\{macro\.id\} macro=\{macro\} refreshCueToken=\{refreshCueToken\} \/>/);
+    assert.match(body, /value=\{frame\.ringValue\}/);
+    assert.match(body, /drivenExternally/);
+    assert.match(sources.homeScreen, /<SportProgressBar value=\{framePart\.barValue\} variant=\{macro\.variant\} drivenExternally \/>/);
+    assert.match(sources.homeScreen, /const frame = useHomeNutritionTimeline\(\{ refreshCueToken \}\)/);
+    assert.doesNotMatch(sources.homeScreen, /function useCountUpNumber/);
+    assert.doesNotMatch(sources.homeScreen, /home-sport-refresh-cue/);
+    assert.doesNotMatch(sources.homeScreen, /key=\{`home-hero-/);
+    assert.doesNotMatch(sources.homeScreen, /replayKey=\{refreshCueToken\}/);
   });
 
   it("keeps Settings governed by sending and error copy independent from button loading state", () => {

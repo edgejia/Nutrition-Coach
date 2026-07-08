@@ -1,8 +1,16 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store.js";
 import { recordHomeCtaOptionSent } from "../api.js";
 import { getCoachAdvice, getCoachCTA } from "../coach-advice.js";
 import { createClientId } from "../lib/clientId.js";
+import type { HomeNutritionSnapshot } from "../lib/home-animation-intent.js";
+import {
+  easeShared,
+  frameAt,
+  HOME_TIMELINE_DURATION_MS,
+  zeroEndpoints,
+} from "../lib/home-animation-timeline.js";
+import type { HomeTimelineEndpoints, HomeTimelineFrame } from "../lib/home-animation-timeline.js";
 import { formatLocalDate } from "../lib/time.js";
 import { buildMealEditPayloadIfComplete } from "../meal-edit-payload.js";
 import { CoachAdviceCard } from "./CoachAdviceCard.js";
@@ -149,75 +157,134 @@ function prefersReducedMotion() {
   );
 }
 
-function useCountUpNumber(targetValue: number, options: { durationMs?: number; animate?: boolean; replayKey?: number } = {}) {
-  const previousValueRef = useRef<number | null>(null);
-  const previousReplayKeyRef = useRef<number | undefined>(options.replayKey);
-  const frameRef = useRef<number | null>(null);
-  const activeAnimationTargetRef = useRef<number | null>(null);
-  const [displayValue, setDisplayValue] = useState(targetValue);
-  const durationMs = options.durationMs ?? 450;
-  const animate = options.animate === true;
-  const replayChanged =
-    options.replayKey !== undefined &&
-    previousReplayKeyRef.current !== undefined &&
-    previousReplayKeyRef.current !== options.replayKey;
+function getHomeTimelineEndpoints(
+  summary: Pick<DailySummary, "totalCalories" | "totalProtein" | "totalCarbs" | "totalFat"> | null,
+  targets: DailyTargets | null,
+): HomeTimelineEndpoints {
+  const calories = getHomeCalorieDisplay(summary, targets);
+  const macros = getHomeMacroDisplays(summary, targets);
+  return {
+    kcal: calories.consumed,
+    percent: calories.percent,
+    ringValue: calories.ringValue,
+    macros: macros.map((macro) => ({
+      grams: macro.current,
+      percent: macro.percent,
+      barValue: macro.progress,
+    })),
+  };
+}
+
+function getSnapshotTimelineEndpoints(
+  snapshot: HomeNutritionSnapshot,
+  targets: DailyTargets | null,
+): HomeTimelineEndpoints {
+  return getHomeTimelineEndpoints(
+    {
+      totalCalories: snapshot.kcal,
+      totalProtein: snapshot.protein,
+      totalCarbs: snapshot.carbs,
+      totalFat: snapshot.fat,
+    },
+    targets,
+  );
+}
+
+function useHomeNutritionTimeline(input: { refreshCueToken: number }): HomeTimelineFrame {
+  const dailySummary = useStore((s) => s.dailySummary);
+  const dailyTargets = useStore((s) => s.dailyTargets);
+  const pendingIntent = useStore((s) => s.homeAnimation.pendingIntent);
+  const consumeHomeAnimationIntent = useStore((s) => s.consumeHomeAnimationIntent);
+  const end = useMemo(
+    () => getHomeTimelineEndpoints(dailySummary, dailyTargets),
+    [dailySummary, dailyTargets],
+  );
+  const [frame, setFrame] = useState<HomeTimelineFrame>(end);
+  const [running, setRunning] = useState(false);
+  const frameRequestRef = useRef<number | null>(null);
+  const activeRunRef = useRef(0);
+  const lastStartedIntentTokenRef = useRef<number | null>(null);
+  const previousRefreshCueRef = useRef(input.refreshCueToken);
+  const runningRef = useRef(false);
 
   useEffect(() => {
-    if (frameRef.current !== null) {
-      cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    }
+    const intentToken = pendingIntent?.token ?? null;
+    const hasNewIntent = pendingIntent !== null && lastStartedIntentTokenRef.current !== intentToken;
+    const refreshCueChanged = previousRefreshCueRef.current !== input.refreshCueToken;
 
-    const previousValue = previousValueRef.current;
-    if ((animate !== true && !replayChanged) || prefersReducedMotion() === true || previousValue === null) {
-      activeAnimationTargetRef.current = null;
-      previousValueRef.current = targetValue;
-      previousReplayKeyRef.current = options.replayKey;
-      setDisplayValue(targetValue);
+    if (!hasNewIntent && !refreshCueChanged) {
       return;
     }
 
-    const replayOffset = Math.max(1, Math.round(Math.abs(targetValue) * 0.08));
-    const startValue = replayChanged && previousValue === targetValue
-      ? Math.max(0, targetValue - replayOffset)
-      : previousValue;
-    let startTime: number | null = null;
-    activeAnimationTargetRef.current = targetValue;
+    previousRefreshCueRef.current = input.refreshCueToken;
+    if (intentToken !== null) {
+      lastStartedIntentTokenRef.current = intentToken;
+    }
 
+    const start =
+      pendingIntent?.kind === "delta" && pendingIntent.from
+        ? getSnapshotTimelineEndpoints(pendingIntent.from, dailyTargets)
+        : zeroEndpoints(end);
+    activeRunRef.current += 1;
+    const runId = activeRunRef.current;
+
+    if (frameRequestRef.current !== null) {
+      cancelAnimationFrame(frameRequestRef.current);
+      frameRequestRef.current = null;
+    }
+
+    const finishImmediately =
+      prefersReducedMotion() ||
+      typeof requestAnimationFrame !== "function" ||
+      typeof cancelAnimationFrame !== "function";
+
+    setFrame(finishImmediately ? end : frameAt(start, end, 0));
+    runningRef.current = !finishImmediately;
+    setRunning(!finishImmediately);
+    if (intentToken !== null) {
+      consumeHomeAnimationIntent(intentToken);
+    }
+
+    if (finishImmediately) {
+      return;
+    }
+
+    let startTime: number | null = null;
     const step = (timestamp: number) => {
-      if (activeAnimationTargetRef.current !== targetValue) {
+      if (activeRunRef.current !== runId) {
         return;
       }
+
       startTime ??= timestamp;
-      const progress = Math.min(1, (timestamp - startTime) / durationMs);
-      setDisplayValue(Math.round(startValue + (targetValue - startValue) * progress));
+      const progress = Math.min(1, (timestamp - startTime) / HOME_TIMELINE_DURATION_MS);
+      setFrame(frameAt(start, end, easeShared(progress)));
 
       if (progress < 1) {
-        frameRef.current = requestAnimationFrame(step);
+        frameRequestRef.current = requestAnimationFrame(step);
         return;
       }
 
-      frameRef.current = null;
-      activeAnimationTargetRef.current = null;
-      previousValueRef.current = targetValue;
-      previousReplayKeyRef.current = options.replayKey;
-      setDisplayValue(targetValue);
+      frameRequestRef.current = null;
+      runningRef.current = false;
+      setFrame(end);
+      setRunning(false);
     };
 
-    frameRef.current = requestAnimationFrame(step);
+    frameRequestRef.current = requestAnimationFrame(step);
+  }, [consumeHomeAnimationIntent, dailyTargets, end, input.refreshCueToken, pendingIntent]);
 
+  useEffect(() => {
     return () => {
-      if (frameRef.current !== null) {
-        cancelAnimationFrame(frameRef.current);
-        frameRef.current = null;
-      }
-      if (activeAnimationTargetRef.current === targetValue) {
-        activeAnimationTargetRef.current = null;
+      activeRunRef.current += 1;
+      runningRef.current = false;
+      if (frameRequestRef.current !== null) {
+        cancelAnimationFrame(frameRequestRef.current);
+        frameRequestRef.current = null;
       }
     };
-  }, [durationMs, options.replayKey, replayChanged, targetValue, animate]);
+  }, []);
 
-  return displayValue;
+  return running || runningRef.current ? frame : end;
 }
 
 export function getMealMacroSummary(meal: Pick<MealEntry, "protein" | "carbs" | "fat">): string {
@@ -321,25 +388,11 @@ function HomeHeader() {
 
 function MacroCard({
   macro,
-  refreshCueToken,
+  framePart,
 }: {
   macro: ReturnType<typeof getHomeMacroDisplays>[number];
-  refreshCueToken: number;
+  framePart: HomeTimelineFrame["macros"][number];
 }) {
-  // Reuse the hero's count-up mechanism so each macro number replays on every refresh, even when the
-  // value is unchanged (replayKey: refreshCueToken). The hook is called once per card at the top of
-  // MacroCard so it stays at a stable position (never inside `.map`).
-  const animatedCurrent = useCountUpNumber(macro.current, {
-    durationMs: 450,
-    animate: false,
-    replayKey: refreshCueToken,
-  });
-  const animatedPercent = useCountUpNumber(macro.percent, {
-    durationMs: 450,
-    animate: false,
-    replayKey: refreshCueToken,
-  });
-
   return (
     <SportCard className="home-sport-macro-card" variant="flat">
       <div>
@@ -347,11 +400,11 @@ function MacroCard({
         <div className="home-sport-macro-metric">{macro.metric}</div>
       </div>
       <div className="home-sport-macro-value">
-        <span>{animatedCurrent}</span>
+        <span>{framePart.grams}</span>
         <small>/{macro.target}</small>
       </div>
-      <SportProgressBar value={macro.progress} variant={macro.variant} replayKey={refreshCueToken} />
-      <div className="home-sport-macro-percent">{animatedPercent}%</div>
+      <SportProgressBar value={framePart.barValue} variant={macro.variant} drivenExternally />
+      <div className="home-sport-macro-percent">{framePart.percent}%</div>
     </SportCard>
   );
 }
@@ -359,39 +412,18 @@ function MacroCard({
 function CalorieHero({
   dailySummary,
   dailyTargets,
-  refreshCueToken,
+  frame,
 }: {
   dailySummary: DailySummary | null;
   dailyTargets: DailyTargets | null;
-  refreshCueToken: number;
+  frame: HomeTimelineFrame;
 }) {
   const display = getHomeCalorieDisplay(dailySummary, dailyTargets);
   const macros = getHomeMacroDisplays(dailySummary, dailyTargets);
-  const previousConsumedRef = useRef<number | null>(null);
-  const shouldAnimateConsumedChange =
-    previousConsumedRef.current !== null && previousConsumedRef.current !== display.consumed;
-  const animatedConsumed = useCountUpNumber(display.consumed, {
-    durationMs: 450,
-    animate: shouldAnimateConsumedChange,
-    replayKey: refreshCueToken,
-  });
-  const animatedPercent = useCountUpNumber(display.percent, {
-    durationMs: 450,
-    animate: shouldAnimateConsumedChange,
-    replayKey: refreshCueToken,
-  });
-  // Derive the ring from the animated percent so the arc replays together with the kcal number.
-  const animatedRingValue = display.target > 0 ? Math.min(1, animatedPercent / 100) : display.ringValue;
-
-  useEffect(() => {
-    previousConsumedRef.current = display.consumed;
-  }, [display.consumed]);
-
-  const refreshCueClass = refreshCueToken > 0 ? " home-sport-refresh-cue" : "";
 
   return (
     <>
-      <SportCard key={`home-hero-${refreshCueToken}`} className={`home-sport-hero${refreshCueClass}`} variant="glow">
+      <SportCard className="home-sport-hero" variant="glow">
         <div className="home-sport-hero-main">
           <div className="home-sport-calorie-copy">
             <div className="sp-label" style={{ marginBottom: 8 }}>
@@ -399,7 +431,7 @@ function CalorieHero({
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
               <span className="sp-display" style={{ fontSize: 72, color: "var(--sp-ink)" }}>
-                {animatedConsumed.toLocaleString("en-US")}
+                {frame.kcal.toLocaleString("en-US")}
               </span>
               <span className="sp-num" style={{ fontSize: 13, color: "var(--sp-ink-3)" }}>
                 / {display.target.toLocaleString("en-US")}
@@ -419,11 +451,12 @@ function CalorieHero({
           </div>
           <SportRing
             className="home-sport-ring"
-            value={animatedRingValue}
+            value={frame.ringValue}
             accentTick
+            drivenExternally
             label={
               <span className="home-sport-ring-label">
-                <strong className="sp-display">{animatedPercent}</strong>
+                <strong className="sp-display">{frame.percent}</strong>
                 <span className="sp-label">完成率</span>
               </span>
             }
@@ -432,9 +465,13 @@ function CalorieHero({
           />
         </div>
       </SportCard>
-      <div className={`home-sport-macro-grid${refreshCueClass}`}>
-        {macros.map((macro) => (
-          <MacroCard key={macro.id} macro={macro} refreshCueToken={refreshCueToken} />
+      <div className="home-sport-macro-grid">
+        {macros.map((macro, index) => (
+          <MacroCard
+            key={macro.id}
+            macro={macro}
+            framePart={frame.macros[index] ?? { grams: macro.current, percent: macro.percent, barValue: macro.progress }}
+          />
         ))}
       </div>
     </>
@@ -549,6 +586,7 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError,
   const cta = getCoachCTA(dailySummary, dailyTargets, undefined, goal);
   const emptyCopy = getHomeEmptyCoachCopy();
   const todayDateKey = dailySummary?.date ?? formatLocalDate(new Date());
+  const frame = useHomeNutritionTimeline({ refreshCueToken });
 
   useEffect(() => {
     setCoachAdvice(coachAdvice);
@@ -581,7 +619,7 @@ export function HomeScreen({ onRefreshToday, refreshingToday, refreshTodayError,
           ariaLabel="下拉重新整理今日資料"
         >
           <main className="screen-scroll home-sport-scroll">
-            <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} refreshCueToken={refreshCueToken} />
+            <CalorieHero dailySummary={dailySummary} dailyTargets={dailyTargets} frame={frame} />
             <CoachAdviceCard advice={coachAdvice} cta={cta} onTaskOptionClick={handleTaskOptionClick} disabled={sending} />
             <MealRows meals={meals} todayDateKey={todayDateKey} openMealEdit={openMealEdit} onEmptyChatClick={handleEmptyChatClick} />
           </main>
