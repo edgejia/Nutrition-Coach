@@ -92,8 +92,7 @@ function splitNarrativeAndLedger(markdown: string) {
 }
 
 function extractNarrativeClaimIds(markdown: string) {
-  const { narrative } = splitNarrativeAndLedger(markdown);
-  return [...narrative.matchAll(/\*\*\[(AS-\d{2})\]\*\*/g)].map((match) => match[1]);
+  return [...extractNarrative(markdown).matchAll(/\*\*\[(AS-\d{2})\]\*\*/g)].map((match) => match[1]);
 }
 
 function extractLedgerClaimIds(markdown: string) {
@@ -181,6 +180,13 @@ function repositoryRelativePath(absolutePath: string) {
 
 function paragraphs(markdown: string) {
   return markdown.split(/\r?\n\s*\r?\n/).map((paragraph) => paragraph.trim());
+}
+
+function extractNarrative(markdown: string) {
+  const { narrative, ledger } = splitNarrativeAndLedger(markdown);
+  const postLedgerNarrativeIndex = ledger.indexOf("## Known limitations and future eval questions");
+  assert.notEqual(postLedgerNarrativeIndex, -1, "missing post-ledger narrative boundary");
+  return `${narrative}\n${ledger.slice(postLedgerNarrativeIndex)}`;
 }
 
 describe("public AI-safety write-up contract", () => {
@@ -271,7 +277,7 @@ describe("public AI-safety write-up contract", () => {
     assertExactUniqueSet(narrativeClaimIds, EXPECTED_CLAIM_IDS, "narrative claim IDs");
     assertExactUniqueSet(ledgerClaimIds, EXPECTED_CLAIM_IDS, "ledger claim IDs");
 
-    const markedParagraphs = paragraphs(splitNarrativeAndLedger(markdown).narrative).filter((paragraph) =>
+    const markedParagraphs = paragraphs(extractNarrative(markdown)).filter((paragraph) =>
       /\*\*\[AS-\d{2}\]\*\*/.test(paragraph),
     );
     assert.equal(markedParagraphs.length, EXPECTED_CLAIM_IDS.length, "each claim must occupy one paragraph");
@@ -301,7 +307,13 @@ describe("public AI-safety write-up contract", () => {
       "Nutrition safety",
     ]);
     for (const row of caseRows) {
-      assert.ok(!/[.!?].+[.!?]/.test(row.join(" ")), `${row[1]} cells must remain concise one-sentence values`);
+      for (const cell of row) {
+        const visibleText = cell.replace(/(!?)\[([^\]\n]+)\]\([^)]+\)/g, "$2");
+        assert.ok(
+          (visibleText.match(/[.!?](?:\s|$)/g)?.length ?? 0) <= 1,
+          `${row[1]} cells must remain concise one-sentence values`,
+        );
+      }
       const links = extractMarkdownLinks(row[4]);
       assert.ok(links.length >= 1 && links.length <= 2, `${row[1]} must have one or two evidence links`);
       assert.ok(links.some((link) => link.text.includes(row[1])), `${row[1]} evidence must name the CASE ID`);
