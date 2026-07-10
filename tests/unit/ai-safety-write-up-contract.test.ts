@@ -106,6 +106,40 @@ flowchart LR
 
 > Bounded evidence only.
 `;
+const SYNTHETIC_POSIX_PATH = ["", "var", "tmp", "synthetic-private-proof.md"].join("/");
+const SYNTHETIC_WINDOWS_PATH = ["Q:", "synthetic", "private-proof.md"].join("\\");
+const SYNTHETIC_FILE_PATH = ["fi", "le://", "localhost", "synthetic", "private-proof.md"].join("/");
+const SYNTHETIC_CREDENTIAL_ASSIGNMENT = [
+  ["SYNTHETIC", "ACCESS", "TOKEN"].join("_"),
+  "=",
+  ["placeholder", "value", "only"].join("-"),
+].join("");
+const SYNTHETIC_TOKEN_PREFIX = ["gh", "p_", "placeholdervalueonly"].join("");
+const PLAIN_PRIVATE_SURFACE_FIXTURE = [
+  `POSIX sample: ${SYNTHETIC_POSIX_PATH}`,
+  `Windows sample: ${SYNTHETIC_WINDOWS_PATH}`,
+  `File sample: ${SYNTHETIC_FILE_PATH}`,
+].join("\n");
+const CREDENTIAL_PRIVATE_SURFACE_FIXTURE = [
+  SYNTHETIC_CREDENTIAL_ASSIGNMENT,
+  SYNTHETIC_TOKEN_PREFIX,
+].join("\n");
+const FENCED_PRIVATE_SURFACE_FIXTURE = [
+  "```text",
+  SYNTHETIC_POSIX_PATH,
+  SYNTHETIC_CREDENTIAL_ASSIGNMENT,
+  "```",
+].join("\n");
+const INDENTED_TILDE_FENCE_FIXTURE = [
+  "   ~~~text",
+  "   bounded sample",
+  "   ~~~",
+].join("\n");
+const CLEAN_INDENTED_BACKTICK_FENCE_FIXTURE = [
+  "   ```text",
+  "   bounded sample",
+  "   ```",
+].join("\n");
 const COMMENTED_TITLE_FIXTURE = `
 // test("commented line title", () => {});
 /* it("commented block title", () => {}); */
@@ -643,6 +677,43 @@ describe("contract mutation resistance", () => {
 
   it("mutation: accepts the supported inline-link, claim-marker, and fenced-diagram surface", () => {
     assert.deepEqual(findUnsupportedLinkSurfaces(SUPPORTED_SURFACE_FIXTURE), []);
+  });
+
+  it("mutation: rejects plain absolute and file-path content", () => {
+    const violations = findUnsupportedLinkSurfaces(PLAIN_PRIVATE_SURFACE_FIXTURE);
+    assert.ok(violations.some((violation) => /POSIX path/i.test(violation)));
+    assert.ok(violations.some((violation) => /Windows path/i.test(violation)));
+    assert.ok(violations.some((violation) => /file-scheme path/i.test(violation)));
+    for (const privateValue of [SYNTHETIC_POSIX_PATH, SYNTHETIC_WINDOWS_PATH, SYNTHETIC_FILE_PATH]) {
+      assert.ok(violations.every((violation) => !violation.includes(privateValue)));
+    }
+  });
+
+  it("mutation: rejects credential-shaped assignments and token prefixes", () => {
+    const violations = findUnsupportedLinkSurfaces(CREDENTIAL_PRIVATE_SURFACE_FIXTURE);
+    assert.ok(violations.some((violation) => /credential assignment/i.test(violation)));
+    assert.ok(violations.some((violation) => /access-token prefix/i.test(violation)));
+    for (const privateValue of [SYNTHETIC_CREDENTIAL_ASSIGNMENT, SYNTHETIC_TOKEN_PREFIX]) {
+      assert.ok(violations.every((violation) => !violation.includes(privateValue)));
+    }
+  });
+
+  it("mutation: rejects private content inside fenced bodies", () => {
+    const violations = findUnsupportedLinkSurfaces(FENCED_PRIVATE_SURFACE_FIXTURE);
+    assert.ok(violations.some((violation) => /fenced body.*POSIX path/i.test(violation)));
+    assert.ok(violations.some((violation) => /fenced body.*credential assignment/i.test(violation)));
+    for (const privateValue of [SYNTHETIC_POSIX_PATH, SYNTHETIC_CREDENTIAL_ASSIGNMENT]) {
+      assert.ok(violations.every((violation) => !violation.includes(privateValue)));
+    }
+  });
+
+  it("mutation: rejects indented tilde fences", () => {
+    const violations = findUnsupportedLinkSurfaces(INDENTED_TILDE_FENCE_FIXTURE);
+    assert.ok(violations.some((violation) => /tilde fence/i.test(violation)));
+  });
+
+  it("mutation: accepts a clean three-space backtick fence", () => {
+    assert.deepEqual(findUnsupportedLinkSurfaces(CLEAN_INDENTED_BACKTICK_FENCE_FIXTURE), []);
   });
 
   it("mutation: rejects commented-out test titles", () => {
