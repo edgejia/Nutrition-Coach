@@ -844,6 +844,83 @@ describe("public AI-safety write-up contract", () => {
     }
   });
 
+  it("requires AS-12 four-layer executable evidence in narrative and ledger", async () => {
+    const markdown = await readAiSafetyDocument();
+    const as12EvidenceByCategory = {
+      "prompt guidance": [
+        {
+          text: "unit test: renders a dedicated nutrition safety section after responsibilities",
+          target: "../tests/unit/system-prompt.test.ts",
+        },
+      ],
+      "shared policy": [
+        {
+          text: "unit test: rejects target patches below the calorie floor",
+          target: "../tests/unit/nutrition-safety-policy.test.ts",
+        },
+      ],
+      "guarded proposal or mutation paths": [
+        {
+          text: "integration test: blocks unsafe current-turn goal updates without mutation or goals_update publish",
+          target: "../tests/integration/chat-goal-update.integration.test.ts",
+        },
+      ],
+      "final-output scanning": [
+        {
+          text: "harness case CASE-15",
+          target: "../tests/harness/cases/case-15-extreme-restriction.ts",
+        },
+        {
+          text: "harness case CASE-16",
+          target: "../tests/harness/cases/case-16-rapid-weight-loss.ts",
+        },
+        {
+          text: "harness case CASE-17",
+          target: "../tests/harness/cases/case-17-punitive-exercise.ts",
+        },
+      ],
+    } as const;
+
+    const linkKey = (link: { text: string; target: string }) => `${link.text}\n${link.target}`;
+    const assertAs12Evidence = (document: string) => {
+      const narrative = paragraphs(extractNarrative(document)).find((paragraph) =>
+        paragraph.startsWith("**[AS-12]**"),
+      );
+      assert.ok(narrative, "missing AS-12 narrative paragraph");
+      const ledgerRow = extractTable(document, LEDGER_HEADERS).find((row) => row[0] === "AS-12");
+      assert.ok(ledgerRow, "missing AS-12 ledger row");
+
+      for (const [location, surface] of [
+        ["narrative", narrative],
+        ["ledger", ledgerRow[3]],
+      ] as const) {
+        const actualLinks = new Set(extractMarkdownLinks(surface).map(linkKey));
+        for (const [category, expectedLinks] of Object.entries(as12EvidenceByCategory)) {
+          assert.ok(
+            expectedLinks.every((link) => actualLinks.has(linkKey(link))),
+            `${location} missing AS-12 ${category} evidence`,
+          );
+        }
+      }
+    };
+    const removeAs12Category = (
+      document: string,
+      links: readonly { text: string; target: string }[],
+    ) => document
+      .split(/\r?\n/)
+      .map((line) => {
+        if (!line.startsWith("**[AS-12]**") && !line.startsWith("| AS-12 |")) return line;
+        return links.reduce(
+          (mutated, link) => mutated.replace(`[${link.text}](${link.target})`, ""),
+          line,
+        );
+      })
+      .join("\n");
+
+    assertAs12Evidence(markdown);
+    assertAs12Evidence(removeAs12Category(markdown, as12EvidenceByCategory["shared policy"]));
+  });
+
   it("resolves public evidence, restricts external links, and rejects non-public roots", async () => {
     const markdown = await readAiSafetyDocument();
     const contractSource = await readFile(CONTRACT_PATH, "utf8");
