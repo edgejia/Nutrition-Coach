@@ -225,6 +225,38 @@ suite("active suite", { skip: false }, () => {
   test(\`active template test\`, function () {});
 });
 `;
+const INACTIVE_TEST_OPTION_SHAPES_FIXTURE = `
+import { it, test } from "node:test";
+test("spread-skipped test", { ...{ skip: true } }, () => {});
+it("computed-skip test", { ["skip"]: true }, () => {});
+test("computed-todo test", { [\`todo\`]: "later" }, () => {});
+`;
+const INACTIVE_SUITE_OPTION_SHAPES_FIXTURE = `
+import { describe, it, suite, test } from "node:test";
+describe("spread-skipped describe", { ...{ skip: true } }, () => {
+  test("test under spread-skipped describe", () => {});
+});
+suite("computed-todo suite", { ["todo"]: "later" }, () => {
+  it("it under computed-todo suite", () => {});
+});
+`;
+const UNRESOLVED_COMPUTED_OPTION_FIXTURE = `
+import { describe, it, test } from "node:test";
+const dynamicTestOption = "skip";
+const dynamicSuiteOption = "todo";
+test("unresolved-computed test", { [dynamicTestOption]: true }, () => {});
+describe("unresolved-computed describe", { [dynamicSuiteOption]: "later" }, () => {
+  it("it under unresolved-computed describe", () => {});
+});
+`;
+const STATICALLY_FALSE_OPTION_SHAPES_FIXTURE = `
+import { it, test } from "node:test";
+const dynamicFalseOption = "skip";
+test("direct false option test", { skip: false }, () => {});
+it("computed-literal false option test", { ["todo"]: false }, () => {});
+test("unresolved-computed false option test", { [dynamicFalseOption]: false }, () => {});
+it("inline-spread false option test", { ...{ skip: false, [\`todo\`]: false } }, () => {});
+`;
 
 type MarkdownLink = {
   text: string;
@@ -968,6 +1000,39 @@ describe("contract mutation resistance", () => {
     assert.deepEqual(
       [...extractActiveTestTitles(RUNNABLE_NODE_TEST_FIXTURE, "runnable.ts")],
       ["active false-option test", 'active "escaped" it', "active template test"],
+    );
+  });
+
+  it("mutation: rejects spread and computed inactive test options", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(INACTIVE_TEST_OPTION_SHAPES_FIXTURE, "inactive-test-option-shapes.ts")],
+      [],
+    );
+  });
+
+  it("mutation: rejects spread and computed inactive suite options", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(INACTIVE_SUITE_OPTION_SHAPES_FIXTURE, "inactive-suite-option-shapes.ts")],
+      [],
+    );
+  });
+
+  it("mutation: rejects unresolved computed inactive option keys", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(UNRESOLVED_COMPUTED_OPTION_FIXTURE, "unresolved-option-shapes.ts")],
+      [],
+    );
+  });
+
+  it("mutation: accepts statically false spread and computed options", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(STATICALLY_FALSE_OPTION_SHAPES_FIXTURE, "statically-false-option-shapes.ts")],
+      [
+        "direct false option test",
+        "computed-literal false option test",
+        "unresolved-computed false option test",
+        "inline-spread false option test",
+      ],
     );
   });
 });
