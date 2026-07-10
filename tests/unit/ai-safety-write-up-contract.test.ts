@@ -145,6 +145,16 @@ const CLEAN_INDENTED_BACKTICK_FENCE_FIXTURE = [
   "   bounded sample",
   "   ```",
 ].join("\n");
+const FENCE_DELIMITER_CREDENTIAL_FIXTURE = [
+  ["```", "text", SYNTHETIC_CREDENTIAL_ASSIGNMENT].join(" "),
+  "bounded sample",
+  "```",
+].join("\n");
+const FENCE_DELIMITER_PATH_TOKEN_FIXTURE = [
+  ["   ```", "text", SYNTHETIC_POSIX_PATH, SYNTHETIC_TOKEN_PREFIX].join(" "),
+  "   bounded sample",
+  "   ```",
+].join("\n");
 const COMMENTED_TITLE_FIXTURE = `
 // test("commented line title", () => {});
 /* it("commented block title", () => {}); */
@@ -897,6 +907,22 @@ describe("contract mutation resistance", () => {
 
   it("mutation: accepts a clean three-space backtick fence", () => {
     assert.deepEqual(findUnsupportedLinkSurfaces(CLEAN_INDENTED_BACKTICK_FENCE_FIXTURE), []);
+  });
+
+  it("mutation: rejects private content on recognized opening fence delimiters", () => {
+    const credentialViolations = findUnsupportedLinkSurfaces(FENCE_DELIMITER_CREDENTIAL_FIXTURE);
+    const pathTokenViolations = findUnsupportedLinkSurfaces(FENCE_DELIMITER_PATH_TOKEN_FIXTURE);
+
+    assert.ok(credentialViolations.includes("fence delimiter: credential assignment"));
+    assert.ok(pathTokenViolations.includes("fence delimiter: POSIX path"));
+    assert.ok(pathTokenViolations.includes("fence delimiter: access-token prefix"));
+    for (const privateValue of [
+      SYNTHETIC_CREDENTIAL_ASSIGNMENT,
+      SYNTHETIC_POSIX_PATH,
+      SYNTHETIC_TOKEN_PREFIX,
+    ]) {
+      assert.ok([...credentialViolations, ...pathTokenViolations].every((violation) => !violation.includes(privateValue)));
+    }
   });
 
   it("mutation: rejects commented-out test titles", () => {
