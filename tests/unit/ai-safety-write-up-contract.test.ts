@@ -358,30 +358,112 @@ function resolveLocalEvidencePath(target: string) {
   return path.normalize(path.resolve(path.dirname(DOC_PATH), withoutFragment));
 }
 
+function createTypeCheckedSource(source: string, sourcePath: string) {
+  const virtualPath = path.resolve(sourcePath);
+  const options: ts.CompilerOptions = {
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    noEmit: true,
+    skipLibCheck: true,
+    target: ts.ScriptTarget.Latest,
+    types: ["node"],
+  };
+  const defaultHost = ts.createCompilerHost(options, true);
+  const isVirtualSource = (fileName: string) => path.resolve(fileName) === virtualPath;
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    fileExists: (fileName) => isVirtualSource(fileName) || defaultHost.fileExists(fileName),
+    readFile: (fileName) => (isVirtualSource(fileName) ? source : defaultHost.readFile(fileName)),
+    getSourceFile: (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
+      if (isVirtualSource(fileName)) {
+        return ts.createSourceFile(fileName, source, languageVersion, true, ts.ScriptKind.TS);
+      }
+      return defaultHost.getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+    },
+  };
+  const program = ts.createProgram([virtualPath], options, host);
+  const sourceFile = program.getSourceFile(virtualPath);
+  assert.ok(sourceFile, `unable to type-check evidence source ${sourcePath}`);
+  return { checker: program.getTypeChecker(), sourceFile };
+}
+
+function isNodeTestImportBinding(
+  checker: ts.TypeChecker,
+  identifier: ts.Identifier,
+  exportedNames: ReadonlySet<string>,
+) {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  return symbol?.declarations?.some((declaration) => {
+    if (!ts.isImportSpecifier(declaration)) return false;
+    const importDeclaration = declaration.parent.parent.parent;
+    return (
+      ts.isImportDeclaration(importDeclaration) &&
+      ts.isStringLiteral(importDeclaration.moduleSpecifier) &&
+      importDeclaration.moduleSpecifier.text === "node:test" &&
+      exportedNames.has((declaration.propertyName ?? declaration.name).text)
+    );
+  }) ?? false;
+}
+
+function isRunnableCallbackArgument(node: ts.Node) {
+  return ts.isArrowFunction(node) || ts.isFunctionExpression(node);
+}
+
+function hasInactiveNodeTestOptions(call: ts.CallExpression) {
+  const optionArguments = call.arguments.slice(1).filter((argument) => !isRunnableCallbackArgument(argument));
+  if (optionArguments.length === 0) return false;
+
+  return optionArguments.some((argument) => {
+    if (!ts.isObjectLiteralExpression(argument)) return true;
+    return argument.properties.some((property) => {
+      const propertyName = property.name && ts.isPropertyName(property.name)
+        ? property.name.getText().replace(/^['"]|['"]$/g, "")
+        : undefined;
+      if (propertyName !== "skip" && propertyName !== "todo") return false;
+      return !ts.isPropertyAssignment(property) || property.initializer.kind !== ts.SyntaxKind.FalseKeyword;
+    });
+  });
+}
+
 function extractActiveTestTitles(source: string, sourcePath: string) {
   const titles = new Set<string>();
-  // Package-dependency-free: Node built-ins plus the already-required TypeScript devDependency.
-  const sourceFile = ts.createSourceFile(
-    sourcePath,
-    source,
-    ts.ScriptTarget.Latest,
-    false,
-    ts.ScriptKind.TS,
-  );
+  const { checker, sourceFile } = createTypeCheckedSource(source, sourcePath);
+  const testExports = new Set(["test", "it"]);
+  const suiteExports = new Set(["describe", "suite"]);
 
-  function visit(node: ts.Node) {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      const callee = node.expression.text;
+  function visit(node: ts.Node, inactiveSuite = false) {
+    if (ts.isCallExpression(node)) {
+      const directSuite =
+        ts.isIdentifier(node.expression) &&
+        isNodeTestImportBinding(checker, node.expression, suiteExports);
+      const propertySuite =
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        isNodeTestImportBinding(checker, node.expression.expression, suiteExports);
+
+      if (directSuite || propertySuite) {
+        const inactiveProperty =
+          propertySuite && (node.expression.name.text === "skip" || node.expression.name.text === "todo");
+        const descendantInactive = inactiveSuite || inactiveProperty || hasInactiveNodeTestOptions(node);
+        ts.forEachChild(node, (child) => visit(child, descendantInactive));
+        return;
+      }
+
+      if (ts.isIdentifier(node.expression)) {
       const title = node.arguments[0];
       if (
-        (callee === "test" || callee === "it") &&
+        !inactiveSuite &&
+        isNodeTestImportBinding(checker, node.expression, testExports) &&
         title &&
-        (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title))
+        (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title)) &&
+        !hasInactiveNodeTestOptions(node) &&
+        node.arguments.slice(1).some(isRunnableCallbackArgument)
       ) {
         titles.add(title.text);
       }
+      }
     }
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, (child) => visit(child, inactiveSuite));
   }
 
   visit(sourceFile);
