@@ -155,14 +155,64 @@ const dynamicTitle = \`template \${suffix}\`;
 test(dynamicTitle, () => {});
 `;
 const SKIPPED_TITLE_FIXTURE = `
+import { it, test } from "node:test";
 test.skip("skipped test", () => {});
 test.todo("todo test");
 it.skip("skipped it", () => {});
 `;
 const ACTIVE_TITLE_FIXTURE = `
+import { describe, it, test } from "node:test";
 test("active \\"quoted\\" test", () => {});
 describe("nested", () => {
   it(\`active nested it\`, () => {});
+});
+`;
+const SHADOWED_NODE_TEST_FIXTURE = `
+import { it, test } from "node:test";
+function invokeShadowed(test: (title: string, callback: () => void) => void) {
+  test("shadowed test title", () => {});
+}
+{
+  const it = (title: string, callback: () => void) => callback();
+  it("shadowed it title", () => {});
+}
+void invokeShadowed;
+void test;
+void it;
+`;
+const INACTIVE_SUITE_FIXTURE = `
+import { describe, it, suite, test } from "node:test";
+describe.skip("skipped describe", () => {
+  test("test under skipped describe", () => {});
+});
+describe.todo("todo describe", () => {
+  it("it under todo describe", () => {});
+});
+suite.skip("skipped suite", () => {
+  test("test under skipped suite", () => {});
+});
+suite("option-disabled suite", { skip: true }, () => {
+  it("it under option-disabled suite", () => {});
+});
+`;
+const INACTIVE_TEST_OPTIONS_FIXTURE = `
+import { it, test } from "node:test";
+test("option-skipped test", { skip: true }, () => {});
+it("option-todo it", { todo: "later" }, () => {});
+`;
+const NON_RUNNABLE_CALLBACK_FIXTURE = `
+import { it, test } from "node:test";
+test("title-only test");
+it("options-only it", { skip: false });
+`;
+const RUNNABLE_NODE_TEST_FIXTURE = `
+import { describe, it, suite, test } from "node:test";
+test("active false-option test", { skip: false, todo: false }, () => {});
+describe("active describe", () => {
+  it("active \\"escaped\\" it", () => {});
+});
+suite("active suite", { skip: false }, () => {
+  test(\`active template test\`, function () {});
 });
 `;
 
@@ -783,6 +833,29 @@ describe("contract mutation resistance", () => {
     assert.deepEqual(
       [...extractActiveTestTitles(ACTIVE_TITLE_FIXTURE, "active.ts")],
       ['active "quoted" test', "active nested it"],
+    );
+  });
+
+  it("mutation: rejects shadowed node:test identifiers", () => {
+    assert.deepEqual([...extractActiveTestTitles(SHADOWED_NODE_TEST_FIXTURE, "shadowed.ts")], []);
+  });
+
+  it("mutation: rejects declarations under skipped or todo suites", () => {
+    assert.deepEqual([...extractActiveTestTitles(INACTIVE_SUITE_FIXTURE, "inactive-suites.ts")], []);
+  });
+
+  it("mutation: rejects option-skipped and option-todo declarations", () => {
+    assert.deepEqual([...extractActiveTestTitles(INACTIVE_TEST_OPTIONS_FIXTURE, "inactive-options.ts")], []);
+  });
+
+  it("mutation: rejects declarations without runnable callbacks", () => {
+    assert.deepEqual([...extractActiveTestTitles(NON_RUNNABLE_CALLBACK_FIXTURE, "no-callback.ts")], []);
+  });
+
+  it("mutation: accepts imported runnable node:test declarations", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(RUNNABLE_NODE_TEST_FIXTURE, "runnable.ts")],
+      ["active false-option test", 'active "escaped" it', "active template test"],
     );
   });
 });
