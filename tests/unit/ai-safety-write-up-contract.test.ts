@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 const DOC_PATH = "docs/ai-safety.md";
 const CONTRACT_PATH = "tests/unit/ai-safety-write-up-contract.test.ts";
 const LEDGER_HEADING = "## Claim ledger";
+const INLINE_LINK_PATTERN = /(!?)\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
 const EXPECTED_CLAIM_IDS = Array.from(
   { length: 18 },
@@ -74,6 +75,36 @@ const LIMITATION_ISSUES = new Map([
   ["AS-17", ALLOWED_ISSUE_URLS[1]],
   ["AS-18", ALLOWED_ISSUE_URLS[2]],
 ]);
+const NON_PUBLIC_FIXTURE_ROOT = ["docs", "research"].join("/");
+const REFERENCE_LINK_FIXTURE = `
+[outside][external]
+[internal][private]
+
+[external]: https://example.invalid/evidence
+[private]: ../${NON_PUBLIC_FIXTURE_ROOT}/notes.md
+`;
+const REFERENCE_IMAGE_FIXTURE = "![diagram][image]\n[image]: ./diagram.png";
+const AUTOLINK_FIXTURE = "<https://example.invalid/evidence>\nhttps://example.invalid/bare";
+const INLINE_HTML_FIXTURE = '<a href="https://example.invalid">link</a>\n<img src="./diagram.png">\n<!-- hidden -->';
+const EXTENDED_AUTOLINK_FIXTURE = "www.example.invalid\nreviewer@example.invalid";
+const UNSAFE_TARGET_FIXTURE = [
+  "[absolute](/tmp/evidence.md)",
+  "[windows](C:\\private\\evidence.md)",
+  "[file](file:///tmp/evidence.md)",
+  "[mail](mailto:reviewer@example.invalid)",
+].join("\n");
+const UNPARSED_LINK_FIXTURE = "broken]( target\n~~~text\nunsupported\n~~~";
+const SUPPORTED_SURFACE_FIXTURE = `
+Prose with **[AS-01]** and [relative evidence](../tests/unit/example.test.ts).
+[Approved issue](https://github.com/edgejia/Nutrition-Coach/issues/107)
+
+\`\`\`mermaid
+flowchart LR
+  A[Untrusted data] --> B[Guarded authority]
+\`\`\`
+
+> Bounded evidence only.
+`;
 
 type MarkdownLink = {
   text: string;
@@ -101,9 +132,13 @@ function extractLedgerClaimIds(markdown: string) {
 }
 
 function extractMarkdownLinks(markdown: string): MarkdownLink[] {
-  return [...markdown.matchAll(/(!?)\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(
+  return [...markdown.matchAll(INLINE_LINK_PATTERN)].map(
     (match) => ({ image: match[1] === "!", text: match[2], target: match[3] }),
   );
+}
+
+function findUnsupportedLinkSurfaces(_markdown: string) {
+  return [] as string[];
 }
 
 function resolveLocalEvidencePath(target: string) {
@@ -190,6 +225,11 @@ function extractNarrative(markdown: string) {
 }
 
 describe("public AI-safety write-up contract", () => {
+  it("rejects unsupported Markdown link, image, and HTML surfaces across the whole document", async () => {
+    const markdown = await readAiSafetyDocument();
+    assert.deepEqual(findUnsupportedLinkSurfaces(markdown), []);
+  });
+
   it("locks the approved heading, opening, navigation, diagram, and semantic Markdown shape", async () => {
     const markdown = await readAiSafetyDocument();
     const lines = markdown.split(/\r?\n/);
@@ -465,5 +505,50 @@ describe("public AI-safety write-up contract", () => {
       [...ALLOWED_ISSUE_URLS].sort(),
       "the three issue URLs are the only external evidence and all must appear",
     );
+  });
+});
+
+describe("contract mutation resistance", () => {
+  it("mutation: rejects reference definitions and reference-style links", () => {
+    const violations = findUnsupportedLinkSurfaces(REFERENCE_LINK_FIXTURE);
+    assert.ok(violations.some((violation) => /reference/i.test(violation)));
+  });
+
+  it("mutation: rejects reference-style images", () => {
+    const violations = findUnsupportedLinkSurfaces(REFERENCE_IMAGE_FIXTURE);
+    assert.ok(violations.some((violation) => /reference/i.test(violation)));
+  });
+
+  it("mutation: rejects autolinks and bare URLs", () => {
+    const violations = findUnsupportedLinkSurfaces(AUTOLINK_FIXTURE);
+    assert.ok(violations.some((violation) => /HTML|autolink/i.test(violation)));
+    assert.ok(violations.some((violation) => /bare URL/i.test(violation)));
+  });
+
+  it("mutation: rejects inline HTML anchors, images, and comments", () => {
+    const violations = findUnsupportedLinkSurfaces(INLINE_HTML_FIXTURE);
+    assert.ok(violations.some((violation) => /HTML/i.test(violation)));
+  });
+
+  it("mutation: rejects www and email extended autolinks", () => {
+    const violations = findUnsupportedLinkSurfaces(EXTENDED_AUTOLINK_FIXTURE);
+    assert.ok(violations.some((violation) => /www/i.test(violation)));
+    assert.ok(violations.some((violation) => /email/i.test(violation)));
+  });
+
+  it("mutation: rejects absolute local and file-scheme link targets", () => {
+    const violations = findUnsupportedLinkSurfaces(UNSAFE_TARGET_FIXTURE);
+    assert.ok(violations.some((violation) => /absolute/i.test(violation)));
+    assert.ok(violations.some((violation) => /scheme/i.test(violation)));
+  });
+
+  it("mutation: rejects unparsed inline-link residue and tilde fences", () => {
+    const violations = findUnsupportedLinkSurfaces(UNPARSED_LINK_FIXTURE);
+    assert.ok(violations.some((violation) => /residue/i.test(violation)));
+    assert.ok(violations.some((violation) => /tilde/i.test(violation)));
+  });
+
+  it("mutation: accepts the supported inline-link, claim-marker, and fenced-diagram surface", () => {
+    assert.deepEqual(findUnsupportedLinkSurfaces(SUPPORTED_SURFACE_FIXTURE), []);
   });
 });
