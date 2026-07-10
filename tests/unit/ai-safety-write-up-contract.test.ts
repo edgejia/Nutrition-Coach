@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
+import ts from "typescript";
 
 const DOC_PATH = "docs/ai-safety.md";
 const CONTRACT_PATH = "tests/unit/ai-safety-write-up-contract.test.ts";
@@ -222,22 +223,34 @@ function resolveLocalEvidencePath(target: string) {
   return path.normalize(path.resolve(path.dirname(DOC_PATH), withoutFragment));
 }
 
-function extractLiteralTestTitles(source: string) {
+function extractActiveTestTitles(source: string, sourcePath: string) {
   const titles = new Set<string>();
-  const declaration = /\b(?:test|it)\(\s*(?:"((?:\\.|[^"\\\n])*)"|'((?:\\.|[^'\\\n])*)'|`([^`\n]*)`)\s*,/g;
+  // Package-dependency-free: Node built-ins plus the already-required TypeScript devDependency.
+  const sourceFile = ts.createSourceFile(
+    sourcePath,
+    source,
+    ts.ScriptTarget.Latest,
+    false,
+    ts.ScriptKind.TS,
+  );
 
-  for (const match of source.matchAll(declaration)) {
-    const rawTitle = match[1] ?? match[2] ?? match[3];
-    if (rawTitle !== undefined && !rawTitle.includes("${")) {
-      titles.add(rawTitle.replace(/\\([\\"'`])/g, "$1"));
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const callee = node.expression.text;
+      const title = node.arguments[0];
+      if (
+        (callee === "test" || callee === "it") &&
+        title &&
+        (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title))
+      ) {
+        titles.add(title.text);
+      }
     }
+    ts.forEachChild(node, visit);
   }
 
+  visit(sourceFile);
   return titles;
-}
-
-function extractActiveTestTitles(source: string, _sourcePath: string) {
-  return extractLiteralTestTitles(source);
 }
 
 function assertExactUniqueSet(actual: string[], expected: readonly string[], label: string) {
@@ -496,7 +509,7 @@ describe("public AI-safety write-up contract", () => {
             const title = link.text.slice(`${layer} test: `.length);
             const targetSource = await readFile(resolved, "utf8");
             assert.ok(
-              extractLiteralTestTitles(targetSource).has(title),
+              extractActiveTestTitles(targetSource, relative).has(title),
               `${claimId} names a missing literal test title in ${relative}: ${title}`,
             );
           } else {
