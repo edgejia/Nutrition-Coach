@@ -137,8 +137,64 @@ function extractMarkdownLinks(markdown: string): MarkdownLink[] {
   );
 }
 
-function findUnsupportedLinkSurfaces(_markdown: string) {
-  return [] as string[];
+function stripFencedCode(markdown: string) {
+  const prose: string[] = [];
+  const fencedBodies: string[] = [];
+  let inFence = false;
+  let fenceLineCount = 0;
+
+  for (const line of markdown.split(/\r?\n/)) {
+    if (/^```/.test(line)) {
+      fenceLineCount += 1;
+      inFence = !inFence;
+      continue;
+    }
+    (inFence ? fencedBodies : prose).push(line);
+  }
+
+  return {
+    prose: prose.join("\n"),
+    fencedBodies: fencedBodies.join("\n"),
+    balanced: fenceLineCount % 2 === 0,
+  };
+}
+
+function findUnsupportedLinkSurfaces(markdown: string) {
+  const violations: string[] = [];
+  const { prose, fencedBodies, balanced } = stripFencedCode(markdown);
+
+  if (!balanced) violations.push("unbalanced backtick fence");
+  if (/^\s{0,3}\[[^\]]+\]:/m.test(prose)) violations.push("reference definition is unsupported");
+  if (/\]\[/.test(prose)) violations.push("reference-style link or image is unsupported");
+  if (/<[A-Za-z/!?]/.test(prose)) violations.push("inline HTML or angle-bracket autolink is unsupported");
+  if (/^~~~/m.test(prose)) violations.push("tilde fence is unsupported");
+
+  const residue = prose.replace(INLINE_LINK_PATTERN, "");
+  if (/\]\(/.test(residue)) violations.push("unparsed inline-link residue is unsupported");
+  if (/(?:https?|ftp|file):\/\//i.test(residue)) violations.push("bare URL is unsupported");
+  if (/\bwww\./i.test(residue)) violations.push("www extended autolink is unsupported");
+  if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(residue)) {
+    violations.push("email extended autolink is unsupported");
+  }
+
+  for (const { target } of extractMarkdownLinks(prose)) {
+    if (target.startsWith("/") || /^[A-Za-z]:[\\/]/.test(target)) {
+      violations.push(`absolute local link target is unsupported: ${target}`);
+    }
+    const scheme = target.match(/^([A-Za-z][A-Za-z0-9+.-]*):/)?.[1]?.toLowerCase();
+    if (scheme && scheme !== "http" && scheme !== "https") {
+      violations.push(`non-http link target scheme is unsupported: ${scheme}`);
+    }
+  }
+
+  if (/(?:https?|ftp|file):\/\//i.test(fencedBodies)) {
+    violations.push("URI scheme inside fenced code is unsupported");
+  }
+  if (/<[A-Za-z/!?]/.test(fencedBodies)) {
+    violations.push("HTML-like content inside fenced code is unsupported");
+  }
+
+  return violations;
 }
 
 function resolveLocalEvidencePath(target: string) {
