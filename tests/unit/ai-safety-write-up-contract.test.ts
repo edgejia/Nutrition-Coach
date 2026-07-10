@@ -455,19 +455,44 @@ function isRunnableCallbackArgument(node: ts.Node) {
   return ts.isArrowFunction(node) || ts.isFunctionExpression(node);
 }
 
+type StaticNodeTestOptionKey = "skip" | "todo" | "unrelated" | "unresolved";
+
+function getStaticNodeTestOptionKey(name: ts.PropertyName): StaticNodeTestOptionKey {
+  let key: string | undefined;
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+    key = name.text;
+  } else if (ts.isComputedPropertyName(name)) {
+    if (ts.isStringLiteral(name.expression) || ts.isNoSubstitutionTemplateLiteral(name.expression)) {
+      key = name.expression.text;
+    } else {
+      return "unresolved";
+    }
+  } else {
+    return "unrelated";
+  }
+
+  return key === "skip" || key === "todo" ? key : "unrelated";
+}
+
+function hasInactiveNodeTestOptionProperties(options: ts.ObjectLiteralExpression): boolean {
+  return options.properties.some((property) => {
+    if (ts.isSpreadAssignment(property)) {
+      return !ts.isObjectLiteralExpression(property.expression) || hasInactiveNodeTestOptionProperties(property.expression);
+    }
+
+    const optionKey = getStaticNodeTestOptionKey(property.name);
+    if (optionKey === "unrelated") return false;
+    return !ts.isPropertyAssignment(property) || property.initializer.kind !== ts.SyntaxKind.FalseKeyword;
+  });
+}
+
 function hasInactiveNodeTestOptions(call: ts.CallExpression) {
   const optionArguments = call.arguments.slice(1).filter((argument) => !isRunnableCallbackArgument(argument));
   if (optionArguments.length === 0) return false;
 
   return optionArguments.some((argument) => {
     if (!ts.isObjectLiteralExpression(argument)) return true;
-    return argument.properties.some((property) => {
-      const propertyName = property.name && ts.isPropertyName(property.name)
-        ? property.name.getText().replace(/^['"]|['"]$/g, "")
-        : undefined;
-      if (propertyName !== "skip" && propertyName !== "todo") return false;
-      return !ts.isPropertyAssignment(property) || property.initializer.kind !== ts.SyntaxKind.FalseKeyword;
-    });
+    return hasInactiveNodeTestOptionProperties(argument);
   });
 }
 
