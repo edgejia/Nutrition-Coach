@@ -8,6 +8,7 @@ const DOC_PATH = "docs/ai-safety.md";
 const CONTRACT_PATH = "tests/unit/ai-safety-write-up-contract.test.ts";
 const LEDGER_HEADING = "## Claim ledger";
 const INLINE_LINK_PATTERN = /(!?)\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+const FENCE_DELIMITER_PATTERN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 
 const EXPECTED_CLAIM_IDS = Array.from(
   { length: 18 },
@@ -108,7 +109,11 @@ flowchart LR
 `;
 const SYNTHETIC_POSIX_PATH = ["", "var", "tmp", "synthetic-private-proof.md"].join("/");
 const SYNTHETIC_WINDOWS_PATH = ["Q:", "synthetic", "private-proof.md"].join("\\");
-const SYNTHETIC_FILE_PATH = ["fi", "le://", "localhost", "synthetic", "private-proof.md"].join("/");
+const SYNTHETIC_FILE_PATH = [
+  ["fi", "le"].join(""),
+  "://",
+  ["localhost", "synthetic", "private-proof.md"].join("/"),
+].join("");
 const SYNTHETIC_CREDENTIAL_ASSIGNMENT = [
   ["SYNTHETIC", "ACCESS", "TOKEN"].join("_"),
   "=",
@@ -195,34 +200,77 @@ function extractMarkdownLinks(markdown: string): MarkdownLink[] {
 function stripFencedCode(markdown: string) {
   const prose: string[] = [];
   const fencedBodies: string[] = [];
-  let inFence = false;
-  let fenceLineCount = 0;
+  let activeFence: { character: "`" | "~"; length: number } | undefined;
+  let mismatched = false;
+  let tildeDelimiterSeen = false;
 
   for (const line of markdown.split(/\r?\n/)) {
-    if (/^```/.test(line)) {
-      fenceLineCount += 1;
-      inFence = !inFence;
+    const delimiter = line.match(FENCE_DELIMITER_PATTERN);
+    if (delimiter) {
+      const run = delimiter[2];
+      const character = run[0] as "`" | "~";
+      tildeDelimiterSeen ||= character === "~";
+
+      if (!activeFence) {
+        activeFence = { character, length: run.length };
+        continue;
+      }
+
+      const compatibleClose =
+        character === activeFence.character &&
+        run.length >= activeFence.length &&
+        delimiter[3].trim().length === 0;
+      if (compatibleClose) {
+        activeFence = undefined;
+        continue;
+      }
+
+      mismatched = true;
+      fencedBodies.push(line);
       continue;
     }
-    (inFence ? fencedBodies : prose).push(line);
+    (activeFence ? fencedBodies : prose).push(line);
   }
 
   return {
     prose: prose.join("\n"),
     fencedBodies: fencedBodies.join("\n"),
-    balanced: fenceLineCount % 2 === 0,
+    balanced: !activeFence,
+    mismatched,
+    tildeDelimiterSeen,
   };
+}
+
+function findPrivateContentSurfaces(markdown: string, location: "prose" | "fenced body") {
+  const categories = new Set<string>();
+  const posixAbsolutePath =
+    /(?:^|[\s"'=:(])\/(?:Users|home|var|tmp|etc|opt|private|root)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+(?=$|[\s"'`),.;:])/m;
+  const windowsAbsolutePath = /(?:^|[\s"'=:(])[A-Za-z]:[\\/](?:[^\\/\s"'`]+[\\/])+[^\\/\s"'`]+/m;
+  const fileSchemePath = /\bfile:\/\/(?:localhost\/)?[^\s"'`<>)]+/i;
+  const credentialAssignment =
+    /\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\s*=\s*(?:"[^"\s]{4,}"|'[^'\s]{4,}'|[^\s"'`]{4,})/;
+  const accessTokenPrefix =
+    /\b(?:ghp_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|sk-[A-Za-z0-9_-]{8,}|AKIA[A-Z0-9]{12,})\b/;
+
+  if (posixAbsolutePath.test(markdown)) categories.add("POSIX path");
+  if (windowsAbsolutePath.test(markdown)) categories.add("Windows path");
+  if (fileSchemePath.test(markdown)) categories.add("file-scheme path");
+  if (credentialAssignment.test(markdown)) categories.add("credential assignment");
+  if (accessTokenPrefix.test(markdown)) categories.add("access-token prefix");
+
+  return [...categories].map((category) => `${location}: ${category}`);
 }
 
 function findUnsupportedLinkSurfaces(markdown: string) {
   const violations: string[] = [];
-  const { prose, fencedBodies, balanced } = stripFencedCode(markdown);
+  const { prose, fencedBodies, balanced, mismatched, tildeDelimiterSeen } = stripFencedCode(markdown);
 
   if (!balanced) violations.push("unbalanced backtick fence");
+  if (mismatched) violations.push("mismatched fence delimiter");
+  if (tildeDelimiterSeen) violations.push("tilde fence is unsupported");
   if (/^\s{0,3}\[[^\]]+\]:/m.test(prose)) violations.push("reference definition is unsupported");
   if (/\]\[/.test(prose)) violations.push("reference-style link or image is unsupported");
   if (/<[A-Za-z/!?]/.test(prose)) violations.push("inline HTML or angle-bracket autolink is unsupported");
-  if (/^~~~/m.test(prose)) violations.push("tilde fence is unsupported");
 
   const residue = prose.replace(INLINE_LINK_PATTERN, "");
   if (/\]\(/.test(residue)) violations.push("unparsed inline-link residue is unsupported");
@@ -234,7 +282,7 @@ function findUnsupportedLinkSurfaces(markdown: string) {
 
   for (const { target } of extractMarkdownLinks(prose)) {
     if (target.startsWith("/") || /^[A-Za-z]:[\\/]/.test(target)) {
-      violations.push(`absolute local link target is unsupported: ${target}`);
+      violations.push("absolute local link target is unsupported");
     }
     const scheme = target.match(/^([A-Za-z][A-Za-z0-9+.-]*):/)?.[1]?.toLowerCase();
     if (scheme && scheme !== "http" && scheme !== "https") {
@@ -248,6 +296,9 @@ function findUnsupportedLinkSurfaces(markdown: string) {
   if (/<[A-Za-z/!?]/.test(fencedBodies)) {
     violations.push("HTML-like content inside fenced code is unsupported");
   }
+
+  violations.push(...findPrivateContentSurfaces(prose, "prose"));
+  violations.push(...findPrivateContentSurfaces(fencedBodies, "fenced body"));
 
   return violations;
 }
