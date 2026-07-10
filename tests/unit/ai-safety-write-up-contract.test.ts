@@ -260,6 +260,7 @@ function extractMarkdownLinks(markdown: string): MarkdownLink[] {
 function stripFencedCode(markdown: string) {
   const prose: string[] = [];
   const fencedBodies: string[] = [];
+  const fenceDelimiters: string[] = [];
   let activeFence: { character: "`" | "~"; length: number } | undefined;
   let mismatched = false;
   let tildeDelimiterSeen = false;
@@ -267,6 +268,7 @@ function stripFencedCode(markdown: string) {
   for (const line of markdown.split(/\r?\n/)) {
     const delimiter = line.match(FENCE_DELIMITER_PATTERN);
     if (delimiter) {
+      fenceDelimiters.push(line);
       const run = delimiter[2];
       const character = run[0] as "`" | "~";
       tildeDelimiterSeen ||= character === "~";
@@ -295,13 +297,14 @@ function stripFencedCode(markdown: string) {
   return {
     prose: prose.join("\n"),
     fencedBodies: fencedBodies.join("\n"),
+    fenceDelimiters: fenceDelimiters.join("\n"),
     balanced: !activeFence,
     mismatched,
     tildeDelimiterSeen,
   };
 }
 
-function findPrivateContentSurfaces(markdown: string, location: "prose" | "fenced body") {
+function findPrivateContentSurfaces(markdown: string, location: "prose" | "fenced body" | "fence delimiter") {
   const categories = new Set<string>();
   const posixAbsolutePath =
     /(?:^|[\s"'=:(])\/(?:Users|home|var|tmp|etc|opt|private|root)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+(?=$|[\s"'`),.;:])/m;
@@ -323,7 +326,7 @@ function findPrivateContentSurfaces(markdown: string, location: "prose" | "fence
 
 function findUnsupportedLinkSurfaces(markdown: string) {
   const violations: string[] = [];
-  const { prose, fencedBodies, balanced, mismatched, tildeDelimiterSeen } = stripFencedCode(markdown);
+  const { prose, fencedBodies, fenceDelimiters, balanced, mismatched, tildeDelimiterSeen } = stripFencedCode(markdown);
 
   if (!balanced) violations.push("unbalanced backtick fence");
   if (mismatched) violations.push("mismatched fence delimiter");
@@ -359,6 +362,7 @@ function findUnsupportedLinkSurfaces(markdown: string) {
 
   violations.push(...findPrivateContentSurfaces(prose, "prose"));
   violations.push(...findPrivateContentSurfaces(fencedBodies, "fenced body"));
+  violations.push(...findPrivateContentSurfaces(fenceDelimiters, "fence delimiter"));
 
   return violations;
 }
