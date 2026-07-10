@@ -918,7 +918,12 @@ describe("public AI-safety write-up contract", () => {
       .join("\n");
 
     assertAs12Evidence(markdown);
-    assertAs12Evidence(removeAs12Category(markdown, as12EvidenceByCategory["shared policy"]));
+    for (const [category, links] of Object.entries(as12EvidenceByCategory)) {
+      assert.throws(
+        () => assertAs12Evidence(removeAs12Category(markdown, links)),
+        new RegExp(`missing AS-12 ${category} evidence`),
+      );
+    }
   });
 
   it("resolves public evidence, restricts external links, and rejects non-public roots", async () => {
