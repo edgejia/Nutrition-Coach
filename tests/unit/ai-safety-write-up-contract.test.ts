@@ -105,6 +105,26 @@ flowchart LR
 
 > Bounded evidence only.
 `;
+const COMMENTED_TITLE_FIXTURE = `
+// test("commented line title", () => {});
+/* it("commented block title", () => {}); */
+`;
+const STRING_TITLE_FIXTURE = `
+const shapedText = 'it("string-only title", () => {})';
+const dynamicTitle = \`template \${suffix}\`;
+test(dynamicTitle, () => {});
+`;
+const SKIPPED_TITLE_FIXTURE = `
+test.skip("skipped test", () => {});
+test.todo("todo test");
+it.skip("skipped it", () => {});
+`;
+const ACTIVE_TITLE_FIXTURE = `
+test("active \\"quoted\\" test", () => {});
+describe("nested", () => {
+  it(\`active nested it\`, () => {});
+});
+`;
 
 type MarkdownLink = {
   text: string;
@@ -214,6 +234,10 @@ function extractLiteralTestTitles(source: string) {
   }
 
   return titles;
+}
+
+function extractActiveTestTitles(source: string, _sourcePath: string) {
+  return extractLiteralTestTitles(source);
 }
 
 function assertExactUniqueSet(actual: string[], expected: readonly string[], label: string) {
@@ -606,5 +630,24 @@ describe("contract mutation resistance", () => {
 
   it("mutation: accepts the supported inline-link, claim-marker, and fenced-diagram surface", () => {
     assert.deepEqual(findUnsupportedLinkSurfaces(SUPPORTED_SURFACE_FIXTURE), []);
+  });
+
+  it("mutation: rejects commented-out test titles", () => {
+    assert.deepEqual([...extractActiveTestTitles(COMMENTED_TITLE_FIXTURE, "commented.ts")], []);
+  });
+
+  it("mutation: rejects string-literal and template-substitution test titles", () => {
+    assert.deepEqual([...extractActiveTestTitles(STRING_TITLE_FIXTURE, "strings.ts")], []);
+  });
+
+  it("mutation: rejects skipped and todo test declarations", () => {
+    assert.deepEqual([...extractActiveTestTitles(SKIPPED_TITLE_FIXTURE, "skipped.ts")], []);
+  });
+
+  it("mutation: accepts active test and it declarations in nested describe blocks", () => {
+    assert.deepEqual(
+      [...extractActiveTestTitles(ACTIVE_TITLE_FIXTURE, "active.ts")],
+      ['active "quoted" test', "active nested it"],
+    );
   });
 });
