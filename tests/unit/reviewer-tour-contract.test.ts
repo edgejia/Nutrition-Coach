@@ -286,11 +286,20 @@ function extractTourStops(markdown: string): TourStop[] {
     const start = (heading.index ?? 0) + heading[0].length;
     const end = headings[index + 1]?.index ?? markdown.length;
     const body = markdown.slice(start, end);
-    const fields = new Map(
-      [...body.matchAll(/^- \*\*(為何讀|精讀範圍|讀完應能回答|下一站)：\*\*\s+(.+)$/gm)].map(
-        (match) => [match[1], match[2]],
-      ),
+    const checkpointMatches = [
+      ...body.matchAll(/^- \*\*(為何讀|精讀範圍|讀完應能回答|下一站)：\*\*\s+(.+)$/gm),
+    ];
+    assert.equal(
+      checkpointMatches.length,
+      CHECKPOINT_FIELD_LABELS.length,
+      `${heading[1]} checkpoint fields must contain exactly four rows`,
     );
+    assertExactUniqueSet(
+      checkpointMatches.map((match) => match[1]),
+      CHECKPOINT_FIELD_LABELS,
+      `${heading[1]} checkpoint fields`,
+    );
+    const fields = new Map(checkpointMatches.map((match) => [match[1], match[2]]));
     return { id: heading[1], title: heading[2], minutes: Number(heading[3]), body, fields };
   });
 }
