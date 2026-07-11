@@ -7,11 +7,13 @@
 - 新增公開英文 AI-safety case study `docs/ai-safety.md`，以 AS-01 到 AS-18 claim/evidence contract 對應 CASE-09 到 CASE-17 的 deterministic instruction/authority 與 nutrition-safety 邊界；這是既有證據的公開敘事，不是 runtime safety-system 變更。
 - ADR 0010 將 1200 kcal/day 記錄為 conservative、non-clinical product safety floor，並明確排除 universal medical advice 或 personalized clinical recommendation 的解讀。
 - 公開文件以相同四欄結構誠實揭露 #107、#108、#109 的 conversational-quality gaps，保留 deterministic guard 與 future eval 問題的界線，不在本 phase 提出修復或 eval framework。
+- 新增公開 `docs/tour.md` 十站／30 分鐘 reviewer path，並同步 README 與 README-en 的三段式 portfolio narrative；這是既有 architecture 與 AI-safety 證據的導覽層，不是 runtime 或 safety-policy 變更。
 
 ### 驗證
 
 - 新增 dependency-free Node contract，檢查 AS-01 到 AS-18、CASE-09 到 CASE-17、標題與 Mermaid/table 結構、literal test-title evidence、公開連結與 private-path exclusion。
 - Phase 111 的 machine gates 包含 AI-safety quick contract、named unit/integration evidence regressions、`yarn tsc --noEmit`、`yarn test:unit`、behavior-matrix drift/harness 檢查與 final `yarn release:check`；release、merge、tag、tunnel 與 production action 仍是分開授權的後續 gate。
+- Phase 112 的 dependency-free reviewer-tour contract 鎖定十個問題、tour-to-source 一 hop／README-to-source 兩 hop 邊界，並搭配 capability 與 behavior generated-doc checks；通過只代表文件契約與 drift gate，不是 runtime、safety-policy 或 release completion 聲明。
 
 ## v3.3 - 2026-07-05
 
