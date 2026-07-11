@@ -252,7 +252,7 @@ const README_NARRATIVE_CONTRACT = [
 const FORBIDDEN_PUBLIC_ROOT_PARTS = [
   ["docs", "research"],
   ["docs", "HANDOFF"],
-  [["plan", "ning"].join("")],
+  [".", ["plan", "ning"].join("")],
 ] as const;
 
 type MarkdownLink = { text: string; target: string; image: boolean };
@@ -309,6 +309,168 @@ function resolvePublicTarget(sourcePath: string, target: string) {
 
 function repositoryRelativePath(absolutePath: string) {
   return path.relative(process.cwd(), absolutePath).split(path.sep).join("/");
+}
+
+function assertPublicMarkdownSurface(markdown: string, sourcePath: string, strictTourSyntax = false) {
+  const violations: string[] = [];
+  const lines = markdown.split(/\r?\n/);
+  let fence: { character: "`" | "~"; length: number } | undefined;
+  let mismatchedFence = false;
+  let tildeFence = false;
+  const prose: string[] = [];
+
+  for (const line of lines) {
+    const delimiter = line.match(/^( {0,3})(`{3,}|~{3,})(.*)$/);
+    if (delimiter) {
+      const run = delimiter[2];
+      const character = run[0] as "`" | "~";
+      tildeFence ||= character === "~";
+      if (!fence) {
+        fence = { character, length: run.length };
+      } else if (character === fence.character && run.length >= fence.length && delimiter[3].trim() === "") {
+        fence = undefined;
+      } else {
+        mismatchedFence = true;
+      }
+      continue;
+    }
+    if (!fence) prose.push(line);
+  }
+
+  if (fence) violations.push("unbalanced fence");
+  if (mismatchedFence) violations.push("mismatched fence");
+  if (tildeFence) violations.push("tilde fence");
+
+  const proseText = prose.join("\n");
+  if (strictTourSyntax) {
+    if (/^\s{0,3}\[[^\]]+\]:/m.test(proseText) || /\]\[/.test(proseText)) {
+      violations.push("reference-link syntax");
+    }
+    if (/<[A-Za-z/!?]/.test(proseText)) violations.push("inline HTML or autolink");
+    const residue = proseText.replace(/(!?)\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, "");
+    if (/\]\(/.test(residue)) violations.push("unparsed link residue");
+    if (/(?:https?|ftp|file):\/\//i.test(residue) || /\bwww\./i.test(residue)) violations.push("bare URL");
+  }
+
+  for (const { target, image } of extractMarkdownLinks(proseText)) {
+    if (image) violations.push("image link");
+    if (target.startsWith("#")) continue;
+    if (target.startsWith("/") || /^[A-Za-z]:[\\/]/.test(target)) {
+      violations.push("absolute link target");
+      continue;
+    }
+    const scheme = target.match(/^([A-Za-z][A-Za-z0-9+.-]*):/)?.[1]?.toLowerCase();
+    if (scheme) {
+      violations.push("unsupported link scheme");
+      continue;
+    }
+    const relative = repositoryRelativePath(resolvePublicTarget(sourcePath, target));
+    if (relative === ".." || relative.startsWith("../")) violations.push("repository-escaping link");
+    if (strictTourSyntax && !REQUIRED_SOURCE_TARGETS.includes(target as (typeof REQUIRED_SOURCE_TARGETS)[number])) {
+      violations.push("unapproved tour target");
+    }
+  }
+
+  for (const parts of FORBIDDEN_PUBLIC_ROOT_PARTS) {
+    const root = parts[0] === "." ? parts.join("") : parts.join("/");
+    if (markdown.includes(root)) violations.push("non-public root");
+  }
+  if (/(?:^|[\s"'=:(])\/(?:Users|home|var|tmp|etc|opt|private|root)\/(?:[A-Za-z0-9_.-]+\/?)+/m.test(markdown)) {
+    violations.push("synthetic absolute path");
+  }
+  if (/(?:^|[\s"'=:(])[A-Za-z]:[\\/](?:[^\\/\s"'`]+[\\/])+[^\\/\s"'`]+/m.test(markdown)) {
+    violations.push("synthetic absolute path");
+  }
+  const credentialAssignment = new RegExp(
+    ["[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*", "\\s*=\\s*", "(?!your-[a-z-]+(?:$|\\s))", "[^\\s\\\"'`]{8,}"].join(""),
+    "m",
+  );
+  const tokenPrefix = new RegExp(
+    [
+      `${["gh", "p_"].join("")}[A-Za-z0-9]{20,}`,
+      `${["github", "_pat_"].join("")}[A-Za-z0-9_]{20,}`,
+      `${["s", "k-", "proj-"].join("")}[A-Za-z0-9_-]{20,}`,
+      `${["AK", "IA"].join("")}[A-Z0-9]{12,}`,
+    ].join("|"),
+  );
+  if (credentialAssignment.test(markdown)) violations.push("credential-shaped assignment");
+  if (tokenPrefix.test(markdown)) violations.push("credential-shaped token");
+
+  const sensitivePayloadPatterns = [
+    new RegExp([["raw", "prompt"].join("[ _-]?"), "\\s*[:=]\\s*[\\\"'{[]"].join(""), "i"),
+    new RegExp([["trans", "cript"].join(""), "\\s*[:=]\\s*[\\\"'{[]"].join(""), "i"),
+    new RegExp([["provider", "payload"].join("[ _-]?"), "\\s*[:=]"].join(""), "i"),
+    new RegExp([["tool", "payload"].join("[ _-]?"), "\\s*[:=]"].join(""), "i"),
+    new RegExp([["session", "id"].join("[ _-]?"), "\\s*[:=]\\s*[\\\"']"].join(""), "i"),
+    new RegExp([["db", "snapshot"].join("[ _-]?"), "\\s*[:=]"].join(""), "i"),
+    new RegExp([["sse", "frames"].join("[ _-]?"), "\\s*[:=]"].join(""), "i"),
+    new RegExp([["image", "data"].join("[ _-]?"), "\\s*[:=]"].join(""), "i"),
+    new RegExp([["final", "reply", "text"].join("[ _-]?"), "\\s*[:=]"].join(""), "i"),
+  ];
+  if (sensitivePayloadPatterns.some((pattern) => pattern.test(markdown))) violations.push("raw sensitive evidence");
+
+  assert.deepEqual(violations, [], `${sourcePath}: public Markdown category violations`);
+}
+
+function mutateTourContract(
+  mutation:
+    | "remove_stop"
+    | "alter_minute"
+    | "omit_field"
+    | "indirect_source"
+    | "exceed_hop"
+    | "change_readme_role"
+    | "swap_support_state"
+    | "remove_case_assertion"
+    | "break_fragment_heading"
+    | "escaping_link"
+    | "private_root"
+    | "overclaim",
+) {
+  const fixture = {
+    stopIds: [...EXPECTED_STOP_IDS],
+    minutes: [...EXPECTED_STOP_MINUTES],
+    fields: EXPECTED_STOP_IDS.map(() => [...CHECKPOINT_FIELD_LABELS]),
+    directTargets: new Map<string, string[]>(
+      QUESTION_CONTRACT.map((question) => [question.id, [...question.directTargets]]),
+    ),
+    hops: new Map(QUESTION_CONTRACT.map((question) => [question.id, 2])),
+    readmeRoles: ["user_problem", "hard_llm_engineering", "tour_verification"],
+    supportStates: new Map([
+      ["same-browser guest-session bootstrap", "supported"],
+      ["day-detail snapshot", "supported-read-only"],
+      ["cross-device continuity", "hidden-future-scope"],
+      ["export", "inert-honest-placeholder"],
+      ["weekly AI insights", "hidden-future-scope"],
+    ]),
+    caseAssertions: new Map([
+      ["CASE-11", ["assertNoTrustedToolAuthority", "assertNoUnauthorizedMutation"]],
+      ["CASE-12", ["assertNoUnauthorizedMutation"]],
+    ]),
+    headings: new Map(REQUIRED_SOURCE_HEADINGS),
+    links: [...REQUIRED_SOURCE_TARGETS] as string[],
+    publicText: "public repository source only",
+    proofScope: [
+      "bounded deterministic application evidence",
+      "not universal model safety",
+      "conservative non-clinical product floor",
+      "not universal or personalized medical advice",
+    ].join("; "),
+  };
+
+  if (mutation === "remove_stop") fixture.stopIds.pop();
+  if (mutation === "alter_minute") fixture.minutes[4] += 1;
+  if (mutation === "omit_field") fixture.fields[3].pop();
+  if (mutation === "indirect_source") fixture.directTargets.set("Q07", ["ai-safety.md#deterministic-safety-cases"]);
+  if (mutation === "exceed_hop") fixture.hops.set("Q01", 3);
+  if (mutation === "change_readme_role") fixture.readmeRoles[1] = "product_feature_list";
+  if (mutation === "swap_support_state") fixture.supportStates.set("cross-device continuity", "supported");
+  if (mutation === "remove_case_assertion") fixture.caseAssertions.set("CASE-11", ["assertNoUnauthorizedMutation"]);
+  if (mutation === "break_fragment_heading") fixture.headings.set("architecture.md#llm-boundary", "## Model Boundary");
+  if (mutation === "escaping_link") fixture.links.push("../../outside.md");
+  if (mutation === "private_root") fixture.publicText = [".", ["plan", "ning"].join("")].join("");
+  if (mutation === "overclaim") fixture.proofScope = "deterministic cases prove universal model safety and universal medical suitability";
+  return fixture;
 }
 
 describe("reviewer tour contract", () => {
@@ -414,6 +576,59 @@ describe("reviewer tour contract", () => {
     }
   });
 
+  it("locks selected capability support states and CASE-11/12 mutation-authority assertions", async () => {
+    const [capabilities, behavior] = await Promise.all([
+      readFile("docs/capability-matrix.md", "utf8"),
+      readFile("tests/harness/behavior-matrix.md", "utf8"),
+    ]);
+    for (const row of [
+      "| onboarding | Guest-session bootstrap | client/src/store.ts | supported |",
+      "| Day Detail | Read-only day snapshot | client/src/components/HistoryDayDetailScreen.tsx | supported-read-only |",
+      "| guest recovery | Cross-device continuity | client/src/components/GuestSessionRecoveryGate.tsx | hidden-future-scope |",
+      "| guest recovery | Export original records | client/src/components/GuestSessionRecoveryGate.tsx | inert-honest-placeholder |",
+      "| History | Weekly AI insights | client/src/components/HistoryScreen.tsx | hidden-future-scope |",
+    ]) {
+      assert.equal(capabilities.match(new RegExp(row.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))?.length, 1, `capability state drift: ${row}`);
+    }
+    for (const row of [
+      "| CASE-11 | no_unauthorized_mutation | assertNoUnauthorizedMutation |",
+      "| CASE-11 | untrusted_tool_authority | assertNoTrustedToolAuthority |",
+      "| CASE-12 | goal_authorization | assertNoUnauthorizedMutation |",
+      "| CASE-12 | no_unauthorized_mutation | assertNoUnauthorizedMutation |",
+    ]) {
+      assert.equal(behavior.match(new RegExp(row.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))?.length, 1, `behavior assertion drift: ${row}`);
+    }
+  });
+
+  it("scans both READMEs and the contract source without exposing private values", async () => {
+    const [readme, readmeEn, contractSource] = await Promise.all([
+      readFile(README_PATHS[0], "utf8"),
+      readFile(README_PATHS[1], "utf8"),
+      readFile("tests/unit/reviewer-tour-contract.test.ts", "utf8"),
+    ]);
+    assertPublicMarkdownSurface(readme, README_PATHS[0]);
+    assertPublicMarkdownSurface(readmeEn, README_PATHS[1]);
+    assertPublicMarkdownSurface(contractSource, "tests/unit/reviewer-tour-contract.test.ts");
+  });
+
+  it("rejects unsafe tour Markdown and requires bounded deterministic and medical claims", async () => {
+    let tour: string;
+    try {
+      tour = await readFile(TOUR_PATH, "utf8");
+    } catch {
+      assert.fail(`${TOUR_PATH} is missing`);
+    }
+    assertPublicMarkdownSurface(tour, TOUR_PATH, true);
+    for (const anchor of [
+      "bounded deterministic application evidence",
+      "not universal model safety",
+      "conservative non-clinical product floor",
+      "not universal or personalized medical advice",
+    ]) {
+      assert.ok(tour.includes(anchor), `${TOUR_PATH} missing bounded proof anchor: ${anchor}`);
+    }
+  });
+
   it("uses existing unit discovery and release wiring without script changes", async () => {
     const [packageSource, releaseSource] = await Promise.all([
       readFile("package.json", "utf8"),
@@ -426,5 +641,152 @@ describe("reviewer tour contract", () => {
     assert.match(releaseSource, /runStep\("Capability matrix generated doc drift", \["matrix:gen:check"\]\)/);
     assert.match(releaseSource, /runStep\("Behavior matrix generated doc drift", \["behavior-matrix:gen:check"\]\)/);
     await assert.doesNotReject(stat("tests/unit/reviewer-tour-contract.test.ts"));
+  });
+});
+
+describe("contract mutation resistance", () => {
+  const assertSyntheticContract = (fixture: ReturnType<typeof mutateTourContract>) => {
+    assertExactUniqueSet(fixture.stopIds, EXPECTED_STOP_IDS, "mutation stop IDs");
+    assert.deepEqual(fixture.minutes, [...EXPECTED_STOP_MINUTES], "mutation minute allocation drift");
+    assert.equal(fixture.minutes.reduce((sum, minutes) => sum + minutes, 0), 30, "mutation minute total drift");
+    for (const fields of fixture.fields) {
+      assertExactUniqueSet(fields, CHECKPOINT_FIELD_LABELS, "mutation checkpoint fields");
+    }
+    for (const question of QUESTION_CONTRACT) {
+      assert.deepEqual(fixture.directTargets.get(question.id), [...question.directTargets], `${question.id} direct primary source drift`);
+      assert.ok((fixture.hops.get(question.id) ?? Number.POSITIVE_INFINITY) <= 2, `${question.id} exceeds two hops`);
+    }
+    assert.deepEqual(
+      fixture.readmeRoles,
+      ["user_problem", "hard_llm_engineering", "tour_verification"],
+      "README bullet role drift",
+    );
+    assert.deepEqual(
+      Object.fromEntries(fixture.supportStates),
+      {
+        "same-browser guest-session bootstrap": "supported",
+        "day-detail snapshot": "supported-read-only",
+        "cross-device continuity": "hidden-future-scope",
+        export: "inert-honest-placeholder",
+        "weekly AI insights": "hidden-future-scope",
+      },
+      "capability support-state drift",
+    );
+    assert.deepEqual(
+      fixture.caseAssertions.get("CASE-11"),
+      ["assertNoTrustedToolAuthority", "assertNoUnauthorizedMutation"],
+      "CASE-11 assertion drift",
+    );
+    assert.deepEqual(
+      fixture.caseAssertions.get("CASE-12"),
+      ["assertNoUnauthorizedMutation"],
+      "CASE-12 assertion drift",
+    );
+    for (const [target, heading] of REQUIRED_SOURCE_HEADINGS) {
+      assert.equal(fixture.headings.get(target), heading, `${target} fragment heading drift`);
+    }
+    for (const target of fixture.links) {
+      const relative = repositoryRelativePath(resolvePublicTarget(TOUR_PATH, target));
+      assert.ok(relative !== ".." && !relative.startsWith("../"), "repository-escaping link");
+    }
+    assertPublicMarkdownSurface(fixture.publicText, "synthetic-public.md");
+    assert.match(fixture.proofScope, /bounded deterministic application evidence/, "deterministic evidence scope drift");
+    assert.match(fixture.proofScope, /not universal model safety/, "universal model-safety overclaim");
+    assert.match(fixture.proofScope, /conservative non-clinical product floor/, "product-floor scope drift");
+    assert.match(fixture.proofScope, /not universal or personalized medical advice/, "medical-evidence overclaim");
+  };
+
+  it("mutation resistance: rejects one removed stop", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("remove_stop")), /stop IDs/);
+  });
+
+  it("mutation resistance: rejects one altered minute", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("alter_minute")), /minute allocation/);
+  });
+
+  it("mutation resistance: rejects one omitted checkpoint field", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("omit_field")), /checkpoint fields/);
+  });
+
+  it("mutation resistance: rejects an indirect answer source", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("indirect_source")), /Q07 direct primary source/);
+  });
+
+  it("mutation resistance: rejects a question beyond two hops", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("exceed_hop")), /exceeds two hops/);
+  });
+
+  it("mutation resistance: rejects a changed README bullet role", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("change_readme_role")), /README bullet role/);
+  });
+
+  it("mutation resistance: rejects a swapped capability support state", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("swap_support_state")), /support-state/);
+  });
+
+  it("mutation resistance: rejects removal of CASE-11 trusted-authority proof", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("remove_case_assertion")), /CASE-11 assertion/);
+  });
+
+  it("mutation resistance: rejects a broken fragment heading", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("break_fragment_heading")), /fragment heading/);
+  });
+
+  it("mutation resistance: rejects a repository-escaping link", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("escaping_link")), /repository-escaping link/);
+  });
+
+  it("mutation resistance: rejects reference links, bare URLs, and inline HTML", () => {
+    for (const markdown of [
+      "[answer][source]\n[source]: architecture.md",
+      "https://example.invalid/evidence",
+      '<a href="architecture.md">answer</a>',
+    ]) {
+      assert.throws(
+        () => assertPublicMarkdownSurface(markdown, "docs/synthetic.md", true),
+        /public Markdown category violations/,
+      );
+    }
+  });
+
+  it("mutation resistance: rejects unbalanced, mismatched, and tilde fences", () => {
+    for (const markdown of ["```text\nunclosed", "```text\n~~~", "~~~text\nbounded\n~~~"]) {
+      assert.throws(
+        () => assertPublicMarkdownSurface(markdown, "docs/synthetic.md", true),
+        /public Markdown category violations/,
+      );
+    }
+  });
+
+  it("mutation resistance: rejects absolute, file, mail, and unsupported link targets", () => {
+    for (const markdown of [
+      `[absolute](${["", "tmp", "evidence.md"].join("/")})`,
+      `[windows](${["C:", "private", "evidence.md"].join("\\")})`,
+      `[file](${[["fi", "le"].join(""), "://", ["tmp", "evidence.md"].join("/")].join("")})`,
+      `[mail](${["mail", "to:"].join("")}reviewer@example.invalid)`,
+      `[custom](${["cus", "tom:"].join("")}evidence)`,
+    ]) {
+      assert.throws(
+        () => assertPublicMarkdownSurface(markdown, "docs/synthetic.md", true),
+        /public Markdown category violations/,
+      );
+    }
+  });
+
+  it("mutation resistance: reports private-root failures by category without echoing the value", () => {
+    const privateValue = [".", ["plan", "ning"].join("")].join("");
+    let error: unknown;
+    try {
+      assertSyntheticContract(mutateTourContract("private_root"));
+    } catch (caught) {
+      error = caught;
+    }
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /public Markdown category violations/);
+    assert.ok(!error.message.includes(privateValue));
+  });
+
+  it("mutation resistance: rejects deterministic and medical evidence overclaiming", () => {
+    assert.throws(() => assertSyntheticContract(mutateTourContract("overclaim")), /deterministic evidence scope/);
   });
 });
