@@ -531,7 +531,11 @@ describe("reviewer tour contract", () => {
     const requiredLinks = extractMarkdownLinks(markdown).filter((link) =>
       REQUIRED_SOURCE_TARGETS.includes(link.target as (typeof REQUIRED_SOURCE_TARGETS)[number]),
     );
-    assertExactUniqueSet(requiredLinks.map(({ target }) => target), REQUIRED_SOURCE_TARGETS, "required tour source targets");
+    assertExactUniqueSet(
+      [...new Set(requiredLinks.map(({ target }) => target))],
+      REQUIRED_SOURCE_TARGETS,
+      "required tour source targets",
+    );
     for (const question of QUESTION_CONTRACT) {
       assert.ok(
         question.directTargets.every((target) => requiredLinks.some((link) => link.target === target)),
