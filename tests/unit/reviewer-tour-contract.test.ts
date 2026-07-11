@@ -728,6 +728,20 @@ describe("contract mutation resistance", () => {
     assert.throws(() => assertSyntheticContract(mutateTourContract("omit_field")), /checkpoint fields/);
   });
 
+  it("WR-01 production extractor rejects duplicate checkpoint rows before Map construction", async () => {
+    const markdown = await readFile(TOUR_PATH, "utf8");
+    const requiredRow = markdown.match(/^- \*\*為何讀：\*\*\s+.+$/m)?.[0];
+    const replacedRow = markdown.match(/^- \*\*精讀範圍：\*\*\s+.+$/m)?.[0];
+    assert.ok(requiredRow, "valid tour fixture must contain a 為何讀 row");
+    assert.ok(replacedRow, "valid tour fixture must contain a 精讀範圍 row");
+
+    const fiveRows = markdown.replace(requiredRow, `${requiredRow}\n${requiredRow}`);
+    assert.throws(() => extractTourStops(fiveRows), /S01 checkpoint fields/);
+
+    const duplicateAndMissing = markdown.replace(replacedRow, requiredRow);
+    assert.throws(() => extractTourStops(duplicateAndMissing), /S01 checkpoint fields/);
+  });
+
   it("mutation resistance: rejects an indirect answer source", () => {
     assert.throws(() => assertSyntheticContract(mutateTourContract("indirect_source")), /Q07 direct primary source/);
   });
