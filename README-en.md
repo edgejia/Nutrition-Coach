@@ -4,6 +4,12 @@
 
 Nutrition Coach is an AI meal logging app. Users can log meals with text or photos; the backend uses an LLM to help estimate calories and macros, stores structured meal records, and streams processing status, results, and suggestions that need confirmation.
 
+## Why this repo
+
+- User problem: make meal logging with text or photos a low-friction entry point, then turn each entry into structured records that remain inspectable.
+- Engineering thesis: use trustworthy LLM application engineering for the hard boundaries—typed contracts, confirm-first proposals, backend authority, committed receipts, and deterministic evidence.
+- Verification path: the [30-minute reviewer tour](docs/tour.md) is the canonical Traditional-Chinese tour; this English README is its synchronized auxiliary entry, not a promise of a full English companion.
+
 ## Project Highlights
 
 - Full-stack TypeScript app: React/Vite client, Fastify API, SQLite persistence.

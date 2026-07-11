@@ -4,6 +4,12 @@
 
 Nutrition Coach 是一個 AI 飲食紀錄應用。使用者可以用文字或照片記錄餐點；後端透過 LLM 輔助估算熱量與三大營養素，將結果寫入結構化紀錄，並用串流回覆顯示處理狀態、結果，以及需要使用者確認的建議。
 
+## 為什麼做這個專案
+
+- 使用者問題：讓文字或照片都能成為飲食紀錄的低摩擦入口，再由系統整理成可查詢的結構化資料。
+- 工程主題：以可信賴的 LLM 應用工程處理真正困難的邊界，包含 typed contracts、confirm-first proposals、backend authority、committed receipts 與 deterministic evidence。
+- 驗證路徑：[30 分鐘 reviewer tour](docs/tour.md) 是繁體中文的 canonical tour；英文 README 是結構同步的 auxiliary entry，不代表另有完整英文導覽。
+
 ## 專案重點
 
 - 全端 TypeScript 應用：React/Vite client、Fastify API、SQLite persistence。
