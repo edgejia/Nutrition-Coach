@@ -282,4 +282,39 @@ describe("demo contract mutation resistance", () => {
     assert.doesNotMatch(source, new RegExp(["make", "SyntheticContract"].join("")));
     assert.doesNotMatch(source, new RegExp(["assert", "SyntheticContract"].join("")));
   });
+
+  it("rejects contradictory retry and operator exceptions in the actual Markdown", () => {
+    for (const exception of [
+      "例外：第二次可留在同一 conversation 改寫 prompt，並拼接第一次成功的證據。",
+      "例外：planning、local tests、PR、CI 或 closeout 任一完成即可取代 fresh exact-action approval。",
+    ]) {
+      const markdown = `${canonicalDocuments.markdown}\n${exception}\n`;
+      assert.throws(
+        () => assertDemoContract(markdown, canonicalDocuments.tunnelMarkdown, canonicalDocuments.changelog),
+        /retry clauses|operator prerequisites/,
+      );
+    }
+  });
+
+  it("rejects raw evidence without echoing the rejected value", () => {
+    const rejectedValue = ["private", "fixture", "value"].join("-");
+    const payload = [["Cook", "ie"].join(""), rejectedValue].join(": ");
+    let error: unknown;
+    try {
+      assertDemoContract(
+        `${canonicalDocuments.markdown}\n${payload}\n`,
+        canonicalDocuments.tunnelMarkdown,
+        canonicalDocuments.changelog,
+      );
+    } catch (caught) {
+      error = caught;
+    }
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /metadata-only evidence/);
+    assert.equal(error.message.includes(rejectedValue), false);
+  });
+
+  it("declares a closed evidence field and value-shape table", () => {
+    assert.match(canonicalDocuments.markdown, /\| Evidence field \| Value shape \|/);
+  });
 });
