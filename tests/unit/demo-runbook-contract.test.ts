@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
-import path from "node:path";
 import { describe, it } from "node:test";
 
 const DEMO_PATH = "docs/demo.md";
@@ -42,10 +41,16 @@ const EXACT_INPUTS = [
   "點選 proposal card 的取消",
   "請把每日熱量目標改成 800 kcal/天。",
 ] as const;
-const MAX_COMPLETE_ATTEMPTS = 2;
 
 type DemoStage = { id: string; title: string; body: string };
 type TimedRow = { id: string; fields: string[] };
+type ContractDocuments = { markdown: string; tunnelMarkdown: string; changelog: string };
+
+const canonicalDocuments: ContractDocuments = {
+  markdown: await readFile(DEMO_PATH, "utf8"),
+  tunnelMarkdown: await readFile(TUNNEL_PATH, "utf8"),
+  changelog: await readFile(CHANGELOG_PATH, "utf8"),
+};
 
 function extractH2Parts(markdown: string) {
   return [...markdown.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
@@ -111,124 +116,90 @@ function assertMetadataOnlySurface(markdown: string, sourcePath: string) {
   assert.deepEqual(categories, [], `${sourcePath}: metadata-only category violations`);
 }
 
-function makeSyntheticContract(
-  mutation:
-    | "remove_stage"
-    | "duplicate_stage"
-    | "remove_row"
-    | "duplicate_row"
-    | "elapsed_drift"
-    | "retry_weakening"
-    | "quick_tunnel"
-    | "operator_gate"
-    | "semantic_drift"
-    | "privacy_leak",
-) {
-  const fixture = {
-    stages: [...EXPECTED_STAGE_IDS],
-    rows: [...EXPECTED_ROW_IDS],
-    elapsed: [...EXPECTED_ELAPSED_TARGETS] as string[],
-    maxAttempts: MAX_COMPLETE_ATTEMPTS,
-    tunnel: "stable_named_tunnel",
-    operatorGate: "merged_main_and_exact_current_thread_approval",
-    semantics: [...EXPECTED_SEMANTIC_OUTCOMES] as string[],
-    publicText: "metadata only",
-  };
-  if (mutation === "remove_stage") fixture.stages.pop();
-  if (mutation === "duplicate_stage") fixture.stages[7] = fixture.stages[6];
-  if (mutation === "remove_row") fixture.rows.pop();
-  if (mutation === "duplicate_row") fixture.rows[5] = fixture.rows[4];
-  if (mutation === "elapsed_drift") fixture.elapsed[5] = "05:01";
-  if (mutation === "retry_weakening") fixture.maxAttempts = 3;
-  if (mutation === "quick_tunnel") fixture.tunnel = "quick_tunnel";
-  if (mutation === "operator_gate") fixture.operatorGate = "planning_approval";
-  if (mutation === "semantic_drift") fixture.semantics[2] = "generic_safety_copy";
-  if (mutation === "privacy_leak") fixture.publicText = `${["session", "id"].join("_")}='rejected-sensitive-fixture'`;
-  return fixture;
+function assertDemoContract(markdown: string, tunnelMarkdown: string, changelog: string) {
+  assert.deepEqual(extractH2Parts(markdown), [...EXPECTED_PARTS]);
+  const stages = extractStages(markdown);
+  assert.deepEqual(stages.map(({ id }) => id), EXPECTED_STAGE_IDS, "stage IDs drift");
+  assert.deepEqual(stages.map(({ title }) => title), EXPECTED_STAGE_TITLES, "stage titles drift");
+  for (const stage of stages) {
+    assert.match(stage.body, /- \*\*動作：\*\*/, `${stage.id} action missing`);
+    assert.match(stage.body, /- \*\*完成條件：\*\*/, `${stage.id} completion missing`);
+    assert.match(stage.body, /- \*\*停止條件：\*\*/, `${stage.id} stop condition missing`);
+  }
+
+  const rows = extractTimedRows(markdown);
+  assert.deepEqual(rows.map(({ id }) => id), EXPECTED_ROW_IDS, "timed row IDs drift");
+  assert.deepEqual(rows.map(({ fields }) => fields[0]), EXPECTED_ELAPSED_TARGETS, "elapsed targets drift");
+  assert.deepEqual(rows.map(({ fields }) => fields[2]), EXACT_INPUTS, "exact inputs drift");
+  assert.ok(elapsedSeconds(rows.at(-1)?.fields[0] ?? "99:99") <= 300, "final elapsed target exceeds five minutes");
+  assertExactUniqueSet(extractMarkerValues(markdown, "SMOKE"), EXPECTED_SMOKE_OUTCOMES, "smoke outcomes");
+  assertExactUniqueSet(extractMarkerValues(markdown, "SEMANTIC"), EXPECTED_SEMANTIC_OUTCOMES, "semantic outcomes");
+
+  assert.match(markdown, /\[Cloudflare Tunnel production runtime\]\(deploy\/cloudflare-tunnel\.md\)/);
+  assert.doesNotMatch(markdown, /cloudflared tunnel (?:login|create|route|run)/);
+  assert.match(tunnelMarkdown, /required public smoke must use the stable named tunnel/);
+  assert.match(tunnelMarkdown, /temporary Quick Tunnel \(including a `trycloudflare\.com` URL\) cannot preserve this app's required same-origin SSE proof/);
+  assert.doesNotMatch(tunnelMarkdown, /Quick tunnels are acceptable/);
+
+  const versionSection = extractVersionSection(changelog, "## v3.4 - Unreleased");
+  assert.equal(versionSection.split(CHANGELOG_CHANGE_ENTRY).length - 1, 1, "Phase 113 change entry drift");
+  assert.equal(versionSection.split(CHANGELOG_VERIFICATION_ENTRY).length - 1, 1, "Phase 113 verification entry drift");
+  for (const entry of [CHANGELOG_CHANGE_ENTRY, CHANGELOG_VERIFICATION_ENTRY]) {
+    for (const nonClaim of ["已合併 `main`", "刷新 runtime", "變更 tunnel", "通過 public smoke", "關閉 #54", "通過 live semantic demo"]) {
+      assert.ok(entry.includes(nonClaim), `Phase 113 changelog non-claim missing: ${nonClaim}`);
+    }
+  }
+
+  for (const anchor of [
+    "新 incognito window 或 isolated browser context",
+    "一個 continuous conversation",
+    "只重設該 browser context 的 cookies 與 localStorage",
+    "不得清除或改寫 durable SQLite、assets、uploads staging、stable signing secret 或其他使用者資料",
+    "最多兩次完整 attempt",
+    "不得在同一 conversation 重送或改寫 prompt",
+    "不得拼接不同 attempt 的證據",
+    "deterministic safety evidence 不能取代失敗的 live run",
+    "merged `main`",
+    "post-merge local closeout",
+    "fresh exact-action approval",
+    "DEFERRED",
+  ]) {
+    assert.ok(markdown.includes(anchor), `${DEMO_PATH} missing boundary anchor: ${anchor}`);
+  }
+  assert.doesNotMatch(markdown, /(?:runtime|public smoke|live semantic).{0,24}(?:已通過|PASS|完成)/i);
+  assertMetadataOnlySurface(markdown, DEMO_PATH);
 }
 
-function assertSyntheticContract(fixture: ReturnType<typeof makeSyntheticContract>) {
-  assertExactUniqueSet(fixture.stages, EXPECTED_STAGE_IDS, "mutation stage IDs");
-  assertExactUniqueSet(fixture.rows, EXPECTED_ROW_IDS, "mutation timed row IDs");
-  assert.deepEqual(fixture.elapsed, [...EXPECTED_ELAPSED_TARGETS], "mutation elapsed targets");
-  assert.ok(elapsedSeconds(fixture.elapsed.at(-1) ?? "99:99") <= 300, "mutation final elapsed target");
-  assert.equal(fixture.maxAttempts, MAX_COMPLETE_ATTEMPTS, "mutation complete-attempt limit");
-  assert.equal(fixture.tunnel, "stable_named_tunnel", "mutation named-tunnel authority");
-  assert.equal(fixture.operatorGate, "merged_main_and_exact_current_thread_approval", "mutation operator gate");
-  assertExactUniqueSet(fixture.semantics, EXPECTED_SEMANTIC_OUTCOMES, "mutation semantic outcomes");
-  assertMetadataOnlySurface(fixture.publicText, "synthetic-demo.md");
+function replaceExactlyOnce(source: string, target: string, replacement: string) {
+  assert.equal(source.split(target).length - 1, 1, `mutation target must occur exactly once: ${target.slice(0, 48)}`);
+  return source.replace(target, replacement);
+}
+
+function findUniqueLine(source: string, prefix: string) {
+  const matches = source.split(/\r?\n/).filter((line) => line.startsWith(prefix));
+  assert.equal(matches.length, 1, `mutation line must occur exactly once: ${prefix}`);
+  return matches[0];
+}
+
+function mutateCanonical(
+  mutate: (documents: ContractDocuments) => ContractDocuments,
+) {
+  return mutate({ ...canonicalDocuments });
 }
 
 describe("public demo runbook contract", () => {
-  it("locks exactly two parts, eight rebuild stages, six timed rows, and six row fields", async () => {
-    const markdown = await readFile(DEMO_PATH, "utf8");
-    assert.deepEqual(extractH2Parts(markdown), [...EXPECTED_PARTS]);
-    const stages = extractStages(markdown);
-    assert.deepEqual(stages.map(({ id }) => id), EXPECTED_STAGE_IDS);
-    assert.deepEqual(stages.map(({ title }) => title), EXPECTED_STAGE_TITLES);
-    for (const stage of stages) {
-      assert.match(stage.body, /- \*\*動作：\*\*/);
-      assert.match(stage.body, /- \*\*完成條件：\*\*/);
-      assert.match(stage.body, /- \*\*停止條件：\*\*/);
-    }
-    const rows = extractTimedRows(markdown);
-    assert.deepEqual(rows.map(({ id }) => id), EXPECTED_ROW_IDS);
-    assert.deepEqual(rows.map(({ fields }) => fields[0]), EXPECTED_ELAPSED_TARGETS);
-    assert.deepEqual(rows.map(({ fields }) => fields[2]), EXACT_INPUTS);
-    assert.ok(elapsedSeconds(rows.at(-1)?.fields[0] ?? "99:99") <= 300);
+  it("validates the complete canonical contract through one real-document entrypoint", () => {
+    assertDemoContract(
+      canonicalDocuments.markdown,
+      canonicalDocuments.tunnelMarkdown,
+      canonicalDocuments.changelog,
+    );
   });
 
-  it("locks five public-smoke handoff outcomes and three semantic outcomes", async () => {
-    const markdown = await readFile(DEMO_PATH, "utf8");
-    assertExactUniqueSet(extractMarkerValues(markdown, "SMOKE"), EXPECTED_SMOKE_OUTCOMES, "smoke outcomes");
-    assertExactUniqueSet(extractMarkerValues(markdown, "SEMANTIC"), EXPECTED_SEMANTIC_OUTCOMES, "semantic outcomes");
-    assert.match(markdown, /\[Cloudflare Tunnel production runtime\]\(deploy\/cloudflare-tunnel\.md\)/);
-    assert.doesNotMatch(markdown, /cloudflared tunnel (?:login|create|route|run)/);
-  });
-
-  it("requires stable named-tunnel evidence for the SSE-dependent public smoke", async () => {
-    const markdown = await readFile(TUNNEL_PATH, "utf8");
-    assert.match(markdown, /required public smoke must use the stable named tunnel/);
-    assert.match(markdown, /temporary Quick Tunnel \(including a `trycloudflare\.com` URL\) cannot preserve this app's required same-origin SSE proof/);
-    assert.doesNotMatch(markdown, /Quick tunnels are acceptable/);
-  });
-
-  it("locks the v3.4 source-only changelog entries and non-claim boundary", async () => {
-    const changelog = extractVersionSection(await readFile(CHANGELOG_PATH, "utf8"), "## v3.4 - Unreleased");
-    assert.equal(changelog.split(CHANGELOG_CHANGE_ENTRY).length - 1, 1, "Phase 113 change entry drift");
-    assert.equal(changelog.split(CHANGELOG_VERIFICATION_ENTRY).length - 1, 1, "Phase 113 verification entry drift");
-    for (const entry of [CHANGELOG_CHANGE_ENTRY, CHANGELOG_VERIFICATION_ENTRY]) {
-      for (const nonClaim of ["已合併 `main`", "刷新 runtime", "變更 tunnel", "通過 public smoke", "關閉 #54", "通過 live semantic demo"]) {
-        assert.ok(entry.includes(nonClaim), `Phase 113 changelog non-claim missing: ${nonClaim}`);
-      }
-    }
-  });
-
-  it("preserves fresh-guest, durable-state, retry, and operator-gate boundaries", async () => {
-    const markdown = await readFile(DEMO_PATH, "utf8");
-    for (const anchor of [
-      "新 incognito window 或 isolated browser context",
-      "一個 continuous conversation",
-      "只重設該 browser context 的 cookies 與 localStorage",
-      "不得清除或改寫 durable SQLite、assets、uploads staging、stable signing secret 或其他使用者資料",
-      "最多兩次完整 attempt",
-      "不得在同一 conversation 重送或改寫 prompt",
-      "不得拼接不同 attempt 的證據",
-      "deterministic safety evidence 不能取代失敗的 live run",
-      "merged `main`",
-      "post-merge local closeout",
-      "fresh exact-action approval",
-      "DEFERRED",
-    ]) {
-      assert.ok(markdown.includes(anchor), `${DEMO_PATH} missing boundary anchor: ${anchor}`);
-    }
-    assert.doesNotMatch(markdown, /(?:runtime|public smoke|live semantic).{0,24}(?:已通過|PASS|完成)/i);
-  });
-
-  it("keeps the public document and contract source metadata-only", async () => {
-    const [markdown, source] = await Promise.all([readFile(DEMO_PATH, "utf8"), readFile(CONTRACT_PATH, "utf8")]);
-    assertMetadataOnlySurface(markdown, DEMO_PATH);
+  it("keeps the public contract source metadata-only and private", async () => {
+    const source = await readFile(CONTRACT_PATH, "utf8");
     assertMetadataOnlySurface(source, CONTRACT_PATH);
+    assert.doesNotMatch(source, /^export\s/m);
   });
 
   it("uses existing unit and release discovery without package or script edits", async () => {
@@ -241,43 +212,74 @@ describe("public demo runbook contract", () => {
     assert.match(packageJson.scripts["test:unit"], /tests\/unit\/\*\.test\.ts/);
     assert.match(releaseSource, /runStep\("Full test suite", \["test"\]\)/);
     await assert.doesNotReject(stat(CONTRACT_PATH));
-    assert.doesNotMatch(await readFile(CONTRACT_PATH, "utf8"), /^export\s/m);
   });
 });
 
 describe("demo contract mutation resistance", () => {
-  it("routes the canonical and mutation suites through one real-document assertion entrypoint", async () => {
-    const source = await readFile(CONTRACT_PATH, "utf8");
-    assert.match(source, /function assertDemoContract\(/);
-    assert.doesNotMatch(source, /makeSyntheticContract|assertSyntheticContract/);
-  });
+  const cases: Array<{
+    name: string;
+    expected: RegExp;
+    mutate: (documents: ContractDocuments) => ContractDocuments;
+  }> = [
+    {
+      name: "removed stage",
+      expected: /stage IDs/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "### R08 · verification", "### X08 · verification") }),
+    },
+    {
+      name: "duplicated stage",
+      expected: /stage IDs/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "### R08 · verification", "### R07 · verification") }),
+    },
+    {
+      name: "removed timed row",
+      expected: /timed row IDs/,
+      mutate: (documents) => {
+        const row = findUniqueLine(documents.markdown, "| M06 |");
+        return { ...documents, markdown: replaceExactlyOnce(documents.markdown, `${row}\n`, "") };
+      },
+    },
+    {
+      name: "duplicated timed row",
+      expected: /timed row IDs/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "| M06 |", "| M05 |") }),
+    },
+    {
+      name: "elapsed drift",
+      expected: /elapsed targets/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "| M06 | 05:00 |", "| M06 | 05:01 |") }),
+    },
+    {
+      name: "Quick Tunnel substitution",
+      expected: /stable named tunnel/,
+      mutate: (documents) => ({ ...documents, tunnelMarkdown: replaceExactlyOnce(documents.tunnelMarkdown, "required public smoke must use the stable named tunnel", "Quick tunnels are acceptable") }),
+    },
+    {
+      name: "semantic outcome drift",
+      expected: /semantic outcomes/,
+      mutate: (documents) => ({ ...documents, markdown: replaceExactlyOnce(documents.markdown, "- SEMANTIC: floor_refusal", "- SEMANTIC: generic_safety_copy") }),
+    },
+    {
+      name: "source-only changelog drift",
+      expected: /change entry drift/,
+      mutate: (documents) => ({ ...documents, changelog: replaceExactlyOnce(documents.changelog, CHANGELOG_CHANGE_ENTRY, "- Phase 113 runtime is complete.") }),
+    },
+  ];
 
-  for (const [mutation, message] of [
-    ["remove_stage", /stage IDs/],
-    ["duplicate_stage", /stage IDs/],
-    ["remove_row", /timed row IDs/],
-    ["duplicate_row", /timed row IDs/],
-    ["elapsed_drift", /elapsed targets/],
-    ["retry_weakening", /attempt limit/],
-    ["quick_tunnel", /named-tunnel authority/],
-    ["operator_gate", /operator gate/],
-    ["semantic_drift", /semantic outcomes/],
-  ] as const) {
-    it(`rejects ${mutation}`, () => {
-      assert.throws(() => assertSyntheticContract(makeSyntheticContract(mutation)), message);
+  for (const mutation of cases) {
+    it(`rejects ${mutation.name} in a copy of the actual documents`, () => {
+      const documents = mutateCanonical(mutation.mutate);
+      assert.throws(
+        () => assertDemoContract(documents.markdown, documents.tunnelMarkdown, documents.changelog),
+        mutation.expected,
+      );
     });
   }
 
-  it("reports privacy failures by category without echoing rejected values", () => {
-    const rejectedValue = "rejected-sensitive-fixture";
-    let error: unknown;
-    try {
-      assertSyntheticContract(makeSyntheticContract("privacy_leak"));
-    } catch (caught) {
-      error = caught;
-    }
-    assert.ok(error instanceof Error);
-    assert.match(error.message, /metadata-only category violations/);
-    assert.ok(!error.message.includes(rejectedValue));
+  it("routes the canonical and mutation suites through one real-document assertion entrypoint", async () => {
+    const source = await readFile(CONTRACT_PATH, "utf8");
+    assert.match(source, /function assertDemoContract\(/);
+    assert.doesNotMatch(source, new RegExp(["make", "SyntheticContract"].join("")));
+    assert.doesNotMatch(source, new RegExp(["assert", "SyntheticContract"].join("")));
   });
 });
