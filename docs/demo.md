@@ -2,7 +2,7 @@
 
 這是唯一的繁體中文 canonical demo 文件。它把乾淨 source checkout 的重建順序與五分鐘 presenter script 固定下來；技術操作仍以 [Cloudflare Tunnel production runtime](deploy/cloudflare-tunnel.md) 為唯一 authority，不在此複製 tunnel 指令。
 
-目前只完成 source contract。公開 runtime、browser smoke 與 live semantic execution 都是 v3.4.1 的 `DEFERRED` 工作：必須先完成 v3.4 source release、合併到 merged `main`、完成 post-merge local closeout，再取得 fresh exact-action approval。這份文件、local checks、PR、CI 或 closeout 都不授權 migration、restart、tunnel operation/configuration、public smoke、GitHub write、`main` push/merge 或 tag movement。
+目前只完成 source contract。所有 retry、source prerequisite、runtime approval、tunnel approval 與 execution state authority，均以本文末尾唯一的 machine-checked table 為準；本段不另行授權任何操作。
 
 ## 第一部分：乾淨 checkout 重建與 operator 檢查
 
@@ -92,13 +92,26 @@
 - SEMANTIC: proposal_cancel
 - SEMANTIC: floor_refusal
 
-任何 row 的時間、精確輸入、預期可見結果或停止條件不符，整個 attempt 立即失敗。最多兩次完整 attempt：第一次失敗後只允許在新的 incognito/isolated context 從 M01 完整重來一次。不得在同一 conversation 重送或改寫 prompt、不得即場換同義句直到成功、不得拼接不同 attempt 的證據。第二次仍失敗時，live result 保持 blocked；可以用 [AI-safety case study](ai-safety.md) 與 deterministic boundary tests 解說，但 deterministic safety evidence 不能取代失敗的 live run。
+### Machine-checked retry and operator authority
 
-Evidence 只保留 intended/observed full SHA、Asia/Taipei time、五個 smoke booleans、六列 elapsed seconds、三個 semantic verdict、attempt number 與 sanitized blocker category。禁止保存或提交 cookies、session/device identifiers、provider/tool payloads、private logs、raw HAR、database rows、image bytes 或 sensitive screenshots。Frozen public inputs 只存在這份 source 文件；其他 raw conversation 不進入 execution evidence。
+任何 row 的時間、精確輸入、預期可見結果或停止條件不符，整個 attempt 立即失敗。下表是 retry 與 operator authority 的唯一 machine-checked surface；其他段落只提供程序與停止條件，不得取代表內 authority。
+
+| Authority field | Exact value |
+| --- | --- |
+| `retry.maximum_complete_attempts` | 最多兩次完整 attempt |
+| `retry.restart_scope` | 第一次失敗後只允許在新的 incognito/isolated context 從 M01 完整重來一次 |
+| `retry.same_conversation_resend_or_rephrase` | forbidden：不得在同一 conversation 重送或改寫 prompt，亦不得即場換同義句直到成功 |
+| `retry.cross_attempt_evidence_splicing` | forbidden：不得拼接不同 attempt 的證據 |
+| `retry.deterministic_evidence_substitution` | forbidden：deterministic safety evidence 不能取代失敗的 live run |
+| `operator.source_prerequisites` | merged `main` 且 post-merge local closeout 已完成 |
+| `operator.runtime_approval` | fresh exact-action approval required |
+| `operator.pr_ci_closeout_authority` | none：這份文件、local checks、PR、CI 或 closeout 都不授權 runtime action |
+| `operator.tunnel_configuration_approval` | tunnel configuration 需要 separate fresh exact-action approval |
+| `execution.operational_and_live_state` | public runtime、browser smoke 與 human timed execution 全部為 `DEFERRED` / `human_needed` |
 
 ### Metadata-only execution evidence schema
 
-Tracked execution evidence 只允許下表逐列列出的 field 與 value shape。每個 field 恰好出現一次；不得增加 attachment、code fence、raw request/response、header、database row、image data 或 workspace path。`sanitized_blocker_category` 只能記錄分類，不得放入原始值或自由文字。
+Tracked execution evidence 只允許下表逐列列出的 field 與 value shape。每個 field 恰好出現一次；只保留 intended/observed full SHA、Asia/Taipei time、五個 smoke booleans、六列 elapsed seconds、三個 semantic verdict、attempt number 與 sanitized blocker category。不得保存或提交 cookies、session/device identifiers、provider/tool payloads、private logs、raw HAR、database rows、image bytes、sensitive screenshots、attachment、code fence、raw request/response、header 或 workspace path；`sanitized_blocker_category` 只能記錄分類，不得放入原始值或自由文字，其他 raw conversation 不進入 execution evidence。
 
 | Evidence field | Value shape |
 | --- | --- |

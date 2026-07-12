@@ -43,6 +43,24 @@ const EXPECTED_EVIDENCE_FIELDS = [
   ["attempt_number", "integer: `1` or `2`"],
   ["sanitized_blocker_category", "enum: `none`, `runtime`, `tunnel`, `transport`, `session`, `persistence`, `asset`, `semantic`, `timeout`, or `privacy`"],
 ] as const;
+const SEMANTIC_VERDICT_INTRO = "三個 human semantic verdict 的固定名稱如下。Browser automation 不可替人判斷，human verdict 也不可替代五個 browser outcome：";
+const AUTHORITY_HEADING = "### Machine-checked retry and operator authority";
+const AUTHORITY_INTRO = "任何 row 的時間、精確輸入、預期可見結果或停止條件不符，整個 attempt 立即失敗。下表是 retry 與 operator authority 的唯一 machine-checked surface；其他段落只提供程序與停止條件，不得取代表內 authority。";
+const EVIDENCE_HEADING = "### Metadata-only execution evidence schema";
+const EVIDENCE_INTRO = "Tracked execution evidence 只允許下表逐列列出的 field 與 value shape。每個 field 恰好出現一次；只保留 intended/observed full SHA、Asia/Taipei time、五個 smoke booleans、六列 elapsed seconds、三個 semantic verdict、attempt number 與 sanitized blocker category。不得保存或提交 cookies、session/device identifiers、provider/tool payloads、private logs、raw HAR、database rows、image bytes、sensitive screenshots、attachment、code fence、raw request/response、header 或 workspace path；`sanitized_blocker_category` 只能記錄分類，不得放入原始值或自由文字，其他 raw conversation 不進入 execution evidence。";
+const FINAL_NON_CLAIM = "v3.4.1 的 public runtime、browser smoke 與 human timed execution 現在全部為 `DEFERRED` / `human_needed`。D-20 至 D-22 不允許 Phase 113 source authoring 宣稱 runtime、tunnel、GitHub、PR/`main` 或 live result 已完成。";
+const EXPECTED_AUTHORITY_FIELDS = [
+  ["retry.maximum_complete_attempts", "最多兩次完整 attempt"],
+  ["retry.restart_scope", "第一次失敗後只允許在新的 incognito/isolated context 從 M01 完整重來一次"],
+  ["retry.same_conversation_resend_or_rephrase", "forbidden：不得在同一 conversation 重送或改寫 prompt，亦不得即場換同義句直到成功"],
+  ["retry.cross_attempt_evidence_splicing", "forbidden：不得拼接不同 attempt 的證據"],
+  ["retry.deterministic_evidence_substitution", "forbidden：deterministic safety evidence 不能取代失敗的 live run"],
+  ["operator.source_prerequisites", "merged `main` 且 post-merge local closeout 已完成"],
+  ["operator.runtime_approval", "fresh exact-action approval required"],
+  ["operator.pr_ci_closeout_authority", "none：這份文件、local checks、PR、CI 或 closeout 都不授權 runtime action"],
+  ["operator.tunnel_configuration_approval", "tunnel configuration 需要 separate fresh exact-action approval"],
+  ["execution.operational_and_live_state", "public runtime、browser smoke 與 human timed execution 全部為 `DEFERRED` / `human_needed`"],
+] as const;
 const EXACT_INPUTS = [
   "依安全虛構範圍完成 onboarding（不填真實個資）",
   "我午餐吃了一個鮭魚飯糰和一杯無糖豆漿，請幫我記錄。",
@@ -151,7 +169,7 @@ function parseExactTwoCellTable(section: string, header: string, label: string) 
     cursor += 1;
   }
 
-  return { lines, rows, cursor };
+  return { lines, rows, cursor, headerIndex };
 }
 
 function assertEvidenceSchema(markdown: string) {
@@ -176,28 +194,52 @@ function assertEvidenceSchema(markdown: string) {
   assert.equal(violations.length, 0, `${DEMO_PATH}#metadata-only-evidence: metadata-only evidence violation (${violations.join(", ")})`);
 }
 
-function assertRetryClauses(markdown: string) {
-  const attempts = [...markdown.matchAll(/最多([兩])次完整 attempt/g)];
-  assert.equal(attempts.length, 1, "retry clauses: complete-attempt limit drift");
-  assert.equal(attempts[0]?.[1], "兩", "retry clauses: maximum must be two");
-  for (const clause of [
-    "第一次失敗後只允許在新的 incognito/isolated context 從 M01 完整重來一次",
-    "不得在同一 conversation 重送或改寫 prompt",
-    "不得即場換同義句直到成功",
-    "不得拼接不同 attempt 的證據",
-  ]) {
-    assert.equal(markdown.split(clause).length - 1, 1, `retry clauses: ${clause}`);
-  }
-  assert.doesNotMatch(markdown, /例外：[^\n]*(?:同一 conversation|改寫 prompt|拼接[^\n]*證據)/, "retry clauses: contradictory exception");
+function assertExactSuffixLine(lines: string[], cursor: number, expected: string, boundary: string) {
+  assert.ok(lines[cursor] === expected, `authority-bearing suffix: ${boundary} drift`);
+  return cursor + 1;
 }
 
-function assertOperatorPrerequisites(markdown: string) {
-  for (const prerequisite of ["merged `main`", "post-merge local closeout", "fresh exact-action approval"]) {
-    assert.ok(markdown.includes(prerequisite), `operator prerequisites: ${prerequisite} missing`);
+function assertAuthorityBearingSuffix(markdown: string) {
+  assert.equal(
+    markdown.split(SEMANTIC_VERDICT_INTRO).length - 1,
+    1,
+    "authority-bearing suffix: semantic verdict anchor must occur exactly once",
+  );
+  const suffix = markdown.slice(markdown.indexOf(SEMANTIC_VERDICT_INTRO));
+  const lines = suffix.split(/\r?\n/);
+  let cursor = 0;
+
+  cursor = assertExactSuffixLine(lines, cursor, SEMANTIC_VERDICT_INTRO, "semantic intro");
+  cursor = assertExactSuffixLine(lines, cursor, "", "semantic intro separator");
+  for (const outcome of EXPECTED_SEMANTIC_OUTCOMES) {
+    cursor = assertExactSuffixLine(lines, cursor, `- SEMANTIC: ${outcome}`, "semantic marker sequence");
   }
-  assert.match(markdown, /這份文件、local checks、PR、CI 或 closeout 都不授權 migration、restart、tunnel operation\/configuration、public smoke、GitHub write、`main` push\/merge 或 tag movement。/);
-  assert.match(markdown, /public runtime、browser smoke 與 human timed execution 現在全部為 `DEFERRED` \/ `human_needed`/);
-  assert.doesNotMatch(markdown, /例外：[^\n]*(?:planning|local tests|PR|CI|closeout)[^\n]*(?:取代|授權|即可)/, "operator prerequisites: contradictory exception");
+  cursor = assertExactSuffixLine(lines, cursor, "", "semantic-to-authority boundary");
+  cursor = assertExactSuffixLine(lines, cursor, AUTHORITY_HEADING, "authority heading");
+  cursor = assertExactSuffixLine(lines, cursor, "", "authority heading separator");
+  cursor = assertExactSuffixLine(lines, cursor, AUTHORITY_INTRO, "authority intro");
+  cursor = assertExactSuffixLine(lines, cursor, "", "authority intro separator");
+
+  const authority = parseExactTwoCellTable(suffix, "| Authority field | Exact value |", "authority-bearing suffix authority");
+  assert.equal(authority.headerIndex, cursor, "authority-bearing suffix: authority table position drift");
+  assert.equal(new Set(authority.rows.map(([name]) => name)).size, authority.rows.length, "authority-bearing suffix: authority fields must not contain duplicates");
+  assert.deepEqual(authority.rows, EXPECTED_AUTHORITY_FIELDS, "authority-bearing suffix: authority field/value allowlist drift");
+  cursor = authority.cursor;
+  cursor = assertExactSuffixLine(lines, cursor, "", "authority-to-metadata boundary");
+  cursor = assertExactSuffixLine(lines, cursor, EVIDENCE_HEADING, "metadata heading");
+  cursor = assertExactSuffixLine(lines, cursor, "", "metadata heading separator");
+  cursor = assertExactSuffixLine(lines, cursor, EVIDENCE_INTRO, "metadata intro");
+  cursor = assertExactSuffixLine(lines, cursor, "", "metadata intro separator");
+
+  const evidence = parseExactTwoCellTable(suffix, "| Evidence field | Value shape |", "authority-bearing suffix evidence");
+  assert.equal(evidence.headerIndex, cursor, "authority-bearing suffix: evidence table position drift");
+  assert.equal(new Set(evidence.rows.map(([name]) => name)).size, evidence.rows.length, "authority-bearing suffix: evidence fields must not contain duplicates");
+  assert.deepEqual(evidence.rows, EXPECTED_EVIDENCE_FIELDS, "authority-bearing suffix: evidence field/value allowlist drift");
+  cursor = evidence.cursor;
+  cursor = assertExactSuffixLine(lines, cursor, "", `${DEMO_PATH}#metadata-only evidence final boundary`);
+  cursor = assertExactSuffixLine(lines, cursor, FINAL_NON_CLAIM, `${DEMO_PATH}#metadata-only evidence final non-claim`);
+  cursor = assertExactSuffixLine(lines, cursor, "", "canonical EOF");
+  assert.equal(cursor, lines.length, "authority-bearing suffix: content after canonical EOF");
 }
 
 function assertRuntimeProvenanceProcedure(markdown: string) {
@@ -272,10 +314,9 @@ function assertDemoContract(markdown: string, tunnelMarkdown: string, changelog:
     assert.ok(markdown.includes(anchor), `${DEMO_PATH} missing boundary anchor: ${anchor}`);
   }
   assert.doesNotMatch(markdown, /(?:runtime|public smoke|live semantic).{0,24}(?:已通過|PASS|完成)/i);
-  assertRetryClauses(markdown);
-  assertOperatorPrerequisites(markdown);
-  assertEvidenceSchema(markdown);
   assertRuntimeProvenanceProcedure(markdown);
+  assertAuthorityBearingSuffix(markdown);
+  assertEvidenceSchema(markdown);
   assertMetadataOnlySurface(markdown, DEMO_PATH);
 }
 
@@ -454,6 +495,18 @@ describe("demo contract mutation resistance", () => {
       }),
     },
     {
+      name: "retry contradiction inside authority region",
+      expected: /authority-bearing suffix/,
+      mutate: (documents) => ({
+        ...documents,
+        markdown: replaceExactlyOnce(
+          documents.markdown,
+          `${AUTHORITY_INTRO}\n`,
+          `${AUTHORITY_INTRO}\n\n補充：第二次可以留在原 conversation 重送。\n`,
+        ),
+      }),
+    },
+    {
       name: "operator contradiction before final non-claim",
       expected: /authority-bearing suffix/,
       mutate: (documents) => ({
@@ -497,7 +550,7 @@ describe("demo contract mutation resistance", () => {
       const markdown = `${canonicalDocuments.markdown}\n${exception}\n`;
       assert.throws(
         () => assertDemoContract(markdown, canonicalDocuments.tunnelMarkdown, canonicalDocuments.changelog),
-        /retry clauses|operator prerequisites/,
+        /authority-bearing suffix/,
       );
     }
   });
